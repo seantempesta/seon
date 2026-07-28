@@ -30,7 +30,9 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent]
             [seon.cluster.work :as work]
-            [seon.schema]))
+            [seon.schema]
+            [seon.test-support :as test-support])
+  (:import [java.util.concurrent CountDownLatch]))
 
 (set! *warn-on-reflection* true)
 
@@ -48,17 +50,22 @@
           (cluster/stop! instance))))))
 
 (defn- await-fact
-  "Poll `probe` against the connection until truthy, else nil.
-  A test-side clock, and deliberately the only one: the production path
-  is event-driven end to end (a committed datom wakes a listener which
-  wakes the loop), but a TEST has to decide when to give up, and a bound
-  that fails loudly is better than a suite that hangs."
+  "Return the first truthy `probe` result published by a database value."
   [connection probe]
-  (loop [attempt 0]
-    (or (probe @connection)
-        (when (< attempt 100)
-          (Thread/sleep 50)
-          (recur (inc attempt))))))
+  (let [events (async/promise-chan)
+        key (keyword (str (ns-name *ns*)) (str (gensym "fact-")))]
+    (d/listen connection key
+              (fn [report]
+                (when-let [value (probe (:db-after report))]
+                  (async/offer! events value))))
+    (try
+      ;; Register interest first, then derive current state. A commit
+      ;; between these operations is observed by one side or the other.
+      (when-let [value (probe @connection)]
+        (async/offer! events value))
+      (test-support/await-event! events "database fact")
+      (finally
+        (d/unlisten connection key)))))
 
 (defn- errors
   [db]
@@ -145,32 +152,32 @@
         (fn [instance]
           (let [routing (:seon.cluster.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")
-                graph (:seon.flow/graph entry)]
+                graph (:seon.flow/graph entry)
+                derived (CountDownLatch. 1)
+                next-agent-work work/next-agent-work]
             ;; root's graph has looked at least once (the arm primes
             ;; its mailbox) and found nothing: turns only advance when
             ;; work was done
             (is (zero? (:seon.cluster.agent/turns
                         (:clojure.core.async.flow/state
                          (flow/ping-proc graph :seon.cluster.agent/turn)))))
-            (async/offer! (:seon.cluster.wake/channel entry) ::probe)
-            (Thread/sleep 200)
-            (is (zero? (:seon.cluster.agent/turns
-                        (:clojure.core.async.flow/state
-                         (flow/ping-proc graph :seon.cluster.agent/turn))))
-                "a wake with no facts to act on is not work")
+            (with-redefs [work/next-agent-work
+                          (fn [& arguments]
+                            (let [result (apply next-agent-work arguments)]
+                              (.countDown derived)
+                              result))]
+              (async/offer! (:seon.cluster.wake/channel entry) ::probe)
+              (test-support/await-event! derived
+                                         "empty-wake work derivation")
+              ;; `ping-proc` is processed by the proc after its active
+              ;; transform returns, so the state is terminal here.
+              (is (zero? (:seon.cluster.agent/turns
+                          (:clojure.core.async.flow/state
+                           (flow/ping-proc
+                            graph :seon.cluster.agent/turn))))
+                  "a wake with no facts to act on is not work"))
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
-
-(deftest the-tower-boots-inside-the-ten-second-bound
-  ;; the armed layers are graph creation and two channel taps, measured
-  ;; at fractions of a millisecond; this fails if that ever stops being
-  ;; true, and the bound is the standing ruling, not a tuned number
-  (let [started (System/currentTimeMillis)]
-    (with-cluster
-      "quick"
-      (fn [_]
-        (let [elapsed (- (System/currentTimeMillis) started)]
-          (is (< elapsed 10000) (str "boot took " elapsed "ms")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts

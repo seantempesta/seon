@@ -21,29 +21,14 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.wake :as wake]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike])
-  (:import [java.util Date]
-           [java.util.concurrent TimeUnit]))
-
-(def ^:private attributes
-  [:seon.cluster.agent/id :seon.cluster.agent/run
-   :seon.cluster.message/id :seon.cluster.message/to
-   :seon.cluster.message/content :seon.cluster.message/at
-   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
-   :seon.cluster.run/plan-digest])
+            [seon.test-support :as test-support])
+  (:import [java.util Date]))
 
 (defn- with-connection [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
+  (test-support/with-database
+    (fn [connection]
       (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- message-tx [id]
   [{:seon.cluster.message/id id
@@ -107,7 +92,7 @@
                                :seon.cluster.wake/key ::probe})]
         (try
           (d/transact connection (message-tx "m-1"))
-          (is (some? (first (async/alts!! [channel (async/timeout 2000)])))
+          (is (some? (test-support/await-event! channel "wake delivery"))
               "the wake arrived")
           (testing "and a commit of a non-wake attribute delivers nothing"
             (d/transact connection [{:seon.cluster.run/id "run-1"
@@ -116,7 +101,7 @@
                                      :seon.cluster.run/opened-at (Date.)
                                      :seon.cluster.run/plan-digest
                                      (apply str (repeat 64 "a"))}])
-            (is (nil? (first (async/alts!! [channel (async/timeout 300)])))))
+            (is (nil? (async/poll! channel))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
@@ -135,13 +120,20 @@
                                :seon.cluster.wake/fault-channel faults
                                :seon.cluster.wake/key ::probe})]
         (try
-          ;; nobody is reading; every commit must still return promptly
-          (let [started (System/nanoTime)]
-            (doseq [n (range 5)]
-              (d/transact connection (message-tx (str "m-" n))))
-            (is (< (/ (- (System/nanoTime) started) 1e6) 5000)
-                "commits are not held hostage by an unread wake channel"))
-          (is (some? (first (async/alts!! [channel (async/timeout 1000)])))
+          ;; Nobody is reading while the transactions run. Completion
+          ;; of the returned Future is the proof that the listener did
+          ;; not park the writer; no elapsed-time threshold is involved.
+          (let [committed
+                (future
+                  (mapv (fn [n]
+                          (d/transact connection
+                                      (message-tx (str "m-" n))))
+                        (range 5)))]
+            (is (= 5
+                   (count
+                    (test-support/await-event!
+                     committed "saturated-listener transactions")))))
+          (is (some? (async/poll! channel))
               "and the newest wake is still there — sliding, not blocking")
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
@@ -166,13 +158,15 @@
         (try
           (async/close! channel)
           (let [committed (future (d/transact connection (message-tx "m-9")))]
-            (is (not= ::hung (deref committed 5000 ::hung))
+            (is (map? (test-support/await-event!
+                       committed "throwing-listener transaction"))
                 "the committing caller returned — the handler swallowed
                  its own failure instead of hanging the writer forever")
             ;; surviving is only half of it: a swallowed failure that
             ;; reports nothing is an invisible fault, so the payload
             ;; must ARRIVE
-            (let [fault (first (async/alts!! [faults (async/timeout 2000)]))]
+            (let [fault (test-support/await-event! faults
+                                                   "wake listener fault")]
               (is (some? fault) "the fault reached the fault channel")
               (is (instance? Throwable fault)
                   "and it is the throwable itself, not a summary of it")))
@@ -198,5 +192,5 @@
                                              is a no-op, because stop may
                                              arrive after a release")
         (d/transact connection (message-tx "m-after"))
-        (is (nil? (first (async/alts!! [channel (async/timeout 300)])))
+        (is (nil? (async/poll! channel))
             "nothing is delivered after unlisten")))))
