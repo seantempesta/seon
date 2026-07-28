@@ -682,3 +682,287 @@ This rung is complete only when all of the following are true:
   and
 - a replayed feels-stateful audit finds every agent self-state claim grounded
   in the transcript or another rendered block, with no unexplained gap.
+
+## Review 2026-07-28 (independent)
+
+Verdict labels are the same narrow classes used by the N4/N5 reviews:
+
+- **CONFIRMED-DEFECT** — the proposed contract or cited support is false or
+  internally incomplete.
+- **STALE-VS-TODAY** — the statement described an earlier tree, but no longer
+  describes the committed or concurrently landing tree reviewed here.
+- **QUESTION** — an owner-taste decision remains implicit and must be sealed
+  before an implementation lane can infer it safely.
+
+### Citation audit
+
+I read every cited `src-old/` and fresh-tree range, plus the cited N4 contracts,
+the prompt-router issue, the current architecture, and the relevant tests. The
+dependency checkouts match the ledger: Datahike
+`357ffc87c8009f342b239145802e1385d4a18ca9`, SCI
+`8fac6e88f32d53a5fd82ebe80640881e317b84fd`, and core.async
+`dc35f3e0d7bc2eef502e77982f48641f025c8051`.
+
+The quarry conclusions are supported. The cited ranges contain the one pulled
+and sorted block set, presence-based AI/HTML placement, one combined rendered
+block value, the whole-prompt escape hatch, the block-chain hash, the second
+page/acquisition path, current-namespace auto-run derivation, root's shared shim
+shape, and plan-teaching colocation. The fresh `seon.render` and package-1 block
+ranges likewise contain the late-resolved router, ordered pull, exact-database
+unit, per-kind surfaces, derived page, and whole-block replacement. The N4
+measurement at `n4-contracts-2026-07-27.md:98-131` supports the quoted
+287-byte/0.004-ms versus 82,893-byte/0.460-ms comparison.
+
+The exceptions and newly landed collisions follow.
+
+1. **STALE-VS-TODAY — the dependency line citations moved when package 2
+   promoted the web dependencies.** Clojure, Malli, and core.async are now at
+   `deps.edn:15-19`, not `:13`, `:14`, and `:17`. Commit `b8601fabe` also moved
+   Datastar SDK/http-kit into default `:deps` and added `resources` to
+   `:paths`. The conclusion “no new dependency is required” is correct; the
+   three line citations are not.
+
+2. **STALE-VS-TODAY — the prompt and run-open citations describe committed
+   `b15d3c418`, not the active message lane.** In the reviewed working tree,
+   `prompt` is at `src/seon/cluster/prompt.cljc:230-275` and run-open trigger
+   metadata is at `src/seon/cluster/loop.cljc:540-559`. More importantly, the
+   prompt now derives sender identity, peer population, and a previous
+   `my.run/wait` note in addition to identity, interruption, trigger, and
+   execution grammar (`prompt.cljc:245-273`). The plan's pre-N5 block inventory,
+   core-context exit, prompt-router issue acceptance, and graduation census omit
+   those three contributions.
+
+   No block/message schema collision was found: `my.message/send` returns the
+   disjoint `:my.message/{to,content}` value
+   (`src/my/message.cljc:72-100`), while delivery produces existing
+   `:seon.cluster.message/*` facts. The collision is ownership: message sender,
+   peer discovery, pause continuity, and message grammar are now prompt prose
+   that the convergence package must move into named blocks without losing.
+   Seal only after that lane commits, then re-grep the final shapes.
+
+3. **CONFIRMED-DEFECT — the proposed unit carries caps that the landed unit
+   does not.** The plan says `seon.render.block/unit` adds
+   `:seon.sci.admit/caps` (§“The block unit”), but the function adds only
+   `:seon.db/db` and `:seon.cluster.agent/id`
+   (`src/seon/render/block.clj:181-199` in the reviewed tree). The bounded N4
+   expansion contract is exact: the same four admission caps, per-path visited
+   refusal, independent node/depth budgets, and deterministic depth-first,
+   left-to-right elisions (`render/block.clj:337-508`; `fa4cb38f4`). Passing
+   caps only to `page`/`expand` does not make them available to an AI projection,
+   a generic data panel, or an authored projection.
+
+   Revise the context contract to name one request/unit builder that threads the
+   effective caps into every projection and then admits the returned value
+   before either AI reduction or bounded HTML expansion. Do not create
+   context-specific caps, a second visited set rule, or a different elision
+   order.
+
+4. **STALE-VS-TODAY — N4 package 2 has landed its first slice, not the
+   registration/cache owner the plan presumes.** Commit `492f2a17e` landed
+   literal runtime declarations and entity/ref expansion in the existing
+   router and block owner. Ref-following is now part of the same depth-first
+   walk, with the same node/depth caps and per-path visited set, and `expand`
+   now takes one `:seon.render/expansion` map
+   (`src/seon/render/block.clj:337-508`). The context plan must consume that
+   committed shape rather than seal the earlier three-argument signature.
+
+   No `seon.cluster.render.registration`, live render graph, SSE owner, or
+   equality snapshot exists under fresh `src/` yet. Therefore “N4 registration
+   memory holds” in the cache section must still be future tense and a
+   dependency on the remaining package-2 contract, not present evidence.
+
+### Prompt convergence and current-trigger falsifier
+
+5. **CONFIRMED-DEFECT — prompt convergence requires an explicit revision of the
+   sealed N3 interface and suite.** Today `prompt/prompt` has output
+   `:seon.cluster.prompt/text`, the schema is a non-empty string
+   (`src/seon/schema/prompt.edn:4-5`), the loop passes that value directly as
+   `:seon.ai/prompt` (`src/seon/cluster/loop.cljc:640-664`), and
+   `prompt_test.clj` asserts directly on strings. The proposed
+   `{text, contributions, database identity}` result cannot land without
+   revising all four together:
+
+   - `:seon.cluster.prompt/request` and output schemas;
+   - `seon.cluster.prompt/prompt`;
+   - the loop handoff that extracts the exact text for `seon.ai`;
+   - `prompt_test.clj` and `turn_test.clj`, preserving every current
+     presence/absence invariant while adding router/contribution invariants.
+
+   The existing prompt suite deliberately does not pin prose bytes
+   (`test/seon/cluster/prompt_test.clj:2-9`), so the migration is implementable;
+   it is still a seal revision. The package table's generic “loop handoff” is
+   not enough. Name this revision explicitly in the core-context package and in
+   the open prompt-router issue before sealing.
+
+6. **CONFIRMED-DEFECT — the current call path can answer the wrong trigger, and
+   the plan does not name the repair.** Run-open correctly records the selected
+   message as `:seon.db/trigger` transaction metadata
+   (`loop.cljc:540-559`). But the subsequent `:call` branch asks
+   `work/unanswered-triggers` again and passes its first result to `prompt`
+   (`loop.cljc:640-645`). The opening transaction has already made the original
+   message “answered”; if a second message arrived while the held run awaited
+   its call pass, that later message is now the first unanswered one. The prompt
+   can therefore describe a message different from the run's recorded cause.
+
+   The active message lane already contains the correct pure read:
+   `seon.cluster.message/trigger` follows the run identity datom to its creating
+   transaction and returns that transaction's trigger
+   (`src/seon/cluster/message.cljc:70-86`). The convergence package must make the
+   prompt request identify the held run (or pass its already-derived trigger)
+   and use that one cause. It must also reconcile the longer target model:
+   `docs/seon/architecture/observability.md:55-57` says a future turn records
+   `:seon.agent.turn/cause-message` because a run may absorb later input. Do not
+   seal “run opener is always turn cause” as a timeless context law.
+
+7. **CONFIRMED-DEFECT — the proposed pre-N5 `:problems` unit is missing its one
+   non-database input.** `seon.problems/block` explicitly refuses when
+   `:seon.cluster.run/live-processes` is absent because neither `#{}` nor
+   “assume alive” is truthful (`src/seon/problems.clj:264-296`). The plan's unit
+   contains only database value, agent id, and caps, while its block table lists
+   problems as ready before N5. Either:
+
+   - define the one trusted unit-input injection seam and include live processes
+     in its contract and capture story; or
+   - keep the problems block out of core prompt/page convergence until the N4
+     process owner supplies that input.
+
+   It cannot be described as a pure database-derived block while silently
+   depending on process liveness.
+
+The remaining pre-/post-N5 boundary is otherwise honest. Identity is a pure
+derivation from agent id, trigger/interruption/execution use already installed
+run/message/config facts, and fleet uses agent/work/problem facts. None requires
+program-graph facts. Current-namespace source, render-function discovery,
+durable authored definitions, SCI acquisition at a basis, cross-agent authored
+visibility, and hot redefinition genuinely require N5. Plan, transcript,
+memory, schedules, collaboration, and canvas wait on their domain facts, not on
+N5 merely because they are later.
+
+The local Qwen proof does not add a context mechanism: it confirms the ordinary
+four-fact OpenAI-compatible target and that the live loop consumes one prompt
+string (`local-provider-2026-07-28.md:72-102,128-166`). It reinforces finding 5:
+the rendered-context map must be reduced to its exact string before the one
+provider boundary; no local-provider branch belongs in context assembly.
+
+### Cache gradient and owner decisions
+
+8. **CONFIRMED-DEFECT — one cache layer is admitted by assumption rather than
+   measurement.** The ordering half is disciplined: the plan keeps fixed bands,
+   treats priority as a prior, records per-contribution evidence, and defers a
+   learned order until real cached-token and outcome measurements exist. That
+   matches `docs/seon/architecture/context.md:440-466`.
+
+   The process-local reuse half is different. It proposes a retained exact-value
+   result cache and cross-consumer reuse without a measurement of projection
+   cost or repeat frequency. N4 measured serialization/admission and block
+   morph size, not the cost or hit rate of AI/HTML projection evaluation. The
+   reactive rule permits caching only measured expensive derivations.
+   Single-flight, newest-pending replacement, and the equality snapshot may
+   remain as pipeline coordination; retaining completed results for later
+   prompt/tab reuse needs a predeclared measurement and a keep/delete threshold.
+   Record misses, joins, hits, evaluation cost, and retained weight before
+   calling the layer a cache win.
+
+9. **STALE-VS-TODAY — five of the eight “owner decisions” are already ruled,
+   and one is a correctness correction rather than taste.**
+
+   - **A:** installed overrides plus derived current-namespace renderers is
+     already the target rule (`context.md:308-324`). Strike A's three-way
+     choice; retain only the real collision-policy question (refuse versus an
+     explicit precedence). Reconcile `ui.md`'s older complete-seed wording.
+   - **B:** run-opening `:seon.db/trigger` metadata is already owner-ruled and
+     implemented. Strike the choice; fix finding 6 and state the future
+     turn-cause boundary.
+   - **C:** durable projection attributes are already qualified-symbol-only.
+     Commit `492f2a17e` adds strings/vectors only as runtime declarations.
+     Strike the choice and cite that durable/runtime split.
+   - **D:** real owner decision. The current router has rendered or flat-error
+     results, while block surfaces turn an HTML nil into a not-hiccup failure.
+     Seal the explicit omitted-success alternative and its behavior for AI and
+     HTML.
+   - **E:** not a taste choice. One completed value shared across unlike AI and
+     HTML projections is false; N4's earlier one-value/one-registration prose
+     must be revised. One invalidation owner with per-kind active/result slots
+     is the minimum correct shape; measure retained reuse per finding 8.
+   - **F:** already ruled by the architecture's observed-stability design.
+     Strike the choice; the enablement experiment remains required.
+   - **G:** real owner decision, jointly with N5. Seal one router invocation
+     seam for compiled Vars and acquired SCI Vars without a second router.
+   - **H:** capture is already ruled: the architecture requires the rendered
+     transaction, byte-exact prompt blob, and per-block hash/token/position/band
+     evidence (`observability.md:34-59`; `context.md:440-446`). Strike the
+     yes/no choice. The remaining contract work is the exact contribution
+     schema and which turn transaction/blob owner persists it.
+
+   The morning owner batch can therefore shrink to D, G, block-name collision
+   precedence, and the exact capture schema/transaction owner. A, B, C, F, and
+   H are documentation/implementation alignment; E is an upstream N4 seal
+   correction.
+
+Commit `1c7abb6a7` also removes an apparent choice: domain errors already enter
+the generic router as flat error values with producer-selected generic or
+specialist projections (`src/seon/error.clj:367-396`). A failed context block
+may add block identity in its enclosing contribution, but must not invent a
+second error shape or merge block keys into the closed `:seon.error/value`.
+
+### Sealed-suite findings
+
+The sketch gets several constitutional points right: discovered JVM `deftest`s,
+one fresh database inside every generated trial, exact-schema validation,
+complete shrink reports, sorted iteration, real sockets/process loss in the
+recurring suite, event-driven readiness, supervisor-owned stop, and a
+reset-from-current-ancestor path.
+
+10. **CONFIRMED-DEFECT — “fixed recorded seeds” still does not seal any seed or
+    deterministic trial identity.** Name the numeric seed for every property
+    and derive database IDs, times, agent/message/run IDs, and filesystem paths
+    from that seed plus trial index. A fresh `random-uuid` database inside each
+    trial satisfies isolation but violates replayability. The failure report
+    must print seed, size, generated value, schema explanation, and complete
+    shrunk check.
+
+11. **CONFIRMED-DEFECT — two proposed oracles compare outputs produced by the
+    same producer.** “Prompt text equals the reduction of the returned
+    contributions” can let one broken assembler manufacture two mutually
+    agreeing wrong outputs. “Shared renderers return byte-identical output for
+    both agents” can pass because both calls omit the same required fact. Keep
+    those as relations, but the acceptance oracle must independently derive the
+    expected ordered names from planted block facts and record each projection
+    invocation/result separately; then compare both returned fields with that
+    independent ledger. Scope must assert the exact rows read/omitted, not only
+    equality of two producer outputs.
+
+12. **CONFIRMED-DEFECT — the missing-trigger example does not satisfy the
+    refusal constitution.** “Produces no partial prompt” is necessary but not
+    sufficient. Assert the named refusal rule from the deepest non-empty
+    `ex-data` and independently prove the database is unchanged. If convergence
+    converts this boundary to a flat error value, revise the sealed N3 refusal
+    contract explicitly and assert that exact alternative instead of accepting
+    either throw or value.
+
+13. **QUESTION — the live proof's ownership must be named before the suite is
+    drafted.** “Start a real child cluster” is compatible with `bin/test` only
+    if the discovered test owns a project-local path, needs no built artifact or
+    running operator, observes readiness, and reports the child-JVM cost. Name
+    the `test/**/*_test.clj` owner and whether the proof uses the existing
+    cluster boot helper or a child JVM. The required interaction is good:
+    current-ancestor boot + real HTTP/SSE + 32-tab fan-out + process loss +
+    reconnect repaint in one recurring surface.
+
+### Ready-to-seal verdict
+
+**Ready to seal? no.** First revise the plan to:
+
+1. absorb the final committed message and N4 package-2 shapes;
+2. thread the one cap set through every unit and preserve bounded N4 expansion;
+3. name the prompt schema/function/loop/suite seal revision and repair trigger
+   selection from the held run;
+4. resolve the problems block's live-process input;
+5. measure before retaining completed render results;
+6. reduce the owner batch to the genuinely open decisions above; and
+7. seal numeric seeds, deterministic trial identities, independent oracles,
+   refusal assertions, and the exact live-test owner.
+
+After those changes, the core direction—one ordered block derivation, one
+router, AI reduction for the agent and HTML placement for the human—is ready
+for contract authoring.
