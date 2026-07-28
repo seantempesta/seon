@@ -524,6 +524,13 @@
   concatenation. One top-level block that slots everything else is the
   same mechanism arranged differently.
 
+  Returns a VECTOR OF ELEMENTS, which is deliberately not itself hiccup:
+  a vector whose head is a vector is not an element, and the grammar
+  refuses it. A caller places the entries — `(seq page)` splices them as
+  a fragment. That refusal is a feature; the alternative is a container
+  this function invented, and placement belongs to whoever owns the
+  document.
+
   Each entry keeps its own `surface-id`, because each entry is its own
   morph target. The page is assembled once for the initial paint and
   never again: after that the pipeline patches the ONE block that

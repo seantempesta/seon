@@ -1,0 +1,62 @@
+{; ---------------------------------------------------------------------------
+ ; THE PAGE ON A SOCKET. Process-local shapes only: a server descriptor,
+ ; a request, a repaint. Nothing here is a database attribute, because
+ ; nothing rendered is stored (O14) and a socket is not a fact.
+ ; ---------------------------------------------------------------------------
+
+ ; A coalescing FLOOR, not a timer standing in for an unobservable
+ ; event. The observable event is the commit, and `listen!` already
+ ; delivers it; this only says how often a tab is willing to be
+ ; repainted, so a burst of commits inside one window costs one repaint
+ ; instead of one each. A config fact rather than a constant, because
+ ; the right value depends on what the cluster is doing and nobody
+ ; should have to edit code to find out.
+ :seon.config.render/coalesce-ms [:int {:min 0 :max 1000}]
+
+ :seon.render.web/port [:int {:min 0 :max 65535}]
+ :seon.render.web/url [:string {:min 1}]
+
+ ; The http-kit server object. A `[:fn]` with an honest generator, the
+ ; supported idiom for a host object — the same shape `seon.store` uses
+ ; for a connection and `seon.flow` for a channel.
+ :seon.render.web/http-server [:fn {:gen/gen seon.render.web/server-generator} seon.render.web/server?]
+
+ :seon.render.web/server
+ [:map {:closed true}
+  [:seon.render.web/server :seon.render.web/http-server]
+  [:seon.render.web/port :seon.render.web/port]
+  [:seon.render.web/url :seon.render.web/url]]
+
+ ; What the handler needs. The database CONNECTION rather than a
+ ; database value, because a page derives at whatever basis is current
+ ; when the request arrives and a feed derives again on every commit —
+ ; a value captured at start would freeze the page at boot.
+ :seon.render.web/service
+ [:map {:closed true}
+  [:seon.store/connection :seon.store/connection]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
+  [:seon.render.web/port {:optional true} :seon.render.web/port]]
+
+ :seon.render.web/feed-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.store/connection :seon.store/connection]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]]
+
+ :seon.render.web/page-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render/page :seon.render/page]
+  [:seon.render.web/feed-url [:string {:min 1}]]]
+
+ ; One repaint: what to send, and what the connection has now seen.
+ ; Keyed by surface id and holding the BYTES, because bytes are what the
+ ; socket costs and what suppression must compare — two values that
+ ; serialize identically are the same page.
+ :seon.render.web/repaint
+ [:map {:closed true}
+  [:seon.render.web/patches [:vector [:tuple :seon.render/surface-id :string]]]
+  [:seon.render.web/delivered [:map-of :seon.render/surface-id :string]]]}
