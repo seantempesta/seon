@@ -651,12 +651,27 @@ GENERATIVE (each entry exactly once), drilled pages carry NO feed
 (repaint moves the reader's ground). LOCAL QWEN RESTARTED by the
 orchestrator (the handoff PID died; command from
 local-provider-2026-07-28.md; serving on :8090 again).
-IN FLIGHT (one): N4's FINAL night slice — root's seeded block set
-(config/default.edn + boot; the bar: start! serves a REAL page, the
-owner opens localhost and sees the cluster's root view with alice
-and bob's conversation drillable) — then the night closes; the
-agent-transcript page (package 5, the owner's hard-to-follow chat
-causes) waits for morning rulings. MORNING BATCH accumulating:
+ROOT PAGE LANDED WITH ONE HONEST BLOCKER (gate 385/1497/0): start!
+stacks the web layer as the last tower rung — a plain bin/repl
+serves the root view, port dial defaults 0 (URL reported never
+assumed), seon.render.root = four render fns + a vector (no root
+route/template/branch anywhere), agents link to /data drills, bind
+failure throws like any layer. THE BLOCKER
+(booted-block-derivation-returns-one-of-four, filed with evidence
+incl. a recorded wrong first reading): identical boots report four
+blocks or ONE; no fixture reproduces (fixture-vs-live-boot again —
+acceptance = a test that BOOTS); relation-find returns four where
+collection-find returns one AGAINST THE SAME BOOTED STORE — smells
+Datahike-index/branch-fork level, we own the fork. A fresh Opus
+investigation agent is ON IT (evidence-first: the seeding
+transaction report's added-datom count distinguishes
+committed-one from committed-four-read-one; then datahike query/index
+paths vs the boot transact shape; loop-reproduce, minimize below
+Seon's layers, fix falsifier-first or design+owner for morning).
+The N4 agent STOPPED FOR THE NIGHT as instructed — package 5 (the
+agent-transcript page) waits for morning rulings. The morning
+localhost view works but shows 1-of-4 blocks until the blocker
+falls. MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
