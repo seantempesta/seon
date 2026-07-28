@@ -400,6 +400,23 @@ facts. State is presence; the one deleted no-history family is
 replaced by NO family. Attribute namespaces take owning code
 namespaces — vacuously satisfied.
 
+**Seal (orchestrator, 2026-07-28 night): accepted as drafted, all three
+risk points.** R1 — the backoff sleep survives: it guards a remote
+provider, the timeout doctrine's one permitted unobservable, and the
+per-agent topology already dissolved the cluster-freeze objection. R7 —
+complete newest-page snapshots on the mult are REQUIRED by the transport
+law itself (latest-wins loss is only free for a COMPLETE value; a patch
+displaced by a patch is permanent loss), with the byte-diff at the
+per-tab writer preserving block-targeted morphs on the socket. R4 — the
+shared sliding-1 stream conn's transient displacement under concurrent
+streams is accepted at token cadence (repair next chunk, terminal from
+facts); the sealed suite must include the concurrent-streams repair
+case. The route! third delivery (one unconditional render wake per
+report) is load-bearing and named here so review never mistakes it for
+incidental. IMPLEMENTATION SEQUENCING: dispatch AFTER the
+test-constructions lane returns units 4/5/8 — it holds wake_test and
+cluster suites this wave deletes/re-grounds.
+
 ## Orchestrator review points — judgment calls with alternatives
 
 - **R1 — the backoff sleep survives the charter's sentence.** Chosen:
