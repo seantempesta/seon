@@ -14,7 +14,8 @@ rung.
 The contract to close is:
 
 ```text
-one immutable database value + one agent
+one immutable database value + one agent + one effective cap set
+  + declared trusted runtime inputs
   → one ordered block derivation
   → one router request per declared output kind
   → :seon.render/ai contributions folded into the prompt
@@ -33,31 +34,33 @@ The shortest falsifier is deliberately structural:
 > through `seon.render/render`, with no edit to `seon.cluster.prompt`, a route,
 > or a page consumer.
 
-The feels-stateful graduation claim is stronger: given the same database value
-and agent, the complete ordered block projection is byte-identical; given a
-new value containing a real situation change, the relevant block alone changes;
-and an agent makes no claim about its situation that the rendered facts did not
-support.
+The feels-stateful graduation claim is stronger: given the same database value,
+agent, caps, and trusted-input snapshot, the complete ordered block projection
+is byte-identical; given new inputs containing a real situation change, the
+relevant block alone changes; and an agent makes no claim about its situation
+that the rendered evidence did not support.
 
 ## Dependency ledger
 
 | Dependency or mechanism | Selected source | Existing Seon proof | Use in this rung |
 |---|---|---|---|
-| Clojure | 1.12.5, `deps.edn:13` | fresh `src/` | Immutable block values, reductions, stable sorting |
-| Malli | 0.20.0, `deps.edn:14` | `src/seon/schema/*.edn` through `seon.schema.edn` | Block, contribution, and rendered-context contracts; honest generators |
+| Clojure | 1.12.5, `deps.edn:15` | fresh `src/` | Immutable block values, reductions, stable sorting |
+| Malli | 0.20.0, `deps.edn:16` | `src/seon/schema/*.edn` through `seon.schema.edn` | Block, contribution, and rendered-context contracts; honest generators |
 | Datahike | `357ffc87c8009f342b239145802e1385d4a18ca9`, `reference-code/datahike` | `seon.render.block/blocks`, N2 transitions, `:seon.db/trigger` transaction metadata | One immutable database value, component refs, history-derived request cause, exact database identity |
 | SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd`, `reference-code/sci` | `seon.sci.eval`, `seon.sci.admit` | Bounded evaluation of agent-authored projections after N5 acquisition |
-| core.async Flow | 1.10.874-alpha3, `deps.edn:17` | `seon.flow`; N4 plan C2–C8 | HTML push pipeline, one active evaluation per block/kind, equality suppression and fan-out |
+| core.async Flow | 1.10.874-alpha3, `deps.edn:19` | `seon.flow`; N4 plan C2–C8 | HTML push pipeline, one active evaluation per block/kind, equality suppression and fan-out |
 | Generic render router | `44435f07b`, `src/seon/render.clj:95-147` | late-resolved projection, flat error values | The only output-kind routing entry |
-| Block family, package 1 | `6dcda1ab9` + implementation `5e71715c1`, `src/seon/schema/block.edn`, `src/seon/render/block.clj` | ordered block pull, unit, surface, page, slot expansion, whole-block replacement | The durable context unit and page composition |
-| N3 prompt facts | `src/seon/cluster/prompt.cljc:61-149`; current prompt at `:160-184` | live interruption-and-adapt proof in `n3-live-proof-2026-07-27.md` | Trigger, identity, reply grammar, interrupted or failed prior run become block projections |
-| Run cause | `src/seon/schema/provenance.edn:17-25`; run-open transaction at `src/seon/cluster/loop.cljc:511-529` | answered-trigger query and live N3 drive | Derive the current request from database facts; do not pass ephemeral prompt-only state |
+| Block family, packages 1–2 | `5e71715c1`, `fa4cb38f4`, `492f2a17e`; `src/seon/schema/block.edn:1-169`, `src/seon/render/block.clj:149-567,628-754` | ordered pull, unit, surface, single-map bounded expansion, entity/ref following, page, generic panel, whole-block replacement | The durable unit and the exact four-cap, per-path-visited, depth-first expansion contract this rung must preserve |
+| Current prompt facts | message landing `722adb18e`; `src/seon/cluster/prompt.cljc:230-275` | prompt tests cover identity, peers, sender, interruption, prior-wait continuity, trigger, and execution grammar | Every current prose contribution becomes a named block without loss |
+| Run cause | `src/seon/cluster/loop.cljc:540-559`; `src/seon/cluster/message.cljc:70-86` | run open records `:seon.db/trigger`; `message/trigger` reads that run's creating transaction | The held run identifies its recorded opener; later turn cause remains a separate observability fact |
+| Error projections | `1c7abb6a7`; `src/seon/error.clj:367-396` | facts select generic or specialist projections through `seon.render/render` | A failed block encloses the existing flat error value; context adds no error family or keys |
 | N4 live render plan | `n4-plan-2026-07-27.md` and `n4-contracts-2026-07-27.md` | package 1 green; block-targeted benchmark | Exact-value render registration, guarded evaluation, block-targeted morphs |
 | N5 program graph | `n5-plan-2026-07-27.md` | reviewed and revised, owner decisions still required | `:seon.fn` and `:seon.ns` facts, acquisition at a basis, current-namespace render-function discovery |
 | Context target | `docs/seon/architecture/context.md` | complete projection, render twins, cache gradient | Intended behavior; not evidence that source has landed |
 | Prompt-router issue | `docs/seon/issues/prompt-assembly-bypasses-the-render-router.md` | open blocker | Closed by the core prompt-convergence package |
 
-No new dependency is required. In particular, this rung needs no context
+No new dependency is required. Datastar SDK, http-kit, and `resources` are
+already on the default classpath after `b8601fabe`. In particular, this rung needs no context
 registry, renderer table, acknowledgement state, notification queue, or stored
 render.
 
@@ -183,22 +186,33 @@ The fresh tree already supplies the right nucleus:
   `src/seon/schema/block.edn`.
 - `seon.render.block/blocks` derives one ordered stored collection;
   `unit` attaches the exact database value and agent id
-  (`src/seon/render/block.clj:131-181`).
+  (`src/seon/render/block.clj:131-199`). It does **not** yet attach caps or
+  live-process input.
 - `surface` and `surfaces` route one declared kind through
   `seon.render/render` and isolate failures by block
-  (`src/seon/render/block.clj:183-274`).
-- `page` derives top-level layout from slots rather than storing a layout kind
-  (`src/seon/render/block.clj:409-462`).
+  (`src/seon/render/block.clj:201-336`).
+- `expand` accepts one closed `:seon.render/expansion` map. Slot filling and
+  entity/ref following share the same four admission caps, independent
+  node/depth budgets, per-path visited set, and deterministic depth-first,
+  left-to-right elision (`src/seon/render/block.clj:337-508`).
+- `page` supplies that exact expansion map and derives top-level layout rather
+  than storing a layout kind (`src/seon/render/block.clj:510-567`).
 - `install-tx` replaces a same-name block wholesale within one agent and emits
   no transaction for an empty request
-  (`src/seon/render/block.clj:602-633`).
-- `seon.cluster.prompt/prompt` still concatenates identity, interruption,
-  trigger, and reply instructions directly
-  (`src/seon/cluster/prompt.cljc:160-184`).
+  (`src/seon/render/block.clj:713-754`).
+- `seon.cluster.prompt/prompt` still concatenates identity, peer/message
+  grammar, interruption, prior-`my.run/wait` continuity, sender-aware trigger,
+  and execution grammar directly (`src/seon/cluster/prompt.cljc:230-275`).
+- Domain errors already select generic or specialist projections and enter the
+  generic router as the closed flat `:seon.error/value`; blocks must enclose,
+  not reshape, that value (`1c7abb6a7`).
 
-Package 1 proves durable block mechanics and HTML placement. It does not yet
+The landed N4 slices prove durable mechanics, bounded expansion, generic data
+panels, and HTML placement. They do not yet
 prove a context, prompt fold, state-gated omission, N5-authored renderer, or
-root/ordinary-agent page through the live pipeline.
+root/ordinary-agent page through the live registration/SSE pipeline. No
+`seon.cluster.render.registration`, equality snapshot, or completed-result
+cache exists in fresh `src/`; those remain dependencies, not present evidence.
 
 ### What can land before N5
 
@@ -208,13 +222,15 @@ facts that already exist:
 | Block | Scope | Facts | AI projection | HTML projection |
 |---|---|---|---|---|
 | `:identity` | per-agent | agent id; `sci.eval/agent-namespace` derivation | identity and where definitions already land | optional compact agent header |
-| `:trigger` | per-agent/current run | run-opening transaction's `:seon.db/trigger` ref and message content | the current request | later transcript/chat surface; may be AI-only initially |
+| `:peers` | shared query, per-agent exclusion | agent rows | peer population plus `my.message/send` grammar, omitted when alone | optional peer summary |
+| `:trigger` | per-agent/current run | held run's creating transaction, `:seon.db/trigger`, message content and sender | the exact current request with sender when present | later transcript/chat surface; may be AI-only initially |
 | `:interruption` | per-agent | prior run, forms, receipts, run error | exact interrupted/failed-run notice, or omitted | error/recovery card, or omitted |
+| `:continuity` | per-agent | preceding run's terminal `my.run/wait` value | the promised wait note, or omitted | optional continuity card |
 | `:execution` | per-agent/config | reply-evaluation fact and available `my.run` dispositions | only the applicable reply grammar | usually omitted |
-| `:problems` | shared derivation, installed selectively | current `seon.problems` facts and live-process input at its owner | concise actionable problems | landed problems HTML |
+| `:problems` | shared derivation, installed selectively | current `seon.problems` facts plus the process owner's captured `:seon.cluster.run/live-processes` set | concise actionable problems | landed problems HTML |
 | `:fleet` | root membership only | agent rows and derived work/problem state | concise cluster summary | root cards/page |
 
-The current N3 prompt helper functions should move or reduce into these
+The current prompt helper functions should move or reduce into these
 projection owners. `seon.cluster.prompt` keeps only block selection, AI
 contribution validation, stable reduction, and the returned rendered-context
 value. No temporary program registry or fake namespace row is needed.
@@ -250,18 +266,40 @@ A durable installed block remains:
  :seon.render/html 'seon.context.interruption/html}
 ```
 
-At render, `seon.render.block/unit` adds:
+The landed `seon.render.block/unit` currently adds only the database value and
+agent id. The core context contract extends one request/unit builder—not each
+projection call site—to add the effective inputs:
 
 ```clojure
 {:seon.db/db <exact immutable database value>
  :seon.cluster.agent/id "agent-a"
- :seon.sci.admit/caps <effective database config>}
+ :seon.sci.admit/caps <the four effective database-config caps>
+ :seon.cluster.run/live-processes <process-owner snapshot>}
 ```
 
-The unit does not carry a connection, latest-value callback, cached output,
-scope flag, page route, or renderer result. The projection queries its exact
-database value. Per-agent versus shared behavior is visible in that query:
-using the agent id scopes; omitting it shares.
+Caps are required for every projection, not only `page`: the builder threads the
+same set into AI, HTML, generic data-panel, and authored units, and the router
+admits the returned value with those caps before AI reduction or HTML
+expansion. HTML then calls the landed two-argument
+`(expand hiccup {:seon.render/surfaces ... :seon.sci.admit/caps ...
+:seon.db/db ...})`; context does not invent another budget, visited rule, or
+elision order.
+
+The live-process set is the one honest non-database input. The cluster process
+owner captures it once beside the selected database value and supplies it
+through this builder; prompt, page, debug, and capture reuse that snapshot.
+If it is absent, a membership containing `:problems` refuses at request
+construction—never substitutes `#{}` or “assume alive.” The contribution
+capture records the input snapshot's sorted process identities so the
+projection can be reproduced. Until the N4 process owner exposes that seam,
+`:problems` stays out of core prompt/page membership even though its compiled
+projection already exists.
+
+The unit does not carry a connection, latest-value callback, retained output,
+scope flag, page route, or renderer result. Projections query the exact
+database value plus only their declared trusted runtime inputs. Per-agent
+versus shared behavior remains visible in the query: using the agent id scopes;
+omitting it shares.
 
 Installed blocks are component children because their membership is genuinely
 per-agent: root receives fleet/problems; an ordinary agent does not. Projection
@@ -334,12 +372,37 @@ contribution vector. No consumer reruns a projection to reconstruct metadata.
 The historical prompt blob remains the byte ground truth; the captured database
 value plus contributions explains how it was built.
 
-Trigger content is not an ephemeral request argument to the renderer. The open
-run's creation transaction already points at its triggering message through
-`:seon.db/trigger`; the trigger block follows that history connection at the
-same database value. The interruption block reuses the proven rule that excludes
-the current open run and inspects the preceding run. This keeps prompt and page
-capable of deriving the same situation without a hidden call-site argument.
+This is an explicit revision of the sealed N3 interface. The core-context
+package changes these four owners atomically:
+
+- `src/seon/schema/prompt.edn`: the request names the held
+  `:seon.cluster.run/id`, agent id, effective caps, and required trusted runtime
+  inputs; the result is a closed rendered-context map containing non-empty
+  text, ordered contributions, and exact database identity;
+- `seon.cluster.prompt/prompt`: returns that map and owns no situation prose;
+- `seon.cluster.loop`: passes the held run id, extracts the exact
+  `:seon.cluster.prompt/text`, and alone places that string in
+  `:seon.ai/prompt`; and
+- `test/seon/cluster/prompt_test.clj` plus
+  `test/seon/cluster/turn_test.clj`: preserve every current
+  presence/absence invariant while adding contribution/router invariants.
+
+The prompt-router issue's acceptance rows must name this schema/function/loop/
+suite revision; “loop handoff” alone is not a seal.
+
+Trigger content is not selected by asking for unanswered work again. The
+`:call` path currently does that and can choose a later message after run open
+has already answered the original. The revised request names the held run, and
+the trigger block calls `seon.cluster.message/trigger` to follow that run's
+creating transaction to its exact `:seon.db/trigger`. It then derives message
+content and sender at the same database value. The run opener is the correct
+cause for this pre-turn prompt contract, not a timeless law: when turns become
+durable, `:seon.agent.turn/cause-message` records the exact inbound message a
+turn absorbed, including later input (`observability.md:55-57`).
+
+The interruption block reuses the proven rule that excludes the held run and
+inspects the preceding run. This keeps prompt and page capable of deriving the
+same situation without a prompt-only message argument.
 
 ### Root and agent pages
 
@@ -390,17 +453,32 @@ with the N5 evaluator owner before sealing authored context.
 
 ### Cache gradient
 
-Caching has two layers and stores no rendered facts:
+The baseline stores no completed render results. N4's remaining live pipeline
+may coordinate one active evaluation, join concurrent consumers, replace a
+pending request with the newest database value, and equality-suppress identical
+HTML morphs. Those are delivery/coordination invariants, not evidence that
+retaining a settled result benefits a later prompt or tab.
 
-- **Process-local render reuse.** N4 registration memory holds the last
-  admitted result per `(agent, block name, output kind, exact database
-  identity)`, one active evaluation per key, and the newest pending database
-  value. Thirty-two HTML tabs share one HTML evaluation. A prompt shares an AI
-  result already computed for that exact key; it never waits on a socket.
-- **Database-derived ordering evidence.** Turn capture records each sent AI
-  contribution's name, content hash, estimated tokens, effective position, and
-  semantic band. Later ordering derives observed change risk within a band.
-  Nothing writes `stable?`, `last-changed`, or a mutable score onto the block.
+Before adding process-local result retention, instrument each
+`(agent, block name, output kind, exact database identity)` with:
+
+- misses, concurrent joins, later hits, and invalidations;
+- projection evaluation wall time and admitted result weight; and
+- retained lifetime and the consumer that reused the value.
+
+The N4 registration package publishes these observations without retaining
+settled values first. The keep/delete experiment is predeclared: enable bounded
+retention only for a measured class whose later-hit time saved exceeds its
+retained byte-time cost over the sealed workload; otherwise delete the layer.
+The report records thresholds and raw distributions before any “cache win.”
+AI and HTML have independent active/result slots under one invalidation owner;
+no result crosses kinds.
+
+The second, separate layer is **database-derived ordering evidence**. Turn
+capture records each sent AI contribution's name, content hash, estimated
+tokens, effective position, and semantic band. Later ordering derives observed
+change risk within a band. Nothing writes `stable?`, `last-changed`, or a
+mutable score onto the block.
 
 The initial deterministic order uses semantic bands and the stored priority as
 a prior, with name as final tie-break:
@@ -417,24 +495,24 @@ An explicit epoch and hysteresis margin freeze the learned order long enough
 for prefix caching to benefit. Until that measurement exists, priority is an
 honest prior, not mislabeled observed stability.
 
-One correction to the N4 prose is required: a block can declare independent AI
-and HTML projection functions, so one completed HTML value cannot literally
-serve an AI request. The correct sharing claim is one block registration and
-one invalidation/acquisition owner with a result slot per kind; each requested
-kind evaluates at most once per exact database value, and all consumers of that
-kind share it.
+One correction to the N4 seal is required: a block can declare independent AI
+and HTML projection functions, so one completed value cannot serve both kinds.
+The minimum correct coordination shape is one invalidation owner with
+independent per-kind active/result slots. Retaining those settled slots across
+requests remains disabled until the measurement above earns it.
 
 ## Package boundaries and falsifiable exits
 
 | Package boundary | Can start when | Owns | Must not own | Falsifiable exit |
 |---|---|---|---|---|
-| Core context contract | N4 package 1 and N3 prompt facts are green | rendered-context/contribution shapes, omission/error behavior, AI reduction | N5 program discovery, web transport, plan/transcript domains | The current N3 prompt bytes are produced by routed `:identity`, `:trigger`, `:interruption`, and `:execution` blocks; deleting an AI key removes only that contribution |
-| Core block projections | Core context contract sealed | pure compiled renderers over exact db; colocated instructions | prompt concatenation, ambient config, stored renders | Clean state omits interruption; both interrupted shapes and failed-before-plan render exactly from planted facts; a missing trigger refuses at the trigger owner |
+| Core context contract and N3 seal revision | Landed N4 bounded expansion plus message lane `722adb18e` | rendered-context/contribution/request shapes, one caps/liveness unit builder, omission/error behavior, AI reduction; explicit prompt schema/function/loop/test revision | N5 program discovery, web transport, plan/transcript domains | Identity, peers/message grammar, interruption, wait continuity, sender-aware trigger, and execution grammar are routed named blocks; the loop sends the returned exact text; deleting an AI key removes only that contribution |
+| Core block projections | Core context contract sealed | compiled renderers over exact db and declared trusted input; colocated instructions | prompt concatenation, ambient config, stored renders | Clean state omits interruption/continuity; planted interruption and wait facts render independently; the trigger follows the held run; missing trigger produces the one sealed refusal with no database change |
 | Seed and membership | Core block projections sealed; agent creation owner identified | default installed block data, root sparse membership, whole-block replacement/reconcile | renderer source copies, root page branch, derived N5 membership | Fresh root and fresh ordinary agent have the intended different component sets; reapply converges with zero transaction; same-name replacement removes a deleted kind |
-| Prompt convergence | Core context and seed contracts green | `seon.cluster.prompt` reduction over routed AI contributions; loop handoff | bespoke identity/warning/trigger prose | The open blocker `prompt-assembly-bypasses-the-render-router` meets every acceptance row; changing one projection symbol changes the sent prompt without consumer edits |
-| N4 live composition | N4 registration/evaluator/HTTP contracts green | per-block/kind exact-value cache, HTML push, AI pull, equality suppression | prompt socket waits, separate AI renderer, whole-page morph | Thirty-two tabs cause one HTML eval; one simultaneous prompt causes at most one AI eval; unrelated commits emit neither; root and agent routes differ only by agent id/block data |
+| Prompt convergence | Core context and seed contracts green | reduction over routed AI contributions; held-run trigger selection; exact-text loop handoff; current prompt/turn invariant migration | bespoke identity/peer/wait/sender/warning/trigger prose | The open issue names and passes the prompt schema/function/loop/suite revision; a later queued message cannot replace the held run's trigger; changing one projection symbol changes the sent prompt without consumer edits |
+| Problems input seam | Cluster process owner exposes one captured live-process set | trusted input construction and capture for `:seon.cluster.run/live-processes` | a default set, stored liveness, a problems-only builder | Missing liveness refuses before rendering a membership containing `:problems`; supplied liveness reproduces the same AI/HTML results and is recorded in sorted capture evidence |
+| N4 live composition | N4 registration/evaluator/HTTP contracts green | per-block/kind active coordination, HTML push, AI pull, equality suppression, cache measurements | retained completed results before evidence, prompt socket waits, separate AI renderer, whole-page morph | Thirty-two tabs join one active HTML eval; one simultaneous prompt uses the independent AI slot; unrelated commits emit neither; misses/joins/hits/cost/weight are reported before any retention experiment |
 | Program-graph context | N5 round trip green | namespace block, current-namespace render discovery, SCI invocation through the router | temporary registry, stored auto-run blocks, author filter | Agent A defines a contracted twin; Agent B in that namespace sees it after restart; changing the definition changes both requested kinds through the same router |
-| Cache observations | turn evidence/context capture facts exist | per-contribution hash/token/position/band capture and candidate within-band order | stored stability fields, provider-specific ordering code | Re-rendering one database value is byte-identical; a changed block invalidates exactly its suffix; a recorded experiment compares static prior versus learned order on cached tokens and outcome |
+| Cache observations | turn evidence/context capture facts exist | per-contribution hash/token/position/band capture, result-retention measurements, and candidate within-band order | stored stability fields, provider-specific ordering code, assumed cross-consumer reuse | Re-rendering one database value is byte-identical; retention is kept or deleted by the predeclared cost/hit threshold; a separate experiment compares static prior versus learned order on cached tokens and outcome |
 | Completeness audit | core + N5 context green; later domain facts available | replay/confabulation scorer and missing-block diagnosis | model-written summaries, coaching answers | Every self-state claim in a replayed answer grounds to transcript first or another rendered contribution; each failure names the missing or contradictory block |
 
 Plan, transcript, memory, collaboration, schedules, and canvas remain their
@@ -444,49 +522,28 @@ their schemas or reimplement their queries.
 
 ## Owner decisions required before contract seal
 
-### Decision A — installed blocks and derived current-namespace blocks
+The following are already ruled and are implementation/documentation
+alignment, not morning choices:
 
-- **Option A:** only stored component blocks. Simple and matches
-  `seon.render.block/blocks` today, but loses the architecture's zero-ceremony
-  current-namespace render functions or forces derived membership to be stored.
-- **Option B:** only derive membership from the program graph. Elegant for
-  authored code, but cannot express root-only fleet, always-on transcript,
-  explicit pins, or hand-set placement.
-- **Option C:** one selection function combines installed overrides with
-  program-graph-derived renderers into one ordinary ordered block vector before
-  routing. No render-time map merge and no stored derived rows.
+- installed anchors plus derived current-namespace renderers
+  (`context.md:308-324`); only collision precedence remains open;
+- run-opening `:seon.db/trigger`, read back from the held run; durable
+  turn-cause is separately `:seon.agent.turn/cause-message`;
+- qualified-symbol-only durable projections; strings/vectors from
+  `492f2a17e` are runtime declarations, not durable block attributes;
+- fixed semantic bands, priority as prior, and measurement before learned
+  order;
+- one invalidation owner with independent AI/HTML slots; this is a correctness
+  correction to N4, with completed-result retention still measurement-gated;
+  and
+- byte-exact prompt blob plus rendered transaction and per-block
+  hash/token/position/band capture (`observability.md:34-59`,
+  `context.md:440-446`).
 
-**Recommendation: Option C.** Store only non-derivable membership; derive
-current-namespace membership. Refuse name collisions until explicit precedence
-is ruled.
+Domain errors likewise keep the landed flat `:seon.error/value`; an enclosing
+contribution may name its block but cannot add keys to that closed shape.
 
-### Decision B — current trigger as data or render request input
-
-- **Option A:** pass message id through a prompt-only render request. Cheap, but
-  the page cannot derive the same current situation and prompt truth depends on
-  a hidden caller argument.
-- **Option B:** install a transient trigger block per run. Makes the request
-  visible but stores derived presentation state and adds a write/cleanup cycle.
-- **Option C:** the standing trigger block follows the open run's
-  transaction-metadata `:seon.db/trigger` connection at the selected database
-  value.
-
-**Recommendation: Option C.** The run-opening transaction already records why
-the run exists. Reuse that fact; do not copy it.
-
-### Decision C — durable literal AI projections
-
-- **Option A:** accrete literal strings into durable
-  `:seon.render/projection`, as the earlier N4 package-2 note proposed.
-- **Option B:** keep durable block slots qualified-symbol-only; put role text and
-  instructions in compiled projection functions, while runtime-only generic
-  units may still carry literal output after a separate router accretion.
-
-**Recommendation: Option B.** It preserves native symbol storage, hot reload,
-state-gated instruction colocation, and one callable contract. The current N3
-literal prose becomes small core projection functions.
-
-### Decision D — how a clean conditional block omits itself
+### Decision 1 — how a clean conditional block omits itself
 
 - **Option A:** return nil or blank text and let consumers filter it. This is
   quarry-compatible but weakens function contracts and makes blank a sentinel.
@@ -500,34 +557,7 @@ literal prose becomes small core projection functions.
 nothing, and avoids nil. This decision also resolves the standing question about
 `[:maybe]` in function return contracts for this mechanism.
 
-### Decision E — cache identity across output kinds
-
-- **Option A:** independent registrations per kind. Straightforward, but
-  duplicates acquisition/invalidation ownership and lets AI/HTML drift.
-- **Option B:** one completed value per block shared across kinds. Cheapest on
-  paper, but false when the block declares two different projection functions.
-- **Option C:** one registration per `(agent, block)` with one shared
-  invalidation/database identity and independent result/active slots per kind.
-
-**Recommendation: Option C.** Thirty-two tabs still share one HTML evaluation;
-all prompt consumers share one AI evaluation; the block remains the
-coordination unit without pretending unlike outputs are equal.
-
-### Decision F — static priority versus measured cache order
-
-- **Option A:** keep priority forever. Deterministic and cheap, but manual
-  volatility guesses remain permanent.
-- **Option B:** learn a global order immediately. Meets the aspiration quickly,
-  but without contribution observations it is unmeasured and can destroy the
-  cache through reorder churn.
-- **Option C:** semantic bands are fixed; priority is the bootstrap prior;
-  contribution observations later derive a frozen, hysteretic within-band
-  candidate and an experiment decides whether it becomes default.
-
-**Recommendation: Option C.** It is deterministic now and honestly measured
-later, with no stored stability state.
-
-### Decision G — authored projection invocation
+### Decision 2 — authored projection invocation
 
 - **Option A:** keep `requiring-resolve` only. Works for compiled core Vars and
   cannot execute N5-only SCI Vars.
@@ -541,115 +571,141 @@ later, with no stored stability state.
 router still owns kind selection and errors; invocation becomes explicit
 instead of assuming every qualified symbol is a host Var.
 
-### Decision H — rendered-context capture
+### Decision 3 — installed/derived name collision precedence
 
-- **Option A:** return only the prompt string and reconstruct block metadata
-  later. Minimal call shape, but reruns projections and cannot prove exact
-  cache/order history.
-- **Option B:** return text plus the ordered contribution vector and complete
-  database identity; the loop passes text to the provider and capture persists
-  the evidence.
+- **Option A:** refuse a derived current-namespace renderer whose qualified
+  block name collides with an installed block. Loud and deterministic, but an
+  agent cannot intentionally replace a standing anchor.
+- **Option B:** installed membership wins explicitly. Supports an administrative
+  pin, but can hide a same-named authored renderer.
+- **Option C:** derived membership wins explicitly. Makes local authoring
+  immediate, but lets namespace code shadow root/standing anchors.
 
-**Recommendation: Option B.** The prompt blob remains byte truth, while the
-contribution vector makes its construction inspectable without re-execution.
+**Recommendation: Option A.** Refuse with both sources named. Add precedence
+later only with a concrete use case; silent map merge is never an option.
+
+### Decision 4 — exact capture schema and transaction owner
+
+- **Option A:** a turn-owned pre-provider transaction commits refs to the exact
+  prompt blob plus a component vector of contribution evidence and the
+  trusted-input snapshot. It makes “what was sent” durable before the
+  unobservable remote call, but requires the turn owner to accept the block
+  schema.
+- **Option B:** the turn's terminal transaction writes the same evidence after
+  the provider call. It adds no pre-call transition, but process loss can leave
+  an attempted remote call without its structured prompt explanation.
+
+**Recommendation: Option A.** Before the provider call, the turn owner commits
+the prompt bytes, rendered database transaction, held-run/turn cause, ordered
+contribution records, and sorted live-process snapshot together. Large text
+remains blob-backed; contribution rows carry name, kind, projection, hash,
+tokens, position, band, and the existing flat error value when failed.
 
 ## Sealed-suite sketch
 
 The next contract author writes these tests only after an independent review
-falsifies or accepts this plan and the owner rules Decisions A–H. Every test is
-a discovered JVM `deftest` under `test/`; no benchmark or one-off drive claims
-correctness.
+falsifies or accepts this plan and the owner rules Decisions 1–4. **Every
+proof named anywhere in this plan becomes a recurring, `bin/test`-discovered
+JVM `deftest`; a benchmark, manual browser drive, or one-off script can measure
+cost but cannot close an exit.**
 
-### Example contracts
+### Suite owners and deterministic identities
 
-- One fresh in-memory database per test installs the canonical block, agent,
-  run, receipt, message, provenance, and config attributes it uses.
-- A clean agent derives identity, trigger, and execution contributions;
-  interruption is explicitly omitted.
-- Both interruption shapes are planted from durable facts: interrupted receipt
-  with missing results, and closed-before-plan or recorded run error.
-- Missing trigger refuses at the trigger projection/assembler boundary and
-  produces no partial prompt.
-- AI-only, HTML-only, and twin blocks route only the declared kinds.
-- One broken block becomes a block-named flat error contribution/card and does
-  not suppress its neighbours.
-- Root and an ordinary agent use the same selection/render functions and differ
-  only in installed block facts.
-- Whole-block replacement removes a deleted AI key; it cannot linger through a
-  merge.
-- Two database values differing only in branch, temporal filters, commit ID, or
-  basis never reuse a contribution.
-- Colocation is behavioral: empty plan-style state includes its teaching;
-  non-empty state removes it without an acknowledgement/retraction write.
+- `test/seon/context_test.clj` owns example contracts and properties over a
+  fresh in-memory database created **inside every trial**.
+- `test/seon/context_live_test.clj` owns the reset/current-ancestor,
+  HTTP/SSE, 32-client, process-loss, reconnect, and post-N5 acquired-renderer
+  interaction. It launches a child JVM from the current
+  `java.class.path`—no built artifact or running operator—and uses only
+  `tmp/context-live/<seed>/<trial>/`. It reuses `seon.cluster/start!` inside the
+  child, following the existing boot tests; the parent owns and replaces the
+  child and reports startup/runtime cost.
+- Property seeds are fixed: determinism `2026072801`, placement `2026072802`,
+  isolation `2026072803`, reduction `2026072804`, coordination `2026072805`,
+  scope `2026072806`, membership `2026072807`, bounded expansion/caps
+  `2026072808`, held-run trigger selection `2026072809`, and completeness
+  scoring `2026072810`.
+- A shared test helper derives database/cluster names, agent/message/run IDs,
+  instants, UUIDs, ports, and project-local paths solely from `(seed,
+  trial-index)`. No `random-uuid`, wall clock, random free port, or unordered
+  map/set iteration participates in an oracle. Failure output prints seed,
+  trial index, size, generated value, schema explanation, deterministic
+  identities, and the complete shrunk check.
 
-### Fixed-seed properties
+### Deterministic recurring oracles
 
-- **Determinism:** generated block sets with unique names, generated projection
-  outputs, and one exact database value always produce the same order,
-  contribution vector, and text bytes. Set/map iteration is sorted.
-- **Placement:** for every generated declaration presence set, AI requests
-  evaluate exactly AI-declaring blocks and HTML requests exactly HTML-declaring
-  blocks.
-- **Isolation:** generated sequences of successful, omitted, unresolved, and
-  throwing projections affect only their own contribution; every returned value
-  validates exactly one result alternative.
-- **Reduction:** the prompt text equals the reduction of the returned successful
-  AI contributions in returned order; no projection is called again during
-  reduction.
-- **Cache state machine:** over generated invalidate/begin/settle/read
-  interleavings per block and kind, at most one evaluation per kind is active,
-  newest exact database value wins, and consumers never receive a result from a
-  different database identity.
-- **Scope:** generated two-agent facts show that per-agent renderers cannot see
-  the other agent's rows, while shared renderers return byte-identical output
-  for both when their query intentionally omits agent scope.
-- **Membership:** generated installed blocks plus generated N5 render-function
-  rows yield one collision-free ordered vector or one explicit collision
-  refusal; no derived renderer is transacted.
+| Contract class | Planted evidence | Independent oracle |
+|---|---|---|
+| Current prompt census | Named block facts for identity, peers/message grammar, interruption, continuity, trigger/sender, and execution | The test derives expected ordered block names directly from planted membership and conditions, records each projection invocation/result in a test ledger, and compares both returned contributions and exact prompt text with that ledger—not with each other |
+| Placement and omission | All AI-only, HTML-only, twin, and clean conditional declaration combinations | Expected invocations come from declaration-key presence in planted facts; omitted success is asserted as its one ruled union arm, never nil/blank or a selector-side duplicate |
+| Error isolation | Successful neighbours around unresolved, throwing, and returned flat-error projections | Expected neighbour bytes come from planted literals; the failed contribution names its block while its nested error equals the existing closed `:seon.error/value` exactly |
+| Held-run trigger | Run A opens on message A; message B arrives before A's `:call` pass | `message/trigger` independently establishes A from the run transaction; the invocation ledger must read A/sender A, omit B, and the provider request must contain A's planted content |
+| Missing trigger refusal | Held run whose creating transaction has no trigger | Deepest non-empty `ex-data` equals the sealed `:seon.cluster.prompt/no-trigger` refusal rule, no partial rendered-context exists, and before/after sorted datoms are identical; if the seal chooses a flat error instead, schema and oracle change atomically to that one exact alternative |
+| Scope | Distinct, tagged rows for agents A/B plus tagged shared rows | The oracle enumerates exact datom IDs each projection may read: A omits B and B omits A; shared includes the planted shared set. Byte equality alone never passes scope |
+| Membership/collision | Installed rows plus generated N5 render-function rows | Expected names and provenance derive independently from planted rows; result is the exact sorted vector or the one ruled collision refusal, and a database census proves no derived descriptor was transacted |
+| Caps and expansion | Generated slot/ref graphs with the four explicit caps | A small test-only depth-first, left-to-right counter computes admitted node positions and expected elision/cycle paths from the planted graph; results must match the landed single-map `expand` contract, with the same caps on AI admission, generic panels, and HTML expansion |
+| Exact database identity | Values differing separately in basis transaction, branch, `as-of`, `since`, history, or commit ID | Invocation ledger and returned contribution identity must name the requested value; no result produced for one identity may satisfy another |
+| Coordination, not assumed cache | Generated invalidate/begin/join/settle/newest-pending schedules | Event ledger proves at most one active evaluation per kind, concurrent joins only, independent AI/HTML slots, and newest pending value; settled later reuse remains a measured feature, not a correctness assumption |
+| Colocation | Empty then non-empty plan-style facts, without any acknowledgement write | Expected teaching/content alternative derives directly from planted state; a sorted datom diff proves only domain facts changed |
+| Root/agent symmetry | Root and ordinary agent memberships with uniquely tagged rows | Both route through the same selected functions; exact expected names derive from each planted membership, so equal omission cannot masquerade as symmetry |
+| Feels-stateful completeness | Fixed replay replies containing grounded, contradictory, and unsupported self-state claims plus the exact transcript/contribution evidence | A test-owned expected claim-to-evidence ledger names every supported block and every unexplained claim; the pure scorer must return that ledger exactly, so a model-written explanation cannot grade itself |
 
-Each property uses fixed recorded seeds, creates a fresh database inside each
-trial, validates generated values against the exact registered schemas, and
-prints the complete shrunk check on failure. The oracle observes returned
-contributions, invocation counts, and durable facts independently.
+Every generated value validates against the exact registered schema before use.
+Generators create representation-valid states; the properties assert semantic
+invariants with the independent ledgers above. Shrinking preserves identity
+derivation and schema validity.
 
-### Recurring interaction proofs
+### Recurring live oracle
 
-- Start a real child cluster from the current ancestor, observe readiness, and
-  create root plus an ordinary agent through the real seed path.
-- Open `/` and `/agent/{id}` through real HTTP/SSE. The initial pages are
-  block-derived; there is no root renderer branch.
-- Open 32 tabs on one agent, derive one prompt at the same database value, then
-  commit one relevant fact. Assert one HTML evaluation for all tabs, one AI
-  evaluation for the prompt kind, identical per-kind bytes, and no whole-page
-  morph.
-- Kill the child mid-render, replace it, reconnect, and assert current facts
-  repaint both pages; no stored render or acknowledgement is required.
-- After N5, define a contracted twin in one agent, restart, enter that namespace
-  from another agent, and assert both kinds resolve through the same router and
-  guarded invocation seam.
+`test/seon/context_live_test.clj` performs one event-driven scenario:
 
-Events and readiness drive synchronization; clocks are only loud foreign-process
-backstops. The proof ends by stopping the child through its supervisor owner.
+1. start the child cluster from the current ancestor and wait for explicit
+   database, graph, and HTTP readiness;
+2. create root and an ordinary agent through the real initialization path,
+   connect `/` and `/agent/{id}` over real HTTP/gzip SSE, and assert exact
+   planted block IDs and morph targets;
+3. attach 32 client feeds to one agent, request AI at the same database value,
+   commit one relevant fact, and assert from the invocation/event ledger one
+   joined HTML evaluation, one independent AI evaluation, no unrelated
+   projection calls, and no whole-page morph;
+4. stop the child mid-render, replace it from the same current ancestor,
+   reconnect, and compare repaint bytes and exact block IDs with a fresh
+   derivation from current facts—no stored render or acknowledgement; and
+5. after N5, transact one contracted twin, replace the child, enter its
+   namespace from another agent, and assert both kinds pass the same router and
+   guarded invocation seam.
+
+Readiness/completion latches and observed SSE events synchronize the test;
+there are no sleeps. A clock is only a loud foreign-process backstop whose
+firing fails with child stdout/stderr and the last readiness event. The parent
+always stops the child it owns in `finally`, and the suite reports child-JVM
+startup and scenario duration without treating either measurement as a
+correctness oracle.
 
 ## Independent falsification gate
 
 Before contracts are drafted, an independent reviewer must try to disprove:
 
-- that the current trigger is derivable solely from the selected database
-  value after claim;
+- that the held run's creating transaction selects exactly its trigger even
+  when a later unanswered message exists;
 - that the installed-plus-derived membership can stay collision-free without
   a stored auto-run row;
 - that one router invocation seam can serve host Vars and N5 SCI Vars without
   weakening the guarded-eval contract;
 - that the omission alternative composes with the existing router and N4
   surface unions;
-- that a one-registration/per-kind-result cache matches N4's flow and
-  equality-suppression contracts;
+- that the one request/unit builder propagates the exact four caps and trusted
+  live-process snapshot to every projection and preserves the landed
+  single-map bounded expansion;
+- that per-kind active coordination matches N4's flow/equality-suppression
+  contracts without assuming completed-result retention;
 - that every pre-N5 block uses already-installed live-boot attributes rather
   than fixture-only schema;
 - that the contribution vector is sufficient for turn capture, prompt replay,
   token accounting, and later cache-gradient measurement without another
-  projection pass.
+  projection pass; and
+- that every exit is claimed by the deterministic recurring suite owner and an
+  oracle independent of the production assembler.
 
 The review returns evidence and dispositions against this document. It does not
 write contracts. Only after the owner rules the decision batch and the plan is
@@ -660,24 +716,34 @@ schemas, stubs, and suites.
 
 This rung is complete only when all of the following are true:
 
-- production prompt assembly contains no identity, trigger, interruption, or
-  reply-grammar concatenation outside block projection owners;
+- production prompt assembly contains no identity, peer/message, sender,
+  trigger, interruption, wait-continuity, or reply-grammar concatenation
+  outside block projection owners;
+- the prompt request/result schemas, prompt function, held-run loop handoff,
+  prompt suite, and turn suite have revised together without losing a current
+  presence/absence invariant;
+- a later queued message cannot replace the held run's recorded trigger;
 - a census finds no ordinary prompt/page consumer calling a projection
   function directly;
 - root and ordinary agent routes select an agent and use the same block/page
   mechanism;
 - every advertised projection symbol resolves through the one invocation seam;
 - prompt, page, debug, and capture consume the same ordered block derivation at
-  one immutable database value;
+  one immutable database value, effective cap set, and captured trusted-input
+  snapshot;
 - conditional guidance appears exactly with its owning state and disappears
   when that state disappears;
 - N5-authored render functions survive restart and become cross-agent visible
   from program facts;
-- per-kind invocation counts prove fan-out and prompt reuse without claiming
-  that AI and HTML outputs are the same value;
+- per-kind invocation counts prove active fan-out without claiming that AI and
+  HTML outputs are the same value or that later reuse is beneficial;
+- completed-result retention, if enabled, passed its predeclared
+  miss/join/hit/cost/weight threshold; otherwise it is absent;
 - cache-order changes, if enabled, are backed by recorded contribution history
   and a measured improvement rather than a priority rename;
-- the recurring process-loss proof repaints from facts with no stored renders;
+- `test/seon/context_live_test.clj` recurrently proves current-ancestor boot,
+  real HTTP/SSE, 32-client fan-out, process loss, reconnect repaint, and child
+  ownership with no stored renders;
 - the open prompt-router issue is closed with the contract and live evidence;
   and
 - a replayed feels-stateful audit finds every agent self-state claim grounded
@@ -966,3 +1032,19 @@ reset-from-current-ancestor path.
 After those changes, the core direction—one ordered block derivation, one
 router, AI reduction for the agent and HTML placement for the human—is ready
 for contract authoring.
+
+### Dispositions
+
+1. Fixed in the dependency ledger: current `deps.edn` lines and the promoted web/resources dependencies are cited.
+2. Fixed in the fresh-tree census, pre-N5 inventory, core-context exit, and graduation gate: committed message lane `722adb18e` contributes peers, sender, wait continuity, and message grammar.
+3. Fixed in “The block unit” and the caps oracle: one builder threads the same four caps through every projection, admission, generic panel, and landed expansion map.
+4. Fixed in the dependency ledger and landed-shape section: `492f2a17e`'s single `:seon.render/expansion` map and ref-following contract replace the stale signature, while registration remains future work.
+5. Fixed in “Prompt convergence” and the first package boundary: prompt request/result schemas, prompt, loop extraction, prompt tests, and turn tests revise as one N3 seal.
+6. Fixed in “Prompt convergence,” the package exits, and the held-run oracle: the request names the held run and `message/trigger` selects its creating transaction; future turns own `:cause-message`.
+7. Fixed in “The block unit” and “Problems input seam”: the process owner supplies and capture records live processes, and missing input refuses before rendering `:problems`.
+8. Fixed in “Cache gradient”: completed-result retention is absent initially and survives only a predeclared miss/join/hit/cost/weight experiment.
+9. Fixed in “Owner decisions”: A, B, C, F, H, and the per-kind cache correction are struck as choices; only omission, invocation, collision precedence, and capture ownership remain.
+10. Fixed in “Suite owners and deterministic identities”: ten numeric seeds and seed/trial-derived databases, times, IDs, UUIDs, ports, and paths are sealed with complete shrink reporting.
+11. Fixed in “Deterministic recurring oracles”: planted membership and invocation/read ledgers independently derive expected names, bytes, and exact scoped rows.
+12. Fixed in the missing-trigger oracle: deepest refusal data and unchanged sorted datoms are required, with any flat-error migration forced to revise schema and oracle atomically.
+13. Fixed in “Suite owners” and “Recurring live oracle”: `test/seon/context_live_test.clj` owns a current-classpath child JVM, project-local paths, event readiness, cost reporting, HTTP/SSE fan-out, process loss, and reconnect.
