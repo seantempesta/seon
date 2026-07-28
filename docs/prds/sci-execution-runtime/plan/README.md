@@ -672,10 +672,14 @@ Research basis: `flow-mechanics`, `flow-inventory`,
   (lane `flow-var-stepfns`, running);
   (b) admission codec D2 — the sci failure arm joins the one bounded
   codec (lane `admission-codec-d2`, running);
-  (c) every trigger-conservation violation fixed at its choke point
-  (SLOT — fills from the audit on return; a cap never fences a bug);
-  (d) the claim/epoch deletion slice, or the named incident that saves
-  each check (SLOT — fills from the zombie audit on return).
+  (c)+(d) — FILLED and MERGED (both audits returned 2026-07-28
+  evening, corroborating each other's livelock construction): the
+  custody revision — CUSTODY PRECEDES WORK, custody IS presence,
+  epochs/leases DELETED (no zombie constructible; presence subsumes,
+  proven). Contract package:
+  `custody-revision-contracts-2026-07-28.md`. Dispatches AFTER the
+  context-blocks lane returns (shared loop.cljc ownership). Episode
+  query delivered (~34 µs, zero new facts) → F1 input.
 - **F1 — the agent-graph blueprint (contract package, orchestrator-
   authored):** one blueprint stamps every agent's graph at agent
   creation — mailbox proc (`:io`, parks on its own wake; `listen!`
