@@ -432,10 +432,31 @@ per-attempt receipt facts (new schema family); (3) failover
 execution in the loop's :call branch consuming disposition, backup
 context = error/ai-prose over the primary's COMMITTED fact (commit
 before the backup call — ordering constraint); (4) backoff strategy
-as again-style config facts, no-backup path only. Falsifiers
-unchanged from the step-5 brief. ALSO IN FLIGHT: the N4 agent drafts
-render-pipeline contracts (problems page in a browser). THEN:
-two-cluster proof; projection-review experiment;
+as again-style config facts, no-backup path only. **TASK #10 COMPLETE — STEP 5 DONE (cd9f41fb3 + 4f93d6587, gate
+246/1095/0 VERIFIED).** Descriptor rows: backup = OVERRIDES over the
+primary (:seon.config.ai.backup/model decides existence; partial
+backup unrepresentable; loop/provider DELETED — same map, second
+name; deliberate departure from research option 2, recorded in
+config.edn). Attempt facts: one row per call, role by CONNECTION
+(failover-from/delay-ms, no :primary stamp); primary's error fact
+commits BEFORE the backup call and record-attempt! returning nil
+after a refusal makes that total (a paid call whose reason couldn't
+commit doesn't happen); backup context = ai-prose over the READ-BACK
+fact (ordering proven by equality); backoff schedule EMPTY whenever
+a backup exists (held by data). Judgment calls accepted: problems
+not extended (successful failover isn't a problem); no :running
+attempt row (a second interruption mechanism for a fact nothing
+reads); the failover prose carries operator-aimed noise → the
+projection-review experiment's first exhibit. FILED:
+a-turns-model-work-can-outlive-its-own-run-lease (60s deadline = 60s
+lease; honest fix is a claim-contract interface change, N2/N3-owned);
+stop-may-leave-the-prepl-server-name-registered (unverified Gemini
+flag, same-JVM same-name restart). Datahike scar: :db.type/long is
+EXACTLY java.lang.Long — an Integer refuses the WHOLE transaction.
+IN FLIGHT: the N4 agent drafts render-pipeline contracts (problems
+page in a browser). NEXT QUEUE: two-cluster proof (+ the failover
+live drive can ride it — a bogus primary endpoint + real backup);
+projection-review experiment (the failover prose is exhibit one);
 released-connection family; dispatcher lands post-measurement. THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
