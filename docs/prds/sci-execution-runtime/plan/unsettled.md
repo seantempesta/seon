@@ -483,11 +483,18 @@ two named exercise goals prove the design: LIVE TOKEN COUNTS and
 STREAMING TOKENS to the interface (exposes the seam: seon.ai is
 one-shot — the streaming SSE path is a named seal-side revision
 composing with the failover work, partials land on the no-history
-churn attribute, counts derive from the stream). IN FLIGHT (two):
-the FRESH N4 agent drafts with all rulings baked (mine-don't-
-reinvent, blocks central, old look faster, polish rows, benchmark
-harness, problems page first); projection-review experiment (real
-outputs for owner critique). NEXT QUEUE: two-cluster proof (+
+churn attribute, counts derive from the stream). PROJECTION REVIEW IN (ead99eb98: verbatim outputs of every error
+family + critique + before/after rewrite proposals in
+research/projection-review-2026-07-28.md; five consumer-visible
+issues — noisy failover context, unclassified transition prose, lost
+instrumentation evidence, unstable sci object identities in
+receipts, duplicate storm-limit messages; each fix is one
+hot-reloadable projection defn once the owner approves the revision
+list — OWNER CRITIQUE SESSION is the next step on this thread).
+IN FLIGHT (one): the FRESH N4 agent drafts with all rulings baked
+(mine-don't-reinvent, blocks central, old look faster, polish rows,
+60fps benchmark harness, tailwind port, streaming exercises,
+problems page first). NEXT QUEUE: two-cluster proof (+
 failover live drive rides it); released-connection family;
 dispatcher lands post-measurement; my.message rung; then the gold
 order (turn evidence + blobs, derived context, plans + memory,
