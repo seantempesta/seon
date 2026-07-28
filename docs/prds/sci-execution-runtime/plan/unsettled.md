@@ -592,8 +592,12 @@ docstring promised "the run resumes on a later wake" — measured
 false (custody releases, the next pass CLOSES the run; the AGENT
 resumes on its next trigger with a fresh ctx, and THE NOTE IS THE
 ONLY CONTINUITY — a delegating agent must put everything its next
-run needs into the note). IN FLIGHT (three): N4 PACKAGE 2;
-my.message Opus agent (mid-unit); context-blocks-plan revision. MORNING BATCH accumulating:
+run needs into the note). CONTEXT PLAN REVISED (cfb75bef3): all review findings dispositioned;
+the morning batch properly REDUCED — eight decisions shrunk to FOUR
+genuine ones (block omission semantics, invocation shape, collision
+precedence, capture ownership); ready for the morning ruling, then
+contract drafting. IN FLIGHT (two): N4 PACKAGE 2; my.message Opus
+agent (mid-unit). MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
