@@ -67,31 +67,79 @@ Failures are flat `:seon.error` values, never throws: the router runs on the
 error path, so an undeclared kind, an unresolvable symbol, and a projection
 that throws are each a value naming what is broken.
 
+### Generic default, specialist where the unit is built
+
+Every kind has a **generic default** renderer that can project any value of its
+family, and a producer that knows more points that value's key at a
+**specialist** — chosen where the unit is BUILT, computed from the value's own
+attributes, never by a conditional at the consumer. `seon.render.block/select`
+is that choice: an ordered set of pure rules belonging to the one producer that
+owns the family, first accepting rule wins, falling through to the default.
+`:seon.render/html`'s generic default is `seon.render.block/data-panel`.
+
+The two halves are one design. Because the key on the unit is the whole answer,
+**the consumer never branches and the specialist's name never leaves its
+producer** — which is what makes "consumers reach a value's renderings only
+through the router" a property of the code rather than a rule people remember.
+An error's steering prose is not a function anybody calls; it is the default
+that `:seon.render/ai` points at, and a malli violation's detailed explanation
+is a specialist the error producer selects from the fact's own attributes.
+
+The rules are a producer's, not a registry: they are built from one family's own
+attributes and are never consulted by anybody rendering. Selection is total,
+because it runs where units are built and that is often the error path — a rule
+that throws or does not resolve has not accepted, so a broken rule costs its own
+specialist and never the render. Both halves are late-resolved symbols, so
+re-evaluating a rule or a renderer changes the next render.
+
 ## The block and its two renders
 
-A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) is the
-UI's unit, and it declares two of the kinds above — selected by key presence,
-with no stored discriminator:
+A **block** (`:seon.block/block`, owned by `seon.render.block`) is the UI's
+unit, and it declares two of the kinds above — selected by key presence, with
+no stored discriminator:
 
-- **ai render** (`:seon.render/ai`) → **prompt** text: a verbatim string, or a
-  qualified symbol the router resolves late.
-- **html render** (`:seon.render/html`) → a **surface**: a symbol, a literal hiccup
-  vector, else the structural pretty-print.
+- **ai render** (`:seon.render/ai`) → **prompt** text: a qualified symbol the
+  router resolves late.
+- **html render** (`:seon.render/html`) → a **surface**: a qualified symbol,
+  resolved the same way, whose output is hiccup.
+
+The DURABLE slot is a qualified symbol only. A literal hiccup vector or a
+verbatim string is admissible on a runtime unit, but never in the database:
+restricting the stored value to one type is what lets it store natively as
+`:db.type/symbol` instead of a `pr-str` EDN string that every read has to
+decode. A block with nothing special to say points at the kind's generic
+default, which costs nothing to store and renders anything.
 
 Presence decides placement: ai-render-only = prompt only (no surface);
-html-render-only = a surface only (zero prompt tokens); both = both.
-`:seon.agent.ctx/name` is
-one keyword in three roles — the prompt header, the per-agent upsert key, and the
-DOM slot id `#surface-<name>` — always in sync, which is what makes "the agent edits
-the same thing the human sees" true. Renders are fns/symbols; the rendered output
-is ephemeral, never stored.
+html-render-only = a surface only (zero prompt tokens); both = both. A block
+declaring neither is legal and renders nowhere — it is data the agent owns and
+nothing displays.
+
+`:seon.block/name` is one keyword in three roles — the prompt header, the
+per-agent upsert key, and (through `seon.render.block/surface-id`) the DOM
+element id — always in sync, which is what makes "the agent edits the same
+thing the human sees" true. `surface-id` is the ONE derivation, so the hole and
+the patch cannot drift; it ESCAPES characters it cannot use rather than
+dropping them, because dropping is how two names become one id and two blocks
+morph over each other. Renders are symbols; the rendered output is ephemeral,
+never stored.
+
+**The morph target is the block.** Each block is patched independently at its
+own `surface-id`, so a transcript append repaints the transcript and the header
+is not recomputed. This is the difference between the block set being a
+convenient grouping and being the unit of live update: interest, registration
+memory and equality suppression are all keyed by block, and "32 tabs, one
+authored evaluation" is one evaluation of one block. Measured: the same one-row
+change is 287 bytes and 0.004 ms as a block morph, or 82,893 bytes and 0.460 ms
+as a whole-page morph — 289× the bytes and 115× the CPU, and the bytes are the
+half that decides whether a slow reader is survivable.
 
 ## Seed-copy — one collection, no merge
 
-Each agent OWNS its complete block set in `:seon.agent/ctx`, seeded at creation.
-Render reads that complete collection sorted by `:seon.agent.ctx/priority` and
+Each agent OWNS its complete block set in `:seon.cluster.agent/blocks`, seeded at creation.
+Render reads that complete collection sorted by `:seon.block/priority` and
 stops: there is no render-time merge and no separate default set — every block an
-agent renders, it owns. The set is deduped app-level by `:seon.agent.ctx/name` (a
+agent renders, it owns. The set is deduped app-level by `:seon.block/name` (a
 plain `:keyword`, NOT a datahike identity, so two agents can each own a
 `:transcript` block); priority sorts with a stable by-name tiebreaker.
 
@@ -102,22 +150,29 @@ registration; the render fn scopes by what it reads. (See [[data-model]] for the
 domain schemas + data-ref scoping; [[agent-runtime]] for the fact-first atomic
 birth transaction and post-commit safe declaration load.)
 
-## `install!` / `remove!` — the one override
+## Installing and removing — the one override
 
-`seon.agent.ctx/install!` and `seon.agent.ctx/remove!` are the sole functions that
-shape a block set:
+`seon.render.block/install-tx` is the sole function that shapes a block set. It
+is PURE: it returns transaction data and the caller commits it, so the
+derivation stays a function of a database value and one owner does the writing.
 
-- `install!` is **scope-aware + variadic** — one block map OR a vector of block
-  maps to load the whole set at once. In an agent's scope it targets THAT
-  agent's `:seon.agent/ctx`.
-  Idempotent **upsert by `:seon.agent.ctx/name`**.
-- `remove!` drops a block by name; because `:seon.agent/ctx` is a component
-  vector, the child entity cascade-retracts.
+- It takes a vector of blocks and targets one agent's
+  `:seon.cluster.agent/blocks`. Idempotent **upsert by `:seon.block/name`**.
+- The upsert REPLACES a same-named block wholesale rather than merging it,
+  because removing a key from a block must remove it from the block — a merge
+  would make `:seon.render/ai` un-deletable and quietly keep a block in the
+  prompt after its author took it out.
+- Removal retracts the block entity; because `:seon.cluster.agent/blocks` is a
+  component collection, the child cascade-retracts.
+- Installing nothing is no transaction. Converged means zero writes.
 
-The cluster manifest declares the initial block data. Agents may later call
-`install!`/`remove!` against the same database-owned collection. A pure ADD
-needs nothing more: name a block and its render symbols; the symbols resolve
-late.
+The name is a plain keyword and deliberately NOT a database identity, so two
+agents may each own a `:transcript`; uniqueness is per agent and the upsert
+enforces it.
+
+The cluster manifest declares the initial block data. Agents may later install
+and remove against the same database-owned collection. A pure ADD needs nothing
+more: name a block and its render symbols; the symbols resolve late.
 
 **Pinning a fn is a block; config shapes the seed.** Any render fn an agent wants
 always-on is nothing but a block — `install!` at a chosen priority pins it,
@@ -141,7 +196,7 @@ siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
 turn's complete ordinary database value. The run loop acquires and formats
-the AI renders in `:seon.agent.ctx/priority` order; the web UI places
+the AI renders in `:seon.block/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
 
@@ -210,7 +265,7 @@ every context band renders an html representation for inspectability.
 
 - **slot** — `(slot :name)` emits
   `[:div {:id "surface-<name>" :data-slot :name}]`, a
-  named, DB-keyed EMPTY hole keyed on `:seon.agent.ctx/name`. It does not resolve
+  named, DB-keyed EMPTY hole keyed on `:seon.block/name`. It does not resolve
   `:name`; it marks a hole. Resolution happens at expansion: render the named
   block's html, and if THAT output contains more slots, recurse to fixpoint.
 - **layout** — a render whose hiccup contains slots; it queries the db (the
@@ -218,6 +273,21 @@ every context band renders an html representation for inspectability.
   **layout-vs-surface is
   a role, never stored**: a render with child slots is a layout, a render with
   none is a leaf **surface**.
+- **top-level is DERIVED**, never a stored `:layout` flag: a block is top-level
+  when no other block's surface slots it in. A page is its top-level surfaces
+  in priority order, so several root cards and one all-slotting layout are the
+  same mechanism arranged differently. When every surface is slotted and none
+  is top-level, the slots form a closed cycle; every surface becomes top-level
+  and the cycle is reported in the hole that closes it, because rendering
+  nothing would be the silent failure this design refuses.
+
+Expansion refuses in place rather than throwing, so one bad slot costs one hole
+and not the page: a slot naming a block the agent does not own keeps the hole
+and names the missing block (install it and the next render fills it); a slot
+naming a block whose surface FAILED gets that surface's error card, so the
+failure appears where it belongs; and a cycle is refused at the hole that
+closes it. The visited set along the path is the observable fact — a depth
+counter would be a magic number standing in for it.
 
 ## Pages — agent view, root view, debug view, app
 
