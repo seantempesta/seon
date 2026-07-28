@@ -239,16 +239,7 @@
     (is (= ::still-running outcome)
         "the time limit did NOT stop it — if this ever passes by
          returning, the mechanism changed and the ceiling moved")
-    (future-cancel task))
-  (testing "and the diagnostic says which case this is"
-    ;; a blocked evaluation records almost no fn-entries — 12 reads as
-    ;; blocked in a host call, where 271M would read as a spin
-    (let [task (future (run "(deref (promise))" 200))]
-      (Thread/sleep 300)
-      (future-cancel task)
-      (is true "the shape of the diagnostic is asserted where it is
-                produced; this case cannot return one at all, which is
-                itself the tell"))))
+    (future-cancel task)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The single owner of the interrupt question

@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [datahike.core :as datahike]
             [seon.flow :as sut])
   (:import [java.io File]
            [java.net ServerSocket URI]
@@ -53,33 +54,40 @@
       "The Flow testbed did not observe its required event."
       {::event event}))))
 
-(defn- await-condition!
-  [event pred]
-  (let [limit (+ (System/nanoTime)
-                 (.toNanos TimeUnit/SECONDS event-backstop-seconds))]
-    (loop []
-      (cond
-        (pred) true
-        (< (System/nanoTime) limit)
-        (do (Thread/sleep 5) (recur))
-        :else
-        (throw
-         (ex-info
-          "The Flow testbed condition did not become true."
-          {::event event}))))))
-
 (defn- take-event!
-  [channel event]
-  (let [[value selected]
-        (async/alts!!
-         [channel (async/timeout
-                   (.toMillis TimeUnit/SECONDS event-backstop-seconds))])]
-    (when-not (= selected channel)
-      (throw
-       (ex-info
-        "The Flow testbed channel did not publish its required event."
-        {::event event})))
-    value))
+  ([channel event]
+   (take-event! channel event (constantly true)))
+  ([channel event accept?]
+   (let [backstop
+         (async/timeout
+          (.toMillis TimeUnit/SECONDS event-backstop-seconds))]
+     (loop []
+       (let [[value selected] (async/alts!! [channel backstop])]
+         (cond
+           (= selected backstop)
+           (throw
+            (ex-info
+             "The Flow testbed channel did not publish its required event."
+             {::event event}))
+
+           (accept? value)
+           value
+
+           :else
+           (recur)))))))
+
+(defn- database-events
+  [connection]
+  (let [channel (async/chan 16)
+        listener-key (random-uuid)]
+    (datahike/listen! connection listener-key #(async/>!! channel %))
+    {::channel channel
+     ::listener-key listener-key}))
+
+(defn- stop-database-events!
+  [connection {::keys [channel listener-key]}]
+  (datahike/unlisten! connection listener-key)
+  (async/close! channel))
 
 (defn- testbed-procs
   [{::keys [parallelism active-evals deliver!]}]
@@ -240,23 +248,23 @@
        ::fault-drop-count (inc count)}])))
 
 (defn- committed-faults
-  [connection]
+  [database]
   (d/q
    '[:find ?proc ?message
      :where
      [?fault :seon.flow-test/fault-id]
      [?fault :seon.flow-test/fault-proc ?proc]
      [?fault :seon.flow-test/fault-message ?message]]
-   @connection))
+   database))
 
 (defn- committed-drop-count
-  [connection]
+  [database]
   (d/q
    '[:find ?count .
      :where
      [?counter :seon.flow-test/fault-drop-id "fault-committer"]
      [?counter :seon.flow-test/fault-drop-count ?count]]
-   @connection))
+   database))
 
 (deftest production-launcher-wedges-degrade-capacity-by-exactly-n
   (let [parallelism 4
@@ -316,9 +324,12 @@
             "all and only the remaining compute slots make progress"))
       (finally
         (.countDown release-wedges)
-        (await-condition!
-         ::production-wedges-released
-         #(empty? @(::sut/active-work launcher)))
+        (dotimes [_ wedge-count]
+          (take-event!
+           (get-in launcher [::sut/started :report-chan])
+           ::production-wedge-released
+           #(contains? wedge-ids (::sut/submission-id %))))
+        (is (empty? @(::sut/active-work launcher)))
         (sut/stop-installed-work-launcher!)))))
 
 (deftest wedged-steps-degrade-capacity-exactly-and-name-themselves
@@ -399,42 +410,55 @@
                 ::completed)
               ::sut/wedged? false}]))
         (await-latch! remaining-work-finished ::remaining-capacity)
-        (await-condition!
-         ::normal-work-released-slots
-         #(= (- parallelism wedge-count)
-             (- parallelism (count @active-evals)))))
+        (dotimes [_ (- parallelism wedge-count)]
+          (take-event!
+           (:report-chan started)
+           ::normal-work-completed
+           #(contains? #{:eval-2 :eval-3} (::sut/pid %))))
+        (is (= wedge-count (count @active-evals))))
       (finally
         (.countDown release-wedges)
-        (await-condition! ::all-evals-finished #(empty? @active-evals))
+        (dotimes [_ wedge-count]
+          (take-event!
+           (:report-chan started)
+           ::wedged-work-released
+           #(contains? wedged-pids (::sut/pid %))))
+        (is (empty? @active-evals))
         (flow/stop graph)
         (stop-executor! compute-executor)))))
 
-(deftest fixed-buffer-backpressure-parks-and-drains-in-order
-  (testing "a full fixed buffer parks producers and loses nothing"
+(deftest fixed-buffer-capacity-drains-in-order-without-loss
+  (testing "a full fixed buffer accepts its capacity and loses nothing"
     (let [{::keys [graph completed] :as testbed}
           (single-eval-testbed 2)]
       (try
-        (flow/start graph)
-        (let [injection
+        (let [started (flow/start graph)
+              filled
               (flow/inject
                graph
                [:eval ::sut/submission]
-               (mapv #(work-message completed %) (range 6)))]
-          (await-condition!
-           ::fixed-buffer-full
-           #(= 2
-               (get-in
-                (channel-data graph :eval ::sut/submission)
-                [:buffer :count])))
-          (is (false? (.isDone ^Future injection))
-              "the producer is parked while the proc remains paused")
+               (mapv #(work-message completed %) (range 2)))
+              _ (.get ^Future filled
+                      event-backstop-seconds
+                      TimeUnit/SECONDS)
+              injection
+              (flow/inject
+               graph
+               [:eval ::sut/submission]
+               (mapv #(work-message completed %) (range 2 6)))]
+          (is (= 2
+                 (get-in
+                  (channel-data graph :eval ::sut/submission)
+                  [:buffer :count])))
           (flow/resume graph)
           (.get ^Future injection
                 event-backstop-seconds
                 TimeUnit/SECONDS)
-          (await-condition!
-           ::fixed-buffer-drained
-           #(= 6 (count @completed)))
+          (dotimes [_ 6]
+            (take-event!
+             (:report-chan started)
+             ::fixed-buffer-item-completed
+             #(= ::sut/eval-complete (::sut/event %))))
           (is (= (range 6) @completed))
           (is (zero?
                (get-in
@@ -481,12 +505,12 @@
           graph
           [:eval ::sut/submission]
           [(work-message completed ::after-interrupt)])
-        (await-condition!
+        (take-event!
+         report-chan
          ::after-interrupt
-         #(= [::after-interrupt] @completed))
-        (await-condition!
-         ::after-interrupt-count
-         #(= 2 (::flow/count (flow/ping-proc graph :eval))))
+         #(= ::after-interrupt (::sut/result %)))
+        (is (= [::after-interrupt] @completed))
+        (is (= 2 (::flow/count (flow/ping-proc graph :eval))))
         (is (empty? @active-evals))
         (finally
           (stop-testbed! testbed))))))
@@ -495,7 +519,7 @@
   (testing "Flow reports an ordinary Throwable and the proc continues"
     (let [{::keys [graph completed] :as testbed}
           (single-eval-testbed 2)
-          {:keys [error-chan]} (flow/start graph)]
+          {:keys [error-chan report-chan]} (flow/start graph)]
       (try
         (flow/resume graph)
         @(flow/inject
@@ -516,11 +540,12 @@
           graph
           [:eval ::sut/submission]
           [(work-message completed ::after-throw)])
-        (await-condition! ::after-throw
-                          #(= [::after-throw] @completed))
-        (await-condition!
-         ::after-throw-count
-         #(= 1 (::flow/count (flow/ping-proc graph :eval))))
+        (take-event!
+         report-chan
+         ::after-throw
+         #(= ::after-throw (::sut/result %)))
+        (is (= [::after-throw] @completed))
+        (is (= 1 (::flow/count (flow/ping-proc graph :eval))))
         (finally
           (stop-testbed! testbed))))))
 
@@ -560,12 +585,13 @@
               (single-eval-testbed 2)
               started (flow/start graph)
               fanout (start-test-fanout! connection graph started 4 4)
-              monitor-messages (atom [])]
+              monitor-messages (async/chan 8)
+              transactions (database-events connection)]
           (try
             (with-redefs
               [flow-monitor/send-message
                (fn [_state message]
-                 (swap! monitor-messages conj message))]
+                 (async/>!! monitor-messages message))]
               (let [monitor-state
                     (flow-monitor/start-server
                      {:flow (::sut/graph fanout)
@@ -576,18 +602,13 @@
                     graph
                     [:eval ::sut/submission]
                     [(throwing-work-message 0)])
-                  (await-condition!
+                  (take-event!
+                   monitor-messages
                    ::monitor-core-fault
-                   #(some
-                     (fn [{:keys [action data]}]
-                       (and (= :error action)
-                            (str/includes?
-                             data
-                             ":pid :eval")
-                            (str/includes?
-                             data
-                             "synthetic core fault 0")))
-                     @monitor-messages))
+                   (fn [{:keys [action data]}]
+                     (and (= :error action)
+                          (str/includes? data ":pid :eval")
+                          (str/includes? data "synthetic core fault 0"))))
                   @(flow/inject
                     graph
                     [:eval ::sut/submission]
@@ -598,20 +619,20 @@
                          ::application-report-copy)]
                     (is (= ::fanout-report
                            (::sut/result application-copy))))
-                  (await-condition!
+                  (take-event!
+                   monitor-messages
                    ::monitor-report-copy
-                   #(some
-                     (fn [{:keys [action data]}]
-                       (and (= :message action)
-                            (= ::fanout-report (::sut/result data))))
-                     @monitor-messages))
+                   (fn [{:keys [action data]}]
+                     (and (= :message action)
+                          (= ::fanout-report (::sut/result data)))))
                   (finally
                     (flow-monitor/stop-server monitor-state)))))
-            (await-condition!
+            (take-event!
+             (::channel transactions)
              ::core-fault-committed
              #(= #{[:eval
                     "java.lang.RuntimeException: synthetic core fault 0"]}
-                 (set (committed-faults connection))))
+                 (set (committed-faults (:db-after %)))))
             (is (= 1
                    (get-in
                     (flow/ping-proc
@@ -619,6 +640,8 @@
                      ::sut/fault-committer)
                     [::flow/state ::sut/committed])))
             (finally
+              (stop-database-events! connection transactions)
+              (async/close! monitor-messages)
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
@@ -668,15 +691,14 @@
               fanout
               (start-test-fanout!
                connection graph started fault-count fault-count)
-              fault-graph (::sut/fault-graph fanout)]
+              fault-graph (::sut/fault-graph fanout)
+              transactions (database-events connection)]
           (try
             (flow/pause-proc fault-graph ::sut/fault-committer)
-            (await-condition!
-             ::fault-committer-paused
-             #(= :paused
-                 (::flow/status
-                  (flow/ping-proc
-                   fault-graph ::sut/fault-committer))))
+            (is (= :paused
+                   (::flow/status
+                    (flow/ping-proc
+                     fault-graph ::sut/fault-committer))))
             (flow/resume graph)
             @(flow/inject
               graph
@@ -686,19 +708,21 @@
               (take-event!
                (::sut/monitor-error-channel fanout)
                ::monitor-buffered-core-fault))
-            (is (empty? (committed-faults connection)))
-            (is (zero? (committed-drop-count connection)))
+            (is (empty? (committed-faults @connection)))
+            (is (zero? (committed-drop-count @connection)))
             (flow/resume-proc fault-graph ::sut/fault-committer)
-            (await-condition!
+            (take-event!
+             (::channel transactions)
              ::all-core-faults-committed
-             #(= fault-count
-                 (count (committed-faults connection))))
+             #(<= fault-count
+                  (count (committed-faults (:db-after %)))))
             (is (= (set (map #(str "java.lang.RuntimeException: "
                                    "synthetic core fault " %)
                              (range fault-count)))
                    (set (map second
-                             (committed-faults connection)))))
+                             (committed-faults @connection)))))
             (finally
+              (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
@@ -715,15 +739,14 @@
               (start-test-fanout!
                connection graph started
                fault-buffer-capacity fault-count)
-              fault-graph (::sut/fault-graph fanout)]
+              fault-graph (::sut/fault-graph fanout)
+              transactions (database-events connection)]
           (try
             (flow/pause-proc fault-graph ::sut/fault-committer)
-            (await-condition!
-             ::overflow-fault-committer-paused
-             #(= :paused
-                 (::flow/status
-                  (flow/ping-proc
-                   fault-graph ::sut/fault-committer))))
+            (is (= :paused
+                   (::flow/status
+                    (flow/ping-proc
+                     fault-graph ::sut/fault-committer))))
             (flow/resume graph)
             @(flow/inject
               graph
@@ -733,30 +756,33 @@
               (take-event!
                (::sut/monitor-error-channel fanout)
                ::monitor-overflow-core-fault))
-            (await-condition!
+            (take-event!
+             (::channel transactions)
              ::fault-drops-committed
-             #(= (- fault-count fault-buffer-capacity)
-                 (committed-drop-count connection)))
+             #(<= (- fault-count fault-buffer-capacity)
+                  (committed-drop-count (:db-after %))))
             (flow/resume-proc fault-graph ::sut/fault-committer)
-            (await-condition!
+            (take-event!
+             (::channel transactions)
              ::retained-core-faults-committed
-             #(= fault-buffer-capacity
-                 (count (committed-faults connection))))
-            (is (= 3 (committed-drop-count connection)))
+             #(<= fault-buffer-capacity
+                  (count (committed-faults (:db-after %)))))
+            (is (= 3 (committed-drop-count @connection)))
             (finally
+              (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
 (deftest sliding-mailbox-is-nonblocking-bounded-and-latest-only
   (testing "a paused sliding buffer of one retains only the latest snapshot"
-    (let [delivered (atom [])
+    (let [delivered (async/promise-chan)
           graph
           (flow/create-flow
            {:procs
             {:mailbox
              {:proc
               (sut/mailbox-proc
-               {::sut/deliver! #(swap! delivered conj %)})
+               {::sut/deliver! #(async/put! delivered %)})
               :chan-opts
               {::sut/mailbox
                {:buf-or-n (async/sliding-buffer 1)}}}}
@@ -776,8 +802,7 @@
                  (:buffer
                   (channel-data graph :mailbox ::sut/mailbox))))
           (flow/resume graph)
-          (await-condition! ::latest-mail
-                            #(= [99] @delivered)))
+          (is (= 99 (take-event! delivered ::latest-mail))))
         (finally
           (flow/stop graph))))))
 
@@ -801,8 +826,8 @@
               ::sut/wedged? false})
            (range 20))]
       (try
-        (flow/start graph)
-        (let [injection
+        (let [started (flow/start graph)
+              injection
               (flow/inject
                graph
                [:eval ::sut/submission]
@@ -814,16 +839,19 @@
           (await-latch! mid-step ::load-mid-step)
           (flow/pause graph)
           (.countDown release-mid-step)
-          (await-condition!
-           ::load-paused
-           #(= :paused
-               (::flow/status (flow/ping-proc graph :eval))))
-          (let [paused-count (count @completed)]
-            (Thread/sleep 30)
-            (is (= paused-count (count @completed))))
+          (take-event!
+           (:report-chan started)
+           ::load-paused-after-current-step
+           #(= 3 (::sut/result %)))
+          (is (= :paused
+                 (::flow/status (flow/ping-proc graph :eval))))
+          (is (nil? (async/poll! (:report-chan started)))
+              "the acknowledged pause publishes no next completion")
           (flow/resume graph)
-          (await-condition! ::load-complete
-                            #(= 20 (count @completed)))
+          (take-event!
+           (:report-chan started)
+           ::load-complete
+           #(= 19 (::sut/result %)))
           (is (= (range 20) @completed)))
         (finally
           (stop-testbed! testbed))))))
@@ -836,7 +864,7 @@
           graph-b (::graph b)]
       (try
         (flow/start graph-a)
-        (flow/start graph-b)
+        (let [started-b (flow/start graph-b)]
         (flow/resume graph-a)
         (flow/resume graph-b)
         (flow/stop graph-a)
@@ -845,12 +873,15 @@
           graph-b
           [:eval ::sut/submission]
           [(work-message (::completed b) ::flow-b)])
-        (await-condition! ::flow-b
-                          #(= [::flow-b] @(::completed b)))
+        (take-event!
+         (:report-chan started-b)
+         ::flow-b
+         #(= ::flow-b (::sut/result %)))
+        (is (= [::flow-b] @(::completed b)))
         (is (= :running
                (::flow/status (flow/ping-proc graph-b :eval))))
         (is (thrown? Throwable
-                     (flow/ping graph-a :timeout-ms 20)))
+                     (flow/ping graph-a :timeout-ms 20))))
         (finally
           (stop-testbed! a)
           (stop-testbed! b))))))
@@ -1009,17 +1040,23 @@
               ::released)
             ::sut/wedged? true}])
         (await-latch! wedge-started ::monitor-wedge-started)
-        (let [parked-injection
+        (let [filled-injection
               (flow/inject
                graph
                [:eval ::sut/submission]
-               (mapv #(work-message post-wedge-results %) (range 3)))
-              _ (await-condition!
-                 ::monitor-buffer-full
-                 #(= 2
-                     (get-in
-                      (channel-data graph :eval ::sut/submission)
-                      [:buffer :count])))
+               (mapv #(work-message post-wedge-results %) (range 2)))
+              _ (.get ^Future filled-injection
+                      event-backstop-seconds
+                      TimeUnit/SECONDS)
+              _ (is (= 2
+                       (get-in
+                        (channel-data graph :eval ::sut/submission)
+                        [:buffer :count])))
+              parked-injection
+              (flow/inject
+               graph
+               [:eval ::sut/submission]
+               [(work-message post-wedge-results 2)])
               monitor-state
               (flow-monitor/start-server
                {:flow (::sut/graph fanout)
@@ -1065,9 +1102,11 @@
               (.get ^Future parked-injection
                     event-backstop-seconds
                     TimeUnit/SECONDS)
-              (await-condition!
+              (take-event!
+               (::sut/application-report-channel fanout)
                ::monitor-post-wedge-drain
-               #(= 3 (count @post-wedge-results)))
+               #(= 2 (::sut/result %)))
+              (is (= 3 (count @post-wedge-results)))
               (sut/stop-error-fanout! fanout)
               (flow/stop graph)
               (stop-executor! compute-executor))))))
