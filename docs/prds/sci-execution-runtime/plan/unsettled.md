@@ -612,10 +612,34 @@ floor dial. seon.render.web/not-yet ENUMERATES undone-by-design in
 code (interest matching, shared registration, per-tab graph,
 isolated sink — each designed, none open). Its suites 93/245/0;
 full-gate reds = my.message's mid-flight turn_test (722adb18e).
-IN FLIGHT (two): N4 continues (streaming exercises on seon.ai —
-FREE, failover landed — driven by local Qwen; /data pager);
-my.message Opus agent (mid-unit; holds config/default.edn + ui.md —
-root's seeded blocks + further ui.md accretion sequenced behind it). MORNING BATCH accumulating:
+**SUBAGENTS ARE LIVE — my.message COMPLETE (722adb18e..dc5efd7cc,
+gate 368/1438/0 verified).** send is a VALUE (third agent-facing
+shape reached through the first — the loop commits the message in
+the SAME terminal tx as the form's receipt; delivery = the wake;
+11 lines + a driver rule vs the quarry's 590-line effectful
+message!). Composition: the fold reads EVERY form's value — send in
+one form, complete in another; fan-out = a vector. The chain bound
+is DERIVED (tx-meta caused-by walks; human messages terminate free;
+dial max-chain 16 as backstop) — the stored hops integer and its
+deadlock-prone reset rule DISSOLVED. Live proof (3 DeepSeek drives,
+research/my-message-proof-2026-07-28.md): alice→bob→reply→alice
+completed 166833 — a number none of HER forms computed — 8.2s, zero
+error facts. Two protocol rules derived from failed drives: a
+completed run's result delivers back to the trigger's sender; A
+REPLY IS NOT A QUESTION (ours-by-caused-by = the real terminator).
+BLOCKER FOUND+FIXED: my.run/wait LIVELOCKED the loop (close derived
+for an unheld run, refuse, self-rewake — the old test was green
+BECAUSE every close refused; archived with live proof). Filed:
+failed-form-doesn't-stop-the-fold (bob answered with an unbound-var
+string in perfect confidence — three candidate rulings in the note);
+my.run error values omit :seon.error/kind. SIX MORNING QUESTIONS in
+the proof doc §7 (bound currency, refusal visibility to sender, wait
+semantics, self-messaging keep/refuse, verbatim replies, Math/sqrt
+absent from base — N5's surface decision). IN FLIGHT (one): N4
+(streaming exercises via local Qwen; /data pager; NOW UNBLOCKED:
+root's seeded blocks + ui.md accretion — message units are live data
+for its pages, conversations derive from tx-meta walks never stored
+threads). MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
