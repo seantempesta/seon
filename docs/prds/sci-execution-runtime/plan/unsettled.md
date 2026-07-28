@@ -675,7 +675,14 @@ cluster-stop-races-an-in-flight-transact. "Datahike is PART of
 Seon" earned its keep tonight — the fix is ours, tested in the
 fork's own suite, CHANGELOG'd per its convention.
 The N4 agent stopped for the night; package 5 (agent-transcript
-page) waits for morning rulings. MORNING BATCH accumulating:
+page) waits for morning rulings. LAST LANE OF THE NIGHT: the
+stop-vs-in-flight-transact race is FIXED the event-driven way
+(852ef9759 + archive 2d5a4f09b): the loop PUBLISHES its completion,
+stop! awaits it before releasing the connection; fault-committer
+shutdown awaits active commits and stops treating terminal-channel
+nil as a core fault; no sleeps, no SPI changes; kill -9 keeps crash
+semantics. **FINAL NIGHT GATE: 388/1509/0 VERIFIED. Board quiet —
+everything remaining waits on the owner's morning batch.** MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
