@@ -532,6 +532,26 @@ may reintroduce a shadow build into the dev feedback path.
   A STORY, visible in the html view: build the fleet-oversight block
   (queued in unsettled.md) as the first application — root sees
   parked/mid-turn/current-run/episode per agent live.
+  **Ruling 2026-07-28 post-midnight (owner, conversational — DISTANCE
+  AND SIGNALS):** (1) the neighborhood view needs NO new noun: the ONE
+  render request gains :seon.render/distance (optional, default 1) —
+  how many hops of the care-graph to render, each hop by its owner'''s
+  lens, overridable at any point; representation is the request
+  parameter, never a new kind (consistent with the N5 plan'''s hop
+  ruling). (2) CONTEXT CREATION converges on this mechanism: static
+  context blocks shrink toward the system-message scaffold; an agent'''s
+  context is increasingly "render my namespace at distance N" —
+  staged: entity-graph distance now, code-graph distance at N5, via
+  the sealed contract'''s derived-membership half. (3) THE NETWORK
+  EFFECT: namespaces curate their renders/docstrings/performance from
+  DERIVED USAGE SIGNALS in their own context — error-rate-by-caller on
+  my fns, latency-by-call-site, unused-but-relevant (data matching my
+  schemas flowing elsewhere) — each a query over N5 facts + existing
+  error/timing records, delivered as problems-family blocks, acted on
+  INDEPENDENTLY (no direct communication required). The system gets
+  more resilient as it is used and fails. Fold into the N5 plan at its
+  post-falsification revision; the distance accretion is dispatched
+  now as a seal revision to the block request.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
