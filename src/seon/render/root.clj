@@ -25,6 +25,7 @@
   Crash walk: pure renders over a database value. A kill loses a page
   that re-derives."
   (:require [datahike.api :as d]
+            [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render.block :as block]))
 
@@ -181,6 +182,11 @@
    {:seon.render.block/name :problems
     :seon.render.block/priority 10
     :seon.render/html `problems-html}
+   {:seon.render.block/name :fleet-oversight
+    :seon.render.block/priority 15
+    :seon.render.block/band :dynamic
+    :seon.render/ai `oversight/block-ai
+    :seon.render/html `oversight/block-html}
    {:seon.render.block/name :agents
     :seon.render.block/priority 20
     :seon.render/html `agents-html}
@@ -201,7 +207,7 @@
 (defn seed-tx
   "Transaction data installing root's block set. PURE, and IDEMPOTENT.
 
-  Upsert by name, so a reboot rewrites the same four blocks rather than
+  Upsert by name, so a reboot rewrites the same blocks rather than
   accumulating them, and an agent's own edits to any OTHER block survive
   untouched. Returns empty tx-data when nothing would change, which is
   the converged-means-zero-writes rule the reconciler already proved."
