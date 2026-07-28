@@ -132,9 +132,6 @@
   [(block-map :header 0 :seon.render/html `header-html)
    (block-map :body 10 :seon.render/html `body-html :seon.render/ai `body-ai)])
 
-(defn- html-request []
-  {:seon.cluster.agent/id agent-id :seon.render/kind :seon.render/html})
-
 (def ^:private caps
   "The four result dials, by the names `seon.sci.admit` already takes.
   ONE definition for both callers, deliberately: expansion walks a graph
@@ -147,6 +144,11 @@
    :seon.config.eval.result/max-collection 64
    :seon.config.eval.result/max-string 4096
    :seon.config.eval.result/max-nodes 4096})
+
+(defn- html-request []
+  {:seon.cluster.agent/id agent-id
+   :seon.render/kind :seon.render/html
+   :seon.sci.admit/caps caps})
 
 (defn- page-request []
   {:seon.cluster.agent/id agent-id :seon.sci.admit/caps caps})
@@ -211,7 +213,8 @@
       (is (= [] (block/blocks (d/db connection) other-agent-id)))
       (is (= [] (block/surfaces (d/db connection)
                                 {:seon.cluster.agent/id other-agent-id
-                                 :seon.render/kind :seon.render/html}))))))
+                                 :seon.render/kind :seon.render/html
+                                 :seon.sci.admit/caps caps}))))))
 
 (deftest each-agent-owns-its-own-set
   ;; Two agents may each own a `:transcript`; the name is not a store
@@ -250,7 +253,8 @@
             names (fn [kind]
                     (mapv :seon.render.block/name
                           (block/surfaces db {:seon.cluster.agent/id agent-id
-                                              :seon.render/kind kind})))]
+                                              :seon.render/kind kind
+                                              :seon.sci.admit/caps caps})))]
         (is (= [:header :body] (names :seon.render/html)))
         (is (= [:body] (names :seon.render/ai))
             "the header declares no ai render and is not in the prompt")))))
@@ -588,7 +592,8 @@
                                     [(block-map :body 10 :seon.render/html `body-html)]))
       (is (= [] (block/surfaces (d/db connection)
                                 {:seon.cluster.agent/id agent-id
-                                 :seon.render/kind :seon.render/ai}))
+                                 :seon.render/kind :seon.render/ai
+                                 :seon.sci.admit/caps caps}))
           "the ai render is gone, so the block is out of the prompt"))))
 
 (deftest installing-nothing-is-no-transaction

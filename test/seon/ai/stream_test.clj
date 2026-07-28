@@ -37,6 +37,13 @@
   [text]
   (str "data: {\"choices\":[{\"delta\":{\"content\":" (pr-str text) "}}]}"))
 
+(def ^:private caps
+  "The one cap set every surfaces request carries (context-blocks seal)."
+  {:seon.config.eval.result/max-depth 12
+   :seon.config.eval.result/max-collection 64
+   :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-nodes 4096})
+
 (def ^:private usage-chunk
   "The OpenAI-compatible shape: a final choices-empty chunk with usage."
   "data: {\"choices\":[],\"usage\":{\"completion_tokens\":7,\"prompt_tokens\":3}}")
@@ -332,7 +339,8 @@
       (testing "before anything streams, they render idle rather than absent"
         (let [surfaces (block/surfaces (d/db connection)
                                        {:seon.cluster.agent/id agent-id
-                                        :seon.render/kind :seon.render/html})]
+                                        :seon.render/kind :seon.render/html
+                                        :seon.sci.admit/caps caps})]
           (is (= 2 (count surfaces)))
           (is (every? (comp nil? :seon.error/value) surfaces))
           (is (str/includes? (hiccup/->string (:seon.render/output (second surfaces)))
@@ -344,7 +352,8 @@
                                       #inst "2026-07-28T00:00:00.000-00:00"))
       (let [surfaces (block/surfaces (d/db connection)
                                      {:seon.cluster.agent/id agent-id
-                                      :seon.render/kind :seon.render/html})
+                                      :seon.render/kind :seon.render/html
+                                      :seon.sci.admit/caps caps})
             html (str/join (map (comp hiccup/->string :seon.render/output)
                                 surfaces))]
         (is (str/includes? html "42") "the live count")

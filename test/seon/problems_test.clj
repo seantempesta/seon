@@ -380,7 +380,8 @@
                       :seon.render/html `problems-surface}]}])
       (let [[surface] (block/surfaces @connection
                                       {:seon.cluster.agent/id "root"
-                                       :seon.render/kind :seon.render/html})]
+                                       :seon.render/kind :seon.render/html
+                                       :seon.sci.admit/caps caps})]
         (is (nil? (:seon.error/value surface)))
         (is (= "surface-problems" (:seon.render/surface-id surface))
             "one derivation for the hole and the patch")

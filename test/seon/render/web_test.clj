@@ -341,7 +341,9 @@
 
 (deftest a-nil-projection-keeps-the-blocks-identified-wrapper
   (let [surface
-        (block/surface nil agent-id
+        (block/surface {:seon.db/db nil
+                        :seon.cluster.agent/id agent-id
+                        :seon.sci.admit/caps caps}
                        {:seon.render.block/name :optional
                         :seon.render.block/priority 0
                         :seon.render/html `omitted-html}

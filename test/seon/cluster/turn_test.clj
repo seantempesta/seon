@@ -66,6 +66,37 @@
 ;;; per run and threads it through the fold. This is the real evaluator,
 ;;; injected exactly as production injects it.
 
+(def ^:private seed-blocks
+  "The intended core seed membership (context-blocks contract §3.5).
+  Owned by the seed-and-membership package in production; planted here
+  because a membership is the fixture's own data — the prompt derives
+  from the agent's blocks now, and an agent with no AI blocks has no
+  prompt."
+  [{:seon.render.block/name :identity :seon.render.block/band :anchor
+    :seon.render.block/priority 0
+    :seon.render/ai 'seon.context/identity-ai}
+   {:seon.render.block/name :execution :seon.render.block/band :anchor
+    :seon.render.block/priority 10
+    :seon.render/ai 'seon.context/execution-ai}
+   {:seon.render.block/name :peers :seon.render.block/band :anchor
+    :seon.render.block/priority 20
+    :seon.render/ai 'seon.context/peers-ai}
+   {:seon.render.block/name :interruption :seon.render.block/band :continuity
+    :seon.render.block/priority 30
+    :seon.render/ai 'seon.context/interruption-ai}
+   {:seon.render.block/name :continuity :seon.render.block/band :continuity
+    :seon.render.block/priority 40
+    :seon.render/ai 'seon.context/continuity-ai}
+   {:seon.render.block/name :trigger :seon.render.block/band :dynamic
+    :seon.render.block/priority 90
+    :seon.render/ai 'seon.context/trigger-ai}])
+
+(defn- agent-row
+  "One agent with the core seed membership installed."
+  [agent-id]
+  {:seon.cluster.agent/id agent-id
+   :seon.cluster.agent/blocks seed-blocks})
+
 (defn- with-cluster [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
                        :schema-flexibility :write}
@@ -76,7 +107,7 @@
                   (schema.datahike/malli->datahike-schema
                    (schema/canonical-database-attributes)))
       (d/transact connection
-                  [{:seon.cluster.agent/id "agent-a"}
+                  [(agent-row "agent-a")
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "count the widgets"
@@ -115,10 +146,13 @@
              ;; Small on purpose: the fixture that proves the guard
              ;; should not need sixteen turns to reach it.
              :seon.config.message/max-chain 2
+             ;; max-string bounds BOTH eval-result admission and every
+             ;; prompt contribution now (the one cap set) — sized so a
+             ;; real prompt is never elided while eval results stay small
              :seon.sci.admit/caps
              {:seon.config.eval.result/max-depth 6
               :seon.config.eval.result/max-collection 8
-              :seon.config.eval.result/max-string 32
+              :seon.config.eval.result/max-string 4096
               :seon.config.eval.result/max-nodes 256}})
       (finally
         (d/release connection)
@@ -338,10 +372,26 @@
                        (d/q '[:find ?e . :where
                               [_ :seon.cluster.run/error ?e]] @connection))))
         (testing "so the agent's next prompt tells it what happened"
+          ;; the NEXT prompt belongs to the next held run: open it the
+          ;; way the loop does — creating transaction carries the
+          ;; trigger, agent pointer names the run
+          (d/transact connection
+                      {:tx-data [{:seon.cluster.run/id "run-next"
+                                  :seon.cluster.run/agent
+                                  [:seon.cluster.agent/id "agent-a"]
+                                  :seon.cluster.run/opened-at (Date.)}
+                                 {:seon.cluster.agent/id "agent-a"
+                                  :seon.cluster.agent/run
+                                  [:seon.cluster.run/id "run-next"]}]
+                       :tx-meta {:seon.db/trigger
+                                 [:seon.cluster.message/id "m-1"]}})
           (is (re-find #"DEEPSEEK_API_KEY"
-                       (prompt/prompt @connection
-                                      {:seon.cluster.agent/id "agent-a"
-                                       :seon.cluster.message/id "m-1"}))))))))
+                       (:seon.cluster.prompt/text
+                        (prompt/prompt @connection
+                                       {:seon.cluster.run/id "run-next"
+                                        :seon.cluster.agent/id "agent-a"
+                                        :seon.sci.admit/caps
+                                        (:seon.sci.admit/caps cluster)})))))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
@@ -834,7 +884,7 @@
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
             connection (:seon.store/branch-connection cluster)]
-        (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+        (d/transact connection [(agent-row "agent-b")])
         ;; ONE stub, two agents: the reply depends on WHOSE prompt it
         ;; is, so the delegate answers instead of forwarding the same
         ;; sentence back. (Without this the stub made agent-b message
@@ -913,7 +963,7 @@
                            ;; nothing may be delivered at all
                            :seon.config.message/max-chain 0)
             connection (:seon.store/branch-connection cluster)]
-        (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+        (d/transact connection [(agent-row "agent-b")])
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(my.message/send \"agent-b\" \"hi\")\n"
