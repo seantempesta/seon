@@ -39,7 +39,7 @@ it when fixing; the prepl :ret has already been written by then.)
 
 ## Resolution
 
-Resolved by the operator follow-up after `6e7b03738`.
+Resolved by `7ccd1347a`.
 
 The historical refusal named one exact mismatch:
 `:seon.render.web/served` was a disallowed key. PID 84702 had started
