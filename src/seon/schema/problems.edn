@@ -35,6 +35,13 @@
  ; without being a fault, and the distinction survives into this value.
  :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
 
+ ; An agent the episode cap is deferring (F1 §7). PRESENCE, derived:
+ ; the count is `work/episode-runs`, the deferrals are the unanswered
+ ; agent-sent triggers the gate skips, and the whole row vanishes when
+ ; the next outside trigger's run resets the derivation — no counter,
+ ; no flag, no refusal message row anywhere.
+ :seon.problems/deferred-agent [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
+
  ; The request. `live-processes` is the same set `run/recover-tx` takes,
  ; by the same name, because it is the same question: which holders are
  ; real right now. Absent set = nothing is known to be live, which
@@ -45,4 +52,4 @@
  ; builder carry (§9 of the context-blocks contract package).
  :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
 
- :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]}
+ :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]}

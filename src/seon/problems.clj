@@ -53,6 +53,7 @@
   committed; the next caller re-derives it from the same facts."
   (:require [clojure.string :as str]
             [datahike.api :as d]
+            [seon.cluster.work :as work]
             [seon.error :as error]
             [seon.render :as render]
             [seon.schema.edn :as schema.edn]))
@@ -146,6 +147,26 @@
                 :seon.error/kind kind
                 :seon.cluster.eval/error error}))))
 
+(defn- deferred-agents
+  "Agents whose pending triggers the episode cap is deferring (F1 §7).
+  A derivation over derivations — `work/episode-runs` and
+  `work/deferred-triggers` — so the state vanishes the moment the next
+  outside trigger's run resets the count. Nothing here reads a counter
+  or a flag, because none exists."
+  [db]
+  (->> (d/q '[:find [?agent-id ...]
+              :where [_ :seon.cluster.agent/id ?agent-id]]
+            db)
+       sort
+       (keep (fn [agent-id]
+               (let [deferred (work/deferred-triggers db agent-id)]
+                 (when (seq deferred)
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster.work/episode-runs
+                    (work/episode-runs db agent-id)
+                    :seon.problems/deferred-count (count deferred)}))))
+       vec))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
@@ -175,15 +196,17 @@
         wedged (wedged-runs db live-processes)
         failed (failed-runs db)
         errored (errored-receipts db)
+        deferred (deferred-agents db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq wedged) (assoc :seon.problems/wedged-runs wedged)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
-                (seq errored) (assoc :seon.problems/errored-receipts errored))]
+                (seq errored) (assoc :seon.problems/errored-receipts errored)
+                (seq deferred) (assoc :seon.problems/deferred-agents deferred))]
     (cond-> found
       (seq found) (assoc :seon.render/log `log-report)
       (seq found) (assoc :seon.render/html `html-report)
-      (seq errored) (assoc :seon.render/ai `ai-prose))))
+      (or (seq errored) (seq deferred)) (assoc :seon.render/ai `ai-prose))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE
@@ -261,7 +284,13 @@
            "form" (:seon.cluster.eval/ordinal entry)
            "kind" (:seon.error/kind entry)
            "source" (:seon.cluster.run.form/source entry)
-           "error" (:seon.cluster.eval/error entry))))])
+           "error" (:seon.cluster.eval/error entry))))
+   (family-section
+    "deferred agents"
+    (for [entry (:seon.problems/deferred-agents found)]
+      (row "agent" (:seon.cluster.agent/id entry)
+           "episode runs" (:seon.cluster.work/episode-runs entry)
+           "deferred" (:seon.problems/deferred-count entry))))])
 
 (defn block
   "The problems BLOCK's html render: derive, then project.
@@ -298,17 +327,25 @@
         (html-report found)))))
 
 (defn ai-prose
-  "`:seon.render/ai` — concise steering for failed plan forms."
+  "`:seon.render/ai` — concise steering for failed plan forms, plus the
+  episode-cap line for a deferred agent (F1 §7): present exactly while
+  the derivation says so, gone the moment an outside trigger resets it."
   {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
   [found]
-  (->> (:seon.problems/errored-receipts found)
-       (map (fn [entry]
-              (str "Form " (:seon.cluster.eval/ordinal entry)
-                   " failed during evaluation: "
-                   (:seon.cluster.eval/error entry)
-                   ". The run did not retry it. Inspect receipt "
-                   (:seon.cluster.eval/id entry)
-                   " and revise the remaining plan from current facts.")))
+  (->> (concat
+        (for [entry (:seon.problems/errored-receipts found)]
+          (str "Form " (:seon.cluster.eval/ordinal entry)
+               " failed during evaluation: "
+               (:seon.cluster.eval/error entry)
+               ". The run did not retry it. Inspect receipt "
+               (:seon.cluster.eval/id entry)
+               " and revise the remaining plan from current facts."))
+        (for [entry (:seon.problems/deferred-agents found)]
+          (str "Agent " (:seon.cluster.agent/id entry) " has run "
+               (:seon.cluster.work/episode-runs entry)
+               " self-triggered runs since the last outside trigger; "
+               (:seon.problems/deferred-count entry)
+               " triggers are deferred until one arrives.")))
        (str/join "\n")))
 
 (defn log-report
@@ -350,5 +387,11 @@
                " source=" (pr-str (:seon.cluster.run.form/source entry))
                " kind=" (:seon.error/kind entry)
                (when-let [message (:seon.cluster.eval/error entry)]
-                 (str " error=" (pr-str message))))))
+                 (str " error=" (pr-str message)))))
+        (for [entry (:seon.problems/deferred-agents found)]
+          (str "seon.problems deferred-agent agent="
+               (:seon.cluster.agent/id entry)
+               " episode-runs=" (:seon.cluster.work/episode-runs entry)
+               " deferred=" (:seon.problems/deferred-count entry)
+               " (agent-sent triggers wait for an outside trigger)")))
        (str/join "\n")))
