@@ -483,7 +483,17 @@ two named exercise goals prove the design: LIVE TOKEN COUNTS and
 STREAMING TOKENS to the interface (exposes the seam: seon.ai is
 one-shot — the streaming SSE path is a named seal-side revision
 composing with the failover work, partials land on the no-history
-churn attribute, counts derive from the stream). PROJECTION REVIEW IN (ead99eb98: verbatim outputs of every error
+churn attribute, counts derive from the stream). OWNER ARCHITECTURAL RULING (night, error rendering): consumers reach
+an error's renderings ONLY through the one router — :seon.render/ai
+on the unit, never a bespoke seon.error/ai-prose call site (ai-prose
+demotes to the DEFAULT implementation a key points at). GENERIC
+default renderers per output kind + SPECIALIZED renderers selected
+WHERE THE UNIT IS BUILT from the fact's own attributes (computed,
+never consumer-side conditionals) — first specialist: malli
+validation failures render detailed problem identification from the
+full explanation. Both in-flight lanes corrected; N4's block
+contract names the generic+specialist selection as a reusable shape.
+PROJECTION REVIEW IN (ead99eb98: verbatim outputs of every error
 family + critique + before/after rewrite proposals in
 research/projection-review-2026-07-28.md; five consumer-visible
 issues — noisy failover context, unclassified transition prose, lost
