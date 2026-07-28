@@ -472,6 +472,36 @@ may reintroduce a shadow build into the dev feedback path.
   (4) Test-design units 1–3 (false/racing-proof removal, canonical
   database fixture, minimal shared support) approved; units 4–9 return
   to the owner after those land.
+  **Ruling 2026-07-28 afternoon (owner, conversational — AGENTS ARE
+  FLOWS, no event loop):** the dispatcher design (one central pass
+  farming turn tasks to a pool) is REJECTED as "a JavaScript event
+  loop inside Clojure" — the JVM's threads are cheap and the central
+  loop imports Node's architecture onto a platform that doesn't need
+  it. The model: EVERY AGENT IS ITS OWN INDEPENDENT SEQUENTIAL
+  PROCESS hosted as a running flow — arbitrarily pausable/resumable,
+  kicked off by the messages it receives, parking between episodes;
+  parallelism across agents by construction, no dispatcher, no active
+  set, no scheduler entity. The one-open-run transaction fence and
+  interrupted+adapt recovery stay law. Runaway protection is ONE
+  per-agent dial: max consecutive runs per idle→running episode
+  (outside trigger starts a new episode); self-messaging within an
+  episode is legitimate continuation; any race that could loop agents
+  forever is a design defect to dissolve, never a thing to cap.
+  Flows are expected to be MORE than agents ("I'm guessing it's more
+  than just agents") — a full inventory is commissioned. Workload
+  scheduling: key functions may carry :io/:compute METADATA; chains
+  derive by call-graph propagation (io+compute in one chain = :mixed);
+  unannotated = :mixed, fail-closed; never required on all functions.
+  Transport: facts/metadata commit to the database (shared truth);
+  LARGE TRANSIENT VALUES ride channels with buffers/backpressure;
+  message channels are the expected fit for messaging transport and
+  error propagation — the exact channel-vs-database law is
+  commissioned research, constrained by the crash model (channel
+  contents must be losable; nothing re-executes). Complexity is
+  removed or pushed to the edges. Research in flight:
+  flow-mechanics, flow-inventory, workload-classification,
+  trigger-conservation, zombie-constructibility (all -2026-07-28.md);
+  the giant plan revision follows their return.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
