@@ -496,6 +496,47 @@ assert the surviving mechanism.
   virtual-thread loop — fewer moving parts but loses ping/error/pause
   uniformity for a component that wants exactly those.
 
+## Implementation note — landed 2026-07-28 (F1 lane)
+
+The blueprint is live and the sealed suite is green. Commits, in
+order: `d1ec4a019` (episode dial + `next-agent-work`/gate/deferred +
+wait-closes-in-terminal-tx + the fold's per-agent next ordinal),
+`af200d5d6` (`seon.cluster.agent` blueprint/arm/disarm/armer, public
+`seon.flow/var-process`, `join-error-fanout!`, `wake/route!`, boot
+rewire in `cluster.clj`, armed_test re-ground), `415a7f1f7`
+(problems deferred family + prompt line), `11b2ee1a0` (the ten-test
+suite, seeds 2026072811–2026072820), `d747cc7a9` (boot_test
+orderly-stop + workload census re-grounds).
+
+Deltas from the letter of the package, all recorded here so F2 reads
+one truth:
+
+- **R1 chosen as written**: `seon.cluster.agent` owns blueprint,
+  arm/disarm, and the routing entry; the routing LISTENER's handler
+  lives in `seon.cluster.wake/route!` (the namespace that owns the
+  never-throw/never-park prohibitions), and `wake/listen!` survives
+  unused until F2 cuts it with the central pass.
+- **Boot arming is synchronous** (R6 sharpened): `arm-agents!` arms the
+  fact-derived agent set before registering the listener, so a
+  returned instance IS armed — readiness published, never awaited; the
+  armer proc covers the created-and-messaged window via the boot
+  prime, exactly the invariant's belt.
+- **`episode-runs` counts every run for a never-outside agent**
+  (review-caught): a purely agent-spawned agent has no outside tx, and
+  returning 0 would have voided the cap for exactly the population it
+  most concerns. The gate and the suite pin the corrected semantics.
+- **The dial ships at 100** (owner ruling, superseding §7's proposed
+  16) with unit+provenance in `config/default.edn`; it reads from the
+  database value inside `next-agent-work`, so a live dial change
+  applies at the next pass.
+- **Fault attribution**: tagged faults attribute through the agent's
+  one held run (`tagged-run`); `attributed-run` survives only for the
+  cluster graph's untagged faults until F2 deletes it.
+- The deferred-state prompt line rides `seon.problems/ai-prose` (the
+  problems family's own ai projection); wiring a problems block into
+  the default seed membership stays with the block-seed owner —
+  `seon.context`/`render` were protected paths for this lane.
+
 ## Sequencing
 
 F1 implementation dispatches AFTER the custody-revision wave lands
