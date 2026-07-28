@@ -24,11 +24,15 @@ none constructible, presence subsumes epochs, deletion slice sized);
 custody contract SEALED (ce3ae1c89); F1 blueprint contract SEALED
 (e578c4125 + c0cd2705d — two seal corrections: recorder never resets
 the episode; cap-hit selection skips deferred self-triggers).
-IN FLIGHT: custody-revision implementation (Opus — epochs/leases
-deleted, custody-precedes-work, the two probes as regressions, the
-thrown-prompt-refusal catch). NEXT after it: F1 implementation
-(sealed contract ready), then F2 transport conversions + central-loop
-deletion. Owner-gated: episode-cap default (F4 evidence), test units
+CUSTODY LANDED (435b343ac + 100159309 + ce59f8ab4 — epochs/leases
+deleted, probes red→green, prompt-refusal throw sealed; custody
+suites independently verified 32/179/0; architecture docs purged of
+epoch/lease/heartbeat 8da1560f7; episode-cap default RULED 100,
+5c2d603f2). IN FLIGHT: F1 implementation (Opus — the agent-graph
+blueprint per the sealed contract); test-constructions units 6/7/9
+(render/schema/bench trees). AFTER F1: units 4/5/8 (cluster trees),
+F2 transport conversions + central-loop deletion, the MCP live proof
+(boot a cluster, owner restarts the app, verify eval_clj). Owner-gated: episode-cap default (F4 evidence), test units
 4–9, N4 transcript page (messaging rulings done except verbatim-reply
 confirm). Frictions queued from context-blocks: schema/digest helper
 ownership; the load-order scar (register! in leaf require chains);
