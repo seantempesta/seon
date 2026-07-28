@@ -573,11 +573,22 @@ decision). DEPS PROMOTED (b8601fabe): Datastar SDK + http-kit
 adapter on :deps (http-kit rides the adapter's 2.9.0-beta2),
 resources/ on :paths. Two config reds mid-flight = the my.message
 lane's in-progress dial (theirs; gate-green is their bar).
-IN FLIGHT (four): N4 PACKAGE 2 (SSE/web layer, block pages,
-ref-following + /data, streaming exercises, root's seeded blocks —
-local Qwen preferred for repeated live checks);
-context-blocks-plan; my.message Opus agent;
-architecture-docs-currency. ORCHESTRATOR QUEUE (my successor
+CONTEXT-BLOCKS PLAN IN (b15d3c418: quarry findings, pre/post-N5
+boundaries, prompt-router convergence, measured cache-gradient,
+EIGHT batched morning decisions) — falsification review lane running
+before any seal. ARCHITECTURE DOCS CURRENT (a237c51a2:
+observability/ui/agent-runtime updated with tonight's settled
+contracts, one durable law added, unsettled items correctly
+excluded). IN FLIGHT (four): N4 PACKAGE 2 (SSE/web layer, block
+pages, ref-following + /data, streaming exercises — local Qwen
+preferred for repeated checks); my.message Opus agent;
+context-blocks-review (falsification); test-design-review
+(report-only phase — the goal's dissolution clause; constructions
+implement after the morning read). MORNING BATCH accumulating:
+context-blocks decisions (8, post-review), no-auth provider
+admission, font licensing remedy, N4/N5 decision batches,
+my.message's conversation-loop dial, R41-recorder carve-out
+confirmation, projection-review outputs re-read. ORCHESTRATOR QUEUE (my successor
 runs): review each return; two-cluster proof + failover live drive
 (recipes in research/scripts/); context-blocks plan → independent
 falsification → morning decision batch for the owner; the
