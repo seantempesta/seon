@@ -517,3 +517,132 @@ details.tool-call-details[open] .tool-preview {
     & em { font-style: italic; color: var(--color-text-200); }
   }
 }
+
+/* ============================================================
+   N4 render surfaces — problems, error cards, the data panel.
+
+   SEMANTIC CLASSES, not utility strings, and that is the
+   difference between these and the quarry's markup. A block's
+   html render is authored in Clojure and may be authored by an
+   AGENT; utility soup in that position is unreviewable, cannot
+   be restyled without editing every renderer, and puts the
+   design language beyond the reach of anyone who is not editing
+   Clojure. One class per thing, styled here, using the same
+   tokens as everything above.
+
+   Every rule is scoped to a class this repository's renderers
+   emit, so nothing here can leak into agent-authored markup that
+   did not ask for it.
+   ============================================================ */
+
+.seon-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-200);
+}
+
+.seon-problems-healthy {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-text-500);
+}
+.seon-problems-healthy-mark { color: var(--color-success); }
+
+.seon-problems-family {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+/* The family name is the only heading, and it is quiet: the ROWS
+   are the content, and a loud header competes with them. */
+.seon-problems-family-title {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-500);
+}
+
+.seon-problems-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+}
+/* Rows are a TABLE the eye can scan down, not sentences it has to
+   read across — the quarry's transcript was hard to follow
+   precisely because three incommensurate row shapes shared one
+   column with no gutter. Same grammar every row, every family. */
+.seon-problems-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  padding: 0.25rem 0.5rem;
+  min-width: 0;
+}
+.seon-problems-row + .seon-problems-row {
+  border-top: 1px solid var(--color-base-850);
+}
+
+.seon-problems-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.seon-problems-label {
+  color: var(--color-text-600);
+  font-size: 0.625rem;
+}
+.seon-problems-value {
+  color: var(--color-text-100);
+  overflow-wrap: anywhere;
+}
+
+/* A failed block keeps its place in the layout and says so. It is
+   deliberately loud: fail loud, do not fall down — the page still
+   renders, and the broken block is the thing you cannot miss. */
+.seon-error-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-error);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.seon-error-card-name {
+  color: var(--color-error);
+  font-weight: 600;
+  font-size: 0.625rem;
+}
+.seon-error-card-message { color: var(--color-text-200); }
+
+/* The generic default renderer's output. Lowest fidelity on
+   purpose, so it should LOOK like a fallback rather than compete
+   with a specialist that someone wrote deliberately. */
+.seon-data-panel {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--color-text-300);
+}
+.seon-data-map { display: grid; grid-template-columns: auto 1fr; gap: 0 0.5rem; }
+.seon-data-key { color: var(--color-text-500); }
+.seon-data-value { min-width: 0; overflow-wrap: anywhere; }
+.seon-data-list, .seon-data-set { padding-left: 1rem; }
+.seon-data-string { color: var(--color-text-100); }
+.seon-data-nil { color: var(--color-text-600); font-style: italic; }
+.seon-data-scalar { color: var(--color-info); }
+/* The honest signal, styled so it cannot be mistaken for data. */
+.seon-data-capped {
+  margin-top: 0.25rem;
+  color: var(--color-warning);
+  font-size: 0.625rem;
+}

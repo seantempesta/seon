@@ -148,7 +148,7 @@
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
 
-(declare ai-prose)
+(declare ai-prose html-report)
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
@@ -180,7 +180,120 @@
                 (seq errored) (assoc :seon.problems/errored-receipts errored))]
     (cond-> found
       (seq found) (assoc :seon.render/log `log-report)
+      (seq found) (assoc :seon.render/html `html-report)
       (seq errored) (assoc :seon.render/ai `ai-prose))))
+
+;;; ---------------------------------------------------------------------------
+;;; The html projection — the problems PAGE
+;;; ---------------------------------------------------------------------------
+
+(defn- family-section
+  [title rows]
+  (when (seq rows)
+    [:section {:class "seon-problems-family"}
+     [:h2 {:class "seon-problems-family-title"} title]
+     [:ul {:class "seon-problems-rows"} rows]]))
+
+(defn- row
+  "One problem, as one line. Same grammar for every family: what it is,
+  then the identifiers a digger needs, in a fixed order so the eye can
+  scan a column rather than read a sentence."
+  [& parts]
+  [:li {:class "seon-problems-row"}
+   (for [[label value] (partition 2 parts)
+         :when (some? value)]
+     [:span {:class "seon-problems-field"}
+      [:span {:class "seon-problems-label"} label]
+      [:span {:class "seon-problems-value"} (str value)]])])
+
+(defn html-report
+  "`:seon.render/html` — everything wrong now, as a surface.
+
+  THE THIRD PROJECTION OF ONE VALUE, and deliberately not a third
+  derivation: `problems` already answered what is wrong, `log-report`
+  says it in lines and `ai-prose` says it as steering; this says it in
+  hiccup. Adding it was one key on the value and one function, with no
+  router change and no registration — which is the whole claim the open
+  kind set makes, tested here on the first consumer outside the error
+  family.
+
+  GROUPED BY FAMILY, worst first, because the ordering `problems`
+  already computed is the ordering a reader wants: an error signature
+  that recurred a hundred times leads, and its recurrence count is on
+  the row rather than implied by a hundred rows. That is the one place
+  the html twin must NOT diverge from the ai twin — the quarry's
+  transcript coalesced repeated failures for the agent and not for the
+  human, so a thrash burst was one line in the prompt and a hundred in
+  the page.
+
+  A healthy cluster never reaches here: `problems` declares no
+  projection for `{}`, so there is nothing to render and no cheerful
+  empty state to maintain. The BLOCK renders the healthy case, because
+  only the block knows a surface has to occupy space either way."
+  {:malli/schema [:=> [:cat :seon.problems/problems] :seon.render/hiccup]}
+  [found]
+  [:div {:class "seon-problems"}
+   (family-section
+    "errors"
+    (for [entry (:seon.problems/error-signatures found)]
+      (row "kind" (:seon.error/kind entry)
+           "seen" (:seon.problems/occurrences entry)
+           "signature" (:seon.error/signature entry)
+           "latest" (:seon.error/message (:seon.error/fact entry)))))
+   (family-section
+    "wedged runs"
+    (for [entry (:seon.problems/wedged-runs found)]
+      (row "run" (:seon.cluster.run/id entry)
+           "agent" (:seon.cluster.agent/id entry)
+           "held by" (str (:seon.cluster.run/process entry) " (not alive)"))))
+   (family-section
+    "failed runs"
+    (for [entry (:seon.problems/failed-runs found)]
+      (row "run" (:seon.cluster.run/id entry)
+           "agent" (:seon.cluster.agent/id entry)
+           "error" (:seon.cluster.run/error entry))))
+   (family-section
+    "errored forms"
+    (for [entry (:seon.problems/errored-receipts found)]
+      (row "run" (:seon.cluster.run/id entry)
+           "form" (:seon.cluster.eval/ordinal entry)
+           "kind" (:seon.error/kind entry)
+           "source" (:seon.cluster.run.form/source entry)
+           "error" (:seon.cluster.eval/error entry))))])
+
+(defn block
+  "The problems BLOCK's html render: derive, then project.
+
+  The unit a block projection receives carries the exact immutable
+  database value, so this derives `problems` at that value and renders
+  it — which is what makes the surface a pure function of the database
+  and a reconnect a repaint.
+
+  `:seon.cluster.run/live-processes` must ride on the unit. It is the
+  one input a database cannot answer, `problems` already takes it by
+  that name, and defaulting it here would be the worst kind of quiet
+  lie: an absent set makes every held run wedged, so a default of `#{}`
+  would invent problems and a default of \"assume alive\" would hide
+  them. Absent gets a legible card instead.
+
+  The HEALTHY case is rendered here rather than in `html-report`,
+  because only a block knows its surface has to occupy space whether or
+  not there is anything to say."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (if-not (contains? unit :seon.cluster.run/live-processes)
+    [:div {:class "seon-error-card"}
+     [:span {:class "seon-error-card-message"}
+      (str "This block needs :seon.cluster.run/live-processes on the unit; "
+           "which processes are alive is the one thing the database "
+           "cannot answer.")]]
+    (let [found (problems (:seon.db/db unit)
+                          (select-keys unit [:seon.cluster.run/live-processes]))]
+      (if (empty? found)
+        [:div {:class "seon-problems seon-problems-healthy"}
+         [:span {:class "seon-problems-healthy-mark"} "◆"]
+         [:span "nothing is wrong"]]
+        (html-report found)))))
 
 (defn ai-prose
   "`:seon.render/ai` — concise steering for failed plan forms."

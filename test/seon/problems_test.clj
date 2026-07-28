@@ -25,6 +25,8 @@
             [seon.error :as error]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.render.block :as block]
+            [seon.render.hiccup :as hiccup]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike]))
 
@@ -52,6 +54,14 @@
       (finally
         (d/release connection)
         (d/delete-database configuration)))))
+
+(defn problems-surface
+  "The problems block as a producer wires it: a projection that supplies
+  the liveness set the pipeline will thread from the process. Package 2
+  owns that threading; here the seam is explicit so the test proves the
+  block, not the refusal card."
+  [unit]
+  (problems/block (assoc unit :seon.cluster.run/live-processes #{live})))
 
 (defn- found
   [connection]
@@ -245,7 +255,12 @@
                  (every? (fn [family] (seq (get value family))) present)
                  ;; and NOTHING else appears — this is the half that a
                  ;; stored status would fail
-                 (empty? (remove (cond-> (conj present :seon.render/log)
+                 ;; `log` and `html` ride together — anything wrong is
+                 ;; worth a line AND worth a surface; `ai` only rides
+                 ;; when there is something to steer
+                 (empty? (remove (cond-> (conj present
+                                               :seon.render/log
+                                               :seon.render/html)
                                    (contains? present
                                               :seon.problems/errored-receipts)
                                    (conj :seon.render/ai))
@@ -293,3 +308,91 @@
     (fn [connection]
       (is (= #{} (render/kinds (found connection)))
           "healthy data declares no projection and therefore says nothing"))))
+
+;;; ---------------------------------------------------------------------------
+;;; The html projection — the problems PAGE (N4)
+;;; ---------------------------------------------------------------------------
+
+(deftest the-html-report-is-a-third-projection-of-the-same-value
+  ;; The claim the open kind set makes, tested on the first consumer
+  ;; outside the error family: adding a surface was one key and one
+  ;; function, with no router change and no registration.
+  (with-db
+    (fn [connection]
+      (commit-error! connection)
+      (commit-wedged-run! connection)
+      (let [value (found connection)
+            rendered (render/render {:seon.render/unit value
+                                     :seon.render/kind :seon.render/html})
+            surface (:seon.render/output rendered)]
+        (is (= #{:seon.render/log :seon.render/html} (render/kinds value))
+            "one value, one derivation, several projections")
+        (is (hiccup/hiccup? surface))
+        (is (= surface (problems/html-report value))
+            "the router reaches exactly the same projection")))))
+
+(deftest the-html-twin-coalesces-exactly-as-the-ai-twin-does
+  ;; The quarry's transcript coalesced repeated failures for the agent
+  ;; and NOT for the human, so a thrash burst was one line in the prompt
+  ;; and a hundred rows in the page. One recurrence, one row, with the
+  ;; count ON the row.
+  (with-db
+    (fn [connection]
+      (dotimes [_ 5] (commit-error! connection))
+      (let [value (found connection)
+            html (hiccup/->string (problems/html-report value))]
+        (is (= 1 (count (:seon.problems/error-signatures value))))
+        ;; the exact class, not the substring: the enclosing <ul> is
+        ;; legitimately class="seon-problems-rows"
+        (is (= 1 (count (re-seq #"class=\"seon-problems-row\"" html)))
+            "five occurrences of one signature are ONE row")
+        (is (str/includes? html "5")
+            "and the row carries how many times it happened")))))
+
+(deftest the-block-derives-at-the-units-own-database-value
+  (with-db
+    (fn [connection]
+      (let [healthy @connection
+            _ (commit-wedged-run! connection)
+            broken @connection
+            render-at (fn [db]
+                        (hiccup/->string
+                         (problems/block
+                          {:seon.db/db db
+                           :seon.cluster.run/live-processes #{live}})))]
+        (is (str/includes? (render-at healthy) "nothing is wrong")
+            "the healthy surface still occupies its space")
+        (is (str/includes? (render-at broken) "not alive"))
+        (is (not (str/includes? (render-at broken) "nothing is wrong")))))))
+
+(deftest the-block-refuses-legibly-when-liveness-is-not-supplied
+  ;; The one input a database cannot answer. Defaulting it would either
+  ;; invent problems (#{} makes every held run wedged) or hide them.
+  (with-db
+    (fn [connection]
+      (commit-wedged-run! connection)
+      (let [refused (problems/block {:seon.db/db @connection})]
+        (is (hiccup/hiccup? refused))
+        (is (str/includes? (hiccup/->string refused) "live-processes"))))))
+
+(deftest the-block-is-an-ordinary-block-and-renders-through-the-block-path
+  ;; The proof that the problems page needs no page-specific machinery:
+  ;; it is a block in an agent's set, addressed and morphed like any
+  ;; other block.
+  (with-db
+    (fn [connection]
+      (commit-wedged-run! connection)
+      (d/transact connection
+                  [{:seon.cluster.agent/id "root"
+                    :seon.cluster.agent/blocks
+                    [{:seon.block/name :problems
+                      :seon.block/priority 10
+                      :seon.render/html `problems-surface}]}])
+      (let [[surface] (block/surfaces @connection
+                                      {:seon.cluster.agent/id "root"
+                                       :seon.render/kind :seon.render/html})]
+        (is (nil? (:seon.error/value surface)))
+        (is (= "surface-problems" (:seon.render/surface-id surface))
+            "one derivation for the hole and the patch")
+        (is (str/includes? (hiccup/->string (:seon.render/output surface))
+                           "not alive"))))))

@@ -229,9 +229,7 @@ that are NAMED revisions, not guesses:
   `:seon.render/projection` and one branch, so a non-symbol declaration is its
   own output. `render_test`'s `a-literal-declaration-is-not-yet-routable-and-says-so`
   is the test that changes first, exactly as its comment anticipated.
-- `seon.problems`: add `:seon.render/html` and a `block` projection (~25 lines
-  in the owner's own file). The problems value already declares
-  `:seon.render/log` and routes through the one router; html is one more key.
+- ~~`seon.problems`: add `:seon.render/html`~~ **DONE** — see §4a.
 - `seon.cluster` boot: seed the root agent's block set. Root already exists at
   boot (armed-idle, zero token cost); its blocks are manifest data.
 - `config/default.edn`: the seeded block set — THE defaults document.
@@ -241,6 +239,45 @@ Then the pipeline itself: the render-interest listener (separate from
 registration memory, equality suppression, `mult`, per-tab fixed Flow graph,
 one SSE per tab, and the Datastar shell. Plan §4–§7 and contracts C2/C3/C4/C6/C8
 carry over unchanged except that "unit" now reads "block".
+
+## 4a. The problems page, landed
+
+The owner's ordering put this first because it is the fastest browsable proof,
+and it turned out to be the cheapest thing in the rung: **one key on the value
+and two functions**, with no router change, no registration and no
+page-specific machinery.
+
+- `seon.problems/problems` gained `:seon.render/html`, beside the
+  `:seon.render/log` and `:seon.render/ai` it already declared.
+- `html-report` is the third projection of the one derivation — groups by
+  family, worst-recurring first, one row per problem with the recurrence count
+  ON the row.
+- `block` is the block projection: it derives `problems` at the unit's own
+  exact database value, so the surface is a pure function of the database and a
+  reconnect is a repaint. It renders the healthy case, because only a block
+  knows its surface must occupy space either way.
+
+Two things it refuses to default, both for the same reason. `live-processes`
+is the one input a database cannot answer, so an absent set gets a legible card
+rather than a guess — `#{}` would invent problems (every held run reads as
+wedged) and "assume alive" would hide them. And the healthy state is rendered
+by the block, never by `problems`, which still declares no projection for `{}`.
+
+**The html twin coalesces exactly as the ai twin does**, and that is a sealed
+test rather than a note: the quarry's transcript coalesced repeated failures
+for the agent and not for the human, so a thrash burst was one line in the
+prompt and a hundred rows in the page. Five occurrences of one signature are
+one row with a count on it.
+
+Its absence property caught the new key immediately and correctly — the suite
+enumerates the exact key set a problems value may carry, so adding a projection
+is a deliberate edit rather than a drift.
+
+The CSS landed with it (`resources/public/css/input.css`), in SEMANTIC classes
+rather than utility strings. A block's html render is authored in Clojure and
+may be authored by an AGENT; utility soup in that position is unreviewable and
+cannot be restyled without editing every renderer. `bin/css` compiles it in
+63 ms.
 
 **Package 3 — the interaction model.** The message box does not exist in
 `src-old/` at HEAD; it was deleted in `9d9e870bd`, and the quarry agent
