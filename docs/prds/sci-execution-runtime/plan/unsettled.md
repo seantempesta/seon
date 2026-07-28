@@ -551,14 +551,33 @@ the entity graph — unit refs render as units, bounded
 (depth/nodes/visited — entity graphs cycle); "the /data browser is
 ESPECIALLY that" (the get-in drill = the purest case, joins N4's
 page set). Task #12: the audit's coverage shopping list.
-IN FLIGHT (four): N4 implements package 1 (+ recursion/-data
-directions relayed); context-blocks-plan lane (the biggest gold —
-plan overnight, contracts await MORNING RULINGS); local-qwen-provider
-lane (openai-compat row against a local server, one live local turn,
-tok/s measured — unlimited local multiplies everything);
-my.message Opus agent (the value shape, driver interpretation, the
-conversation-loop guard DIAL flagged not baked, live two-agent
-delegation proof on DeepSeek). ORCHESTRATOR QUEUE (my successor
+N4 PACKAGE 1 GREEN (306/1248 at its commit): expand was UNBOUNDED —
+fan-out WITHOUT cycles OOM'd the JVM at 22 blocks (per-path visited
+refuses the wrong thing); now bounded by the SAME admission caps
+(node+depth separate budgets, depth-first so elisions are stable for
+equality suppression). Fused-walk experiment: NO — the 7.5ms
+admission was a bad predicate; reorder+index → 0.012ms p50 (670×);
+"an expensive-looking stage is a reason to READ the stage." Block
+thesis on surviving numbers: 287B/0.004ms block morph vs
+82,893B/0.460ms whole-page (289×/115×). Problems page = one key +
+two functions (live-processes REFUSES a default — #{} invents
+problems, assume-alive hides them). CSS = semantic classes
+(agent-authored html makes utility soup unreviewable). ui.md
+accreted ×3. Font = filed LICENSING issue (release artifacts ship an
+unlicensed woff2, weight mismatch — remedy in the note).
+LOCAL QWEN LIVE (ee133634e+cd613e30d,
+research/local-provider-2026-07-28.md): Qwen3.6-35B-A3B-4bit-DWQ via
+MLX at 127.0.0.1:8090, 42.6 tok/s, real turn trigger-to-close 2.6s,
+dummy LOCAL_LLM_API_KEY=LOCAL (no-auth provider admission = morning
+decision). DEPS PROMOTED (b8601fabe): Datastar SDK + http-kit
+adapter on :deps (http-kit rides the adapter's 2.9.0-beta2),
+resources/ on :paths. Two config reds mid-flight = the my.message
+lane's in-progress dial (theirs; gate-green is their bar).
+IN FLIGHT (four): N4 PACKAGE 2 (SSE/web layer, block pages,
+ref-following + /data, streaming exercises, root's seeded blocks —
+local Qwen preferred for repeated live checks);
+context-blocks-plan; my.message Opus agent;
+architecture-docs-currency. ORCHESTRATOR QUEUE (my successor
 runs): review each return; two-cluster proof + failover live drive
 (recipes in research/scripts/); context-blocks plan → independent
 falsification → morning decision batch for the owner; the
