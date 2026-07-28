@@ -534,9 +534,35 @@ an ai render of blocks), stderr presentations bypass the log kind,
 program-graph render declarations name ABSENT functions (N5's).
 The coverage shopping list (which units grow ai/html/log renders, in
 order) is in the report — feeds N4 block pages directly.
-IN FLIGHT (two): N4 implements package 1 to green + real bench
-numbers; the error-system lane (projection-revisions lineage)
-finishes the router correction + approved conciseness. NEXT QUEUE: two-cluster proof (+
+ERROR LANE LANDED (1c7abb6a7 — projections through the render
+contract + approved conciseness; N4's fence lifted, N4 is now
+last-finisher for the issues index).
+**THE OVERNIGHT PROGRAM (owner asleep, rulings recorded):** morning
+goal = ALL of (browsable UI / subagents messaging / proofs),
+sequenced by READINESS — if rendering logic isn't solid, HOLD the UI
+milestone and advance the others; solidity outranks demos. TOKENS:
+unlimited DeepSeek; Muse sparingly if DeepSeek struggles; UNLIMITED
+LOCAL — Qwen 3.6 35B A3B named ("particularly good at agentic
+workflows"). Guardrails: defaults (path-limited commits, no history
+changes, deps.edn only the named Datastar/resources promotion, ui.md
+only via sealed-review commits, never data/clusters/default or
+ACME). RECURSIVE RENDERING (task #11, owner): pages are folds over
+the entity graph — unit refs render as units, bounded
+(depth/nodes/visited — entity graphs cycle); "the /data browser is
+ESPECIALLY that" (the get-in drill = the purest case, joins N4's
+page set). Task #12: the audit's coverage shopping list.
+IN FLIGHT (four): N4 implements package 1 (+ recursion/-data
+directions relayed); context-blocks-plan lane (the biggest gold —
+plan overnight, contracts await MORNING RULINGS); local-qwen-provider
+lane (openai-compat row against a local server, one live local turn,
+tok/s measured — unlimited local multiplies everything);
+my.message Opus agent (the value shape, driver interpretation, the
+conversation-loop guard DIAL flagged not baked, live two-agent
+delegation proof on DeepSeek). ORCHESTRATOR QUEUE (my successor
+runs): review each return; two-cluster proof + failover live drive
+(recipes in research/scripts/); context-blocks plan → independent
+falsification → morning decision batch for the owner; the
+released-connection family; gate verify after N4 lands. NEXT QUEUE: two-cluster proof (+
 failover live drive rides it); released-connection family;
 dispatcher lands post-measurement; my.message rung; then the gold
 order (turn evidence + blobs, derived context, plans + memory,
