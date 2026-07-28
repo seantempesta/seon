@@ -110,6 +110,45 @@
            (sort-by :seon.fresh-operator/name)
            vec))))
 
+(defn- optional-value
+  [optional]
+  (when (.isPresent optional)
+    (.get optional)))
+
+(defn- operator-launch-process?
+  [^java.lang.ProcessHandle handle]
+  (let [info (.info handle)
+        command (optional-value (.command info))
+        arguments (some-> (optional-value (.arguments info)) vec)
+        [main option form] (take-last 3 arguments)]
+    (and (.isAlive handle)
+         (string? command)
+         (str/ends-with? command "/java")
+         (= "clojure.main" main)
+         (= "-e" option)
+         (string? form)
+         (str/includes? form "(seon.cluster/start!")
+         (str/includes? form "\"ready — instrumented\"")
+         (str/includes? form
+                        "(clojure.core/deref (clojure.core/promise))"))))
+
+(defn- orphan-operator-jvm-pids
+  [rows]
+  (let [advertised-pids
+        (into #{}
+              (comp
+               (filter :seon.fresh-operator/alive?)
+               (map #(get-in % [:seon.fresh-operator/advertisement
+                                :seon.boot/pid])))
+              rows)]
+    (with-open [processes (java.lang.ProcessHandle/allProcesses)]
+      (->> (iterator-seq (.iterator processes))
+           (filter operator-launch-process?)
+           (map #(.pid ^java.lang.ProcessHandle %))
+           (remove advertised-pids)
+           sort
+           vec))))
+
 (defn- require-advertisement!
   [root name]
   (valid-name! name)
@@ -349,7 +388,8 @@
     (fail! "`status` takes no arguments."
            {:seon.fresh-operator/arguments arguments}))
   (let [rows (advertisement-rows root)
-        alive-count (count (filter :seon.fresh-operator/alive? rows))]
+        alive-count (count (filter :seon.fresh-operator/alive? rows))
+        orphan-pids (orphan-operator-jvm-pids rows)]
     (println (format "%-22s %8s %-7s %7s %s"
                      "CLUSTER" "PID" "STATE" "PREPL" "URL"))
     (println (apply str (repeat 78 "-")))
@@ -361,7 +401,12 @@
                (if alive? "alive" "stale")
                (or (:seon.boot/prepl-port advertisement) "-")
                (or (:seon.render.web/url advertisement) "-"))))
-    (println (str alive-count "/" (count rows) " clusters alive"))))
+    (println (str alive-count "/" (count rows) " clusters alive"))
+    (println
+     (str "orphan seon JVMs: "
+          (if (seq orphan-pids)
+            (str/join ", " orphan-pids)
+            "none")))))
 
 (defn- open!
   [root arguments]
@@ -442,7 +487,7 @@
         events
         (try
           (prepl-eval! ad (stop-form name))
-          (catch java.io.IOException error
+          (catch Throwable error
             (sigterm! root name ad (ex-message error))
             nil))]
     (when events
