@@ -130,8 +130,11 @@
     (loop [idle 0]
       (if (pos? (.available stream))
         (let [read (.read stream buffer)]
-          (.append out (String. buffer 0 read))
-          (recur 0))
+          ; .read returns -1 at EOF; available>0 makes that rare, not
+          ; impossible — a negative count must end the drain, not throw
+          (when (pos? read)
+            (.append out (String. buffer 0 read)))
+          (if (pos? read) (recur 0) nil))
         (when (< idle 8)
           (Thread/sleep 60)
           (recur (inc idle)))))

@@ -131,8 +131,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn prompt
-  "The rendered context for the agent holding the request's run,
-  derived from `db`. Selection → one router request per AI-declaring
+  "Derive the rendered context for the agent holding the request's run.
+  Selection → one router request per AI-declaring
   block in membership order → validation (string | nil | flat error) →
   ordered reduction.
 
