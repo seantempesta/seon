@@ -71,7 +71,8 @@ content. With `enable_thinking=false`, the same endpoint returned
 
 ## Working descriptor row
 
-These were the effective database dials before the loop was armed:
+The original proof predates the explicit no-auth target state. Its effective
+database dials before the loop was armed were:
 
 ```clojure
 {:seon.config.ai/endpoint
@@ -82,9 +83,12 @@ These were the effective database dials before the loop was armed:
  :seon.config.ai/timeout-ms 300000}
 ```
 
-The live drive exported `LOCAL_LLM_API_KEY=LOCAL`. No backup model was
-configured. The full endpoint, rather than a `/v1` base URL, is correct for
-fresh `seon.ai`, whose leaf constructs the POST directly.
+That proof exported `LOCAL_LLM_API_KEY=LOCAL`; the loopback server ignored it.
+The current target/request contract instead declares
+`:seon.config.ai/no-auth true`, so the request leaf omits authorization
+entirely.
+No backup model was configured. The full endpoint, rather than a `/v1` base
+URL, is correct for fresh `seon.ai`, whose leaf constructs the POST directly.
 
 The production loop now derives this row from database facts, but
 `cluster/start!` currently applies only `(config/defaults)` at boot
@@ -97,8 +101,7 @@ the model call. The reproducible drive remains at
 `tmp/local-qwen-live-drive.clj` and runs with:
 
 ```bash
-LOCAL_LLM_API_KEY=LOCAL \
-  clojure -M:dev -e '(load-file "tmp/local-qwen-live-drive.clj")'
+clojure -M:dev -e '(load-file "tmp/local-qwen-live-drive.clj")'
 ```
 
 The older research recipe's `clojure -M:dev -M` invocation is stale for the
@@ -168,20 +171,22 @@ deliberately left running for overnight local-token use.
 
 ## No-auth decision
 
-The local MLX server ignores authorization, but the current Seon contract does
-not admit a no-auth target:
+The local MLX server ignores authorization. The original Seon contract did not
+admit a no-auth target:
 
 - `:seon.config.ai/api-key-variable` is a required non-empty string;
 - `seon.ai/complete` returns `::no-credential` without making a request when
   that environment variable is absent; and
 - every transmitted request unconditionally carries `Authorization: Bearer`.
 
-The dummy `LOCAL_LLM_API_KEY=LOCAL` value is explicit evidence of that contract
-and is acceptable for this proof because the loopback server ignores it. It
-must not become a silent provider convention.
+The dummy `LOCAL_LLM_API_KEY=LOCAL` value is explicit evidence of that former
+contract. It did not become a provider convention.
 
-Owner decision required: either retain the four-fact target and document that
-no-auth OpenAI-compatible servers receive a named dummy credential, or accrete
-an explicit no-auth state to the one existing target/leaf contract so absence
-omits the header while hosted targets still fail closed. No provider-specific
-branch or second transport mechanism is warranted.
+Owner decision resolved 2026-07-28 evening: the existing target/request union
+now admits exactly one of a non-empty `:seon.ai/api-key-variable` or literal
+`:seon.config.ai/no-auth true`. Simple absence was rejected because a forgotten
+hosted credential would otherwise become a silent unauthenticated request.
+Both and neither are schema-invalid. At the one HTTP leaf, no-auth bypasses
+the environment read and the ordinary request header map contains no
+`Authorization` entry; credentialed targets retain the prior fail-closed
+`::no-credential` result before the send leaf is entered.

@@ -56,6 +56,24 @@
            :seon.ai/request
            (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))))
 
+(deftest no-auth-is-an-explicit-exclusive-target-shape
+  (let [target {:seon.ai/endpoint "http://127.0.0.1:8090/v1/chat/completions"
+                :seon.ai/model "local-model"
+                :seon.config.ai/no-auth true
+                :seon.ai/timeout-ms 300000}]
+    (is (schema/valid-candidate-value? :seon.ai/target target))
+    (is (schema/valid-candidate-value?
+         :seon.ai/request
+         (assoc target :seon.ai/prompt "hello")))
+    (is (not (schema/valid-candidate-value?
+              :seon.ai/target
+              (assoc target :seon.ai/api-key-variable "DUMMY")))
+        "a descriptor cannot declare both authentication shapes")
+    (is (not (schema/valid-candidate-value?
+              :seon.ai/target
+              (dissoc target :seon.config.ai/no-auth)))
+        "omitting a credential does not silently mean no-auth")))
+
 (deftest one-dial-configures-a-backup-and-the-rest-inherit
   ;; the shape that makes a PARTIAL backup unrepresentable: `model`
   ;; decides, everything else is an override
@@ -215,11 +233,38 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-missing-credential-is-loud-in-the-value
-  (let [outcome (ai/complete base)]
+  (let [requests (atom [])
+        outcome
+        (with-redefs-fn
+          {#'seon.ai/send-request
+           (fn [request]
+             (swap! requests conj request)
+             {:seon.ai/text "must not happen"})}
+          #(ai/complete base))]
     (is (error? outcome))
     (is (= :seon.ai/no-credential (:seon.error/kind outcome)))
     (is (re-find #"SEON_AI_TEST_KEY_ABSENT" (:seon.error/message outcome))
-        "the message names the variable that is unset")))
+        "the message names the variable that is unset")
+    (is (empty? @requests)
+        "a hosted target refuses before constructing or sending a request")))
+
+(deftest explicit-no-auth-omits-the-authorization-header
+  (let [requests (atom [])
+        request (-> base
+                    (dissoc :seon.ai/api-key-variable)
+                    (assoc :seon.config.ai/no-auth true))
+        outcome
+        (with-redefs-fn
+          {#'seon.ai/send-request
+           (fn [request-data]
+             (swap! requests conj request-data)
+             {:seon.ai/text "local reply"})}
+          #(ai/complete request))]
+    (is (= {:seon.ai/text "local reply"} outcome))
+    (is (= 1 (count @requests)))
+    (is (= {"content-type" "application/json"}
+           (:seon.ai.http/headers (first @requests)))
+        "the captured request map contains no Authorization header")))
 
 (deftest transport-failure-is-an-ordinary-value
   ;; port 1 answers nothing; the credential is present so the call is

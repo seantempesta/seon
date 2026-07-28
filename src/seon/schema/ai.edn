@@ -1,8 +1,12 @@
-{; ONE PROVIDER, ONE ATTEMPT, ONE DEADLINE. The seam to B2 is exactly
- ; three facts — endpoint, model, and the NAME of the environment
- ; variable holding the credential. The credential itself is read at
- ; the leaf and never becomes a datom.
+{; ONE PROVIDER, ONE ATTEMPT, ONE DEADLINE. Authentication is exactly
+ ; one of two explicit shapes: the NAME of the environment variable
+ ; holding the credential, or the literal no-auth fact. The credential
+ ; itself is read at the leaf and never becomes a datom.
  :seon.ai/api-key-variable [:string {:min 1}]
+ ; Literal true rather than boolean: false would be a second spelling
+ ; for the authenticated shape. The target/request unions below make
+ ; both and neither unrepresentable.
+ :seon.config.ai/no-auth [:= true]
  :seon.ai/endpoint [:string {:min 1}]
  :seon.ai/model [:string {:min 1}]
  :seon.ai/prompt [:string {:min 1}]
@@ -43,7 +47,10 @@
   [:seon.ai/tokens :seon.ai/tokens]
   [:seon.ai/usage {:optional true} :seon.ai/usage]]
 
- :seon.ai/request [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
+ :seon.ai/request
+ [:or
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
  :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens]] :seon.error/value]
 
  ; ---------------------------------------------------------------------
@@ -57,7 +64,10 @@
  ; database attribute — the roles are a shape, not a row.
  :seon.ai/primary :seon.ai/target
  :seon.ai/backup :seon.ai/target
- :seon.ai/target [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+ :seon.ai/target
+ [:or
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]]
  ; TWO ROLES, and the backup is ABSENT rather than nil when there is
  ; none — absence is the state, and `:seon.ai/backup?` downstream is
  ; literally `(contains? targets :seon.ai/backup)`.

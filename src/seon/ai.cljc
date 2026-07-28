@@ -32,8 +32,9 @@
   something the agent can read. (Contrast the submission backstop in
   the eval path, whose firing IS a bug report.)
 
-  THE DESCRIPTOR ROW IS FOUR FACTS: endpoint, model, timeout, and the
-  NAME of the environment variable holding the credential. The
+  THE DESCRIPTOR ROW IS endpoint, model, timeout, and exactly one
+  authentication declaration: the NAME of the environment variable
+  holding the credential, or explicit `:seon.config.ai/no-auth true`. A
   credential is read at the leaf, never becomes a datom, and never
   enters Git. A `:seon.ai/request` is a `:seon.ai/target` plus what to
   say, which is why the call site is `(assoc target :seon.ai/prompt …)`
@@ -447,10 +448,130 @@
           (:seon.ai/usage snapshot) (assoc :seon.ai/usage
                                            (:seon.ai/usage snapshot)))))))
 
+(defn- http-request-data
+  "Ordinary request data for the JDK leaf."
+  [request key]
+  (cond-> {:seon.ai/endpoint (:seon.ai/endpoint request)
+           :seon.ai/timeout-ms (:seon.ai/timeout-ms request)
+           :seon.ai/stream? (boolean (:seon.ai/stream? request))
+           :seon.ai.http/headers {"content-type" "application/json"}
+           :seon.ai.http/body (json/write-str (request-body request))}
+    (:seon.ai/sink request)
+    (assoc :seon.ai/sink (:seon.ai/sink request))
+
+    key
+    (assoc-in [:seon.ai.http/headers "authorization"]
+              (str "Bearer " key))))
+
+(defn- send-request
+  "Send one ordinary request map through the JDK HTTP leaf."
+  [{:keys [:seon.ai/endpoint :seon.ai/timeout-ms
+           :seon.ai.http/headers :seon.ai.http/body]
+    stream? :seon.ai/stream?
+    sink :seon.ai/sink}]
+  (let [client (.build (HttpClient/newBuilder))
+        ;; THE one deadline, and it is the HTTP client's own: a request
+        ;; timeout the JVM enforces, not a wrapper thread racing the call.
+        builder (-> (HttpRequest/newBuilder (URI/create endpoint))
+                    (.timeout (Duration/ofMillis (long timeout-ms))))
+        http-request
+        (-> (reduce-kv (fn [request-builder name value]
+                         (.header request-builder name value))
+                       builder
+                       headers)
+            (.POST (HttpRequest$BodyPublishers/ofString body))
+            (.build))]
+    (try
+      ;; ONE attempt. Synchronous send on the calling thread — the
+      ;; loop proc is :io and may block; there is no retry, no
+      ;; backoff, and no second provider to fall back to.
+      (let [response (.send client http-request
+                            (if stream?
+                              ;; ofInputStream, not ofLines. `ofLines`
+                              ;; does not yield incrementally on a
+                              ;; stream the client holds open, which
+                              ;; is exactly the trap the web slice hit
+                              ;; reading SSE: it reported nothing for
+                              ;; a feed that was working perfectly.
+                              ;; Reading the stream ourselves is the
+                              ;; behaviour we have proven.
+                              (HttpResponse$BodyHandlers/ofInputStream)
+                              (HttpResponse$BodyHandlers/ofString)))
+            status (.statusCode response)
+            ;; a non-2xx body has to be readable either way, and a
+            ;; stream's body is only readable once
+            read-body (fn [] (if stream?
+                               (slurp (.body response))
+                               (.body response)))]
+        (if (<= 200 status 299)
+          (try
+            (if stream?
+              (streamed-completion (.body response) sink)
+              (completion-text (json/read-str (.body response))))
+            (catch Throwable failure
+              {:seon.error/kind ::unparseable-body
+               :seon.error/message (str "The provider's response was not "
+                                        "readable JSON: "
+                                        (ex-message failure))
+               :seon.error/data {::status status
+                                 ::error-class :response
+                                 ::http-status status
+                                 ::request-transmitted? true
+                                 ::response-started? true
+                                 ;; a 2xx body EXISTS, so the provider
+                                 ;; generated and charged for output
+                                 ;; even though we cannot read it
+                                 ::output-observed? true}}))
+          (let [text (str (read-body))
+                body (subs text 0 (min 500 (count text)))]
+            {:seon.error/kind ::provider-error
+             :seon.error/message (str "The provider answered " status ".")
+             :seon.error/data {::status status
+                               ::body body
+                               ::error-class (status-class status)
+                               ::http-status status
+                               ::request-transmitted? true
+                               ::response-started? true
+                               ;; a rejection carries no generated
+                               ;; output; a 2xx would not be here
+                               ::output-observed? false}})))
+      (catch java.net.http.HttpTimeoutException failure
+        ;; an ordinary outcome: the model was slow. Never a bug report.
+        ;; A CONNECT timeout never transmitted anything; any other
+        ;; timeout may have. The JDK distinguishes them by class
+        ;; (`HttpConnectTimeoutException extends HttpTimeoutException`),
+        ;; which is the only honest way to know, and "cannot prove it
+        ;; was free" is not "it was free".
+        (let [connect? (instance? java.net.http.HttpConnectTimeoutException
+                                  failure)]
+          {:seon.error/kind ::timeout
+           :seon.error/message (str "The model did not answer within "
+                                    timeout-ms "ms.")
+           :seon.error/data {:seon.ai/timeout-ms timeout-ms
+                             ::error-class (if connect?
+                                             :transport-before-send
+                                             :timeout)
+                             ::request-transmitted? (not connect?)
+                             ::response-started? false
+                             ::output-observed? false}}))
+      (catch Throwable failure
+        (let [before-send? (transport-before-send? failure)]
+          {:seon.error/kind ::transport-failure
+           :seon.error/message (or (ex-message failure)
+                                   (.getName (class failure)))
+           :seon.error/data {:seon.ai/endpoint endpoint
+                             ::throwable (.getName (class failure))
+                             ::error-class (if before-send?
+                                             :transport-before-send
+                                             :transport-unknown)
+                             ::request-transmitted? (not before-send?)
+                             ::response-started? false
+                             ::output-observed? false}})))))
+
 (defn complete
   "Call the model once and return its text, or a flat error value.
-  ONE attempt. No retry, no backoff, no fallback provider. Reads the
-  credential from the environment variable the request NAMES.
+  ONE attempt. No retry, no backoff, no fallback provider. A request
+  either names its credential variable or explicitly declares no-auth.
 
   Flat `:seon.error` values, never throws:
   - `::no-credential` — the named environment variable is unset. This
@@ -461,118 +582,21 @@
   - `::provider-error` — a non-2xx response, carrying its status;
   - `::unparseable-body` — 2xx with a body this cannot read."
   {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/completion]}
-  [{:keys [:seon.ai/endpoint :seon.ai/api-key-variable :seon.ai/timeout-ms]
-    stream? :seon.ai/stream?
-    sink :seon.ai/sink
+  [{:keys [:seon.ai/api-key-variable]
+    no-auth :seon.config.ai/no-auth
     :as request}]
-  (if-let [key (credential api-key-variable)]
-    (let [client (.build (HttpClient/newBuilder))
-          ;; THE one deadline, and it is the HTTP client's own: a
-          ;; request timeout the JVM enforces, not a wrapper thread
-          ;; racing the call.
-          http-request
-          (-> (HttpRequest/newBuilder (URI/create endpoint))
-              (.timeout (Duration/ofMillis (long timeout-ms)))
-              (.header "content-type" "application/json")
-              (.header "authorization" (str "Bearer " key))
-              (.POST (HttpRequest$BodyPublishers/ofString
-                      (json/write-str (request-body request))))
-              (.build))]
-      (try
-        ;; ONE attempt. Synchronous send on the calling thread — the
-        ;; loop proc is :io and may block; there is no retry, no
-        ;; backoff, and no second provider to fall back to.
-        (let [response (.send client http-request
-                              (if stream?
-                                ;; ofInputStream, not ofLines. `ofLines`
-                                ;; does not yield incrementally on a
-                                ;; stream the client holds open, which
-                                ;; is exactly the trap the web slice hit
-                                ;; reading SSE: it reported nothing for
-                                ;; a feed that was working perfectly.
-                                ;; Reading the stream ourselves is the
-                                ;; behaviour we have proven.
-                                (HttpResponse$BodyHandlers/ofInputStream)
-                                (HttpResponse$BodyHandlers/ofString)))
-              status (.statusCode response)
-              ;; a non-2xx body has to be readable either way, and a
-              ;; stream's body is only readable once
-              read-body (fn [] (if stream?
-                                 (slurp (.body response))
-                                 (.body response)))]
-          (if (<= 200 status 299)
-            (try
-              (if stream?
-                (streamed-completion (.body response) sink)
-                (completion-text (json/read-str (.body response))))
-              (catch Throwable failure
-                {:seon.error/kind ::unparseable-body
-                 :seon.error/message (str "The provider's response was not "
-                                          "readable JSON: "
-                                          (ex-message failure))
-                 :seon.error/data {::status status
-                                   ::error-class :response
-                                   ::http-status status
-                                   ::request-transmitted? true
-                                   ::response-started? true
-                                   ;; a 2xx body EXISTS, so the provider
-                                   ;; generated and charged for output
-                                   ;; even though we cannot read it
-                                   ::output-observed? true}}))
-            (let [text (str (read-body))
-                  body (subs text 0 (min 500 (count text)))]
-              {:seon.error/kind ::provider-error
-               :seon.error/message (str "The provider answered " status ".")
-               :seon.error/data {::status status
-                                 ::body body
-                                 ::error-class (status-class status)
-                                 ::http-status status
-                                 ::request-transmitted? true
-                                 ::response-started? true
-                                 ;; a rejection carries no generated
-                                 ;; output; a 2xx would not be here
-                                 ::output-observed? false}})))
-        (catch java.net.http.HttpTimeoutException failure
-          ;; an ordinary outcome: the model was slow. Never a bug report.
-          ;; A CONNECT timeout never transmitted anything; any other
-          ;; timeout may have. The JDK distinguishes them by class
-          ;; (`HttpConnectTimeoutException extends HttpTimeoutException`),
-          ;; which is the only honest way to know, and "cannot prove it
-          ;; was free" is not "it was free".
-          (let [connect? (instance? java.net.http.HttpConnectTimeoutException
-                                    failure)]
-            {:seon.error/kind ::timeout
-             :seon.error/message (str "The model did not answer within "
-                                      timeout-ms "ms.")
-             :seon.error/data {:seon.ai/timeout-ms timeout-ms
-                               ::error-class (if connect?
-                                               :transport-before-send
-                                               :timeout)
-                               ::request-transmitted? (not connect?)
-                               ::response-started? false
-                               ::output-observed? false}}))
-        (catch Throwable failure
-          (let [before-send? (transport-before-send? failure)]
-            {:seon.error/kind ::transport-failure
-             :seon.error/message (or (ex-message failure)
-                                     (.getName (class failure)))
-             :seon.error/data {:seon.ai/endpoint endpoint
-                               ::throwable (.getName (class failure))
-                               ::error-class (if before-send?
-                                               :transport-before-send
-                                               :transport-unknown)
-                               ::request-transmitted? (not before-send?)
-                               ::response-started? false
-                               ::output-observed? false}}))))
-    {:seon.error/kind ::no-credential
-     :seon.error/message (if (string? api-key-variable)
-                           (str "The environment variable "
-                                api-key-variable " is not set.")
-                           "No credential variable was configured.")
-     :seon.error/data {:seon.ai/api-key-variable api-key-variable
-                       ::error-class :credential
-                       ;; NO NETWORK CALL HAPPENED. This is the one
-                       ;; failure that is provably free.
-                       ::request-transmitted? false
-                       ::response-started? false
-                       ::output-observed? false}}))
+  (let [key (when-not no-auth (credential api-key-variable))]
+    (if (or no-auth key)
+      (send-request (http-request-data request key))
+      {:seon.error/kind ::no-credential
+       :seon.error/message (if (string? api-key-variable)
+                             (str "The environment variable "
+                                  api-key-variable " is not set.")
+                             "No credential variable was configured.")
+       :seon.error/data {:seon.ai/api-key-variable api-key-variable
+                         ::error-class :credential
+                         ;; NO NETWORK CALL HAPPENED. This is the one
+                         ;; failure that is provably free.
+                         ::request-transmitted? false
+                         ::response-started? false
+                         ::output-observed? false}})))
