@@ -363,6 +363,28 @@ The audit question for any `kind`/`type` field is therefore: does it SELECT the
 entity's schema (BANNED → make it presence-based) or is it a value-flavor /
 derived label / library shape (FINE → keep the enum)?
 
+**Third rule (owner, 2026-07-28): a stored STATUS that restates the presence
+of other facts on the same entity is also banned.** State is tested by
+attribute presence — `missing?`, `get-else`, an AEVT walk — never read back
+from a discriminator committed alongside the facts it summarizes. A status
+enum survives only when at least one of its values is NOT derivable from
+presence (and then the honest fix is usually one more fact, e.g. an
+`interrupted-at` instant, after which the enum dies). Transitions fence on
+the ABSENCE of terminal facts (`:db.fn/cas` from nil), so the invalid
+double-settlement is unrepresentable rather than checked. Grounding, query
+costs, and the Datahike file:line evidence:
+`docs/prds/sci-execution-runtime/research/state-without-kinds-2026-07-28.md`.
+
+**The status/phase enums in the §4 tables below predate this rule** and are
+quarry-era targets kept for the entities not yet rebuilt. The fresh tree has
+already designed them out where it has landed: eval receipts carry
+`result-edn`/`error` presence plus `interrupted-at` (no
+`:seon.cluster.eval/status`), attempts carry the error ref's presence (no
+`:seon.ai.attempt/outcome`), and disposition/error-class are derived at read
+from the stored http-status. Do not re-import a stored status when rebuilding
+an entity from these tables; carry only the observation facts and derive the
+label.
+
 ## 4. Per-entity schema tables
 
 Facet column reads `valueType / cardinality / unique|component`. Mixed-`:or`
