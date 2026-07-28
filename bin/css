@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# The stylesheet build — Tailwind v4, standalone.
+#
+#   bin/css          # one-shot: input.css -> output.css
+#   bin/css --watch  # incremental, for the dev loop
+#
+# PORTED from the quarry (owner ruling 2026-07-27: port the tailwind-CSS
+# build system), and DECOUPLED in the port. In the old tree this exact
+# argv lived inside `script/seon/dev/artifact.clj`'s `build-source!`,
+# textually adjacent to the shadow-cljs steps and welded to the artifact
+# manifest: `output.css` was a REQUIRED build output folded into
+# `css-digest` -> `application-digest`, so a stylesheet edit invalidated
+# the application artifact and a missing stylesheet threw the whole
+# build. The CLJS build is dead (owner, 2026-07-27) and the artifact
+# machinery serves the old system only, so the port keeps the transform
+# and drops every coupling: this script depends on nothing but bun and
+# the two file paths.
+#
+# It is honest about being a two-argument transform. There is no config
+# file to find (Tailwind v4 is CSS-first — every directive, token and
+# source glob lives in input.css), no classpath to warm, no lock to
+# take, and no digest to publish. The measured cost in the quarry's own
+# build audit was 171-187 ms, which is why a watcher is a convenience
+# rather than a requirement, and why NOTHING in the runtime boot may own
+# this: a stylesheet is a build product, not a component
+# (plan/reference/integrant-boot-design-2026-07-26.md:50 — the deleted
+# `:seon.web/tailwind` Integrant watcher stays deleted).
+#
+# input.css already scans the FRESH tree (`@source "../../../src/**"`),
+# so nothing about the port changes what gets scanned.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+cli="node_modules/@tailwindcss/cli/dist/index.mjs"
+
+if [ ! -f "$cli" ]; then
+  echo "bin/css: $cli is missing — run 'bun install --frozen-lockfile'" >&2
+  exit 2
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "bin/css: bun is not on PATH" >&2
+  exit 2
+fi
+
+exec bun "$cli" \
+  -i resources/public/css/input.css \
+  -o resources/public/css/output.css \
+  "$@"

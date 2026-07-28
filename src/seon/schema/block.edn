@@ -1,0 +1,191 @@
+{; ---------------------------------------------------------------------------
+ ; THE BLOCK — the one mechanism behind every page and every prompt.
+ ;
+ ; Owner ruling, 2026-07-27 night, binding on N4: the root interface "is
+ ; really just different context blocks that return :seon.render/ai and
+ ; :seon.render/html", so blocks are central and root and agent views are
+ ; ONE mechanism. Root is per-cluster and root is an agent, so "root's
+ ; page" is not a second code path — it is the root agent's block set.
+ ;
+ ; A block is a UNIT for the landed router (src/seon/render.clj): a map
+ ; declaring, per output kind, the qualified symbol that projects it.
+ ; That is why this file registers no renderer table, no page registry
+ ; and no dispatch: `:seon.render/html` below is one more kind key on an
+ ; open set, exactly as `:seon.render/log` was, and `seon.render/render`
+ ; needs no edit to route a block.
+ ;
+ ; File boundaries are editorial (the loader is one global population),
+ ; so the `:seon.render/html` kind is declared HERE, in the file that
+ ; owns its first consumer, rather than by editing the sealed
+ ; render.edn — the same reason error.edn owns nothing about the router.
+ ; ---------------------------------------------------------------------------
+
+ ; THE NAME IN THREE ROLES, and always in sync because there is only one
+ ; of it: the prompt header the agent reads, the upsert key within one
+ ; agent's block set, and (through `seon.render.block/surface-id`) the
+ ; DOM element id the morph targets. That third role is what makes "the
+ ; agent edits the same thing the human sees" true rather than a slogan.
+ ;
+ ; A plain `:keyword`, deliberately NOT a database identity: two agents
+ ; each own a `:transcript` block, and making the name unique across the
+ ; store would forbid exactly the arrangement the design requires.
+ ; Uniqueness is per agent and is enforced by the upsert, not by Datahike.
+ :seon.block/name :keyword
+
+ ; ORDER IS DERIVED FROM DATA, never from position. Cardinality-many is a
+ ; SET in Datahike (persistent_set.cljc:133), so a block set has no
+ ; stored order to lose; the render sorts by priority with the name as a
+ ; stable tiebreaker, which makes two derivations of one database value
+ ; the same value. Lower sorts first, so a header can sit at 0 without
+ ; anybody renumbering the rest.
+ :seon.block/priority :int
+
+ ; THE BLOCK ENTITY. `:seon.db/entity true` is load-bearing rather than
+ ; decorative: `canonical-database-attributes` installs entity-map
+ ; entries by construction, and a family declared only as standalone
+ ; attributes is unavailable to the LIVE boot path even while fixtures
+ ; that install explicit lists stay green — the fixture-vs-live-boot
+ ; class that already bit the message family (38ab48470).
+ ;
+ ; Both render keys are OPTIONAL and presence decides placement, which is
+ ; the whole selection mechanism: ai only = prompt only (no surface),
+ ; html only = a surface only (zero prompt tokens), both = both. A block
+ ; carrying neither is legal and renders nowhere — it is data the agent
+ ; owns and nothing displays, and refusing it would be inventing a rule
+ ; the design does not need.
+ :seon.block/block
+ [:map {:seon.db/entity true}
+  [:seon.block/name :seon.block/name]
+  [:seon.block/priority :seon.block/priority]
+  [:seon.render/ai {:optional true} :seon.render/ai]
+  [:seon.render/html {:optional true} :seon.render/html]]
+
+ ; EACH AGENT OWNS ITS COMPLETE SET, seeded at creation. There is no
+ ; render-time merge with a default set and no fallback: every block an
+ ; agent renders, it owns, so "what does this agent see?" is one pull
+ ; rather than a reconstruction. Component, so removing the agent
+ ; cascade-retracts its blocks and no orphan block outlives its owner.
+ :seon.cluster.agent/blocks [:set {:seon.db/component true} :seon.db/ref]
+
+ ; ---------------------------------------------------------------------------
+ ; THE HTML KIND
+ ; ---------------------------------------------------------------------------
+
+ ; One more kind on the open set. Its consumer is a surface in the
+ ; browser, and its output grammar is hiccup — stated by the consumer,
+ ; per the router's rule that a kind's grammar belongs to the kind's
+ ; consumer and never to the router.
+ :seon.render/html :seon.render/projection
+
+ ; HICCUP IS A NAMED PREDICATE, and that is a limitation being paid for
+ ; honestly rather than a preference. Hiccup is a tree, and a
+ ; self-referential declaration currently overflows the stack in
+ ; `seon.schema/bind-predicates` (issue
+ ; a-self-referential-schema-overflows-the-stack). The supported idiom
+ ; for a shape this registry cannot express is a registered core
+ ; predicate with an honest generator, which is strictly better than
+ ; `:any` here anyway: the grammar belongs to the serializer that
+ ; enforces it, the predicate IS that grammar, and the generator's
+ ; output domain is the serializer's input domain so every totality
+ ; property generates against the real thing.
+ :seon.render/hiccup [:fn {:gen/gen seon.render.hiccup/hiccup-generator} seon.render.hiccup/hiccup?]
+
+ ; ---------------------------------------------------------------------------
+ ; THE RENDERED PAGE
+ ; ---------------------------------------------------------------------------
+
+ ; The DOM element id, derived from the name by ONE function so the hole
+ ; and the patch can never drift apart. `surface-` prefixed because the
+ ; id shares a document with ids nobody here owns.
+ :seon.render/surface-id [:string {:min 9}]
+
+ ; ONE RENDERED BLOCK. Success carries the output; failure carries the
+ ; flat error value INSTEAD — never merged beside it, because
+ ; `:seon.error/value` is a closed shape registered once and a map that
+ ; is both is neither. The surface always carries its name and id, so a
+ ; failed block still has a place to put its error card and its
+ ; neighbours are unaffected: per-block isolation is structural here, not
+ ; a try/catch somebody remembered.
+ ;
+ ; A UNION OF TWO CLOSED MAPS rather than one map with two optional keys,
+ ; and no discriminator: closedness already makes the two disjoint, and
+ ; `:seon.error/value` presence is the same "did this render?" test the
+ ; router's own wrap contract established. This is not the `:close`
+ ; precedent — there the FOLD's end had to be visible in the value
+ ; because an absent ordinal meant two different things; here nothing is
+ ; inferred from an absence, only read from a presence.
+ :seon.render/surface
+ [:or
+  [:map {:closed true}
+   [:seon.block/name :seon.block/name]
+   [:seon.render/surface-id :seon.render/surface-id]
+   [:seon.render/kind :seon.render/kind]
+   [:seon.render/output :seon.render/output]]
+  [:map {:closed true}
+   [:seon.block/name :seon.block/name]
+   [:seon.render/surface-id :seon.render/surface-id]
+   [:seon.render/kind :seon.render/kind]
+   [:seon.error/value :seon.error/value]]]
+
+ ; The agent's blocks rendered into one kind, in priority order. A vector
+ ; because the ORDER is the meaning; the set it came from had none.
+ :seon.render/surfaces [:vector :seon.render/surface]
+
+ ; What a caller asks for. The database value is a positional argument
+ ; rather than a key, matching the landed `seon.problems/problems`
+ ; signature — one convention for "pure over a database value", not two.
+ :seon.render/surfaces-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render/kind :seon.render/kind]]
+
+ ; A page is the html surfaces with every slot expanded, in the order
+ ; the top-level blocks sort. Top-level is DERIVED (a block no other
+ ; block's hiccup slots into), never a stored `:layout` flag — the
+ ; layout-vs-surface distinction is a role the hiccup reveals.
+ :seon.render/page [:vector :seon.render/hiccup]
+
+ ; ---------------------------------------------------------------------------
+ ; GENERIC DEFAULT + SPECIALIST — the reusable selection shape
+ ; (owner architectural ruling, 2026-07-27 night)
+ ;
+ ; Every output kind has a GENERIC default renderer that can project any
+ ; value of the family. A producer that knows more about a particular
+ ; value points that value's key at a SPECIALIST instead — and the
+ ; choice is made WHERE THE UNIT IS BUILT, computed from the value's own
+ ; attributes.
+ ;
+ ; The two halves of the ruling are one design. Because the key on the
+ ; unit is the whole answer, a CONSUMER never branches: it hands the
+ ; unit to the one router and receives whatever the producer decided.
+ ; That is what makes "consumers reach an error's renderings only
+ ; through the router" enforceable rather than a convention — there is
+ ; no second call site to reach for, because the specialist's name never
+ ; leaves the producer.
+ ;
+ ; It also keeps hot reload: the specialist is a SYMBOL resolved late by
+ ; the router on every render, so re-evaluating it changes the next
+ ; render, exactly as the generic default does.
+ ; ---------------------------------------------------------------------------
+
+ ; ONE RULE: a pure predicate over the value's own attributes, and the
+ ; projection to use when it accepts. Both are qualified symbols
+ ; resolved late — a rule is as hot-reloadable as the renderer it picks.
+ :seon.render/specialist [:tuple :qualified-symbol :seon.render/projection]
+
+ ; What a producer asks for. `specialists` is ORDERED and first match
+ ; wins, because "more specific" is a judgement its owner makes and not
+ ; something a scoring function should guess. An empty vector is the
+ ; ordinary case and yields the default, so a family with no specialists
+ ; writes no special code.
+ ;
+ ; This is NOT a registry: the vector belongs to the ONE producer that
+ ; owns the family, is built from that family's own attributes, and is
+ ; never consulted by anybody rendering. A second family's rules are
+ ; invisible here, which is the difference between a producer's rules
+ ; and a dispatch table.
+ :seon.render/selection
+ [:map {:closed true}
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/default :seon.render/projection]
+  [:seon.render/specialists [:vector :seon.render/specialist]]]}
