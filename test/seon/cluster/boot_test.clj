@@ -22,9 +22,10 @@
             [seon.cluster.agent]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
-            [seon.schema])
+            [seon.schema :as schema])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
@@ -327,6 +328,59 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The composed tower — store, ancestor, fork, config, one start!
 ;;; ---------------------------------------------------------------------------
+
+(deftest reopen-accretes-a-new-config-attribute-before-config-applies
+  (let [root (fresh-root)
+        cluster-name "schema-reopen"
+        dial :seon.cluster.boot-test/reopen-dial
+        schema-state (schema/snapshot-state)]
+    (try
+      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root root})]
+        (cluster/stop! instance))
+
+      ;; This is the source-accretion boundary in miniature: the store is
+      ;; closed before today's population gains one persisted dial and the
+      ;; three config shapes widen to admit it.
+      (schema/register! dial [:int {:seon.db/index true}])
+      (doseq [config-shape
+              [:seon.config/manifest
+               :seon.config/effective
+               :seon.config/entity]]
+        (schema/register!
+         config-shape
+         (conj (schema/schema-definition config-shape)
+               [dial {:optional true} dial])))
+
+      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)]
+        (try
+          (testing "reopen installs the new declaration before config writes"
+            (is (contains? (:schema @connection) dial)))
+          (testing "the current canonical schema row also accretes"
+            (is (= (schema/form-string dial)
+                   (d/q '[:find ?form .
+                          :in $ ?dial
+                          :where
+                          [?schema :seon.schema/key ?dial]
+                          [?schema :seon.schema/form ?form]]
+                        @connection
+                        dial))))
+          (testing "config/apply! can transact the newly admitted dial"
+            (let [result
+                  (config/apply!
+                   {:seon.config/connection connection
+                    :seon.config/manifest {dial 7}
+                    :seon.boot/cluster-name cluster-name})]
+              (is (pos? (:seon.reconcile/operations result)))
+              (is (= 7 (get (config/effective @connection cluster-name)
+                            dial)))))
+          (finally
+            (cluster/stop! instance))))
+      (finally
+        (schema/restore-state! schema-state)
+        (delete-recursively! root)))))
 
 (deftest the-tower-stands-in-one-start
   (let [root (fresh-root)]

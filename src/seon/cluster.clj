@@ -333,11 +333,97 @@
   "The opaque provenance identity for the boot schema population."
   "seon.db.process/boot")
 
+(def ^:private schema-row-pattern
+  [:seon.schema/key
+   :seon.schema/form
+   :seon.schema/created-at
+   :seon.db.id/generator
+   {:seon.schema/ns [:seon.ns/name]}])
+
+(defn- declaration-changes
+  "Missing declarations, refusing non-accretive storage changes."
+  [db]
+  (into
+   []
+   (keep
+    (fn [{attribute :db/ident :as declaration}]
+      (if-let [installed (get (:schema db) attribute)]
+        (when-not
+         (= (dissoc declaration :db/ident)
+            (select-keys installed (keys (dissoc declaration :db/ident))))
+          (refused!
+           "The cluster schema cannot be changed in place; reset it."
+           {:seon.boot/attribute attribute
+            :seon.boot/installed installed
+            :seon.boot/current declaration}))
+        declaration)))
+   (schema.datahike/malli->datahike-schema
+    (schema/canonical-database-attributes))))
+
+(defn- missing-process-rows
+  [db]
+  (let [present
+        (into
+         #{}
+         (d/q '[:find [?id ...]
+                :where [_ :seon.db.process/id ?id]]
+              db))]
+    (into
+     []
+     (comp
+      (remove present)
+      (map (fn [process-id] {:seon.db.process/id process-id})))
+     [boot-process-identity config/managing-process-identity])))
+
+(defn- schema-row-changes
+  [db now]
+  (into
+   []
+   (keep
+    (fn [{schema-key :seon.schema/key :as desired}]
+      (let [current
+            (some-> (d/pull db schema-row-pattern
+                            [:seon.schema/key schema-key])
+                    (dissoc :db/id))
+            desired
+            (cond-> desired
+              current
+              (assoc :seon.schema/created-at
+                     (:seon.schema/created-at current)))]
+        (when-not (= desired (select-keys current (keys desired)))
+          desired))))
+   (schema/canonical-schema-rows now)))
+
+(defn- accrete-schema-population!
+  "Install the current additive schema population on one branch.
+
+  Registration and database installation are separate in Datahike's
+  `:write` schema mode. Every opened branch therefore passes through this
+  choke point before any domain transaction. Missing declarations and
+  canonical rows accrete; an incompatible declaration refuses loudly and
+  names reset as the remedy. A converged reopen issues no transaction."
+  [connection]
+  (let [declarations (declaration-changes @connection)]
+    (when (seq declarations)
+      (d/transact connection {:tx-data declarations})))
+  (let [process-rows (missing-process-rows @connection)]
+    (when (seq process-rows)
+      (d/transact connection {:tx-data process-rows})))
+  (let [schema-rows (schema-row-changes @connection (java.util.Date.))]
+    (when (seq schema-rows)
+      (d/transact connection
+                  {:tx-data schema-rows
+                   :tx-meta
+                   {:seon.db/process
+                    [:seon.db.process/id boot-process-identity]}})))
+  nil)
+
 (defn populate-ancestor!
   "The default ancestor content: this code's own schema population.
   Named by symbol in `ancestor/ensure!`'s request, so the producer is
   data and N5's program-graph indexer replaces it without touching the
-  boot path. Three transactions, each DERIVED and none hand-written:
+  boot path. The convergent population transactions are DERIVED, never
+  hand-written:
   the Datahike declarations of every registered database attribute, the
   core process entities the provenance refs resolve to (genesis data —
   bootstrap content lives in the ancestor), and the canonical schema rows
@@ -347,19 +433,7 @@
                      :seon.store/branch-connection]]]
     :nil]}
   [{connection :seon.store/branch-connection}]
-  (d/transact connection
-              {:tx-data (schema.datahike/malli->datahike-schema
-                         (schema/canonical-database-attributes))})
-  (d/transact connection
-              {:tx-data [{:seon.db.process/id boot-process-identity}
-                         {:seon.db.process/id
-                          config/managing-process-identity}]})
-  (d/transact connection
-              {:tx-data (schema/canonical-schema-rows (java.util.Date.))
-               :tx-meta
-               {:seon.db/process
-                [:seon.db.process/id boot-process-identity]}})
-  nil)
+  (accrete-schema-population! connection))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The tower above the REPL
@@ -797,6 +871,11 @@
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance :seon.boot/cluster-connection connection))
+        ;; A branch may predate this process's additive schema population.
+        ;; Install it before recovery or config can transact a newly added
+        ;; attribute. This is the same population that creates an ancestor;
+        ;; converged reopens issue zero transactions.
+        _ (accrete-schema-population! connection)
         ;; BEFORE anything resumes: a previous process's wreckage is
         ;; settled here, so the first pass of any loop derives work from
         ;; facts that already tell the truth about who holds what
@@ -859,8 +938,9 @@
   process-root store (first instance; siblings reuse the held store) →
   ancestor/ensure! (population from :seon.boot/ancestor-branch when
   supplied, else the default schema population) → registry/
-  ensure-cluster! → store/open-branch! → config/apply! with the shipped
-  defaults → return the complete instance. A later-layer failure THROWS
+  ensure-cluster! → store/open-branch! → accrete the current schema
+  population → config/apply! with the shipped defaults → return the complete
+  instance. A later-layer failure THROWS
   with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance
   (tower fields absent from the failure point) while the REPL and
   advertisement survive; the instance stays registered, and the caller
