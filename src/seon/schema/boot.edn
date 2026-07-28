@@ -1,8 +1,8 @@
-{:seon.boot/advertisement [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant]]
+{:seon.boot/advertisement [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant] [:seon.render.web/url {:optional true} :seon.render.web/url] [:seon.render.web/port {:optional true} :seon.render.web/port]]
  :seon.boot/ancestor-branch :keyword
  :seon.boot/cluster-name [:string {:min 1}]
  :seon.boot/config [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/root :seon.boot/root] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port :seon.boot/prepl-port] [:seon.boot/log-dir :seon.boot/log-dir] [:seon.boot/store-dir :seon.boot/store-dir] [:seon.boot/ancestor-branch {:optional true} :seon.boot/ancestor-branch]]
- :seon.boot/instance [:map {:closed true} [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops]]
+ :seon.boot/instance [:map {:closed true} [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops] [:seon.render.web/served {:optional true} :seon.render.web/server] [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]]
  ; THE ARMED LAYERS, each optional because absence marks where boot
  ; stopped: the loop's handle, the graph it runs on, the error fan-out
  ; that makes flow's error channel more than a 100-deep buffer nobody
@@ -32,4 +32,24 @@
 
  :seon.boot/root [:string {:min 1}]
  :seon.boot/start-instant :inst
- :seon.boot/store-dir [:string {:min 1}]}
+ :seon.boot/store-dir [:string {:min 1}]
+ :seon.cluster.agent/count [:int {:min 0}]
+ :seon.block/count [:int {:min 0}]
+
+ ; THE BOOT BANNER'S data, derived from a started instance. Optional
+ ; where the tower may not have reached — a degraded instance still has
+ ; a readiness, and absence marks what never stood.
+ :seon.boot/readiness
+ [:map {:closed true}
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.boot/pid :seon.boot/pid]
+  [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
+  [:seon.cluster.agent/count :seon.cluster.agent/count]
+  [:seon.block/count :seon.block/count]
+  [:seon.problems/problems :seon.problems/problems]
+  [:seon.render.web/url {:optional true} :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]
+  [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs]
+  [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+  [:seon.instrument/instrumented {:optional true} [:int {:min 0}]]]
+}

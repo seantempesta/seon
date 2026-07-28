@@ -32,6 +32,12 @@ exec clojure -M:dev -e \
                                          :seon.config.eval.result/max-collection
                                          :seon.config.eval.result/max-string
                                          :seon.config.eval.result/max-nodes])})]
-       (println \"seon $cluster ready — REPL advertised; instrumented\"
-                (:seon.instrument/instrumented applied) \"vars\"))
+       ;; the banner DERIVES from the started instance, so it cannot say
+       ;; something the system does not; the instrumented count is the
+       ;; one field boot does not own, and it is assoc'd rather than
+       ;; re-derived
+       (println (seon.cluster/banner
+                 (assoc (seon.cluster/readiness instance)
+                        :seon.instrument/instrumented
+                        (:seon.instrument/instrumented applied)))))
      @(promise))"

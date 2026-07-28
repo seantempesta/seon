@@ -214,7 +214,7 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
-  [:seon.config.web/port :seon.config.web/port]
+  [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error
@@ -269,7 +269,7 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
-  [:seon.config.web/port :seon.config.web/port]
+  [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error

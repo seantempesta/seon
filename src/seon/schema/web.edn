@@ -19,11 +19,17 @@
  ; for a connection and `seon.flow` for a channel.
  :seon.render.web/http-server [:fn {:gen/gen seon.render.web/server-generator} seon.render.web/server?]
 
+ ; The port the derivation ASKED for, present exactly when it is not the
+ ; port we got. Key presence answers "did this fall back?" so no reader
+ ; has to remember to compare two numbers.
+ :seon.render.web/wanted-port :seon.render.web/port
+
  :seon.render.web/server
  [:map {:closed true}
   [:seon.render.web/server :seon.render.web/http-server]
   [:seon.render.web/port :seon.render.web/port]
-  [:seon.render.web/url :seon.render.web/url]]
+  [:seon.render.web/url :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]]
 
  ; What the handler needs. The database CONNECTION rather than a
  ; database value, because a page derives at whatever basis is current

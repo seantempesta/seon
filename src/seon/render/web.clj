@@ -372,6 +372,51 @@
 ;;; Lifecycle
 ;;; ---------------------------------------------------------------------------
 
+(def port-floor
+  "7700. The bottom of the derived range.
+
+  GROUNDED, not picked from the air: 7700-7999 carries no IANA
+  assignment, sits clear of the crowded 3000/4000/5000/8000/8080 block
+  every other dev server reaches for, and is comfortably below the
+  ephemeral range the operating system allocates from (49152+ on this
+  platform), so a derived port can never collide with one the OS was
+  about to hand out."
+  7700)
+
+(def port-ceiling
+  "8000, exclusive. Three hundred ports — enough that a handful of named
+  clusters on one machine rarely collide, small enough that the whole
+  range is greppable when one does."
+  8000)
+
+(defn derived-port
+  "The default port for a cluster NAME. Pure, and stable forever.
+
+  THE POINT IS BOOKMARKABILITY: a named cluster answers on the same port
+  after every restart, so a browser tab keeps working and nobody reads a
+  log to find their own cluster. The derivation is not magic — it is
+  FNV-1a over the name's UTF-8 bytes, folded into the range — and it is
+  written out here rather than delegated to `clojure.core/hash` on
+  purpose: `hash` is stable in practice but its stability across JVM
+  versions is not a contract, and a bookmark that silently moves is
+  worse than one that never existed.
+
+  Collisions are expected and handled, not prevented: two names can land
+  on one port, and `start!` falls back to an ephemeral port and SAYS SO
+  rather than refusing to serve."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.render.web/port]}
+  [cluster-name]
+  (let [;; FNV-1a, 32-bit: offset basis 2166136261, prime 16777619.
+        ;; Unsigned arithmetic by construction — the mask keeps it in
+        ;; 32 bits so the JVM's signed longs cannot change the answer.
+        hashed (reduce (fn [accumulated byte-value]
+                         (-> (bit-xor accumulated (bit-and byte-value 0xff))
+                             (* 16777619)
+                             (bit-and 0xffffffff)))
+                       2166136261
+                       (.getBytes ^String cluster-name "UTF-8"))]
+    (+ port-floor (mod hashed (- port-ceiling port-floor)))))
+
 (defn start!
   "Bind an http-kit server on LOOPBACK and return its descriptor.
 
@@ -386,15 +431,34 @@
   {:malli/schema [:=> [:cat :seon.render.web/service] :seon.render.web/server]}
   [service]
   (let [workers (Executors/newVirtualThreadPerTaskExecutor)
-        server (http/run-server
-                (handler service)
-                {:ip "127.0.0.1"
-                 :port (or (:seon.render.web/port service) 0)
-                 :worker-pool workers
-                 :legacy-return-value? false})]
-    {:seon.render.web/server server
-     :seon.render.web/port (http/server-port server)
-     :seon.render.web/url (str "http://127.0.0.1:" (http/server-port server))}))
+        wanted (or (:seon.render.web/port service) 0)
+        bind! (fn [port]
+                (http/run-server (handler service)
+                                 {:ip "127.0.0.1"
+                                  :port port
+                                  :worker-pool workers
+                                  :legacy-return-value? false}))
+        ;; A TAKEN PORT MUST NOT COST THE VIEW. Two clusters whose names
+        ;; derive the same port, or a stale process still holding one,
+        ;; are ordinary situations — so the second one serves anyway, on
+        ;; an ephemeral port, and REPORTS both numbers. Refusing to serve
+        ;; would make a name collision look like a broken build; serving
+        ;; silently on a different port would make a bookmark fail with
+        ;; no explanation. Saying so is the only honest option.
+        [server fell-back?]
+        (try
+          [(bind! wanted) false]
+          (catch java.net.BindException _
+            (when-not (zero? wanted)
+              [(bind! 0) true])))
+        bound (http/server-port server)]
+    (cond-> {:seon.render.web/server server
+             :seon.render.web/port bound
+             :seon.render.web/url (str "http://127.0.0.1:" bound)}
+      ;; present exactly when the wanted port was not the bound one, so
+      ;; "did this fall back?" is key presence rather than a comparison
+      ;; every reader has to remember to make
+      fell-back? (assoc :seon.render.web/wanted-port wanted))))
 
 (defn stop!
   "Close the server. Every connection's `on-close` unlistens its own

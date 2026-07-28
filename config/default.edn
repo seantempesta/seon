@@ -81,12 +81,14 @@
  ; loudly and production to degrade only by explicit configuration.
  :seon.config/on-core-error :panic
 
- ; THE VIEW. Unit: TCP port; 0 means the operating system chooses and
- ; boot reports the URL it got. Zero is the honest default because a
- ; second cluster in the same JVM must not fail to boot over a UI port,
- ; and nobody should have to know a number in advance to open a browser.
- ; Pin it when a stable bookmark is worth more than that.
- :seon.config.web/port 0
+ ; THE VIEW'S PORT IS DELIBERATELY ABSENT, and absence is the state: with
+ ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
+ ; over the name — `seon.render.web/derived-port`), so every named
+ ; cluster is bookmarkable and answers on the same port after every
+ ; restart. Setting this pins one instead, and an explicit port is
+ ; somebody's decision that outranks a derivation.
+ ; Unit: TCP port. A derived port that is already taken falls back to an
+ ; ephemeral one and reports BOTH numbers.
 
  ; Unit: milliseconds between repaints of one tab. Provenance: 16 ms is
  ; one frame at 60 fps, the owner's stated bar, and it is a FLOOR rather

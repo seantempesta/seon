@@ -19,6 +19,9 @@
   Every server is stopped and every database deleted in a `finally`, so
   a failing assertion cannot leak a listening port into the next test."
   (:require [clojure.string :as str]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.render.block :as block]
@@ -128,6 +131,10 @@
           (Thread/sleep 60)
           (recur (inc idle)))))
     (.toString out)))
+
+(defn- check!
+  [label result]
+  (is (true? (:result result)) (str label " failed: " (pr-str result))))
 
 (defn- patches
   [text]
@@ -340,3 +347,67 @@
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
           (is (str/includes? (.body response) "seon-data-drill")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Derived ports — bookmarkable, restart-stable, collision-tolerant
+;;; ---------------------------------------------------------------------------
+
+(deftest a-name-derives-one-port-forever
+  ;; THE POINT IS A BOOKMARK: a named cluster must answer on the same
+  ;; port after every restart, or the tab a person left open stops
+  ;; working for no visible reason.
+  (doseq [name ["default" "acme" "morning" "a" "клас" "with-dashes"]]
+    (is (= (web/derived-port name) (web/derived-port name))
+        (str "unstable derivation for " name)))
+  (testing "and it is a pinned VALUE, not merely stable within a run —
+            these are the numbers a bookmark depends on"
+    (is (= 7994 (web/derived-port "default")))
+    (is (= 7815 (web/derived-port "acme")))))
+
+(deftest derived-ports-stay-inside-the-documented-range
+  ;; Below the ephemeral range the OS allocates from, so a derived port
+  ;; can never collide with one the OS was about to hand out.
+  (check!
+   "derived port range"
+   (tc/quick-check
+    500
+    (prop/for-all [name (gen/such-that seq gen/string-ascii 100)]
+      (<= web/port-floor (web/derived-port name) (dec web/port-ceiling)))
+    :seed 202607280501)))
+
+(deftest different-names-mostly-differ-and-collisions-are-survivable
+  ;; Three hundred ports and a hash: collisions are EXPECTED. The
+  ;; contract is not that they never happen, it is that they cost
+  ;; nothing — which the next test proves.
+  (let [names (map (fn [index] (str "cluster-" index)) (range 60))
+        ports (map web/derived-port names)]
+    (is (> (count (distinct ports)) 45)
+        "a derivation that bunched everything onto a few ports would
+         make the fallback the normal path rather than the exception")))
+
+(deftest a-taken-port-serves-anyway-and-says-so
+  ;; A name collision must not look like a broken build, and a moved
+  ;; bookmark must not fail silently. Both numbers, or neither is
+  ;; actionable.
+  (with-server two-blocks
+    (fn [connection first-server]
+      (let [taken (:seon.render.web/port first-server)
+            second-server (web/start!
+                           {:seon.store/connection connection
+                            :seon.cluster.agent/id agent-id
+                            :seon.sci.admit/caps caps
+                            :seon.config.render/coalesce-ms 16
+                            :seon.render.web/port taken})]
+        (try
+          (is (not= taken (:seon.render.web/port second-server))
+              "it bound somewhere else")
+          (is (= taken (:seon.render.web/wanted-port second-server))
+              "and it says which bookmark just stopped working")
+          (is (= 200 (.statusCode (fetch second-server "/")))
+              "while serving normally — the collision costs a port, not a view")
+          (finally (web/stop! second-server))))))
+  (testing "a clean bind reports no wanted-port at all, so key presence
+            answers 'did this fall back?'"
+    (with-server two-blocks
+      (fn [_connection server]
+        (is (nil? (:seon.render.web/wanted-port server)))))))

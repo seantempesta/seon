@@ -88,8 +88,11 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.run]
             [seon.cluster.store :as store]
+            [clojure.string :as str]
             [seon.config :as config]
             [seon.flow :as flow]
+            [seon.problems :as problems]
+            [seon.render.block :as block]
             [seon.render.root :as root]
             [seon.render.web :as web]
             [taoensso.timbre :as log]
@@ -471,12 +474,19 @@
   no-UI-today state that nobody would notice until they opened a
   browser.
 
-  Port 0 by default so a second cluster just works and the chosen port
-  is REPORTED rather than assumed; a dial pins it when somebody wants a
-  stable bookmark."
+  THE PORT IS DERIVED FROM THE CLUSTER NAME, so a named cluster answers
+  on the same port after every restart and a browser tab keeps working.
+  A manifest dial still wins — an explicit port is somebody's decision
+  and outranks a derivation. When the derived port is taken, the view
+  binds an ephemeral one and says BOTH numbers, because a name collision
+  must not look like a broken build and a moved bookmark must not fail
+  silently."
   [connection cluster-name dials]
-  (let [served (web/start!
-                (cond-> {:seon.store/connection connection
+  (let [wanted (or (:seon.config.web/port dials)
+                   (web/derived-port cluster-name))
+        served (web/start!
+                (cond-> {:seon.render.web/port wanted
+                         :seon.store/connection connection
                          :seon.cluster.agent/id root-agent-id
                          :seon.sci.admit/caps
                          (select-keys dials
@@ -485,12 +495,15 @@
                                        :seon.config.eval.result/max-string
                                        :seon.config.eval.result/max-nodes])
                          :seon.config.render/coalesce-ms
-                         (:seon.config.render/coalesce-ms dials)}
-                  (:seon.config.web/port dials)
-                  (assoc :seon.render.web/port
-                         (:seon.config.web/port dials))))]
-    (log/info (str "seon " cluster-name " view: "
-                   (:seon.render.web/url served)))
+                         (:seon.config.render/coalesce-ms dials)}))]
+    (if-let [unavailable (:seon.render.web/wanted-port served)]
+      (log/warn (str "seon " cluster-name " view: port " unavailable
+                     " was taken, serving on "
+                     (:seon.render.web/url served)
+                     " instead — a bookmark on " unavailable
+                     " will not reach this cluster"))
+      (log/info (str "seon " cluster-name " view: "
+                     (:seon.render.web/url served))))
     served))
 
 (defn- attributed-run
@@ -760,9 +773,24 @@
           ;; loop produces and must never be able to cost it
           ;; a database VALUE, not the connection: `effective` reads
           ;; the dials at a basis like every other derivation
-          dials (config/effective @connection cluster-name)]
-      (publish! (assoc instance :seon.render.web/served
-                       (serve! connection cluster-name dials))))))
+          dials (config/effective @connection cluster-name)
+          served (serve! connection cluster-name dials)
+          ;; THE ADVERTISEMENT GAINS THE URL, so discovery never parses a
+          ;; log. The operator reads advertisements as its only truth,
+          ;; and a URL scraped from stdout would be a second source that
+          ;; drifts. Staleness semantics are unchanged: pid and
+          ;; start-instant still say whether this process is real.
+          advertisement (assoc (:seon.boot/advertisement instance)
+                               :seon.render.web/url
+                               (:seon.render.web/url served)
+                               :seon.render.web/port
+                               (:seon.render.web/port served))]
+      (write-advertisement!
+       (cluster-paths (:seon.boot/root config) cluster-name)
+       advertisement)
+      (publish! (assoc instance
+                       :seon.render.web/served served
+                       :seon.boot/advertisement advertisement)))))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.
@@ -782,7 +810,8 @@
   has running."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/instance]}
   [overrides]
-  (let [config (resolve-bootstrap overrides)
+  (let [began (System/nanoTime)
+        config (resolve-bootstrap overrides)
         cluster-name (:seon.boot/cluster-name config)
         paths (cluster-paths (:seon.boot/root config) cluster-name)
         name (server-name cluster-name)]
@@ -838,7 +867,12 @@
                                 instances)))
                      value)]
       (try
-        (stack-tower! instance publish!)
+        ;; the elapsed measure belongs to boot, not to whoever prints
+        ;; the banner: a caller timing `start!` from outside measures
+        ;; its own require time too
+        (let [stood (stack-tower! instance publish!)]
+          (publish! (assoc stood :seon.boot/ready-ms
+                           (quot (- (System/nanoTime) began) 1000000))))
         (catch Throwable failure
           ;; LOUD, and the REPL survives: the degraded instance rides the
           ;; refusal so the caller can diagnose over the live socket and
@@ -868,6 +902,96 @@
                               (assoc instances cluster-name marker))
           true
           (recur))))))
+
+(defn readiness
+  "The boot banner, DERIVED from a started instance. Never duplicated.
+
+  Everything here is read back out of the instance and the database it
+  points at, so the banner cannot say something the system does not.
+  That is the whole discipline: a banner assembled from variables the
+  boot path happened to have in hand drifts the first time a layer
+  changes, and a banner nobody can regenerate is a log line rather than
+  a readout.
+
+  Returns ordinary data; `bin/repl` prints it. A caller that wants one
+  field takes one field."
+  {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
+  [instance]
+  (let [connection (:seon.boot/cluster-connection instance)
+        db (some-> connection deref)
+        served (:seon.render.web/served instance)
+        advertisement (:seon.boot/advertisement instance)
+        agents (if db
+                 (or (d/q '[:find (count ?a) . :where
+                            [?a :seon.cluster.agent/id _]] db)
+                     0)
+                 0)
+        blocks (if db
+                 (count (block/blocks db root-agent-id))
+                 0)
+        found (if db
+                (problems/problems
+                 db {:seon.cluster.run/live-processes
+                     #{(process-identity advertisement)}})
+                {})]
+    (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name advertisement)
+             :seon.boot/pid (:seon.boot/pid advertisement)
+             :seon.boot/prepl-port (:seon.boot/prepl-port advertisement)
+             :seon.cluster.agent/count agents
+             :seon.block/count blocks
+             ;; `{}` when healthy — the same value `problems` derives, so
+             ;; the banner screams exactly when the facts do and nobody
+             ;; maintains a second notion of "fine"
+             :seon.problems/problems found}
+      served (assoc :seon.render.web/url (:seon.render.web/url served))
+      (:seon.render.web/wanted-port served)
+      (assoc :seon.render.web/wanted-port
+             (:seon.render.web/wanted-port served))
+      (:seon.boot/recovered-runs instance)
+      (assoc :seon.boot/recovered-runs
+             (:seon.boot/recovered-runs instance))
+      (:seon.boot/ready-ms instance)
+      (assoc :seon.boot/ready-ms (:seon.boot/ready-ms instance)))))
+
+(defn banner
+  "`readiness` as the block a person reads at a terminal.
+
+  THE URL LEADS, because it is the one thing somebody is about to use.
+  A fallback port is called out on its own line rather than folded into
+  the URL line — a bookmark that stopped working deserves a sentence,
+  not a number somebody has to notice."
+  {:malli/schema [:=> [:cat :seon.boot/readiness] :string]}
+  [{:seon.render.web/keys [url wanted-port]
+    :seon.problems/keys [problems]
+    :as ready}]
+  (str/join
+   "\n"
+   (cond-> [(str "seon " (:seon.boot/cluster-name ready) " ready")
+            (str "  view         " (or url "(not serving)"))]
+     wanted-port
+     (conj (str "  port         " wanted-port
+                " was taken — a bookmark on it will not reach this cluster"))
+     true
+     (into [(str "  repl         " (:seon.boot/prepl-port ready)
+                 "  (pid " (:seon.boot/pid ready) ")")
+            (str "  agents       " (:seon.cluster.agent/count ready))
+            (str "  blocks       " (:seon.block/count ready)
+                 " live on root")
+            (str "  problems     " (if (empty? problems)
+                                     "none"
+                                     (str (count problems) " families — "
+                                          (str/join ", " (sort (map name (keys problems)))))))])
+     ;; only when there WAS wreckage: a zero here is noise on every
+     ;; healthy boot, and noise is what makes a banner unread
+     (pos? (or (:seon.boot/recovered-runs ready) 0))
+     (conj (str "  recovered    " (:seon.boot/recovered-runs ready)
+                " run(s) from a dead process"))
+     (:seon.instrument/instrumented ready)
+     (conj (str "  instrumented " (:seon.instrument/instrumented ready)
+                " vars"))
+     (:seon.boot/ready-ms ready)
+     (conj (format "  boot         %.2fs"
+                   (/ (double (:seon.boot/ready-ms ready)) 1000))))))
 
 (defn stop!
   "Stop exactly THIS instance, instance-addressed never name-addressed.
