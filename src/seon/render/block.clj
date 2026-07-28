@@ -462,7 +462,8 @@
   [surface failure]
   [:div {:id (:seon.render/surface-id surface)
          :class "seon-error-card"
-         :data-block (subs (str (:seon.render.block/name surface)) 1)}
+         :data-block (subs (str (:seon.render.block/name surface)) 1)
+         :data-error-kind (str (:seon.error/kind failure))}
    [:span {:class "seon-error-card-name"}
     (str (:seon.render.block/name surface))]
    [:span {:class "seon-error-card-message"}

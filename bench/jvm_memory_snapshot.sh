@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Measurement only: JVM heap, RSS, and platform-thread cost at agent scale.
+# Active question/results:
+# docs/prds/sci-execution-runtime/research/measurements-2026-07-25.md
+# Correctness owner: test/seon/cluster/loop_test.clj.
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then

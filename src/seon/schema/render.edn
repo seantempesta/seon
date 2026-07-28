@@ -13,6 +13,7 @@
  ; unit and the kind a caller asks for. Nothing maps short names to keys,
  ; because a second naming is a second place to drift.
  :seon.render/kind :qualified-keyword
+ :seon.render/kinds [:set :seon.render/kind]
  ; The declaration. USUALLY a fully qualified symbol naming the
  ; projection fn, resolved LATE on every render so a re-`defn` takes
  ; effect with no re-registration — the proven `:seon.ancestor/populate`

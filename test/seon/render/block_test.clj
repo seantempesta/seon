@@ -277,6 +277,15 @@
       (let [explanation (last node)]
         (and (string? explanation) (not (str/blank? explanation))))))
 
+(defn- structured-error-card?
+  [node]
+  (or (not (and (vector? node)
+                (map? (nth node 1 nil))
+                (= "seon-error-card" (:class (nth node 1)))))
+      (let [attributes (nth node 1)]
+        (and (not (str/blank? (:data-block attributes)))
+             (not (str/blank? (:data-error-kind attributes)))))))
+
 (deftest generated-block-graphs-preserve-the-graph-contract
   (support/assert-check!
    (tc/quick-check
@@ -327,6 +336,8 @@
                         (= (zipmap expected-names (repeat 1)) evaluations)
                         (= page again)
                         (every? locally-explained-hole?
+                                (tree-seq sequential? seq page))
+                        (every? structured-error-card?
                                 (tree-seq sequential? seq page))
                         (<= (count (graph-markers page))
                             (:seon.config.eval.result/max-nodes caps))

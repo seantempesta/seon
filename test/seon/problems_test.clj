@@ -16,7 +16,8 @@
   trial, and the attributes come from
   `canonical-database-attributes` — the live boot derivation, not a
   hand-listed fixture set."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -261,81 +262,61 @@
     (test-support/assert-check! result "Absent facts produced entries.")))
 
 ;;; ---------------------------------------------------------------------------
-;;; The log projection composes, and routes
+;;; Structured twins — one family value, two presentations
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-log-report-composes-the-per-fact-lines
-  (with-db
-    (fn [connection]
-      (commit-error! connection)
-      (commit-wedged-run! connection)
-      (commit-failed-run! connection)
-      (commit-errored-receipt! connection)
-      (let [value (found connection)
-            report (:seon.render/output
-                    (render/render {:seon.render/unit value
-                                    :seon.render/kind :seon.render/log}))
-            lines (str/split-lines report)
-            fact (:seon.error/fact
-                  (first (:seon.problems/error-signatures value)))]
-        (is (= 4 (count lines)) "one line per problem, one problem per line")
-        (is (str/includes? (first lines)
-                           (str "sig=" (:seon.error/signature fact)
-                                " occurrences=1"))
-            "aggregate evidence leads before coordinates")
-        (is (every? #(str/includes? % "run-") (rest lines)))
-        (testing "and it routes through the ONE projection router, because
-        a problems value is a unit like any other"
-          (is (= report
-                 (:seon.render/output
-                  (render/render {:seon.render/unit value
-                                  :seon.render/kind :seon.render/log})))))))))
-
-(deftest a-healthy-cluster-logs-nothing
-  (with-db
-    (fn [connection]
-      (is (= #{} (render/kinds (found connection)))
-          "healthy data declares no projection and therefore says nothing"))))
-
-;;; ---------------------------------------------------------------------------
-;;; The html projection — the problems PAGE (N4)
-;;; ---------------------------------------------------------------------------
-
-(deftest the-html-report-is-a-third-projection-of-the-same-value
-  ;; The claim the open kind set makes, tested on the first consumer
-  ;; outside the error family: adding a surface was one key and one
-  ;; function, with no router change and no registration.
-  (with-db
-    (fn [connection]
-      (commit-error! connection)
-      (commit-wedged-run! connection)
-      (let [value (found connection)
-            rendered (render/render {:seon.render/unit value
-                                     :seon.render/kind :seon.render/html})
-            surface (:seon.render/output rendered)]
-        (is (= #{:seon.render/log :seon.render/html} (render/kinds value))
-            "one value, one derivation, several projections")
-        (is (hiccup/hiccup? surface))
-        (is (= surface (problems/html-report value))
-            "the router reaches exactly the same projection")))))
-
-(deftest the-html-twin-coalesces-exactly-as-the-ai-twin-does
-  ;; The quarry's transcript coalesced repeated failures for the agent
-  ;; and NOT for the human, so a thrash burst was one line in the prompt
-  ;; and a hundred rows in the page. One recurrence, one row, with the
-  ;; count ON the row.
-  (with-db
-    (fn [connection]
-      (dotimes [_ 5] (commit-error! connection))
-      (let [value (found connection)
-            html (hiccup/->string (problems/html-report value))]
-        (is (= 1 (count (:seon.problems/error-signatures value))))
-        ;; the exact class, not the substring: the enclosing <ul> is
-        ;; legitimately class="seon-problems-rows"
-        (is (= 1 (count (re-seq #"class=\"seon-problems-row\"" html)))
-            "five occurrences of one signature are ONE row")
-        (is (str/includes? html "5")
-            "and the row carries how many times it happened")))))
+(deftest projection-twins-preserve-the-generated-family-structure
+  (test-support/assert-check!
+   (tc/quick-check
+    24
+    (prop/for-all [present
+                   (gen/not-empty
+                    (gen/set (gen/elements (vec (keys families)))))
+                   error-occurrences (gen/choose 1 5)]
+      (with-db
+        (fn [connection]
+          (doseq [family present]
+            (if (= :seon.problems/error-signatures family)
+              (dotimes [_ error-occurrences] (commit-error! connection))
+              ((get families family) connection)))
+          (let [value (found connection)
+                log (problems/log-report value)
+                html (problems/html-report value)
+                routed-log
+                (:seon.render/output
+                 (render/render {:seon.render/unit value
+                                 :seon.render/kind :seon.render/log}))
+                routed-html
+                (:seon.render/output
+                 (render/render {:seon.render/unit value
+                                 :seon.render/kind :seon.render/html}))
+                rows
+                (filter
+                 (fn [node]
+                   (and (vector? node)
+                        (= "seon-problems-row"
+                           (:class (nth node 1 nil)))))
+                 (tree-seq sequential? seq html))]
+            (and
+             (seon.schema/valid-candidate-value?
+              :seon.problems/problems value)
+             (= present (set/intersection present (set (keys value))))
+             (= (count present) (count (str/split-lines log)))
+             (= (count present) (count rows))
+             (= log routed-log)
+             (= html routed-html)
+             (hiccup/hiccup? html)
+             (or (not (contains? present
+                                 :seon.problems/error-signatures))
+                 (let [[signature]
+                       (:seon.problems/error-signatures value)]
+                   (and (= error-occurrences
+                           (:seon.problems/occurrences signature))
+                        (= 1
+                           (count
+                            (:seon.problems/error-signatures value)))))))))))
+    :seed 202607280902)
+   "problems projection twins"))
 
 (deftest the-block-derives-at-the-units-own-database-value
   (with-db

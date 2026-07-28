@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Measurement only: concurrent per-agent turn latency and completion shape.
+# Active question/results:
+# docs/prds/sci-execution-runtime/research/measurements-2026-07-25.md
+# Correctness owner: test/seon/cluster/loop_test.clj.
+# The 120-second curl limit guards a foreign HTTP request; it is not proof.
 set -euo pipefail
 
 usage() {

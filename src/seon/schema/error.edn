@@ -133,6 +133,11 @@
  ; point — the primary's why-clause is the SAME derivation the agent,
  ; the escalation owner and the log already get.
  :seon.error/reason [:enum :your-run :no-attributable-agent :recurring :failover]
+ ; Machine-readable projection structure. The durable fact remains the
+ ; evidence owner; the notice carries its lookup ref, the derived kind,
+ ; every route it declares, and the selected human presentation.
+ :seon.error/evidence [:tuple [:enum :seon.error/id] :seon.error/id]
+ :seon.error/presentation :seon.render/projection
  :seon.error/notice-request [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; The notice is DERIVED and never stored: a fact plus the projection
  ; declarations, which is what makes it routable through the one generic
@@ -140,7 +145,7 @@
  ; than on the entity because a stored symbol identical on every row is
  ; stored-derived data, and because the ai projection needs the reason
  ; the entity cannot carry.
- :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.error/presentation :seon.error/presentation] [:seon.render/kinds :seon.render/kinds] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
 
  ; How many faults the fan-out's bounded buffer had to DROP in this
  ; process. Process-local by nature — it counts what never became a

@@ -229,6 +229,7 @@
           (let [initial (read-patches! stream 2)]
             (is (= 2 (patches initial)))
             (is (str/includes? initial "seon-error-card"))
+            (is (str/includes? initial "data-error-kind"))
             (is (str/includes? initial "surface-broken")
                 "the failure keeps the block's address, so a fix morphs over it")
             (is (str/includes? initial "seon")

@@ -380,20 +380,25 @@
   [{:seon.error/keys [fact reason occurrence occurrences notification-limit
                       notification]
     agent-id :seon.cluster.agent/id}]
-  (cond-> {:seon.error/fact fact
-           ;; The fact's own kind selects the specialist. Consumers never
-           ;; classify errors or name projection functions.
-           :seon.render/ai (if (= :seon.instrument/contract-violated
-                                  (:seon.error/kind fact))
-                             `instrumentation-prose
-                             `ai-prose)
+  (let [presentation (if (= :seon.instrument/contract-violated
+                            (:seon.error/kind fact))
+                       `instrumentation-prose
+                       `ai-prose)]
+    (cond-> {:seon.error/fact fact
+             :seon.error/kind (:seon.error/kind fact)
+             :seon.error/evidence [:seon.error/id (:seon.error/id fact)]
+             :seon.error/presentation presentation
+             :seon.render/kinds #{:seon.render/ai :seon.render/log}
+             ;; The fact's own kind selects the specialist. Consumers never
+             ;; classify errors or name projection functions.
+             :seon.render/ai presentation
            :seon.render/log `log-line}
-    reason (assoc :seon.error/reason reason)
-    occurrence (assoc :seon.error/occurrence occurrence)
-    occurrences (assoc :seon.error/occurrences occurrences)
-    notification-limit (assoc :seon.error/notification-limit notification-limit)
-    notification (assoc :seon.error/notification notification)
-    agent-id (assoc :seon.cluster.agent/id agent-id)))
+      reason (assoc :seon.error/reason reason)
+      occurrence (assoc :seon.error/occurrence occurrence)
+      occurrences (assoc :seon.error/occurrences occurrences)
+      notification-limit (assoc :seon.error/notification-limit notification-limit)
+      notification (assoc :seon.error/notification notification)
+      agent-id (assoc :seon.cluster.agent/id agent-id))))
 
 (defn- fact-source
   [fact]

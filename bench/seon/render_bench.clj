@@ -3,6 +3,11 @@
 ;;;   clojure -M:test bench/seon/render_bench.clj
 ;;;   clojure -M:test bench/seon/render_bench.clj --trials 2000
 ;;;
+;;; ACTIVE QUESTION: can the current block derivation and serialization
+;;; remain inside a 16 ms frame under realistic page sizes? Record results in
+;;; `docs/prds/sci-execution-runtime/research/n4-contracts-2026-07-27.md`.
+;;; Correctness belongs to `test/seon/render/`; this file never gates it.
+;;;
 ;;; WHY THIS IS PART OF THE RUNG AND NOT A LATER NICETY. The owner's bar
 ;;; is "no N=1 attempts. This shit has to be fast. Like 60fps fast for
 ;;; very dynamic rendering" — so 16 ms per frame under churn is a DESIGN
