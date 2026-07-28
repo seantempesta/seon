@@ -10,6 +10,20 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**AUTONOMOUS CHARTER (owner, night close): iterate, don'''t be
+dogmatic.** No final solutions expected — keep the cycle moving
+(falsify → revise → seal → implement → live-prove → ledger), surface
+evidence that contradicts a ruling with a recommendation instead of
+complying or deviating silently, iterate hardest on agent-facing
+output quality (default renderers, prompts, error prose — read the
+real output). CURRENT STATE for a cold start: F0-F2 landed (agents
+are flows, gate 404/1612/0 at d28598214); distance accretion landed;
+fleet-oversight block live on /; N5 plan revised post-falsification
+(64a796b28) — SEAL GATE = owner rules the 12 decisions + name table
+in its §8; context pilot in flight (before/after prompt evidence +
+live Qwen drive); F4 parallel drives next after the pilot; §7
+delegation preconditions are separate units with their own owners.
+
 **WORKING EDGE (2026-07-28 midnight).** QUEUED NEXT (owner ruling #2):
 the namespace+distance CONTEXT PILOT — one agent'''s prompt derived as
 render(namespace, distance) over the entity graph, static blocks
