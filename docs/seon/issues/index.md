@@ -25,7 +25,7 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (12)
+## Friction (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -36,6 +36,7 @@ See `README.md` for the convention.
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [Contracts that require a LIVE connection are called with a released one](instrumentation-surfaces-released-connection-contracts.md) | friction | Core |
 | [Flow monitor test preselects an unreserved port](flow-monitor-test-preselects-an-unreserved-port.md) | friction | Core |
+| [Flow procs capture closures and two default to :mixed, defeating hot reload and pinning platform threads](flow-procs-capture-closures-and-default-to-mixed.md) | friction | Core |
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 | [Route ordinary stderr presentations through log renders](stderr-presentations-bypass-the-log-render-kind.md) | friction | general |
 | [The design language's font is redistributed without its license, and only at one weight](the-bundled-font-has-no-license-and-only-one-weight.md) | friction | UI |
