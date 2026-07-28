@@ -1,0 +1,54 @@
+---
+type: issue
+status: open
+severity: friction
+tags: [issue, architecture, render, error, runtime]
+---
+
+# Route ordinary stderr presentations through log renders
+
+## Problem
+
+Several fresh-tree paths compose human-facing stderr text directly even though
+`:seon.render/log` is the process-log output kind. This leaves a second log
+presentation mechanism beside the render router and makes the same fault look
+different depending on which path emitted it.
+
+## Evidence
+
+`src/seon/cluster.clj:590-606` builds separate dropped-fault and development
+panic lines with `println`, `ex-message`, and `pr-str`; the development path
+also commits the same fault through `seon.error`. `src/seon/cluster/export.clj:
+91-99,195-200` defines and calls another local warning formatter even though
+its own docstring says a logging owner should replace it.
+`src/seon/instrument.clj:199-204` adds a third stderr formatter for the
+zero-instrumented-vars fault.
+
+The error family's ordinary log projection is already
+`seon.error/log-line`, declared on a notice as `:seon.render/log`
+(`src/seon/error.clj:348-364,450-486` at the audit snapshot). The architecture
+names that kind as the process-log consumer at
+`docs/seon/architecture/ui.md:47-64`.
+
+The recursion-fence fallback at `src/seon/cluster.clj:498-503` is excluded from
+this issue: it runs only when durable fault handling itself failed, so asking
+the failed path or router to render it would not be a sound recovery
+dependency.
+
+## Owner
+
+The process-log consumer of `seon.render`, with `seon.error` owning fault log
+units and the export owner supplying an ordinary warning unit.
+
+## Acceptance
+
+- A successfully normalized core fault reaches stderr through its
+  `:seon.render/log` declaration and `seon.render/render`, including development
+  panic output.
+- Export fallback warnings are ordinary log units or use the same log
+  projection consumer; `warn!` is not a second formatter.
+- Drop reporting has one explicit process-local unit or a documented
+  last-resort boundary when no durable fact exists.
+- Only recursion-fence output remains direct, and a regression proves a fault's
+  ordinary stderr bytes come from the same log projection used by
+  `seon.problems`.
