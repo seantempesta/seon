@@ -583,10 +583,17 @@ excluded). TEST-DESIGN REVIEW IN (55a28e8d7: 334 tests / 33 namespaces + six
 benchmarks swept; ELEVEN ranked findings with dissolution designs,
 collapsing tests named, a nine-unit implementation order —
 constructions implement AFTER the morning read, phase 2 of task
-#13). IN FLIGHT (three): N4 PACKAGE 2 (SSE/web layer, block pages,
-ref-following + /data, streaming exercises — local Qwen preferred
-for repeated checks); my.message Opus agent; context-blocks-review
-(falsification). MORNING BATCH accumulating:
+#13). CONTEXT PLAN REVIEWED (9540875ad): NOT ready — six blockers (cap
+propagation, prompt seal revision + trigger selection,
+problems-block live-process input, measure-before-caching, decision
+batch REDUCTION, deterministic oracles); revision lane running.
+MEASURED HONESTY FIX visible from the my.message lane: my.run/wait's
+docstring promised "the run resumes on a later wake" — measured
+false (custody releases, the next pass CLOSES the run; the AGENT
+resumes on its next trigger with a fresh ctx, and THE NOTE IS THE
+ONLY CONTINUITY — a delegating agent must put everything its next
+run needs into the note). IN FLIGHT (three): N4 PACKAGE 2;
+my.message Opus agent (mid-unit); context-blocks-plan revision. MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
