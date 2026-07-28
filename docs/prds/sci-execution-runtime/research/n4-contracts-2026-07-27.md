@@ -330,6 +330,54 @@ same mechanism with a path cursor: the quarry's drill is paged `get-in`
 navigation into any nested value, so its pager IS bounded expansion where the
 cursor says where to resume rather than eliding.
 
+## 4c. Package 2, landed so far
+
+Three slices, each with its own sealed suite. The my.message lane held
+`config/default.edn`, `ui.md`, `loop.cljc` and the message schemas throughout,
+so root's seeded block set and any further `ui.md` accretion are sequenced
+after them, not skipped.
+
+**The literal accretion, and the split it forced.** A literal declaration is now
+its own output — a verbatim string for a prose kind, a vector for a hiccup kind
+— so a block that just says a fixed thing needs no function. Widening
+`:seon.render/projection` to admit literals BROKE every block transaction: the
+bridge derived `:db.type/string` from the union's first branch. That is the
+durable/runtime split proven rather than argued. The schema stays a symbol
+because the schema IS the durable side; `seon.render/declaration?` is the
+code-level contract that admits both. The admissible shapes stay narrow because
+`kinds` derives kinds from the unit, so admitting numbers would silently turn
+`:seon.render/priority 3` into a kind — now pinned by a test.
+
+**Ref-following**, per §4b, with task #11's falsifier sealed over real facts.
+
+**The page on a socket.** Measured on a real http-kit server, ephemeral loopback
+port, real SSE:
+
+| event | patches | bytes |
+|---|---|---|
+| initial paint, two blocks | 2 | 218 |
+| commit changing one block | 1 | 102 |
+| commit changing no projection | 0 | 0 |
+
+The middle row is the rung's thesis on the wire: the block that reads nothing is
+never re-serialized and never re-sent. `seon.render.web/not-yet` enumerates what
+this slice does NOT do — interest matching, the shared registration, the per-tab
+Flow graph, the isolated sink — because a feed that quietly did less than the
+design says would be the absence-read-as-health class on the most visible
+surface in the system.
+
+Three bugs the instruments caught, all mine and all worth keeping:
+
+- the first live page came back 15 bytes, just the doctype: `page` returns a
+  VECTOR OF ELEMENTS, which is not hiccup as a child, and the grammar refused
+  the whole document rather than emitting something plausible. It needed `seq`.
+  A serializer that guessed would have shipped a subtly wrong page;
+- the SSE proof reported zero events for a feed that was working —
+  `BodyHandlers/ofLines` does not yield on a stream that never ends;
+- then it reported the PREVIOUS paint as the current one, because one `.read`
+  returns one chunk. That briefly looked like a suppression bug in the server.
+  Reading SSE correctly is now part of the test, both traps written down.
+
 **Package 3 — the interaction model.** The message box does not exist in
 `src-old/` at HEAD; it was deleted in `9d9e870bd`, and the quarry agent
 recovered its exact code (`git show 9d9e870bd^:src/seon/web/datastar.cljs:1142-1172`)
