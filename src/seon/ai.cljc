@@ -55,8 +55,12 @@
   kill after it returns but before the plan commits loses the reply,
   and nothing re-calls."
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
+            [clojure.test.check.generators :as gen]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import [java.net URI]
+  (:import [java.io BufferedReader InputStreamReader]
+           [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]
            [java.time Duration]))
@@ -64,6 +68,20 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/ai.edn
 ;;; ---------------------------------------------------------------------------
+
+(defn sink?
+  "True for a partial sink: any function of one argument."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x]
+  (ifn? x))
+
+(def sink-generator
+  "An honest generator: a real function that ignores its snapshot,
+  which is exactly what a sink is allowed to do."
+  (gen/fmap (fn [_] (fn [_partial] nil)) (gen/return nil)))
+
+;; the gate refuses a `[:fn]` naming anything not registered
+(schema/register-core-predicate! 'seon.ai/sink? sink?)
 
 (schema.edn/load! {})
 
@@ -181,15 +199,91 @@
   shape is right and survives; what dies with the quarry is everything
   around it (streaming, thinking modes, provider dispatch)."
   {:malli/schema [:=> [:cat :seon.ai/request] [:map]]}
-  [{:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]}]
+  [{:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
+    stream? :seon.ai/stream?}]
   ;; STRING keys: this is the wire document, not Clojure data. It is
   ;; built as strings and read back as strings, so nothing in between
   ;; has to remember which side of the boundary it is on.
-  {"model" model
-   "stream" false
-   "messages" (cond-> []
-                system (conj {"role" "system" "content" system})
-                true (conj {"role" "user" "content" prompt}))})
+  (cond-> {"model" model
+           "stream" (boolean stream?)
+           "messages" (cond-> []
+                        system (conj {"role" "system" "content" system})
+                        true (conj {"role" "user" "content" prompt}))}
+    ;; ask for usage on the stream. OpenRouter now returns it always and
+    ;; documents the option as a deprecated no-op, so this is harmless
+    ;; where it is ignored and load-bearing where it is not
+    ;; (docs/seon/reference/llm-adapters.md:169-179)
+    stream? (assoc "stream_options" {"include_usage" true})))
+
+(defn stream-event
+  "One SSE line folded into the accumulating snapshot. PURE.
+
+  THE WHOLE STREAMING PARSER, and it is small on purpose: an SSE line is
+  either `data: <json>`, `data: [DONE]`, a comment, or blank. Everything
+  else about streaming — when to publish, where partials land, what a
+  token count is for — belongs to somebody else.
+
+  Two provider shapes, one fold. An OpenAI-compatible provider emits a
+  final choices-empty chunk carrying usage; Gemini attaches cumulative
+  usage to content chunks and never sends a usage-only one
+  (`docs/seon/reference/llm-adapters.md:169-186`). So usage is retained
+  as the NEWEST seen, independently of choices, and neither shape is
+  assumed.
+
+  A line this cannot read is SKIPPED rather than fatal. A provider that
+  sends a keep-alive comment, a blank line, or one malformed chunk has
+  not failed the call, and turning presentation noise into a call
+  failure would be the streaming path breaking the invariant it exists
+  under."
+  {:malli/schema [:=> [:cat :seon.ai/partial :string] :seon.ai/partial]}
+  [snapshot line]
+  (let [payload (when (str/starts-with? line "data:")
+                  (str/trim (subs line 5)))]
+    (if (or (nil? payload) (= "[DONE]" payload) (str/blank? payload))
+      snapshot
+      (let [chunk (try (json/read-str payload) (catch Throwable _ nil))
+            delta (some-> chunk (get "choices") first (get "delta")
+                          (get "content"))
+            usage (get chunk "usage")
+            text (cond-> (:seon.ai/text snapshot)
+                   (string? delta) (str delta))]
+        (cond-> (assoc snapshot :seon.ai/text text)
+          ;; newest usage wins, and only when the provider sent one
+          (map? usage) (assoc :seon.ai/usage usage)
+          ;; THE LIVE TOKEN COUNT, from the same fold rather than a
+          ;; second mechanism: the provider's own completion count when
+          ;; it has told us, and the chunk count until then — which is
+          ;; exactly one token per chunk for every provider we speak to,
+          ;; and is honestly an approximation rather than a promise.
+          true (assoc :seon.ai/tokens
+                      (or (some-> usage (get "completion_tokens"))
+                          (:seon.ai/tokens (update snapshot :seon.ai/tokens
+                                                   (fnil inc 0)))
+                          0)))))))
+
+(defn stream-fold
+  "Fold SSE `lines` into one snapshot, publishing to `sink` as it goes.
+
+  PUBLISHING IS COALESCED BY THE SINK'S OWN CADENCE, not by this: it is
+  called once per content chunk, and a sink that wants fewer is the one
+  that knows how few. What this guarantees is the other half — a sink
+  that THROWS cannot break the call. Presentation may lag, drop, or be
+  broken; it may never affect transport, parsing, usage, or evaluation,
+  which is the invariant streaming lives under.
+
+  Returns the final snapshot. The caller turns it into a completion, so
+  a streamed call and a one-shot call are the same value downstream."
+  {:malli/schema [:=> [:cat [:sequential :string] [:maybe :seon.ai/sink]]
+                  :seon.ai/partial]}
+  [lines sink]
+  (reduce (fn [snapshot line]
+            (let [next-snapshot (stream-event snapshot line)]
+              (when (and sink (not= (:seon.ai/text snapshot)
+                                    (:seon.ai/text next-snapshot)))
+                (try (sink next-snapshot) (catch Throwable _ nil)))
+              next-snapshot))
+          {:seon.ai/text "" :seon.ai/tokens 0}
+          lines))
 
 (defn completion-text
   "The assistant text in a decoded provider response, or a flat error.
@@ -322,6 +416,37 @@
       ;; request may have been transmitted) are all terminal
       :else :fail)))
 
+(defn- streamed-completion
+  "Read an SSE body to natural EOF and return one completion value.
+
+  A streamed call and a one-shot call return the SAME shape — that is
+  the point, and it is why this lives beside `completion-text` rather
+  than replacing it: everything downstream, including the failover
+  disposition and the attempt facts, is untouched by which transport
+  ran.
+
+  Reads to natural EOF because reply evaluation is `:batch`
+  (`docs/seon/reference/llm-adapters.md:545-556`): the complete program
+  is parsed once, so aborting on the first form would be a different
+  evaluation mode, not an optimization.
+
+  Empty text is an error, not an empty reply, exactly as
+  `completion-text` treats it — a provider that streamed nothing has
+  failed the call however cleanly it closed the socket."
+  [body sink]
+  (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
+    (let [snapshot (stream-fold (line-seq reader) sink)
+          text (:seon.ai/text snapshot)]
+      (if (str/blank? text)
+        {:seon.error/kind ::unparseable-body
+         :seon.error/message
+         "The provider streamed no assistant text."
+         :seon.error/data {::body-shape ::empty-stream}}
+        (cond-> {:seon.ai/text text
+                 :seon.ai/tokens (:seon.ai/tokens snapshot)}
+          (:seon.ai/usage snapshot) (assoc :seon.ai/usage
+                                           (:seon.ai/usage snapshot)))))))
+
 (defn complete
   "Call the model once and return its text, or a flat error value.
   ONE attempt. No retry, no backoff, no fallback provider. Reads the
@@ -337,6 +462,8 @@
   - `::unparseable-body` — 2xx with a body this cannot read."
   {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/completion]}
   [{:keys [:seon.ai/endpoint :seon.ai/api-key-variable :seon.ai/timeout-ms]
+    stream? :seon.ai/stream?
+    sink :seon.ai/sink
     :as request}]
   (if-let [key (credential api-key-variable)]
     (let [client (.build (HttpClient/newBuilder))
@@ -356,11 +483,28 @@
         ;; loop proc is :io and may block; there is no retry, no
         ;; backoff, and no second provider to fall back to.
         (let [response (.send client http-request
-                              (HttpResponse$BodyHandlers/ofString))
-              status (.statusCode response)]
+                              (if stream?
+                                ;; ofInputStream, not ofLines. `ofLines`
+                                ;; does not yield incrementally on a
+                                ;; stream the client holds open, which
+                                ;; is exactly the trap the web slice hit
+                                ;; reading SSE: it reported nothing for
+                                ;; a feed that was working perfectly.
+                                ;; Reading the stream ourselves is the
+                                ;; behaviour we have proven.
+                                (HttpResponse$BodyHandlers/ofInputStream)
+                                (HttpResponse$BodyHandlers/ofString)))
+              status (.statusCode response)
+              ;; a non-2xx body has to be readable either way, and a
+              ;; stream's body is only readable once
+              read-body (fn [] (if stream?
+                                 (slurp (.body response))
+                                 (.body response)))]
           (if (<= 200 status 299)
             (try
-              (completion-text (json/read-str (.body response)))
+              (if stream?
+                (streamed-completion (.body response) sink)
+                (completion-text (json/read-str (.body response))))
               (catch Throwable failure
                 {:seon.error/kind ::unparseable-body
                  :seon.error/message (str "The provider's response was not "
@@ -375,8 +519,8 @@
                                    ;; generated and charged for output
                                    ;; even though we cannot read it
                                    ::output-observed? true}}))
-            (let [body (subs (str (.body response)) 0
-                              (min 500 (count (str (.body response)))))]
+            (let [text (str (read-body))
+                  body (subs text 0 (min 500 (count text)))]
               {:seon.error/kind ::provider-error
                :seon.error/message (str "The provider answered " status ".")
                :seon.error/data {::status status

@@ -12,8 +12,39 @@
  ; error value, never a bug report.
  :seon.ai/timeout-ms [:int {:min 1}]
  :seon.ai/text [:string {:min 1}]
- :seon.ai/request [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
- :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]] :seon.error/value]
+ ; STREAMING is a transport choice and nothing more
+ ; (docs/seon/reference/llm-adapters.md:545-563: wire transport and reply
+ ; evaluation are independent). Its one invariant, quoted from that
+ ; authority because it is the thing a partial-display feature always
+ ; breaks: "Partial display is presentation-only and cannot affect
+ ; transport, parsing, usage, or evaluation." A streamed call and a
+ ; one-shot call return the SAME completion value.
+ :seon.ai/stream? :boolean
+
+ ; Where partials GO, injected by the caller rather than known here.
+ ; `seon.ai` owns the wire and the fold; it does not own the database,
+ ; so it cannot be the thing that decides a partial becomes a datom.
+ ; The sink is called with a snapshot and its return value is ignored —
+ ; presentation may lag or drop, and it may never slow the call.
+ :seon.ai/sink [:fn {:gen/gen seon.ai/sink-generator} seon.ai/sink?]
+
+ ; The provider's own usage map, retained as the NEWEST seen. Kept
+ ; independently of choices because Gemini attaches cumulative usage to
+ ; content chunks while OpenAI-compatible providers emit one final
+ ; choices-empty chunk — the portable fold must not assume either.
+ :seon.ai/usage [:map-of :string :any]
+ :seon.ai/tokens [:int {:min 0}]
+
+ ; One snapshot handed to the sink: everything so far, plus the live
+ ; token count derived from the SAME fold rather than counted twice.
+ :seon.ai/partial
+ [:map {:closed true}
+  [:seon.ai/text :string]
+  [:seon.ai/tokens :seon.ai/tokens]
+  [:seon.ai/usage {:optional true} :seon.ai/usage]]
+
+ :seon.ai/request [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
+ :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens]] :seon.error/value]
 
  ; ---------------------------------------------------------------------
  ; THE DESCRIPTOR ROW. A target is one callable model: the four wire

@@ -1,0 +1,86 @@
+{; ---------------------------------------------------------------------------
+ ; THE STREAMED REPLY, as facts — the one high-churn path in the system,
+ ; and the reason the no-history facet exists.
+ ;
+ ; Root AGENTS.md names this case exactly: high-churn presentation state
+ ; is a cardinality-one, unindexed attribute registered with
+ ; `:seon.db/no-history?`, carrying the CURRENT VALUE only, written as
+ ; COALESCED complete-value snapshots by an isolated non-blocking sink,
+ ; and retracted at its terminal in the same transaction that settles
+ ; the real fact. Every one of those clauses is load-bearing:
+ ;
+ ; - current value only, because a token-by-token history of a reply
+ ;   that already exists in full is pure index amplification;
+ ; - complete snapshots rather than deltas, because a consumer that
+ ;   missed one delta would be permanently wrong, while a consumer that
+ ;   misses one snapshot is briefly behind;
+ ; - retracted at the terminal, so the durable reply is the only reply
+ ;   and nothing has to decide which of two texts is real.
+ ;
+ ; It stays on the ONE database path deliberately. A side channel would
+ ; be faster to write and would cost the property that makes the whole
+ ; UI simple: the page is a pure function of the database, so a reconnect
+ ; is a repaint and a partial reply survives one exactly as a settled one
+ ; does.
+ ; ---------------------------------------------------------------------------
+
+ :seon.ai.stream/id [:string {:min 1 :seon.db/identity true}]
+
+ ; WHOSE reply is streaming. A ref, so \"what is this agent saying right
+ ; now\" is a follow rather than a scan, and so the row cascades with the
+ ; agent it belongs to.
+ :seon.ai.stream/agent :seon.db/ref
+
+ ; The coalesced partial. `:seon.db/no-history?` is the whole point:
+ ; twenty-two snapshots of a growing reply must not become twenty-two
+ ; retained values of a string that is about to be superseded by the
+ ; settled fact anyway.
+ ;
+ ; Deliberately UNINDEXED. Nothing queries by partial text; exactly one
+ ; consumer follows the agent ref to read it, and an index here would be
+ ; per-write cost for a lookup nobody performs.
+ :seon.ai.stream/text [:string {:seon.db/no-history? true}]
+
+ ; THE LIVE TOKEN COUNT, from the same fold that produces the text
+ ; rather than a second mechanism counting the same thing twice. It is
+ ; the provider's own `completion_tokens` once the provider has said,
+ ; and the chunk count until then — an approximation, and named as one
+ ; in `seon.ai/stream-event` rather than presented as a measurement.
+ :seon.ai.stream/tokens [:int {:min 0 :seon.db/no-history? true}]
+
+ ; When the newest snapshot was committed. Also no-history: a reader
+ ; wants to know the stream is alive, and nobody wants the timestamp of
+ ; every snapshot of a reply that is about to settle.
+ :seon.ai.stream/at [:inst {:seon.db/no-history? true}]
+
+ :seon.ai.stream/stream
+ [:map {:seon.db/entity true}
+  [:seon.ai.stream/id :seon.ai.stream/id]
+  [:seon.ai.stream/agent :seon.ai.stream/agent]
+  [:seon.ai.stream/text {:optional true} :seon.ai.stream/text]
+  [:seon.ai.stream/tokens {:optional true} :seon.ai.stream/tokens]
+  [:seon.ai.stream/at {:optional true} :seon.ai.stream/at]]
+
+ ; How often the sink is willing to COMMIT, which is a different
+ ; question from how often the provider emits. The provider decides the
+ ; chunk rate; this decides the datom rate, and the gap between them is
+ ; the whole reason a sink exists rather than a direct write.
+ :seon.config.ai.stream/publish-ms [:int {:min 0 :max 5000}]
+
+ ; What a publisher needs, and notably NOT a database value: it commits
+ ; over the life of a call, so it holds the connection and derives a
+ ; value per transaction.
+ :seon.ai.stream/publisher-request
+ [:map {:closed true}
+  [:seon.ai.stream/id :seon.ai.stream/id]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.store/connection :seon.store/connection]
+  [:seon.config.ai.stream/publish-ms :seon.config.ai.stream/publish-ms]]
+
+ ; The handles. `sink` goes to `seon.ai`; `stop!` belongs to whoever
+ ; started it, and must run — it is what commits the complete text.
+ :seon.ai.stream/publisher
+ [:map {:closed true}
+  [:seon.ai.stream/sink :seon.ai/sink]
+  [:seon.ai.stream/stop! :seon.ai/sink]
+  [:seon.ai.stream/worker :any]]}
