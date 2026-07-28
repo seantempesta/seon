@@ -1,0 +1,23 @@
+{; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
+ ; Two agents differ only in the agent-id their procs carry and the
+ ; mailbox channel routed to them — there is no per-agent variation.
+ :seon.cluster.agent/blueprint-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]
+
+ ; THE ROUTING ENTRY: process-local map atom held on the cluster
+ ; instance beside the connection — the sanctioned kind of process
+ ; state (a disposable artifact, rebuilt by arming at boot). It is not
+ ; a fact: it names live channels. ::armed is keyed by agent id;
+ ; ::channels by the recipient's ENTITY id, because that is what a
+ ; committed `:seon.cluster.message/to` datom carries, so the wake
+ ; handler's delivery is one map lookup — no query, no park.
+ :seon.cluster.agent/routing [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+
+ :seon.cluster.agent/arm-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+
+ :seon.cluster.agent/disarm-request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+
+ ; One armed agent's process-local entry: its graph, its mailbox, the
+ ; orderly-stop completion, and the entity id its routing rides on.
+ :seon.cluster.agent/armed [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/eid :int] [:seon.flow/graph :seon.flow/graph] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel]]
+
+ :seon.cluster.agent/eid :int}

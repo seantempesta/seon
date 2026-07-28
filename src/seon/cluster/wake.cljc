@@ -134,6 +134,59 @@
          (async/offer! fault-channel failure)))))
   key)
 
+(defn route!
+  "Register the ROUTING wake handler on a connection (F1 §4).
+  The per-agent successor of `listen!`'s one-channel delivery, under
+  the SAME two absolute prohibitions (it never throws and never parks
+  — every delivery is `offer!` and the whole handler is one
+  try/catch). For each committed datom:
+
+  - `:seon.cluster.message/to` — the datom's VALUE is the recipient's
+    entity id, so delivery is one lookup in the routing map the
+    supplied `channels` fn returns: `offer!` a payload-free wake into
+    that agent's mailbox. No query, no derivation, no commit. A
+    recipient with NO routing entry offers to the ARMER instead — the
+    belt for the created-and-messaged-in-one-commit window;
+  - `:seon.cluster.agent/id` — a committed agent creation IS an arm
+    wake: `offer!` to the armer, whose pass derives
+    (agents in facts) − (armed set) and arms each.
+
+  A closed mailbox refusing delivery is a FAULT fact, exactly as in
+  `listen!` — a swallowed failure nobody hears about is an invisible
+  one. Coalescing on every `(sliding-buffer 1)` target is safe by the
+  standing argument: a wake says only \"look\", and the woken pass
+  derives everything from facts. L8 holds by construction: the armer's
+  own work commits no wake-set attribute (arming writes nothing; the
+  prime is an `offer!`)."
+  {:malli/schema [:=> [:cat :seon.cluster.wake/route-request]
+                  :seon.cluster.wake/key]}
+  [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
+           :seon.cluster.wake/armer-channel
+           :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
+  (d/listen
+   connection
+   key
+   (fn [report]
+     (try
+       (doseq [datom (:tx-data report)]
+         (case (nth datom 1)
+           :seon.cluster.agent/id
+           (async/offer! armer-channel ::wake)
+
+           :seon.cluster.message/to
+           (if-let [channel (get (channels) (nth datom 2))]
+             (when-not (async/offer! channel ::wake)
+               (async/offer! fault-channel
+                             (ex-info "the wake channel refused delivery"
+                                      {:seon.error/kind ::undeliverable-wake
+                                       ::key key})))
+             (async/offer! armer-channel ::wake))
+
+           nil))
+       (catch #?(:clj Throwable :cljs :default) failure
+         (async/offer! fault-channel failure)))))
+  key)
+
 (defn unlisten!
   "Remove the wake handler. Idempotent — removing an absent listener is
   a no-op, because `::flow/stop` may arrive after a store release."

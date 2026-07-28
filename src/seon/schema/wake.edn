@@ -4,4 +4,12 @@
  :seon.cluster.wake/attributes [:set :keyword]
  :seon.cluster.wake/listen-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/attributes :seon.cluster.wake/attributes] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
  :seon.cluster.wake/key :keyword
+ ; THE ROUTING DELIVERY (F1 §4): one registration per cluster whose
+ ; handler ROUTES each committed wake datom to its recipient's mailbox
+ ; instead of one global channel. `channels` is a zero-arg fn returning
+ ; the CURRENT process-local routing map (recipient entity id →
+ ; mailbox channel) — a fn, not a snapshot, because arming grows the
+ ; map while the listener lives.
+ :seon.cluster.wake/channels fn?
+ :seon.cluster.wake/route-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/channels :seon.cluster.wake/channels] [:seon.cluster.wake/armer-channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
  :seon.cluster.wake/unlisten-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]}

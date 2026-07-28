@@ -28,6 +28,7 @@
             [datahike.api :as d]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
+            [seon.cluster.agent]
             [seon.cluster.work :as work]
             [seon.schema]))
 
@@ -89,11 +90,25 @@
                  (d/q '[:find ?id . :in $ ?id
                         :where [?agent :seon.cluster.agent/id ?id]]
                       @connection "root"))))
-        (testing "the loop proc is running on its own graph"
+        (testing "the ARMER proc is running on the cluster's own graph"
           (is (= :running
                  (:clojure.core.async.flow/status
                   (flow/ping-proc (:seon.flow/graph instance)
-                                  :seon.cluster.loop/loop)))))
+                                  :seon.cluster.agent/armer)))))
+        (testing "and the root agent has its OWN armed graph (F1): the
+        armer's boot prime derived the agent set from facts and armed
+        one graph per agent, mailbox and turn procs both running"
+          (let [routing (:seon.cluster.agent/routing instance)
+                entry (seon.cluster.agent/armed routing "root")]
+            (is (some? entry))
+            (is (= :running
+                   (:clojure.core.async.flow/status
+                    (flow/ping-proc (:seon.flow/graph entry)
+                                    :seon.cluster.agent/mailbox))))
+            (is (= :running
+                   (:clojure.core.async.flow/status
+                    (flow/ping-proc (:seon.flow/graph entry)
+                                    :seon.cluster.agent/turn))))))
         (testing "and the fault path exists — this is D4"
           (is (some? (:seon.flow/error-fanout instance)))
           (is (some? (:seon.flow/fault-channel
@@ -128,19 +143,20 @@
       (with-cluster
         "idle"
         (fn [instance]
-          (let [graph (:seon.flow/graph instance)]
-            ;; the loop has looked at least once (boot primes the wake)
-            ;; and found nothing: turns only advance when work was done
-            (is (zero? (:seon.cluster.loop/turns
+          (let [routing (:seon.cluster.agent/routing instance)
+                entry (seon.cluster.agent/armed routing "root")
+                graph (:seon.flow/graph entry)]
+            ;; root's graph has looked at least once (the arm primes
+            ;; its mailbox) and found nothing: turns only advance when
+            ;; work was done
+            (is (zero? (:seon.cluster.agent/turns
                         (:clojure.core.async.flow/state
-                         (flow/ping-proc graph :seon.cluster.loop/loop)))))
-            (async/offer! (:seon.cluster.wake/channel
-                           (:seon.cluster.loop/cluster instance))
-                          ::probe)
+                         (flow/ping-proc graph :seon.cluster.agent/turn)))))
+            (async/offer! (:seon.cluster.wake/channel entry) ::probe)
             (Thread/sleep 200)
-            (is (zero? (:seon.cluster.loop/turns
+            (is (zero? (:seon.cluster.agent/turns
                         (:clojure.core.async.flow/state
-                         (flow/ping-proc graph :seon.cluster.loop/loop))))
+                         (flow/ping-proc graph :seon.cluster.agent/turn))))
                 "a wake with no facts to act on is not work")
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
@@ -166,22 +182,35 @@
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)
             handle (:seon.cluster.loop/cluster instance)
-            graph (:seon.flow/graph instance)]
-        ;; INJECTED AT THE REAL SEAM: the loop's transform calls
-        ;; `next-work`, so a throw there is a throw inside a running
-        ;; flow proc — the exact path §1.2's three report shapes come
+            routing (:seon.cluster.agent/routing instance)
+            entry (seon.cluster.agent/armed routing "root")
+            graph (:seon.flow/graph entry)]
+        ;; INJECTED AT THE REAL SEAM: the turn proc's transform calls
+        ;; `next-agent-work`, so a throw there is a throw inside a
+        ;; running flow proc — the exact path §1.2's report shapes come
         ;; from. Nothing here touches the error channel by hand.
-        (with-redefs [work/next-work
+        (with-redefs [work/next-agent-work
                       (fn [& _]
                         (throw (ex-info "injected core fault"
                                         {:seon.error/kind ::injected})))]
-          (async/offer! (:seon.cluster.wake/channel handle) ::fault)
+          (async/offer! (:seon.cluster.wake/channel entry) ::fault)
           (let [fact (first (await-fact connection (comp seq errors)))]
             (testing "exactly one error fact, carrying what happened"
               (is (some? fact))
               (is (= ::injected (:seon.error/kind fact)))
               (is (= "clojure.lang.ExceptionInfo" (:seon.error/class fact)))
-              (is (= :seon.cluster.loop/loop (:seon.error/proc fact)))
+              (is (= :seon.cluster.agent/turn (:seon.error/proc fact)))
+              (is (= "root"
+                     (d/q '[:find ?agent-id .
+                            :in $ ?error-id
+                            :where
+                            [?error :seon.error/id ?error-id]
+                            [?error :seon.error/agent ?agent]
+                            [?agent :seon.cluster.agent/id ?agent-id]]
+                          @connection (:seon.error/id fact)))
+                  "the fault arrived TAGGED with its agent — structural
+                   provenance from the error-channel join, no
+                   attributed-run query")
               (is (= (:seon.cluster.run/process handle)
                      (:seon.error/process fact)))
               (is (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))))
@@ -232,10 +261,10 @@
 
         (testing "FAIL LOUD IS NOT FALL DOWN: the proc survived its own
         throw with pre-step state, and the next wake is an ordinary pass"
-          (async/offer! (:seon.cluster.wake/channel handle) ::after)
+          (async/offer! (:seon.cluster.wake/channel entry) ::after)
           (is (= :running
                  (:clojure.core.async.flow/status
-                  (flow/ping-proc graph :seon.cluster.loop/loop
+                  (flow/ping-proc graph :seon.cluster.agent/turn
                                   :timeout-ms 5000))))
           (is (zero? @(:seon.error/drops instance))
               "and nothing was dropped on the way"))))))

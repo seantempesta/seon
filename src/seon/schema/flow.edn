@@ -27,6 +27,7 @@
  :seon.flow/fix-step-fn fn?
  :seon.flow/future [:fn {:gen/gen seon.flow/java-future-generator} seon.flow/java-future?]
  :seon.flow/graph [:fn {:gen/gen seon.flow/graph-generator} seon.flow/graph?]
+ :seon.flow/join-error-request [:map [:seon.flow/started [:map [:error-chan :seon.flow/channel]]] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/tag [:map-of :qualified-keyword :string]]]
  :seon.flow/indexer-proc-request [:map [:seon.flow/compile-namespace-fn :seon.flow/compile-namespace-fn] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
  :seon.flow/launcher [:fn {:gen/gen seon.flow/proc-launcher-generator} seon.flow/proc-launcher?]
  :seon.flow/launcher-configuration [:map {:closed true} [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]

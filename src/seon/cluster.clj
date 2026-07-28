@@ -76,7 +76,7 @@
             [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
             [seon.cluster.run :as run]
@@ -524,18 +524,41 @@
          [?agent :seon.cluster.agent/id ?agent-id]]
        db process))
 
+(defn- tagged-run
+  "The run the TAGGED agent points at and this process holds, or nil.
+  The per-agent successor of `attributed-run`: an agent graph's fault
+  arrives tagged with its agent (structural provenance from the
+  error-channel join), so attribution is that agent's one held run —
+  exact under concurrency, where the global query stopped being."
+  [db agent-id process]
+  (d/q '[:find ?id .
+         :in $ ?agent-id ?process
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.cluster.agent/run ?run]
+         [?run :seon.cluster.run/process ?process]
+         [?run :seon.cluster.run/id ?id]]
+       db agent-id process))
+
 (defn- commit-fault!
   "Commit one escaped Throwable as durable facts. TOTAL, never throws.
   Everything it needs is read fresh: the dials from the config
   singleton, the attribution from the database value at the fault's
-  own basis. It goes through `store/transact!`, which never throws, and
-  it ignores its own outcome — if the database refuses the fault, the
-  answer is not to fault about the fault (the recursion fence)."
+  own basis. A fault from an agent graph carries its agent as a
+  structural tag (F1 §6) and attributes through `tagged-run`; an
+  untagged fault (the cluster's own graph) falls back to
+  `attributed-run` until F2 retires it. It goes through
+  `store/transact!`, which never throws, and it ignores its own
+  outcome — if the database refuses the fault, the answer is not to
+  fault about the fault (the recursion fence)."
   [connection cluster-name process caps fault]
   (try
     (let [db @connection
           dials (config/effective db cluster-name)
-          [run-id agent-id] (attributed-run db process)]
+          tagged (:seon.cluster.agent/id fault)
+          [run-id agent-id] (if tagged
+                              [(tagged-run db tagged process) tagged]
+                              (attributed-run db process))]
       (store/transact!
        connection
        (error/commit-tx
@@ -597,39 +620,47 @@
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))
 
-(defn- loop-graph-definition
-  [handle]
-  {:procs {:seon.cluster.loop/loop
-           {:proc (flow.core/process #'cluster.loop/step
-                                     {:workload :io})
-            :args handle}}
+(defn- cluster-graph-definition
+  "The cluster's OWN small graph (F1 R7): the armer proc now, the
+  render proc at F2, a schedule proc later — one cluster graph per
+  cluster, so the component that arms agents has exactly the
+  ping/error/pause uniformity every other proc has."
+  [handle routing]
+  {:procs {:seon.cluster.agent/armer
+           {:proc (flow/var-process #'cluster.agent/armer-step :io
+                                    {:seon.cluster.loop/cluster handle
+                                     :seon.cluster.agent/routing routing})}}
    :conns []})
 
-(defn- arm-loop!
-  "Start the run loop for this cluster: graph, fan-out, listener, wake.
-  ARMED AND IDLE. The graph is running and the wake channel is primed
-  with one look, and that spends NOTHING: a wake says only \"look\", and
-  `next-work` finds work only where facts already are. A fresh cluster
-  has no triggers, so boot makes zero model calls; a REBOOTED cluster
-  finds the work its predecessor left, which is the same mechanism and
-  is exactly what makes interrupted+adapt happen without a recovery
-  code path.
+(defn- arm-agents!
+  "Arm this cluster: the armer graph, fan-out, routing listener, prime.
+  ARMED AND IDLE — the per-agent successor of the single run loop
+  (F1). The armer's prime derives (agents in facts) − (armed set) and
+  arms one graph per agent (R6: arm-all-at-boot); each arm ends with
+  its own mailbox prime, whose first pass derives that agent's work
+  from FACTS. A fresh cluster has no triggers, so boot makes zero
+  model calls; a REBOOTED one picks up the work its predecessor left
+  by the same mechanism — recovery has already settled dead custody,
+  and the first pass settles what recovery released.
 
-  ORDER IS THE CONTRACT. The graph starts first because the fan-out
-  taps ITS channels; the listener comes last because its fault channel
-  is THE FAN-OUT'S — the wake listener's own failures must land where
-  every other fault lands, not in a channel somebody invented. This is
-  the wiring whose absence meant every core fault in a live cluster was
-  dropped by a sliding buffer nobody read."
+  ORDER IS THE CONTRACT. The cluster graph starts first because the
+  fan-out taps ITS channels; the routing listener comes after the
+  fan-out because its fault channel is THE FAN-OUT'S; the armer prime
+  comes LAST, after the listener, so an agent created between the
+  prime's derivation and the listener's registration cannot exist —
+  anything committed earlier is in the facts the prime's pass reads.
+  This is the wiring whose absence meant every core fault in a live
+  cluster was dropped by a sliding buffer nobody read."
   [instance connection cluster-name]
   (let [process (process-identity (:seon.boot/advertisement instance))
-        wake-channel (async/chan (async/sliding-buffer 1))
+        armer-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
-        handle (loop-handle connection cluster-name process wake-channel
+        handle (loop-handle connection cluster-name process armer-channel
                             completion)
+        routing (cluster.agent/routing)
         drops (atom 0)
         graph (flow.core/create-flow
-               (loop-graph-definition handle))
+               (cluster-graph-definition handle routing))
         started (flow.core/start graph)
         _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!
@@ -672,31 +703,52 @@
                                    (:clojure.core.async.flow/ex fault))
                                   (pr-str fault)))
                      (flush)))})]
-    (wake/listen! {:seon.cluster.wake/connection connection
-                   :seon.cluster.wake/attributes (wake/wake-attributes)
-                   :seon.cluster.wake/channel wake-channel
-                   ;; the listener's own faults ride the same path as
-                   ;; every other fault
-                   :seon.cluster.wake/fault-channel
-                   (:seon.flow/fault-channel fanout)
-                   ;; the key the loop's own ::flow/stop arity unlistens
-                   :seon.cluster.wake/key :seon.cluster.loop/wake})
-    (async/offer! wake-channel :seon.cluster.loop/boot)
+    ;; the fault channel joins the routing entry so every later arm
+    ;; can tap its agent graph's errors into the ONE committer inbox
+    (swap! routing assoc :seon.cluster.agent/fault-channel
+           (:seon.flow/fault-channel fanout))
+    ;; ARM ALL AT BOOT (R6), synchronously: boot's own arming step
+    ;; derives the agent set from facts and arms one graph per agent,
+    ;; so a returned instance IS armed — readiness is published, never
+    ;; awaited. The armer proc covers everything committed after this
+    ;; read: its prime below re-derives (agents − armed) from facts.
+    (doseq [agent-id (sort (d/q '[:find [?id ...]
+                                  :where [_ :seon.cluster.agent/id ?id]]
+                                @connection))]
+      (cluster.agent/arm! {:seon.cluster.loop/cluster handle
+                           :seon.cluster.agent/id agent-id
+                           :seon.cluster.agent/routing routing}))
+    ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster, and its
+    ;; own faults ride the same path as every other fault
+    (wake/route! {:seon.cluster.wake/connection connection
+                  :seon.cluster.wake/channels
+                  (fn [] (cluster.agent/channels routing))
+                  :seon.cluster.wake/armer-channel armer-channel
+                  :seon.cluster.wake/fault-channel
+                  (:seon.flow/fault-channel fanout)
+                  :seon.cluster.wake/key :seon.cluster.agent/route})
+    ;; the boot prime: the armer's first pass arms every agent in
+    ;; facts, and each arm primes its own mailbox once
+    (async/offer! armer-channel :seon.cluster.agent/boot)
     {:seon.cluster.loop/cluster handle
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
+     :seon.cluster.agent/routing routing
      :seon.error/drops drops}))
 
-(defn- disarm-loop!
+(defn- disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.
-  The graph goes first so nothing new is derived, and stopping it runs
-  the loop's own `::flow/stop` arity, which unlistens. Then the
-  fan-out detaches its taps. Each layer is released only if it stands —
-  a degraded instance disarms the same way.
+  The routing LISTENER goes first so nothing new is routed while the
+  graphs unwind; the ARMER next, so no new agent graph can appear
+  mid-teardown (which is also what makes arm/disarm races
+  unrepresentable rather than locked around); then each agent graph,
+  each joined at its own turn proc's completion; then the fan-out
+  detaches its taps. Each layer is released only if it stands — a
+  degraded instance disarms the same way.
 
   ORDERLY STOP WAITS FOR THE ACTIVE PASS. `flow/stop` only queues
   `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
-  The proc therefore publishes its own completion from the stop
+  Each proc therefore publishes its own completion from the stop
   transition, which Flow invokes only after the active transform
   returns. This wait honestly includes a seconds-long model call and
   any transaction it starts; only then may the branch connection be
@@ -710,10 +762,18 @@
   ;; holding sockets belonging to somebody outside this process
   (when-let [served (:seon.render.web/served instance)]
     (web/stop! served))
+  (when-let [handle (:seon.cluster.loop/cluster instance)]
+    (wake/unlisten! {:seon.cluster.wake/connection
+                     (:seon.store/branch-connection handle)
+                     :seon.cluster.wake/key :seon.cluster.agent/route}))
   (when-let [graph (:seon.flow/graph instance)]
     (flow.core/stop graph)
     (async/<!! (:seon.cluster.loop/completion
                 (:seon.cluster.loop/cluster instance))))
+  (when-let [routing (:seon.cluster.agent/routing instance)]
+    (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
+      (cluster.agent/disarm! {:seon.cluster.agent/id agent-id
+                              :seon.cluster.agent/routing routing})))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
@@ -767,7 +827,7 @@
         ]
     (let [instance (publish!
                     (merge instance
-                           (arm-loop! instance connection cluster-name)))
+                           (arm-agents! instance connection cluster-name)))
           ;; LAST, and after the loop, because the view renders what the
           ;; loop produces and must never be able to cost it
           ;; a database VALUE, not the connection: `effective` reads
@@ -1015,7 +1075,7 @@
       (try
         ;; the armed layers first: nothing new may be derived while the
         ;; database resources are being released
-        (disarm-loop! instance)
+        (disarm-agents! instance)
         (when-let [connection (:seon.boot/cluster-connection instance)]
           (d/release connection))
         (when (:seon.store/store instance)

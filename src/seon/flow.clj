@@ -80,35 +80,51 @@
 
 (schema.edn/load! {})
 
-(defn- var-process
-  [step-var workload args & [options]]
-  (when-not (var? step-var)
-    (throw
-     (ex-info
-      "A Flow proc step must be a Var so running graphs hot reload."
-      {::step step-var})))
-  (when-not (contains? #{:io :compute} workload)
-    (throw
-     (ex-info
-      "A Flow proc must declare either :io or :compute workload."
-      {::step step-var
-       ::workload workload})))
-  (let [launcher
-        (flow/process
-         step-var
-         (assoc (or options {}) :workload workload))]
-    (reify
-      core.protocols/Datafiable
-      (datafy [_]
-        (datafy/datafy launcher))
+(defn var-process
+  "Build one Flow proc launcher from a step VAR and a pinned workload.
+  THE construction door for every proc in the system (F0(a), the F1
+  blueprint): it REFUSES a non-var step — an anonymous step captures
+  its closures and hot reload silently stops applying to running
+  graphs — and REFUSES a missing or `:mixed` workload, because the
+  `:mixed` default pins one platform thread per proc forever and is
+  the one measured scaling cliff (flow-mechanics 2026-07-28 §1). Both
+  refusals are construction-time throws, never review items. `args`
+  merge into the start options' `:args` so `create-flow` definitions
+  stay pure data."
+  {:malli/schema
+   [:function
+    [:=> [:cat :any [:enum :io :compute] :map] ::launcher]
+    [:=> [:cat :any [:enum :io :compute] :map :map] ::launcher]]}
+  ([step-var workload args]
+   (var-process step-var workload args {}))
+  ([step-var workload args options]
+   (when-not (var? step-var)
+     (throw
+      (ex-info
+       "A Flow proc step must be a Var so running graphs hot reload."
+       {::step step-var})))
+   (when-not (contains? #{:io :compute} workload)
+     (throw
+      (ex-info
+       "A Flow proc must declare either :io or :compute workload."
+       {::step step-var
+        ::workload workload})))
+   (let [launcher
+         (flow/process
+          step-var
+          (assoc options :workload workload))]
+     (reify
+       core.protocols/Datafiable
+       (datafy [_]
+         (datafy/datafy launcher))
 
-      flow.spi/ProcLauncher
-      (describe [_]
-        (flow.spi/describe launcher))
-      (start [_ start-options]
-        (flow.spi/start
-         launcher
-         (update start-options :args #(merge args %)))))))
+       flow.spi/ProcLauncher
+       (describe [_]
+         (flow.spi/describe launcher))
+       (start [_ start-options]
+         (flow.spi/start
+          launcher
+          (update start-options :args #(merge args %))))))))
 
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
@@ -628,6 +644,24 @@
      ::monitor-error-channel monitor-error-channel
      ::fault-channel fault-channel
      ::completion completion}))
+
+(defn join-error-fanout!
+  "Feed one more started graph's errors into an existing fan-out.
+  The N-source generalization (F1 §6): every agent graph's error
+  channel joins the cluster's ONE counted-dropping fault channel,
+  tagged with structural provenance —
+  `(async/pipeline 1 fault-channel (map #(merge % tag)) error-chan
+  false)`. `close?` is false so one source graph's stop never closes
+  the committer's inbox; the pipeline itself ends when the source's
+  error channel closes (its graph stopped), so nothing needs an
+  explicit unjoin. Returns the pipeline's result channel."
+  {:malli/schema [:=> [:cat ::join-error-request] ::channel]}
+  [{::keys [started fault-channel tag]}]
+  (async/pipeline 1
+                  fault-channel
+                  (map #(merge % tag))
+                  (:error-chan started)
+                  false))
 
 (defn stop-error-fanout!
   "Detach and stop one error fan-out without stopping its source graph."
