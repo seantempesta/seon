@@ -6,48 +6,36 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
-**COMPACTION HANDOFF (2026-07-28 morning — read FIRST).** The owner
-is PRESENT and wants the MORNING DECISION SESSION run next — batch
-his rulings via AskUserQuestion (plain language, options+recommenda-
-tions, ≤4 questions per call) from these docs, in this order:
-1. CONTEXT-BLOCKS (4 decisions): context-blocks-plan-2026-07-28.md
-   §"Owner decisions required before contract seal" — omission
-   semantics, invocation shape, collision precedence, capture
-   ownership. After ruling → draft contracts (fresh Opus, the plan
-   is falsified+revised, cite the review dispositions).
-2. TEST DISSOLUTIONS (11 ranked, 9-unit order):
-   test-design-review-2026-07-28.md — he approves the order/scope,
-   then implementation lanes.
-3. MESSAGING (6 questions): my-message-proof-2026-07-28.md §7 —
-   chain-bound currency, refusal visibility to sender, wait
-   semantics, self-messaging keep/refuse, verbatim replies,
-   Math/sqrt-absent-from-base (N5's surface decision).
-4. PROJECTION OUTPUTS: projection-review-2026-07-28.md "After
-   revisions" section — he re-reads, approves or iterates (each fix
-   is a hot-reloadable defn).
-5. SMALL: no-auth local-provider admission
-   (local-provider-2026-07-28.md); font licensing
-   (the filed issue carries the remedy); MCP RESTART (task #3 — asks
-   HIM to restart the MCP client; unblocks live eval_clj).
-IN FLIGHT RIGHT NOW (review on return, then refill): the N4 agent
-(SendMessage a1862bb9eb02818eb — derived ports, URL into the
-advertisement, boot banner, home-cluster design note); the
-fresh-operator lane left bin/seon-fresh + script/seon/fresh_operator.clj
-UNTRACKED/UNCOMMITTED. **OWNER SIMPLIFICATION (morning, overrides the
-fleet spec): NO multi-name, NO --count, NO seed command — "I can run
-the command several times to launch more clusters; I don't want
-command line args to be overcomplicated."** The operator is: start
-[name?] (no arg → default if free else a generated name; each
-invocation = one more cluster; prints the URL), status, open [name?],
-stop [name?], logs [name?]. Resume the lane with THIS spec and have
-it rework its uncommitted files down to it (single-quote the resume
-payload). The owner also KILLED the N4 agent's wind-down mid-commit —
-its ports/advertisement/banner slice DID land first (f88b537cf, gate
-392/1522/0 per its last report; verify). Gate baseline 388/1509/0 (+ the two lanes' additions).
-The local Qwen server runs as background task (harness) on :8090 —
-it never exits by design; the owner knows. Agent A/B lessons +
-long-lived-lane pattern are in auto-memory. The N4 agent also owes
-package 5 (agent-transcript page) AFTER the messaging rulings.
+**WORKING EDGE (2026-07-28 midday — the presence-not-kinds wave).**
+Gate 403/1566/0, independently verified. The morning decision session
+resolved into the "Rulings 2026-07-28" batch (README): omission =
+nil-punning, state is presence (three stored discriminators DELETED,
+sealed N3 receipt revision: presence + `interrupted-at`, settlement
+fences on absence), context-blocks Decisions 2–4 per recommendation,
+test units 1–3 approved. Landed and reviewed: the simplified fresh
+operator (`6e7b03738`, de-hacked `7ccd1347a` — plain stop! var,
+event-driven empty-JVM exit); render nil-unification (`12a5fef33` —
+declaration?-on-get everywhere, omitted blocks keep their identified
+wrapper element); presence-not-kinds (`7bb7ccbfe`+`447abce8e` — enums
+deleted, wrong-trigger `:call` defect fixed with regression);
+data-model.md third rule (`9a0fe5266`); context-blocks CONTRACT
+SEALED (`b05a6b9f6` + seal correction `a236eefc6` — declaration? at
+the selector). Research inputs: simplification-catalog-2026-07-28.md
+(six collapse groups; group 1 = render unit everywhere),
+state-without-kinds-2026-07-28.md (doctrine + audit).
+IN FLIGHT: test-constructions sol lane (units 2–3 of the review;
+unit 1 `44fb814f4` + fixture `08c18b305` landed).
+NEXT READY: context-blocks IMPLEMENTATION (contract sealed, its lane-A
+dependency landed); catalog group 4 (admission-codec D2); the
+prompt-formatter → render-unit collapse (catalog group 1, after
+context-blocks lands its census).
+STILL OWNER-GATED: messaging 6 questions (my-message-proof §7 — gate
+N4 package 5, the agent-transcript page); test units 4–9 (after 1–3);
+no-auth provider admission (local-provider-2026-07-28.md); projection
+outputs re-read; MCP restart (task #3, owner action). New issue:
+a-nil-query-input-matches-anything-so-prompt-cannot-refuse.md.
+The local Qwen server runs as a harness background task on :8090 —
+it never exits by design; the owner knows.
 
 **SEALED (owner, s3 close): schema definitions leave code files.**
 Attribute/entity schemas are EDN data under `src/seon/schema/*.edn` —
