@@ -13,15 +13,28 @@
   on a complete, counted SSE event; its clock is only the shared loud
   backstop around the future returned by that read.
 
-  Every server is stopped and every database deleted in a `finally`, so
-  a failing assertion cannot leak a listening port into the next test."
-  (:require [clojure.string :as str]
+  THE FULL PIPELINE, not a handler: since F2 the derivation lives in
+  the RENDER PROC and a tab is a tap on a mult, so the fixture builds
+  the real proc in a real one-proc graph and registers the real routing
+  listener. A commit therefore reaches a socket the way production
+  reaches it — `route!` offers one render wake, the proc derives once
+  for the whole cluster, and each tab diffs the complete snapshot
+  against what it last delivered.
+
+  Every server is stopped, every graph joined at its own completion,
+  and every database deleted in a `finally`, so a failing assertion
+  cannot leak a listening port or a live proc into the next test."
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow.core]
+            [clojure.string :as str]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.cluster.wake :as wake]
             [seon.config :as config]
+            [seon.flow :as flow]
             [seon.render.block :as block]
             [seon.render.web :as web]
             [seon.test-support :as support])
@@ -64,20 +77,88 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- with-server
+  "The whole render pipeline on real sockets: the render proc in its own
+  graph, the mult the tabs tap, the routing listener that wakes it.
+
+  `body` receives the connection, the server descriptor, and the graph
+  — the graph so a test can `flow.core/ping` it and assert HOW MANY
+  derivations a commit cost, which is the claim the shared registration
+  exists to make."
   [blocks body]
   (support/with-database
     (fn [connection]
-      (let [server (atom nil)]
+      (let [server (atom nil)
+            render-channel (async/chan (async/sliding-buffer 1))
+            pages-channel (async/chan (async/sliding-buffer 1))
+            registration (atom {})
+            completion (async/promise-chan)
+            fault-channel (async/chan (async/dropping-buffer 8))
+            stream-channel (async/chan (async/sliding-buffer 1))
+            view {:seon.render.web/render-channel render-channel
+                  :seon.render.web/pages-channel pages-channel
+                  :seon.render.web/registration registration
+                  :seon.render.web/completion completion}
+            graph (flow.core/create-flow
+                   {:procs
+                    {:seon.render.web/render
+                     {:proc (flow/var-process
+                             #'web/render-step :io
+                             (assoc view :seon.cluster.loop/cluster
+                                    {:seon.store/branch-connection connection
+                                     :seon.sci.admit/caps caps
+                                     ;; the cluster's one stream conn:
+                                     ;; production always has it, and
+                                     ;; the proc now refuses to be
+                                     ;; built without it
+                                     :seon.cluster.loop/stream-channel
+                                     stream-channel}))}}
+                    :conns []})
+            {:keys [report-chan error-chan]} (flow.core/start graph)]
+        ;; nothing asserts on reports here, but an unread report or
+        ;; error channel would eventually park the graph's own plumbing
+        (async/go-loop [] (when (async/<! report-chan) (recur)))
+        (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
-      (d/transact connection [{:seon.cluster.agent/id agent-id
-                               :seon.cluster.agent/blocks blocks}])
-      (reset! server (web/start! {:seon.store/connection connection
-                                  :seon.cluster.agent/id agent-id
-                                  :seon.sci.admit/caps caps
-                                  :seon.config.render/coalesce-ms 16}))
-      (body connection @server)
-      (finally
-            (when @server (web/stop! @server))))))))
+          (d/transact connection [{:seon.cluster.agent/id agent-id
+                                   :seon.cluster.agent/blocks blocks}])
+          (flow.core/resume graph)
+          (wake/route! {:seon.cluster.wake/connection connection
+                        :seon.cluster.wake/channels (constantly {})
+                        :seon.cluster.wake/armer-channel
+                        (async/chan (async/sliding-buffer 1))
+                        :seon.cluster.wake/render-channel render-channel
+                        :seon.cluster.wake/fault-channel fault-channel
+                        :seon.cluster.wake/key ::route})
+          (reset! server (web/start!
+                          {:seon.store/connection connection
+                           :seon.cluster.agent/id agent-id
+                           :seon.sci.admit/caps caps
+                           :seon.render.web/pages-mult (async/mult pages-channel)
+                           :seon.render.web/registration registration
+                           :seon.render.web/render-channel render-channel}))
+          (body connection @server graph)
+          (finally
+            (when @server (web/stop! @server))
+            (wake/unlisten! {:seon.cluster.wake/connection connection
+                             :seon.cluster.wake/key ::route})
+            (flow.core/stop graph)
+            ;; the proc's OWN completion, under the shared loud
+            ;; backstop: a wedged proc must fail this suite noisily
+            ;; rather than hang the runner forever
+            (support/await-event! (future (async/<!! completion))
+                                  [:render-proc-stopped])
+            (async/close! render-channel)
+            (async/close! pages-channel)
+            (async/close! stream-channel)))))))
+
+(defn- derivations
+  "The render proc's pass count, from its own ping — the oracle for
+  ONE derivation per commit however many tabs are open."
+  [graph]
+  (-> (flow.core/ping graph)
+      (get :seon.render.web/render)
+      (get :clojure.core.async.flow/state)
+      (get :seon.render.web/passes)))
 
 (defn- block-map
   [name priority projection]
@@ -137,7 +218,7 @@
 
 (deftest the-page-places-every-surface-at-its-own-id
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (let [response (fetch server "/")
             body (.body response)]
         (is (= 200 (.statusCode response)))
@@ -151,7 +232,7 @@
   ;; is stripped by that element's first whole-element morph, and the
   ;; tab then looks alive while receiving nothing.
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (let [body (.body (fetch server "/"))]
         (is (< (.indexOf body "</main>") (.indexOf body "data-init"))
             "the opener is after every surface, not inside one")
@@ -162,7 +243,7 @@
   ;; Root is an agent. If this test ever needs a root-specific branch,
   ;; the design has regressed.
   (with-server two-blocks
-    (fn [connection server]
+    (fn [connection server _graph]
       (d/transact connection
                   [{:seon.cluster.agent/id "agent-b"
                     :seon.cluster.agent/blocks [(block-map :banner 0 `banner-html)]}])
@@ -175,14 +256,14 @@
 
 (deftest static-resources-come-off-the-classpath
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (is (= 200 (.statusCode (fetch server "/js/datastar.js"))))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 
 (deftest an-unknown-route-is-an-honest-404
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (is (= 404 (.statusCode (fetch server "/nope")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -191,7 +272,7 @@
 
 (deftest the-initial-paint-sends-every-block-once
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [initial (read-patches! stream 2)]
@@ -206,7 +287,7 @@
   ;; actually changed, and the block that reads nothing is never
   ;; re-serialized and never re-sent.
   (with-server two-blocks
-    (fn [connection server]
+    (fn [connection server _graph]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (read-patches! stream 2)
@@ -223,7 +304,7 @@
   ;; works, and the broken one occupies its own space saying so.
   (with-server [(block-map :banner 0 `banner-html)
                 (block-map :broken 10 `broken-html)]
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [initial (read-patches! stream 2)]
@@ -241,7 +322,7 @@
   ;; page from current facts — which is also what makes a killed process
   ;; cost nothing.
   (with-server two-blocks
-    (fn [connection server]
+    (fn [connection server _graph]
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
         (read-patches! first-stream 2)
         (.close first-stream))
@@ -255,21 +336,28 @@
           (finally (.close second-stream)))))))
 
 (deftest two-tabs-each-get-their-own-complete-paint
+  ;; ONE DERIVATION, N TABS — the shared registration's whole claim,
+  ;; and the reason the proc exists. Both tabs still get their own
+  ;; complete paint and their own byte-identical morph; what changed is
+  ;; that the page behind them was derived once for the cluster.
   (with-server two-blocks
-    (fn [connection server]
+    (fn [connection server graph]
       (let [a (open-feed server (str "/feed/" agent-id))
             b (open-feed server (str "/feed/" agent-id))]
         (try
           (read-patches! a 2)
           (read-patches! b 2)
-          (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-          (let [to-a (read-patches! a 1)
-                to-b (read-patches! b 1)]
-            (is (= 1 (patches to-a)))
-            (is (= 1 (patches to-b)))
-            (is (= to-a to-b)
-                "identical bytes — determinism is what lets one
-                 registration serve every tab when that lands"))
+          (let [before (derivations graph)]
+            (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+            (let [to-a (read-patches! a 1)
+                  to-b (read-patches! b 1)]
+              (is (= 1 (patches to-a)))
+              (is (= 1 (patches to-b)))
+              (is (= to-a to-b)
+                  "identical bytes — determinism is what lets ONE
+                   registration serve every tab")
+              (is (= 1 (- (derivations graph) before))
+                  "the commit cost ONE derivation, not one per tab")))
           (finally (.close a) (.close b)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -279,13 +367,12 @@
 (deftest suppression-compares-bytes
   ;; Bytes are what the socket costs and what the browser diffs, and the
   ;; serializer is deterministic, so this is sound.
-  (let [surface {:seon.render.block/name :x
-                 :seon.render/surface-id "surface-x"
-                 :seon.render/kind :seon.render/html
-                 :seon.render/output [:div {:id "surface-x"} "same"]}
-        first-pass (web/changed {} [surface] caps nil)
-        second-pass (web/changed (:seon.render.web/delivered first-pass)
-                                 [surface] caps nil)]
+  ;; a PAGE — `{surface-id → html}` — because since F2 the serialization
+  ;; happens once in `page-of` and the proc and every tab compare the
+  ;; same bytes; suppression itself is unchanged in kind, only relocated
+  (let [page {"surface-x" "<div id=\"surface-x\">same</div>"}
+        first-pass (web/changed {} page)
+        second-pass (web/changed (:seon.render.web/delivered first-pass) page)]
     (is (= 1 (count (:seon.render.web/patches first-pass))))
     (is (= 0 (count (:seon.render.web/patches second-pass)))
         "an unchanged surface is not sent twice")
@@ -308,15 +395,11 @@
         "empty content keeps the block's stable morph target")))
 
 (deftest a-later-non-nil-render-patches-back-into-the-same-wrapper
-  (let [omitted {:seon.render.block/name :optional
-                 :seon.render/surface-id "surface-optional"
-                 :seon.render/kind :seon.render/html
-                 :seon.render/output nil}
-        visible (assoc omitted :seon.render/output
-                       [:div {:id "surface-optional"} "now visible"])
-        first-paint (web/changed {} [omitted] caps nil)
+  (let [empty-wrapper "<div id=\"surface-optional\"></div>"
+        visible "<div id=\"surface-optional\">now visible</div>"
+        first-paint (web/changed {} {"surface-optional" empty-wrapper})
         repaint (web/changed (:seon.render.web/delivered first-paint)
-                             [visible] caps nil)]
+                             {"surface-optional" visible})]
     (is (= [["surface-optional" "<div id=\"surface-optional\"></div>"]]
            (:seon.render.web/patches first-paint)))
     (is (= 1 (count (:seon.render.web/patches repaint))))
@@ -328,7 +411,7 @@
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
   (with-server two-blocks
-    (fn [_connection server]
+    (fn [_connection server _graph]
       (let [root (.body (fetch server "/data"))]
         (is (str/includes? root "seon-data-drill"))
         (is (str/includes? root "showing 1")
@@ -380,13 +463,20 @@
   ;; bookmark must not fail silently. Both numbers, or neither is
   ;; actionable.
   (with-server two-blocks
-    (fn [connection first-server]
+    (fn [connection first-server _graph]
       (let [taken (:seon.render.web/port first-server)
             second-server (web/start!
                            {:seon.store/connection connection
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps caps
-                            :seon.config.render/coalesce-ms 16
+                            ;; its own disposable view half: this test
+                            ;; is about the PORT, and the second view
+                            ;; never opens a feed
+                            :seon.render.web/pages-mult
+                            (async/mult (async/chan (async/sliding-buffer 1)))
+                            :seon.render.web/registration (atom {})
+                            :seon.render.web/render-channel
+                            (async/chan (async/sliding-buffer 1))
                             :seon.render.web/port taken})]
         (try
           (is (not= taken (:seon.render.web/port second-server))
@@ -399,5 +489,5 @@
   (testing "a clean bind reports no wanted-port at all, so key presence
             answers 'did this fall back?'"
     (with-server two-blocks
-      (fn [_connection server]
+      (fn [_connection server _graph]
         (is (nil? (:seon.render.web/wanted-port server)))))))

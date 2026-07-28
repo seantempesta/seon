@@ -239,6 +239,8 @@
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
                           :seon.cluster.wake/armer-channel armer-channel
+                          :seon.cluster.wake/render-channel
+                          (async/chan (async/sliding-buffer 1))
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route})
@@ -942,6 +944,8 @@
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
                           :seon.cluster.wake/armer-channel armer-channel
+                          :seon.cluster.wake/render-channel
+                          (async/chan (async/sliding-buffer 1))
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route-trial})

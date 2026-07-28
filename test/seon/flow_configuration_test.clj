@@ -54,8 +54,11 @@
                 ::sut/commit-fault! identity
                 ::sut/panic! identity})]
              [:cluster
+              ;; the render proc joins the census automatically: it is
+              ;; built through `var-process`, which refuses `:mixed` at
+              ;; construction, and `describe` needs no live channels
               ((private-var 'seon.cluster 'cluster-graph-definition)
-               {} (atom {}))]
+               {} (atom {}) {})]
              [:agent
               (seon.cluster.agent/graph-definition
                {:seon.cluster.loop/cluster

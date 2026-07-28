@@ -1,21 +1,34 @@
 (ns seon.render.web
   "The page on a socket — http-kit, one Datastar SSE per tab, one morph
-  per block.
+  per block, ONE derivation per cluster.
 
-  N4 package 2, first web slice. What is REAL here: the server, the
-  routes, the shell, the initial paint, live repaint driven by Datahike
-  `listen!`, PER-BLOCK equality suppression, and the latest-wins mailbox.
-  What is deliberately NOT here is named in `not-yet` below rather than
-  implied by silence — a feed that quietly did less than the design says
-  would be the absence-read-as-health class on the most visible surface
-  in the system.
+  F2 §1: the render pipeline is one derivation → equality suppression →
+  `mult` → per-tab sliding-1 taps. The RENDER PROC (a proc of the
+  cluster's own graph, pinned `:io`, built through
+  `seon.flow/var-process`) runs one pass per wake over ONE database
+  value, derives every WATCHED agent's page, suppresses at the proc
+  against the last value PRODUCED, and puts one COMPLETE
+  `{agent-id → {surface-id → html}}` snapshot on the mult. Complete
+  snapshots, never incremental patches — a sliding-1 tap holds exactly
+  one pending value, so a patch displaced by a patch would be a
+  PERMANENTLY lost morph; the newest-only buffer row demands a complete
+  value (F2 R7).
 
-  ONE MORPH PER BLOCK, which is the whole point of the rung. A repaint
-  derives the agent's surfaces, compares each against the last value
-  DELIVERED on this connection, and patches only the blocks whose
-  projection actually changed. The quarry sent the entire
-  `<main id=\"app-view\">` subtree on every relevant datom; measured, the
-  same one-row change is 287 bytes here against 82,893 bytes there.
+  ONE MORPH PER BLOCK is preserved AT THE SOCKET: each tab's writer
+  diffs the snapshot against what IT last delivered and sends only the
+  changed blocks — the same 287-bytes-not-82,893 wire economy this
+  namespace proved, now computed per tab from one shared derivation
+  instead of derived per tab. DELETED with F2: the per-connection
+  `d/listen` registration, the hand-rolled latest-wins mailbox, and the
+  per-tab full re-derivation.
+
+  THE WAKE SOURCE is `wake/route!` — the cluster's ONE listener — which
+  offers one payload-free render wake per transaction report; a freshly
+  opened tab offers its own. The COALESCE FLOOR
+  (`:seon.config.render/coalesce-ms`, a config fact) is honored at the
+  proc: a burst of commits costs one derivation for the whole cluster,
+  and the per-tab writer just writes. It remains a coalescing floor
+  over an observed event (the commit), never a poll.
 
   THE FEED OPENER IS A SIBLING OF THE MORPH TARGETS, never a child. A
   `data-init` inside a morphed element is stripped by the first
@@ -24,14 +37,15 @@
   and the reason the shell puts the opener in its own hidden div beside
   the surfaces rather than on the container.
 
-  Crash walk. The server holds a socket and a listener per connection
-  and nothing durable, so a kill loses zero facts: every tab reconnects
-  and repaints from current facts, which is what \"reconnect = repaint\"
-  means operationally. `stop!` closes the server, and each connection's
-  `on-close` unlistens its own listener — the listener is registered
-  per connection precisely so its lifetime is the connection's and no
-  bookkeeping outlives the socket."
-  (:require [clojure.java.io :as io]
+  Crash walk. Everything here is channel contents or process-local
+  disposable state — the produced-memory, the delivered-memory, the
+  watched registration, pending snapshots on taps — all free to lose by
+  the transport law: every tab reconnects and repaints from current
+  facts (reconnect = repaint), the registration re-fills from
+  `on-open`, and the next commit re-offers the wake."
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
@@ -71,33 +85,41 @@
 ;; core predicate — resolvable is not the same as vouched for
 (schema/register-core-predicate! 'seon.render.web/server? server?)
 
+(defn mult?
+  "True for a core.async mult — the fan-out the page snapshots ride."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (satisfies? clojure.core.async/Mult value))
+
+(defonce ^:private generator-mult
+  (delay (async/mult (async/chan (async/sliding-buffer 1)))))
+
+(def mult-generator
+  "An honest generator: a real mult over a real channel, created once."
+  (gen/fmap (fn [_] @generator-mult) (gen/return nil)))
+
+(schema/register-core-predicate! 'seon.render.web/mult? mult?)
+
 (schema.edn/load! {})
 
 (def not-yet
-  "What this slice does NOT do, stated so nobody reads its absence as
-  health. Each line is a package-2 remainder with a settled design, not
-  an open question.
+  "What this namespace does NOT do, stated so nobody reads its absence
+  as health. The F2 census (contract §1.3): `::shared-registration` and
+  `::isolated-sink` LANDED with the render proc and the stream conn;
+  `::per-tab-graph` is REJECTED, not deferred — a tab is a tap and a
+  virtual thread, never a graph and never a listener (the inventory's
+  ruling, reconciled into `ui.md` in the same wave).
 
-  - ATTRIBUTE-INTEREST MATCHING. A repaint re-derives every block of the
-    agent rather than only the blocks whose read attributes changed. The
-    wire is already correct (suppression means only changed blocks are
-    sent); the CPU is bounded and measured at ~0.5 ms for a whole page,
-    so this is a real cost and a small one. The fix is the render-interest
-    listener matching registrations BEFORE coalescing.
-  - THE SHARED REGISTRATION. Each connection keeps its own last-delivered
-    values, so two tabs on one agent evaluate the blocks twice. The
-    32-tab falsifier needs one registration per block with a `mult` and
-    per-tab taps; this slice proves the morph granularity, not the
-    sharing.
-  - THE PER-TAB FLOW GRAPH. Connections use the adapter's own callbacks
-    plus one listener; `ui.md` specifies a small fixed Flow graph per
-    tab, which restores Flow reporting and lifecycle.
-  - COALESCING CADENCE. `:seon.config.render/coalesce-ms` exists and is
-    honoured as a floor between repaints; the isolated non-blocking sink
-    that lets presentation lag without touching the producer is the
-    streaming slice's, because it is the streamed-partial path that
-    needs it."
-  [::interest-matching ::shared-registration ::per-tab-graph ::isolated-sink])
+  - ATTRIBUTE-INTEREST MATCHING. The render wake fires on EVERY commit;
+    a pass re-derives every WATCHED agent's blocks rather than only the
+    blocks whose read attributes changed. The wire is already exact
+    (suppression means only changed blocks are sent) and the CPU is
+    bounded (~0.5 ms per watched page). Matching commits against block
+    read-sets needs the program graph's `:seon.fn/calls`-era facts (N5)
+    to be a COMPUTED rule; a hand-list of read attributes per block now
+    would be the hand-list class (F2 R6). Named so its absence is a
+    decision, not a silence."
+  [::interest-matching])
 
 ;;; ---------------------------------------------------------------------------
 ;;; The shell
@@ -171,107 +193,294 @@
                       :seon.db/db db})
        [:div {:id (:seon.render/surface-id surface)} ""]))))
 
+(defn page-of
+  "One agent's page as `{surface-id → html}`. THE one serialization.
+
+  Derives the agent's html surfaces at `db` and serializes each through
+  `surface-html`. The render proc and the initial paint both call THIS,
+  so the bytes the proc suppresses against and the bytes a tab diffs
+  against are the same bytes by construction — colocation is what makes
+  the byte contract structural (F2 R2). `snapshot` is the agent's
+  transient `:seon.ai/partial` (or nil), threaded into every unit
+  through the one builder."
+  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id
+                       :seon.sci.admit/caps
+                       ;; nil is a REAL value here, not an absent key:
+                       ;; an agent that is not streaming has no snapshot
+                       ;; and the unit must carry no `:seon.ai/partial`
+                       [:or :nil :seon.ai/partial]]
+                  [:map-of :seon.render/surface-id :string]]}
+  [db agent-id caps snapshot]
+  (into {}
+        (map (fn [surface]
+               [(:seon.render/surface-id surface)
+                (surface-html surface caps db)]))
+        (block/surfaces db (cond-> {:seon.cluster.agent/id agent-id
+                                    :seon.render/kind :seon.render/html
+                                    :seon.sci.admit/caps caps}
+                             snapshot (assoc :seon.ai/partial snapshot)))))
+
 (defn changed
-  "The surfaces whose HTML differs from `delivered`, plus the new map.
+  "The patches whose bytes differ between `delivered` and `page`.
 
   EQUALITY SUPPRESSION, and it compares the BYTES rather than the
   values, deliberately: bytes are what the socket costs and what the
   browser diffs, and two values that serialize identically are the same
   page whatever their internal representation. Determinism makes this
   sound — the serializer sorts attributes, so one value is always one
-  byte string.
+  byte string. The comparison is UNCHANGED in kind since the first web
+  slice, relocated in owner (F2 §1.5): the proc suppresses against the
+  last value PRODUCED, each tab diffs against the last value IT
+  delivered.
 
   Returns `{:seon.render.web/patches [[id html] …]
-            :seon.render.web/delivered {id → html}}`, with patches
-  ordered so a page repaints in reading order."
-  {:malli/schema [:=> [:cat [:map-of :string :string] :seon.render/surfaces
-                       :seon.sci.admit/caps :any]
+            :seon.render.web/delivered {id → html}}`, patches sorted by
+  id so one input always yields one output."
+  {:malli/schema [:=> [:cat [:map-of :string :string]
+                       [:map-of :string :string]]
                   :seon.render.web/repaint]}
-  [delivered surfaces caps db]
-  (reduce (fn [accumulated surface]
-            (let [id (:seon.render/surface-id surface)
-                  html (surface-html surface caps db)]
-              (if (= html (get delivered id))
-                accumulated
-                (-> accumulated
-                    (update :seon.render.web/patches conj [id html])
-                    (assoc-in [:seon.render.web/delivered id] html)))))
-          {:seon.render.web/patches []
-           :seon.render.web/delivered delivered}
-          surfaces))
+  [delivered page]
+  {:seon.render.web/patches
+   (into []
+         (filter (fn [[id html]] (not= html (get delivered id))))
+         (sort-by key page))
+   :seon.render.web/delivered page})
 
 ;;; ---------------------------------------------------------------------------
-;;; The feed
+;;; The render proc — the cluster graph's second proc (F2 §1)
 ;;; ---------------------------------------------------------------------------
 
-(defn- surfaces-of
-  [db agent-id caps]
-  (block/surfaces db {:seon.cluster.agent/id agent-id
-                      :seon.render/kind :seon.render/html
-                      :seon.sci.admit/caps caps}))
+(defn- coalesce-floor
+  "The coalescing floor, read from the config facts at `db` — a live
+  dial change applies at the very next pass. 0 when absent."
+  [db]
+  (or (d/q '[:find ?value .
+             :where [_ :seon.config.render/coalesce-ms ?value]]
+           db)
+      0))
 
-(defn- paint!
-  "Derive, suppress, and patch. Returns the new delivered map.
-  Patches ONE element per changed block: the morph target is the block."
-  [generator db agent-id caps delivered]
-  (let [{:seon.render.web/keys [patches] :as repaint}
-        (changed delivered (surfaces-of db agent-id caps) caps db)]
-    (doseq [[_id html] patches]
-      ;; default patch mode is `outer`, which is what a complete morph of
-      ;; one element wants; the id rides in the element itself
-      (datastar/patch-elements! generator html))
-    (:seon.render.web/delivered repaint)))
+(defn- render-pass
+  "ONE pass over ONE database value: derive every WATCHED agent's page,
+  suppress against the last value PRODUCED, and return
+  `[state' pages-or-nil]` — `pages` is the COMPLETE
+  `{agent-id → {surface-id → html}}` snapshot exactly when anything
+  changed."
+  [{registration :seon.render.web/registration :as state}]
+  (let [handle (:seon.cluster.loop/cluster state)
+        connection (:seon.store/branch-connection handle)
+        caps (:seon.sci.admit/caps handle)
+        db @connection
+        watched (into (sorted-set)
+                      (keep (fn [[agent-id tabs]]
+                              (when (pos? (long tabs)) agent-id)))
+                      @registration)
+        pages (into {}
+                    (map (fn [agent-id]
+                           [agent-id
+                            (page-of db agent-id caps
+                                     (get-in state [::streams agent-id]))]))
+                    watched)
+        state (-> state
+                  (update ::passes inc)
+                  (assoc ::watched (count watched)))]
+    (if (= pages (::produced state))
+      [state nil]
+      [(assoc state ::produced pages) pages])))
+
+(defn render-step
+  "The render proc's transform, in Flow's four arities (F2 §1.1).
+
+  Two in-ports, both `(sliding-buffer 1)`: `::interest` — the render
+  wake channel, a payload-free \"look\"; `::stream` — the cluster's one
+  stream conn carrying `{agent-id + :seon.ai/partial snapshot}` entries
+  (an entry with no snapshot is that agent's CLEAR — presence of text
+  is the state). One out-port, `::pages`, feeding the mult; sliding-1
+  everywhere means the proc never parks.
+
+  THE COALESCE FLOOR is honored HERE: a wake arriving inside the floor
+  waits out the remainder before the next derivation (this proc is
+  `:io`; the wait coalesces further wakes on the sliding-1 in-ports),
+  so a burst of commits costs one derivation for the whole cluster and
+  the per-tab writer just writes. The one surviving render clock, and
+  it remains a coalescing floor over an observed event — the commit,
+  delivered by the routing listener — never a poll.
+
+  All state is disposable by the transport law: the produced-memory is
+  rebuilt by one re-render after any restart, and a stream snapshot is
+  superseded or cleared by its producer."
+  {:malli/schema [:function
+                  [:=> [:cat] [:map]]
+                  [:=> [:cat :map] :map]
+                  [:=> [:cat :map :keyword] :map]
+                  [:=> [:cat :map :keyword :any]
+                   ;; `[state out]`, where `out` is nil when suppression
+                   ;; found nothing to say and otherwise ONE complete
+                   ;; page snapshot on `::pages`
+                   [:tuple :map
+                    [:or :nil
+                     [:map-of :keyword
+                      [:vector [:map-of :seon.cluster.agent/id
+                                [:map-of :seon.render/surface-id
+                                 :string]]]]]]]]}
+  ([]
+   {:ins {}
+    :outs {}
+    :workload :io
+    :ping-map-fn (fn [state]
+                   {::passes (::passes state 0)
+                    ::watched-agents (::watched state 0)
+                    ::tap-count (transduce (map long) + 0
+                                           (vals @(:seon.render.web/registration
+                                                   state)))
+                    ::streaming-agents (count (::streams state))})})
+  ([args]
+   ;; THE PORTS ARE A DEPENDENCY, SO SAY SO. A nil in-port does not
+   ;; fail: Flow leaves the proc :running with an unreadable port, it
+   ;; takes nothing forever, and — measured — its stop transition never
+   ;; runs either, so `disarm-agents!` waits on a completion that can
+   ;; never arrive. A silent wedge that turns into a hang at shutdown
+   ;; is exactly the class the readiness rule exists to kill, so the
+   ;; proc refuses to be built without the channels it reads.
+   (let [ports {::interest (:seon.render.web/render-channel args)
+                ::stream (:seon.cluster.loop/stream-channel
+                          (:seon.cluster.loop/cluster args))
+                ::pages (:seon.render.web/pages-channel args)}]
+     (when-let [missing (seq (sort (keep (fn [[port channel]]
+                                           (when-not channel port))
+                                         ports)))]
+       (throw (ex-info "the render proc is missing an in/out port"
+                       {:seon.error/kind ::missing-port
+                        ::missing (vec missing)}))))
+   (assoc args
+          ::flow/in-ports
+          {::interest (:seon.render.web/render-channel args)
+           ::stream (:seon.cluster.loop/stream-channel
+                     (:seon.cluster.loop/cluster args))}
+          ::flow/out-ports
+          {::pages (:seon.render.web/pages-channel args)}
+          ::produced {}
+          ::streams {}
+          ::passes 0
+          ::watched 0
+          ::last-pass-nanos 0))
+  ([state transition]
+   (when (= ::flow/stop transition)
+     ;; its OWN completion, not the cluster handle's: disarm must join
+     ;; BOTH cluster-graph procs' active transforms before the branch
+     ;; connection is released
+     (async/put! (:seon.render.web/completion state) ::stopped))
+   state)
+  ([state input message]
+   (let [state (if (= ::stream input)
+                 (let [agent-id (:seon.cluster.agent/id message)]
+                   (if-let [snapshot (:seon.ai/partial message)]
+                     (assoc-in state [::streams agent-id] snapshot)
+                     (update state ::streams dissoc agent-id)))
+                 state)
+         connection (:seon.store/branch-connection
+                     (:seon.cluster.loop/cluster state))
+         floor (coalesce-floor @connection)
+         elapsed-ms (quot (- (System/nanoTime)
+                             (long (::last-pass-nanos state)))
+                          1000000)
+         remainder (- floor elapsed-ms)]
+     (when (pos? remainder)
+       ;; the floor: wait out the remainder BEFORE deriving, so the
+       ;; sliding-1 in-ports coalesce the burst and one derivation
+       ;; serves it whole
+       (Thread/sleep (long remainder)))
+     (let [[state pages] (render-pass state)]
+       [(assoc state ::last-pass-nanos (System/nanoTime))
+        (when pages {::pages [pages]})]))))
+
+;;; ---------------------------------------------------------------------------
+;;; The feed — per tab: a tap and a virtual thread (F2 §1.3)
+;;; ---------------------------------------------------------------------------
+
+(defn- register-tab!
+  "Count one open tab on `agent-id` in the watched registration."
+  [registration agent-id]
+  (swap! registration update agent-id (fnil inc 0)))
+
+(defn- deregister-tab!
+  "Drop one open tab; the last tab out removes the agent entirely, so
+  the render pass stops deriving a page nobody is watching."
+  [registration agent-id]
+  (swap! registration
+         (fn [watched]
+           (let [remaining (dec (long (get watched agent-id 1)))]
+             (if (pos? remaining)
+               (assoc watched agent-id remaining)
+               (dissoc watched agent-id))))))
 
 (defn feed
-  "The SSE response for one tab.
+  "The SSE response for one tab: a tap and a virtual thread — never a
+  graph, never a listener.
 
-  One Datahike listener per connection, registered in `on-open` and
-  removed in `on-close`, so its lifetime is exactly the socket's and a
-  dropped tab leaves nothing behind.
+  `on-open` registers interest for the agent, taps the mult with a
+  `(sliding-buffer 1)`, paints once from the CURRENT database value
+  (the initial full paint — every block, at its own id), offers one
+  render wake so a freshly watched agent is derived without waiting for
+  the next commit, then loops on the tap: take the newest complete
+  snapshot, select this agent's entry, diff against this connection's
+  own last-delivered map, and patch only the changed blocks.
 
-  THE LISTENER DOES ALMOST NOTHING, and that is a hard constraint rather
-  than a style: Datahike invokes it on the writer's commit path, so work
-  inside it is added to EVERY subsequent transaction. It `offer!`s onto
-  a latest-wins mailbox and returns. A full mailbox is not a problem to
-  report — it means a repaint is already pending, and the newest
-  database value is the one that matters.
+  Backpressure walk: this tab's socket backpressure is absorbed by this
+  loop alone — the tap's sliding-1 keeps the newest page pending and
+  the proc never parks (inventory §3.2, measured mechanics §5).
 
-  Painting happens on the connection's own thread, never the writer's."
+  `on-close` untaps and deregisters. The connection owns exactly one
+  virtual thread and one map; nothing outlives the socket."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
   [request {:keys [:seon.cluster.agent/id :seon.store/connection]
             caps :seon.sci.admit/caps
-            coalesce :seon.config.render/coalesce-ms}]
-  (let [;; latest-wins: at most one pending repaint per tab, and the
-        ;; newest database value wins. This is the mailbox the
-        ;; architecture calls for, expressed with the one construct that
-        ;; already means it.
-        mailbox (java.util.concurrent.ArrayBlockingQueue. 1)
-        key (str "seon.render.web/" id "/" (random-uuid))
+            pages-mult :seon.render.web/pages-mult
+            registration :seon.render.web/registration
+            render-channel :seon.render.web/render-channel}]
+  (let [tap (async/chan (async/sliding-buffer 1))
         painting (volatile! true)]
     (datastar.http-kit/->sse-response
      request
      {datastar.http-kit/on-open
       (fn [generator]
-        (d/listen (:seon.store/connection-value request) key
-                  (fn [_report] (.offer mailbox :look)))
+        ;; interest FIRST, so the pass a wake triggers derives this
+        ;; agent; the tap BEFORE the paint, so a snapshot racing the
+        ;; paint is diffed rather than missed
+        (register-tab! registration id)
+        (async/tap pages-mult tap)
         (.start
          (Thread/ofVirtual)
          (fn []
            (try
-             (loop [delivered (paint! generator @connection id caps {})]
-               (when @painting
-                 (if (.poll mailbox coalesce java.util.concurrent.TimeUnit/MILLISECONDS)
-                   ;; a coalescing floor, not a timer: several commits
-                   ;; inside one window produce one repaint, and the
-                   ;; window is a config fact rather than a constant
-                   (recur (paint! generator @connection id caps delivered))
-                   (recur delivered))))
+             (let [initial (page-of @connection id caps nil)]
+               ;; the initial full paint: every block, at its own id
+               (doseq [[_id html] (sort-by key initial)]
+                 (datastar/patch-elements! generator html))
+               (async/offer! render-channel ::wake)
+               (loop [delivered initial]
+                 (when @painting
+                   (when-let [pages (async/<!! tap)]
+                     (if-let [page (get pages id)]
+                       (let [{:seon.render.web/keys [patches]}
+                             (changed delivered page)]
+                         (doseq [[_id html] patches]
+                           ;; default patch mode is `outer` — a complete
+                           ;; morph of one element; the id rides in the
+                           ;; element itself
+                           (datastar/patch-elements! generator html))
+                         (recur page))
+                       ;; a snapshot that predates this tab's interest
+                       ;; carries no entry for its agent; the wake this
+                       ;; tab offered brings the next one
+                       (recur delivered))))))
              (catch Throwable _ nil)))))
 
       datastar.http-kit/on-close
       (fn [_generator _status]
         (vreset! painting false)
-        (d/unlisten connection key))})))
+        (async/untap pages-mult tap)
+        (async/close! tap)
+        (deregister-tab! registration id))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Routes
@@ -305,7 +514,6 @@
   {:malli/schema [:=> [:cat :seon.render.web/service] fn?]}
   [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps
-    coalesce :seon.config.render/coalesce-ms
     :as service}]
   (fn [request]
     (let [uri (:uri request)
@@ -332,11 +540,14 @@
                          :seon.render.web/feed-url (str "/feed/" agent-id)})})
 
         (str/starts-with? uri "/feed/")
-        (feed (assoc request :seon.store/connection-value connection)
-              {:seon.cluster.agent/id (agent-of "/feed/")
-               :seon.store/connection connection
-               :seon.sci.admit/caps caps
-               :seon.config.render/coalesce-ms coalesce})
+        (feed request
+              (merge {:seon.cluster.agent/id (agent-of "/feed/")}
+                     (select-keys service
+                                  [:seon.store/connection
+                                   :seon.sci.admit/caps
+                                   :seon.render.web/pages-mult
+                                   :seon.render.web/registration
+                                   :seon.render.web/render-channel])))
 
         (= "/data" uri)
         ;; the drill over the CLUSTER's own facts. Its cursor is
@@ -466,8 +677,9 @@
       fell-back? (assoc :seon.render.web/wanted-port wanted))))
 
 (defn stop!
-  "Close the server. Every connection's `on-close` unlistens its own
-  listener, so nothing survives this that could keep painting."
+  "Close the server. Every connection's `on-close` untaps its own tap
+  and drops its registration, so nothing survives this that could keep
+  painting."
   {:malli/schema [:=> [:cat :seon.render.web/server] :nil]}
   [{:keys [:seon.render.web/server]}]
   (http/server-stop! server)

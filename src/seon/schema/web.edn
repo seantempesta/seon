@@ -5,13 +5,23 @@
  ; ---------------------------------------------------------------------------
 
  ; `:seon.config.render/coalesce-ms` is DECLARED in config.edn, with the
- ; other dials and inside the config singleton entity — which is what
- ; makes it an installed attribute rather than only a shape. It is a
- ; coalescing FLOOR, not a timer standing in for an unobservable event:
- ; the observable event is the commit and `listen!` already delivers it.
- ; This file references it; one attribute, one declaration site.
+ ; other dials and inside the config singleton entity. It is a
+ ; coalescing FLOOR honored at the RENDER PROC (F2 §1.2), read from the
+ ; config facts per pass — not a timer standing in for an unobservable
+ ; event: the observable event is the commit and the routing listener
+ ; already delivers it.
 
  :seon.render.web/port [:int {:min 0 :max 65535}]
+
+ ; The fan-out the complete page snapshots ride: the render proc's
+ ; `::pages` out-port, multed, tapped per tab with a sliding-1.
+ :seon.render.web/pages-mult [:fn {:gen/gen seon.render.web/mult-generator} seon.render.web/mult?]
+
+ ; The watched-agent registration: a process-local atom
+ ; `{agent-id → open-tab count}`, written by the feed's
+ ; on-open/on-close, read by the render pass. Disposable by the
+ ; transport law — it names live sockets, and reconnect = repaint.
+ :seon.render.web/registration [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
  :seon.render.web/url [:string {:min 1}]
 
  ; The http-kit server object. A `[:fn]` with an honest generator, the
@@ -40,7 +50,9 @@
   [:seon.store/connection :seon.store/connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/render-channel :seon.flow/channel]
   [:seon.render.web/port {:optional true} :seon.render.web/port]]
 
  :seon.render.web/feed-request
@@ -48,7 +60,9 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.store/connection :seon.store/connection]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/render-channel :seon.flow/channel]]
 
  :seon.render.web/page-request
  [:map {:closed true}

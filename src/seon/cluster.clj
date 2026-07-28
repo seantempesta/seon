@@ -558,17 +558,25 @@
   binds an ephemeral one and says BOTH numbers, because a name collision
   must not look like a broken build and a moved bookmark must not fail
   silently."
-  [connection cluster-name dials]
+  [connection cluster-name dials view]
   (let [wanted (or (:seon.config.web/port dials)
                    (web/derived-port cluster-name))
         served (web/start!
-                (cond-> {:seon.render.web/port wanted
-                         :seon.store/connection connection
-                         :seon.cluster.agent/id root-agent-id
-                         :seon.sci.admit/caps
-                         (config/result-caps dials)
-                         :seon.config.render/coalesce-ms
-                         (:seon.config.render/coalesce-ms dials)}))]
+                ;; THE VIEW HALF comes from the armed layer, not from
+                ;; here: the mult, the watched registration, and the
+                ;; render wake channel all belong to the render proc's
+                ;; pipeline, and the web service only taps and offers.
+                ;; The coalesce floor is no longer passed — the PROC
+                ;; reads it from the config facts per pass (F2 §1.2), so
+                ;; a live dial change applies without restarting a tab.
+                (merge {:seon.render.web/port wanted
+                        :seon.store/connection connection
+                        :seon.cluster.agent/id root-agent-id
+                        :seon.sci.admit/caps (config/result-caps dials)}
+                       (select-keys view
+                                    [:seon.render.web/pages-mult
+                                     :seon.render.web/registration
+                                     :seon.render.web/render-channel])))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
       (log/warn (str "seon " cluster-name " view: port " unavailable
                      " was taken, serving on "
@@ -699,15 +707,22 @@
              (:seon.config.error/escalate-to dials)))))
 
 (defn- cluster-graph-definition
-  "The cluster's OWN small graph (F1 R7): the armer proc now, the
-  render proc at F2, a schedule proc later — one cluster graph per
-  cluster, so the component that arms agents has exactly the
-  ping/error/pause uniformity every other proc has."
-  [handle routing]
+  "The cluster's OWN small graph (F1 R7, F2 §1): the armer proc and the
+  render proc — a schedule proc later. One cluster graph per cluster,
+  so the components that arm agents and derive pages have exactly the
+  ping/error/pause uniformity every other proc has. The render proc's
+  channels are external ports (created by `arm-agents!`, carried on the
+  handle and the view), so the graph definition stays pure data."
+  [handle routing view]
   {:procs {:seon.cluster.agent/armer
            {:proc (flow/var-process #'cluster.agent/armer-step :io
                                     {:seon.cluster.loop/cluster handle
-                                     :seon.cluster.agent/routing routing})}}
+                                     :seon.cluster.agent/routing routing})}
+           :seon.render.web/render
+           {:proc (flow/var-process #'web/render-step :io
+                                    (assoc view
+                                           :seon.cluster.loop/cluster
+                                           handle))}}
    :conns []})
 
 (defn- arm-agents!
@@ -737,9 +752,20 @@
         handle (loop-handle connection cluster-name process armer-channel
                             stream-channel completion)
         routing (cluster.agent/routing)
+        ;; the render pipeline's external ports (F2 §1): the wake
+        ;; channel route! delivers into, the pages channel the proc's
+        ;; snapshots exit on (multed here, tapped per tab), the watched
+        ;; registration the feed writes, and the proc's own orderly-stop
+        ;; completion — all process-local, all free to lose
+        render-channel (async/chan (async/sliding-buffer 1))
+        pages-channel (async/chan (async/sliding-buffer 1))
+        view {:seon.render.web/render-channel render-channel
+              :seon.render.web/pages-channel pages-channel
+              :seon.render.web/registration (atom {})
+              :seon.render.web/completion (async/promise-chan)}
         drops (atom 0)
         graph (flow.core/create-flow
-               (cluster-graph-definition handle routing))
+               (cluster-graph-definition handle routing view))
         started (flow.core/start graph)
         _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!
@@ -803,6 +829,7 @@
                   :seon.cluster.wake/channels
                   (fn [] (cluster.agent/channels routing))
                   :seon.cluster.wake/armer-channel armer-channel
+                  :seon.cluster.wake/render-channel render-channel
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.cluster.agent/route})
@@ -813,6 +840,12 @@
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
      :seon.cluster.agent/routing routing
+     ;; the view half `serve!` hands to the web service: one mult over
+     ;; the proc's pages out-port, the shared registration, and the
+     ;; wake channel a freshly opened tab offers into
+     :seon.render.web/view (assoc view
+                                  :seon.render.web/pages-mult
+                                  (async/mult pages-channel))
      :seon.error/drops drops}))
 
 (defn- disarm-agents!
@@ -847,8 +880,15 @@
                      :seon.cluster.wake/key :seon.cluster.agent/route}))
   (when-let [graph (:seon.flow/graph instance)]
     (flow.core/stop graph)
+    ;; BOTH cluster-graph procs are joined at their own completions —
+    ;; `flow/stop` only queues `::flow/stop`, so a render pass holding
+    ;; the branch connection would otherwise still be deriving when the
+    ;; connection is released
     (async/<!! (:seon.cluster.loop/completion
-                (:seon.cluster.loop/cluster instance))))
+                (:seon.cluster.loop/cluster instance)))
+    (some-> (get-in instance [:seon.render.web/view
+                              :seon.render.web/completion])
+            async/<!!))
   (when-let [routing (:seon.cluster.agent/routing instance)]
     (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
       (cluster.agent/disarm! {:seon.cluster.agent/id agent-id
@@ -858,6 +898,12 @@
   (when-let [handle (:seon.cluster.loop/cluster instance)]
     (async/close! (:seon.cluster.wake/channel handle))
     (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
+  ;; the render pipeline's own ports, after the proc that reads them has
+  ;; published its completion: a tab still looping on a tap sees its tap
+  ;; close and falls out of the loop
+  (when-let [view (:seon.render.web/view instance)]
+    (async/close! (:seon.render.web/render-channel view))
+    (async/close! (:seon.render.web/pages-channel view)))
   nil)
 
 (defn- stack-tower!
@@ -918,7 +964,8 @@
           ;; a database VALUE, not the connection: `effective` reads
           ;; the dials at a basis like every other derivation
           dials (config/effective @connection cluster-name)
-          served (serve! connection cluster-name dials)
+          served (serve! connection cluster-name dials
+                         (:seon.render.web/view instance))
           ;; THE ADVERTISEMENT GAINS THE URL, so discovery never parses a
           ;; log. The operator reads advertisements as its only truth,
           ;; and a URL scraped from stdout would be a second source that

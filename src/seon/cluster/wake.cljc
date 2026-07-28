@@ -151,6 +151,14 @@
     wake: `offer!` to the armer, whose pass derives
     (agents in facts) − (armed set) and arms each.
 
+  THE THIRD DELIVERY (F2 §1.4) is per REPORT, not per datom: one
+  payload-free wake into the render channel, UNCONDITIONALLY. Every
+  commit is render interest — receipts, replies, and problems are all
+  page content — so matching would be a hand-list of read attributes
+  (the class F2 R6 refuses until the program graph can compute it).
+  One line under the same two prohibitions, and one listener per
+  cluster instead of resurrecting a second registration.
+
   A closed mailbox refusing delivery is a FAULT fact, exactly as in
   `listen!` — a swallowed failure nobody hears about is an invisible
   one. Coalescing on every `(sliding-buffer 1)` target is safe by the
@@ -161,13 +169,22 @@
   {:malli/schema [:=> [:cat :seon.cluster.wake/route-request]
                   :seon.cluster.wake/key]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
-           :seon.cluster.wake/armer-channel
+           :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
   (d/listen
    connection
    key
    (fn [report]
      (try
+       ;; the render wake FIRST and once for the whole report: a page
+       ;; is derived from facts, so the pass wants only "look" — and
+       ;; putting it ahead of the routing keeps it unconditional by
+       ;; construction rather than by a reviewer checking every arm
+       (when-not (async/offer! render-channel ::wake)
+         (async/offer! fault-channel
+                       (ex-info "the render channel refused delivery"
+                                {:seon.error/kind ::undeliverable-wake
+                                 ::key key})))
        (doseq [datom (:tx-data report)]
          (case (nth datom 1)
            :seon.cluster.agent/id
