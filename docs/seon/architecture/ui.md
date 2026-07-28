@@ -30,6 +30,17 @@ the one `:interrupt-fn`, value admission, and bounded output. Supervision,
 bounded evals, and cheap flow-graph rebuilds protect the process; the UI does
 not rely on a process wall.
 
+**Kind is the boundary (owner, 2026-07-29).** A kind is never chosen
+interior to the system: the delivery boundary states it — the agent
+prompt boundary asks for `:seon.render/ai`, the browser boundary for
+`:seon.render/html`, the log sink for `:seon.render/log`. The same
+value returning from the same eval renders ai to the agent and html to
+the browser because the ENDPOINT differs, not the data. Only boundary
+owners name a kind; interior code passes units through; renderers
+declare what they can produce and the boundary picks. This is why kind
+is a request argument and never a stored fact: a boundary is a place,
+not a property of data.
+
 ## Interactions are database transactions
 
 An interactive control posts the authored handler symbol and ordinary
