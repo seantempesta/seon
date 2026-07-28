@@ -32,10 +32,11 @@ tions, ≤4 questions per call) from these docs, in this order:
 IN FLIGHT RIGHT NOW (review on return, then refill): the N4 agent
 (SendMessage a1862bb9eb02818eb — derived ports, URL into the
 advertisement, boot banner, home-cluster design note); the
-fresh-operator sol lane (bin/codex-agent, name fresh-operator —
-bin/seon-fresh in bb with FLEET semantics: start multi-name/--count,
-seed, status at 40 clusters; single-quote resume payloads, backticks
-get eaten). Gate baseline 388/1509/0 (+ the two lanes' additions).
+fresh-operator sol lane STOPPED WITHOUT LANDING (no bin/seon-fresh,
+no commit — resume it by name to completion; the full fleet spec was
+delivered on its last resume: bin/seon-fresh in bb, ads as truth,
+start multi-name/--count + seed + status at 40 clusters +
+open/stop/logs; single-quote resume payloads, backticks get eaten). Gate baseline 388/1509/0 (+ the two lanes' additions).
 The local Qwen server runs as background task (harness) on :8090 —
 it never exits by design; the owner knows. Agent A/B lessons +
 long-lived-lane pattern are in auto-memory. The N4 agent also owes
