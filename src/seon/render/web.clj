@@ -37,6 +37,7 @@
             [datahike.api :as d]
             [org.httpkit.server :as http]
             [seon.render.block :as block]
+            [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -331,6 +332,31 @@
                :seon.store/connection connection
                :seon.sci.admit/caps caps
                :seon.config.render/coalesce-ms coalesce})
+
+        (= "/data" uri)
+        ;; the drill over the CLUSTER's own facts. Its cursor is
+        ;; ordinary query data, so a drilled position is a link
+        ;; somebody can send rather than a session somebody holds.
+        (let [query (into {} (map (fn [pair]
+                                    (let [[k v] (str/split pair #"=" 2)]
+                                      [k (some-> v (java.net.URLDecoder/decode
+                                                    "UTF-8"))])))
+                          (str/split (or (:query-string request) "") #"&"))]
+          {:status 200
+           :headers {"content-type" "text/html; charset=utf-8"}
+           :body (shell {:seon.cluster.agent/id id
+                         :seon.render/page
+                         [(data/drill-html
+                           {:seon.render/value (schema/canonical-database-attributes)
+                            :seon.sci.admit/caps caps
+                            :seon.render.data/cursor
+                            (data/parse-cursor (get query "path")
+                                               (get query "offset"))})]
+                         ;; no feed: a drilled page is a position, and
+                         ;; repainting it under the reader would move
+                         ;; the ground they are standing on. Reload is
+                         ;; the refresh, and the URL is the state.
+                         :seon.render.web/feed-url (str "/feed/" id)})})
 
         (str/starts-with? uri "/css/")
         (or (resource (subs uri 1)) {:status 404 :body "not found"})

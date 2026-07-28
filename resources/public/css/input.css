@@ -646,3 +646,92 @@ details.tool-call-details[open] .tool-preview {
   color: var(--color-warning);
   font-size: 0.625rem;
 }
+
+/* ============================================================
+   The /data drill and the streaming exercises.
+   Same rule as above: semantic classes, styled once, so an
+   agent-authored render never has to reach for utility strings.
+   ============================================================ */
+
+.seon-data-drill {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.seon-data-crumbs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.seon-data-crumb, .seon-data-step, .seon-data-page {
+  color: var(--color-info);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+.seon-data-crumb:hover, .seon-data-step:hover, .seon-data-page:hover {
+  color: var(--color-signal);
+}
+.seon-data-crumb + .seon-data-crumb::before {
+  content: "/ ";
+  color: var(--color-text-600);
+}
+/* The range line is the honest "this is a window" signal, so it is
+   always present and never styled away. */
+.seon-data-range { color: var(--color-text-500); font-size: 0.625rem; }
+.seon-data-window {
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  padding: 0.4rem 0.6rem;
+}
+.seon-data-entry {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr;
+  gap: 0 0.75rem;
+  padding: 0.1rem 0;
+}
+.seon-data-entry + .seon-data-entry { border-top: 1px solid var(--color-base-850); }
+.seon-data-pager { display: flex; gap: 1rem; }
+.seon-data-leaf {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text-100);
+}
+
+.seon-stream-tokens { display: flex; align-items: baseline; gap: 0.4rem; }
+.seon-stream-label {
+  color: var(--color-text-600);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.seon-stream-count {
+  color: var(--color-signal);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  /* tabular figures so a climbing counter does not shift the layout
+     on every morph — a number that jitters reads as a broken page */
+  font-variant-numeric: tabular-nums;
+}
+.seon-stream-reply {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-100);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.seon-stream-idle { color: var(--color-text-600); font-style: italic; }
+/* The cursor is CSS on an EMPTY span, never a character in the text,
+   so the reply's bytes are exactly the model's and a copy-paste does
+   not pick up decoration. */
+.seon-stream-cursor {
+  display: inline-block;
+  width: 0.5rem;
+  height: 1em;
+  margin-left: 0.1rem;
+  vertical-align: text-bottom;
+  background: var(--color-signal);
+  animation: seon-blink 1.06s step-end infinite;
+}
+@keyframes seon-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .seon-stream-cursor { animation: none; opacity: 0.6; }
+}

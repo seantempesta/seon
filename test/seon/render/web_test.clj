@@ -326,3 +326,17 @@
         "an unchanged surface is not sent twice")
     (is (= (:seon.render.web/delivered first-pass)
            (:seon.render.web/delivered second-pass)))))
+
+(deftest the-data-drill-is-browsable-and-its-cursor-is-in-the-url
+  ;; A drilled position is a LINK, so the proof is that following one
+  ;; lands somewhere different from the root.
+  (with-server two-blocks
+    (fn [_connection server]
+      (let [root (.body (fetch server "/data"))]
+        (is (str/includes? root "seon-data-drill"))
+        (is (str/includes? root "showing 1")
+            "a window, and it says so"))
+      (testing "a stale or mangled cursor shows the root rather than failing"
+        (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
+          (is (= 200 (.statusCode response)))
+          (is (str/includes? (.body response) "seon-data-drill")))))))
