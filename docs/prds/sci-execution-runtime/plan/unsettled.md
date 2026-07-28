@@ -10,7 +10,11 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
-**WORKING EDGE (2026-07-28 midnight).** F2 COMPLETE (5daf05e24,
+**WORKING EDGE (2026-07-28 midnight).** QUEUED NEXT (owner ruling #2):
+the namespace+distance CONTEXT PILOT — one agent'''s prompt derived as
+render(namespace, distance) over the entity graph, static blocks
+reduced to scaffold; dispatch when the render-distance lane lands;
+its evidence feeds the N5 plan revision. F2 COMPLETE (5daf05e24,
 2e372027d, a468a92b1, 72019b7ae, 96a2ddfaf) — central loop deleted
 (13 fns, 1 ns, 6 attrs, 0 new), live SSE proven, gate 396/1564/0.
 THE SPINE F0-F2 IS LANDED: agents are flows end to end. MCP bridge

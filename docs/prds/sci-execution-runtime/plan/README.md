@@ -552,6 +552,22 @@ may reintroduce a shadow build into the dev feedback path.
   more resilient as it is used and fails. Fold into the N5 plan at its
   post-falsification revision; the distance accretion is dispatched
   now as a seal revision to the block request.
+  **Ruling 2026-07-28 post-midnight #2 (owner, verbatim): "I want to
+  try building up the WHOLE render system this way. Namespace and
+  distance centric context for agents."** This is the organizing
+  principle, not a feature: an agent'''s context IS render(its
+  namespace, distance N) — every hop by its owner'''s lens,
+  redirectable at any slot, distance implied 1. The call convention:
+  distance is an argument TO the renderer (never a property of it);
+  opting deeper is the renderer'''s compositional act — delegate
+  neighbors to THEIR renderers through the one router, expansion
+  decrements per hop, distance 0 = name only; a slot may carry an
+  explicit projection symbol (the override point), captured in
+  provenance like every projection choice. Static context blocks
+  shrink to the scaffold (system message, basics). The N5 plan
+  re-centers on this at its post-falsification revision; the PILOT —
+  one agent'''s prompt derived as its namespace view at entity-graph
+  distance — dispatches when the distance accretion lands.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
