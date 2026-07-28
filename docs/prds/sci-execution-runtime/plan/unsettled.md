@@ -32,11 +32,18 @@ tions, ≤4 questions per call) from these docs, in this order:
 IN FLIGHT RIGHT NOW (review on return, then refill): the N4 agent
 (SendMessage a1862bb9eb02818eb — derived ports, URL into the
 advertisement, boot banner, home-cluster design note); the
-fresh-operator sol lane STOPPED WITHOUT LANDING (no bin/seon-fresh,
-no commit — resume it by name to completion; the full fleet spec was
-delivered on its last resume: bin/seon-fresh in bb, ads as truth,
-start multi-name/--count + seed + status at 40 clusters +
-open/stop/logs; single-quote resume payloads, backticks get eaten). Gate baseline 388/1509/0 (+ the two lanes' additions).
+fresh-operator lane left bin/seon-fresh + script/seon/fresh_operator.clj
+UNTRACKED/UNCOMMITTED. **OWNER SIMPLIFICATION (morning, overrides the
+fleet spec): NO multi-name, NO --count, NO seed command — "I can run
+the command several times to launch more clusters; I don't want
+command line args to be overcomplicated."** The operator is: start
+[name?] (no arg → default if free else a generated name; each
+invocation = one more cluster; prints the URL), status, open [name?],
+stop [name?], logs [name?]. Resume the lane with THIS spec and have
+it rework its uncommitted files down to it (single-quote the resume
+payload). The owner also KILLED the N4 agent's wind-down mid-commit —
+its ports/advertisement/banner slice DID land first (f88b537cf, gate
+392/1522/0 per its last report; verify). Gate baseline 388/1509/0 (+ the two lanes' additions).
 The local Qwen server runs as background task (harness) on :8090 —
 it never exits by design; the owner knows. Agent A/B lessons +
 long-lived-lane pattern are in auto-memory. The N4 agent also owes
