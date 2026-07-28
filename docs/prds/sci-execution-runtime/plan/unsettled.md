@@ -10,6 +10,22 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**WORKING EDGE (2026-07-28 midnight).** F2 COMPLETE (5daf05e24,
+2e372027d, a468a92b1, 72019b7ae, 96a2ddfaf) — central loop deleted
+(13 fns, 1 ns, 6 attrs, 0 new), live SSE proven, gate 396/1564/0.
+THE SPINE F0-F2 IS LANDED: agents are flows end to end. MCP bridge
+decoupled from source (ade7d2344) + verified live; boot reopen
+accretion (546987dfc); default cluster RESET (owner-authorized; old
+data in tmp/reset-proof), page 200. NO FABLE SUBAGENTS (owner ruling
+— Agent tool inherits parent model; always pass model opus; in
+auto-memory). IN FLIGHT: renderable-corpus N5 plan (Opus — the
+namespace-centered/scoped-views/bisect-to-owners rulings, see README
+late-night batches); fleet-oversight block (sol); operator
+stop-fallback (sol). NEXT SPINE: F4 live drives (N-agent parallel,
+two-cluster, 100-parked, kill -9), then N5 per the returning plan.
+Known 500-class issue: stale-vocabulary rows on reopened branches —
+boot should refuse loudly (filed by F2 lane).
+
 **WORKING EDGE (2026-07-28 night).** QUEUED (owner direction, late night):
 a fleet-oversight BLOCK over flow ping — one unit pinging the
 cluster's graphs (parked/mid-turn, current-run-id, episode-runs,
