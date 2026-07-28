@@ -9,6 +9,9 @@
   classpath), one directory per scenario, so the production
   `seon/schema` resource directory is never touched by a test."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -66,53 +69,79 @@
 (schema/register-core-predicate! 'seon.schema.edn-test/fixture-instant?
                                  fixture-instant?)
 
-(deftest the-gate-admits-and-refuses-populations
-  (testing "a resolvable, honest population admits"
-    (is (vector?
-         (schema.edn/admit
-          {:seon.schema/forms
-           {:seon.schema.edn.gate/base [:string {:min 1}]
-            :seon.schema.edn.gate/alias :seon.schema.edn.gate/base
-            :seon.schema.edn.gate/stamp
-            [:fn {:gen/schema :inst}
-             'seon.schema.edn-test/fixture-instant?]}}))))
-  (testing "an unresolved reference refuses, naming the key"
-    (let [data (test-support/refusal-data
-                #(schema.edn/admit
-                  {:seon.schema/forms
-                   {:seon.schema.edn.gate/dangling
-                    :seon.schema.edn.gate/nowhere}}))]
-      (is (map? data))))
-  (testing "a [:fn] whose UNLOADED owner namespace registers the
-            predicate at load admits — the gate requiring-resolves the
-            owner instead of demanding load-order (nothing requires
-            seon.schema.edn-test-fixture; admission loads it)"
-    (is (vector?
-         (schema.edn/admit
-          {:seon.schema/forms
-           {:seon.schema.edn.gate/late
-            [:fn {:gen/schema :inst}
-             'seon.schema.edn-test-fixture/late-instant?]}}))))
-  (testing "a [:fn] in a namespace that does not exist still refuses"
-    (is (map? (test-support/refusal-data
-               #(schema.edn/admit
-                 {:seon.schema/forms
-                  {:seon.schema.edn.gate/phantom
-                   [:fn {:gen/schema :inst}
-                    'seon.schema.no-such-namespace/predicate?]}})))))
-  (testing "a [:fn] naming no registered core predicate refuses"
-    (is (map? (test-support/refusal-data
-               #(schema.edn/admit
-                 {:seon.schema/forms
-                  {:seon.schema.edn.gate/ghost
-                   [:fn {:gen/schema :inst}
-                    'seon.schema.edn-test/no-such-predicate?]}})))))
-  (testing "a [:fn] with no honest generator refuses"
-    (is (map? (test-support/refusal-data
-               #(schema.edn/admit
-                 {:seon.schema/forms
-                  {:seon.schema.edn.gate/dishonest
-                   [:fn 'seon.schema.edn-test/fixture-instant?]}}))))))
+(def ^:private mutation-generator
+  (gen/elements
+   [{:mutation :unresolved
+     :attribute :seon.schema.edn.gate/alias
+     :error ::schema.edn/unresolved-reference}
+    {:mutation :dishonest-generator
+     :attribute :seon.schema.edn.gate/stamp
+     :error ::schema.edn/dishonest-generator}
+    {:mutation :unregistered-predicate
+     :attribute :seon.schema.edn.gate/stamp
+     :error ::schema.edn/unregistered-predicate}
+    {:mutation :malformed
+     :attribute :seon.schema.edn.gate/malformed
+     :error :seon.schema/invalid-schema}]))
+
+(defn- valid-population
+  []
+  {:seon.schema.edn.gate/base [:string {:min 1}]
+   :seon.schema.edn.gate/alias :seon.schema.edn.gate/base
+   :seon.schema.edn.gate/stamp
+   [:fn {:gen/schema :inst}
+    'seon.schema.edn-test/fixture-instant?]})
+
+(defn- mutate-population
+  [forms mutation]
+  (case mutation
+    :unresolved
+    (assoc forms :seon.schema.edn.gate/alias
+           :seon.schema.edn.gate/nowhere)
+
+    :dishonest-generator
+    (assoc forms :seon.schema.edn.gate/stamp
+           [:fn 'seon.schema.edn-test/fixture-instant?])
+
+    :unregistered-predicate
+    (assoc forms :seon.schema.edn.gate/stamp
+           [:fn {:gen/schema :inst}
+            'seon.schema.edn-test/no-such-predicate?])
+
+    :malformed
+    (assoc forms :seon.schema.edn.gate/malformed [:not-a-schema])))
+
+(deftest one-gate-admits-populations-or-names-the-generated-mutation
+  (test-support/assert-check!
+   (tc/quick-check
+    80
+    (prop/for-all [{:keys [mutation attribute error]} mutation-generator]
+      (let [forms (valid-population)
+            admitted (schema.edn/admit {:seon.schema/forms forms})
+            refusal
+            (try
+              (schema.edn/admit
+               {:seon.schema/forms (mutate-population forms mutation)})
+              test-support/committed
+              (catch clojure.lang.ExceptionInfo failure
+                (ex-data failure)))]
+        (and (= (set (keys forms))
+                (into #{} (map :seon.schema/key) admitted))
+             (= error (or (::schema.edn/error refusal)
+                          (:seon.schema/error refusal)))
+             (= attribute (or (::schema.edn/attribute refusal)
+                              (:seon.schema/key refusal)))
+             (= :user-input (:seon.error/kind refusal)))))
+    :seed 202607280703)
+   "schema population admission"))
+
+(deftest an-unloaded-predicate-owner-registers-at-admission
+  (is (vector?
+       (schema.edn/admit
+        {:seon.schema/forms
+         {:seon.schema.edn.gate/late
+          [:fn {:gen/schema :inst}
+           'seon.schema.edn-test-fixture/late-instant?]}}))))
 
 (deftest register!-flows-through-the-same-gate
   (testing "the agent producer meets the same honesty bar — one gate,

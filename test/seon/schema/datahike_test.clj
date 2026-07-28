@@ -1,93 +1,127 @@
 (ns seon.schema.datahike-test
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as support]))
 
 (schema/register! ::title :string)
-(schema/register! ::mixed-value [:or :string :int])
-(schema/register! ::string-set
-                  [:set {:seon.db/index true
-                         :seon.db/no-history? true}
-                   :string])
-(schema/register! ::string-set-alias ::string-set)
-(schema/register! ::tags ::string-set-alias)
-(schema/register! ::secondary-double
-                  [:double {:db.secondary/only true}])
-(schema/register! ::and-secondary-double
-                  [:and {:db.secondary/only true} :double])
-(schema/register! ::secondary-float
-                  [:float {:db.secondary/only true}])
-(schema/register! ::and-secondary-float
-                  [:and {:db.secondary/only true} :float])
-(schema/register! ::and-string-set
-                  [:and {} [:set :string]])
 
-(defn- result-or-error-kind [f form]
-  (try
-    [:value (f form)]
-    (catch clojure.lang.ExceptionInfo error
-      [:error (:seon.error/kind (ex-data error))])))
+(def ^:private scalar-generator
+  (gen/elements
+   [:string :int :double :float :keyword :boolean :inst :uuid :symbol]))
 
-(deftest mixed-unions-declare-the-edn-string-storage-type
-  (is (= {:db/ident ::mixed-value
-          :db/valueType :db.type/string
-          :db/cardinality :db.cardinality/one}
-         (schema.datahike/malli->datahike-attr ::mixed-value))))
+(def ^:private facet-generator
+  (gen/let [indexed? gen/boolean
+            no-history? gen/boolean
+            uniqueness (gen/elements [nil :identity :value])]
+    (cond-> {}
+      indexed? (assoc :seon.db/index true)
+      no-history? (assoc :seon.db/no-history? true)
+      (= :identity uniqueness) (assoc :seon.db/identity true)
+      (= :value uniqueness) (assoc :seon.db/unique true))))
 
-(deftest alias-chains-preserve-collection-cardinality-and-storage-facets
-  (is (= {:db/ident ::tags
-          :db/valueType :db.type/string
-          :db/cardinality :db.cardinality/many
-          :db/index true
-          :db/noHistory true}
-         (schema.datahike/malli->datahike-attr ::tags))))
+(def ^:private supported-form-generator
+  (gen/one-of
+   [(gen/let [base scalar-generator
+              properties facet-generator]
+      {:base base :properties properties})
+    (gen/let [head (gen/elements [:vector :set :sequential])
+              child scalar-generator
+              indexed? gen/boolean
+              no-history? gen/boolean]
+      {:base [head child]
+       :properties
+       (cond-> {}
+         indexed? (assoc :seon.db/index true)
+         no-history? (assoc :seon.db/no-history? true))})
+    (gen/let [component? gen/boolean
+              identity? gen/boolean]
+      {:base [:set :seon.db/ref]
+       :properties
+       (cond-> {}
+         component? (assoc :seon.db/component true)
+         identity? (assoc :seon.db/identity true))})
+    (gen/fmap (fn [base]
+                {:base base :properties {:db.secondary/only true}})
+              (gen/elements [:double :float]))
+    (gen/return {:base [:or :string :int] :properties {}})]))
 
-(deftest and-wrapped-secondary-attributes-map
-  (is (= {:db/ident ::and-secondary-double
-          :db/valueType :db.type/tuple
-          :db/cardinality :db.cardinality/one
-          :db.secondary/only true}
-         (schema.datahike/malli->datahike-attr ::and-secondary-double))))
+(defn- carry-properties
+  [form properties]
+  (if (empty? properties)
+    form
+    (if (vector? form)
+      (into [(first form) properties] (rest form))
+      [form properties])))
 
-(deftest guards-treat-direct-and-and-wrapped-forms-identically
-  (testing "secondary-only admission resolves the stored value type"
-    (doseq [[direct wrapped] [[::secondary-double ::and-secondary-double]
-                              [::secondary-float ::and-secondary-float]]]
-      (is (= (dissoc (schema.datahike/malli->datahike-attr direct) :db/ident)
-             (dissoc (schema.datahike/malli->datahike-attr wrapped)
-                     :db/ident)))))
-  (testing "collection child and cardinality guards resolve the stored form"
-    (is (= {:db/valueType :db.type/string
-            :db/cardinality :db.cardinality/many}
-           (dissoc (schema.datahike/malli->datahike-attr ::and-string-set)
-                   :db/ident))))
-  (testing "every form guard has direct and :and-wrapped parity"
-    (doseq [guard [schema.datahike/form->datahike-value-type
-                   schema.datahike/form->cardinality
-                   schema.datahike/form->child-form]
-            form [:string
-                  [:enum :open :done]
-                  [:set :string]
-                  [:maybe :string]]]
-      (is (= (result-or-error-kind guard form)
-             (result-or-error-kind guard [:and {} form]))
-          (str guard " disagreed for " form)))))
+(defn- declarations
+  [{:keys [base properties]}]
+  (let [direct (carry-properties base properties)
+        snapshot (schema/snapshot-state)]
+    (try
+      (schema/register! ::direct direct)
+      (schema/register! ::wrapped [:and properties base])
+      (schema/register! ::alias-base direct)
+      (schema/register! ::alias-middle ::alias-base)
+      (schema/register! ::aliased ::alias-middle)
+      (mapv #(dissoc (schema.datahike/malli->datahike-attr %) :db/ident)
+            [::direct ::wrapped ::aliased])
+      (finally
+        (schema/restore-state! snapshot)))))
+
+(deftest supported-ast-wrappers-and-aliases-have-one-declaration
+  (support/assert-check!
+   (tc/quick-check
+    80
+    (prop/for-all [generated supported-form-generator]
+      (let [[direct wrapped aliased] (declarations generated)]
+        (and (= direct wrapped aliased)
+             (contains? direct :db/valueType)
+             (contains? direct :db/cardinality)
+             (contains? #{:db.cardinality/one :db.cardinality/many}
+                        (:db/cardinality direct)))))
+    :seed 202607280701)
+   "supported schema AST equivalence"))
+
+(def ^:private refused-form-generator
+  (gen/elements
+   [{:form [:maybe :string] :rule :nilable}
+    {:form [:string {:db.secondary/only true}] :rule :secondary}
+    {:form [:enum "not-a-keyword"] :rule :enum}
+    {:form [:map-of :string :string] :rule :unstorable}]))
+
+(deftest unsupported-database-attributes-refuse-at-one-rule
+  (support/assert-check!
+   (tc/quick-check
+    40
+    (prop/for-all [{:keys [form]} refused-form-generator]
+      (let [snapshot (schema/snapshot-state)]
+        (try
+          (let [data (try
+                       (schema/register! ::refused form)
+                       (schema.datahike/malli->datahike-attr ::refused)
+                       support/committed
+                       (catch clojure.lang.ExceptionInfo error
+                         (ex-data error)))]
+            (and (map? data)
+                 (= :user-input (:seon.error/kind data))))
+          (finally
+            (schema/restore-state! snapshot)))))
+    :seed 202607280702)
+   "unsupported database attribute refusal"))
 
 (deftest registered-shape-round-trips-through-datahike
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
+  (support/with-database
+    {:seon.test-support/extra-schema
+     [(schema.datahike/malli->datahike-attr ::title)]}
+    (fn [connection]
       (testing "derive, install, transact, and read through the public call shape"
-        (d/transact connection
-                    (schema.datahike/malli->datahike-schema [::title]))
         (d/transact connection [{::title "Alpha"}])
         (is (= "Alpha"
                (d/q '[:find ?title .
                       :where [_ ::title ?title]]
-                    (d/db connection)))))
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+                    (d/db connection))))))))
