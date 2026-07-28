@@ -10,7 +10,7 @@
             [datahike.api :as d]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.test-support :as test-support])
   (:import [java.nio.charset StandardCharsets]
            [java.util UUID]))
 
@@ -42,22 +42,6 @@
 (def ^:private unmanaged-process
   "seon.db.process/unmanaged")
 
-(def ^:private process-identity-schema
-  {:db/ident :seon.db.process/id
-   :db/valueType :db.type/string
-   :db/cardinality :db.cardinality/one
-   :db/unique :db.unique/identity})
-
-(def ^:private model-attributes
-  [:seon.db/process
-   :seon.db/user
-   :seon.config/cluster
-   :seon.config/applied-manifest-digest
-   :seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/concurrency
-   :seon.config/on-core-error
-   :seon.cluster.run/id])
-
 (def ^:private digest
   (str/join (repeat 64 "a")))
 
@@ -68,24 +52,18 @@
 
 (defn- with-model-database
   ([body]
-   (with-model-database (random-uuid) body))
+   (test-support/with-database
+     (fn [connection]
+       (d/transact connection
+                   [{:seon.db.process/id unmanaged-process}])
+       (body connection))))
   ([id body]
-   (let [configuration {:store {:backend :memory :id id}
-                        :schema-flexibility :write}
-         _ (d/create-database configuration)
-         connection (d/connect configuration)]
-     (try
+   (test-support/with-database
+     {::test-support/database-id id}
+     (fn [connection]
        (d/transact connection
-                   (into [process-identity-schema]
-                         (schema.datahike/malli->datahike-schema
-                          model-attributes)))
-       (d/transact connection
-                   [{:seon.db.process/id managing-process}
-                    {:seon.db.process/id unmanaged-process}])
-       (body connection)
-       (finally
-         (d/release connection)
-         (d/delete-database configuration))))))
+                   [{:seon.db.process/id unmanaged-process}])
+       (body connection)))))
 
 (defn- transaction-meta
   [process]

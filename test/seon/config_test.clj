@@ -6,7 +6,7 @@
             [datahike.api :as d]
             [seon.config :as config]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.test-support :as test-support]))
 
 (set! *warn-on-reflection* true)
 
@@ -91,63 +91,6 @@
                                      (:optional (second entry)))
                         (first entry)))))
         (drop 2 (schema/schema-definition :seon.config/effective))))
-
-(def ^:private process-identity-schema
-  {:db/ident :seon.db.process/id
-   :db/valueType :db.type/string
-   :db/cardinality :db.cardinality/one
-   :db/unique :db.unique/identity})
-
-(def ^:private model-attributes
-  [:seon.db/process
-   :seon.db/user
-   :seon.config/cluster
-   :seon.config/applied-manifest-digest
-   :seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/concurrency
-   :seon.config.eval.result/max-depth
-   :seon.config.eval.result/max-collection
-   :seon.config.eval.result/max-string
-   :seon.config.eval.result/max-nodes
-   :seon.config.web/port
-   :seon.config.render/coalesce-ms
-   :seon.config.eval/time-limit-ms
-   :seon.config.error/escalate-to
-   :seon.config.error/recurrence-limit
-   :seon.config.message/max-chain
-   :seon.config/on-core-error
-   :seon.config.ai/endpoint
-   :seon.config.ai/model
-   :seon.config.ai/api-key-variable
-   :seon.config.ai/timeout-ms
-   :seon.config.ai.backup/model
-   :seon.config.ai.backup/endpoint
-   :seon.config.ai.backup/api-key-variable
-   :seon.config.ai.backup/timeout-ms
-   :seon.config.ai.retry/base-delay-ms
-   :seon.config.ai.retry/multiplier
-   :seon.config.ai.retry/jitter-fraction
-   :seon.config.ai.retry/maximum-delay-ms
-   :seon.config.ai.retry/maximum-retries
-   :seon.config.ai.retry/maximum-total-delay-ms])
-
-(defn- with-config-database
-  [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection
-                  (into [process-identity-schema]
-                        (schema.datahike/malli->datahike-schema
-                         model-attributes)))
-      (d/transact connection
-                  [{:seon.db.process/id config/managing-process-identity}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
 
 (defn- deepest-ex-data
   [error]
@@ -265,7 +208,7 @@
     (is (schema/valid-candidate-value? :seon.config/entity row))))
 
 (deftest apply-defaults-round-trips-through-database-facts
-  (with-config-database
+  (test-support/with-database
     (fn [connection]
       (let [manifest (config/defaults)
             result

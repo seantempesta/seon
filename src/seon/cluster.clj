@@ -329,6 +329,10 @@
 ;;; The default ancestor population
 ;;; ---------------------------------------------------------------------------
 
+(def boot-process-identity
+  "The opaque provenance identity for the boot schema population."
+  "seon.db.process/boot")
+
 (defn populate-ancestor!
   "The default ancestor content: this code's own schema population.
   Named by symbol in `ancestor/ensure!`'s request, so the producer is
@@ -347,13 +351,14 @@
               {:tx-data (schema.datahike/malli->datahike-schema
                          (schema/canonical-database-attributes))})
   (d/transact connection
-              {:tx-data [{:seon.db.process/id
+              {:tx-data [{:seon.db.process/id boot-process-identity}
+                         {:seon.db.process/id
                           config/managing-process-identity}]})
   (d/transact connection
               {:tx-data (schema/canonical-schema-rows (java.util.Date.))
                :tx-meta
                {:seon.db/process
-                [:seon.db.process/id config/managing-process-identity]}})
+                [:seon.db.process/id boot-process-identity]}})
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -400,8 +405,9 @@
 (defn- recover-runs!
   "Settle every run held by a dead process, before anything resumes.
   BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
-  released immediately, and its dangling `:running` receipts become
-  `:interrupted` — the 60-second lease is not waited out, because the
+  released immediately, and its dangling receipts — those carrying no
+  terminal fact — get `interrupted-at` asserted (presence is the state;
+  there is no status) — the 60-second lease is not waited out, because the
   lease exists to bound a holder we cannot ask about and here we can:
   this process just started, so on this branch every other holder is
   provably gone (one connection per branch, one process per store).
@@ -411,6 +417,7 @@
   nothing, so a clean boot commits nothing at all."
   [connection process]
   (let [db @connection
+        now (java.util.Date.)
         open-runs (d/q '[:find [(pull ?run [*]) ...]
                          :where
                          [?run :seon.cluster.run/id _]
@@ -430,7 +437,8 @@
                              {:seon.cluster.run/run run
                               :seon.cluster.run/receipts
                               (receipts-of (:seon.cluster.run/id run))
-                              :seon.cluster.run/live-processes #{process}})))
+                              :seon.cluster.run/live-processes #{process}
+                              :seon.cluster.run/now now})))
                          open-runs)]
     (when (seq operations)
       (d/transact connection operations))
