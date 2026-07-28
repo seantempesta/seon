@@ -583,6 +583,13 @@ may reintroduce a shadow build into the dev feedback path.
   Mostly this is about writing REALLY GOOD DEFAULT RENDERERS;
   overrides exist for the special cases and their impact is
   provenance-captured.
+  **The bar (owner, closing the 2026-07-28 design night): "an elegant
+  solution that is obvious to agents because the concept is so simple.
+  It'''s just data in and out. Write a new function to change it."**
+  This is the GRADUATION CRITERION for the pilot and N5: a fresh agent,
+  told one sentence, changes what it sees by writing one defn — no
+  registration ceremony, no API to learn. Evaluate it as an agent eval
+  (src-inspect-ai/), not a code review.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
