@@ -10,11 +10,10 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [A booted cluster's block derivation returns one block where the facts have four](booted-block-derivation-returns-one-of-four.md) | blocker | Core |
 | [A refused transaction needs value-based classification at the transact wrapper](transaction-refusal-loses-its-ex-data.md) | blocker | Core |
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
@@ -26,7 +25,7 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (9)
+## Friction (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -38,6 +37,7 @@ See `README.md` for the convention.
 | [Keep the old source tree off Babashka's default classpath](babashka-default-classpath-exposes-src-old.md) | friction | general |
 | [Route ordinary stderr presentations through log renders](stderr-presentations-bypass-the-log-render-kind.md) | friction | general |
 | [The design language's font is redistributed without its license, and only at one weight](the-bundled-font-has-no-license-and-only-one-weight.md) | friction | UI |
+| [Three smaller defects in the vendored Datahike, found beside the card-many scan bug](datahike-planner-and-caches-carry-three-smaller-defects.md) | friction | Core |
 | [stop! may leave the prepl server name registered](stop-may-leave-the-prepl-server-name-registered.md) | friction | general |
 
 ## Cleanup (4)

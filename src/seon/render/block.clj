@@ -166,14 +166,6 @@
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
                   [:vector :seon.block/block]]}
   [db agent-id]
-  ;; A RELATION FIND, then one pull each — deliberately not the tidier
-  ;; `:find [?block ...]` or `:find [(pull ?block [*]) ...]`.
-  ;; MEASURED, not preferred: against a live cluster's file store, both
-  ;; collection forms returned ONE of four blocks that the relation form
-  ;; below listed in full from the same database value. In a fresh
-  ;; in-memory fixture all three agreed, which is exactly why the
-  ;; fixture suites never saw it and the first booted page rendered one
-  ;; block. Issue: datahike-collection-find-returns-one-binding.
   (->> (d/q '[:find ?block
               :in $ ?agent-id
               :where

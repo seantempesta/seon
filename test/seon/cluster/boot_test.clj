@@ -18,6 +18,8 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
+            [seon.render.block :as block]
+            [seon.render.root :as root-render]
             [seon.schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -417,6 +419,60 @@
         (try
           (is (= 0 (:seon.boot/recovery-operations instance))
               "a store with no wreckage is not written to at boot")
+          (finally
+            (cluster/stop! instance))))
+      (finally
+        (delete-recursively! root)))))
+
+;;; ---------------------------------------------------------------------------
+;;; What boot's seeding leaves derivable
+;;;
+;;; A LIVE BOOT, never a fixture, because that is exactly the gap this
+;;; invariant fell through: every in-memory fixture agreed while a booted
+;;; cluster served a root page with one of its four blocks and no sign the
+;;; other three were missing. The cause was Datahike's fused
+;;; `:sorted-merge` path taking a cardinality-many scan (fixed in the
+;;; vendored fork, `datahike.query.plan/build-pipeline`); the class is
+;;; "a derivation disagrees with the facts it derives from", so the
+;;; assertion is that equality, at the choke point, against a real store.
+;;; ---------------------------------------------------------------------------
+
+(deftest boots-seeded-blocks-are-all-derivable
+  (let [root (fresh-root)]
+    (try
+      (let [instance (cluster/start! {:seon.boot/cluster-name "blocks"
+                                      :seon.boot/root root})]
+        (try
+          (let [db @(:seon.boot/cluster-connection instance)
+                agent-id "root"
+                relation (into #{}
+                               (map first)
+                               (d/q '[:find ?block
+                                      :in $ ?agent-id
+                                      :where
+                                      [?agent :seon.cluster.agent/id ?agent-id]
+                                      [?agent :seon.cluster.agent/blocks ?block]]
+                                    db agent-id))
+                derived (block/blocks db agent-id)]
+            (testing "the facts carry root's whole seeded set"
+              (is (= (count root-render/blocks) (count relation))))
+            (testing "the derivation agrees with the facts, one for one"
+              (is (= (count relation) (count derived)))
+              (is (= (into #{} (map :seon.block/name) root-render/blocks)
+                     (into #{} (map :seon.block/name) derived))))
+            (testing "every index answers the same, so no read is privileged"
+              (let [agent-eid (:e (first (d/datoms db :avet
+                                                   :seon.cluster.agent/id agent-id)))]
+                (is (= (count relation)
+                       (count (d/datoms db :eavt agent-eid
+                                        :seon.cluster.agent/blocks))))
+                (is (= relation
+                       (set (d/q '[:find [?block ...]
+                                   :in $ ?agent-id
+                                   :where
+                                   [?agent :seon.cluster.agent/id ?agent-id]
+                                   [?agent :seon.cluster.agent/blocks ?block]]
+                                 db agent-id)))))))
           (finally
             (cluster/stop! instance))))
       (finally
