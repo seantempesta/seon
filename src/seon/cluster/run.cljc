@@ -515,6 +515,7 @@
            :seon.cluster.eval/result-edn]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
+          [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]]]
     [:vector :some]]}
@@ -537,6 +538,7 @@
            :seon.cluster.eval/result-edn]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
+          [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]]]
     [:vector :some]]}
@@ -567,6 +569,9 @@
       (:seon.cluster.eval/error request)
       (conj [:db/add (:db/id receipt) :seon.cluster.eval/error
              (:seon.cluster.eval/error request)])
+      (:seon.error/kind request)
+      (conj [:db/add (:db/id receipt) :seon.error/kind
+             (:seon.error/kind request)])
       (:seon.cluster.eval/output request)
       (conj [:db/add (:db/id receipt) :seon.cluster.eval/output
              (:seon.cluster.eval/output request)]))))

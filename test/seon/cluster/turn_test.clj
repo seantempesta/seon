@@ -17,6 +17,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.loop :as cluster.loop]
             [seon.error :as error]
+            [seon.render :as render]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
@@ -560,9 +561,12 @@
                                            [?e :seon.error/id _]]
                                          @connection)))
                   fact (durable-fact @connection error-id)]
-              (is (= (error/ai-prose
-                      (error/notice {:seon.error/fact fact
-                                     :seon.error/reason :failover}))
+              (is (= (:seon.render/output
+                      (render/render
+                       {:seon.render/unit
+                        (error/notice {:seon.error/fact fact
+                                       :seon.error/reason :failover})
+                        :seon.render/kind :seon.render/ai}))
                      (:seon.ai/system backup-request)))))
           (testing "two attempt rows tell the whole story"
             (is (= 2 (count rows)))

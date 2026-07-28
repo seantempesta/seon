@@ -54,6 +54,7 @@
   (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.error :as error]
+            [seon.render :as render]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -121,32 +122,33 @@
 
 (defn- errored-receipts
   [db]
-  (->> (d/q '[:find ?id ?run-id ?ordinal
+  (->> (d/q '[:find ?id ?run-id ?ordinal ?source ?kind ?error
               :where
               [?receipt :seon.cluster.eval/status :error]
               [?receipt :seon.cluster.eval/id ?id]
               [?receipt :seon.cluster.eval/ordinal ?ordinal]
+              [?receipt :seon.error/kind ?kind]
+              [?receipt :seon.cluster.eval/error ?error]
               [?receipt :seon.cluster.eval/run ?run]
-              [?run :seon.cluster.run/id ?run-id]]
+              [?run :seon.cluster.run/id ?run-id]
+              [?form :seon.cluster.run.form/run ?run]
+              [?form :seon.cluster.run.form/ordinal ?ordinal]
+              [?form :seon.cluster.run.form/source ?source]]
             db)
        (sort)
-       (mapv (fn [[id run-id ordinal]]
-               (let [message (d/q '[:find ?error .
-                                    :in $ ?id
-                                    :where
-                                    [?receipt :seon.cluster.eval/id ?id]
-                                    [?receipt :seon.cluster.eval/error ?error]]
-                                  db id)]
-                 (cond-> {:seon.cluster.eval/id id
-                          :seon.cluster.run/id run-id
-                          :seon.cluster.eval/ordinal ordinal}
-                   ;; a receipt can error with no message — absence is
-                   ;; the state, and an empty string would be a lie
-                   message (assoc :seon.cluster.eval/error message)))))))
+       (mapv (fn [[id run-id ordinal source kind error]]
+               {:seon.cluster.eval/id id
+                :seon.cluster.run/id run-id
+                :seon.cluster.eval/ordinal ordinal
+                :seon.cluster.run.form/source source
+                :seon.error/kind kind
+                :seon.cluster.eval/error error}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
+
+(declare ai-prose)
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
@@ -177,16 +179,30 @@
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored))]
     (cond-> found
-      (seq found) (assoc :seon.render/log `log-report))))
+      (seq found) (assoc :seon.render/log `log-report)
+      (seq errored) (assoc :seon.render/ai `ai-prose))))
+
+(defn ai-prose
+  "`:seon.render/ai` — concise steering for failed plan forms."
+  {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
+  [found]
+  (->> (:seon.problems/errored-receipts found)
+       (map (fn [entry]
+              (str "Form " (:seon.cluster.eval/ordinal entry)
+                   " failed during evaluation: "
+                   (:seon.cluster.eval/error entry)
+                   ". The run did not retry it. Inspect receipt "
+                   (:seon.cluster.eval/id entry)
+                   " and revise the remaining plan from current facts.")))
+       (str/join "\n")))
 
 (defn log-report
   "`:seon.render/log` — the whole value as lines, newest concern first.
   COMPOSES rather than reformats: an error signature's line is
-  `seon.error/log-line` over the latest fact, so the line a digger sees
-  in `problems` is byte-identical to the one the fault path emitted, and
-  there is exactly one place that decides what an error looks like in a
-  log. The other three families have no per-fact owner, so their lines
-  are built here, in the same `key=value` grammar.
+  the latest fact's notice through `seon.render/render`, so the line a
+  digger sees in `problems` is byte-identical to the one the fault path
+  emitted. The other three families have no per-fact owner, so their
+  lines are built here, in the same `key=value` grammar.
 
   Returns \"\" for a healthy cluster — nothing wrong is nothing to say,
   and a cheerful \"no problems\" line is noise in a log that only exists
@@ -195,9 +211,13 @@
   [found]
   (->> (concat
         (for [entry (:seon.problems/error-signatures found)]
-          (str (error/log-line
-                (error/notice {:seon.error/fact (:seon.error/fact entry)}))
-               " occurrences=" (:seon.problems/occurrences entry)))
+          (:seon.render/output
+           (render/render
+            {:seon.render/unit
+             (error/notice {:seon.error/fact (:seon.error/fact entry)
+                            :seon.error/occurrences
+                            (:seon.problems/occurrences entry)})
+             :seon.render/kind :seon.render/log})))
         (for [entry (:seon.problems/wedged-runs found)]
           (str "seon.problems wedged-run run=" (:seon.cluster.run/id entry)
                " agent=" (:seon.cluster.agent/id entry)
@@ -212,6 +232,8 @@
                (:seon.cluster.eval/id entry)
                " run=" (:seon.cluster.run/id entry)
                " ordinal=" (:seon.cluster.eval/ordinal entry)
+               " source=" (pr-str (:seon.cluster.run.form/source entry))
+               " kind=" (:seon.error/kind entry)
                (when-let [message (:seon.cluster.eval/error entry)]
                  (str " error=" (pr-str message))))))
        (str/join "\n")))

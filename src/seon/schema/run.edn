@@ -66,6 +66,7 @@
   [:seon.cluster.eval/status :seon.cluster.eval/status]
   [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
+  [:seon.error/kind {:optional true} :seon.error/kind]
   [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
 
  :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]

@@ -68,6 +68,7 @@
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.error :as error]
+            [seon.render :as render]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -140,7 +141,7 @@
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
            :seon.cluster.eval/status :seon.cluster.eval/result-edn
-           :seon.cluster.eval/error :seon.cluster.eval/output
+           :seon.cluster.eval/error :seon.cluster.eval/output :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
@@ -149,6 +150,7 @@
                          :seon.cluster.eval/status status}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
                   error (assoc :seon.cluster.eval/error error)
+                  kind (assoc :seon.error/kind kind)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
                   output (assoc :seon.cluster.eval/output output))]
@@ -543,9 +545,8 @@
       ;;
       ;; - `:failover-now` — a conclusively unpaid failure WITH a backup
       ;;   configured. The primary's error fact commits FIRST, and the
-      ;;   backup's system segment is `error/ai-prose` over that
-      ;;   committed fact: the projection every other consumer gets, not
-      ;;   a notice written here;
+      ;;   backup's system segment is the notice's `:seon.render/ai`
+      ;;   projection through the one router over that committed fact;
       ;; - `:backoff` — a conclusively unpaid TRANSIENT failure with no
       ;;   backup. The schedule is derived once, is EMPTY whenever a
       ;;   backup exists, and each wait is one more attempt row;
@@ -674,9 +675,12 @@
                      ;; durable — never a notice written at this call
                      ;; site. The backup reads exactly what the agent,
                      ;; the escalation owner and the log read.
-                     (error/ai-prose
-                      (error/notice {:seon.error/fact fact
-                                     :seon.error/reason :failover})))
+                     (:seon.render/output
+                      (render/render
+                       {:seon.render/unit
+                        (error/notice {:seon.error/fact fact
+                                       :seon.error/reason :failover})
+                        :seon.render/kind :seon.render/ai})))
 
               (and (= :backoff disposition) (seq waits))
               (do
@@ -753,6 +757,11 @@
                                 (:seon.cluster.eval/error evaluation)
                                 (assoc :seon.cluster.eval/error
                                        (:seon.cluster.eval/error evaluation))
+                                (:seon.error/kind
+                                 (:seon.sci.admit/value evaluation))
+                                (assoc :seon.error/kind
+                                       (:seon.error/kind
+                                        (:seon.sci.admit/value evaluation)))
                                 (:seon.cluster.eval/output evaluation)
                                 (assoc :seon.cluster.eval/output
                                        (:seon.cluster.eval/output evaluation))

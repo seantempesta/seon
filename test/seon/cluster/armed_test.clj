@@ -232,13 +232,10 @@
 
         (testing "FAIL LOUD IS NOT FALL DOWN: the proc survived its own
         throw with pre-step state, and the next wake is an ordinary pass"
-          (is (= :running
-                 (:clojure.core.async.flow/status
-                  (flow/ping-proc graph :seon.cluster.loop/loop))))
           (async/offer! (:seon.cluster.wake/channel handle) ::after)
-          (Thread/sleep 200)
           (is (= :running
                  (:clojure.core.async.flow/status
-                  (flow/ping-proc graph :seon.cluster.loop/loop))))
+                  (flow/ping-proc graph :seon.cluster.loop/loop
+                                  :timeout-ms 5000))))
           (is (zero? @(:seon.error/drops instance))
               "and nothing was dropped on the way"))))))

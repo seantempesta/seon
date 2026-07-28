@@ -9,7 +9,9 @@
   The deadlines are short (a few hundred ms) and the runaway cases are
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -89,6 +91,21 @@
         "one evaluation's def cannot reach the next")
     (is (= :seon.sci.eval/evaluation-failed
            (:seon.error/kind (:seon.sci.admit/value evaluation))))))
+
+(deftest failure-evidence-has-stable-object-markers
+  (let [first-run (run "(no-such-fn 1)")
+        second-run (run "(no-such-fn 1)")
+        first-edn (:seon.cluster.eval/result-edn first-run)
+        second-edn (:seon.cluster.eval/result-edn second-run)]
+    (doseq [result-edn [first-edn second-edn]]
+      (is (some? (edn/read-string result-edn)))
+      (is (not (str/includes? result-edn "#object[")))
+      (is (not (re-find #"0x[0-9a-f]+" result-edn))))
+    (is (= (get-in (:seon.sci.admit/value first-run)
+                   [:seon.error/data :seon.sci.eval/data :sci.impl/callstack])
+           (get-in (:seon.sci.admit/value second-run)
+                   [:seon.error/data :seon.sci.eval/data :sci.impl/callstack]))
+        "SCI runtime objects project to stable markers across evaluations")))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]

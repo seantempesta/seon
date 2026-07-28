@@ -33,7 +33,7 @@
  ; core fault and never becomes an error fact — but a plan that keeps
  ; erroring is something a human wants to see, so it is a problem
  ; without being a fault, and the distinction survives into this value.
- :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]]
+ :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
 
  ; The request. `live-processes` is the same set `run/recover-tx` takes,
  ; by the same name, because it is the same question: which holders are
@@ -42,4 +42,4 @@
  ; must not get a quieter answer than the truth.
  :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes [:set :seon.cluster.run/process]]]
 
- :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.render/log {:optional true} :seon.render/projection]]}
+ :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection]]}

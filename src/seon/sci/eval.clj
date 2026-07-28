@@ -277,8 +277,7 @@
                              (.getName (class throwable))
                              :seon.sci.admit/record record}
                       (ex-data throwable)
-                      (assoc :seon.sci.eval/data
-                             (pr-str (ex-data throwable))))})
+                      (assoc :seon.sci.eval/data (ex-data throwable)))})
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
@@ -353,15 +352,24 @@
                    (bounded-output printed caps))))
       (catch Throwable throwable
           (let [record (record (if (interrupted? throwable) :time :error))
-                value (failure-value throwable record)]
+                value (failure-value throwable record)
+                admitted
+                (admit/admit
+                 {:seon.sci.admit/value value
+                  :seon.sci.admit/interrupt-fn (constantly nil)
+                  :seon.sci.admit/caps caps
+                  :seon.config/on-core-error :record
+                  :seon.sci.admit/record record})]
             (cond-> {:seon.cluster.eval/status
                      (if (= :time (:seon.eval/outcome record))
                        :interrupted
                        :error)
-                     :seon.sci.admit/value value
-                     :seon.cluster.eval/result-edn (pr-str value)
+                     :seon.sci.admit/value (:seon.sci.admit/value admitted)
+                     :seon.cluster.eval/result-edn
+                     (:seon.cluster.eval/result-edn admitted)
                      :seon.cluster.eval/error (:seon.error/message value)
-                     :seon.sci.admit/capped? false
+                     :seon.sci.admit/capped?
+                     (:seon.sci.admit/capped? admitted)
                      :seon.sci.admit/record record}
               ;; whatever it printed BEFORE it failed is often the whole
               ;; story of why

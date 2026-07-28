@@ -762,3 +762,107 @@ Each item below is exactly one existing projection defn change and can be approv
 7. **`seon.problems/log-report`: aggregate-first error line.** Place `occurrences=N` immediately after kind/signature rather than at the far right of the composed line, so recurrence is visible before coordinates and message text.
 
 The first approval should be item 1: it removes known backup-model noise without changing durable facts, routing, log output, or delivery counts. Item 2 is the next highest-value truthfulness fix.
+
+## After revisions (2026-07-28, approved)
+
+### Agent eval error
+
+```text
+Form 0 failed during evaluation: Unable to resolve symbol: no-such-fn. The run did not retry it. Inspect receipt ["42450df2-1650-4bc2-bc4c-26c90369f95c" 0 1] and revise the remaining plan from current facts.
+```
+
+```text
+seon.problems errored-receipt receipt=["42450df2-1650-4bc2-bc4c-26c90369f95c" 0 1] run=42450df2-1650-4bc2-bc4c-26c90369f95c ordinal=0 source="(no-such-fn 1)" kind=:seon.sci.eval/evaluation-failed error="Unable to resolve symbol: no-such-fn"
+```
+
+### Transition refusal
+
+```text
+The close of run-stale was refused atomically by :seon.cluster.run/stale-epoch for requested claim epoch 0. Nothing from this close committed. Re-read the run before deciding whether a new transition is eligible. Evidence: error err-transition-stale, kind :seon.cluster.run/refused, signature 49ba31a53292568eeea706e33438b39d83caf19d56593e753671ed2bd84c5873.
+```
+
+```text
+seon.error kind=:seon.cluster.run/refused run=run-stale rule=:seon.cluster.run/stale-epoch transition=seon.cluster.run/close-call requested-epoch=0 committed=false id=err-transition-stale message="seon.cluster.run/close-call was refused by :seon.cluster.run/stale-epoch." process=4242-1700000000000 basis-t=536870915 at=#inst "2026-07-28T12:00:00.000-00:00" sig=49ba31a53292568eeea706e33438b39d83caf19d56593e753671ed2bd84c5873
+```
+
+### Escaped Throwable
+
+```text
+The loop :step failed with :projection-review/core-fault. No agent or run could be attributed. Inspect error err-core-fault; the proc survived and no work was re-executed. Signature: f44f081550f70f5922cd8d1c261d0956e5fad77a86a19317c31520b853fe81cb.
+```
+
+```text
+seon.error kind=:projection-review/core-fault proc=:seon.cluster.loop/loop op=:step cid=:seon.cluster.wake/wake run=- id=err-core-fault message="injected core fault" process=4242-1700000000000 basis-t=536870914 at=#inst "2026-07-28T12:00:00.000-00:00" sig=f44f081550f70f5922cd8d1c261d0956e5fad77a86a19317c31520b853fe81cb class=clojure.lang.ExceptionInfo
+```
+
+### Model call — No credential
+
+```text
+The model was not called: The environment variable SEON_PROJECTION_REVIEW_KEY_ABSENT is not set. Configure the credential before retrying. Evidence: error err-model-no-credential, kind :seon.ai/no-credential, signature 9c6095eb9dae3c9f73f1ac81bd3faa9838fdb083283edb2d1288151f4d1c5344.
+```
+
+```text
+seon.error kind=:seon.ai/no-credential run=- phase=:credential transmitted=false response-started=false output=false id=err-model-no-credential message="The environment variable SEON_PROJECTION_REVIEW_KEY_ABSENT is not set." process=4242-1700000000000 basis-t=536870914 at=#inst "2026-07-28T12:00:00.000-00:00" sig=9c6095eb9dae3c9f73f1ac81bd3faa9838fdb083283edb2d1288151f4d1c5344
+```
+
+### Model call — Connect refused at localhost
+
+```text
+The primary model was not called: the connection failed before send. This attempt cost nothing; a configured backup may run immediately. Evidence: error err-model-connect-refused, kind :seon.ai/transport-failure, signature 9b73d693374cf3f44a131743507cf375fb7c0be54803d3ad5d900d589da04271.
+```
+
+```text
+seon.error kind=:seon.ai/transport-failure run=- phase=:transport-before-send transmitted=false response-started=false output=false disposition=failover-now id=err-model-connect-refused message="Connection refused" process=4242-1700000000000 basis-t=536870914 at=#inst "2026-07-28T12:00:00.000-00:00" sig=9b73d693374cf3f44a131743507cf375fb7c0be54803d3ad5d900d589da04271
+```
+
+### Model call — Unparseable decoded body
+
+```text
+The model returned a response but no assistant text. Do not retry automatically; inspect the response evidence first. Evidence: error err-model-unparseable, kind :seon.ai/unparseable-body, signature 4373563a7cc54c698523fed3e642b9730011c21c7102a5d7def35dcd6aafde8c.
+```
+
+```text
+seon.error kind=:seon.ai/unparseable-body run=- id=err-model-unparseable message="The provider's response carried no assistant text." process=4242-1700000000000 basis-t=536870914 at=#inst "2026-07-28T12:00:00.000-00:00" sig=4373563a7cc54c698523fed3e642b9730011c21c7102a5d7def35dcd6aafde8c
+```
+
+### Failover
+
+```text
+The primary model was not called: its connection failed before send, so no output exists and this failover is safe. You are the one backup attempt. Answer the unchanged user request below; do not wait for or reconstruct a primary response.
+```
+
+```text
+seon.error kind=:seon.ai/transport-failure run=- phase=:transport-before-send transmitted=false response-started=false output=false disposition=failover-now id=861ceb78-b22a-4616-b48a-1dc2e69a277f message="Connection refused" process=4242-1700000000000 basis-t=536870915 at=#inst "2026-07-28T12:00:00.000-00:00" sig=9b73d693374cf3f44a131743507cf375fb7c0be54803d3ad5d900d589da04271
+```
+
+### Instrumentation violation
+
+```text
+Contract violation in seon.error/value input: expected :seon.error/fact, received "not a fact". The call was stopped before the function ran. Evidence: error err-instrumentation, kind :seon.instrument/contract-violated, signature 2758a09f6e18fb95022ef3bed3764bffedb709bde7ec3d339ef9d7f39634b4e6.
+```
+
+```text
+seon.error kind=:seon.instrument/contract-violated proc=:seon.cluster.loop/loop op=:step cid=:seon.cluster.wake/wake run=- fn=seon.error/value arm=input expected=:seon.error/fact args="[\"not a fact\"]" id=err-instrumentation message="seon.error/value violated its contract (invalid-input): [[\"invalid type\"]]" process=4242-1700000000000 basis-t=536870914 at=#inst "2026-07-28T12:00:00.000-00:00" sig=2758a09f6e18fb95022ef3bed3764bffedb709bde7ec3d339ef9d7f39634b4e6 class=clojure.lang.ExceptionInfo
+```
+
+### Storm bound
+
+```clojure
+[#:seon.cluster.message{:id "err-storm-1-no-attributable-agent",
+                        :content
+                        "The loop :step failed with :projection-review/recurring. No agent or run could be attributed. Inspect error err-storm-1; the proc survived and no work was re-executed. Signature: 8c40ea18147a5e82b02182e5e67708fb60d8be3bf610f1455bf2441790315d2c."}
+ #:seon.cluster.message{:id "err-storm-2-no-attributable-agent",
+                        :content
+                        "The loop :step failed with :projection-review/recurring. No agent or run could be attributed. Inspect error err-storm-2; the proc survived and no work was re-executed. Signature: 8c40ea18147a5e82b02182e5e67708fb60d8be3bf610f1455bf2441790315d2c."}
+ #:seon.cluster.message{:id "err-storm-3-recurring",
+                        :content
+                        "Core fault :projection-review/recurring reached 3 occurrences in process 4242-1700000000000 (notification limit 3). Further occurrences remain in seon.problems but will not message you. Latest error: err-storm-3. Signature: 8c40ea18147a5e82b02182e5e67708fb60d8be3bf610f1455bf2441790315d2c."}]
+```
+
+```text
+seon.error kind=:projection-review/recurring proc=:seon.cluster.loop/loop op=:step cid=:seon.cluster.wake/wake run=- id=err-storm-3 message="recurring injected core fault" process=4242-1700000000000 basis-t=536870916 at=#inst "2026-07-28T12:00:00.003-00:00" sig=8c40ea18147a5e82b02182e5e67708fb60d8be3bf610f1455bf2441790315d2c class=clojure.lang.ExceptionInfo occurrence=3 limit=3 notification=final
+```
+
+```text
+seon.error kind=:projection-review/recurring sig=8c40ea18147a5e82b02182e5e67708fb60d8be3bf610f1455bf2441790315d2c occurrences=6 proc=:seon.cluster.loop/loop op=:step cid=:seon.cluster.wake/wake run=- id=err-storm-6 message="recurring injected core fault" process=4242-1700000000000 basis-t=536870919 at=#inst "2026-07-28T12:00:00.006-00:00" class=clojure.lang.ExceptionInfo
+```

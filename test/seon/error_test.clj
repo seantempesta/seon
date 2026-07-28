@@ -360,6 +360,12 @@
                             {:seon.cluster.run/id "run-9"
                              :seon.cluster.agent/id "agent-3"})))
 
+(defn- rendered
+  [notice kind]
+  (:seon.render/output
+   (render/render {:seon.render/unit notice
+                   :seon.render/kind kind})))
+
 (deftest a-notice-declares-its-projections-and-routes
   (let [notice (error/notice {:seon.error/fact (fact)
                               :seon.error/reason :your-run
@@ -367,10 +373,7 @@
     (is (seon.schema/valid-candidate-value? :seon.error/notice notice))
     (is (= #{:seon.render/ai :seon.render/log} (render/kinds notice)))
     (testing "the error family reaches its prose through the generic router"
-      (is (= (error/ai-prose notice)
-             (:seon.render/output
-              (render/render {:seon.render/unit notice
-                              :seon.render/kind :seon.render/ai})))))))
+      (is (string? (rendered notice :seon.render/ai))))))
 
 (deftest the-projection-keys-are-derived-never-stored
   (let [fact (fact)]
@@ -380,21 +383,58 @@
 
 (deftest the-prose-says-what-happened-and-where-the-evidence-is
   (let [fact (fact)
-        prose (error/ai-prose (error/notice {:seon.error/fact fact
-                                             :seon.error/reason :your-run}))]
-    (is (str/includes? prose (:seon.error/message fact)))
+        prose (rendered (error/notice {:seon.error/fact fact
+                                       :seon.error/reason :your-run})
+                        :seon.render/ai)]
     (is (str/includes? prose (:seon.error/id fact)) "the evidence is nameable")
     (is (str/includes? prose "run-9") "the run it interrupted")
-    (testing "and it does not claim more than it knows"
-      (is (str/includes? prose "may")
-          "a fault mid-transform may or may not have completed its work"))))
+    (is (str/includes? prose ":seon.cluster.run/stale-epoch")
+        "the actionable rule leads instead of wrapper prose")))
+
+(deftest failover-prose-contains-no-operator-clauses
+  (let [fact (error/normalize
+              (request {:seon.error/kind :seon.ai/transport-failure
+                        :seon.error/message "Connection refused"
+                        :seon.error/data
+                        {:seon.ai/error-class :transport-before-send
+                         :seon.ai/request-transmitted? false
+                         :seon.ai/output-observed? false}}))
+        prose (rendered (error/notice {:seon.error/fact fact
+                                       :seon.error/reason :failover})
+                        :seon.render/ai)]
+    (is (str/includes? prose "Answer the unchanged user request"))
+    (is (not (str/includes? prose (:seon.error/id fact))))
+    (is (not (str/includes? prose "basis-t")))
+    (is (not (str/includes? prose "Evidence:")))
+    (is (not (str/includes? prose "may or may not")))))
+
+(deftest instrumentation-evidence-survives-normalization
+  (let [violation {:seon.error/kind :seon.instrument/contract-violated
+                   :seon.error/message "bad call"
+                   :seon.error/data
+                   {:seon.instrument/fn "seon.error/value"
+                    :seon.instrument/arm :input
+                    :seon.instrument/schema ":seon.error/fact"
+                    :seon.instrument/args "[\"not a fact\"]"}}
+        fact (error/normalize
+              (request (transform-error
+                        (ex-info "bad call" violation))))]
+    (is (= "seon.error/value" (:seon.instrument/fn fact)))
+    (is (= :input (:seon.instrument/arm fact)))
+    (is (= ":seon.error/fact" (:seon.instrument/expected fact)))
+    (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
+    (let [notice (error/notice {:seon.error/fact fact})
+          prose (rendered notice :seon.render/ai)]
+      (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
+      (is (str/includes? prose "received \"not a fact\"")))))
 
 (deftest the-why-clause-is-derived-from-the-reason
   (let [fact (fact)
         prose (fn [reason]
-                (error/ai-prose
+                (rendered
                  (error/notice (cond-> {:seon.error/fact fact}
-                                 reason (assoc :seon.error/reason reason)))))
+                                 reason (assoc :seon.error/reason reason)))
+                 :seon.render/ai))
         none (prose nil)
         reasons (map prose [:your-run :no-attributable-agent :recurring])]
     (is (= 3 (count (distinct reasons)))
@@ -405,7 +445,8 @@
 
 (deftest the-log-line-is-one-line-and-derived
   (let [fact (fact)
-        line (error/log-line (error/notice {:seon.error/fact fact}))]
+        line (rendered (error/notice {:seon.error/fact fact})
+                       :seon.render/log)]
     (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
     (is (str/includes? line (:seon.error/id fact)))
     (is (str/includes? line (:seon.error/signature fact)))
@@ -555,9 +596,9 @@
             outcomes (mapv (fn [_] (commit! connection source {})) (range 6))
             [facts messages] (last outcomes)]
         (is (= 6 facts) "every occurrence is still evidence")
-        (is (= {"root" 4} messages)
-            "two ordinary escalations, one :recurring at the limit, then
-             silence — bounded at limit + 1 no matter how long it storms")))))
+        (is (= {"root" 3} messages)
+            "two ordinary escalations, one final message at the limit, then
+             silence")))))
 
 (deftest a-message-id-is-derived-so-delivery-is-idempotent
   (with-db

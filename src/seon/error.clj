@@ -118,14 +118,14 @@
   the two projection declarations — and the ONE generic router
   (`seon.render`) resolves and applies them:
 
-  - `ai-prose` (`:seon.render/ai`) is steering prose for an agent: what
-    happened, why it is being told, what it can do. It is STORED at
-    commit time as the explanation message's content, and that is not a
-    stored-derived slip: a message is a historical fact about what an
-    agent WAS TOLD, and it must not silently change when the error's
-    context does. The same function will feed the failover \"you are the
-    backup, and why\" notice — one derivation, several consumers, never
-    several renderers.
+  - `ai-prose` is the generic `:seon.render/ai` implementation: what
+    happened, why the reader is being told, and what it can do. A fact
+    with specialist evidence selects its specialist in `notice`, where
+    the unit is built; consumers still ask only for `:seon.render/ai`.
+    The result is STORED at commit time as the explanation message's
+    content, and that is not a stored-derived slip: a message is a
+    historical fact about what an agent WAS TOLD, and it must not
+    silently change when the error's context does.
   - `log-line` (`:seon.render/log`) is a structured single line, DERIVED
     and never stored. Nothing durable depends on it, so it may change
     shape freely. `seon.problems` COMPOSES it rather than reformatting
@@ -140,8 +140,10 @@
   that was never committed is an error the next boot never sees — which
   is the same crash row as the work it was reporting on."
   (:require [clojure.core.async.flow :as-alias flow]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -229,6 +231,11 @@
   describe\" has to describe that much."
   [source failure]
   (or (when (map? source) (not-empty (:seon.error/message source)))
+      (when (and (map? source)
+                 (:seon.cluster.run/rule source)
+                 (:seon.cluster.run/transition source))
+        (str (:seon.cluster.run/transition source) " was refused by "
+             (:seon.cluster.run/rule source) "."))
       (when failure
         (let [deepest (root-cause failure)]
           (or (not-empty (ex-message deepest))
@@ -297,6 +304,10 @@
     run-id :seon.cluster.run/id
     agent-id :seon.cluster.agent/id}]
   (let [failure (throwable source)
+        failure-data (when failure (refusal failure))
+        instrument-data (when (= :seon.instrument/contract-violated
+                                 (:seon.error/kind failure-data))
+                          (:seon.error/data failure-data))
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         ;; :record UNCONDITIONALLY. The dial governs the failing site;
@@ -323,6 +334,14 @@
       (and flow? (::flow/pid source)) (assoc :seon.error/proc (::flow/pid source))
       (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
       (and flow? (::flow/cid source)) (assoc :seon.error/cid (::flow/cid source))
+      (:seon.instrument/fn instrument-data)
+      (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
+      (:seon.instrument/arm instrument-data)
+      (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
+      (:seon.instrument/schema instrument-data)
+      (assoc :seon.instrument/expected (:seon.instrument/schema instrument-data))
+      (:seon.instrument/args instrument-data)
+      (assoc :seon.instrument/args (:seon.instrument/args instrument-data))
       basis-t (assoc :seon.error/basis-t basis-t)
       run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
       agent-id (assoc :seon.error/agent [:seon.cluster.agent/id agent-id]))))
@@ -347,10 +366,10 @@
 
 (defn notice
   "The routing unit for one fact: the fact plus its projection keys.
-  Declares `:seon.render/ai` → `seon.error/ai-prose` and
-  `:seon.render/log` → `seon.error/log-line`, so the unit routes through
-  the one generic router (`seon.render/render`) and nothing dispatches
-  on the error family by name.
+  Declares the generic `:seon.render/log` implementation and selects the
+  `:seon.render/ai` implementation from the fact's own attributes, so
+  the unit routes through the one generic router (`seon.render/render`)
+  and no consumer dispatches on the error family by name.
 
   `:seon.error/reason` is the per-RECIPIENT why-clause and is optional
   because a log has no recipient: one fact is `:your-run` to the
@@ -358,12 +377,88 @@
   transaction, which is why the reason is derived here and never stored
   on the entity."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
-  [{:seon.error/keys [fact reason] agent-id :seon.cluster.agent/id}]
+  [{:seon.error/keys [fact reason occurrence occurrences notification-limit
+                      notification]
+    agent-id :seon.cluster.agent/id}]
   (cond-> {:seon.error/fact fact
-           :seon.render/ai `ai-prose
+           ;; The fact's own kind selects the specialist. Consumers never
+           ;; classify errors or name projection functions.
+           :seon.render/ai (if (= :seon.instrument/contract-violated
+                                  (:seon.error/kind fact))
+                             `instrumentation-prose
+                             `ai-prose)
            :seon.render/log `log-line}
     reason (assoc :seon.error/reason reason)
+    occurrence (assoc :seon.error/occurrence occurrence)
+    occurrences (assoc :seon.error/occurrences occurrences)
+    notification-limit (assoc :seon.error/notification-limit notification-limit)
+    notification (assoc :seon.error/notification notification)
     agent-id (assoc :seon.cluster.agent/id agent-id)))
+
+(defn- fact-source
+  [fact]
+  (try
+    (edn/read-string (:seon.error/data-edn fact))
+    (catch Throwable _ {})))
+
+(defn- flat-data
+  [fact]
+  (let [source (fact-source fact)]
+    (if (map? (:seon.error/data source))
+      (:seon.error/data source)
+      source)))
+
+(defn- evidence-prose
+  [fact]
+  (str "Evidence: error " (:seon.error/id fact)
+       ", kind " (:seon.error/kind fact)
+       ", signature " (:seon.error/signature fact) "."))
+
+(defn- refusal-prose
+  [fact]
+  (let [source (fact-source fact)
+        request (:seon.cluster.run/request source)
+        transition (:seon.cluster.run/transition source)
+        operation (some-> transition name (str/replace #"-call$" ""))
+        run-id (or (:seon.cluster.run/id request)
+                   (second (:seon.error/run fact)))
+        rule (:seon.cluster.run/rule source)
+        requested-epoch (:seon.cluster.run/claim-epoch request)]
+    (str "The " operation " of " run-id " was refused atomically by " rule
+         (when requested-epoch
+           (str " for requested claim epoch " requested-epoch))
+         ". Nothing from this " operation " committed. Re-read the run before"
+         " deciding whether a new transition is eligible. "
+         (evidence-prose fact))))
+
+(defn instrumentation-prose
+  "`:seon.render/ai` — detailed steering for a validation failure."
+  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
+  [notice]
+  (let [fact (:seon.error/fact notice)
+        {instrument-fn :seon.instrument/fn
+         arm :seon.instrument/arm
+         expected :seon.instrument/expected
+         args :seon.instrument/args} fact
+        admitted-value (some-> args edn/read-string)
+        received (some-> (if (= :input arm)
+                           (first admitted-value)
+                           admitted-value)
+                         pr-str)]
+    (str "Contract violation in " instrument-fn " " (name arm)
+         ": expected " expected
+         (when received (str ", received " received))
+         (if (= :input arm)
+           ". The call was stopped before the function ran. "
+           ". The function returned an invalid value. ")
+         (evidence-prose fact))))
+
+(defn- render-output
+  [unit kind]
+  (let [rendered (render/render {:seon.render/unit unit
+                                 :seon.render/kind kind})]
+    (or (:seon.render/output rendered)
+        (:seon.error/message rendered))))
 
 (defn ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
@@ -397,55 +492,64 @@
   {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
   (let [{:seon.error/keys [fact reason]} notice
-        {:seon.error/keys [id kind message proc op cid class basis-t run]} fact
-        run-id (second run)]
-    (str/join
-     " "
-     (remove
-      nil?
-      [(str "An error stopped work" (when proc (str " in " proc)) ": "
-            message " (" kind ").")
-       (when (and op cid)
-         (str "It happened while handling " cid " at " op "."))
-       (when run-id (str "It interrupted run " run-id "."))
-       ;; the honesty rule: a fault mid-transform has the same ambiguity
-       ;; the interrupted-run warning already refuses to paper over
-       (str "Work already under way may or may not have completed;"
-            " nothing was retried and nothing re-executed.")
-       (case reason
-         :your-run "You are being told because this interrupted your own run."
-         :no-attributable-agent
-         (str "You are being told because you are this cluster's escalation"
-              " owner and this error could not be attributed to one agent.")
-         :recurring
-         (str "You are being told because this same failure has now recurred"
-              " often enough to be a pattern rather than bad luck.")
-         ;; the one reason with no recipient AGENT: the reader is the
-         ;; backup MODEL, and it reads this as the system segment of the
-         ;; request that replaces the one that failed
-         :failover
-         (str "You are being told because you are this cluster's configured"
-              " backup model and the primary model failed: this request was"
-              " moved to you. Answer the request that follows as it stands.")
-         nil)
-       (str "Evidence: error " id
-            (when class (str ", " class))
-            (when basis-t (str ", basis-t " basis-t))
-            ".")
-       ;; what you can do next — present exactly when somebody is being
-       ;; contacted, because it is advice to a reader and a log has none.
-       ;; The advice is per-reader: an agent with a database can pull the
-       ;; fact, a backup MODEL cannot, and telling it to read a row it has
-       ;; no way to reach is the kind of boilerplate this prose may not
-       ;; carry.
-       (case reason
-         nil nil
-         :failover
-         (str "The primary call was not retried and will not be; answer the"
-              " request that follows on its own terms rather than waiting"
-              " for a primary answer that does not exist.")
-         (str "Nothing will retry this for you: read error " id
-              " and decide from the current facts."))]))))
+        {:seon.error/keys [id kind message proc op run process signature]} fact
+        run-id (second run)
+        data (flat-data fact)
+        error-class (:seon.ai/error-class data)]
+    (cond
+      (= reason :failover)
+      (str "The primary model was not called: its connection failed before"
+           " send, so no output exists and this failover is safe. You are the"
+           " one backup attempt. Answer the unchanged user request below; do"
+           " not wait for or reconstruct a primary response.")
+
+      (= kind :seon.cluster.run/refused)
+      (refusal-prose fact)
+
+      (= reason :recurring)
+      (if-let [occurrence (:seon.error/occurrence notice)]
+        (str "Core fault " kind " reached " occurrence " occurrences in process "
+             process " (notification limit "
+             (:seon.error/notification-limit notice)
+             "). Further occurrences remain in seon.problems but will not"
+             " message you. Latest error: " id ". Signature: " signature ".")
+        (str "Core fault " kind " reached its final notification for signature "
+             signature ". Later occurrences remain in seon.problems. Latest"
+             " error: " id "."))
+
+      (= kind :seon.ai/no-credential)
+      (str "The model was not called: " message
+           " Configure the credential before retrying. "
+           (evidence-prose fact))
+
+      (= error-class :transport-before-send)
+      (str "The primary model was not called: the connection failed before"
+           " send. This attempt cost nothing; a configured backup may run"
+           " immediately. " (evidence-prose fact))
+
+      (= kind :seon.ai/unparseable-body)
+      (str "The model returned a response but no assistant text. Do not retry"
+           " automatically; inspect the response evidence first. "
+           (evidence-prose fact))
+
+      :else
+      (str/join
+       " "
+       (remove
+        nil?
+        [(str (if proc
+                (str "The " (or (some-> proc name) "proc") " " op
+                     " failed with " kind ".")
+                (str message " (" kind ").")))
+         (case reason
+           :your-run (str "It interrupted run " run-id ".")
+           :no-attributable-agent "No agent or run could be attributed."
+           nil)
+         (str "Inspect error " id "; "
+              (if proc
+                "the proc survived and no work was re-executed."
+                "nothing was retried.")
+              " Signature: " signature ".")])))))
 
 (defn log-line
   "`:seon.render/log` — one structured line for a human reading stderr.
@@ -462,28 +566,62 @@
   when absent."
   {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
-  (let [{:seon.error/keys [id at kind message process signature
-                           class proc op cid run basis-t]}
-        (:seon.error/fact notice)]
+  (let [fact (:seon.error/fact notice)
+        {:seon.error/keys [id at kind message process signature
+                           class proc op cid run basis-t]} fact
+        source (fact-source fact)
+        data (flat-data fact)
+        aggregate? (:seon.error/occurrences notice)]
     (str/join
      " "
      (remove
       nil?
       ["seon.error"
-       (str "id=" id)
-       (str "at=" (pr-str at))
        (str "kind=" kind)
-       (when class (str "class=" class))
+       (when aggregate? (str "sig=" signature))
+       (when aggregate? (str "occurrences=" aggregate?))
        (when proc (str "proc=" proc))
        (when op (str "op=" op))
        (when cid (str "cid=" cid))
-       (when-let [run-id (second run)] (str "run=" run-id))
-       (when basis-t (str "basis-t=" basis-t))
+       (str "run=" (or (second run)
+                       (get-in source [:seon.cluster.run/request
+                                       :seon.cluster.run/id])
+                       "-"))
+       (when-let [rule (:seon.cluster.run/rule source)] (str "rule=" rule))
+       (when-let [transition (:seon.cluster.run/transition source)]
+         (str "transition=" transition))
+       (when-let [epoch (get-in source [:seon.cluster.run/request
+                                        :seon.cluster.run/claim-epoch])]
+         (str "requested-epoch=" epoch))
+       (when (= kind :seon.cluster.run/refused) "committed=false")
+       (when-let [phase (:seon.ai/error-class data)] (str "phase=" phase))
+       (when (contains? data :seon.ai/request-transmitted?)
+         (str "transmitted=" (:seon.ai/request-transmitted? data)))
+       (when (contains? data :seon.ai/response-started?)
+         (str "response-started=" (:seon.ai/response-started? data)))
+       (when (contains? data :seon.ai/output-observed?)
+         (str "output=" (:seon.ai/output-observed? data)))
+       (when (= :transport-before-send (:seon.ai/error-class data))
+         "disposition=failover-now")
+       (when-let [instrument-fn (:seon.instrument/fn fact)]
+         (str "fn=" instrument-fn))
+       (when-let [arm (:seon.instrument/arm fact)] (str "arm=" (name arm)))
+       (when-let [expected (:seon.instrument/expected fact)]
+         (str "expected=" expected))
+       (when-let [args (:seon.instrument/args fact)] (str "args=" (pr-str args)))
+       (str "id=" id)
+       (str "message=" (pr-str (str/replace message #"\s+" " ")))
        (str "process=" process)
-       (str "signature=" signature)
-       ;; one line by construction: a message with a newline in it would
-       ;; otherwise be two log lines to every tool that reads them
-       (str "message=" (pr-str (str/replace message #"\s+" " ")))]))))
+       (when basis-t (str "basis-t=" basis-t))
+       (str "at=" (pr-str at))
+       (when-not aggregate? (str "sig=" signature))
+       (when class (str "class=" class))
+       (when-let [occurrence (:seon.error/occurrence notice)]
+         (str "occurrence=" occurrence))
+       (when-let [limit (:seon.error/notification-limit notice)]
+         (str "limit=" limit))
+       (when-let [notification (:seon.error/notification notice)]
+         (str "notification=" (name notification)))]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The commit — PURE transaction data, so this namespace stays store-free
@@ -541,13 +679,16 @@
   this path. `about` points at the fact through the shared tempid, and
   its ABSENCE on an ordinary user message is what makes the storm fence
   computable without a flag."
-  [fact recipient reason]
+  [fact recipient reason notification]
   {:seon.cluster.message/id (str (:seon.error/id fact) "-" (name reason))
    :seon.cluster.message/to [:seon.cluster.agent/id recipient]
-   :seon.cluster.message/content (ai-prose (notice
-                                            {:seon.error/fact fact
-                                             :seon.error/reason reason
-                                             :seon.cluster.agent/id recipient}))
+   :seon.cluster.message/content
+   (render-output
+    (notice (merge {:seon.error/fact fact
+                    :seon.error/reason reason
+                    :seon.cluster.agent/id recipient}
+                   notification))
+    :seon.render/ai)
    :seon.cluster.message/at (:seon.error/at fact)
    :seon.cluster.message/about fact-tempid})
 
@@ -661,15 +802,19 @@
         ;; recorded and told to NOBODY. Review-caught; the general rule
         ;; is that a decision about the fact is made from the fact.
         attributed (second (:seon.error/agent fact))
-        tell (fn [recipient reason]
+        final-notification {:seon.error/occurrence occurrence
+                            :seon.error/notification-limit limit
+                            :seon.error/notification :final}
+        tell (fn [recipient reason notification]
                (when (and recipient (agent-exists? db recipient))
-                 (message-tx fact recipient reason)))]
+                 (message-tx fact recipient reason notification)))]
     (into [(assoc fact :db/id fact-tempid)]
           (remove nil?)
           [(when (and attributed interrupted-a-run?
                       (not recurring?) (not silent?))
-             (tell attributed :your-run))
-           (when (and interrupted-a-run? (not attributed) (not silent?))
-             (tell escalate-to :no-attributable-agent))
+             (tell attributed :your-run nil))
+           (when (and interrupted-a-run? (not attributed)
+                      (not recurring?) (not silent?))
+             (tell escalate-to :no-attributable-agent nil))
            (when (and recurring? (not= escalate-to attributed))
-             (tell escalate-to :recurring))])))
+             (tell escalate-to :recurring final-notification))])))

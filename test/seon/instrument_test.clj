@@ -57,6 +57,10 @@
             from the cause chain like any other refusal")
        (is (= "seon.error/value" (:seon.instrument/fn (:seon.error/data data)))
            "naming the function whose contract was violated")
+       (is (= :input (:seon.instrument/arm (:seon.error/data data))))
+       (is (= ":seon.error/fact"
+              (:seon.instrument/schema (:seon.error/data data)))
+           "the single positional input is identified, not Malli's cat wrapper")
        (is (re-find #"invalid-input" (ex-message failure)))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can

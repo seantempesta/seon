@@ -13,6 +13,7 @@
             [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.problems :as problems]
+            [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
   (:import [java.util Date]))
@@ -108,16 +109,17 @@
                 (cond-> {:seon.error/fact fact}
                   reason (assoc :seon.error/reason reason)))
         problem-value (found connection)]
-    {:ai (error/ai-prose notice)
-     :log (error/log-line notice)
+    {:ai (:seon.render/output
+          (render/render {:seon.render/unit notice
+                          :seon.render/kind :seon.render/ai}))
+     :log (:seon.render/output
+           (render/render {:seon.render/unit notice
+                           :seon.render/kind :seon.render/log}))
      :raw fact
      :problems problem-value
-     :problems-log (problems/log-report problem-value)}))
-
-(defn- problem-output [value]
-  (str (fenced "clojure" (pp-str value))
-       "Rendered `:seon.render/log`:\n\n"
-       (fenced "text" (problems/log-report value))))
+     :problems-log (:seon.render/output
+                    (render/render {:seon.render/unit problem-value
+                                    :seon.render/kind :seon.render/log}))}))
 
 (defn- output-blocks [{:keys [ai log raw problems problems-log]}]
   (str "Actual AI projection:\n\n"
@@ -187,11 +189,16 @@
                         first
                         (dissoc :db/id))
             problem-value (found connection)]
-        {:ai nil
+        {:ai (:seon.render/output
+              (render/render {:seon.render/unit problem-value
+                              :seon.render/kind :seon.render/ai}))
          :log nil
          :raw receipt
          :problems problem-value
-         :problems-log (problems/log-report problem-value)}))))
+         :problems-log (:seon.render/output
+                        (render/render {:seon.render/unit problem-value
+                                        :seon.render/kind
+                                        :seon.render/log}))}))))
 
 (defn- transition-case []
   (with-db
@@ -360,7 +367,18 @@
                  vec)
             latest (last facts)]
         (assoc (rendered-error connection latest :recurring)
-               :root-messages messages)))))
+               :root-messages messages
+               :final-notification-log
+               (:seon.render/output
+                (render/render
+                 {:seon.render/unit
+                  (error/notice
+                   {:seon.error/fact (nth facts 2)
+                    :seon.error/reason :recurring
+                    :seon.error/occurrence 3
+                    :seon.error/notification-limit 3
+                    :seon.error/notification :final})
+                  :seon.render/kind :seon.render/log})))))))
 
 (defn- model-family-section [cases]
   (str
@@ -429,9 +447,8 @@
      "- Model leaf: `seon.ai/complete` produces missing-credential and "
      "localhost-refusal values; `seon.ai/completion-text` produces the "
      "decoded-body failure without a server.\n"
-     "- Projections: `seon.error/ai-prose`, `seon.error/log-line`, "
-     "`seon.problems/problems`, and `seon.problems/log-report` are called "
-     "directly over committed facts.\n\n"
+     "- Projections: error notices and problems values are projected through "
+     "`seon.render/render`; consumers never name an implementation function.\n\n"
      "The raw fact is bounded at its producer: error payloads pass through "
      "`seon.sci.admit`, while receipts store the evaluator's already-admitted "
      "strings. `seon.problems` is always re-derived from the final immutable "
@@ -636,5 +653,43 @@
      "without changing durable facts, routing, log output, or delivery counts. "
      "Item 2 is the next highest-value truthfulness fix.")))
 
-(spit output-path (str (report) "\n"))
+(defn- after-projection
+  [label {:keys [ai log problems-log]}]
+  (str "### " label "\n\n"
+       (fenced "text" ai)
+       "\n"
+       (fenced "text" (or log problems-log))
+       "\n"))
+
+(defn- after-report []
+  (let [eval-output (eval-case)
+        transition-output (transition-case)
+        fault-output (fault-case)
+        model-output (model-cases)
+        failover-output (failover-case)
+        instrumentation-output (instrumentation-case)
+        storm-output (storm-case)]
+    (str
+     "## After revisions (2026-07-28, approved)\n\n"
+     (after-projection "Agent eval error" eval-output)
+     (after-projection "Transition refusal" transition-output)
+     (after-projection "Escaped Throwable" fault-output)
+     (apply str
+            (for [{:keys [label output]} model-output]
+              (after-projection (str "Model call — " label) output)))
+     (after-projection "Failover" failover-output)
+     (after-projection "Instrumentation violation" instrumentation-output)
+     "### Storm bound\n\n"
+     (fenced "clojure" (pp-str (:root-messages storm-output)))
+     "\n"
+     (fenced "text" (:final-notification-log storm-output))
+     "\n"
+     (fenced "text" (:problems-log storm-output)))))
+
+(let [existing (slurp output-path)
+      marker "\n## After revisions (2026-07-28, approved)"
+      marker-at (str/index-of existing marker)
+      baseline (if marker-at (subs existing 0 marker-at) existing)]
+  (spit output-path
+        (str (str/trimr baseline) "\n\n" (str/trimr (after-report)) "\n")))
 (println output-path)

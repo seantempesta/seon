@@ -7,6 +7,10 @@
  ; deliberately instruments nothing at all.
  :seon.instrument/registered [:int {:min 0}]
  :seon.instrument/instrumented [:int {:min 0}]
+ :seon.instrument/fn [:string {:min 1}]
+ :seon.instrument/arm [:enum :input :output]
+ :seon.instrument/expected [:string {:min 1}]
+ :seon.instrument/args :string
 
  ; The dial decides, and the caps are optional because they are only
  ; needed to bound a violation's arguments — a REPL caller with no caps

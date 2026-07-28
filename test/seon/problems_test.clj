@@ -111,14 +111,20 @@
   (d/transact connection
               [{:seon.cluster.run/id "run-with-receipt"
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                :seon.cluster.run/opened-at now
+               :seon.cluster.run/opened-at now
                 :seon.cluster.run/closed-at now}
+               {:seon.cluster.run.form/id "run-with-receipt:0"
+                :seon.cluster.run.form/run
+                [:seon.cluster.run/id "run-with-receipt"]
+                :seon.cluster.run.form/ordinal 0
+                :seon.cluster.run.form/source "(widgets)"}
                {:seon.cluster.eval/id "receipt-1"
                 :seon.cluster.eval/run [:seon.cluster.run/id "run-with-receipt"]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/claim-epoch 1
                 :seon.cluster.eval/at now
                 :seon.cluster.eval/status :error
+                :seon.error/kind :seon.sci.eval/evaluation-failed
                 :seon.cluster.eval/error "Unable to resolve symbol: widgets"}]))
 
 (def ^:private families
@@ -209,6 +215,13 @@
         (is (= "run-with-receipt" (:seon.cluster.run/id entry)))
         (is (= 0 (:seon.cluster.eval/ordinal entry)))
         (is (str/includes? (:seon.cluster.eval/error entry) "widgets"))
+        (is (= "(widgets)" (:seon.cluster.run.form/source entry)))
+        (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind entry)))
+        (is (str/includes?
+             (:seon.render/output
+              (render/render {:seon.render/unit value
+                              :seon.render/kind :seon.render/ai}))
+             "Form 0 failed during evaluation"))
         (is (nil? (:seon.problems/error-signatures value))
             "an agent's own mistake never became an error FACT, and the
              distinction survives into the value")))))
@@ -232,7 +245,10 @@
                  (every? (fn [family] (seq (get value family))) present)
                  ;; and NOTHING else appears — this is the half that a
                  ;; stored status would fail
-                 (empty? (remove (conj present :seon.render/log)
+                 (empty? (remove (cond-> (conj present :seon.render/log)
+                                   (contains? present
+                                              :seon.problems/errored-receipts)
+                                   (conj :seon.render/ai))
                                  (keys value)))
                  ;; empty means empty: `{}`, never `{family []}`
                  (= (empty? present) (= {} value))
@@ -253,16 +269,17 @@
       (commit-failed-run! connection)
       (commit-errored-receipt! connection)
       (let [value (found connection)
-            report (problems/log-report value)
+            report (:seon.render/output
+                    (render/render {:seon.render/unit value
+                                    :seon.render/kind :seon.render/log}))
             lines (str/split-lines report)
             fact (:seon.error/fact
                   (first (:seon.problems/error-signatures value)))]
         (is (= 4 (count lines)) "one line per problem, one problem per line")
-        (is (str/starts-with? (first lines)
-                              (error/log-line
-                               (error/notice {:seon.error/fact fact})))
-            "an error's line IS seon.error's line — one owner decides what
-             an error looks like in a log, and problems composes it")
+        (is (str/includes? (first lines)
+                           (str "sig=" (:seon.error/signature fact)
+                                " occurrences=1"))
+            "aggregate evidence leads before coordinates")
         (is (every? #(str/includes? % "run-") (rest lines)))
         (testing "and it routes through the ONE projection router, because
         a problems value is a unit like any other"
@@ -274,6 +291,5 @@
 (deftest a-healthy-cluster-logs-nothing
   (with-db
     (fn [connection]
-      (is (= "" (problems/log-report (found connection)))
-          "a cheerful `no problems` line is noise in a log that exists to
-           be grepped"))))
+      (is (= #{} (render/kinds (found connection)))
+          "healthy data declares no projection and therefore says nothing"))))
