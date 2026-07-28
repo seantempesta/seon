@@ -26,7 +26,8 @@
   Run:
     DEEPSEEK_API_KEY=… clojure -M:dev -e \\
       '(load-file \"docs/prds/sci-execution-runtime/research/scripts/my-message-two-agent-2026-07-28.clj\")'"
-  (:require [clojure.string :as str]
+  (:require [clojure.edn]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.message :as message]))
@@ -154,11 +155,20 @@
      [{:seon.cluster.message/id "human-1"
        :seon.cluster.message/to [:seon.cluster.agent/id "alice"]
        :seon.cluster.message/content
-       (str "I need to know how many prime numbers there are below 100. "
+       ;; A QUESTION PLAIN clojure.core ANSWERS. The first drive asked
+       ;; for primes below 100 and the delegate reached for
+       ;; `Math/sqrt`, which the base sci context does not carry: form
+       ;; 0 failed, form 1 read the unbound var, and bob delivered
+       ;; "there are Unbound: #'my.agents.bob/primes-below-100 prime
+       ;; numbers" in perfect confidence (filed:
+       ;; a-failed-form-does-not-stop-the-fold). This proof is about
+       ;; DELEGATION, so the arithmetic must not be the variable — the
+       ;; callable surface is N5's and is not hand-extended here.
+       (str "I need the sum of all the multiples of 3 below 1000. "
             "Do not work it out yourself — bob is the agent who handles "
-            "counting problems, so ask bob for the number, pause while "
-            "you wait, and when bob answers, complete with the answer in "
-            "a sentence for me.")
+            "arithmetic, so ask bob for the number, pause while you "
+            "wait, and when bob answers, complete with the number in a "
+            "sentence for me.")
        :seon.cluster.message/at (java.util.Date.)}])
     (stamp "TRIGGER — the human asked alice, and alice was told to delegate")
 
@@ -177,17 +187,29 @@
      (fn [db] (seq (filterv #(= "alice" (:to %)) (agent-messages db "bob"))))
      240)
 
+    ;; THE MILESTONE THAT MATTERS, and it is deliberately not "alice
+    ;; closed a run": a closed run proves nothing — she closed one by
+    ;; pausing, twice, on the drive where bob's answer was garbage. The
+    ;; delegation is only proven when alice COMPLETES with a result
+    ;; carrying the number only bob computed.
     (await-fact
-     "alice closed a run AFTER bob answered" connection
+     "alice completed with a result derived from bob's answer" connection
      (fn [db]
-       (let [bob-at (some-> (first (agent-messages db "bob")) :at inst-ms)
-             closed (filterv (fn [run]
-                               (and (= "alice" (:agent run))
-                                    (not= :open (:closed run))
-                                    bob-at
-                                    (>= (inst-ms (:closed run)) bob-at)))
-                             (runs db))]
-         (seq closed)))
+       (let [answer (some-> (first (filterv #(= "alice" (:to %))
+                                            (agent-messages db "bob")))
+                            :content)
+             digits (some->> answer (re-seq #"\d+") (sort-by count) last)]
+         (when digits
+           (seq (for [{:keys [run agent]} (runs db)
+                      :when (= "alice" agent)
+                      {:keys [result]} (receipts db run)
+                      :let [value (try (clojure.edn/read-string result)
+                                       (catch Throwable _ nil))]
+                      :when (and (map? value)
+                                 (= :completed (:my.run/disposition value))
+                                 (str/includes? (:my.run/result value)
+                                                digits))]
+                  (:my.run/result value))))))
      240)
 
     ;; ------------------------------------------------------------------

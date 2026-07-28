@@ -253,13 +253,25 @@
           ;; exist writes a message the driver has to refuse. Omitted
           ;; entirely when it is alone — the sentence is present exactly
           ;; while the facts that cause it are.
+          ;; THE EXAMPLE USES A REAL ID, and that is not polish. The
+          ;; first live drive's model read "your namespace is
+          ;; my.agents.alice" two lines above "other agents: bob" and
+          ;; wrote (my.message/send "my.agents.bob" …) — an agent this
+          ;; cluster does not have. The delivery rule refused it
+          ;; correctly and recorded the fact, but alice had already
+          ;; completed believing she had asked. A prompt that shows the
+          ;; agent the exact string to pass cannot be read that way.
           (when (seq others)
-            (str "Other agents in this cluster: " (str/join ", " others)
-                 ". Send one a message by returning "
-                 "(my.message/send \"their-id\" \"what you want to say\") "
-                 "from a form — that delivers it and wakes them, and "
-                 "their reply comes back to you as a new request. "
-                 "Return a vector of sends to message several."))
+            (str "Other agents in this cluster, by id: "
+                 (str/join ", " others)
+                 ". To ask one for something, return "
+                 "(my.message/send \"" (first others)
+                 "\" \"what you want to say\") from a form — that "
+                 "delivers it and wakes them. Use the bare id exactly as "
+                 "listed above; it is not a namespace. Their answer "
+                 "comes back to you later as a new request, so pause "
+                 "with my.run/wait after asking. Return a vector of "
+                 "sends to message several."))
           (interrupted-sentence db agent-id)
           (paused-sentence db agent-id)
           (if sender

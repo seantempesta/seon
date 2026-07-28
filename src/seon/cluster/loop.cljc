@@ -783,9 +783,29 @@
                     ;; transaction: a message that exists without the
                     ;; receipt explaining where it came from is the torn
                     ;; window this loop has closed everywhere else.
+                    ;; WHAT THIS FORM ASKS TO SEND — explicitly, or by
+                    ;; completing a run somebody else asked for. The
+                    ;; second is derived from the trigger rather than
+                    ;; remembered by the agent: bob computed the right
+                    ;; answer on the first live drive and called
+                    ;; `complete`, which addressed nobody, and alice
+                    ;; waited forever for a number that already existed.
+                    ;; The reply is an ordinary `my.message` value, so
+                    ;; it goes through the same bound, the same
+                    ;; recipient check and the same derived id.
+                    asked (or (messages (:seon.sci.admit/value evaluation))
+                              (when (= :completed
+                                       (:my.run/disposition settled))
+                                (message/reply
+                                 @connection
+                                 (cond-> {:my.run/result
+                                          (:my.run/result settled)
+                                          :seon.cluster.agent/id agent-id}
+                                   trigger
+                                   (assoc :seon.cluster.message/trigger
+                                          trigger)))))
                     delivery
-                    (when-let [asked (messages
-                                      (:seon.sci.admit/value evaluation))]
+                    (when asked
                       (message/delivery
                        @connection
                        (cond-> {:my.message/value asked

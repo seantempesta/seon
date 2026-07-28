@@ -818,8 +818,11 @@
                                 "\"please count the widgets\")\n"
                                 "(my.run/complete \"asked agent-b\")"))})]
           (drive! cluster 10)
-          (testing "the message is a durable fact addressed to the peer"
-            (is (= #{["please count the widgets" "agent-b" "agent-a"]}
+          (testing "the message is a durable fact addressed to the peer —
+                    and the peer's completion answers back, derived from
+                    the trigger rather than remembered by the delegate"
+            (is (= #{["please count the widgets" "agent-b" "agent-a"]
+                     ["there are three widgets" "agent-a" "agent-b"]}
                    (set (d/q '[:find ?content ?to-id ?from-id
                                :where
                                [?m :seon.cluster.message/content ?content]
@@ -833,21 +836,25 @@
                               [_ :seon.cluster.run/closed-at ?c]]
                             @connection))))
           (testing "message and receipt rode ONE transaction"
-            (let [pairs (d/q '[:find ?mtx ?rtx
-                               :where
-                               [?m :seon.cluster.message/content
-                                "please count the widgets" ?mtx]
-                               [?m :seon.cluster.message/from ?agent]
-                               [?run :seon.cluster.run/agent ?agent]
-                               [?r :seon.cluster.eval/run ?run]
-                               [?r :seon.cluster.eval/ordinal 0]
-                               [?r :seon.cluster.eval/status :done ?rtx]]
-                             @connection)
-                  [message-tx receipt-tx] (first pairs)]
-              (is (= 1 (count pairs)) "exactly one sender's form to check")
-              (is (= message-tx receipt-tx)
-                  "no window in which the message exists and the receipt
-                   explaining where it came from does not")))
+            ;; asked from the MESSAGE's transaction rather than by
+            ;; joining runs: agent-a has two runs by the time the
+            ;; delegate has answered, and a join on "a done receipt at
+            ;; ordinal 0" matches both of them.
+            (let [message-tx
+                  (d/q '[:find ?mtx . :where
+                         [?m :seon.cluster.message/content
+                          "please count the widgets" ?mtx]]
+                       @connection)]
+              (is (= [0]
+                     (d/q '[:find [?ordinal ...]
+                            :in $ ?tx
+                            :where
+                            [?r :seon.cluster.eval/status :done ?tx]
+                            [?r :seon.cluster.eval/ordinal ?ordinal]]
+                          @connection message-tx))
+                  "the message rode the terminal transaction of the very
+                   form that asked for it — no window in which a message
+                   exists and the receipt explaining it does not")))
           (testing "and that transaction names the trigger it answers"
             (is (= 1 (message/chain-depth
                       @connection

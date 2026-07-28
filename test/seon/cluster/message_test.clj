@@ -341,3 +341,71 @@
           (is (= limit (run-to-refusal "m-1"))
               "the budget is per-conversation, not per-cluster and not
                per-lifetime"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The completion reply — and the bounce it must not become
+;;; ---------------------------------------------------------------------------
+
+(deftest a-completed-run-answers-the-agent-that-asked
+  (with-database
+    (fn [connection]
+      (ask! connection "m-0" "alice" "ask bob")
+      (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
+                            :value (my.message/send "bob" "how many?")})
+      (is (= {:my.message/to "alice" :my.message/content "25"}
+             (message/reply @connection
+                            {:my.run/result "25"
+                             :seon.cluster.agent/id "bob"
+                             :seon.cluster.message/trigger
+                             "r-1-0-message-0"}))
+          "bob completing a run alice triggered owes alice the answer —
+           derived from the trigger, never remembered by the agent"))))
+
+(deftest a-completed-run-answering-a-human-replies-to-nobody
+  (with-database
+    (fn [connection]
+      (ask! connection "m-0" "alice" "how many?")
+      (is (nil? (message/reply @connection
+                               {:my.run/result "25"
+                                :seon.cluster.agent/id "alice"
+                                :seon.cluster.message/trigger "m-0"}))
+          "delivery to a human is a surface, not a message to an agent
+           that does not exist"))))
+
+(deftest a-reply-is-not-a-question-so-completing-does-not-bounce
+  ;; THE SECOND LIVE DRIVE'S CORRECTION. alice delegated, bob answered,
+  ;; and alice's completion — the sentence meant for the human — was
+  ;; delivered straight back to bob, who opened a run to consider it.
+  ;; Only the chain limit would have stopped the bounce. The trigger is
+  ;; an answer to us exactly when the message that CAUSED it was ours,
+  ;; and that is the walk the depth bound already does.
+  (with-database
+    (fn [connection]
+      (ask! connection "m-0" "alice" "ask bob")
+      (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
+                            :value (my.message/send "bob" "how many?")})
+      (deliver! connection {:sender "bob" :trigger "r-1-0-message-0"
+                            :run "r-2"
+                            :value (my.message/send "alice" "25")})
+      (is (nil? (message/reply @connection
+                               {:my.run/result "There are 25."
+                                :seon.cluster.agent/id "alice"
+                                :seon.cluster.message/trigger
+                                "r-2-0-message-0"}))
+          "alice completing on bob's ANSWER owes bob nothing — the
+           delegation ends when the delegator completes, which is what
+           puts the chain bound back to being a backstop")))
+
+  (testing "but a genuine second question from the same peer is answered"
+    (with-database
+      (fn [connection]
+        (ask! connection "m-0" "bob" "ask alice something")
+        (deliver! connection {:sender "bob" :trigger "m-0" :run "r-1"
+                              :value (my.message/send "alice" "how many?")})
+        (is (= "bob" (:my.message/to
+                      (message/reply @connection
+                                     {:my.run/result "25"
+                                      :seon.cluster.agent/id "alice"
+                                      :seon.cluster.message/trigger
+                                      "r-1-0-message-0"})))
+            "bob's message was caused by the HUMAN's, not by alice's")))))

@@ -90,6 +90,21 @@
   ; direction (it can only make the guard fire later, never never).
   [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
 
+ ; What a completed run owes the agent that asked for it. The result is
+ ; the disposition's own text, and the trigger is optional because a
+ ; run answering a human has nobody to reply TO — absence is the state,
+ ; and it is what makes "reply to the asker" a derivation rather than
+ ; a rule with an exception.
+ :seon.cluster.message/reply-request
+ [:map {:closed true}
+  [:my.run/result :my.run/result]
+  ; WHO IS COMPLETING, needed to ask the second question the chain
+  ; answers: is this trigger an ANSWER to something I sent? A reply is
+  ; not a question, and completing back at it is how a delegation
+  ; becomes a bounce.
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
+
  :seon.cluster.message/delivery
  [:map {:closed true}
   [:seon.cluster.message/rows [:vector :map]]

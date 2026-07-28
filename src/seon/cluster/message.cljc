@@ -118,6 +118,67 @@
       (recur parent (inc depth) (conj seen id))
       depth)))
 
+(defn sender
+  "The agent that sent `message-id`, or nil when it came from outside."
+  {:malli/schema [:=> [:cat :any :seon.cluster.message/id]
+                  [:maybe :seon.cluster.agent/id]]}
+  [db message-id]
+  (d/q '[:find ?agent-id .
+         :in $ ?message-id
+         :where
+         [?message :seon.cluster.message/id ?message-id]
+         [?message :seon.cluster.message/from ?agent]
+         [?agent :seon.cluster.agent/id ?agent-id]]
+       db message-id))
+
+(defn reply
+  "The message a completed run owes the agent that asked for it, or nil.
+  A `my.message/send` VALUE, deliberately — so the reply goes through
+  `delivery` like any other message and inherits the recipient check,
+  the conversation bound and the derived id, rather than becoming a
+  second way to make a message.
+
+  THIS IS DERIVED, NOT REMEMBERED, and the live drive is the argument.
+  Alice delegated correctly; bob read \"agent alice sent you: how many
+  primes under 100?\", worked it out, and called
+  `(my.run/complete \"25\")` — which addressed nobody, because
+  completion had no recipient. Alice waited forever for an answer that
+  had already been computed. Asking the model to remember \"reply by
+  message, THEN complete\" would be a protocol an agent can forget on
+  any turn; the trigger already knows who asked, so the driver answers
+  them.
+
+  Nil when the trigger came from outside the agent population — a
+  human's request completes to the human, and delivery to a human is a
+  surface, not a message to an agent that does not exist.
+
+  AND NIL WHEN THE TRIGGER IS ALREADY AN ANSWER TO US, which is the
+  correction the second live drive forced. A REPLY IS NOT A QUESTION:
+  alice delegated to bob, bob answered, and alice's own completion —
+  the sentence meant for the human — was delivered straight back to
+  bob, who opened a run to consider it. The conversation would have
+  bounced to the chain limit and only the limit would have stopped it.
+
+  The distinction is derivable from the chain that is already recorded:
+  the trigger is an answer to us exactly when the message that CAUSED
+  it was one of ours. Nothing new is stored, no reply flag, no
+  in-reply-to attribute — the same `caused-by` walk the depth bound
+  uses answers a second question. And it is the right terminator:
+  a delegation ends when the delegator completes, so the chain bound
+  goes back to being the backstop it should be rather than the thing
+  that stops ordinary conversations."
+  {:malli/schema [:=> [:cat :any :seon.cluster.message/reply-request]
+                  [:maybe :my.message/message]]}
+  [db {:keys [:seon.cluster.message/trigger :my.run/result
+              :seon.cluster.agent/id]}]
+  (let [asker (and trigger (sender db trigger))
+        answering-us? (and trigger
+                           (= id (some->> (caused-by db trigger)
+                                          (sender db))))]
+    (when (and asker (not answering-us?))
+      {:my.message/to asker
+       :my.message/content result})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The delivery
 ;;; ---------------------------------------------------------------------------
