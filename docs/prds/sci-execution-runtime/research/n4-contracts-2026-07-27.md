@@ -279,6 +279,57 @@ may be authored by an AGENT; utility soup in that position is unreviewable and
 cannot be restyled without editing every renderer. `bin/css` compiles it in
 63 ms.
 
+## 4b. Recursive unit rendering — and the hole it exposed in package 1
+
+Owner direction, 2026-07-27 night: a unit's rendered form embeds its REFS as
+units, the expander follows connections asking the router per node, bounded by
+depth/node budget plus a visited set — the entity graph can cycle where value
+trees could not. And "the `/data` browser is ESPECIALLY that."
+
+**Does package 1's `expand` already do this?** Same shape, strictly narrower
+case, and — as shipped — NOT BOUNDED. It resolves slots by block name within one
+agent's finite set rather than following refs, and it had a visited set and no
+budget.
+
+That gap is real and I found it by trying to falsify the claim rather than
+asserting it. A visited set is per PATH: it refuses cycles and permits fan-out.
+Twenty-two blocks with **no cycle anywhere**, each slotting the next twice,
+expanded to millions of nodes and **OOM'd the JVM** (`tmp/n4_expand_blowup.clj`).
+The same input now completes in 7.8 ms at 8,212 nodes.
+
+So the recursion property needed naming NOW, not in package 2 — not because of
+ref-following, but because the boundedness discipline ref-following will reuse
+did not exist in the function that is supposed to own it. Resealing later would
+have meant resealing after consumers existed.
+
+What landed:
+
+- `expand` takes `:seon.sci.admit/caps` — the SAME four dials, because a graph
+  that fans out and cycles is the problem the admission codec already solved and
+  a second set of size dials would drift from the first;
+- node budget and depth budget are separate, because a long thin chain and a
+  wide DAG are different ways to be too big, and each gets its own legible note
+  in the hole that stopped;
+- the walk is depth-first, left to right, so one input always elides the same
+  holes — equality suppression is meaningless otherwise;
+- `page` takes `:seon.render/page-request` carrying the caps.
+
+A second real bug fell out of the totality test for a starved budget: `walk` was
+mapping over the element's TAG and attribute map as if they were children, so an
+exhausted budget could replace a `:div` with an elision span. The grammar caught
+it, which is what the grammar is for. Elements now keep their head and only
+children are walked.
+
+**Package 2 owns ref-following and `/data`.** Following a connection is the same
+act as filling a slot — ask the router for a node, descend, count it, stop at
+the budget or at a node already on the path — so it is a new owner (it needs the
+database value and a per-node router call) reusing this discipline, not a new
+discipline. Its recursive falsifier is the owner's own example: an error notice
+→ its message → the run → the receipts, as one expanded page. `/data` is the
+same mechanism with a path cursor: the quarry's drill is paged `get-in`
+navigation into any nested value, so its pager IS bounded expansion where the
+cursor says where to resume rather than eliding.
+
 **Package 3 — the interaction model.** The message box does not exist in
 `src-old/` at HEAD; it was deleted in `9d9e870bd`, and the quarry agent
 recovered its exact code (`git show 9d9e870bd^:src/seon/web/datastar.cljs:1142-1172`)

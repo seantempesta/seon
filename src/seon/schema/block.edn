@@ -139,6 +139,16 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/kind :seon.render/kind]]
 
+ ; What a page needs. Caps are REQUIRED, and they are the SAME four
+ ; dials `seon.sci.admit` already takes — expansion is a walk over a
+ ; graph that can fan out and can cycle, which is precisely the problem
+ ; the admission codec already solved, so it uses that solution's dials
+ ; rather than inventing a second set to drift from them.
+ :seon.render/page-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]]
+
  ; A page is the html surfaces with every slot expanded, in the order
  ; the top-level blocks sort. Top-level is DERIVED (a block no other
  ; block's hiccup slots into), never a stored `:layout` flag — the

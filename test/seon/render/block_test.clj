@@ -21,7 +21,8 @@
   test, matching every other suite in the tree.
 
   Seeds are fixed; generated inputs are functions of their seed."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -132,6 +133,22 @@
 
 (defn- html-request []
   {:seon.cluster.agent/id agent-id :seon.render/kind :seon.render/html})
+
+(def ^:private caps
+  "The four result dials, by the names `seon.sci.admit` already takes.
+  ONE definition for both callers, deliberately: expansion walks a graph
+  that can fan out and can cycle, and the data panel walks a value that
+  can be enormous — the same problem the admission codec already solved,
+  so both take that solution's dials rather than a second set to drift
+  from them. Supplied EXPLICITLY everywhere, because a renderer that
+  invented its own bounds would be exactly that second set."
+  {:seon.config.eval.result/max-depth 12
+   :seon.config.eval.result/max-collection 64
+   :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-nodes 4096})
+
+(defn- page-request []
+  {:seon.cluster.agent/id agent-id :seon.sci.admit/caps caps})
 
 (defn- check!
   [label result]
@@ -319,7 +336,7 @@
   (with-database two-blocks
     (fn [connection]
       (let [db (d/db connection)
-            rendered (block/page db agent-id)]
+            rendered (block/page db (page-request))]
         (is (= 1 (count rendered))
             "the body is slotted BY the header, so only the header is top-level")
         (is (= [:header {:class "flex gap-2"}
@@ -335,14 +352,14 @@
     [(block-map :one 0 :seon.render/html `body-html)
      (block-map :two 10 :seon.render/html `body-html)]
     (fn [connection]
-      (is (= 2 (count (block/page (d/db connection) agent-id)))))))
+      (is (= 2 (count (block/page (d/db connection) (page-request))))))))
 
 (deftest a-slot-naming-a-block-the-agent-does-not-own-self-heals
   ;; The quarry's behaviour, kept: name the block, and the next render
   ;; fills it. A throw here would cost the page.
   (with-database [(block-map :layout 0 :seon.render/html `slots-a-missing-block-html)]
     (fn [connection]
-      (let [[page] (block/page (d/db connection) agent-id)]
+      (let [[page] (block/page (d/db connection) (page-request))]
         (is (true? (hiccup/hiccup? page)))
         (is (re-find #"no-such-block" (pr-str page))
             "the hole says which block is missing")))))
@@ -354,7 +371,7 @@
     [(block-map :cycle-one 0 :seon.render/html `cycle-one-html)
      (block-map :cycle-two 10 :seon.render/html `cycle-two-html)]
     (fn [connection]
-      (let [rendered (block/page (d/db connection) agent-id)]
+      (let [rendered (block/page (d/db connection) (page-request))]
         (is (seq rendered) "the page still renders")
         (is (true? (every? hiccup/hiccup? rendered)))
         (is (re-find #"cycle" (pr-str rendered))
@@ -365,7 +382,7 @@
     [(block-map :layout 0 :seon.render/html `header-html)
      (block-map :body 10 :seon.render/html `throwing-html)]
     (fn [connection]
-      (let [[page] (block/page (d/db connection) agent-id)]
+      (let [[page] (block/page (d/db connection) (page-request))]
         (is (re-find #"body" (pr-str page))
             "the failing block's card is inside the layout's hole")))))
 
@@ -446,15 +463,6 @@
       (qualified-symbol?
        (block/select value (assoc selection :seon.render/specialists rules))))
     :seed 202607280203)))
-
-(def ^:private caps
-  "The four result dials, by the names `seon.sci.admit` already takes.
-  Supplied EXPLICITLY: a panel that invented its own bounds would be a
-  second set of size dials drifting from the config facts."
-  {:seon.config.eval.result/max-depth 12
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 4096})
 
 (deftest the-generic-html-default-renders-anything
   ;; The kind's floor: nothing is unrenderable, and no producer has to
@@ -555,3 +563,79 @@
   (with-database two-blocks
     (fn [connection]
       (is (= [] (block/install-tx (d/db connection) agent-id []))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Bounded expansion — the discipline ref-following will reuse
+;;; ---------------------------------------------------------------------------
+
+(defn- fan-out-surfaces
+  "A DAG with NO cycle anywhere: each block slots the next one twice.
+  The visited set has nothing to catch — every path is acyclic — so this
+  is the case a loop guard alone cannot bound."
+  [depth]
+  (let [names (mapv (fn [index] (keyword (str "b" index))) (range depth))]
+    (mapv (fn [index]
+            {:seon.block/name (names index)
+             :seon.render/surface-id (block/surface-id (names index))
+             :seon.render/kind :seon.render/html
+             :seon.render/output
+             (if (< (inc index) depth)
+               [:div (block/slot (names (inc index)))
+                (block/slot (names (inc index)))]
+               [:span "leaf"])})
+          (range depth))))
+
+(deftest expansion-is-bounded-by-nodes-not-only-by-cycles
+  ;; THE DEFECT THIS TEST EXISTS FOR: the first implementation had a
+  ;; visited set and no budget, and a visited set is per PATH — it
+  ;; refuses cycles and permits fan-out. Twenty-two blocks with no cycle
+  ;; expanded to millions of nodes and OOM'd the JVM
+  ;; (tmp/n4_expand_blowup.clj). A graph that can fan out needs a NODE
+  ;; budget, which is the lesson the admission codec already paid for.
+  (let [surfaces (fan-out-surfaces 22)
+        expanded (block/expand (:seon.render/output (first surfaces))
+                               surfaces caps)
+        nodes (count (tree-seq sequential? seq expanded))]
+    (is (hiccup/hiccup? expanded))
+    (is (< nodes (* 4 (:seon.config.eval.result/max-nodes caps)))
+        (str "expansion must be bounded by the budget, not by luck; got "
+             nodes " nodes"))
+    (is (str/includes? (hiccup/->string expanded) "elided")
+        "and it SAYS it was elided — a reader must never have to guess")))
+
+(deftest expansion-is-deterministic-under-the-budget
+  ;; Equality suppression is meaningless if a budget elides a different
+  ;; subtree per call, so the walk is depth-first and left-to-right and
+  ;; one input always produces one value.
+  (let [surfaces (fan-out-surfaces 22)
+        once (block/expand (:seon.render/output (first surfaces)) surfaces caps)
+        twice (block/expand (:seon.render/output (first surfaces)) surfaces caps)]
+    (is (= once twice))))
+
+(deftest depth-is-bounded-independently-of-node-count
+  ;; A long thin chain spends few nodes and still must stop, because
+  ;; depth and fan-out are different ways to be too big.
+  (let [deep (mapv (fn [index]
+                     {:seon.block/name (keyword (str "d" index))
+                      :seon.render/surface-id
+                      (block/surface-id (keyword (str "d" index)))
+                      :seon.render/kind :seon.render/html
+                      :seon.render/output
+                      [:div (block/slot (keyword (str "d" (inc index))))]})
+                   (range 200))
+        expanded (block/expand (:seon.render/output (first deep)) deep caps)]
+    (is (hiccup/hiccup? expanded))
+    (is (str/includes? (hiccup/->string expanded) "deeper than the configured")
+        "the hole says why it stopped, and names the block")))
+
+(deftest a-budget-of-nothing-still-produces-hiccup
+  ;; Totality at the boundary: the render path may not throw because a
+  ;; dial was set low.
+  (let [surfaces (fan-out-surfaces 4)
+        starved (assoc caps
+                       :seon.config.eval.result/max-nodes 1
+                       :seon.config.eval.result/max-depth 1)
+        expanded (block/expand (:seon.render/output (first surfaces))
+                               surfaces starved)]
+    (is (hiccup/hiccup? expanded))
+    (is (string? (hiccup/->string expanded)))))

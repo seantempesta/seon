@@ -307,19 +307,47 @@
   - a slot naming a block whose surface failed — the surface's error
     card fills the hole, so the failure appears WHERE it belongs;
   - a CYCLE — a slots b slots a. Refused at the hole that closes the
-    loop, naming the cycle. A depth counter would be a magic number
-    standing in for an observable fact; the visited set on the path IS
-    the observable fact."
-  {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/surfaces]
+    loop, naming the cycle. The visited set along the PATH is the
+    observable fact, so a chain that closes is caught exactly where it
+    closes;
+  - the BUDGET is exhausted. The hole stays, saying so.
+
+  THE VISITED SET IS NOT ENOUGH ON ITS OWN, and the first draft of this
+  function shipped believing it was. A visited set is per PATH, so it
+  refuses cycles and permits fan-out: a slots b twice, b slots c twice,
+  and twenty-two blocks with no cycle anywhere expand to four million
+  nodes. Measured — `tmp/n4_expand_blowup.clj` OOMs the JVM at depth 22.
+  A graph that can fan out needs a NODE budget, not just a loop guard,
+  which is the same lesson `seon.sci.admit` already paid for on value
+  trees; expansion therefore takes the SAME four dials rather than a
+  second set to drift from them.
+
+  Bounded expansion is also the general mechanism, not a slot-specific
+  one. A unit's rendered form embeds its refs as units, and following a
+  connection is the same act as filling a slot: ask the router for a
+  node, descend, count it, stop at the budget or at a node already on
+  the path. The entity graph can genuinely cycle where a value tree
+  could not, so the visited set is load-bearing there and the budget
+  bounds the fan-out. Ref-following is its own owner (it needs the
+  database value and a per-node router call); this function is that
+  owner's discipline, proven on the closed case first.
+
+  Deterministic: depth-first, left to right, so one input always elides
+  the same holes. A budget that elided a different subtree per call
+  would make equality suppression meaningless."
+  {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/surfaces
+                       :seon.sci.admit/caps]
                   :seon.render/hiccup]}
-  [hiccup surfaces]
-  (let [by-id (into {} (map (juxt :seon.render/surface-id identity)) surfaces)]
+  [hiccup surfaces caps]
+  (let [by-id (into {} (map (juxt :seon.render/surface-id identity)) surfaces)
+        remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
+        max-depth (long (:seon.config.eval.result/max-depth caps))]
     (letfn [(note [hole text]
               ;; the HOLE stays, carrying why. Self-healing, the
               ;; quarry's behaviour: name the block, and the next render
               ;; fills it.
               (conj (subvec hole 0 2) text))
-            (fill [hole visited]
+            (fill [hole visited depth]
               (let [id (:id (nth hole 1))
                     slot-name (:data-slot (nth hole 1))]
                 (cond
@@ -327,30 +355,56 @@
                   (note hole (str "cycle: " slot-name
                                   " is already being expanded on this path"))
 
+                  (>= depth max-depth)
+                  (note hole (str "not expanded: " slot-name
+                                  " is deeper than the configured depth"))
+
                   :else
                   (if-let [found (by-id id)]
                     (if-let [failure (:seon.error/value found)]
                       (error-card found failure)
-                      (walk (:seon.render/output found) (conj visited id)))
+                      (walk (:seon.render/output found)
+                            (conj visited id)
+                            (inc depth)))
                     (note hole (str "no block named " slot-name
                                     " — install one and this fills itself"))))))
             (slot? [node]
               (and (vector? node)
                    (map? (nth node 1 nil))
                    (contains? (nth node 1) :data-slot)))
-            (walk [node visited]
-              (cond
-                (slot? node) (fill node visited)
-                (vector? node) (mapv (fn [child] (walk child visited)) node)
-                ;; a seq child stays a SEQ — turning it into a vector
-                ;; would make it look like an element with a non-tag
-                ;; head, which the grammar rightly refuses. `doall`
-                ;; because a lazy page is a page that renders somewhere
-                ;; else, later, on a thread nobody chose.
-                (sequential? node)
-                (doall (map (fn [child] (walk child visited)) node))
-                :else node))]
-      (walk hiccup #{}))))
+            (walk [node visited depth]
+              ;; every node counts, and the budget is checked BEFORE the
+              ;; work rather than after: a check that fires once the
+              ;; subtree is already built has not bounded anything
+              (if (neg? (vswap! remaining dec))
+                ;; deterministic, because the walk is depth-first and
+                ;; left-to-right: one input always elides the same holes,
+                ;; which equality suppression depends on
+                [:span {:class "seon-expansion-elided"}
+                 "elided — this page is larger than the configured caps"]
+                (cond
+                  (slot? node) (fill node visited depth)
+                  ;; an element keeps its HEAD and its attributes: only
+                  ;; children are walked. Walking the whole vector let an
+                  ;; exhausted budget replace a `:div` TAG with an
+                  ;; elision span, which is not an element at all — the
+                  ;; grammar caught it, which is what the grammar is for.
+                  (vector? node)
+                  (let [attributed? (and (map? (nth node 1 nil))
+                                         (not (hiccup/raw? (nth node 1))))
+                        prefix (subvec node 0 (if attributed? 2 1))]
+                    (into prefix
+                          (map (fn [child] (walk child visited depth)))
+                          (subvec node (count prefix))))
+                  ;; a seq child stays a SEQ — turning it into a vector
+                  ;; would make it look like an element with a non-tag
+                  ;; head, which the grammar rightly refuses. `doall`
+                  ;; because a lazy page is a page that renders somewhere
+                  ;; else, later, on a thread nobody chose.
+                  (sequential? node)
+                  (doall (map (fn [child] (walk child visited depth)) node))
+                  :else node)))]
+      (walk hiccup #{} 0))))
 
 (defn page
   "The agent's html page: the top-level surfaces, expanded, in order.
@@ -373,9 +427,10 @@
   morph target. The page is assembled once for the initial paint and
   never again: after that the pipeline patches the ONE block that
   changed."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id] :seon.render/page]}
-  [db agent-id]
-  (let [surfaces (surfaces db {:seon.cluster.agent/id agent-id
+  {:malli/schema [:=> [:cat :any :seon.render/page-request] :seon.render/page]}
+  [db {:keys [:seon.cluster.agent/id] caps :seon.sci.admit/caps}]
+  (let [agent-id id
+        surfaces (surfaces db {:seon.cluster.agent/id agent-id
                                :seon.render/kind :seon.render/html})
         ;; every id some OTHER surface slots. Derived by looking at what
         ;; the hiccup says, which is what makes `layout-vs-surface is a
@@ -403,7 +458,7 @@
     (mapv (fn [surface]
             (if-let [failure (:seon.error/value surface)]
               (error-card surface failure)
-              (expand (:seon.render/output surface) surfaces)))
+              (expand (:seon.render/output surface) surfaces caps)))
           roots)))
 
 ;;; ---------------------------------------------------------------------------
