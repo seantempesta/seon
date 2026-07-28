@@ -6,6 +6,25 @@ tags: [prd, agent, runtime]
 
 # F2 — transport conversions + the central-loop deletion: contract package (2026-07-28)
 
+**IMPLEMENTATION NOTE (landed 2026-07-28).** Four path-limited commits in
+the sequenced order: `5daf05e24` (stream conversion + the `seon.ai.stream`
+funeral), `2e372027d` (render proc + `web.clj` conversion + web_test
+re-ground), `a468a92b1` (the central-pass cut + its suite re-grounds),
+`96a2ddfaf` (the sealed suite, seeds 2026072821-2026072829). Live proof:
+`../research/f2-live-render-proof-2026-07-28.md`, harness committed at
+`script/seon/dev/live_render_proof.clj`. Gate at close: `bin/test`
+396 tests / 1564 assertions, 0 failures, 0 errors (from 387/1503 at the
+F1 baseline).
+
+Two deviations from the drafted package, both narrower than the text:
+R3's block move landed in `seon.render.root` rather than a new render
+namespace (the blocks are ordinary root blocks and the seed owner already
+lives there), and seed 2026072827 is a RE-SEAL of `loop_test`'s existing
+crash walk rather than a second copy of it — one regression per class.
+One seam was closed in passing: a nil in-port leaves a Flow proc
+`:running` but unreadable AND its stop transition never runs, so the
+render proc now refuses construction without the channels it reads.
+
 The AGENTS-ARE-FLOWS rebuild's cut wave (plan README §F2, after F1
 green): streamed tokens become one `(sliding-buffer 1)` conn into a
 render proc; render fan-out becomes one derivation → equality
