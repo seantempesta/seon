@@ -745,8 +745,10 @@ Research basis: `flow-mechanics`, `flow-inventory`,
 
 **Owner decisions, collected (nothing else is waiting on you):**
 
-1. Episode-cap default number (set at F4 with drive evidence; 16
-   proposed).
+1. Episode-cap default: **RULED 100** (owner, 2026-07-28 night) —
+   ships in `config/default.edn` with unit+provenance comment; the F1
+   implementation adds it; F4's drives may argue a different number
+   with evidence.
 2. Implicit `:compute` for computed-pure functions, or always-explicit
    metadata (`workload-classification-2026-07-28.md` §recommendation:
    implicit).
