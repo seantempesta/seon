@@ -448,6 +448,30 @@ may reintroduce a shadow build into the dev feedback path.
   never panics ("the fire alarm doesn't burn" — orchestrator carve-out
   confirmed by this ruling); error facts are durable and projectable
   so the digging has something to dig.
+  **Rulings 2026-07-28 (owner, plain-language batch — presence-not-kinds
+  session, grounded in state-without-kinds-2026-07-28.md +
+  simplification-catalog-2026-07-28.md):** (1) OMISSION = NIL-PUNNING
+  (replaces context-blocks Decision 1): nil and absent unify under `get`
+  — a projection with nothing to say may return nil or omit the key;
+  consumers ALWAYS read render keys with `get`, never `contains?`;
+  `[:maybe]` is allowed in in-memory function RETURN contracts (stored
+  attributes stay nil-free — the bridge forces absence there). An
+  omitted block keeps its identified wrapper element so its morph
+  target survives. (2) STATE IS PRESENCE, never a stored discriminator:
+  delete `:seon.ai.attempt/outcome`, stored `:seon.ai/disposition`/
+  `error-class` (derive at read from stored observations), and — sealed
+  N3 revision — `:seon.cluster.eval/status`: `:running`/`:done`/
+  `:error` collapse into presence of `result-edn`/`error`,
+  `:interrupted` becomes an `interrupted-at` instant, settlement fences
+  on ABSENCE of terminal facts. `:seon.render/kind` is exempt: a
+  request argument, never stored. (3) Context-blocks Decisions 2–4 go
+  with the researched recommendations: ONE computed projection-
+  invocation seam in the one router (compiled Var or N5 SCI Var, same
+  result union); installed/derived name collisions REFUSE loudly naming
+  both sources; exact-prompt capture commits BEFORE the provider call.
+  (4) Test-design units 1–3 (false/racing-proof removal, canonical
+  database fixture, minimal shared support) approved; units 4–9 return
+  to the owner after those land.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
