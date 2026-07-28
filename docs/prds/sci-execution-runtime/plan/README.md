@@ -590,6 +590,18 @@ may reintroduce a shadow build into the dev feedback path.
   told one sentence, changes what it sees by writing one defn — no
   registration ceremony, no API to learn. Evaluate it as an agent eval
   (src-inspect-ai/), not a code review.
+  **Guardrail (owner, 2026-07-28 close): NOTHING SYSTEM-WIDE, NOTHING
+  WEIRD PER-FUNCTION.** A renderer is a normal Clojure function — one
+  unit map in, data out; :seon.render/distance is a unit key it MAY
+  read; no function anywhere identifies its own distance or gains a
+  new argument/annotation. Discovery uses only metadata durable defns
+  already carry. ALL machinery lives in dedicated namespaces: the
+  traversal in seon.render.walk (clojure.walk'''s vocabulary —
+  "care-graph" is retired as coinage), explanation in seon.data, the
+  router the one entry. A design element requiring edits outside the
+  render family + seon.data + schema EDN + the N5 indexer is
+  misdesigned. Every new name gets a stated name table for owner veto
+  before contracts seal.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
