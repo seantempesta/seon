@@ -104,11 +104,12 @@
 
 (defn- next-ordinal
   "The first form ordinal of `run` with no terminal receipt, or nil.
-  Resume is a QUERY, never a cursor: a receipt is terminal when its
-  status is not `:running`, and `recover-tx` has already turned a dead
-  process's `:running` receipts into `:interrupted` ones — so an
-  interrupted form is DONE being attempted and the fold moves past it.
-  Nothing re-executes."
+  Resume is a QUERY, never a cursor: a receipt is terminal when it
+  carries a terminal fact — `result-edn`, `error`, or `interrupted-at`
+  (the query twin of `run/terminal?`; there is no status to read) —
+  and `recover-tx` has already stamped a dead process's dangling
+  receipts with `interrupted-at`, so an interrupted form is DONE being
+  attempted and the fold moves past it. Nothing re-executes."
   [db run-id]
   (let [ordinals (d/q '[:find [?ordinal ...]
                         :in $ ?run-id
@@ -124,8 +125,10 @@
                              [?run :seon.cluster.run/id ?run-id]
                              [?receipt :seon.cluster.eval/run ?run]
                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                             [?receipt :seon.cluster.eval/status ?status]
-                             [(not= ?status :running)]]
+                             (or [?receipt :seon.cluster.eval/result-edn _]
+                                 [?receipt :seon.cluster.eval/error _]
+                                 [?receipt
+                                  :seon.cluster.eval/interrupted-at _])]
                            db run-id))]
     (first (sort (remove settled ordinals)))))
 

@@ -1,10 +1,18 @@
 (ns seon.cluster.run-test
-  "Sealed acceptance for the run model (revised 2026-07-27).
+  "Sealed acceptance for the run model (revised 2026-07-28).
 
   Orchestrator-authored. The implementation lane makes these green by
   implementing the seon.cluster.run `*-call` transitions ONLY — schemas
   and tests are byte-sealed; friction is reported, never resolved by
   weakening. Everything runs against in-memory Datahike in-process.
+
+  CONTRACT REVISION 2026-07-28 (owner ruling: STATE IS PRESENCE):
+  `:seon.cluster.eval/status` is DELETED. A receipt is running exactly
+  when it carries none of `result-edn`/`error`/`interrupted-at`;
+  settling asserts terminal facts; recovery asserts `interrupted-at`
+  by CAS-on-absence. Every behavioral assertion below is unchanged —
+  only the state representation it observes moved from an enum to
+  attribute presence.
 
   The acceptance surface is the state-machine property: generated
   command sequences run against the real database while a pure MODEL
@@ -47,7 +55,7 @@
    :seon.cluster.eval/ordinal
    :seon.cluster.eval/claim-epoch
    :seon.cluster.eval/at
-   :seon.cluster.eval/status
+   :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
    :seon.cluster.eval/error])
 
@@ -125,15 +133,15 @@
       (is (nil? (run/interrupted-warning
                  forms
                  [{:seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/status :done}]))))
+                   :seon.cluster.eval/result-edn "1"}]))))
     (testing "an interrupted receipt derives exactly one warning naming
               the first interrupted ordinal and the missing tail"
       (let [warning (run/interrupted-warning
                      forms
                      [{:seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/status :done}
+                       :seon.cluster.eval/result-edn "1"}
                       {:seon.cluster.eval/ordinal 1
-                       :seon.cluster.eval/status :interrupted}])]
+                       :seon.cluster.eval/interrupted-at t1}])]
         (is (= 1 (:seon.cluster.eval/ordinal warning)))
         (is (= 2 (:seon.cluster.run/missing-results warning)))))))
 
@@ -285,29 +293,37 @@
                 settle {::run/id "receipts"
                         ::run/claim-epoch 1
                         :seon.cluster.eval/ordinal 0
-                        :seon.cluster.eval/status :done
                         :seon.cluster.eval/result-edn "42"}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
                       (transact-or-refusal connection (start-tx start)))
                 "duplicate start is refused")
+            (is (not= ::committed
+                      (transact-or-refusal
+                       connection
+                       (settle-tx (dissoc settle
+                                          :seon.cluster.eval/result-edn))))
+                "a settle carrying no terminal fact is refused")
             (is (= ::committed
                    (transact-or-refusal connection (settle-tx settle))))
             (doseq [terminal [settle
-                              (assoc settle :seon.cluster.eval/status :error
-                                    :seon.cluster.eval/error "changed")]]
+                              (assoc settle
+                                     :seon.cluster.eval/result-edn
+                                     "{:seon.error/kind :x}"
+                                     :seon.cluster.eval/error "changed")]]
               (is (not= ::committed
                         (transact-or-refusal connection
                                              (settle-tx terminal)))
                   "a terminal receipt cannot settle again"))
-            (is (= :done
-                   (:seon.cluster.eval/status
-                    (d/pull @connection
-                            '[*]
-                            [:seon.cluster.eval/id
-                             (pr-str ["receipts" 0 1])])))
-                "the first terminal outcome is preserved"))
+            (let [receipt (d/pull @connection
+                                  '[*]
+                                  [:seon.cluster.eval/id
+                                   (pr-str ["receipts" 0 1])])]
+              (is (= "42" (:seon.cluster.eval/result-edn receipt))
+                  "the first terminal outcome is preserved")
+              (is (nil? (:seon.cluster.eval/error receipt))
+                  "and the refused re-settle changed nothing")))
           (let [start {::run/id "receipts"
                        ::run/claim-epoch 1
                        :seon.cluster.eval/ordinal 1
@@ -328,14 +344,14 @@
                        (settle-tx {::run/id "receipts"
                                    ::run/claim-epoch 1
                                    :seon.cluster.eval/ordinal 1
-                                   :seon.cluster.eval/status :done})))
+                                   :seon.cluster.eval/result-edn "1"})))
                 "the old epoch cannot settle after takeover")
-            (is (= :running
-                   (:seon.cluster.eval/status
-                    (d/pull @connection
-                            '[*]
-                            [:seon.cluster.eval/id
-                             (pr-str ["receipts" 1 1])]))))))))))
+            (is (false? (run/terminal?
+                         (d/pull @connection
+                                 '[*]
+                                 [:seon.cluster.eval/id
+                                  (pr-str ["receipts" 1 1])])))
+                "so the receipt stays running — no terminal fact")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The state machine — generated command sequences against a pure model
@@ -382,6 +398,8 @@
                (gen/elements run-ids)
                (gen/choose 0 3)
                (gen/elements [:current :stale :absurd]))
+    ;; the settled kind names WHICH terminal fact the settle asserts:
+    ;; :done → result-edn, :error → error, :interrupted → interrupted-at
     (gen/tuple (gen/return :receipt-settle)
                (gen/elements run-ids)
                (gen/choose 0 3)
@@ -443,14 +461,16 @@
              (= epoch (:epoch entry))
              (nil? (get-in model [:receipts [run-id ordinal epoch]]))))
       :receipt-settle
-      (let [[run-id ordinal guess _status] args
+      (let [[run-id ordinal guess _kind] args
             entry (run-of run-id)
             epoch (resolve-epoch model run-id guess)
             receipt (get-in model [:receipts [run-id ordinal epoch]])]
         (and (some? entry)
              (not (:closed entry))
              (= epoch (:epoch entry))
-             (= :running (:status receipt))))
+             ;; running IS the absence of a settled fact
+             (some? receipt)
+             (nil? (:settled receipt))))
       :recover true)))
 
 (defn- model-apply
@@ -486,25 +506,25 @@
             (assoc-in model [:runs run-id :digest] digest))
     :receipt-start (let [[run-id ordinal guess] args
                          epoch (resolve-epoch model run-id guess)]
+                     ;; no :settled key: a started receipt is running
+                     ;; by the absence of any terminal fact
                      (assoc-in model [:receipts [run-id ordinal epoch]]
                                {:id (pr-str [run-id ordinal epoch])
                                 :run run-id
                                 :ordinal ordinal
-                                :epoch epoch
-                                :status :running}))
-    :receipt-settle (let [[run-id ordinal guess status] args
+                                :epoch epoch}))
+    :receipt-settle (let [[run-id ordinal guess kind] args
                           epoch (resolve-epoch model run-id guess)]
                       (assoc-in model
-                                [:receipts [run-id ordinal epoch] :status]
-                                status))
+                                [:receipts [run-id ordinal epoch] :settled]
+                                kind))
     :recover (let [[live] args]
                (-> model
                    (update :receipts
                            #(into {} (map (fn [[k receipt]]
-                                            [k (if (= :running
-                                                      (:status receipt))
+                                            [k (if (nil? (:settled receipt))
                                                  (assoc receipt
-                                                        :status :interrupted)
+                                                        :settled :interrupted)
                                                  receipt)]))
                                   %))
                    (update :runs
@@ -591,15 +611,20 @@
                         (resolve-epoch model run-id guess)
                         :seon.cluster.eval/ordinal ordinal
                         :seon.cluster.eval/at now})))
-    :receipt-settle (let [[run-id ordinal guess status] args]
+    :receipt-settle (let [[run-id ordinal guess kind] args]
                       (transact-or-refusal
                        connection
                        (run/receipt-settle-tx
-                        {::run/id run-id
-                         ::run/claim-epoch
-                         (resolve-epoch model run-id guess)
-                         :seon.cluster.eval/ordinal ordinal
-                         :seon.cluster.eval/status status})))
+                        (merge {::run/id run-id
+                                ::run/claim-epoch
+                                (resolve-epoch model run-id guess)
+                                :seon.cluster.eval/ordinal ordinal}
+                               ;; the settle IS the terminal fact
+                               (case kind
+                                 :done {:seon.cluster.eval/result-edn "42"}
+                                 :error {:seon.cluster.eval/error "boom"}
+                                 :interrupted
+                                 {:seon.cluster.eval/interrupted-at now})))))
     :recover (let [[live] args
                    tx (into []
                             (mapcat
@@ -617,7 +642,8 @@
                                                 [?r :seon.cluster.eval/run
                                                  ?run]]
                                               (d/db connection) run-id))
-                                   ::run/live-processes live}))))
+                                   ::run/live-processes live
+                                   ::run/now now}))))
                             run-ids)]
                (if (seq tx)
                  (transact-or-refusal connection tx)
@@ -627,18 +653,30 @@
   "Durable-fact invariants checked after EVERY command."
   [connection model]
   (let [database-receipts
+        ;; the settled kind is DERIVED from which terminal fact is
+        ;; present — the same derivation every reader now performs
         (into #{}
-              (map (fn [[id run-id ordinal epoch status]]
-                     {:id id :run run-id :ordinal ordinal
-                      :epoch epoch :status status}))
-              (d/q '[:find ?id ?run-id ?ordinal ?epoch ?status
-                     :where
-                     [?receipt :seon.cluster.eval/id ?id]
-                     [?receipt :seon.cluster.eval/run ?run]
-                     [?run :seon.cluster.run/id ?run-id]
-                     [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                     [?receipt :seon.cluster.eval/claim-epoch ?epoch]
-                     [?receipt :seon.cluster.eval/status ?status]]
+              (map (fn [eid]
+                     (let [receipt (d/pull @connection '[*] eid)
+                           run-id (:seon.cluster.run/id
+                                   (d/pull @connection
+                                           [:seon.cluster.run/id]
+                                           (:db/id
+                                            (:seon.cluster.eval/run
+                                             receipt))))]
+                       (cond-> {:id (:seon.cluster.eval/id receipt)
+                                :run run-id
+                                :ordinal (:seon.cluster.eval/ordinal receipt)
+                                :epoch (:seon.cluster.eval/claim-epoch
+                                        receipt)}
+                         (:seon.cluster.eval/result-edn receipt)
+                         (assoc :settled :done)
+                         (:seon.cluster.eval/error receipt)
+                         (assoc :settled :error)
+                         (:seon.cluster.eval/interrupted-at receipt)
+                         (assoc :settled :interrupted)))))
+              (d/q '[:find [?receipt ...]
+                     :where [?receipt :seon.cluster.eval/id _]]
                    @connection))]
     (and
      (every?
@@ -716,14 +754,16 @@
 ;;; Recovery preserves every terminal receipt byte-for-byte
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private receipt-status-gen
+(def ^:private receipt-state-gen
+  ;; which terminal fact (if any) each seeded receipt carries: running
+  ;; is the ABSENCE of all three — never a stored label
   (gen/elements [:running :done :error]))
 
 (deftest recovery-preserves-terminal-receipts-exactly
   ;; One FRESH database per trial (the shared-database class, already
   ;; fixed once in the state machine, does not get a second life), and
   ;; ids derive from generated values only — replayable under the seed.
-  (let [pull-terminals
+  (let [pull-receipts
         (fn [connection run-id]
           (->> (d/q '[:find [?r ...]
                       :in $ ?run-id
@@ -731,20 +771,23 @@
                       [?run :seon.cluster.run/id ?run-id]
                       [?r :seon.cluster.eval/run ?run]]
                     (d/db connection) run-id)
-               (mapv #(d/pull (d/db connection) '[*] %))
-               (filterv #(contains? #{:done :error}
-                                    (:seon.cluster.eval/status %)))
+               (mapv #(d/pull (d/db connection) '[*] %))))
+        pull-terminals
+        (fn [connection run-id]
+          (->> (pull-receipts connection run-id)
+               (filterv #(or (:seon.cluster.eval/result-edn %)
+                             (:seon.cluster.eval/error %)))
                (sort-by :seon.cluster.eval/ordinal)
                vec))
         check
         (tc/quick-check
          30
-         (prop/for-all [statuses (gen/vector receipt-status-gen 1 5)
+         (prop/for-all [states (gen/vector receipt-state-gen 1 5)
                         dead? gen/boolean
                         round gen/nat]
            (with-model-database
              (fn [connection]
-               (let [run-id (str "keep-" round "-" (count statuses)
+               (let [run-id (str "keep-" round "-" (count states)
                                  "-" dead?)
                      agent-id (str "keeper-" run-id)
                      holder (if dead? "dead-process" "live-process")]
@@ -763,44 +806,36 @@
                  (d/transact
                   connection
                   (vec (map-indexed
-                        (fn [ordinal status]
-                          {:seon.cluster.eval/id (pr-str [run-id ordinal 1])
-                           :seon.cluster.eval/run
-                           [:seon.cluster.run/id run-id]
-                           :seon.cluster.eval/ordinal ordinal
-                           :seon.cluster.eval/claim-epoch 1
-                           :seon.cluster.eval/at t1
-                           :seon.cluster.eval/status status
-                           :seon.cluster.eval/result-edn (str ordinal)})
-                        statuses)))
+                        (fn [ordinal state]
+                          (cond-> {:seon.cluster.eval/id
+                                   (pr-str [run-id ordinal 1])
+                                   :seon.cluster.eval/run
+                                   [:seon.cluster.run/id run-id]
+                                   :seon.cluster.eval/ordinal ordinal
+                                   :seon.cluster.eval/claim-epoch 1
+                                   :seon.cluster.eval/at t1}
+                            (= :done state)
+                            (assoc :seon.cluster.eval/result-edn
+                                   (str ordinal))
+                            (= :error state)
+                            (assoc :seon.cluster.eval/error
+                                   (str "boom-" ordinal))))
+                        states)))
                  (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (run/recover-tx
                         {::run/run (run-entity connection run-id)
-                         ::run/receipts
-                         (mapv #(d/pull (d/db connection) '[*] %)
-                               (d/q '[:find [?r ...]
-                                      :in $ ?run-id
-                                      :where
-                                      [?run :seon.cluster.run/id ?run-id]
-                                      [?r :seon.cluster.eval/run ?run]]
-                                    (d/db connection) run-id))
-                         ::run/live-processes #{"live-process"}})
+                         ::run/receipts (pull-receipts connection run-id)
+                         ::run/live-processes #{"live-process"}
+                         ::run/now t2})
                        _ (when (seq recovery)
                            (d/transact connection recovery))
-                       entity (run-entity connection run-id)
-                       statuses-after
-                       (set (d/q '[:find [?status ...]
-                                   :in $ ?run-id
-                                   :where
-                                   [?run :seon.cluster.run/id ?run-id]
-                                   [?r :seon.cluster.eval/run ?run]
-                                   [?r :seon.cluster.eval/status ?status]]
-                                 (d/db connection) run-id))]
+                       entity (run-entity connection run-id)]
                    (and
-                    ;; no receipt stays :running
-                    (not (contains? statuses-after :running))
-                    ;; terminal receipts are IDENTICAL, whole entities
+                    ;; no receipt stays running: every one now carries
+                    ;; a terminal fact
+                    (every? run/terminal? (pull-receipts connection run-id))
+                    ;; settled receipts are IDENTICAL, whole entities
                     (= terminals-before (pull-terminals connection run-id))
                     ;; dead holders released; live holders keep custody
                     (if dead?

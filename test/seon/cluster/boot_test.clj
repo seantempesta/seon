@@ -427,12 +427,13 @@
                       :seon.cluster.run.form/run [:seon.cluster.run/id "run-crashed"]
                       :seon.cluster.run.form/ordinal 0
                       :seon.cluster.run.form/source "(+ 1 1)"}
+                     ;; dangling = started with no terminal fact —
+                     ;; running IS that absence, there is no status
                      {:seon.cluster.eval/id "e-0"
                       :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
                       :seon.cluster.eval/ordinal 0
                       :seon.cluster.eval/claim-epoch 1
-                      :seon.cluster.eval/at now
-                      :seon.cluster.eval/status :running}])
+                      :seon.cluster.eval/at now}])
         (cluster/stop! instance))
 
       ;; the next boot must settle it, with no lease wait
@@ -449,11 +450,12 @@
             (is (nil? (d/q (quote [:find ?l . :where
                                    [_ :seon.cluster.run/lease-until ?l]])
                            @connection))))
-          (testing "its dangling receipt reads :interrupted, never :running"
-            (is (= [:interrupted]
-                   (d/q (quote [:find [?s ...] :where
-                                [_ :seon.cluster.eval/status ?s]])
-                        @connection))))
+          (testing "its dangling receipt carries interrupted-at — the
+                    one terminal fact recovery asserts"
+            (is (= 1 (count
+                      (d/q (quote [:find [?at ...] :where
+                                   [_ :seon.cluster.eval/interrupted-at ?at]])
+                           @connection)))))
           (testing "and the run is still OPEN with its plan intact —
                     recovery settles custody, it does not re-plan or
                     re-execute anything"

@@ -25,7 +25,7 @@
    :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
    :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
    :seon.cluster.eval/claim-epoch :seon.cluster.eval/at
-   :seon.cluster.eval/status :seon.cluster.eval/result-edn
+   :seon.cluster.eval/interrupted-at :seon.cluster.eval/result-edn
    :seon.cluster.eval/error
    :seon.cluster.message/id :seon.cluster.message/to
    :seon.cluster.message/content :seon.cluster.message/at
@@ -94,14 +94,13 @@
                     :seon.cluster.eval/ordinal 0
                     :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at now
-                    :seon.cluster.eval/status :done
                     :seon.cluster.eval/result-edn "2"}
                    {:seon.cluster.eval/id "e-1"
                     :seon.cluster.eval/run [:seon.cluster.run/id "run-0"]
                     :seon.cluster.eval/ordinal 1
                     :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at now
-                    :seon.cluster.eval/status :interrupted}])
+                    :seon.cluster.eval/interrupted-at now}])
       (let [text (prompt/prompt (d/db connection) request)
             lower (str/lower-case text)]
         (is (str/includes? lower "interrupt")
@@ -186,7 +185,6 @@
                     :seon.cluster.eval/ordinal 0
                     :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at (Date. 1500)
-                    :seon.cluster.eval/status :done
                     :seon.cluster.eval/result-edn "2"}
                    {:seon.cluster.run/id "run-now"
                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
@@ -280,7 +278,6 @@
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/claim-epoch 1
          :seon.cluster.eval/at (Date. 1500)
-         :seon.cluster.eval/status :done
          :seon.cluster.eval/result-edn
          (pr-str {:my.run/disposition :wait
                   :my.run/note "asked bob for the prime count for the human"})}])
@@ -304,7 +301,6 @@
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/claim-epoch 1
            :seon.cluster.eval/at (Date. 1500)
-           :seon.cluster.eval/status :done
            :seon.cluster.eval/result-edn
            (pr-str {:my.run/disposition :completed
                     :my.run/result "done"})}])
@@ -326,6 +322,5 @@
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/claim-epoch 1
            :seon.cluster.eval/at (Date. 1500)
-           :seon.cluster.eval/status :done
            :seon.cluster.eval/result-edn "#not-a-tag{"}])
         (is (string? (prompt/prompt (d/db connection) request)))))))

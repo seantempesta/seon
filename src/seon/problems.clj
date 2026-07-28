@@ -124,7 +124,9 @@
   [db]
   (->> (d/q '[:find ?id ?run-id ?ordinal ?source ?kind ?error
               :where
-              [?receipt :seon.cluster.eval/status :error]
+              ;; PRESENCE IS THE STATE: an errored receipt is one that
+              ;; carries an error — there is no status label to filter
+              ;; on, and the clause below already binds it
               [?receipt :seon.cluster.eval/id ?id]
               [?receipt :seon.cluster.eval/ordinal ?ordinal]
               [?receipt :seon.error/kind ?kind]

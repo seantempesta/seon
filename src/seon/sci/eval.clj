@@ -90,10 +90,11 @@
   be the L17 violation the quarry's own comment warned about.
 
   Crash walk: this namespace owns no durable state. A kill during an
-  evaluation leaves the loop's `:running` receipt, which N2's
-  `recover-tx` settles as `:interrupted` — and rows 6 and 7 of the
-  crash walk stay indistinguishable, which is honest: the form's effect
-  MAY have happened. Nothing re-executes."
+  evaluation leaves the loop's running receipt (one with no terminal
+  fact), which N2's `recover-tx` settles by asserting its
+  `interrupted-at` — and rows 6 and 7 of the crash walk stay
+  indistinguishable, which is honest: the form's effect MAY have
+  happened. Nothing re-executes."
   (:require [clojure.test.check.generators :as gen]
             [my.message]
             [my.run]
@@ -307,11 +308,12 @@
   6. disarm in `finally`.
 
   Never throws. A failure of any kind returns an ordinary map whose
-  `:seon.sci.admit/value` is a flat `:seon.error` value:
-  `:seon.cluster.eval/status` is `:done` when the form produced a
-  value, `:interrupted` when the time limit fired, and `:error`
-  otherwise. The record rides through with `fn-entries` and
-  `allocated-bytes` intact."
+  `:seon.sci.admit/value` is a flat `:seon.error` value. PRESENCE IS
+  THE STATE (owner ruling 2026-07-28): `:seon.cluster.eval/error` is
+  present exactly when the form failed, and
+  `:seon.cluster.eval/interrupted-at` — the instant the interrupt was
+  observed — is present exactly when the time limit fired. The record
+  rides through with `fn-entries` and `allocated-bytes` intact."
   {:malli/schema [:=> [:cat :seon.sci.eval/request]
                   :seon.sci.eval/evaluation]}
   [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
@@ -350,8 +352,7 @@
                          ;; evaluator does not default one
                          :seon.config/on-core-error on-core-error
                          :seon.sci.admit/record (record :ok)})]
-          (cond-> {:seon.cluster.eval/status :done
-                   :seon.sci.admit/value (:seon.sci.admit/value admitted)
+          (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn admitted)
                    :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
@@ -369,17 +370,18 @@
                   :seon.sci.admit/caps caps
                   :seon.config/on-core-error :record
                   :seon.sci.admit/record record})]
-            (cond-> {:seon.cluster.eval/status
-                     (if (= :time (:seon.eval/outcome record))
-                       :interrupted
-                       :error)
-                     :seon.sci.admit/value (:seon.sci.admit/value admitted)
+            (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                      :seon.cluster.eval/result-edn
                      (:seon.cluster.eval/result-edn admitted)
                      :seon.cluster.eval/error (:seon.error/message value)
                      :seon.sci.admit/capped?
                      (:seon.sci.admit/capped? admitted)
                      :seon.sci.admit/record record}
+              ;; the instant the interrupt was OBSERVED — the one
+              ;; genuinely new fact a cut evaluation leaves. Its
+              ;; presence IS the interrupted state; there is no label.
+              (= :time (:seon.eval/outcome record))
+              (assoc :seon.cluster.eval/interrupted-at (java.util.Date.))
               ;; whatever it printed BEFORE it failed is often the whole
               ;; story of why
               (seq (str printed))

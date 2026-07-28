@@ -170,16 +170,20 @@
                   [:vector :some]]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
-           :seon.cluster.eval/status :seon.cluster.eval/result-edn
-           :seon.cluster.eval/error :seon.cluster.eval/output :seon.error/kind
+           :seon.cluster.eval/result-edn :seon.cluster.eval/error
+           :seon.cluster.eval/interrupted-at
+           :seon.cluster.eval/output :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
                          :seon.cluster.run/claim-epoch claim-epoch
-                         :seon.cluster.eval/ordinal ordinal
-                         :seon.cluster.eval/status status}
+                         :seon.cluster.eval/ordinal ordinal}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
                   error (assoc :seon.cluster.eval/error error)
+                  ;; the cut instant, present exactly when the time
+                  ;; limit fired — its presence IS the interrupted state
+                  interrupted-at (assoc :seon.cluster.eval/interrupted-at
+                                        interrupted-at)
                   kind (assoc :seon.error/kind kind)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
@@ -304,11 +308,15 @@
 
 ;;; The transport-phase evidence the leaf recorded, carried onto the
 ;;; attempt row under THE PRODUCER'S OWN KEYS. Selected rather than
-;;; re-keyed one by one: a `cond->` per field is five chances to drop
+;;; re-keyed one by one: a `cond->` per field is four chances to drop
 ;;; one silently, and `false` is a meaningful value here that a
-;;; truthiness test would eat.
+;;; truthiness test would eat. OBSERVATIONS ONLY (owner ruling
+;;; 2026-07-28): the error class and the disposition are pure functions
+;;; of this evidence (`seon.ai/status-class`, `seon.ai/disposition`
+;;; over the error fact's data-edn), derived at read, never stored
+;;; beside the facts they restate.
 (def ^:private evidence-attributes
-  [:seon.ai/error-class :seon.ai/http-status :seon.ai/request-transmitted?
+  [:seon.ai/http-status :seon.ai/request-transmitted?
    :seon.ai/response-started? :seon.ai/output-observed?])
 
 (defn- record-attempt!
@@ -328,7 +336,6 @@
   [cluster request now]
   (let [{target :seon.ai/target
          failure :seon.error/value
-         disposition :seon.ai/disposition
          run-id :seon.cluster.run/id
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
@@ -346,15 +353,16 @@
                       :seon.ai.attempt/ordinal ordinal
                       :seon.ai.attempt/at now
                       :seon.ai/endpoint (:seon.ai/endpoint target)
-                      :seon.ai/model (:seon.ai/model target)
-                      :seon.ai.attempt/outcome (if failure :error :success)}
+                      :seon.ai/model (:seon.ai/model target)}
                      (select-keys (:seon.error/data failure)
                                   evidence-attributes))
               ;; the fact is created by THIS transaction, so the ref is
               ;; its tempid — a lookup ref to something the same
-              ;; transaction is still creating is not a bet to take
+              ;; transaction is still creating is not a bet to take.
+              ;; THE REF'S PRESENCE IS THE OUTCOME: an attempt failed
+              ;; exactly when it points at an error fact, and there is
+              ;; no stored :success/:error label restating that.
               commit (assoc :seon.ai.attempt/error (:db/id (first commit)))
-              disposition (assoc :seon.ai/disposition disposition)
               ;; ROLE BY CONNECTION: only the backup points back, so a
               ;; reader can tell a failover from a retry without a stamp
               failover-from (assoc :seon.ai.attempt/failover-from
@@ -646,12 +654,19 @@
                               :error
                               :released)
                             0)))))
+            ;; THE TRIGGER THE RUN OPENED ON, read from the run's own
+            ;; creating transaction (`message/trigger`) — never re-asked
+            ;; from `unanswered-triggers`. The run's opening transaction
+            ;; ANSWERED its trigger, so the re-ask returned a DIFFERENT
+            ;; message whenever one had arrived between open and this
+            ;; call, and nil otherwise (which only prompted the right
+            ;; content because nil in a query pattern matches anything).
+            ;; One derivation, one owner: the recorded cause is the
+            ;; prompt's cause.
             text (prompt/prompt @connection
                                 {:seon.cluster.agent/id agent-id
                                  :seon.cluster.message/id
-                                 (first (map :seon.cluster.message/id
-                                             (work/unanswered-triggers
-                                              @connection agent-id)))})
+                                 (message/trigger @connection run-id)})
             backup (:seon.ai/backup cluster)
             ;; DERIVED ONCE, and EMPTY whenever a backup exists. That is
             ;; the whole "backoff only on the no-backup path" rule, held
@@ -686,8 +701,6 @@
                                                :seon.cluster.agent/id agent-id
                                                :seon.ai.attempt/ordinal ordinal}
                                         failure (assoc :seon.error/value failure)
-                                        disposition
-                                        (assoc :seon.ai/disposition disposition)
                                         failover-from
                                         (assoc :seon.ai.attempt/failover-from
                                                failover-from)
@@ -843,15 +856,18 @@
                     (cond-> {:seon.cluster.run/id run-id
                              :seon.cluster.run/process process
                              :seon.cluster.run/claim-epoch epoch
-                             :seon.cluster.run.form/ordinal ordinal
-                             :seon.cluster.eval/status
-                             (:seon.cluster.eval/status evaluation)}
+                             :seon.cluster.run.form/ordinal ordinal}
                       (:seon.cluster.eval/result-edn evaluation)
                       (assoc :seon.cluster.eval/result-edn
                              (:seon.cluster.eval/result-edn evaluation))
                       (:seon.cluster.eval/error evaluation)
                       (assoc :seon.cluster.eval/error
                              (:seon.cluster.eval/error evaluation))
+                      ;; the cut instant rides through as the one
+                      ;; interrupted fact — presence is the state
+                      (:seon.cluster.eval/interrupted-at evaluation)
+                      (assoc :seon.cluster.eval/interrupted-at
+                             (:seon.cluster.eval/interrupted-at evaluation))
                       (:seon.error/kind
                        (:seon.sci.admit/value evaluation))
                       (assoc :seon.error/kind

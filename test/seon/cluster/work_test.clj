@@ -51,7 +51,7 @@
    :seon.cluster.eval/ordinal
    :seon.cluster.eval/claim-epoch
    :seon.cluster.eval/at
-   :seon.cluster.eval/status
+   :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
    :seon.cluster.eval/error
    :seon.cluster.message/id
@@ -131,7 +131,7 @@
                 :seon.cluster.eval/ordinal ordinal
                 :seon.cluster.eval/claim-epoch 1
                 :seon.cluster.eval/at now
-                :seon.cluster.eval/status :done
+                ;; the result's presence IS the terminal state
                 :seon.cluster.eval/result-edn "1"}]))
 
 (defn- close-run! [connection]

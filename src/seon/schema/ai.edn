@@ -105,10 +105,11 @@
  :seon.ai.attempt/run [:and {:seon.db/index true} :seon.db/ref]
  :seon.ai.attempt/ordinal [:int {:min 0}]
  :seon.ai.attempt/at :inst
- :seon.ai.attempt/outcome [:enum :success :error]
  ; The error FACT this attempt produced — the whole normalized record
  ; with its signature, prose projection and evidence, never a copy of
- ; its message.
+ ; its message. ITS PRESENCE IS THE OUTCOME (owner ruling 2026-07-28):
+ ; an attempt failed exactly when it points at an error fact, and there
+ ; is no stored :success/:error label restating that.
  :seon.ai.attempt/error :seon.db/ref
  ; ROLE BY CONNECTION, never a `:primary`/`:backup` stamp: an attempt is
  ; the backup exactly when it points at the attempt it replaced. That
@@ -119,8 +120,12 @@
  ; The descriptor fields and the transport evidence keep the names the
  ; PRODUCERS already use — `seon.ai/target`'s own endpoint/model and the
  ; leaf's own `:seon.error/data` evidence keys — so reading a row back
- ; needs no translation table.
- :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/outcome :seon.ai.attempt/outcome] [:seon.ai/disposition {:optional true} :seon.ai/disposition] [:seon.ai/error-class {:optional true} :seon.ai/error-class] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+ ; needs no translation table. The row stores OBSERVATIONS only (owner
+ ; ruling 2026-07-28): the disposition acted on and the error class are
+ ; pure functions of the durable evidence (`seon.ai/disposition`,
+ ; `status-class`, the error fact's data-edn), derived at read rather
+ ; than frozen beside the facts they restate.
+ :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
 
  ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:

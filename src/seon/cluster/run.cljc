@@ -32,20 +32,20 @@
     transition stays a deterministic pure function (generative tests
     supply it). The transition fences STATE; time is first-party input
     from core code — agents never reach this layer.
-  - Crashes are rare and NOTHING re-executes: boot recovery marks
-    dangling `:running` eval receipts `:interrupted` and releases
-    custody held by dead processes, leaving every terminal receipt
-    untouched. A form has AT MOST ONE terminal receipt, ever. The
-    interrupted state surfaces as ONE derived warning, never per-eval
-    markers.
+  - Crashes are rare and NOTHING re-executes: boot recovery asserts
+    `:seon.cluster.eval/interrupted-at` on dangling receipts (those
+    carrying no terminal fact) and releases custody held by dead
+    processes, leaving every settled receipt untouched. A form has AT
+    MOST ONE settlement, ever. The interrupted state surfaces as ONE
+    derived warning, never per-eval markers.
 
   Crash walk: every transition here is ONE atomic transaction (a single
   `[:db.fn/call ...]`), so a kill at any instant leaves it either fully
   committed or absent — there is no partial window inside this
   namespace. The two windows that remain live OUTSIDE it: a run opened
   before its plan commits (recovery sees an open unplanned run — the
-  known unowned issue), and a receipt written `:running` before its
-  eval settles (recovery marks it `:interrupted`)."
+  known unowned issue), and a receipt started before its eval settles
+  (recovery asserts its `interrupted-at`)."
   (:require [datahike.api :as d]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -99,10 +99,24 @@
         (some? (::lease-until run))
         (<= (inst-ms (::lease-until run)) (inst-ms now)))))
 
+(defn terminal?
+  "True when the receipt carries a terminal fact.
+  THE ONE PRESENCE QUESTION over receipts (owner ruling 2026-07-28): a
+  receipt settles by asserting `result-edn` or `error`, and is cut by
+  `interrupted-at`. A receipt carrying none of the three is running —
+  there is no status label to read. `seon.cluster.work/next-ordinal`
+  asks the same question as a query; this is its map twin."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [receipt]
+  (boolean (or (:seon.cluster.eval/result-edn receipt)
+               (:seon.cluster.eval/error receipt)
+               (:seon.cluster.eval/interrupted-at receipt))))
+
 (defn interrupted-warning
   "Derive the ONE interrupted warning for a run, or nil when clean.
-  Non-nil exactly when an `:interrupted` receipt exists among the
-  supplied receipts:
+  Non-nil exactly when a receipt carrying
+  `:seon.cluster.eval/interrupted-at` exists among the supplied
+  receipts:
   {:seon.cluster.eval/ordinal first-interrupted-ordinal
    :seon.cluster.run/missing-results count-of-forms-at-or-after-it}.
   The caller supplies one run's forms and receipts and knows which run
@@ -116,8 +130,9 @@
                         [:map
                          [:seon.cluster.eval/ordinal
                           :seon.cluster.eval/ordinal]
-                         [:seon.cluster.eval/status
-                          :seon.cluster.eval/status]]]]
+                         [:seon.cluster.eval/interrupted-at
+                          {:optional true}
+                          :seon.cluster.eval/interrupted-at]]]]
                   [:maybe [:map
                            [:seon.cluster.eval/ordinal
                             :seon.cluster.eval/ordinal]
@@ -125,8 +140,7 @@
   [forms receipts]
   (when-let [ordinal
              (->> receipts
-                  (filter #(= :interrupted
-                              (:seon.cluster.eval/status %)))
+                  (filter :seon.cluster.eval/interrupted-at)
                   (map :seon.cluster.eval/ordinal)
                   sort
                   first)]
@@ -464,7 +478,8 @@
       :else run)))
 
 (defn receipt-start-tx
-  "Transaction data starting one absent receipt at `:running`."
+  "Transaction data starting one absent receipt.
+  A started receipt carries no terminal fact — that absence IS running."
   {:malli/schema
    [:=> [:cat [:map {:closed true}
                [::id ::id]
@@ -498,23 +513,24 @@
       :seon.cluster.eval/run (:db/id run)
       :seon.cluster.eval/ordinal ordinal
       :seon.cluster.eval/claim-epoch claim-epoch
-      :seon.cluster.eval/at at
-      :seon.cluster.eval/status :running}]))
+      :seon.cluster.eval/at at}]))
 
 (defn receipt-settle-tx
-  "Transaction data settling one running receipt exactly once."
+  "Transaction data settling one running receipt exactly once.
+  Settling IS asserting terminal facts: `result-edn`, `error`, and/or
+  `interrupted-at` — at least one, and there is no status label."
   {:malli/schema
    [:=> [:cat
          [:map {:closed true}
           [::id ::id]
           [::claim-epoch ::claim-epoch]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [:seon.cluster.eval/status
-           [:enum :done :error :interrupted]]
           [:seon.cluster.eval/result-edn {:optional true}
            :seon.cluster.eval/result-edn]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
+          [:seon.cluster.eval/interrupted-at {:optional true}
+           :seon.cluster.eval/interrupted-at]
           [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]]]
@@ -524,27 +540,31 @@
 
 (defn receipt-settle-call
   "Settle one running receipt, inside the transaction.
-  The run and receipt must both name the request's exact current epoch;
-  a terminal receipt never returns to running or changes outcome."
+  The run and receipt must both name the request's exact current epoch.
+  The settle-once fence is PRESENCE: a receipt already carrying any
+  terminal fact refuses `::receipt-terminal`, so a settled receipt
+  never returns to running or changes outcome; a settle carrying no
+  terminal fact refuses `::no-terminal-fact`, because \"settled with
+  nothing settled\" is a caller bug."
   {:malli/schema
    [:=> [:cat :any
          [:map {:closed true}
           [::id ::id]
           [::claim-epoch ::claim-epoch]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [:seon.cluster.eval/status
-           [:enum :done :error :interrupted]]
           [:seon.cluster.eval/result-edn {:optional true}
            :seon.cluster.eval/result-edn]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
+          [:seon.cluster.eval/interrupted-at {:optional true}
+           :seon.cluster.eval/interrupted-at]
           [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id claim-epoch]
-         :seon.cluster.eval/keys [ordinal status]} request
+         :seon.cluster.eval/keys [ordinal]} request
         run (receipt-run db `receipt-settle-call request)
         receipt (current-receipt db id ordinal claim-epoch)]
     (cond
@@ -560,47 +580,49 @@
       (not= claim-epoch (:seon.cluster.eval/claim-epoch receipt))
       (refuse! `receipt-settle-call ::stale-receipt-epoch request)
 
-      (not= :running (:seon.cluster.eval/status receipt))
-      (refuse! `receipt-settle-call ::receipt-terminal request))
-    (cond-> [[:db/add (:db/id receipt) :seon.cluster.eval/status status]]
-      (:seon.cluster.eval/result-edn request)
-      (conj [:db/add (:db/id receipt) :seon.cluster.eval/result-edn
-             (:seon.cluster.eval/result-edn request)])
-      (:seon.cluster.eval/error request)
-      (conj [:db/add (:db/id receipt) :seon.cluster.eval/error
-             (:seon.cluster.eval/error request)])
-      (:seon.error/kind request)
-      (conj [:db/add (:db/id receipt) :seon.error/kind
-             (:seon.error/kind request)])
-      (:seon.cluster.eval/output request)
-      (conj [:db/add (:db/id receipt) :seon.cluster.eval/output
-             (:seon.cluster.eval/output request)]))))
+      (terminal? receipt)
+      (refuse! `receipt-settle-call ::receipt-terminal request)
+
+      (not (terminal? request))
+      (refuse! `receipt-settle-call ::no-terminal-fact request))
+    (into []
+          (keep (fn [attribute]
+                  (when-some [value (get request attribute)]
+                    [:db/add (:db/id receipt) attribute value])))
+          [:seon.cluster.eval/result-edn
+           :seon.cluster.eval/error
+           :seon.cluster.eval/interrupted-at
+           :seon.error/kind
+           :seon.cluster.eval/output])))
 
 (defn recover-tx
   "Boot recovery for one run against dead-process facts.
-  Every `:running` receipt becomes `:interrupted`; custody held by a
-  process outside `::live-processes` is released; EVERY terminal
-  receipt (`:done`/`:error`/`:interrupted`) is left byte-untouched.
-  Returns [] for a run needing nothing. Pure over supplied values (the
-  boot pass reads once and recovers every run from one basis), so this
-  stays a plain data function rather than a `:db.fn/call`. NOTHING here
-  re-opens, re-plans, or re-executes."
+  Every running receipt — one carrying NO terminal fact — gets
+  `:seon.cluster.eval/interrupted-at` asserted at `::now`, fenced by
+  CAS-on-absence so double recovery cannot re-stamp it; custody held by
+  a process outside `::live-processes` is released; EVERY settled
+  receipt is left byte-untouched. Returns [] for a run needing nothing.
+  Pure over supplied values (the boot pass reads once and recovers
+  every run from one basis), so this stays a plain data function rather
+  than a `:db.fn/call`. NOTHING here re-opens, re-plans, or
+  re-executes."
   {:malli/schema [:=> [:cat [:map {:closed true}
                              [::run [:map]]
                              [::receipts [:sequential :map]]
-                             [::live-processes [:set ::process]]]]
+                             [::live-processes [:set ::process]]
+                             [::now :inst]]]
                   [:vector :some]]}
   [request]
-  (let [{::keys [run receipts live-processes]} request
+  (let [{::keys [run receipts live-processes now]} request
         interrupted
         (keep (fn [receipt]
-                (when (= :running (:seon.cluster.eval/status receipt))
+                (when-not (terminal? receipt)
                   [:db.fn/cas
                    [:seon.cluster.eval/id
                     (:seon.cluster.eval/id receipt)]
-                   :seon.cluster.eval/status
-                   :running
-                   :interrupted]))
+                   :seon.cluster.eval/interrupted-at
+                   nil
+                   now]))
               receipts)
         process (::process run)
         lease-until (::lease-until run)

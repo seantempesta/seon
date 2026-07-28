@@ -9,7 +9,8 @@
   without touching a line here. The model call is stubbed for the same
   reason the sealed AI suite has no network: a suite that needs a paid
   call is a suite nobody runs."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [my.run :as my.run]
@@ -44,8 +45,9 @@
 ;;; the injected evaluator: whatever the current fixture wants the form
 ;;; to evaluate to, without a sci context
 (def ^:dynamic *evaluation*
-  {:seon.cluster.eval/status :done
-   :seon.cluster.eval/result-edn "1"
+  ;; presence is the state: a clean evaluation is result-edn with no
+  ;; error and no interrupted-at — there is no status key
+  {:seon.cluster.eval/result-edn "1"
    :seon.sci.admit/value 1})
 
 (defn fake-evaluate
@@ -198,11 +200,16 @@
                 (is (= (pr-str (my.run/complete "counted 6"))
                        (get results 2))
                     "and the disposition round-tripped through admission")))
-            (testing "every receipt is done — no interrupt, no error"
-              (is (= #{:done}
-                     (set (d/q '[:find [?status ...] :where
-                                 [_ :seon.cluster.eval/status ?status]]
-                               @connection)))))
+            (testing "every receipt settled clean — no interrupt, no error"
+              (is (= 3 (count (d/q '[:find ?e :where
+                                     [?e :seon.cluster.eval/result-edn _]]
+                                   @connection))))
+              (is (empty? (d/q '[:find ?e :where
+                                 (or [?e :seon.cluster.eval/error _]
+                                     [?e :seon.cluster.eval/interrupted-at _])]
+                               @connection))
+                  "no error and no cut instant anywhere — presence is
+                   the state"))
             (is (some? (d/q '[:find ?c . :where
                               [_ :seon.cluster.run/closed-at ?c]] @connection))
                 "and the run closed")))))))
@@ -224,10 +231,14 @@
                                     "(my.run/complete (str \"there are \""
                                     " (widget-count 4)))")})]
           (drive! cluster 10)
-          (testing "every form ran"
-            (is (= #{:done}
-                   (set (d/q '[:find [?s ...] :where
-                               [_ :seon.cluster.eval/status ?s]] @connection)))))
+          (testing "every form ran and settled clean"
+            (is (= 3 (count (d/q '[:find ?e :where
+                                   [?e :seon.cluster.eval/result-edn _]]
+                                 @connection))))
+            (is (empty? (d/q '[:find ?e :where
+                               (or [?e :seon.cluster.eval/error _]
+                                   [?e :seon.cluster.eval/interrupted-at _])]
+                             @connection))))
           (testing "the def landed in the agent's namespace"
             (is (re-find #"my\.agents\.agent-a/widget-count"
                          (d/q '[:find ?edn . :where
@@ -276,8 +287,7 @@
         ;; the loop's own pass settles it before deriving anything
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(my.run/complete \"answered\")"})]
-          (binding [*evaluation* {:seon.cluster.eval/status :done
-                                  :seon.cluster.eval/result-edn
+          (binding [*evaluation* {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "answered"))
                                   :seon.sci.admit/value (my.run/complete "answered")}]
             (drive-passes! cluster 8)))
@@ -346,11 +356,10 @@
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(loop [] (recur))"})]
           (drive! cluster 6)
-          (is (= [:interrupted]
-                 (d/q '[:find [?status ...] :where
-                        [_ :seon.cluster.eval/status ?status]]
-                      @connection))
-              "the receipt records the time limit, and the fold moved on")
+          (is (= 1 (count (d/q '[:find [?at ...] :where
+                                 [_ :seon.cluster.eval/interrupted-at ?at]]
+                               @connection)))
+              "the receipt records its cut instant, and the fold moved on")
           (is (re-find #"(?i)time"
                        (d/q '[:find ?error . :where
                               [_ :seon.cluster.eval/error ?error]]
@@ -362,8 +371,7 @@
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text
                              "(+ 1 1)\n(my.run/complete \"two widgets\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/status :done
-                               :seon.cluster.eval/result-edn "2"
+        (binding [*evaluation* {:seon.cluster.eval/result-edn "2"
                                :seon.sci.admit/value 2}]
           (let [connection (:seon.store/branch-connection cluster)
                 reports (drive! cluster 10)]
@@ -384,8 +392,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/complete \"done\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/status :done
-                               :seon.cluster.eval/result-edn
+        (binding [*evaluation* {:seon.cluster.eval/result-edn
                                (pr-str (my.run/complete "done"))
                                :seon.sci.admit/value (my.run/complete "done")}]
           (let [connection (:seon.store/branch-connection cluster)
@@ -413,8 +420,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/wait \"need input\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/status :done
-                               :seon.cluster.eval/result-edn
+        (binding [*evaluation* {:seon.cluster.eval/result-edn
                                (pr-str (my.run/wait "need input"))
                                :seon.sci.admit/value (my.run/wait "need input")}]
           (let [connection (:seon.store/branch-connection cluster)
@@ -502,6 +508,21 @@
        (sort-by :seon.ai.attempt/ordinal)
        vec))
 
+(defn- derived-disposition
+  "Re-derive what the loop decided, from durable facts alone.
+  The attempt's error fact carries the evidence, and the backup role is
+  the `failover-from` connection — a stored disposition would only
+  restate this derivation (owner ruling 2026-07-28)."
+  [db row backup-configured?]
+  (let [fact (d/pull db '[*] (:db/id (:seon.ai.attempt/error row)))
+        value (edn/read-string (:seon.error/data-edn fact))]
+    (ai/disposition
+     {:seon.error/value value
+      :seon.ai/backup? (boolean
+                        (and backup-configured?
+                             (not (contains? row
+                                             :seon.ai.attempt/failover-from))))})))
+
 (defn- durable-fact
   "The committed error fact, read BACK OUT of the database.
   The two refs are restored to the lookup-ref shape `normalize` emitted,
@@ -531,21 +552,22 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"one\")"}])]
-          (binding [*evaluation* {:seon.cluster.eval/status :done
-                                  :seon.cluster.eval/result-edn
+          (binding [*evaluation* {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "one"))
                                   :seon.sci.admit/value (my.run/complete "one")}]
             (drive! cluster 10)))
         (is (= 1 (count @requests)) "one request built, so one call made")
         (let [[row :as rows] (attempt-rows @connection)]
           (is (= 1 (count rows)))
-          (is (= :success (:seon.ai.attempt/outcome row)))
           (is (.equals "probe" (:seon.ai/model row)))
-          (is (not (contains? row :seon.ai.attempt/error)))
+          (is (not (contains? row :seon.ai.attempt/error))
+              "no error ref — the ref's presence IS the outcome, and a
+               success simply has none")
           (is (not (contains? row :seon.ai.attempt/failover-from))
               "nothing failed over, so nothing points anywhere")
           (is (not (contains? row :seon.ai/disposition))
-              "and a success has no disposition to compute"))
+              "and no disposition is stored on any row — it is derived
+               at read from the durable evidence"))
         (is (nil? (d/q '[:find ?e . :where [?e :seon.error/id _]] @connection))
             "and a call that worked committed no error fact")))))
 
@@ -560,8 +582,7 @@
                        requests
                        [unpaid {:seon.ai/text "(my.run/complete \"backed up\")"}])]
           (binding [*evaluation*
-                    {:seon.cluster.eval/status :done
-                     :seon.cluster.eval/result-edn
+                    {:seon.cluster.eval/result-edn
                      (pr-str (my.run/complete "backed up"))
                      :seon.sci.admit/value (my.run/complete "backed up")}]
             (drive! cluster 10)))
@@ -599,11 +620,13 @@
                      (:seon.ai/system backup-request)))))
           (testing "two attempt rows tell the whole story"
             (is (= 2 (count rows)))
-            (is (= [:error :success]
-                   (mapv :seon.ai.attempt/outcome rows)))
-            (is (= :failover-now (:seon.ai/disposition primary-row))
-                "and WHY the second call was allowed is a fact, not an
-                 inference from the fact that it happened")
+            (is (= [true false]
+                   (mapv #(contains? % :seon.ai.attempt/error) rows))
+                "the error ref's presence IS the outcome")
+            (is (= :failover-now
+                   (derived-disposition @connection primary-row true))
+                "and WHY the second call was allowed is derivable from
+                 the durable evidence alone — never a stored label")
             (is (false? (:seon.ai/request-transmitted? primary-row))
                 "the evidence that made it allowed is on the row too")
             (is (some? (:seon.ai.attempt/error primary-row))
@@ -659,7 +682,10 @@
           (is (= 1 (count @requests)) (str label ": exactly one call"))
           (let [rows (attempt-rows @connection)]
             (is (= 1 (count rows)) (str label ": exactly one attempt row"))
-            (is (= :fail (:seon.ai/disposition (first rows)))))
+            (is (= :fail (derived-disposition @connection
+                                              (first rows) true))
+                (str label ": the terminal decision is derivable from"
+                     " the evidence")))
           (is (nil? (d/q '[:find ?d . :where
                            [_ :seon.cluster.run/plan-digest ?d]] @connection))
               (str label ": no plan"))
@@ -688,9 +714,9 @@
         (let [rows (attempt-rows @connection)]
           (is (= 3 (count rows)))
           (is (= [:backoff :backoff :backoff]
-                 (mapv :seon.ai/disposition rows))
-              "every one of them was computed, and the last one had no
-               wait left to spend")
+                 (mapv #(derived-disposition @connection % false) rows))
+              "every one of them is derivable from its own evidence,
+               and the last one had no wait left to spend")
           (is (= [1 2] (keep :seon.ai.attempt/delay-ms rows))
               "each retry records the wait that preceded it — the
                doubling is readable back out of the facts")
@@ -725,14 +751,17 @@
              nothing, because the backoff path is the NO-backup path")
         (let [rows (attempt-rows @connection)]
           (is (= 2 (count rows)))
-          (is (= [:failover-now :backoff] (mapv :seon.ai/disposition rows))
+          (is (= [:failover-now :backoff]
+                 (mapv #(derived-disposition @connection % true) rows))
               "and the SECOND row is the interesting one. `disposition`
                is pure and says what it always says about a 503 with no
-               further target: waiting could help. What decides that
-               nothing waits is the SCHEDULE, which is empty because
-               this cluster configured a backup — the two facts are
-               separate on purpose, and the row records the computed
-               judgement rather than laundering it into the outcome")
+               further target (the backup row's failover-from connection
+               removes the backup from ITS decision): waiting could
+               help. What decides that nothing waits is the SCHEDULE,
+               which is empty because this cluster configured a backup
+               — the two facts are separate on purpose, and both remain
+               derivable from the evidence rather than laundered into a
+               stored label")
           (is (every? #(not (contains? % :seon.ai.attempt/delay-ms)) rows)
               "so no wait was ever spent, and the rows say so"))))))
 
@@ -749,22 +778,24 @@
                       (recording-completer
                        requests
                        [unpaid {:seon.ai/text "(my.run/complete \"ok\")"}])]
-          (binding [*evaluation* {:seon.cluster.eval/status :done
-                                  :seon.cluster.eval/result-edn
+          (binding [*evaluation* {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "ok"))
                                   :seon.sci.admit/value (my.run/complete "ok")}]
             (drive! cluster 10)))
-        (let [story (d/q '[:find ?model ?disposition ?message
+        (let [story (d/q '[:find ?model ?message
                            :where
                            [?backup :seon.ai.attempt/failover-from ?primary]
                            [?backup :seon.ai/model ?model]
-                           [?primary :seon.ai/disposition ?disposition]
                            [?primary :seon.ai.attempt/error ?error]
                            [?error :seon.error/message ?message]]
-                         @connection)]
-          (is (= #{["backup-probe" :failover-now
-                    "probe failure: transport-failure"]}
-                 story)))))))
+                         @connection)
+              [primary-row] (attempt-rows @connection)]
+          (is (= #{["backup-probe" "probe failure: transport-failure"]}
+                 story))
+          (is (= :failover-now
+                 (derived-disposition @connection primary-row true))
+              "and WHY is one derivation over the same facts — no
+               stored label required to tell the story"))))))
 
 (deftest a-failed-model-call-ends-the-turn-without-a-plan
   (with-cluster
@@ -849,7 +880,7 @@
                      (d/q '[:find [?ordinal ...]
                             :in $ ?tx
                             :where
-                            [?r :seon.cluster.eval/status :done ?tx]
+                            [?r :seon.cluster.eval/result-edn _ ?tx]
                             [?r :seon.cluster.eval/ordinal ?ordinal]]
                           @connection message-tx))
                   "the message rode the terminal transaction of the very
@@ -898,3 +929,51 @@
                              [?e :seon.error/kind ?kind]]
                            @connection)))
               "and the refusal is a durable error fact with its own kind"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The prompt's cause is the run's recorded trigger
+;;; ---------------------------------------------------------------------------
+
+(deftest the-call-prompts-with-the-trigger-the-run-opened-on
+  ;; simplification-catalog-2026-07-28 group 3's confirmed defect: the
+  ;; :call pass re-asked `unanswered-triggers` for the prompt's cause,
+  ;; but the run-opening transaction ANSWERS its trigger, so the re-ask
+  ;; selected whatever message arrived NEXT (and only prompted the
+  ;; right content when none had, because nil matched anything). The
+  ;; trigger the run OPENED on is the trigger: recorded as tx-meta on
+  ;; the opening transaction, derived back by `message/trigger`.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            requests (atom [])]
+        ;; pass 1: the loop opens a run on m-1 ("count the widgets")
+        (let [work (work/next-work @connection (request connection))]
+          (is (= :open (:seon.cluster.work/situation work)))
+          (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                              :seon.cluster.work/next work}
+                             (Date.)))
+        ;; message B arrives BETWEEN open and the :call pass
+        (d/transact connection
+                    [{:seon.cluster.message/id "m-2"
+                      :seon.cluster.message/to
+                      [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.message/content "ignore everything else"
+                      :seon.cluster.message/at (Date.)}])
+        ;; pass 2: the ONE paid call must carry m-1's content, not m-2's
+        (with-redefs [ai/complete
+                      (recording-completer
+                       requests
+                       [{:seon.ai/text "(my.run/complete \"counted\")"}])]
+          (let [work (work/next-work @connection (request connection))]
+            (is (= :call (:seon.cluster.work/situation work)))
+            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                :seon.cluster.work/next work}
+                               (Date.))))
+        (is (= 1 (count @requests)))
+        (let [prompt-text (:seon.ai/prompt (first @requests))]
+          (is (str/includes? prompt-text "count the widgets")
+              "the provider request carries the trigger the run OPENED
+               on — the run's own recorded cause")
+          (is (not (str/includes? prompt-text "ignore everything else"))
+              "a message arriving between open and :call cannot
+               displace it"))))))

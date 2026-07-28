@@ -22,7 +22,12 @@
  :seon.cluster.eval/ordinal [:int {:min 0}]
  :seon.cluster.eval/result-edn :string
  :seon.cluster.eval/run :seon.db/ref
- :seon.cluster.eval/status [:enum :running :done :error :interrupted]
+ ; When this eval was cut instead of settling: the time limit fired, or
+ ; boot recovery found the receipt dangling after its process died.
+ ; STATE IS PRESENCE (owner ruling 2026-07-28): a receipt with none of
+ ; result-edn/error/interrupted-at is running, and there is no stored
+ ; status restating which of those facts exist.
+ :seon.cluster.eval/interrupted-at :inst
  :seon.cluster.run/agent :seon.db/ref
  :seon.cluster.run/claim-epoch [:int {:min 1}]
  :seon.cluster.run/closed-at :inst
@@ -51,11 +56,12 @@
   [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
   [:seon.cluster.run.form/source :seon.cluster.run.form/source]]
 
- ; The eval receipt entity. The optionals are exactly the states a
- ; receipt genuinely has: a `:running` receipt has no result and no
- ; error; a `:done` one has a result; an `:error` or time-limited one
- ; has an error and the flat error value as its result. Absence is the
- ; state, never a stored nil.
+ ; The eval receipt entity. The optionals ARE the states — absence is
+ ; the state, never a stored nil and never a status label: a running
+ ; receipt has no result, no error and no interrupted-at; a settled one
+ ; has a result; a failed or time-limited one has an error and the flat
+ ; error value as its result; a cut one has interrupted-at. There is no
+ ; fourth fact for a discriminator to restate (owner ruling 2026-07-28).
  :seon.cluster.eval/receipt
  [:map {:seon.db/entity true}
   [:seon.cluster.eval/id :seon.cluster.eval/id]
@@ -63,9 +69,10 @@
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
   [:seon.cluster.eval/claim-epoch :seon.cluster.eval/claim-epoch]
   [:seon.cluster.eval/at :seon.cluster.eval/at]
-  [:seon.cluster.eval/status :seon.cluster.eval/status]
   [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
+  [:seon.cluster.eval/interrupted-at {:optional true}
+   :seon.cluster.eval/interrupted-at]
   [:seon.error/kind {:optional true} :seon.error/kind]
   [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
 

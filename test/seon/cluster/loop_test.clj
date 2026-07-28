@@ -62,7 +62,6 @@
               :seon.cluster.run/process "process/one"
               :seon.cluster.run/claim-epoch 1
               :seon.cluster.run.form/ordinal 0
-              :seon.cluster.eval/status :done
               :seon.cluster.eval/result-edn "1"}
         without (cluster.loop/terminal-tx base now)
         with (cluster.loop/terminal-tx
@@ -155,18 +154,16 @@
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.run.form/ordinal 0
                                 :seon.cluster.run.form/source "(+ 1 1)"}]))))
-      (testing "a running receipt and its terminal, with a result"
+      (testing "a running receipt (no terminal fact) and its settlement"
         (is (map? (d/transact connection
                               [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.eval/ordinal 0
                                 :seon.cluster.eval/claim-epoch 1
-                                :seon.cluster.eval/at now
-                                :seon.cluster.eval/status :running}])))
+                                :seon.cluster.eval/at now}])))
         (is (map? (d/transact connection
                               [{:seon.cluster.eval/id "e-0"
-                                :seon.cluster.eval/status :done
                                 :seon.cluster.eval/result-edn "2"}]))))
       (testing "the model-attempt chain: a failed primary carrying its
       transport evidence, and the backup that points back at it"
@@ -178,9 +175,6 @@
                                 :seon.ai.attempt/at now
                                 :seon.ai/endpoint "https://example.invalid/v1"
                                 :seon.ai/model "primary-probe"
-                                :seon.ai.attempt/outcome :error
-                                :seon.ai/disposition :failover-now
-                                :seon.ai/error-class :transport-before-send
                                 :seon.ai/http-status 503
                                 :seon.ai/request-transmitted? false
                                 :seon.ai/response-started? false
@@ -193,7 +187,6 @@
                                 :seon.ai.attempt/at now
                                 :seon.ai/endpoint "https://example.invalid/v2"
                                 :seon.ai/model "backup-probe"
-                                :seon.ai.attempt/outcome :success
                                 :seon.ai.attempt/delay-ms 0
                                 :seon.ai.attempt/failover-from
                                 [:seon.ai.attempt/id "run-live-attempt-0"]}]))))
@@ -205,7 +198,6 @@
                                 :seon.cluster.eval/ordinal 1
                                 :seon.cluster.eval/claim-epoch 1
                                 :seon.cluster.eval/at now
-                                :seon.cluster.eval/status :error
                                 :seon.cluster.eval/error "boom"
                                 :seon.cluster.eval/result-edn "{:seon.error/kind :x}"}]))))
       (testing "the refs really are refs — a follow, not a string"
@@ -234,7 +226,7 @@
    :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
    :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
    :seon.cluster.eval/claim-epoch :seon.cluster.eval/at
-   :seon.cluster.eval/status :seon.cluster.eval/result-edn
+   :seon.cluster.eval/interrupted-at :seon.cluster.eval/result-edn
    :seon.cluster.eval/error
    :seon.cluster.message/id :seon.cluster.message/to
    :seon.cluster.message/content :seon.cluster.message/at
@@ -288,13 +280,19 @@
                  (range 2)))
 
       (seq receipts)
-      (into (map (fn [[ordinal status]]
-                   {:seon.cluster.eval/id (str "e-" ordinal)
-                    :seon.cluster.eval/run [:seon.cluster.run/id "run-1"]
-                    :seon.cluster.eval/ordinal ordinal
-                    :seon.cluster.eval/claim-epoch 1
-                    :seon.cluster.eval/at now
-                    :seon.cluster.eval/status status})
+      ;; the receipt's state is WHICH terminal fact it carries: :done →
+      ;; result-edn, :interrupted → interrupted-at, none → running
+      (into (map (fn [[ordinal state]]
+                   (cond-> {:seon.cluster.eval/id (str "e-" ordinal)
+                            :seon.cluster.eval/run
+                            [:seon.cluster.run/id "run-1"]
+                            :seon.cluster.eval/ordinal ordinal
+                            :seon.cluster.eval/claim-epoch 1
+                            :seon.cluster.eval/at now}
+                     (= :done state)
+                     (assoc :seon.cluster.eval/result-edn "2")
+                     (= :interrupted state)
+                     (assoc :seon.cluster.eval/interrupted-at now)))
                  receipts)))
     :tx-meta {:seon.db/trigger [:seon.cluster.message/id "m-1"]}}))
 
