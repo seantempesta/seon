@@ -502,6 +502,22 @@ may reintroduce a shadow build into the dev feedback path.
   flow-mechanics, flow-inventory, workload-classification,
   trigger-conservation, zombie-constructibility (all -2026-07-28.md);
   the giant plan revision follows their return.
+  **Rulings 2026-07-28 evening (owner, decision batch):** (1) a
+  function the program graph PROVES pure counts as `:compute`
+  implicitly — no annotation needed; explicit metadata remains for the
+  genuinely ambiguous. (2) Attribute namespaces take the OWNING CODE
+  NAMESPACE (the colocation rule enforced): block attributes are
+  canonical as `:seon.render.block/*` (the `:seon.block/*` landed names
+  rename in the context-blocks implementation wave; `:seon.context/*`
+  already colocates; `:seon.agent.ctx/*` is a quarry ghost — docs
+  rewrite). (3) Failed sends: send-time validation returns the error
+  value for what is knowable mid-turn (typo'd recipients), and a
+  derived prompt line from the agent's own recorded error facts covers
+  the rest — a context block accretion after the context-blocks rung
+  lands; nothing new stored, no refusal messages. (4) Local no-auth
+  model servers get an EXPLICIT no-auth state on the one provider
+  target shape (header omitted when declared; hosted targets still
+  fail closed) — never a dummy credential (lane `no-auth-provider`).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
