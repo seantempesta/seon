@@ -80,10 +80,11 @@
   "The whole render pipeline on real sockets: the render proc in its own
   graph, the mult the tabs tap, the routing listener that wakes it.
 
-  `body` receives the connection, the server descriptor, and the graph
-  — the graph so a test can `flow.core/ping` it and assert HOW MANY
-  derivations a commit cost, which is the claim the shared registration
-  exists to make."
+  `body` receives the connection, the server descriptor, and a CONTEXT
+  map holding the live pipeline: `:graph` so a test can `flow.core/ping`
+  it and assert HOW MANY derivations a commit cost (the claim the shared
+  registration exists to make), and `:pages-mult` so a test can take a
+  tap of its own and be the slow browser on purpose."
   [blocks body]
   (support/with-database
     (fn [connection]
@@ -113,6 +114,7 @@
                                      :seon.cluster.loop/stream-channel
                                      stream-channel}))}}
                     :conns []})
+            pages-mult (async/mult pages-channel)
             {:keys [report-chan error-chan]} (flow.core/start graph)]
         ;; nothing asserts on reports here, but an unread report or
         ;; error channel would eventually park the graph's own plumbing
@@ -133,10 +135,15 @@
                           {:seon.store/connection connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
-                           :seon.render.web/pages-mult (async/mult pages-channel)
+                           :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
                            :seon.render.web/render-channel render-channel}))
-          (body connection @server graph)
+          (body connection @server
+                {:graph graph
+                 :pages-mult pages-mult
+                 :render-channel render-channel
+                 :stream-channel stream-channel
+                 :registration registration})
           (finally
             (when @server (web/stop! @server))
             (wake/unlisten! {:seon.cluster.wake/connection connection
@@ -151,14 +158,19 @@
             (async/close! pages-channel)
             (async/close! stream-channel)))))))
 
-(defn- derivations
-  "The render proc's pass count, from its own ping — the oracle for
-  ONE derivation per commit however many tabs are open."
-  [graph]
-  (-> (flow.core/ping graph)
+(defn- ping-state
+  "The render proc's own ping state — passes, watched agents, taps and
+  streaming agents, exposed by its `:ping-map-fn`."
+  [context]
+  (-> (flow.core/ping (:graph context))
       (get :seon.render.web/render)
-      (get :clojure.core.async.flow/state)
-      (get :seon.render.web/passes)))
+      (get :clojure.core.async.flow/state)))
+
+(defn- derivations
+  "The render proc's pass count — the oracle for ONE derivation per
+  commit however many tabs are open."
+  [context]
+  (:seon.render.web/passes (ping-state context)))
 
 (defn- block-map
   [name priority projection]
@@ -212,13 +224,36 @@
                (recur)))))))
    [:render-patches expected]))
 
+(defn- read-until!
+  "Read the feed until `needle` appears, returning everything read.
+  Event-driven with the shared loud backstop, and the morph count of
+  the returned text IS the coalescing measure: how many repaints the
+  tab had to see before the settled value arrived."
+  [stream needle]
+  (support/await-event!
+   (future
+     (let [out (StringBuilder.)]
+       (loop []
+         (let [next-byte (.read stream)]
+           (when (neg? next-byte)
+             (throw (ex-info "SSE feed closed before its needle."
+                             {::needle needle
+                              ::actual (.toString out)})))
+           (.append out (char next-byte))
+           (let [text (.toString out)]
+             (if (and (str/includes? text needle)
+                      (str/ends-with? text "\n\n"))
+               text
+               (recur)))))))
+   [:render-until needle]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The document
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-page-places-every-surface-at-its-own-id
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (let [response (fetch server "/")
             body (.body response)]
         (is (= 200 (.statusCode response)))
@@ -232,7 +267,7 @@
   ;; is stripped by that element's first whole-element morph, and the
   ;; tab then looks alive while receiving nothing.
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (let [body (.body (fetch server "/"))]
         (is (< (.indexOf body "</main>") (.indexOf body "data-init"))
             "the opener is after every surface, not inside one")
@@ -243,7 +278,7 @@
   ;; Root is an agent. If this test ever needs a root-specific branch,
   ;; the design has regressed.
   (with-server two-blocks
-    (fn [connection server _graph]
+    (fn [connection server _context]
       (d/transact connection
                   [{:seon.cluster.agent/id "agent-b"
                     :seon.cluster.agent/blocks [(block-map :banner 0 `banner-html)]}])
@@ -256,14 +291,14 @@
 
 (deftest static-resources-come-off-the-classpath
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (is (= 200 (.statusCode (fetch server "/js/datastar.js"))))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 
 (deftest an-unknown-route-is-an-honest-404
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (is (= 404 (.statusCode (fetch server "/nope")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -272,7 +307,7 @@
 
 (deftest the-initial-paint-sends-every-block-once
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [initial (read-patches! stream 2)]
@@ -287,7 +322,7 @@
   ;; actually changed, and the block that reads nothing is never
   ;; re-serialized and never re-sent.
   (with-server two-blocks
-    (fn [connection server _graph]
+    (fn [connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (read-patches! stream 2)
@@ -304,7 +339,7 @@
   ;; works, and the broken one occupies its own space saying so.
   (with-server [(block-map :banner 0 `banner-html)
                 (block-map :broken 10 `broken-html)]
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [initial (read-patches! stream 2)]
@@ -322,7 +357,7 @@
   ;; page from current facts — which is also what makes a killed process
   ;; cost nothing.
   (with-server two-blocks
-    (fn [connection server _graph]
+    (fn [connection server _context]
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
         (read-patches! first-stream 2)
         (.close first-stream))
@@ -341,13 +376,13 @@
   ;; complete paint and their own byte-identical morph; what changed is
   ;; that the page behind them was derived once for the cluster.
   (with-server two-blocks
-    (fn [connection server graph]
+    (fn [connection server context]
       (let [a (open-feed server (str "/feed/" agent-id))
             b (open-feed server (str "/feed/" agent-id))]
         (try
           (read-patches! a 2)
           (read-patches! b 2)
-          (let [before (derivations graph)]
+          (let [before (derivations context)]
             (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
             (let [to-a (read-patches! a 1)
                   to-b (read-patches! b 1)]
@@ -356,9 +391,186 @@
               (is (= to-a to-b)
                   "identical bytes — determinism is what lets ONE
                    registration serve every tab")
-              (is (= 1 (- (derivations graph) before))
+              (is (= 1 (- (derivations context) before))
                   "the commit cost ONE derivation, not one per tab")))
           (finally (.close a) (.close b)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The F2 sealed suite — seeds 2026072822, 2026072823, 2026072824, 2026072828
+;;; ---------------------------------------------------------------------------
+
+;;; 2. render-proc-one-derivation-many-tabs-test — seed 2026072822
+
+(deftest render-proc-one-derivation-many-tabs-test
+  ;; ORACLE: N real SSE tabs on one agent, one committed change — each
+  ;; tab receives exactly the changed block's morph (counted events,
+  ;; byte-compared), the proc's pass count advanced by ONE for that
+  ;; commit rather than by N, and an untouched block's id appears on no
+  ;; socket. This is the shared registration's whole reason to exist:
+  ;; the wire was already exact per tab, the DERIVATION was not.
+  (with-server two-blocks
+    (fn [connection server context]
+      (let [tabs (mapv (fn [_] (open-feed server (str "/feed/" agent-id)))
+                       (range 4))]
+        (try
+          (doseq [tab tabs] (read-patches! tab 2))
+          (let [before (derivations context)]
+            (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+            (let [morphs (mapv (fn [tab] (read-patches! tab 1)) tabs)]
+              (is (every? (fn [morph] (= 1 (patches morph))) morphs)
+                  "each tab got exactly ONE morph — the changed block")
+              (is (= 1 (count (distinct morphs)))
+                  "byte-identical across every tab, because one
+                   derivation produced them all")
+              (is (every? (fn [morph] (str/includes? morph "agents: 2"))
+                          morphs)
+                  "and it is the block that actually changed")
+              (is (not-any? (fn [morph] (str/includes? morph "surface-banner"))
+                            morphs)
+                  "the untouched block's id reached NO socket")
+              (is (= 1 (- (derivations context) before))
+                  "ONE derivation for the commit, not one per tab")))
+          (finally (doseq [tab tabs] (.close tab))))))))
+
+;;; 3. slow-tab-newest-complete-page-test — seed 2026072823
+
+(deftest slow-tab-newest-complete-page-test
+  ;; ORACLE: one tap deliberately unread while K distinct commits land.
+  ;; On read it yields ONE value equal to the NEWEST COMPLETE page —
+  ;; every block current, no lost morph — which is the §1.2 displacement
+  ;; class dead by construction: increments on a sliding-1 buffer would
+  ;; permanently lose a block whose patch was displaced by another
+  ;; block's. The proc never parked while the slow tap sat full: a fast
+  ;; sibling tab observed every repaint.
+  (with-server two-blocks
+    (fn [connection server context]
+      (let [slow (async/chan (async/sliding-buffer 1))
+            fast (open-feed server (str "/feed/" agent-id))]
+        (async/tap (:pages-mult context) slow)
+        (try
+          (read-patches! fast 2)
+          (let [before (derivations context)
+                k 5]
+            ;; nobody reads `slow` for the whole burst
+            (doseq [n (range k)]
+              (d/transact connection
+                          [{:seon.cluster.agent/id (str "slow-" n)}])
+              ;; the fast sibling proves the proc kept passing while the
+              ;; slow tap stayed full — never parked, never blocked
+              (read-patches! fast 1))
+            (let [pending (support/await-event! slow [:slow-tap-newest])
+                  page (get pending agent-id)]
+              (is (some? page) "the slow tap yielded a value")
+              (is (= 2 (count page))
+                  "a COMPLETE page — every block present, not a patch")
+              (is (= page (web/page-of @connection agent-id caps nil))
+                  "and it is the NEWEST page: byte-equal to a fresh
+                   derivation at the current basis, so no block was lost
+                   to displacement")
+              (is (nil? (async/poll! slow))
+                  "exactly ONE value was pending, newest-wins")
+              (let [passes (- (derivations context) before)]
+                (is (<= passes k)
+                    "coalescing means passes never exceed commits")
+                (is (pos? passes) "and the proc did keep deriving"))))
+          (finally
+            (async/untap (:pages-mult context) slow)
+            (.close fast)))))))
+
+;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
+
+(deftest reconnect-is-repaint-wire-test
+  ;; ORACLE: the in-process kill projection — drop the taps and the
+  ;; channel contents mid-flight, then reopen the feed. The initial
+  ;; paint derives EVERY block from current facts. The database holds no
+  ;; partial text at ANY basis (an as-of walk over the window), and
+  ;; nothing is retracted because nothing was ever written: after F2 no
+  ;; partial row CAN exist, so the stale-partial repair class is
+  ;; unrepresentable rather than handled.
+  (with-server two-blocks
+    (fn [connection server context]
+      ;; a tab, a commit it never sees, and then the socket is gone —
+      ;; the kill projection, minus killing the JVM (F4 owns that)
+      (let [doomed (open-feed server (str "/feed/" agent-id))]
+        (read-patches! doomed 2)
+        (.close doomed))
+      ;; a snapshot in flight on the stream conn, dropped on the floor
+      (async/offer! (:stream-channel context)
+                    {:seon.cluster.agent/id agent-id
+                     :seon.ai/partial {:seon.ai/text "half a re"
+                                       :seon.ai/tokens 3}})
+      (async/poll! (:stream-channel context))
+      (d/transact connection [{:seon.cluster.agent/id "after-the-drop"}])
+      (let [fresh (open-feed server (str "/feed/" agent-id))]
+        (try
+          (let [repaint (read-patches! fresh 2)]
+            (is (= 2 (patches repaint))
+                "a fresh connection paints EVERY block")
+            (is (str/includes? repaint "agents: 2")
+                "at the CURRENT basis — reconnect is repaint, and the
+                 in-flight partial was superseded, never replayed"))
+          (finally (.close fresh))))
+      (testing "and no partial text exists at ANY basis in the window"
+        (let [db @connection
+              stream-attributes
+              (d/q '[:find [?ident ...]
+                     :where [_ :db/ident ?ident]
+                     [(namespace ?ident) ?ns]
+                     [(clojure.string/starts-with? ?ns "seon.ai.stream")]]
+                   db)]
+          (is (empty? stream-attributes)
+              "the attribute family is GONE from the registry, so a
+               partial row is unrepresentable — nothing to retract,
+               nothing to mistake for a settled reply")
+          ;; every REAL basis in the window — Datahike transaction ids
+          ;; start above 536870912, so the walk asks the facts which
+          ;; bases exist rather than counting from one
+          (doseq [t (sort (d/q '[:find [?tx ...]
+                                 :where [?tx :db/txInstant _]]
+                               db))]
+            (is (empty? (d/q '[:find [?e ...]
+                               :where [?e :seon.ai.stream/text _]]
+                             (d/as-of db t)))
+                (str "no partial row at basis " t))))))))
+
+;;; 8. coalesce-floor-one-derivation-test — seed 2026072828
+
+(deftest coalesce-floor-one-derivation-test
+  ;; ORACLE: M commits inside one floor window cost ONE derivation pass,
+  ;; and each tab receives at most one morph per actually-changed block.
+  ;; The floor is read from the CONFIG FACT planted per trial, honoured
+  ;; at the proc, so a burst costs one derivation for the whole cluster
+  ;; instead of one per tab. It remains a coalescing floor over an
+  ;; observed event — the commit — never a poll.
+  (with-server two-blocks
+    (fn [connection server context]
+      ;; the dial as a fact, the way production ships it
+      (d/transact connection [{:seon.config/cluster "web-test"
+                               :seon.config.render/coalesce-ms 250}])
+      (let [tab (open-feed server (str "/feed/" agent-id))]
+        (try
+          (read-patches! tab 2)
+          ;; the dial's own commit changes no block, so suppression
+          ;; correctly puts NOTHING on the wire for it — the tab is
+          ;; already settled
+          (let [before (derivations context)
+                m 6]
+            (doseq [n (range m)]
+              (d/transact connection
+                          [{:seon.cluster.agent/id (str "burst-" n)}]))
+            ;; the counter block changed m times; the tab sees the
+            ;; settled value after far fewer repaints than commits
+            (let [settled (read-until! tab (str "agents: " (+ 1 m)))]
+              (is (< (patches settled) m)
+                  (str "the tab saw " (patches settled) " repaints for "
+                       m " commits — the burst coalesced"))
+              (is (not (str/includes? settled "surface-banner"))
+                  "and the unchanged block still never went on the wire"))
+            (let [passes (- (derivations context) before)]
+              (is (< passes m)
+                  (str "the floor coalesced " m " commits into " passes
+                       " derivations for the whole cluster"))))
+          (finally (.close tab)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Suppression, as a pure unit
@@ -411,7 +623,7 @@
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
   (with-server two-blocks
-    (fn [_connection server _graph]
+    (fn [_connection server _context]
       (let [root (.body (fetch server "/data"))]
         (is (str/includes? root "seon-data-drill"))
         (is (str/includes? root "showing 1")
@@ -489,5 +701,5 @@
   (testing "a clean bind reports no wanted-port at all, so key presence
             answers 'did this fall back?'"
     (with-server two-blocks
-      (fn [_connection server _graph]
+      (fn [_connection server _context]
         (is (nil? (:seon.render.web/wanted-port server)))))))

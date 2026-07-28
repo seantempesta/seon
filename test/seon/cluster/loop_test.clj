@@ -292,7 +292,16 @@
                  receipts)))
     :tx-meta {:seon.db/trigger [:seon.cluster.message/id "m-1"]}}))
 
-(deftest every-kill-position-has-one-next-action
+;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
+;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
+;;; derives the same expected situation per row under the AGENT-SCOPED
+;;; request, and the interrupted ordinal is never re-derived for
+;;; execution (the clause below). The rows were always per-agent facts;
+;;; the global pass just asked the question badly. ONE regression per
+;;; class, so this is the re-seal of the existing walk rather than a
+;;; second copy of it.
+
+(deftest kill-positions-per-agent-test
   (doseq [[row state expected]
           [["1 — trigger only" nil :open]
            ["2-4 — claimed, no plan, custody died" {} nil]

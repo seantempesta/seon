@@ -19,6 +19,9 @@
   state table rather than tested twice: every row IS one of these
   states, and the comment on each row says which."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
@@ -288,6 +291,69 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The two derivations that are NOT work
 ;;; ---------------------------------------------------------------------------
+
+;;; ---------------------------------------------------------------------------
+;;; The F2 sealed suite — situation-totality-property, seed 2026072829
+;;; ---------------------------------------------------------------------------
+
+(deftest situation-totality-property
+  ;; ORACLE, re-sealed agent-scoped after the central pass died: over
+  ;; GENERATED run/receipt/trigger states, `next-agent-work` is TOTAL —
+  ;; it returns only the four situations or nil, `more-agent-work?`
+  ;; never disagrees with it, and `:resume` always carries the FIRST
+  ;; unsettled ordinal.
+  ;;
+  ;; The enumeration above visits every state by construction; this
+  ;; visits combinations the table does not name — receipts landing out
+  ;; of order, a claimed-and-closed run, a trigger arriving after the
+  ;; run that would answer it. Enumeration proves the table; generation
+  ;; guards the CLASS, which is what makes this the one choke-point
+  ;; regression for the situation enum.
+  (let [check
+        (tc/quick-check
+         200
+         (prop/for-all
+          [holder (gen/elements [nil process other-process])
+           planned? gen/boolean
+           closed? gen/boolean
+           triggered? gen/boolean
+           trigger-first? gen/boolean
+           receipts (gen/vector-distinct (gen/elements [0 1]) {:max-elements 2})]
+          (with-database
+            (fn [connection]
+              (when trigger-first? (add-trigger! connection))
+              (open-run! connection {:holder holder
+                                     :planned? planned?
+                                     :triggered? (and triggered?
+                                                      trigger-first?)})
+              (when (and triggered? (not trigger-first?))
+                (add-trigger! connection))
+              (doseq [ordinal receipts] (terminal-receipt! connection ordinal))
+              (when closed? (close-run! connection))
+              (let [db (d/db connection)
+                    derived (work/next-agent-work db request)
+                    situation (:seon.cluster.work/situation derived)]
+                (and
+                 ;; TOTAL: only the four situations, or idle
+                 (contains? #{:resume :call :open :close nil} situation)
+                 ;; the rewake predicate never drifts from the derivation
+                 (= (some? derived) (work/more-agent-work? db request))
+                 ;; a derived situation always validates its own schema
+                 (or (nil? derived)
+                     (seon.schema/valid-candidate-value?
+                      :seon.cluster.work/next derived))
+                 ;; :resume carries the FIRST ordinal with no terminal
+                 ;; receipt — never one already settled, which is what
+                 ;; "nothing re-executes" means in the derivation
+                 (or (not= :resume situation)
+                     (let [ordinal (:seon.cluster.run.form/ordinal derived)]
+                       (and (not (contains? (set receipts) ordinal))
+                            (= ordinal
+                               (first (remove (set receipts)
+                                              (range 2))))))))))))
+         :seed 2026072829)]
+    (is (true? (:result check))
+        (str "situation totality failed: " (pr-str check)))))
 
 (deftest an-unplanned-orphan-run-is-settled-not-resumed
   (with-database

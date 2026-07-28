@@ -19,6 +19,9 @@
   (:require [clojure.core.async :as async]
             [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.wake :as wake]
@@ -208,6 +211,85 @@
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The F2 sealed suite — route-render-wake-and-disjointness-property
+;;; seed 2026072826
+;;; ---------------------------------------------------------------------------
+
+(deftest route-render-wake-and-disjointness-property
+  ;; ORACLE: over generated commit batches — the render channel receives
+  ;; a wake for EVERY report, unconditionally; mailbox routing is
+  ;; unchanged by the added delivery; and the C2 property holds over the
+  ;; re-grounded COMPUTED sets, with the message/to delivery asserted
+  ;; from the other direction (an attribute that routes to a mailbox is
+  ;; one no turn commits).
+  (let [check
+        (tc/quick-check
+         50
+         (prop/for-all
+          [commits (gen/vector (gen/elements [:message :agent :run]) 1 8)]
+          (test-support/with-database
+            (fn [connection]
+              (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+              (let [mailbox (async/chan 64)
+                    armer (async/chan 64)
+                    ;; a COUNTING render channel: production slides,
+                    ;; because a wake says only "look" and coalescing is
+                    ;; free — here every delivery is kept so the
+                    ;; per-report claim can be counted at all
+                    render (async/chan 256)
+                    faults (async/chan (async/sliding-buffer 1))
+                    key (wake/route!
+                         {:seon.cluster.wake/connection connection
+                          :seon.cluster.wake/channels
+                          (fn [] {(agent-eid connection) mailbox})
+                          :seon.cluster.wake/armer-channel armer
+                          :seon.cluster.wake/render-channel render
+                          :seon.cluster.wake/fault-channel faults
+                          :seon.cluster.wake/key ::property})]
+                (try
+                  (doseq [[commit index] (map vector commits (range))]
+                    (case commit
+                      :message (d/transact connection (message-tx
+                                                       (str "pm-" index)))
+                      :agent (d/transact connection
+                                         [{:seon.cluster.agent/id
+                                           (str "pa-" index)}])
+                      :run (d/transact connection (run-tx
+                                                   (str "pr-" index)))))
+                  (let [drain (fn [channel]
+                                (loop [n 0]
+                                  (if (async/poll! channel)
+                                    (recur (inc n))
+                                    n)))
+                        rendered (drain render)
+                        mailed (drain mailbox)
+                        armed (drain armer)]
+                    (and
+                     ;; one render wake per REPORT, every report
+                     (= (count commits) rendered)
+                     ;; routing is unchanged by the added delivery
+                     (= (count (filter #{:message} commits)) mailed)
+                     (= (count (filter #{:agent} commits)) armed)
+                     ;; and no fault was raised on any healthy path
+                     (nil? (async/poll! faults))))
+                  (finally
+                    (wake/unlisten!
+                     {:seon.cluster.wake/connection connection
+                      :seon.cluster.wake/key key})))))))
+         :seed 2026072826)]
+    (is (true? (:result check))
+        (str "routing/render-wake property failed: " (pr-str check))))
+
+  (testing "C2 from the other direction: every attribute that routes to
+            a mailbox is one no turn commits"
+    (let [wakes (wake/wake-attributes)
+          commits (cluster.loop/committed-attributes)]
+      (is (every? (fn [attribute] (not (contains? commits attribute)))
+                  wakes))
+      (is (every? (fn [attribute] (not (contains? wakes attribute)))
+                  commits)))))
 
 (deftest unlisten-is-idempotent-and-stops-delivery
   (with-connection

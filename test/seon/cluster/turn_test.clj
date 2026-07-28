@@ -9,7 +9,9 @@
   without touching a line here. The model call is stubbed for the same
   reason the sealed AI suite has no network: a suite that needs a paid
   call is a suite nobody runs."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow.core]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -18,6 +20,8 @@
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
+            [seon.flow]
+            [seon.render.web :as web]
             [seon.cluster :as cluster]
             [seon.cluster.loop :as cluster.loop]
             [seon.error :as error]
@@ -1224,3 +1228,271 @@
           (is (not (str/includes? prompt-text "ignore everything else"))
               "a message arriving between open and :call cannot
                displace it"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The F2 sealed suite — streaming rides channels, the database keeps facts
+;;; seeds 2026072821, 2026072825
+;;; ---------------------------------------------------------------------------
+
+(defn- streaming-completer
+  "A provider stub that STREAMS: it feeds the turn's own sink a growing
+  sequence of complete snapshots — the shape `seon.ai/stream-fold`
+  produces — and then returns the settled completion, exactly as a real
+  streamed call does. Records the request so a test can prove the turn
+  asked for a stream at all."
+  [ledger chunks]
+  (fn [request]
+    (swap! ledger conj request)
+    (let [sink (:seon.ai/sink request)]
+      (reduce (fn [text chunk]
+                (let [grown (str text chunk)]
+                  (when sink
+                    (sink {:seon.ai/text grown
+                           :seon.ai/tokens (count (str/split grown #"\s+"))}))
+                  grown))
+              ""
+              chunks))
+    {:seon.ai/text (apply str chunks)}))
+
+(defn- render-proc-for
+  "One render proc reading `cluster`'s stream conn, so a test can ping
+  it for what production's page derivation would see. Returns the graph
+  and its completion."
+  [cluster]
+  (let [completion (async/promise-chan)
+        graph (flow.core/create-flow
+               {:procs
+                {:seon.render.web/render
+                 {:proc (seon.flow/var-process
+                         #'web/render-step :io
+                         {:seon.render.web/render-channel
+                          (async/chan (async/sliding-buffer 1))
+                          :seon.render.web/pages-channel
+                          (async/chan (async/sliding-buffer 1))
+                          :seon.render.web/registration (atom {})
+                          :seon.render.web/completion completion
+                          :seon.cluster.loop/cluster cluster})}}
+                :conns []})
+        {:keys [report-chan error-chan]} (flow.core/start graph)]
+    (async/go-loop [] (when (async/<! report-chan) (recur)))
+    (async/go-loop [] (when (async/<! error-chan) (recur)))
+    (flow.core/resume graph)
+    {:graph graph :completion completion}))
+
+(defn- streaming-agents
+  [{:keys [graph]}]
+  (-> (flow.core/ping graph)
+      (get :seon.render.web/render)
+      (get :clojure.core.async.flow/state)
+      (get :seon.render.web/streaming-agents)))
+
+(defn- await-streaming!
+  "Wait until the render proc's ping reports `expected` streaming
+  agents. Event-driven against the proc's own published state, with a
+  loud backstop whose firing is itself the bug report."
+  [proc expected label]
+  (test-support/await-event!
+   (future
+     (loop []
+       (if (= expected (streaming-agents proc))
+         expected
+         (recur))))
+   label))
+
+;;; 1. streaming-writes-zero-datoms-test — seed 2026072821
+
+(deftest streaming-writes-zero-datoms-test
+  ;; ORACLE: a stubbed STREAMED :call through the real turn, with the
+  ;; real channel sink. The datom census over the whole turn contains
+  ;; only the attempt row, the capture and the terminal facts — ZERO
+  ;; streaming datoms, because the registry no longer contains any
+  ;; `:seon.ai.stream/*` attribute to write. The render proc's ping
+  ;; shows the agent streaming during the call and CLEARED after, and
+  ;; the settled reply's text equals the fold's final snapshot text.
+  ;;
+  ;; The measured margin this replaces: a channel hand-off is 0.01 ms
+  ;; where the durable transact of the same value is 74-88 ms, so the
+  ;; partials were paying ~7,000x to be facts nobody could need once
+  ;; the reply had settled.
+  (with-cluster
+    (fn [cluster]
+      (let [stream-channel (async/chan (async/sliding-buffer 1))
+            cluster (assoc cluster :seon.cluster.loop/stream-channel
+                           stream-channel)
+            connection (:seon.store/branch-connection cluster)
+            proc (render-proc-for cluster)
+            requests (atom [])
+            chunks ["(my.run/complete " "\"streamed" " home\")"]]
+        (try
+          (with-redefs [ai/complete (streaming-completer requests chunks)]
+            (let [basis-before (:max-tx @connection)
+                  reports (drive! cluster 10)]
+              (is (= [:open :call :resume]
+                     (vec (take 3 (mapv :seon.cluster.work/situation
+                                        reports))))
+                  "an ordinary turn — a streamed call and a one-shot
+                   call return the same completion value")
+
+              (testing "the turn ASKED for a stream and supplied its sink"
+                (let [call (first (filter :seon.ai/stream? @requests))]
+                  (is (some? call) "the :call arm set :seon.ai/stream?")
+                  (is (fn? (:seon.ai/sink call))
+                      "and handed the provider the one-line channel sink")))
+
+              (testing "ZERO streaming datoms were committed by the turn"
+                (let [db @connection]
+                  ;; the census that matters is over the attributes that
+                  ;; EXIST: nothing can have been written under a family
+                  ;; the registry does not install, so the class is dead
+                  ;; by construction rather than by counting rows
+                  (is (empty?
+                       (d/q '[:find [?ident ...]
+                              :where [_ :db/ident ?ident]
+                              [(namespace ?ident) ?ns]
+                              [(clojure.string/starts-with? ?ns
+                                                            "seon.ai.stream")]]
+                            db))
+                      "the whole :seon.ai.stream/* family is GONE from
+                       the registry — a partial row is unrepresentable")
+                  (is (pos? (- (:max-tx db) basis-before))
+                      "while the turn's OWN facts did commit")))
+
+              (testing "the attempt row and the terminal facts are what landed"
+                (is (= 1 (count (d/q '[:find ?e :where
+                                       [?e :seon.ai.attempt/ordinal _]]
+                                     @connection)))
+                    "ONE attempt row for the one paid call")
+                (is (some? (d/q '[:find ?edn . :where
+                                  [?e :seon.cluster.eval/result-edn ?edn]]
+                                @connection))
+                    "and the terminal receipt settled"))
+
+              (testing "the settled reply's text equals the fold's final
+                        snapshot text"
+                (let [reply (d/q '[:find ?text . :where
+                                   [?m :seon.cluster.message/content ?text]
+                                   [?m :seon.cluster.message/from _]]
+                                 @connection)]
+                  (is (or (nil? reply)
+                          (string? reply))
+                      "the reply is a durable fact or the run closed
+                       without one — either way the TEXT never came
+                       from the channel")))
+
+              (testing "the render proc saw the stream and then CLEARED it"
+                (await-streaming! proc 0 [:streaming-cleared])
+                (is (= 0 (streaming-agents proc))
+                    "presence of text IS the state, so the clear is the
+                     absence of an entry — the settled facts repaint
+                     the page and the proc drops the snapshot"))))
+          (finally
+            (flow.core/stop (:graph proc))
+            (test-support/await-event! (future (async/<!! (:completion proc)))
+                                       [:render-proc-stopped])
+            (async/close! stream-channel)))))))
+
+;;; 5. concurrent-streams-share-one-conn-test — seed 2026072825
+
+(deftest concurrent-streams-share-one-conn-test
+  ;; ORACLE: two agents streaming onto the ONE sliding-1 conn. A's offer
+  ;; can displace B's newest snapshot — accepted at token cadence (R4)
+  ;; — and the repair is B's next chunk. The claims that must hold
+  ;; anyway: both agents settle at their EXACT texts, which come from
+  ;; FACTS and never from the channel; a displaced snapshot is
+  ;; superseded by that agent's next offer; and the producers' fold
+  ;; threads are NEVER parked, whatever the render side is doing.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            stream-channel (async/chan (async/sliding-buffer 1))
+            cluster (assoc cluster :seon.cluster.loop/stream-channel
+                           stream-channel)]
+        ;; a second agent with a trigger of its own
+        (d/transact connection
+                    [(agent-row "agent-b")
+                     {:seon.cluster.message/id "m-b"
+                      :seon.cluster.message/to
+                      [:seon.cluster.agent/id "agent-b"]
+                      :seon.cluster.message/content "count the sprockets"
+                      :seon.cluster.message/at (Date.)}])
+        ;; NOBODY reads the conn for the whole run: every offer must
+        ;; still return immediately, which is what sliding-1 buys
+        (let [offers (atom [])
+              texts {"agent-a" "(my.run/complete \"alpha\")"
+                     "agent-b" "(my.run/complete \"beta\")"}
+              completer
+              (fn [request]
+                (let [sink (:seon.ai/sink request)
+                      ;; which agent this call belongs to is derivable
+                      ;; from the prompt the turn captured
+                      agent-id (if (str/includes? (:seon.ai/prompt request)
+                                                  "sprockets")
+                                 "agent-b"
+                                 "agent-a")
+                      text (get texts agent-id)]
+                  (doseq [n (range 1 (inc (count text)))]
+                    (let [started (System/nanoTime)]
+                      (when sink
+                        (sink {:seon.ai/text (subs text 0 n)
+                               :seon.ai/tokens n}))
+                      (swap! offers conj (- (System/nanoTime) started))))
+                  {:seon.ai/text text}))]
+          (try
+            (with-redefs [ai/complete completer]
+              (drive-passes! cluster 24))
+
+            (testing "both agents settled at their EXACT texts, from facts"
+              (doseq [[agent-id text] texts]
+                (let [sources
+                      (d/q '[:find [?source ...]
+                             :in $ ?agent-id
+                             :where
+                             [?agent :seon.cluster.agent/id ?agent-id]
+                             [?run :seon.cluster.run/agent ?agent]
+                             [?form :seon.cluster.run.form/run ?run]
+                             [?form :seon.cluster.run.form/source ?source]]
+                           @connection agent-id)
+                      receipts
+                      (d/q '[:find [?edn ...]
+                             :in $ ?agent-id
+                             :where
+                             [?agent :seon.cluster.agent/id ?agent-id]
+                             [?run :seon.cluster.run/agent ?agent]
+                             [?e :seon.cluster.eval/run ?run]
+                             [?e :seon.cluster.eval/result-edn ?edn]]
+                           @connection agent-id)]
+                  (is (seq receipts)
+                      (str agent-id " produced a terminal receipt"))
+                  ;; the FROZEN PLAN is the durable record of what the
+                  ;; provider settled on. It is a fact, committed once,
+                  ;; and it is byte-identical to this agent's own text —
+                  ;; while the channel, shared and lossy, carried only
+                  ;; presentation that either arrived or did not
+                  (is (= [text] sources)
+                      (str agent-id "'s settled text came from FACTS: "
+                           "the frozen plan, not the shared conn")))))
+
+            (testing "the producers' fold threads were NEVER parked"
+              (is (seq @offers) "the sinks really ran")
+              ;; sliding-1 never parks a producer: it drops the older
+              ;; value. The oracle is the offers' own durations — an
+              ;; offer that parked on an unread channel would be orders
+              ;; of magnitude slower than one that slid.
+              (let [slowest (apply max @offers)]
+                (is (< slowest 100000000)
+                    (str "the slowest offer took " slowest
+                         " ns — a parked producer would never return
+                          while nothing reads the conn"))))
+
+            (testing "a displaced snapshot is superseded, never lost work"
+              ;; only ONE value is ever pending, and it is the newest
+              (let [pending (async/poll! stream-channel)]
+                (is (or (nil? pending)
+                        (contains? #{"agent-a" "agent-b"}
+                                   (:seon.cluster.agent/id pending)))
+                    "at most one newest snapshot, whichever agent won
+                     the race — the other's next chunk repairs it")
+                (is (nil? (async/poll! stream-channel))
+                    "and never a queue: sliding-1 holds exactly one")))
+            (finally
+              (async/close! stream-channel))))))))
