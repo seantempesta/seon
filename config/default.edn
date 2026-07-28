@@ -81,6 +81,19 @@
  ; loudly and production to degrade only by explicit configuration.
  :seon.config/on-core-error :panic
 
+ ; THE VIEW. Unit: TCP port; 0 means the operating system chooses and
+ ; boot reports the URL it got. Zero is the honest default because a
+ ; second cluster in the same JVM must not fail to boot over a UI port,
+ ; and nobody should have to know a number in advance to open a browser.
+ ; Pin it when a stable bookmark is worth more than that.
+ :seon.config.web/port 0
+
+ ; Unit: milliseconds between repaints of one tab. Provenance: 16 ms is
+ ; one frame at 60 fps, the owner's stated bar, and it is a FLOOR rather
+ ; than a tick — a burst of commits inside one window costs one repaint
+ ; and a quiet cluster costs none.
+ :seon.config.render/coalesce-ms 16
+
  ; THE MODEL SEAM. DeepSeek is the standing default provider; the loop
  ; is installed at boot, so the provider it would call has to be a fact
  ; rather than a literal in a drive script. Nothing here spends

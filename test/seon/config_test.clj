@@ -43,6 +43,11 @@
     :seon.config.eval/time-limit-ms
     :seon.config.error/escalate-to
     :seon.config.error/recurrence-limit
+    ;; THE VIEW — two dials, added when boot began serving a page.
+    ;; This set is enumerated deliberately so that GAINING a dial is an
+    ;; edit somebody made on purpose rather than drift nobody noticed.
+    :seon.config.web/port
+    :seon.config.render/coalesce-ms
     :seon.config.message/max-chain
     :seon.config/on-core-error
     :seon.config.ai/endpoint
@@ -104,6 +109,8 @@
    :seon.config.eval.result/max-collection
    :seon.config.eval.result/max-string
    :seon.config.eval.result/max-nodes
+   :seon.config.web/port
+   :seon.config.render/coalesce-ms
    :seon.config.eval/time-limit-ms
    :seon.config.error/escalate-to
    :seon.config.error/recurrence-limit

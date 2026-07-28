@@ -10,10 +10,11 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (10)
+## Blocker (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [A booted cluster's block derivation returns one block where the facts have four](booted-block-derivation-returns-one-of-four.md) | blocker | Core |
 | [A refused transaction needs value-based classification at the transact wrapper](transaction-refusal-loses-its-ex-data.md) | blocker | Core |
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |

@@ -4,14 +4,12 @@
  ; nothing rendered is stored (O14) and a socket is not a fact.
  ; ---------------------------------------------------------------------------
 
- ; A coalescing FLOOR, not a timer standing in for an unobservable
- ; event. The observable event is the commit, and `listen!` already
- ; delivers it; this only says how often a tab is willing to be
- ; repainted, so a burst of commits inside one window costs one repaint
- ; instead of one each. A config fact rather than a constant, because
- ; the right value depends on what the cluster is doing and nobody
- ; should have to edit code to find out.
- :seon.config.render/coalesce-ms [:int {:min 0 :max 1000}]
+ ; `:seon.config.render/coalesce-ms` is DECLARED in config.edn, with the
+ ; other dials and inside the config singleton entity — which is what
+ ; makes it an installed attribute rather than only a shape. It is a
+ ; coalescing FLOOR, not a timer standing in for an unobservable event:
+ ; the observable event is the commit and `listen!` already delivers it.
+ ; This file references it; one attribute, one declaration site.
 
  :seon.render.web/port [:int {:min 0 :max 65535}]
  :seon.render.web/url [:string {:min 1}]

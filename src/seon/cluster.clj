@@ -90,6 +90,9 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.flow :as flow]
+            [seon.render.root :as root]
+            [seon.render.web :as web]
+            [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
@@ -444,8 +447,51 @@
 (def root-agent-id "root")
 
 (defn- seed-root-agent!
+  "The root agent, and the blocks that make it a PAGE.
+
+  Both in one place because they are one fact about a fresh cluster:
+  every cluster has a root from its first transaction, and a root with
+  no blocks would serve a blank page while claiming to be a view. The
+  block install is an idempotent upsert by name, so a reboot rewrites
+  the same set and any block an agent added itself survives."
   [connection]
-  (d/transact connection [{:seon.cluster.agent/id root-agent-id}]))
+  (d/transact connection [{:seon.cluster.agent/id root-agent-id}])
+  (let [seed (root/seed-tx @connection root-agent-id)]
+    (when (seq seed)
+      (d/transact connection seed))))
+
+(defn- serve!
+  "Bind the cluster's web view, or refuse LOUDLY.
+
+  The last layer, deliberately: everything it renders must already
+  stand, and a failure here must not be able to cost the run loop. It
+  throws like any other tower layer, so the REPL survives and the
+  degraded instance carries what stood — which is the honest behaviour
+  for a port that is already taken, rather than a silent fallback to a
+  no-UI-today state that nobody would notice until they opened a
+  browser.
+
+  Port 0 by default so a second cluster just works and the chosen port
+  is REPORTED rather than assumed; a dial pins it when somebody wants a
+  stable bookmark."
+  [connection cluster-name dials]
+  (let [served (web/start!
+                (cond-> {:seon.store/connection connection
+                         :seon.cluster.agent/id root-agent-id
+                         :seon.sci.admit/caps
+                         (select-keys dials
+                                      [:seon.config.eval.result/max-depth
+                                       :seon.config.eval.result/max-collection
+                                       :seon.config.eval.result/max-string
+                                       :seon.config.eval.result/max-nodes])
+                         :seon.config.render/coalesce-ms
+                         (:seon.config.render/coalesce-ms dials)}
+                  (:seon.config.web/port dials)
+                  (assoc :seon.render.web/port
+                         (:seon.config.web/port dials))))]
+    (log/info (str "seon " cluster-name " view: "
+                   (:seon.render.web/url served)))
+    served))
 
 (defn- attributed-run
   "The run this process holds and has not closed, or nil.
@@ -644,6 +690,10 @@
   sleep; if it ever needs to be clean, the honest fix is a completion
   the proc publishes, not a clock."
   [instance]
+  ;; the VIEW goes first: it is the newest layer and the only one
+  ;; holding sockets belonging to somebody outside this process
+  (when-let [served (:seon.render.web/served instance)]
+    (web/stop! served))
   (when-let [graph (:seon.flow/graph instance)]
     (flow.core/stop graph))
   (when-let [fanout (:seon.flow/error-fanout instance)]
@@ -697,7 +747,16 @@
         ;; (`bin/repl`, and the drive scripts), which is where a human
         ;; is watching. See `seon.instrument`.
         ]
-    (publish! (merge instance (arm-loop! instance connection cluster-name)))))
+    (let [instance (publish!
+                    (merge instance
+                           (arm-loop! instance connection cluster-name)))
+          ;; LAST, and after the loop, because the view renders what the
+          ;; loop produces and must never be able to cost it
+          ;; a database VALUE, not the connection: `effective` reads
+          ;; the dials at a basis like every other derivation
+          dials (config/effective @connection cluster-name)]
+      (publish! (assoc instance :seon.render.web/served
+                       (serve! connection cluster-name dials))))))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.

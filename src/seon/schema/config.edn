@@ -29,6 +29,20 @@
  :seon.config.error/recurrence-limit
  [:int {:min 1}]
 
+ ; THE VIEW. Port 0 means the operating system chooses and the chosen
+ ; port is reported — a second cluster just works, and nobody has to
+ ; know a number in advance. Pin it when a stable bookmark is wanted.
+ :seon.config.web/port [:int {:min 0 :max 65535}]
+
+ ; How often a tab is willing to be repainted. A coalescing FLOOR, not
+ ; a timer standing in for an unobservable event: the observable event
+ ; is the commit and `listen!` already delivers it. Declared HERE with
+ ; the other dials, because a dial has to be inside the config
+ ; singleton entity to install as an attribute at all — a declaration
+ ; beside its consumer would have been tidier and would not have
+ ; installed.
+ :seon.config.render/coalesce-ms [:int {:min 0 :max 1000}]
+
  ; HOW LONG A CONVERSATION MAY RUN WITHOUT A HUMAN. Unit: agent-to-agent
  ; hops in one causal chain. Delivery IS the wake, so alice messaging
  ; bob wakes bob, whose reply wakes alice — a polite infinite
@@ -145,6 +159,9 @@
   [:seon.config.error/recurrence-limit
    {:optional true}
    :seon.config.error/recurrence-limit]
+  [:seon.config.web/port {:optional true} :seon.config.web/port]
+  [:seon.config.render/coalesce-ms
+   {:optional true} :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain
    {:optional true}
    :seon.config.message/max-chain]
@@ -197,6 +214,8 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
+  [:seon.config.web/port :seon.config.web/port]
+  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
@@ -250,6 +269,8 @@
    {:optional true} :seon.config.error/escalate-to]
   [:seon.config.error/recurrence-limit
    :seon.config.error/recurrence-limit]
+  [:seon.config.web/port :seon.config.web/port]
+  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
