@@ -3,7 +3,9 @@
  ;; lights green. The old system lives under `src-old/`/`test-old/` as the
  ;; quarry (git is the archive) and is DISABLED by default: it loads only
  ;; through the explicitly old-facing aliases below.
- :paths ["src"]
+ ;; resources joins the classpath for the render pipeline's assets
+ ;; (css build products, bundled fonts once licensed).
+ :paths ["src" "resources"]
 
  :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
              "clojars" {:url "https://repo.clojars.org/"}}
@@ -45,6 +47,15 @@
         ;; zero-dependency. The HTTP client is JDK java.net.http (no
         ;; coordinate needed): plain synchronous, virtual threads park.
         org.clojure/data.json {:mvn/version "2.5.1"}
+
+        ;; The render pipeline's wire: Datastar SSE morphs over http-kit
+        ;; (N4 — the web layer is system code; the block morph rides SSE).
+        dev.data-star.clojure/sdk
+        {:local/root "reference-code/datastar-clojure/libraries/sdk"}
+        ;; http-kit itself rides the adapter's own coordinate (2.9.0-beta2)
+        dev.data-star.clojure/http-kit
+        {:local/root
+         "reference-code/datastar-clojure/libraries/sdk-http-kit"}
 
         com.taoensso/timbre {:mvn/version "6.5.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
