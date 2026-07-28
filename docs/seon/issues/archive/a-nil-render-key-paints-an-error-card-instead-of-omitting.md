@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, render, agent]
 ---
 
@@ -42,3 +42,25 @@ regression per site. The nil-returning-projection behavior is a contract
 decision (probably: omitted, while preserving the block's identified
 wrapper element so later morphs still have a target) — owned by the
 context-blocks omission ruling (Decision 1), not fixed ad hoc here.
+
+## Resolution
+
+Commit `12a5fef33` applies the 2026-07-28 owner ruling at every cited
+consumer. Block selection and entity-ref fallback now call
+`render/declaration?` on the value read with `get`; the generic data panel
+unifies nil and absent render values and removes nil-punned render keys from
+its unit fallback. A nil html projection is a successful omission rather than
+malformed hiccup.
+
+`seon.render.web/surface-html` serializes an omitted surface as an empty `div`
+carrying the block's existing `:seon.render/surface-id`. The identified wrapper
+therefore survives the empty state, and a later non-nil output produces a
+whole-element patch for the same id.
+
+Proof:
+
+- `bin/test seon.render.block-test seon.render.web-test` — 60 tests, 145
+  assertions, 0 failures, 0 errors.
+- The changed-test gate widened through nine dependent namespaces — 147 tests,
+  504 assertions, 0 failures, 0 errors.
+- `bin/test` — 396 tests, 1,544 assertions, 0 failures, 0 errors.
