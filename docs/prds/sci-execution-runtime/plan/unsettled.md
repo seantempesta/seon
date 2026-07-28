@@ -10,7 +10,14 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
-**WORKING EDGE (2026-07-28 night).** Gate 425/1675/0 (context-blocks
+**WORKING EDGE (2026-07-28 night).** QUEUED (owner direction, late night):
+a fleet-oversight BLOCK over flow ping — one unit pinging the
+cluster's graphs (parked/mid-turn, current-run-id, episode-runs,
+buffer occupancy) with ai+html projections through the ONE router;
+root carries it by default, capture snapshots it as the
+live-processes trusted input. Dispatch after F2 lands (wants the
+render proc + F1 ping states). Derive-don't-store; measure before
+caching. Gate 425/1675/0 (context-blocks
 landing; independent verification in flight). LANDED tonight:
 context-blocks rung complete (082370df9/6d89d9107/f31d63e39/e377688e2
 — schema, seon.context + pre-provider capture, membership/omission,
