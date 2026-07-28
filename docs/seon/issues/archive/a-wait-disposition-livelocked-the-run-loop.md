@@ -50,7 +50,7 @@ livelock and stay green.
 
 ## Resolution
 
-The `:close` branch now takes custody before closing when it does not already
+Fixed in `722adb18e` ("Agents can message each other"). The `:close` branch now takes custody before closing when it does not already
 hold the run — the same takeover `settle-interruption!` uses — and treats a
 refused claim (somebody else holds a live lease) as a non-error outcome rather
 than closing a run that is not its own. After the fix the same probe reports
@@ -63,7 +63,10 @@ retracted so a later trigger can open a new run, and the wait note still
 readable in the receipt (which is where `seon.cluster.prompt` reads it back to
 tell the agent what it was waiting for).
 
-Full gate green with the change. What is NOT settled by this fix is a design
+Full gate green with the change (350/1392/0 at `61d7a3604`), and the live
+two-agent drive exercises the path for real: alice pauses with `my.run/wait`
+after delegating, her run closes on the next pass, and bob's answer opens a
+fresh run for her — the sequence that spun forever before the fix. What is NOT settled by this fix is a design
 question recorded for the owner: `wait` releases and the very next pass closes,
 so a "waiting" run has no observable resumable state and `my.run/wait`'s
 docstring promise that "the run resumes on a later wake" is not what happens —
