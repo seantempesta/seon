@@ -6,753 +6,802 @@ tags: [research, agent, architecture]
 
 # The renderable corpus — N5's design plan
 
-The owner's late-night direction (2026-07-28) is one sentence with a lot
-inside it: **make everything in the site effortlessly compose rendering
-together.** Its mechanism is the program graph. Every namespace owns its data
-and publishes the functions that explain that data; a function whose declared
-INPUT is a schema and whose declared OUTPUT is a render projection *is* the
-renderer for that data; requiring another namespace pulls that namespace's own
-view of itself; and hops out from the viewing point decide how much detail you
-get. `/data` stops being a page and becomes `seon.data` — the namespace whose
-job is understanding and explaining all the data in the system.
+**REVISED 2026-07-28 post-midnight.** The first draft (`97d9919c6`) was
+falsified by `renderable-corpus-falsification-2026-07-28.md` (10 findings, 6
+seal-blocking) and superseded by the owner's post-midnight rulings, the
+confinement guardrail, and the distance-is-a-query principle. Every section
+carries a dated marker naming what changed. The first draft's shape survives;
+five of its mechanisms do not.
 
-The same facts answer a second question the owner raised in the same breath:
-when a broad global attempt fails in parts, **which namespace owns each part**.
-Ownership is a corpus query, failures are durable facts with provenance, and
-delivery is `my.message` — so distributed fix delegation (§7) is the same
-mechanism read from the other side.
+The organizing principle is the owner's, verbatim: **"Namespace and distance
+centric context for agents."** An agent's context IS `render(its namespace,
+distance N)` — every hop rendered by its owner's projection, redirectable at
+any slot, distance implied 1. `/data` is re-grounded as `seon.data`, the
+namespace whose job is understanding and explaining all the data in the system.
 
-Nothing here is a new mechanism. The router (`src/seon/render.clj`), the
-census/membership seam (`src/seon/render/block.clj`), the bounded expansion
-budgets, the schema-registration properties that already name renderers, and
-the quarry's call-edge indexer are all landed or written. N5 supplies the one
-missing half — **the facts** — and then discovery, scoped selection, and composition
-are queries over them.
+## The three standing constraints this design is answerable to
 
-This document sequences nothing. `plan/README.md` §3 remains the only
-ordering; this is the design the N5 rung's contract packages are authored
-from.
+Recorded here because they are binding on every section below, and because the
+first draft violated two of them.
+
+**1. The bar.** *"An elegant solution that is obvious to agents because the
+concept is so simple. It's just data in and out. Write a new function to change
+it."* This is the graduation criterion, evaluated as an agent eval
+(`src-inspect-ai/`), not a code review: a fresh agent, told one sentence,
+changes what it sees by writing one `defn`.
+
+**2. The confinement guardrail (owner, binding).** *"I don't want anything that
+requires changes all over the system. No forcing every function to identify its
+own distance or anything that makes the system weird. A function that takes in
+data and processes it is normal Clojure."* Its four implications are contract:
+
+- **renderers keep the plain signature** — one unit map in, data out. Distance
+  is an optional key on the unit; a renderer that does not care never mentions
+  it, and nothing anywhere declares its own distance;
+- **discovery uses only metadata durable defns already carry** —
+  `:malli/schema`, docstrings, and the existing `^{:seon.workload …}` leaves.
+  **This design adds no new per-function annotation of any kind**;
+- **all machinery lives in dedicated namespaces** — traversal in
+  `seon.render.walk`, explanation and census in `seon.data`, **the router
+  untouched as the one entry**;
+- **any element that would touch code outside the render family, `seon.data`,
+  schema EDN, and the N5 indexer is misdesigned** — pull it inward or cut it.
+
+**3. Distance is a query, never a decoration (owner).** *"Distance is mostly a
+query to the database — we have refs and understand distance between entities;
+namespaces are entities and functions have schemas; there are many ways to
+interpret this WITHOUT explicitly decorating functions and namespaces."*
+Encoded in §4: distance is a walk over the ref graph, the graph is the
+database, the interpretation is an **edge-selection argument** to the walk, and
+**nothing in this design writes a distance or depth fact anywhere.**
+
+This document sequences nothing. `plan/README.md` §3 remains the only ordering.
+
+## Name table — veto these before contracts seal
+
+**New 2026-07-28 post-midnight**, per the owner's naming-pass instruction.
+Every name this plan introduces, with its grounding. Umbrella nouns and
+coinages are called out where they were removed.
+
+| name | kind | grounded in | note |
+|---|---|---|---|
+| `seon.render.walk` | namespace | `clojure.walk` — the language's own name for traversing a structure | owns distance, edge selection, budget, cycle path. The word "care-graph" is **RETIRED as coinage**; it named nothing a dependency names |
+| `seon.render.walk/neighbors` | function | ordinary graph vocabulary | what a renderer calls to delegate outward one hop |
+| `:seon.render.walk/edges` | request key | the edge-selection argument (§4.2) | the metric; never stored |
+| `:seon.render.walk/path` | request key | `expand`'s landed per-path visited set | cycle refusal |
+| `:seon.render.walk/remaining` | request key | `expand`'s landed node budget (`block.clj:528`) | shared node budget |
+| `:seon.render/distance` | unit / request key | **owner-ruled name** | optional, default 1, 0 = name only. Supersedes the first draft's `:seon.render/depth` |
+| `seon.data` | namespace | the owner's own phrasing ("a namespace `seon.data` whose job is understanding and explaining all the data") | census, resolution chain, completeness, entity enrichment, the code floor |
+| `seon.data/code-ai` | function | mirrors the landed `seon.context/identity-ai`, `peers-ai`, … naming | the AI floor (§3.4) |
+| `:seon.fn/arities` | attribute | Clojure's own word for a function's argument-count variants (`arglists`); Malli's `:function` holds one `:=>` per arity | replaces the first draft's `:seon.fn/arms` — "arm" is neither Clojure's nor Malli's word |
+| `:seon.fn.arity/{ordinal,arg-count,variadic?,input-form,input-schema,output-form,output-schema}` | attributes | Clojure arity vocabulary + Malli's `:=>` input/output positions | colocated under the owning code namespace per the 2026-07-28 attribute ruling |
+| `:seon.render.kind/{kind,outputs}` | attributes | `render/kinds` is the landed computed kind vocabulary | one row per kind, registered beside the kind's own schema |
+| `:seon.ns.require/{target,alias,refers,refer-all?,as-alias?}` | attributes | **the quarry's own registered names** (`src-old/seon/ns/source.cljc:19-31`) | adopted verbatim, not renamed |
+
+**Vocabulary corrections applied throughout this revision:** the first draft
+used "lens" as an umbrella noun for a renderer. The landed vocabulary is
+**projection** (`:seon.render/projection` is a registered schema key, and the
+router's own docstring uses it); every "lens" is now "projection". "Care-graph"
+is deleted. "Hop depth" is replaced by the ruled "distance".
 
 ## 0. Dependency ledger
 
+**Revised 2026-07-28 post-midnight** — four citations corrected per the
+falsification's citation audit; the rulings and guardrails added as governing
+authority.
+
 | dependency | selected source | what it establishes |
 |---|---|---|
-| the router | `src/seon/render.clj:81-174` | `declaration?` (symbol / string / vector), `kinds` (computed, never listed), `render` (late var-backed resolution, total, flat error values) |
-| block census | `src/seon/render/block.clj:172-321` (`blocks`/`derived`/`membership`/`required-inputs`/`unit`) | the landed derived-membership seam — `derived` returns `[]` "by construction" pre-N5 and is the exact function N5 fills |
-| bounded expansion | `src/seon/render/block.clj:477-660` (`expand`) | depth-first left-to-right, per-path visited set, NODE budget + DEPTH budget from `:seon.sci.admit/caps` (`:seon.config.eval.result/max-nodes` / `max-depth`); measured OOM at depth 22 without the node budget |
-| family selection | `src/seon/render/block.clj:744-791` (`select`) | generic default + producer-chosen specialists, decided WHERE THE UNIT IS BUILT; late-resolved rules; a throwing rule costs its own specialist |
-| generic floor | `src/seon/render/block.clj:793-887` (`data-panel`), `src/seon/render/data.clj` (the get-in drill) | the process-level generic render and the windowed drill; both bounded by the SAME admission caps |
-| program-graph schema | `src/seon/schema.cljc:509-575` | `:seon.fn/*`, `:seon.ns/*`, `:seon.schema/*` already registered — including `:seon.ns/require-edges` (component set) and the `:map` properties that ALREADY declare `:seon.render/ai`/`:seon.render/html` for `:seon.fn`, `:seon.ns`, `:seon.schema` |
-| the quarry indexer | `src-old/seon/db/program.clj` (581 lines) | the diff/reconcile discipline: identity attributes, `unchanged-row?`, complete-population assert, stale-entity retraction |
-| the quarry edge indexer | `src-old/seon/program/edge.cljc:11-30` | `::calls [:set :string]`, `::uncertainties` (`:dynamic-call`, `:open-higher-order`, `:unresolved-symbol`), `::effect` |
-| the quarry family renderers | `src-old/seon/render/handlers/{fn,ns,schema}.cljc` | the ai/html twins the fresh `schema.cljc` properties already name — and which do not exist in `src/` (open issue `program-graph-render-declarations-name-absent-functions`) |
-| the sealed contract | `plan/context-blocks-contracts-2026-07-28.md` §3.2, §3.9, §10 | the two N5 edges this plan must serve: derived membership, and the invocation seam's SCI half |
-| classification research | `research/workload-classification-2026-07-28.md` §2 | the ~15-line reachability fold over `:seon.fn/calls` + tags; the probe results |
-| presence doctrine | `research/state-without-kinds-2026-07-28.md` §1 | no kind discriminators; `:seon.error/kind` is a DIAGNOSTIC tag (`docs/conventions.md:378`) |
-| the fault-routing ruling | `plan/README.md`, rulings 2026-07-26 PM ("Errors, the flow way") | "who should fix this is a query": committed provenance + `:seon.agent/namespace` (unique, at most one) wakes the owning agent; a call path spanning namespaces derives multiple interested owners; no dispatch table |
-| messaging + the error system | landed (`my.message` subagents; one normalizer, fault consumer, projections-per-consumer) | delegation's transport and its durable failure facts — §7 adds no mechanism to either |
-| the architecture target | `docs/seon/architecture/context.md:287-400` | "derive the derivable, store only the overrides"; the auto-run rule — "the render pass QUERIES THE PROGRAM GRAPH for fns in the current namespace whose OUTPUT SCHEMA is a render type" |
-
-The last row matters most: the owner's direction is not new architecture. It is
-`context.md`'s auto-run rule, already written in present tense, finally given
-its facts — plus two accretions the architecture does not yet state (the
-scoped-selection model, §3, and hop-depth, §4). §7's delegation is likewise
-the fault-routing ruling applied deliberately rather than only on faults.
+| **the rulings + guardrails** | `plan/README.md` post-midnight batch; the owner's confinement and distance-is-a-query messages | distance call convention; namespace+distance as THE organizing principle; the resolution chain; the bar; confinement; no decoration |
+| the router | `src/seon/render.clj:81-174` | `declaration?`, `kinds` (computed), `render` (late var-backed resolution, total, flat error values). **Untouched by this design** |
+| block census | `src/seon/render/block.clj:172-321` | the landed derived-membership seam — `derived` returns `[]` pre-N5 and is the function N5 fills |
+| bounded expansion | `src/seon/render/block.clj:477-660` | the reusable asset is the **discipline**: deterministic DFS, per-path visited set, shared node + depth budgets. It is a *hiccup slot/ref* walker with a closed request that hardcodes `:seon.render/html` (`:610-621`) — **not** a namespace walker (SB-5) |
+| family selection | `src/seon/render/block.clj:744-791` (`select`) | producer-side first-matching-specialist selection, decided where the unit is BUILT |
+| generic floor | `block.clj:793-887` (`data-panel`), `src/seon/render/data.clj` | the html floor and the get-in drill. **There is no AI floor**: `seon.error/ai-prose` accepts `:seon.error/notice`, not an arbitrary unit (`error.clj:465-495`) |
+| program-graph schema | `src/seon/schema.cljc:509-575` | `:seon.fn/*`, `:seon.ns/*`, `:seon.schema/*` and the `:map` properties that already declare renderers — **six** symbols, all absent from `src/` |
+| schema-row derivation | `src/seon/schema.cljc:1858-1872` | `:seon.schema/ns` is assoc'd **only when `(namespace schema-key)` is non-nil** — so `:seon.fn`, `:seon.ns`, `:seon.schema` have no owner ref (SB-4, probe-confirmed) |
+| the quarry indexer | `src-old/seon/db/program.clj` | the diff/reconcile discipline. `unchanged-row?` (`:215-226`) compares functions, namespaces and schemas — **not tests** |
+| the quarry edge indexer | `src-old/seon/program/edge.cljc:15-25` | `::calls`, `::effect`, and an **eight**-member uncertainty enum (the first draft cited three) |
+| the quarry require facts | `src-old/seon/ns/source.cljc:19-31` | `:seon.ns.require/target` / `alias` / `refers` / `refer-all?` / `as-alias?` — **none registered in the fresh tree** |
+| the quarry namespace render | `src-old/seon/agent/ctx/namespaces.cljc`, `src-old/seon/render/handlers/ns.cljc` | ruling #3's named default for a namespace-as-data-type: signatures + docstrings, bodies by budget — **mine it, never reinvent** |
+| landed oversight | `src/seon/oversight.clj` (`abf8680d7`) | the fleet block is **landed, not queued** |
+| error facts | `src/seon/schema/error.edn:43-106`, `src/seon/error.clj:270-347` | kind/message/process/proc/op/cid/basis/run/agent are queryable; **namespace, var, schema key, test symbol and call path are not** — they live inside the `:seon.error/data-edn` string (SB-6) |
+| fault routing | `plan/README.md` rulings 2026-07-26 PM | "who should fix this is a query" — a **target ruling**, not landed facts |
+| the sealed contract | `plan/context-blocks-contracts-2026-07-28.md` §3.2, §3.9, §10 | the two N5 edges: derived membership, and the invocation seam's SCI half |
+| classification research | `research/workload-classification-2026-07-28.md` §2 | the reachability fold over `:seon.fn/calls` + the **existing** `:seon.workload` leaf metadata |
+| presence doctrine | `research/state-without-kinds-2026-07-28.md` §1 | no kind discriminators; `:seon.error/kind` is a diagnostic tag (`conventions.md:378`) |
+| the architecture target | `docs/seon/architecture/context.md:287-400,388-395` | "derive the derivable, store only the overrides"; the auto-run rule names output schemas that **no landed renderer declares** (§2.1) |
 
 ## 1. The corpus indexer
 
+**Revised 2026-07-28 post-midnight** — the two single-name schema attributes
+are REPLACED by arity rows (SB-2); attribute count corrected (five, not four);
+every quarry field gets a disposition (R-1); and the whole section is confirmed
+against the guardrail — it touches only the indexer and schema EDN, and adds
+**no per-function annotation**.
+
 ### 1.1 What a `:seon.fn` row must carry
 
-The landed schema (`schema.cljc:509-536`) already has sym / ns / source /
-source-fingerprint / arglists / doc / private? / spec / read-attrs. N5 adds
-four, all lifted at index time exactly the way `:seon.fn/doc` already is:
+Landed already (`schema.cljc:512-536`): sym / ns / source / source-fingerprint
+/ arglists / doc / private? / spec / read-attrs. N5 adds **five** attributes
+and one component collection:
 
 ```clojure
-;; the call graph — the quarry's own attribute, re-landed
 :seon.fn/calls [:set :string]              ; fully qualified callee symbols
-:seon.fn/uncertainties [:set [:enum :dynamic-call :open-higher-order
-                              :unresolved-symbol]]
-;; scheduling: EXPLICIT metadata only where the graph cannot prove purity
-:seon.fn/workload [:enum :io :compute]     ; from ^{:seon.workload …} defn meta
-;; the DECLARED contract's schema NAMES — not the forms, the names
-:seon.fn/input-schema :keyword
-:seon.fn/output-schema :keyword
+:seon.fn/uncertainties [:set :seon.fn/uncertainty]   ; §1.3 — eight members
+:seon.fn/workload [:enum :io :compute]     ; lifted from EXISTING ^{:seon.workload …} leaves
+:seon.fn/arity-max [:int {:min 0}]
+:seon.fn/variadic? :boolean
+:seon.fn/arities [:set {:seon.db/component true} :seon.db/ref]
 ```
 
-`input-schema` / `output-schema` are populated only when `:malli/schema` has
-the shape `[:=> [:cat S] T]` (or `[:catn [_ S]] T`) **and `S`/`T` are
-registered schema keys** — a keyword the global schema population answers for.
-An inline anonymous form populates neither: an inline shape is not a name, and
-naming is the whole discovery mechanism. This is deliberately narrow. A
-function that wants to be discoverable registers its shapes; that is the
-existing house rule (`data-modeling`: register shared shapes once and
-reference them), not a new tax.
+Every one of these is **derived from what a defn already carries** — its
+`:malli/schema`, its metadata, its analyzed body. Nothing asks an author for
+anything new, which is the guardrail's second implication stated as a property
+of the row.
 
-`:seon.fn/spec` keeps the whole `:malli/schema` form string as today, so
-nothing is lost and the two name attributes are a projection of it — a
-derivation the indexer performs ONCE at index time rather than every reader
-re-parsing a string. (This is the one stored derivation in the design and it
-earns its place: the alternative is `edn/read-string` inside every discovery
-query.)
+`:seon.fn/arities` is a `[:set …]`, not a `[:vector …]` (raised by review,
+2026-07-28): **cardinality-many is a SET** — L13 says order is never a
+collection-type property, and every landed component-ref collection follows it
+(`:seon.cluster.agent/blocks`, `:seon.cluster.run/forms`,
+`:seon.context.capture/contributions`, `:seon.ns/require-edges`). Arity order
+is carried by each child's own `:seon.fn.arity/ordinal`, exactly as the sealed
+contribution rows carry `position`.
 
-`:seon.ns` rows are unchanged and already sufficient: `name`, `source`, `doc`,
-`summary`, `require-edges` (a component set of require edges — the care-graph's
-edges, §4).
+### 1.2 Contract arities as data — replacing the two-name projection
 
-### 1.2 What the terminal transaction commits
+The first draft stored one `input-schema` and one `output-schema`, admitting
+only `[:=> [:cat S] T]`. A JVM probe over real var metadata returned **nil for
+all five real cases** — inline `[:maybe :string]` outputs, `[:or …]` outputs,
+`:function` multi-arity, variadic `[:catn [k [:* :any]]]`, `[:or]` inputs
+(SB-2). Malli and Seon's own completeness walker (`schema.cljc:777-802`)
+support `:=>` and every arm of `:function`; two cardinality-one attributes
+cannot.
 
-Two producers, ONE row shape — that is the accretion test.
+**One row per arity**, preserving the whole contract:
 
-- **Build-time (rung "-1", the publish command).** The JVM indexer walks
-  `src/`, produces the desired program rows, and the result is baked into the
-  shared database ancestor (`plan/README.md`: "one deliberate build indexes ALL
-  code and produces the bootstrap"). A fresh cluster forks that ancestor; it
-  never re-indexes.
-- **Runtime (the agent's own defn).** When an eval's form defines a var, the
-  form's TERMINAL transaction — the same transaction that commits the eval
-  receipt — carries the `:seon.fn` row for each defined var, with the same
-  attributes derived from the same analysis. An agent override of a core
-  function is a later transaction on the same facts (`README.md` rulings,
-  2026-07-26 PM: "no disk write-back, ever"). Provenance is minimal tx-meta
-  (`:seon.db/user` + `:seon.db/process`), so "who wrote this function" is a
-  join on the datom's transaction, never a `created-by` attribute.
+```clojure
+:seon.fn.arity/ordinal      [:int {:min 0}]   ; position within :function
+:seon.fn.arity/arg-count    [:int {:min 0}]
+:seon.fn.arity/variadic?    :boolean
+:seon.fn.arity/input-form   :string           ; the arity's input form, verbatim EDN
+:seon.fn.arity/output-form  :string           ; the arity's output form, verbatim EDN
+;; NAMES — present only when the form IS a registered keyword. A projection of
+;; the form, never a replacement for it.
+:seon.fn.arity/input-schema  :keyword
+:seon.fn.arity/output-schema :keyword
+```
 
-Requirement carried forward unchanged: **a durable defn REQUIRES a complete
-`:malli/schema`** (no `:any` without a proven polymorphic boundary). N5's
-admission refuses the commit otherwise, with a flat error value the agent
-sees — which is also what makes `input-schema`/`output-schema` reliably
-present on agent-authored renderers.
+A single-arity `:=>` produces one row; a `:function` produces one per arity;
+forms are always complete, so nothing is discarded and multi-arity accretes
+with no cardinality change. Renderer eligibility is a **separate pure
+projection** over these rows (§2.2) — "complete function" and "discoverable
+renderer" stop being the same predicate, which is SB-2's required revision.
 
-### 1.3 Acquisition at a basis
+### 1.3 Quarry field dispositions (R-1)
 
-Unchanged from the sealed model: a fresh SCI fork materializes namespaces from
-facts at a database value — `:namespaces` for what is pre-resolved, `:load-fn`
-over `:seon.ns/source` for the rest. **L14 stands**: `:load-fn` cannot resolve
-a bare same-namespace symbol and `:namespaces` is consulted first, so a
-namespace materialized from source must be materialized whole, never
-symbol-by-symbol. Loading a namespace never publishes schema; registrations are
-committed `:seon.schema` facts that a tier ACQUIRES at a basis.
+The uncertainty enum has **eight** members; dropping five would turn a quarry
+uncertainty into an apparently certain call graph. **All eight are adopted, and
+every one is fail-closed**: any uncertainty on a row forces `:mixed` and marks
+its call edges incomplete.
 
-### 1.4 Quarrying `seon.db.program` honestly
+| member | disposition |
+|---|---|
+| `:dynamic-call` | adopt — edge unresolved |
+| `:open-higher-order` | adopt — edge unresolved |
+| `:unresolved-symbol` | adopt — edge unresolved |
+| `:constructed-keyword` | adopt — `read-attrs` incomplete; must not read as a complete attribute set |
+| `:dynamic-read-attributes` | adopt — same, reads |
+| `:dynamic-written-attributes` | adopt — same, writes |
+| `:macro-expansion` | adopt — call edges may be synthetic |
+| `:value-passed-pattern` | adopt — the edge exists, the call site does not |
 
-**Survives — this is genuinely earned knowledge, and re-deriving it would cost
-a week:**
+If the new analyzer genuinely cannot produce one of these states, N5.1 proves
+why rather than silently omitting it.
 
-- *identity-attribute reconciliation* (`program.clj:38-39,132-143`): a program
-  row is identified by whichever of `:seon.ns/name` / `:seon.fn/sym` /
-  `:seon.schema/key` / `:seon.test/sym` it carries. No kind field, no row type —
-  the presence doctrine, already applied.
-- *the complete-population assert* (`program.clj:205-213`): an index run that
-  produced zero functions must REFUSE rather than retract the corpus. This is
-  a real scar: a partial index is indistinguishable from a deletion, and only
-  the refusal tells them apart.
-- *deterministic ordering of the desired rows* (`desired-sort-key`), so two
-  index runs of one tree produce one transaction.
-- *stale-entity retraction scoped by provenance* (`stale-entity-tx`), with the
-  agent-home carve-out — the shape survives; its provenance key changes (below).
-- *`unchanged-row?` diffing*, so a reindex of an unchanged tree writes nothing.
-  Converged = zero writes is the same discipline config reconciliation already
-  proved at B2.
+**Require-edge targets:** register the quarry's `:seon.ns.require/target` /
+`alias` / `refers` / `refer-all?` / `as-alias?` verbatim. Without `target`, a
+component ref set cannot be walked, so §4's require-hop edge selection has no
+edges. (It is *not* needed for the default edge selection — see §4.2.)
 
-**Dies:**
+**`unchanged-row?` gains a test arm** (`src-old/seon/db/program.clj:215-226`
+compares functions, namespaces and schemas only). Without it, every test row is
+emitted as changed on every index and N5.1's zero-datom reindex falsifier
+fails.
 
-- *the `:seon.db.process/boot` provenance queries* (`program.clj:59-114`). The
-  bootstrap is no longer "what the boot process wrote"; it is a shared database
-  ancestor every cluster forks. The diff's baseline becomes the ancestor's own
-  basis, not a process tag. Three queries and their `or-join` collapse.
-- *`apply-release-config!`* (`program.clj:486-581`) — config→facts is B2's,
-  landed. It is a second config writer.
-- *`compile-initialization-pages`* (`program.clj:427-484`) — page compilation is
-  B2's. Its schema-dependency-order logic is worth READING before the ancestor
-  build is written, then leaving where it is.
-- *the empty-string sentinels* (`get-else … :seon.fn/spec ""`,
-  `:seon.fn/private? false`, `:seon.db.id.generator/absent`). Absent is absent;
-  a stored `""` for "no spec" is stored nil wearing a hat. Presence ruling,
-  2026-07-28.
-- *`src-old/seon/client/indexing.clj`* — the pod half. O13; deleted.
+### 1.4 Two producers, one row shape
 
-**Adopted from elsewhere in the quarry:** `src-old/seon/program/edge.cljc`'s
-`::calls` and `::uncertainties` (the fail-closed signal the classification
-research depends on), and `src-old/seon/render/handlers/{fn,ns,schema}.cljc` as
-the first three family specialists — which is not optional work: the fresh
-`schema.cljc` already names those symbols in its `:map` properties and they do
-not exist, which is exactly the filed issue
-`program-graph-render-declarations-name-absent-functions`. N5 either lands them
-or the declarations lie.
+Unchanged: the build-time indexer bakes rows into the shared database ancestor;
+an agent's own `defn` commits the same row shape in the form's terminal
+transaction, provenance as minimal tx-meta. A durable defn still REQUIRES a
+complete `:malli/schema`. Acquisition at a basis is unchanged (L14: `:load-fn`
+cannot resolve a bare same-namespace symbol, so a namespace materializes
+whole).
+
+### 1.5 Quarrying `seon.db.program`
+
+**Survives:** identity-attribute reconciliation, the complete-population
+assert, deterministic desired ordering, provenance-scoped stale retraction,
+zero-write convergence. **Dies:** the `:seon.db.process/boot` provenance
+queries (the ancestor's basis is the baseline now), `apply-release-config!`,
+`compile-initialization-pages`, the empty-string sentinels,
+`src-old/seon/client/indexing.clj`.
 
 ## 2. Renderer discovery
 
-### 2.1 The rule
+**Revised 2026-07-28 post-midnight** — the `*-output` suffix rule is WITHDRAWN
+(SB-3), and its replacement is re-cut against the confinement guardrail: the
+first revision's tree-wide output migration would have edited `seon.error` and
+`seon.oversight`, outside the allowed boundary. The registry adapts to the
+tree instead.
 
-> A renderer for schema `S` and kind `K` is a function whose declared INPUT
-> schema is `S` and whose declared OUTPUT schema is `K`'s output schema.
+### 2.1 The output contract problem, and the confined resolution
 
-Both halves are NAMES, and the query is two clauses:
+There is no canonical render output contract today. Landed projections declare
+`[:maybe :string]` (`context.clj:55-65`), `:string`, `[:string {:min 1}]`
+(`error.clj:436-494`), `:seon.render/hiccup` (`render/data.clj:170-178`,
+`render/root.clj:38`), `[:maybe :seon.render/hiccup]` (`oversight.clj:283`).
+The quarried handlers declare `[:maybe :string]` and
+`[:maybe :seon.render.canvas/hiccup]`. The architecture
+(`context.md:388-395`) says the output schema *is* `:seon.render/ai` /
+`:seon.render/html`, which cannot be — those keys are declaration slots holding
+symbols. Three conventions, none followed.
+
+**The resolution: the KIND declares which output forms count as its
+projections, as one fact, seeded from what the tree already declares.**
 
 ```clojure
+:seon.render.kind/kind    [:keyword {:seon.db/identity true}]
+:seon.render.kind/outputs [:set :string]   ; accepted output forms, verbatim EDN
+```
+
+Seeded in schema EDN — one file, **zero code edits anywhere**:
+
+- `:seon.render/ai` → `#{"[:maybe :string]" "[:string {:min 1}]" ":string"
+  ":seon.render/prose"}`
+- `:seon.render/html` → `#{":seon.render/hiccup" "[:maybe :seon.render/hiccup]"}`
+
+This is the guardrail applied to a real tension: the first revision made
+discovery correct by migrating ~15 declarations across four namespaces, two of
+them outside the render family. Adapting the registry instead makes discovery
+correct **on the tree as it is**. A new kind registers one row beside its own
+schema; the census derives the kind set; nothing central is hand-maintained
+except each kind's own declaration of what it accepts — which is that kind's
+contract, not a list of other people's code.
+
+Convergence on one canonical form per kind (`:seon.render/prose`,
+`:seon.render/hiccup`) remains desirable and is offered as an **optional**
+later tidy-up, never a precondition (owner decision 8).
+
+**Why `[:maybe …]` forms are accepted here, stated because it reads like a
+violation and is not** (raised by review, 2026-07-28): the house ban on
+`[:maybe X]` governs **stored attributes**, where the Datahike bridge forces
+absence instead of nil. The sealed nil-punning ruling is explicit that
+"`[:maybe]` is allowed in in-memory function RETURN contracts", and a
+projection returning nil IS the ruled omission mechanism — forbidding
+`[:maybe]` in render outputs would forbid omission itself. Two further notes:
+`:seon.render.kind/outputs` stores **strings** naming accepted contract forms,
+so no `[:maybe]` schema is ever registered as an attribute's own shape; and
+`seon.context/identity-ai` already declares `[:maybe :string]` in landed,
+sealed code (`context.clj:55-65`).
+
+### 2.2 Eligibility — a total projection over arity rows
+
+An arity row is a **render arity** for `(S, K)` when all of:
+
+1. `arg-count` = 1 and `variadic?` is false;
+2. `input-schema` is present (the input IS a registered keyword `S`);
+3. `output-form` ∈ the `:seon.render.kind/outputs` of kind `K`.
+
+A function is a **discoverable renderer** for `(S, K)` when it has a render
+arity for `(S, K)` **and is not private**. Every other case has a stated
+outcome:
+
+| case | outcome |
+|---|---|
+| no arity matches | not discoverable; still invocable through an explicit declaration |
+| several arities, different `(S,K)` | discoverable for each — one function, several data types, legal |
+| several arities, same `(S,K)` | indexer refuses `::ambiguous-contract` naming the fn and both ordinals |
+| `private?` true | **excluded from discovery** (SB-4); still invocable by explicit declaration from its own namespace |
+| input is `[:or …]` or inline | not discoverable — a complete contract with no single named `S` |
+| output form outside the kind's accepted set | not discoverable, and **listed by the completeness query** as "renderer-shaped, unaccepted output" — the worklist for the optional convergence |
+
+The query is two clauses over projected names:
+
+```clojure
+;; the accepted forms bind as a COLLECTION parameter, never as a set value
+;; tested with `contains?` — a sequential binding would silently match
+;; nothing, since (contains? ["x"] "x") is false.
 '[:find [?sym ...]
-  :in $ ?input-schema ?output-schema
+  :in $ ?S [?form ...]
   :where
-  [?fn :seon.fn/input-schema ?input-schema]
-  [?fn :seon.fn/output-schema ?output-schema]
+  [?arity :seon.fn.arity/input-schema ?S]
+  [?arity :seon.fn.arity/output-form ?form]
+  [?fn :seon.fn/arities ?arity]
+  (not [?fn :seon.fn/private? true])
   [?fn :seon.fn/sym ?sym]]
 ```
 
-**`K`'s output schema is computed, never tabled.** One derivation:
+### 2.3 Never structural value matching
 
-```clojure
-(defn output-schema-for-kind [kind]           ; :seon.render/ai → :seon.render/ai-output
-  (keyword "seon.render" (str (name kind) "-output")))
-```
+Unchanged and load-bearing. No walker inspects a value's shape to guess a
+renderer — that is a kind system recomputed wrongly at every read
+(`state-without-kinds-2026-07-28.md` §1; `:seon.error/kind` is a diagnostic
+tag, `conventions.md:378`). Matching a declared *contract form* is not value
+matching: the form is a name the author wrote. The one sanctioned
+value-touching selection stays `seon.render.block/select`, which runs where the
+unit is BUILT, in the producer that already knows what it made. **Producers
+declare; consumers never classify.**
 
-`:seon.render/ai-output` is `[:maybe :string]`; `:seon.render/html-output` is
-`[:maybe :seon.render/hiccup]`. A new kind registers its own `<kind>-output`
-schema and becomes discoverable with no edit anywhere — the same
-no-hand-maintained-lists property `render/kinds` already has on the unit side.
-The kind keyword itself cannot double as the output schema key: on a unit
-`:seon.render/ai` holds a *declaration* (symbol | string | vector), so one
-global key would have two contradictory shapes. The suffix rule is a computed
-structural rule (L17), not a registry.
+### 2.4 Defaults on registrations, and the completeness queries
 
-A kind whose `<kind>-output` schema is not registered is discoverable but
-unverifiable; the completeness query (§2.3) names it as a problem rather than
-silently producing nothing.
+The registration-property mechanism is landed (`schema.cljc:541-575`) and is
+the owner's declared default (§3). Two derived completeness queries feed
+`seon.problems`, grouped by owner where an owner exists:
 
-### 2.2 What discovery must NEVER be
+1. **schemas with no projection for kind K** — omission-shaped, nil when
+   complete;
+2. **declarations naming absent functions** — the landed open issue as a
+   standing query. Its honest current answer is **six** symbols (ai + html for
+   fn, schema and ns), not three (R-3, verified).
 
-**Never structural value matching.** There is no walker that inspects a value's
-shape and guesses which renderer fits. That is a kind system with the label
-moved from the datom to the classifier, and the doctrine forbids it on both
-ends: `state-without-kinds-2026-07-28.md` §1 (an entity is its attributes; a
-stored discriminator that restates other facts is recording data incorrectly)
-and `docs/conventions.md:378` (`:seon.error/kind` is a **diagnostic tag** on a
-flat error value — it names what happened for a human, and nothing dispatches
-on it). A structural classifier is worse than a stored kind: it is a kind
-recomputed, wrongly, at every read.
+The "24 used / 0 registered" `:seon.ai.attempt/*` scar is **deleted**: all
+seven distinct used attributes are registered at `src/seon/schema/ai.edn:112-138`
+(R-3, verified). The general query — attributes written but never registered —
+survives; its example was false.
 
-The one sanctioned value-touching selection stays exactly where it is: the
-landed `seon.render.block/select` (`block.clj:744-791`) runs **where the unit
-is built**, in the producer, which already knows what it made. That is a
-producer expressing intent from its own attributes, not a consumer inferring a
-type. The distinction is the whole of the rule: **producers declare, consumers
-never classify.**
+## 3. Scoped selection — the resolution chain
 
-### 2.3 Where defaults attach, and the completeness check
+**Revised 2026-07-28 post-midnight** — re-centered on ruling #3's four steps
+with the viewer held CONSTANT through the walk; made total across the six cases
+the falsification proved undefined (SB-4); "lens" replaced by "projection"
+throughout. Confinement check: the chain is one function in `seon.data`; the
+router is untouched.
 
-The default renderer for a schema is a property on its **registration** — the
-mechanism already landed in `schema.cljc:544-575`:
-
-```clojure
-:seon.fn
-[:map {:seon.db/entity true
-       :seon.render/ai   'seon.render.handlers.fn/render-ai
-       :seon.render/html 'seon.render.handlers.fn/render-html}
- …]
-```
-
-These properties travel with the schema into the global population as part of
-`:seon.schema/form`, so "what renders a `:seon.fn`?" is answerable from facts
-with no code loaded. Note what this makes true: **a pulled entity IS a unit**
-(`block.clj:433-458` says so already), so an entity whose schema carries these
-properties renders through the router with no extra step — provided the
-properties are projected onto the pulled map. That projection is one function
-in `seon.data` (§5): pull the entity, look up the schemas its attributes belong
-to, merge their render declarations. Nothing is stored.
-
-Two derived completeness queries, both feeding `seon.problems` and therefore
-each namespace agent's own context:
-
-1. **Schemas without renderers** — registered entity schemas for which neither
-   a registration property nor a discovered `:seon.fn` renderer answers kind
-   `K`. Grouped by `:seon.schema/ns`, so the namespace's own agent sees its own
-   gaps and nobody else's nagging.
-2. **Declarations naming absent functions** — every render declaration
-   (property or `:seon.fn` row) whose symbol does not resolve through the one
-   invocation seam. This is the landed open issue turned into a standing
-   query; the three `seon.render.handlers.*` symbols are its first rows.
-
-Both are omission-shaped: no gaps ⇒ nil ⇒ the block contributes nothing
-(the sealed nil-punning ruling). Neither stores a thing.
-
-## 3. Scoped selection — rendering is always from a point of view
-
-**Owner ruling, 2026-07-28 late night: rendering is ALWAYS scoped from the
-point of view of the VIEWING namespace.** A namespace controls how *it* sees
-the world. Another namespace legitimately sees the same data differently, and
-that is not a conflict to resolve — it is the model.
-
-This reframes the whole section, and the word "override" is the wrong noun for
-what happens. There is no canonical view being overridden. There is no global
-renderer table. **The schema owner's renderer is simply the default lens** —
-the view you get when you have not said how you look at this data — and a
-viewing namespace's own renderer is not a special case granted an exception,
-it is the ordinary answer to the ordinary question *"how does `V` see an `S`?"*.
-
-Two consequences to hold on to, because they are what make the design simple
-rather than clever:
-
-- **Specialization is by construction, not by precedence.** The key contains
-  `V`. Different viewers ask different questions and get different answers. No
-  arbitration runs, because nothing is in conflict.
-- **There is nothing to be canonical.** "The renderer for `:seon.cluster.run`"
-  is not a well-formed question; "how does `my.agents.foo` see a
-  `:seon.cluster.run`?" is. The owner's lens answers it when the viewer has no
-  opinion, which is most of the time and is why the system feels like it has
-  defaults.
-
-What follows is therefore a **total lookup with one refusal** — not a merge,
-and not a precedence contest.
-
-### 3.1 The lookup
-
-Selection is keyed by `(schema S, kind K, viewing-namespace V)`. Four rungs,
-first hit wins, no merge at any rung:
-
-| rung | provider | meaning |
+| step | provider | note |
 |---|---|---|
-| 1 | a discovered renderer defined **in `V`** | how the viewing namespace looks at this data — the ordinary answer |
-| 2 | a discovered renderer defined **in `O`**, the schema's owning namespace (`:seon.schema/ns`) | **the default lens**: how the data's owner presents it to a viewer with no opinion |
-| 3 | the **registration property** on `S` (`:seon.render/ai` / `:seon.render/html` in the `:map` props) | the lens that ships with the schema itself |
-| 4 | the **kind's generic**: `seon.render.block/data-panel` for html, the `seon.error` steering default for ai | the floor — nothing is ever unrenderable |
+| 1 | **explicit slot redirect** by the delegating renderer | the override point; captured in provenance |
+| 2 | **the viewer's local override** for the data type | the viewer `V` is the ORIGINAL agent's namespace and is **constant through the whole walk** — hop 3 renders through hop 0's overrides; perspective never silently shifts |
+| 3 | **the owning namespace's default** | registration property first, then a discovered public fn in `O` (§3.2) |
+| 4 | **the floor: code/data panels** | "code is a good fallback as it's the truth of the system" |
 
-**The scope IS the defn's namespace.** No `renders-for` attribute, no scope
-declaration, no registry: putting the function in your namespace is how you
-say "this is how I look at that", which is exactly the owner's "all namespaces
-self-focused". It is visible by reading `ls` of a namespace's functions, and it
-disappears when the defn does.
+The constant viewer is the ruling's sharpest clause: `V` rides the request
+unchanged at every hop, so selection is `(S, K, V)` where `V` never varies
+within one render.
 
-The lookup is total — rung 4 always answers — so selection returns a symbol,
-never nil, and no consumer needs a fallback branch.
+### 3.1 Which schema — value-to-schema, defined before selection (SB-4)
 
-### 3.2 Multiple lenses versus collisions — the structural distinction
+Selection cannot start until `S` is known, and the first draft never said how.
+Presence-based, never classification:
 
-The sealed contract rules that name collisions **REFUSE loudly naming both
-sources** (ruling 3), so the line between "two legitimate lenses" and "an
-accident" has to be structural rather than judged. Asking what the key contains
-decides it:
+| the thing being rendered | how `S` is determined | ambiguity |
+|---|---|---|
+| a pulled **entity** | its **identity attribute** — `:seon.entity/id-attr` enumerates them, and a unique identity attribute names the entity schema | two present → refuse `::ambiguous-identity` naming both; zero present → no `S`, floor |
+| a **namespace** | `S` = the `:seon.ns` entity schema (a namespace IS a rendered data type) | none |
+| a **producer-built unit** | the producer declares `:seon.render/schema S` on the request | absent → no `S`, floor |
 
-- **Selection is scoped, so multiplicity across namespaces is not conflict.**
-  The key includes `V`. Two renderers for `(S, K)` in *different* namespaces
-  answer *different keys* — two viewers, two points of view. There is no
-  collision to detect because there is no shared key, and nothing arbitrates.
-- **Two renderers for `(S, K)` in the SAME namespace is a collision.** The key
-  is genuinely shared and nothing orders them. It REFUSES loudly, naming both
-  symbols, in the house `refuse!` shape:
+This dissolves SB-4's multi-schema ambiguity rather than arbitrating it:
+identity attributes are unique by construction, so "structurally matches two
+entity schemas" stops being a question anyone asks — and §5's entity enrichment
+stays total, merging the declarations of exactly one schema.
+
+### 3.2 Which owner — and what happens when there is none
+
+`O` is `:seon.schema/ns`, assoc'd **only for qualified schema keys**
+(`schema.cljc:1858-1872`). `:seon.fn`, `:seon.ns`, `:seon.schema` — §2's own
+primary examples — have no owner ref (probe-confirmed). Total outcomes:
+
+| case | outcome |
+|---|---|
+| `O` exists and its registration declares `K` | the **registration property wins** — an explicit declaration outranks inference |
+| `O` exists, no property, exactly one public discovered fn | that fn |
+| `O` exists, no property, several public discovered fns | refuse `::ambiguous-owner-default` naming all |
+| **no `O`** (unqualified key) | rung 3 is the registration property alone; absent → rung 4 |
+| a property naming an absent function | rung 3 fails to resolve → rung 4, and the completeness query already names it |
+
+### 3.3 Failure does not fall through — stated plainly (SB-4)
+
+The first draft claimed the floor backstops a broken projection. It does not:
+`render` catches a throwing projection and returns `::projection-failed`
+(`render.clj:153-169`); `block/surface` preserves it as an error surface
+(`block.clj:358-387`). **Nothing retries rung 4.**
+
+That behavior is correct and stays. The plan's language is corrected: **the
+floor is a SELECTION fallback, never a FAILURE fallback.** A selected
+projection that throws produces an error surface; a selected projection that
+does not exist produces the floor.
+
+### 3.4 The AI floor must be built (SB-4)
+
+There is no generic AI floor: `seon.error/ai-prose` accepts
+`:seon.error/notice`, not an arbitrary unit. Ruling #3 names what it should
+be — **code**. N5 builds `seon.data/code-ai`, the AI twin of `data-panel`:
+signatures + docstrings, bodies by budget, mined from the quarry's namespace
+context render and never reinvented. With both floors, rung 4 is total for both
+kinds — which it is not today.
+
+### 3.5 Multiple projections versus collisions
+
+Selection is scoped, so two renderers for `(S, K)` in different namespaces
+answer different keys — two viewers, two points of view, nothing to arbitrate.
+Two **public** renderers for `(S, K)` in the same namespace share a key and
+nothing orders them: refuse loudly naming both symbols. Block-name collisions
+keep their landed refusal (`block.clj:234-261`) — names are an identity
+namespace, selection is a scoped lookup, and the two stay separate.
+
+### 3.6 Provenance — and the asymmetry that must be fixed (SB-4)
+
+AI contributions record the qualified projection symbol
+(`cluster/prompt.cljc:116-127`). **A successful HTML surface records none**
+(`block.clj:354-387`). So the first draft's "the HTML audit is already
+answerable" was false, and ruling #1's per-slot override could not be captured.
+
+Named seal revision, inside the render family: `:seon.render/projection` is
+recorded on **every** successful surface, and a slot redirect records the
+redirecting slot alongside the chosen symbol. Both are already-computed values;
+recording them is a field, not a mechanism. Which rung answered stays derived
+(compare the symbol's namespace against `V` and `O`).
+
+## 4. Distance — a walk over the ref graph
+
+**Rewritten 2026-07-28 post-midnight.** Three inputs reshaped this section:
+ruling #1/#2 (distance, default 1, 0 = name only, an argument TO the renderer,
+delegation decrements); SB-5 (`expand` is a hiccup slot walker and cannot be
+the traversal); and the owner's distance-is-a-query principle (the metric is an
+edge selection over the ref graph, and nothing is decorated). The name
+"care-graph" is retired.
+
+### 4.1 Nothing declares its distance; nothing stores it
+
+**Confirmed property of this design: no attribute, unit key, or fact anywhere
+records a distance or a depth.** Distance exists in exactly two places — as an
+optional key on a render request while a render is in flight, and as the number
+of hops a query walked. It is never written, never indexed, never cached.
+
+Renderers keep the plain signature: **one unit map in, data out.** A renderer
+that wants deeper neighbors reads `(get unit :seon.render/distance)` and calls
+one function; a renderer that does not care never mentions it. That is the
+whole author-facing surface, and it is ordinary Clojure.
+
+### 4.2 The metric is an edge selection, not a fixed neighborhood
+
+The owner's principle: *namespaces are entities and functions have schemas;
+there are many ways to interpret distance without decorating anything.* So
+`seon.render.walk` takes the interpretation as an argument:
 
 ```clojure
-{:seon.error/kind :seon.data/refused
- :seon.data/rule :seon.data/renderer-collision
- :seon.schema/key S
- :seon.render/kind K
- :seon.ns/name V
- :seon.data/renderers [sym-a sym-b]}
+:seon.render.walk/edges   ; which refs constitute one hop
 ```
 
-- **Block-name collisions keep the landed refusal unchanged**
-  (`block.clj:234-261`). Block names are an *identity* namespace: two things
-  claiming one name is unresolvable by construction, and the sealed ruling
-  stands. Renderer selection is not an identity namespace; it is a scoped
-  lookup. **These are two mechanisms and both are correct** — the confusion to
-  avoid is trying to make one of them serve the other.
+| edge selection | one hop means | available |
+|---|---|---|
+| **entity refs** (implied default) | follow the entity's `:seon.db/ref` attributes | **now** — needs no new facts at all |
+| require-hops | `:seon.ns/require-edges` → `:seon.ns.require/target` | post-N5 (§1.3 registers the targets) |
+| call-hops | `:seon.fn/calls` | post-N5 |
+| shares-a-schema-with | entities/functions mentioning the same `:seon.schema/key` | post-N5 |
 
-One consequence to state plainly so nobody "fixes" it later: an installed
-block that names the same block-name as a derived one still refuses, *even
-though* the scoped lookup would happily have answered two viewers. Names and
-lookups are different questions.
+**Code-distance and data-distance are ONE mechanism** the moment N5 makes
+namespaces and functions entities with refs. They are not two subsystems to
+reconcile later; they are different `edges` arguments to the same query. That
+is why the default works today with zero new facts, and why post-N5 selections
+are additions to a table rather than a second walker.
 
-### 3.3 Provenance — which renderer produced what was seen
+### 4.3 Delegation decrements; the walk owns the accounting
 
-**Already landed; nothing new is stored.** The context capture writes
-`:seon.render/projection` — the exact symbol — on each contribution row
-(`plan/context-blocks-contracts-2026-07-28.md` §5). The symbol's namespace
-plus `V` and `O` re-derive which rung answered, so the rung is a derivation,
-not a field. The same is true of an HTML surface: `:seon.render/surface`
-carries the block and the router names the projection in any failure.
+The ruling's call convention: distance is an argument to the renderer, and
+opting deeper is the renderer's compositional act — delegate neighbors to
+**their** renderers through the one router, decrementing per hop, distance 0 =
+name only.
 
-The audit question "why did this agent see THAT rendering of this data?" is
-therefore already answerable: the capture names the symbol, the corpus at the
-captured basis names the rungs, and the two together reproduce the choice.
+Delegation without accounting is the four-million-node OOM again
+(`block.clj:500-522`). The confinement guardrail forbids putting that
+accounting in the router. So it lives where the machinery is allowed to live:
 
-## 4. The care-graph
+**`seon.render.walk/neighbors`** — the one function a renderer calls to
+delegate. It resolves the neighbors by the `edges` selection, decrements
+distance, extends the visited path, decrements the shared node budget, calls
+the **untouched** router once per neighbor, and returns their rendered values.
+The renderer decides *whether* to delegate; the walk does the arithmetic.
 
-### 4.1 Requires are the edges
+```clojure
+:seon.render.walk/path       ; visited path — cycle refusal in place
+:seon.render.walk/remaining  ; shared node budget (a volatile, as `expand` already uses)
+```
 
-`:seon.ns/require-edges` is landed schema. Viewing namespace `V` at hop 0; its
-requires at hop 1; their requires at hop 2. Each required namespace `N`
-contributes **its own view of itself**: the renderer for `(:seon.ns, K, V=N)`
-— i.e. `N`'s own namespace renderer if it wrote one, else the `:seon.ns`
-registration default (`render-ai`/`render-html`), else the panel. The viewer
-does not choose how a required namespace presents itself, which is precisely
-the owner's "those namespaces control what they show AIs and users".
+Budgets come from the same `:seon.sci.admit/caps` the eval door and `expand`
+already use — **no second set of dials**. At distance 0 a delegation returns
+the **name only**; on a path member it is a cycle refusal in place; on an
+exhausted budget it is a legible hole.
 
-This is not a new walk. It is `expand` with require-edges as the edges:
-depth-first, left to right, per-path visited set (namespace requires genuinely
-cycle in a live corpus), and the **existing** node/depth budgets from
-`:seon.sci.admit/caps` — `:seon.config.eval.result/max-nodes` and
-`max-depth`. **No new caps machinery, and this is not a preference**: the
-measured lesson (`block.clj:500-522`, `tmp/n4_expand_blowup.clj`) is that a
-per-path visited set refuses the wrong thing — a graph with no cycle at all
-fanned out to four million nodes and OOM'd at depth 22. A require graph fans
-out harder than a block graph. The node budget is the load-bearing bound; the
-depth budget is the hop horizon.
+`expand` keeps its landed job (hiccup slots and refs) as one consumer of the
+same discipline. The first draft's "one line to thread depth" is withdrawn;
+whether a generic budgeted-walk helper is worth extracting from `expand` is an
+N5.6 implementation detail, not a contract claim.
 
-### 4.2 Hop depth: a request parameter, not a kind
+### 4.4 A namespace is a rendered data type
 
-**Recommendation: a parameter on the request — `:seon.render/depth` — never a
-new kind.** Three reasons, in order of weight:
+Ruling #3, and the piece that makes "render my namespace at distance N"
+concrete:
 
-1. **Kinds name CONSUMERS** (`ai`, `html`, `log`): who the projection is for.
-   Depth names how much of one consumer's output. Making depth a kind
-   multiplies the kind set by the depth budget, and `render/kinds` — which
-   computes what a unit can become — would start reporting `:seon.render/ai-1`,
-   `:seon.render/ai-2` as different things a unit *can become*. It cannot; it
-   is one thing at different distances.
-2. **Precedent is already sealed.** The presence ruling exempts
-   `:seon.render/kind` as "a request argument, never stored". Depth is the same
-   species: a request argument, never stored. It rides `:seon.render/unit-request`
-   beside `:seon.render/kind` and `:seon.sci.admit/caps`, and `unit` threads it
-   onto the unit exactly like caps (one line in `block.clj:313-321`).
-3. **Nil-punning gives the default for free.** A projection that does not care
-   never mentions it; `(get unit :seon.render/depth)` is nil at hop 0 and a
-   projection reads nil as "full detail, you are the subject". A projection
-   that does care writes one `cond`. No projection is obliged to change.
+| distance | a namespace renders as |
+|---|---|
+| 0 | the **name** only |
+| 1 (default) | **signatures + docstrings** |
+| deeper | **bodies, by budget** |
 
-Vocabulary-table implications — one row added, one non-word recorded:
+The default projection is the quarry's namespace context render — mined, not
+reinvented. Edge order is deterministic (sorted by target symbol) so two
+renders of one database value are one value.
+
+### 4.5 Vocabulary
 
 | Say | Never | Meaning |
 |---|---|---|
-| hop depth, `:seon.render/depth` | detail level, LOD, zoom, summary kind | the request's distance in `:seon.ns/require-edges` from the viewing namespace, bounded by the same `:seon.config.eval.result/max-depth` cap the eval door and `expand` already use |
+| distance, `:seon.render/distance` | depth, hop count, detail level, LOD, zoom, summary kind, care-graph | how many hops to render, each by its owner's projection; an ARGUMENT to the renderer; default 1; 0 = name only; decremented by `seon.render.walk`, never stored |
+| edge selection, `:seon.render.walk/edges` | neighborhood, proximity model | which refs constitute one hop; the metric as a query argument |
 
-And explicitly banned: a `:seon.render/summary` or `:seon.render/compact`
-kind. The quarry already tried density as a taxonomy — `src/seon/render/`'s
-"render-prominence law" grew flat presence-sets (`::compact`, `::full-source`,
-`::with-tests`) with precedence rules between them. That is the shape this
-ruling replaces with one integer.
-
-### 4.3 What composition looks like end to end
-
-Viewing `my.agents.foo`: hop 0 is the namespace's own source and its own
-render functions (the auto-run rule, `context.md:388`); hop 1 is one card per
-required namespace, each rendered by its owner at depth 1; hop 2 the same at
-depth 2 — until the node budget or the depth cap stops the walk, at which point
-the hole stays and says so (`expand`'s existing self-healing behaviour). The
-agent's context and the human's page are the same walk under two kinds.
+Banned by construction: a `:seon.render/summary` or `:seon.render/compact`
+kind. The first draft's `:seon.render/depth` is superseded.
 
 ## 5. `seon.data` — the namespace that explains the system's data
 
-`/data` is re-grounded as **`seon.data`**, and the re-grounding is a demotion
-of the route: the page becomes one html render of a unit, and the unit is a
-census.
+**Revised 2026-07-28 post-midnight** — the false `:seon.ai.attempt/*` scar
+removed (R-3); the AI floor added as an owned deliverable (§3.4); entity
+enrichment made total by §3.1; boundaries confirmed against the guardrail.
 
-**`seon.data` OWNS:**
+`seon.data` OWNS: the **census** (every registered schema × every kind × every
+candidate renderer, as data — itself a renderable unit, rendered lazily); the
+**resolution chain** (§3, one function); the **completeness derivations**
+(§2.4); **entity enrichment** (project the identity-named schema's render
+declarations onto a pulled entity); and **the code floor** (`code-ai`).
 
-- **the census** — every registered schema × every kind × every candidate
-  renderer, as DATA. The owner's ruling stands verbatim: the census enumerates
-  all possible views as data and *is itself a renderable unit* (ai + html),
-  and rendering is **lazy** — you pay only for the kinds you request. The
-  census is a value; asking for a view runs one projection.
-- **the scoped selection lookup** (§3.1) and its one refusal (§3.2) — one function,
-  the single place selection happens.
-- **the completeness derivations** (§2.3): schemas without renderers,
-  declarations naming absent functions, and the quarry's oldest scar —
-  attributes written but never registered (`:seon.ai.attempt/*` 24 used / 0
-  registered). All three are the same query family over the corpus and the
-  attribute population.
-- **entity-unit enrichment**: projecting a pulled entity's schemas' render
-  declarations onto the pulled map, so an entity renders through the router
-  with nothing declared at the call site.
+It DERIVES everything and STORES nothing. It has no attributes of its own.
 
-**`seon.data` DERIVES everything and STORES nothing.** It has no attributes of
-its own. Every question it answers is a query over `:seon.fn` / `:seon.ns` /
-`:seon.schema` at a database value. If it ever grows a stored index, that is
-the caching decision the plan says to *measure first*, and it needs its own
-ruling.
+It does not absorb the render mechanisms: `data-panel` stays in
+`seon.render.block`, the drill stays in `seon.render.data`, traversal is
+`seon.render.walk`, and the router stays the one untouched entry.
 
-**It does not absorb the render mechanisms.** `data-panel` stays in
-`seon.render.block` (it is the html kind's floor, used by the router path), and
-the get-in drill stays in `seon.render.data` (it is a render mechanism, and the
-attribute-colocation ruling puts `:seon.render.data/*` there). `seon.data` is
-the *explanation* layer above them. Whether the drill should move is an owner
-decision (§8.6) rather than a thing this plan decides quietly.
-
-Ping's place: **ping is the process-local half of the census** and must tell a
-story. The census answers "what views exist over the system's data"; ping
-answers "what is this process doing right now" — parked/mid-turn, current run,
-episode runs, buffer occupancy. Same unit shape, same two projections, same
-router. The fleet-oversight block is that unit (§6).
+Ping's place is unchanged and now landed: `src/seon/oversight.clj`
+(`abf8680d7`) is the process-local half of the census, ai+html through the one
+router, never committing its result.
 
 ## 6. What lands when — the N5 order
 
-Each unit names its falsifier. Order is dependency order, not preference.
+**Revised 2026-07-28 post-midnight** — falsifiers corrected (R-2, R-3), the
+output migration demoted from precondition to optional (§2.1), N5.6 re-scoped
+to the walk + edge selection, oversight moved from "queued" to "landed".
 
-**N5.1 — the indexer and its facts.** Four new `:seon.fn` attributes (§1.1);
-the build-time producer; the diff/reconcile discipline quarried per §1.4.
-*Falsifier:* index `src/`, and (a) `:seon.fn` rows exist for every public defn
-with a count matching an independent `rg` census; (b) the workload classifier
-returns the research's probed answers over the real graph, with `:mixed` for
-every row carrying an uncertainty; (c) the declarations-naming-absent-functions
-query returns exactly the three `seon.render.handlers.*` symbols the filed
-issue names — a query whose right answer is a known-bad state is the honest
-first test; (d) a second index of an unchanged tree writes ZERO datoms.
+**N5.1 — the indexer and its facts.** Five attributes plus arity rows
+(§1.1–1.2); eight uncertainty members, all fail-closed (§1.3); require-edge
+target attributes; `unchanged-row?`'s test arm; the `:seon.render.kind` rows
+seeded from the tree (§2.1).
+*Falsifiers:* (a) `:seon.fn` rows exist for every public defn, count matching an
+independent `rg` census; (b) arity rows round-trip all five probe cases the
+falsification recorded — inline output, `[:or]` output, `:function`
+multi-arity, variadic `:catn`, `[:or]` input — with **no arity discarded**;
+(c) the classifier returns the research's probed answers, and every row
+carrying any of the eight uncertainties classifies `:mixed`; (d) the
+declarations-naming-absent-functions query returns exactly **six** symbols,
+derived from an independent scan rather than a copied count; (e) a second index
+of an unchanged tree — **including test rows** — writes zero datoms; (f) a
+whole-tree diff shows changes confined to the indexer, schema EDN, and the
+render family.
 
-**N5.2 — the corpus round trip** (old step 4, verbatim). *Falsifier:* a `defn`
-in form 1 is callable in form 2; another agent calls it after a restart;
-acquisition happens at a basis; a durable defn without a complete
-`:malli/schema` is refused with a flat error the agent sees.
+**N5.2 — the corpus round trip** (old step 4, verbatim). Unchanged.
 
-**N5.3 — renderer discovery.** `output-schema-for-kind`, the two-clause query,
-the registration-property lookup, the two completeness queries, and
-`seon.render.block/derived` becoming non-empty. *Falsifier:* the sealed
-`membership-collision-property` (seed 2026072807) stops being vacuous — it is
-already written against a derived side that is currently empty by
-construction, so N5.3 is the first thing that can make it fail; plus a datom
-census proving a membership derivation transacts nothing.
+**N5.3 — renderer discovery.** Eligibility over arity rows, the query, the
+registration lookup, the completeness queries, and `block/derived` becoming
+non-empty.
+*Falsifier — corrected (R-2):* the sealed `membership-collision-property` is
+**already non-vacuous** (it constructs derived rows and `with-redefs`es
+`block/derived`, `test/seon/context_test.clj:536-582`); it proves the
+membership seam and nothing about discovery. It is KEPT, and N5.3 adds a
+**separate discovery property** over planted `:seon.fn` / `:seon.fn.arity` /
+`:seon.schema` / `:seon.ns` facts covering: named unary (accepted),
+multi-arity with one render arity (accepted), multi-arity with two same-`(S,K)`
+arities (refused), variadic (excluded), `[:or]` input (excluded), private
+(excluded), same-scope collision (refused), missing owner (floor), both kinds,
+and an output form outside the kind's accepted set (excluded + listed).
 
-**N5.4 — the invocation seam's SCI half** (the sealed named edge,
-`context-blocks-contracts` §3.9/§10.1), authored WITH the N5 evaluator owner:
-acquisition basis, fork, `:interrupt-fn`, admission placement. *Falsifier:* a
-projection defined by an agent, resolved through the seam, returns the same
-result union as a compiled Var and passes the same admission owner; a
-projection that spins is stopped by the one `:interrupt-fn` and its failure is
-a flat value naming the projection.
+**N5.4 — the invocation seam's SCI half.** Unchanged (sealed named edge).
 
-**N5.5 — scoped selection.** Four rungs, one same-namespace refusal.
-*Falsifier:* an agent defines a renderer for `(S, :seon.render/ai)` in its own
-namespace and the NEXT prompt's contribution changes with no edit to
-`seon.cluster.prompt`, no route change and no reinstall (the sealed structural
-falsifier, §4.9 of the contract, now exercised from the derived side); a second
-renderer for the same `(S, K)` in the SAME namespace refuses loudly naming both
-symbols and writes nothing; the capture's `:seon.render/projection` names the
-symbol that actually ran.
+**N5.5 — the resolution chain.** Ruling #3's four steps, the constant viewer,
+the totality cases (§3.1–3.3), the AI floor (§3.4), the surface provenance
+revision (§3.6).
+*Falsifiers:* an agent defines a renderer in its own namespace and the next
+prompt contribution changes with no edit to `seon.cluster.prompt` and no
+reinstall; a second public renderer for the same `(S,K)` in the same namespace
+refuses naming both; an entity with two identity attributes refuses
+`::ambiguous-identity`; a schema with no owner and no property renders through
+the floor **for both kinds**; a throwing projection produces an error surface
+and **does not** invoke the floor; every successful HTML surface carries its
+projection symbol.
 
-**N5.6 — care-graph composition.** Require-edge walk on the existing expansion
-budgets; `:seon.render/depth` on the request. *Falsifier:* a namespace with a
-deliberately pathological require fan-out (the depth-22 construction, ported to
-require edges) is bounded by the node budget and leaves legible holes rather
-than OOM'ing; a require cycle is refused at the hole that closes it; the same
-walk at depth 0 and depth 2 produces different bytes from the SAME renderers.
+**N5.6 — `seon.render.walk`.** `:seon.render/distance` on the unit; the `edges`
+selection with entity refs as the implied default; `neighbors` owning
+decrement, cycle refusal and budget; the namespace-as-data-type default
+projection mined from the quarry.
+*Falsifiers:* distance 0 renders the name only; absent distance renders 1; a
+cycle refuses at the hole that closes it; a pathological fan-out is bounded by
+the shared node budget with legible holes rather than an OOM; the same
+renderers at distance 1 and 3 produce different bytes; a slot redirect changes
+the bytes AND is captured; switching `edges` from entity refs to require-hops
+changes the neighbor set with **no other change**; and a datom census proves
+**no distance or depth fact was written**.
 
-### What the fleet-oversight block already proves — before any of this
+**The pilot** (ruling #2): one agent's prompt derived as its namespace view at
+entity-graph distance, dispatching when the distance accretion lands. **The
+graduation criterion** is the bar, run as an agent eval.
 
-The fleet-oversight block is queued pre-N5 (dispatch after F2; it wants the
-render proc and F1's ping states). It is not a warm-up: it proves the
-composition's **invocation and placement halves end to end while the corpus is
-still empty.**
+**Already landed:** the fleet-oversight block (`src/seon/oversight.clj`,
+`abf8680d7`) proves the invocation and placement halves — one unit, two
+projections, one router, installed on root — while the corpus is still empty.
+N5.3 adds *discovery* to a working path, never a second path.
 
-- one unit, two projections, through the ONE router — so N5.3 adds
-  *discovery* to a path that already works, never a second path;
-- root carries it by default as installed block data — so the installed and
-  derived sides of `membership` are exercised against each other before
-  derived is non-empty;
-- capture snapshots it as the `:seon.cluster.run/live-processes` trusted
-  input — so the declared-inputs refusal (`assert-inputs!`) has a real
-  customer;
-- and it is the first "ping tells a story" surface visible in html — the
-  process-local census, which N5.1's corpus census then extends from the
-  process to the code.
+## 7. Distributed fix delegation — preconditions before it is a query
 
-If the fleet block is hard to build, that is evidence about the *render*
-composition, discovered before the corpus work depends on it.
+**Revised 2026-07-28 post-midnight** — the first draft claimed three landed
+mechanisms already made delegation a query and that only `:seon.test` rows were
+missing. SB-6 falsified that with two walks. Restated as **target architecture
+with named preconditions.**
 
-## 7. Distributed fix delegation along namespace boundaries
+The direction is unchanged: a strong model takes a global broad-strokes
+attempt; it fails in parts; each failing part routes to the namespace agent
+that owns it, carrying the vision plus refs to the failures; that agent
+localizes the fix; the global view stops iterating once every failure is
+bisected.
 
-**Owner direction, 2026-07-28 late night:** a strong model takes a global,
-broad-strokes attempt (the `seon.ai` generate-code shape). It fails **in
-parts**. Each failing part routes to the namespace agent that OWNS it — a
-schema conflict to the schema's owner, a broken test to the test's owner —
-carrying the vision plus the failure details, and that agent localizes the
-fix. *"Don't keep iterating from the global view once you have bisected the
-problem cleanly along namespace boundaries."*
+### 7.1 What is landed, and what is a target
 
-This is the same corpus, read for a different question. §§1–4 make a namespace
-explain itself; this section makes a namespace *answer for* itself. Both are
-queries over `:seon.fn` / `:seon.ns` / `:seon.schema` — which is why no new
-machinery appears below.
+**Landed:** `my.message`; durable error facts with kind, message,
+process/proc/op/cid, basis, run, agent (`schema/error.edn:43-106`);
+`:seon.cluster.message/about` as a reference to a durable error.
 
-### 7.1 Everything this needs is already ruled
+**Target, not landed facts:** "who should fix this is a query" — the joins it
+presumes do not exist.
 
-Three landed mechanisms compose into the whole flow, and naming them is the
-design:
+And each namespace agent's context being its own namespace view — what makes
+localization work rather than merely route — is precisely what §§1–4 build.
+Delegation is downstream of the corpus.
 
-1. **"Who should fix this is a query."** The error architecture already rules
-   it (`plan/README.md`, rulings 2026-07-26 PM): *"Routing is derivation, never
-   a router: the committed fault carries its provenance (namespace, var, proc,
-   run), so 'who should fix this' is a query — the namespace's assigned agent
-   (`:seon.agent/namespace`, unique, at most one) wakes on faults touching its
-   namespace exactly the way messages wake … a fault whose program-graph call
-   path spans namespaces derives multiple interested owners … No dispatch
-   table, no subscription registry — commit good provenance and the routing
-   already exists."* Delegation is that ruling used on purpose rather than
-   only for faults.
-2. **Failures are durable facts with provenance.** The error system landed
-   (one normalizer, fault consumer, projections-per-consumer); a failure is a
-   committed fact, not a message payload. So the delegating message carries a
-   **ref to the fact**, never a copy of it — and the receiving agent derives
-   the detail at its own basis, at whatever depth its own view specifies.
-3. **Delivery is `my.message`.** Subagent messaging is live and a message is
-   the trigger that opens the receiving agent's run (the run-opening
-   transaction records the message as `:seon.db/trigger` tx-meta). Delegation
-   needs no new transport and no new lifecycle.
+### 7.2 Four preconditions, each a named deliverable
 
-And one property from §§1–4 is what makes localization *work* rather than just
-route: **each namespace agent's context is its own namespace view.** The
-receiving agent already sees its source, its schemas, its renderers, and its
-requires at hop 1 — with no briefing assembled by the global attempt, and no
-paste of context that would go stale. The message is small precisely because
-the view is derived.
+| # | precondition | why (falsification evidence) |
+|---|---|---|
+| P1 | **failure provenance as queryable refs**, not parsable text: `:seon.error/fn`, `/schema-key`, `/test`, `/ns`, call-root evidence, lifted at normalize time | the normalizer stores the whole source as `:seon.error/data-edn`, a string (`error.clj:270-347`); a schema key printed inside it is not joinable |
+| P2 | **test-result ingestion** — a boundary committing outcomes that reference an exact `:seon.test` row, plus the attempt/batch identity whose vision delegation carries | `bin/test` derives namespaces from filenames and exits on counts (`bin/test:15-44`); it transacts nothing |
+| P3 | **namespace assignment** — `:seon.cluster.agent/namespace` (unique, at most one) | the fresh schema has `:seon.cluster.agent/id` and no namespace ref; the target is `data-model.md:102-111` |
+| P4 | **delegation delivery evidence** — an idempotent multi-failure message shape and a durable record that each message committed | ending the global episode on "every failure has an owner and a message" requires evidence of delivery, not just ownership |
 
-### 7.2 What N5 must supply — the ownership query, per failure shape
+The schema-conflict walk needs one correction: a duplicate schema-file conflict
+throws ex-data carrying `:seon.schema.edn/attribute` and the two files
+(`schema/edn.clj:148-167`), **not** `:seon.schema/key` as the first draft
+claimed — and that refusal is not committed through `seon.error` at all. P1
+covers both.
 
-Bisection is computable exactly when a failure names something whose owner the
-corpus knows. Four shapes, three of which are already answerable and one of
-which is a concrete N5 gap:
+**Confinement note:** P1–P3 touch `seon.error`, `bin/test`, and the agent
+schema — outside this design's boundary. That is exactly why §7 is scoped as
+*preconditions* rather than N5 work: they are separate units with their own
+owners, and N5 does not reach into them.
 
-| failing thing | the fact it carries | the ownership path | status |
-|---|---|---|---|
-| a **form** (an eval that threw, a defn that would not admit) | the receipt's provenance + the symbol being defined or called | `:seon.fn/sym` → `:seon.fn/ns` → `:seon.ns/name` → the agent with that `:seon.agent/namespace` | needs N5.1's rows; the receipt half is landed |
-| a **schema** (conflicting registration, a validation failure naming a key) | `:seon.schema/key` on the error fact | `:seon.schema/key` → `:seon.schema/ns` → owner namespace → its agent | **landed attribute** (`schema.cljc:563`); needs only that error facts carry the key |
-| a **call path** spanning namespaces | the fault's provenance + `:seon.fn/calls` reachability | every namespace on the path derives as an interested owner (the ruling's own words) | needs `:seon.fn/calls` — N5.1 |
-| a **test** | `:seon.test/sym` | `:seon.test/sym` → `:seon.test/ns` → owner namespace → its agent | **GAP**: the quarry registers `:seon.test/sym` / `:seon.test/ns` / `:seon.test/source` (`src-old/seon/db/program.clj:27-36`) and the fresh `schema.cljc` does not. N5.1 must index test rows, or a broken test has no computable owner |
+### 7.3 Ownership, once the preconditions exist
 
-That last row is the one real new requirement this section places on N5, and
-it is small: `:seon.test` is already in the quarry's identity-attribute list,
-so the indexer's reconcile discipline covers it the moment the rows exist.
+| failing thing | ownership path |
+|---|---|
+| a **form** | `:seon.error/fn` → `:seon.fn/ns` → `:seon.ns/name` → assigned agent |
+| a **schema** | `:seon.error/schema-key` → `:seon.schema/ns` → agent; **unqualified key ⇒ no owner ⇒ escalate**, as §3.2 |
+| a **test** | test-result fact → `:seon.test/sym` → `:seon.test/ns` → agent |
+| a **call path** | call-root evidence + `:seon.fn/calls` reachability → every namespace on the path |
+| **unattributable** | root, loudly, as a problems row — never a name-prefix guess (R34) |
 
-**A failure with no computable owner goes to root, loudly, as a problems row.**
-Fail-closed: an unattributable failure is a fact about the corpus (something
-ran that the graph does not know about), and it is exactly the case where the
-global view legitimately keeps working. It must never be silently dropped, and
-it must never be guessed at by name prefix — that would be the banned hand
-list wearing a heuristic's clothes (R34).
-
-### 7.3 The flow, and the stopping rule
-
-1. The global attempt runs and produces failures — each a committed fact with
-   provenance.
-2. The bisection is one query: group the failures by derived owner namespace.
-   Pure, over a database value, transacting nothing.
-3. For each owned group, one `my.message` to that namespace's agent carrying
-   **the vision** (what the global attempt was trying to achieve, in prose) and
-   **refs to the failure facts**. The receiving agent's next turn derives the
-   rest from its own namespace view.
-4. Unowned failures stay with the global view (and surface on root's problems
-   block).
-5. **The stopping rule is structural, not a policy anyone remembers:** the
-   global attempt's episode ends when every failure has an owner and a
-   message. It continues only while unowned failures remain. So "don't keep
-   iterating from the global view" is enforced by there being nothing left for
-   that view to iterate on — not by a counter, and not by the episode cap
-   (ruled 100), which stays what it is: a runaway backstop.
-
-Two consequences worth stating so they are not re-litigated:
-
-- **No dispatcher, no work queue, no assignment table, no retry orchestrator.**
-  Every one of those would be the central-loop shape the agents-are-flows
-  ruling already rejected. A message wakes an agent; the agent's own graph does
-  the rest.
-- **Concurrent localized fixes are safe by construction, and this is not luck.**
-  A namespace has at most one assigned agent (`:seon.agent/namespace`, unique),
-  and each agent has at most one open run (the transaction fence). Two agents
-  fixing two namespaces is ordinary parallelism; two agents fixing one
-  namespace cannot be constructed.
+The stopping rule and the no-dispatcher property are unchanged: the global
+episode ends when every failure has an owner **and durable delivery evidence**;
+a message wakes an agent; one agent per namespace and one open run per agent
+make concurrent localized fixes safe by construction.
 
 ### 7.4 Falsifier
 
-A deliberately multi-namespace broken change: one schema conflict in namespace
-A, one failing test in namespace B, one throwing form in namespace C, and one
-failure whose provenance names nothing indexed. The proof is that (a) the
-bisection query returns exactly three owners and one unowned residue, (b)
-exactly three messages are sent and each names the right agent, (c) each
-receiving agent's derived context already contains the relevant source without
-the message carrying it, (d) the global agent's episode ends with the
-unowned residue and does not re-attempt the three delegated parts, and (e) the
-whole bisection transacts nothing.
+A deliberately multi-namespace broken change (schema conflict in A, failing
+test in B, throwing form in C, one unattributable failure): the bisection
+returns three owners and one residue, three idempotent messages commit with
+durable evidence, each receiving agent's derived context already contains the
+relevant source, the global episode ends without re-attempting the delegated
+parts, and the bisection query itself transacts nothing.
 
-## 8. Owner decisions required before the contracts seal
+## 8. Owner decisions — the post-revision set
 
-1. **The kind→output-schema suffix rule** (§2.1). `:seon.render/ai` ⇒
-   `:seon.render/ai-output`, computed. Recommended over both alternatives: a
-   registry row per kind (a hand list), or reusing the kind keyword itself as
-   the output schema key (impossible — one global key, two contradictory
-   shapes).
-2. **Discovery requires REGISTERED schema names on the contract.** An inline
-   anonymous `:malli/schema` makes a function undiscoverable. Recommended: yes,
-   naming is the mechanism. The cost is that agents must register a shape
-   before they can render it; the benefit is that discovery never guesses.
-3. **The defn's namespace IS the viewing scope** (§3.1) — no scope attribute.
-   Recommended. The alternative (an explicit `renders-for` declaration) buys
-   cross-namespace claiming, which is exactly the thing "all namespaces
-   self-focused" rejects.
-4. **Same-namespace duplicate renderers REFUSE** (§3.2), while cross-namespace
-   ones are separate keys answering separate viewers. Recommended; this is the structural line
-   between declared intent and accident.
-5. **Hop depth is a request parameter, not a kind** (§4.2), with the
-   vocabulary row and the explicit ban on a `:seon.render/summary` kind.
-   Recommended.
-6. **`seon.data`'s boundary** (§5): the census + selection + completeness +
-   entity enrichment, with `data-panel` staying in `seon.render.block` and the
-   drill staying in `seon.render.data`. Alternative: fold the drill into
-   `seon.data` and let `seon.render.data` die. Recommended: keep them split —
-   the drill is a render mechanism and its attributes are already colocated —
-   but this is a taste call the owner should make before a lane bakes it in.
-7. **`:seon.fn/input-schema` / `output-schema` as stored projections of
-   `:seon.fn/spec`** (§1.1) — the one stored derivation in the design. Accepted
-   because the alternative is parsing an EDN string inside every discovery
-   query, but it IS a derived-state exception and deserves an explicit yes.
-8. **Implicit `:compute` for computed-pure functions** — already collected as
-   plan decision 2 and unchanged here; N5.1 is the rung where it becomes
-   answerable from real facts, so it wants an answer at this rung rather than
-   later.
+**Revised 2026-07-28 post-midnight.** Of the first draft's 12, **six dissolve**
+under the rulings, the guardrails, or the falsification; six survive, four
+sharpened; four are new. Names are additionally up for veto in the name table
+above.
 
-Raised by §7 (delegation):
+### Dissolved (no decision needed)
 
-9. **`:seon.test` rows enter the fresh corpus** (§7.2) — adopting the quarry's
-   `:seon.test/sym` / `ns` / `source` shape, so a broken test has a computable
-   owner. Recommended: yes; without it the test row of the bisection table is
-   unanswerable and broken tests fall to root.
-10. **A failure whose call path spans namespaces messages EVERY interested
-    owner** (the fault ruling's own words), rather than only the deepest
-    frame's owner. Recommended: every interested owner — the safety argument
-    is structural (one agent per namespace, one run per agent), and the
-    alternative silently picks a frame as "the" cause, which is the guess the
-    corpus exists to avoid. Cost: N messages for one failure.
-11. **The global attempt does not `wait` for its delegates.** Recommended: it
-    ends its episode, and a delegate's reply message re-triggers it as an
-    ordinary new episode — the messaging model, needing no new state.
-    Alternative: `my.run/wait` held open across delegated fixes, which
-    reintroduces a coordination state the crash model would then have to
-    recover.
-12. **Unowned failures escalate to root as a problems row** (§7.2), never a
-    name-prefix guess at an owner. Recommended; stated because a heuristic
-    here would be very tempting and is the banned hand list.
+- **D1 the suffix rule** — withdrawn; replaced by kind-declared accepted output
+  forms seeded from the tree (§2.1). SB-3 + confinement.
+- **D5 hop depth as a parameter** — owner-ruled (distance, default 1, 0 = name
+  only, an argument to the renderer). The recommendation was right, the
+  contract wrong. SB-1.
+- **D7 stored input/output name projections** — dissolved with the two-name
+  attribute; arity rows store forms verbatim (§1.2). SB-2.
+- **D3 the defn's namespace IS the viewing scope** — ruled by ruling #3, which
+  fixes the viewer as the original agent's namespace, constant through the
+  walk.
+- **D10 fan-out to every interested owner** — retained as design, not a live
+  decision: unreachable until P1 exists.
+- **D11 the global attempt does not wait for delegates** — unchanged as design
+  and subsumed by P4, which is the thing that actually needs building.
+
+### Surviving, sharpened
+
+1. **Discovery requires a REGISTERED input schema name** (§2.2) — now one
+   eligibility clause among several rather than the whole contract.
+   Recommended: yes; naming is the mechanism.
+2. **The registration property outranks a discovered function in the owning
+   namespace** (§3.2). NEW SHARPNESS: the first draft had inference silently
+   outranking an explicit declaration (SB-4). Recommended: declaration wins.
+3. **Private functions are excluded from discovery** (§2.2). Recommended: yes.
+4. **Same-namespace public duplicates refuse; cross-namespace are separate
+   keys** (§3.5). Unchanged.
+5. **`seon.data`'s boundary** (§5) — census, resolution, completeness,
+   enrichment, code floor; `data-panel`, the drill and the walk stay in the
+   render family. Recommended: keep split.
+6. **`:seon.test` corpus rows — SCOPE EXPANDED** (§7.2): the row shape **plus**
+   test-result ingestion (P2) **plus** the `unchanged-row?` test arm. Without
+   all three a broken test has no owner and the zero-datom falsifier fails.
+   Recommended: yes, as one unit — and owned outside N5.
+
+### New
+
+7. **The kind declares its accepted output forms, seeded from the tree**
+   (§2.1) — chosen over migrating ~15 declarations across four namespaces
+   because two of them (`seon.error`, `seon.oversight`) are outside the
+   confinement boundary. Recommended: adapt the registry, not the tree.
+8. **Convergence on one canonical output form per kind is OPTIONAL and later**
+   (§2.1), never a precondition of discovery. Recommended: leave it optional;
+   revisit only if the accepted-forms set grows unwieldy.
+9. **Value-to-schema is by identity attribute; two identity attributes refuse**
+   (§3.1). Recommended: yes — it dissolves multi-schema ambiguity instead of
+   arbitrating it.
+10. **The floor is a selection fallback, never a failure fallback** (§3.3), and
+    the AI floor (`seon.data/code-ai`) is built in N5.5 (§3.4). Recommended:
+    yes; a broken projection must stay loud, and code is the ruled floor.
+11. **Delegation ships behind its four preconditions** (§7.2), owned outside
+    N5. Recommended: yes — saying otherwise is the overclaim SB-6 caught.
+12. **The name table** (above) — every introduced name, for veto before
+    contracts seal. `seon.render.walk`, `seon.data/code-ai`,
+    `:seon.fn/arities` + `:seon.fn.arity/*`, `:seon.render.kind/*`,
+    `:seon.render.walk/{edges,path,remaining}`.
 
 ## 9. The single riskiest design point
 
-**Scoped selection's rung 1 — a renderer in the viewing namespace silently
-changing what an agent sees.** Discovery is a query, and a query's answer
-changes when someone commits a function. That is the entire point (an agent
-improves how its namespace explains itself, and the next turn shows it), and it
-is also the sharpest edge in the design: an agent can, by writing one `defn`,
-change what it is shown about its own data — including data it does not own —
-with no installation, no review, and no refusal anywhere, because the lookup is
-total and cross-namespace multiplicity is legal by construction.
+**Revised 2026-07-28 post-midnight** — one advertised mitigation was false and
+is replaced by the two that are real.
 
-Three properties keep it honest, and all three must be in the sealed suite
-rather than assumed:
+**The viewer's local override — step 2 — changing what an agent sees, silently,
+because someone wrote a `defn`.** That is the design working as intended (the
+bar demands exactly this) and it is the sharpest edge: an agent can change how
+it sees data it does not own, with no installation, no review and no refusal,
+because the chain is total and cross-namespace multiplicity is legal by
+construction. Ruling #3's constant viewer *widens* it — one override applies to
+every hop of the walk, including hops through namespaces that never consented.
 
-- the choice is **recorded** — the capture names the exact symbol, so a
-  confabulating agent's context is reproducible after the fact (§3.3);
-- the scope is **bounded** — a rung-1 renderer applies only to views taken
-  from that namespace, never to another namespace's view of the same schema,
-  which is what makes it a point of view rather than a corruption;
-- the floor is **unreachable to break** — rung 4 is a compiled-core generic, so
-  a broken or malicious lens costs its own surface (`render` is total) and
-  the panel still explains the value.
+Two mitigations are real, and both are N5 deliverables rather than assumptions:
 
-The residual risk that no property removes: an agent that writes a *plausible
-but wrong* renderer for data it does not own degrades its own context quietly,
-and the failure looks like a model mistake rather than a rendering one. The
-mitigation is legibility, not prevention — the rung is derivable from the
-capture, so "why did it think that?" has an answer. Naming this now is
-deliberate: it should be the first thing looked at when an agent starts being
-confidently wrong about facts the database plainly holds.
+- **the choice is recorded** — for AI today, and for HTML and slot redirects
+  only after §3.6's surface-provenance revision lands. Until then an HTML view
+  cannot be audited at all;
+- **the scope is bounded to the viewer** — an override applies only to renders
+  taken from `V`, never to another agent's view of the same data.
+
+**The mitigation that is NOT real, and was claimed in the first draft:** the
+floor does not backstop a broken projection. A throwing projection yields
+`::projection-failed` and an error surface; rung 4 is never retried
+(`render.clj:153-169`, `block.clj:358-387`). A confidently-wrong projection
+degrades its own view loudly; a *plausible* wrong one degrades it quietly, and
+the failure still looks like a model mistake rather than a rendering one.
+
+The residual risk is honestly bounded: legibility, not prevention. When an
+agent starts being confidently wrong about facts the database plainly holds,
+the first thing to check is which projection answered — and after §3.6, that
+question has an answer for both kinds.
