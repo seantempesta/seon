@@ -5,7 +5,8 @@
             [clojure.string :as str])
   (:import [java.io PushbackReader]
            [java.net InetSocketAddress ServerSocket Socket]
-           [java.time Instant]))
+           [java.time Instant]
+           [java.util.concurrent TimeUnit]))
 
 (def ^:private cluster-name-pattern
   #"\A[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})\z")
@@ -382,23 +383,11 @@
 (defn- stop-form
   [name]
   (pr-str
-   `(do
-      (require 'malli.instrument)
-      (let [instances# @@(ns-resolve 'seon.cluster
-                                     (symbol "running-instances"))
-            stop-instance!#
-            (malli.instrument/-original (var seon.cluster/stop!))]
+   `(let [instances# @@(ns-resolve 'seon.cluster
+                                   (symbol "running-instances"))]
       (if-let [instance# (get instances# ~name)]
-          (do
-            (stop-instance!# instance#)
-            (when-not
-             (seq @@(ns-resolve 'seon.cluster
-                                (symbol "running-instances")))
-              (future
-                (Thread/sleep 100)
-                (System/exit 0)))
-            :stopped)
-          :absent)))))
+        (do (seon.cluster/stop! instance#) :stopped)
+        :absent))))
 
 (defn- sibling-names
   [root pid]
@@ -426,6 +415,23 @@
     (.destroy ^java.lang.ProcessHandle (.get handle))
     (println (str "● " name " stop path=SIGTERM"))))
 
+(defn- stop-empty-jvm!
+  [root advertisement]
+  (let [pid (:seon.boot/pid advertisement)]
+    (when (empty? (sibling-names root pid))
+      (when-let [handle
+                 (let [optional (java.lang.ProcessHandle/of (long pid))]
+                   (when (.isPresent optional) (.get optional)))]
+        (when (.isAlive ^java.lang.ProcessHandle handle)
+          (.destroy ^java.lang.ProcessHandle handle)
+          (try
+            (.get (.onExit ^java.lang.ProcessHandle handle)
+                  5 TimeUnit/SECONDS)
+            (catch java.util.concurrent.TimeoutException _
+              (fail! "The empty cluster JVM did not exit after SIGTERM."
+                     {:seon.boot/pid pid}))))
+        (println (str "● empty JVM pid " pid " exited"))))))
+
 (defn- stop!
   [root arguments]
   (when (> (count arguments) 1)
@@ -445,7 +451,10 @@
           (fail! "The live JVM did not own the advertised cluster."
                  {:seon.fresh-operator/name name
                   :seon.fresh-operator/result value}))
-        (println (str "● " name " stop path=prepl"))))))
+        (println (str "● " name " stop path=prepl"))
+        ;; Reading :ret is the observable flush boundary. Only then may
+        ;; the client terminate a JVM whose last advertisement is gone.
+        (stop-empty-jvm! root ad)))))
 
 (defn- logs!
   [root arguments]
