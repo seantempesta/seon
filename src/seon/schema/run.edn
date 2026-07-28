@@ -12,7 +12,6 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.agent/run {:optional true} :seon.cluster.agent/run]]
  :seon.cluster.eval/at :inst
- :seon.cluster.eval/claim-epoch [:int {:min 1}]
  :seon.cluster.eval/error :string
  ; What the form PRINTED. Agent-visible evidence about its own work, so
  ; it is durable rather than dropped on the floor; bounded by the same
@@ -29,11 +28,9 @@
  ; status restating which of those facts exist.
  :seon.cluster.eval/interrupted-at :inst
  :seon.cluster.run/agent :seon.db/ref
- :seon.cluster.run/claim-epoch [:int {:min 1}]
  :seon.cluster.run/closed-at :inst
  :seon.cluster.run/forms [:set {:seon.db/component true} :seon.db/ref]
  :seon.cluster.run/id [:string {:min 1 :seon.db/identity true}]
- :seon.cluster.run/lease-until :inst
  :seon.cluster.run/missing-results [:int {:min 0}]
  :seon.cluster.run/opened-at :inst
  ; Why a run ended before it had a plan — a lost model call, an
@@ -44,7 +41,11 @@
 
  :seon.cluster.run/plan-digest [:string {:min 1}]
  :seon.cluster.run/process [:string {:min 1}]
- :seon.cluster.run/run [:map {:seon.db/entity true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/claim-epoch {:optional true} :seon.cluster.run/claim-epoch] [:seon.cluster.run/lease-until {:optional true} :seon.cluster.run/lease-until] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
+ ; Custody IS presence (custody revision 2026-07-28): `/process`
+ ; present = held, absent = unheld. There is no claim epoch and no
+ ; lease clock — the flock + single writer make a competing claimant
+ ; unrepresentable, and the settle-once presence fences carry the rest.
+ :seon.cluster.run/run [:map {:seon.db/entity true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
  ; The ordered form entity. Same reason as the message map: without it
  ; only `/id` installed, so a frozen plan could not be transacted on the
  ; live boot path. Every entry is required — `plan-call` writes all four
@@ -67,7 +68,6 @@
   [:seon.cluster.eval/id :seon.cluster.eval/id]
   [:seon.cluster.eval/run :seon.cluster.eval/run]
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-  [:seon.cluster.eval/claim-epoch :seon.cluster.eval/claim-epoch]
   [:seon.cluster.eval/at :seon.cluster.eval/at]
   [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]

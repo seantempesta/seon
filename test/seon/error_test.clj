@@ -155,7 +155,7 @@
 
 (def ^:private refusal-gen
   (gen/fmap (fn [kind] (ex-data (ex-cause (ex-cause (refused-chain kind)))))
-            (gen/elements [:seon.cluster.run/stale-epoch
+            (gen/elements [:seon.cluster.run/not-the-holder
                            :seon.cluster.run/run-closed
                            :seon.cluster.run/agent-pointer-broken])))
 
@@ -297,14 +297,14 @@
   ;; sentence can appear.
   (let [fact (error/normalize
               (request (transform-error
-                        (refused-chain :seon.cluster.run/stale-epoch))))]
+                        (refused-chain :seon.cluster.run/not-the-holder))))]
     (is (= "the transition refused" (:seon.error/message fact)))))
 
 (deftest the-kind-comes-from-the-deepest-ex-data
   (let [fact (error/normalize
               (request (transform-error
-                        (refused-chain :seon.cluster.run/stale-epoch))))]
-    (is (= :seon.cluster.run/stale-epoch (:seon.error/kind fact))
+                        (refused-chain :seon.cluster.run/not-the-holder))))]
+    (is (= :seon.cluster.run/not-the-holder (:seon.error/kind fact))
         "the wrappers carry :error and {} — the rule is at the bottom")))
 
 (deftest an-unclassifiable-source-is-fail-closed-never-absent
@@ -354,7 +354,7 @@
 
 (defn- fact []
   (error/normalize (request (transform-error (refused-chain
-                                              :seon.cluster.run/stale-epoch))
+                                              :seon.cluster.run/not-the-holder))
                             {:seon.cluster.run/id "run-9"
                              :seon.cluster.agent/id "agent-3"})))
 
@@ -386,7 +386,7 @@
                         :seon.render/ai)]
     (is (str/includes? prose (:seon.error/id fact)) "the evidence is nameable")
     (is (str/includes? prose "run-9") "the run it interrupted")
-    (is (str/includes? prose ":seon.cluster.run/stale-epoch")
+    (is (str/includes? prose ":seon.cluster.run/not-the-holder")
         "the actionable rule leads instead of wrapper prose")))
 
 (deftest failover-prose-contains-no-operator-clauses
@@ -536,8 +536,8 @@
       say what happened, so the fact is recorded and nobody is mailed"
         (let [[facts messages]
               (commit! connection
-                       {:seon.error/kind :seon.cluster.run/stale-epoch
-                        :seon.error/message "the claim epoch moved"}
+                       {:seon.error/kind :seon.cluster.run/not-the-holder
+                        :seon.error/message "the run is held by another process"}
                        {:seon.cluster.agent/id "agent-3"
                         :seon.cluster.run/id "run-9"})]
           (is (= 1 facts))

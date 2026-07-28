@@ -38,8 +38,6 @@
    :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at
    :seon.cluster.run/process
-   :seon.cluster.run/claim-epoch
-   :seon.cluster.run/lease-until
    :seon.cluster.run/plan-digest
    :seon.cluster.run/forms
    :seon.cluster.run.form/id
@@ -49,7 +47,6 @@
    :seon.cluster.eval/id
    :seon.cluster.eval/run
    :seon.cluster.eval/ordinal
-   :seon.cluster.eval/claim-epoch
    :seon.cluster.eval/at
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
@@ -103,11 +100,8 @@
             (cond-> [(cond-> {:seon.cluster.run/id run-id
                               :seon.cluster.run/agent
                               [:seon.cluster.agent/id agent-id]
-                              :seon.cluster.run/opened-at now
-                              :seon.cluster.run/claim-epoch 1}
-                       holder (assoc :seon.cluster.run/process holder
-                                     :seon.cluster.run/lease-until
-                                     (Date. (+ (inst-ms now) 60000)))
+                              :seon.cluster.run/opened-at now}
+                       holder (assoc :seon.cluster.run/process holder)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
                       :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
@@ -129,7 +123,6 @@
               [{:seon.cluster.eval/id (str run-id "-" ordinal)
                 :seon.cluster.eval/run [:seon.cluster.run/id run-id]
                 :seon.cluster.eval/ordinal ordinal
-                :seon.cluster.eval/claim-epoch 1
                 :seon.cluster.eval/at now
                 ;; the result's presence IS the terminal state
                 :seon.cluster.eval/result-edn "1"}]))

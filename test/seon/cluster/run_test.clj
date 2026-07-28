@@ -1,24 +1,32 @@
 (ns seon.cluster.run-test
-  "Sealed acceptance for the run model (revised 2026-07-28).
+  "Sealed acceptance for the run model (revised 2026-07-28, twice).
 
   Orchestrator-authored. The implementation lane makes these green by
   implementing the seon.cluster.run `*-call` transitions ONLY — schemas
   and tests are byte-sealed; friction is reported, never resolved by
   weakening. Everything runs against in-memory Datahike in-process.
 
-  CONTRACT REVISION 2026-07-28 (owner ruling: STATE IS PRESENCE):
-  `:seon.cluster.eval/status` is DELETED. A receipt is running exactly
-  when it carries none of `result-edn`/`error`/`interrupted-at`;
-  settling asserts terminal facts; recovery asserts `interrupted-at`
-  by CAS-on-absence. Every behavioral assertion below is unchanged —
-  only the state representation it observes moved from an enum to
-  attribute presence.
+  CONTRACT REVISION 2026-07-28 morning (owner ruling: STATE IS
+  PRESENCE): `:seon.cluster.eval/status` is DELETED. A receipt is
+  running exactly when it carries none of
+  `result-edn`/`error`/`interrupted-at`.
+
+  CUSTODY REVISION 2026-07-28 (custody-revision-contracts-2026-07-28):
+  CUSTODY IS PRESENCE. `:seon.cluster.run/process` present = held,
+  absent = unheld; claiming is CAS-on-absence inside the transaction;
+  claiming from a DEAD holder is TAKEOVER = RECOVERY, one shape (stamp
+  that custody's running receipts `interrupted-at`, then retract/assert
+  the process — one transaction). There is no claim epoch and no lease:
+  every behavioral assertion the epoch/lease arms carried is KEPT below,
+  re-expressed against the surviving fences — `::not-the-holder` (the
+  one loud custody refusal), settle-once by presence, `(run, ordinal)`
+  receipt identity, and recovery idempotence.
 
   The acceptance surface is the state-machine property: generated
   command sequences run against the real database while a pure MODEL
   decides, for every command, whether the transition must commit or
   refuse. A transition that commits when the model says refuse (a
-  stolen live lease, a reopened closed run, a second plan) or refuses
+  stolen held run, a reopened closed run, a second plan) or refuses
   when the model says commit is a counterexample. Invariants over
   durable facts are asserted after every command."
   (:require [clojure.test :refer [deftest is testing]]
@@ -42,8 +50,6 @@
    :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at
    :seon.cluster.run/process
-   :seon.cluster.run/claim-epoch
-   :seon.cluster.run/lease-until
    :seon.cluster.run/plan-digest
    :seon.cluster.run/forms
    :seon.cluster.run.form/id
@@ -53,7 +59,6 @@
    :seon.cluster.eval/id
    :seon.cluster.eval/run
    :seon.cluster.eval/ordinal
-   :seon.cluster.eval/claim-epoch
    :seon.cluster.eval/at
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
@@ -114,16 +119,10 @@
   (testing "open is the absence of closed-at"
     (is (true? (run/open? {})))
     (is (false? (run/open? {::run/closed-at t2}))))
-  (testing "claimed means a holder under a live lease"
-    (is (true? (run/claimed? {::run/process "p1" ::run/lease-until t2} t1)))
-    (is (false? (run/claimed? {::run/process "p1" ::run/lease-until t0} t1)))
-    (is (false? (run/claimed? {} t1))))
-  (testing "expired means open with a lapsed holder"
-    (is (true? (run/expired? {::run/process "p1" ::run/lease-until t0} t1)))
-    (is (false? (run/expired? {::run/process "p1" ::run/lease-until t2} t1)))
-    (is (false? (run/expired? {::run/closed-at t2
-                               ::run/process "p1"
-                               ::run/lease-until t0} t1)))))
+  (testing "held is the PRESENCE of a process — custody is presence,
+            and there is no lease clock to consult"
+    (is (true? (run/held? {::run/process "p1"})))
+    (is (false? (run/held? {})))))
 
 (deftest interrupted-warning-is-one-derived-value
   (let [forms [{:seon.cluster.run.form/ordinal 0}
@@ -161,25 +160,33 @@
                               ::run/agent [:seon.cluster.agent/id "teacher"]
                               ::run/opened-at t0}))))
         (is (= "lesson" (agent-pointer connection "teacher"))))
-      (testing "claim an unheld open run"
+      (testing "claim an unheld open run — CAS-on-absence"
         (is (= ::committed
                (transact-or-refusal
                 connection
                 (run/claim-tx {::run/id "lesson"
                                ::run/process "p1"
-                               ::run/lease-until t2
+                               ::run/live-processes #{"p1"}
                                ::run/now t1}))))
-        (is (= 1 (::run/claim-epoch (run-entity connection "lesson")))))
+        (is (= "p1" (::run/process (run-entity connection "lesson")))))
+      (testing "a held run refuses a second live claim"
+        (is (= ::run/run-held
+               (::run/rule (transact-or-refusal
+                            connection
+                            (run/claim-tx {::run/id "lesson"
+                                           ::run/process "p2"
+                                           ::run/live-processes #{"p1" "p2"}
+                                           ::run/now t1})))))
+        (is (= "p1" (::run/process (run-entity connection "lesson")))
+            "the refusal leaves custody unchanged"))
       (testing "plan freezes once, with its ordered owned forms"
         (is (= ::committed
                (transact-or-refusal
                 connection
                 (run/plan-tx {::run/id "lesson"
                               ::run/process "p1"
-                              ::run/claim-epoch 1
                               ::run/plan-digest "digest-a"
-                              ::run/sources ["(+ 1 1)" "(+ 2 2)"]
-                              ::run/now t1}))))
+                              ::run/sources ["(+ 1 1)" "(+ 2 2)"]}))))
         (is (= ["(+ 1 1)" "(+ 2 2)"]
                (->> (d/q '[:find ?ordinal ?source
                            :in $ ?run-id
@@ -191,15 +198,6 @@
                          (d/db connection) "lesson")
                     (sort-by first)
                     (mapv second)))))
-      (testing "heartbeat renews the holder's lease under its epoch"
-        (is (= ::committed
-               (transact-or-refusal
-                connection
-                (run/heartbeat-tx {::run/id "lesson"
-                                   ::run/process "p1"
-                                   ::run/claim-epoch 1
-                                   ::run/lease-until (at 3600000)
-                                   ::run/now t1})))))
       (testing "close settles the run and retracts the pointer it
                 derived from the run's own agent connection"
         (is (= ::committed
@@ -207,63 +205,51 @@
                 connection
                 (run/close-tx {::run/id "lesson"
                                ::run/process "p1"
-                               ::run/claim-epoch 1
-                               ::run/closed-at t2
-                               ::run/now t2}))))
+                               ::run/closed-at t2}))))
         (let [entity (run-entity connection "lesson")]
           (is (false? (run/open? {::run/closed-at
                                   (::run/closed-at entity)})))
-          (is (nil? (::run/process entity)))
-          (is (nil? (::run/lease-until entity))))
+          (is (nil? (::run/process entity))
+              "a closed run holds no custody"))
         (is (nil? (agent-pointer connection "teacher")))))))
 
-(deftest expired-custody-refuses-every-held-run-transition
+(deftest a-non-holder-refuses-every-held-run-transition
+  ;; the surviving custody assertion, re-expressed from the lease-era
+  ;; expiry test: a process that does not hold the run cannot act on
+  ;; it, and the refusal leaves every fact unchanged. `::not-the-holder`
+  ;; is the ONE loud custody refusal (custody revision, kept fences).
   (doseq [[operation tx]
-          [[:heartbeat
-            #(run/heartbeat-tx {::run/id "expired"
-                                ::run/process "p1"
-                                ::run/claim-epoch 1
-                                ::run/lease-until t2
-                                ::run/now t1})]
-           [:release
-            #(run/release-tx {::run/id "expired"
-                              ::run/process "p1"
-                              ::run/claim-epoch 1
-                              ::run/now t1})]
+          [[:release
+            #(run/release-tx {::run/id "held"
+                              ::run/process "p2"})]
            [:close
-            #(run/close-tx {::run/id "expired"
-                            ::run/process "p1"
-                            ::run/claim-epoch 1
-                            ::run/closed-at t1
-                            ::run/now t1})]
+            #(run/close-tx {::run/id "held"
+                            ::run/process "p2"
+                            ::run/closed-at t1})]
            [:plan
-            #(run/plan-tx {::run/id "expired"
-                           ::run/process "p1"
-                           ::run/claim-epoch 1
-                           ::run/plan-digest "expired-digest"
-                           ::run/sources ["(+ 1 1)"]
-                           ::run/now t1})]]]
+            #(run/plan-tx {::run/id "held"
+                           ::run/process "p2"
+                           ::run/plan-digest "held-digest"
+                           ::run/sources ["(+ 1 1)"]})]]]
     (with-model-database
       (fn [connection]
-        (d/transact connection [{:seon.cluster.agent/id "expired-agent"}])
+        (d/transact connection [{:seon.cluster.agent/id "held-agent"}])
         (d/transact connection
-                    (run/open-tx {::run/id "expired"
+                    (run/open-tx {::run/id "held"
                                   ::run/agent
-                                  [:seon.cluster.agent/id "expired-agent"]
+                                  [:seon.cluster.agent/id "held-agent"]
                                   ::run/opened-at (at -120000)}))
         (d/transact connection
-                    (run/claim-tx {::run/id "expired"
+                    (run/claim-tx {::run/id "held"
                                    ::run/process "p1"
-                                   ::run/lease-until t0
+                                   ::run/live-processes #{"p1"}
                                    ::run/now (at -60000)}))
-        (testing (str (name operation) " requires a live lease")
-          (is (= ::run/lease-expired
+        (testing (str (name operation) " requires holding the run")
+          (is (= ::run/not-the-holder
                  (::run/rule (transact-or-refusal connection (tx)))))
-          (let [entity (run-entity connection "expired")]
+          (let [entity (run-entity connection "held")]
             (is (= "p1" (::run/process entity))
                 "the refusal leaves custody unchanged")
-            (is (= t0 (::run/lease-until entity))
-                "the refusal cannot renew or retract the expired lease")
             (is (nil? (::run/closed-at entity)))
             (is (nil? (::run/plan-digest entity)))))))))
 
@@ -284,14 +270,12 @@
           (d/transact connection
                       (run/claim-tx {::run/id "receipts"
                                      ::run/process "p1"
-                                     ::run/lease-until t0
+                                     ::run/live-processes #{"p1"}
                                      ::run/now (at -60000)}))
           (let [start {::run/id "receipts"
-                       ::run/claim-epoch 1
                        :seon.cluster.eval/ordinal 0
                        :seon.cluster.eval/at t0}
                 settle {::run/id "receipts"
-                        ::run/claim-epoch 1
                         :seon.cluster.eval/ordinal 0
                         :seon.cluster.eval/result-edn "42"}]
             (is (= ::committed
@@ -319,13 +303,16 @@
             (let [receipt (d/pull @connection
                                   '[*]
                                   [:seon.cluster.eval/id
-                                   (pr-str ["receipts" 0 1])])]
+                                   (pr-str ["receipts" 0])])]
               (is (= "42" (:seon.cluster.eval/result-edn receipt))
                   "the first terminal outcome is preserved")
               (is (nil? (:seon.cluster.eval/error receipt))
                   "and the refused re-settle changed nothing")))
+          ;; the takeover interleaving, re-expressed from the epoch era:
+          ;; a running receipt under a DEAD holder is stamped by the
+          ;; takeover itself, so the dead pass's late settle refuses by
+          ;; PRESENCE — the fence the epoch used to claim to be.
           (let [start {::run/id "receipts"
-                       ::run/claim-epoch 1
                        :seon.cluster.eval/ordinal 1
                        :seon.cluster.eval/at t0}]
             (is (= ::committed
@@ -335,23 +322,32 @@
                     connection
                     (run/claim-tx {::run/id "receipts"
                                    ::run/process "p2"
-                                   ::run/lease-until t2
+                                   ;; p1 is DEAD at this instant
+                                   ::run/live-processes #{"p2"}
                                    ::run/now t1})))
-                "an expired run is taken over at the next epoch")
+                "a run held by a dead process is taken over")
+            (is (= "p2" (::run/process (run-entity connection "receipts"))))
+            (is (= t1 (:seon.cluster.eval/interrupted-at
+                       (d/pull @connection '[*]
+                               [:seon.cluster.eval/id
+                                (pr-str ["receipts" 1])])))
+                "the takeover stamped the dead custody's running receipt
+                 in the SAME transaction — the intermediate state never
+                 exists")
             (is (not= ::committed
                       (transact-or-refusal
                        connection
                        (settle-tx {::run/id "receipts"
-                                   ::run/claim-epoch 1
                                    :seon.cluster.eval/ordinal 1
                                    :seon.cluster.eval/result-edn "1"})))
-                "the old epoch cannot settle after takeover")
-            (is (false? (run/terminal?
-                         (d/pull @connection
-                                 '[*]
-                                 [:seon.cluster.eval/id
-                                  (pr-str ["receipts" 1 1])])))
-                "so the receipt stays running — no terminal fact")))))))
+                "the dead pass's late settle refuses — by presence")
+            (is (= ::run/receipt-exists
+                   (::run/rule (transact-or-refusal
+                                connection
+                                (start-tx start))))
+                "and `(run, ordinal)` identity makes re-execution
+                 unrepresentable: an ordinal that ever had a receipt
+                 refuses forever, across any custody change")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The state machine — generated command sequences against a pure model
@@ -363,8 +359,9 @@
 
 (def ^:private command-gen
   "One generated command. Times are monotonic per sequence position:
-  the runner assigns now = (at (* index 60000)) so eligibility windows
-  are decided by the generated lease spans, not wall clocks."
+  the runner assigns now = (at (* index 60000)). A claim carries the
+  set of processes ALIVE at that instant (the claimant is always in
+  it); whether the current holder is in it decides refuse vs takeover."
   (gen/one-of
    [(gen/tuple (gen/return :open)
                (gen/elements run-ids)
@@ -372,38 +369,25 @@
     (gen/tuple (gen/return :claim)
                (gen/elements run-ids)
                (gen/elements process-ids)
-               ;; lease span in minutes ahead of now: 0 = already lapsed
-               ;; at the next step, longer spans stay live across steps
-               (gen/choose 0 5))
-    (gen/tuple (gen/return :heartbeat)
-               (gen/elements run-ids)
-               (gen/elements process-ids)
-               ;; epoch guess: :current resolves from the model, the
-               ;; others probe stale and absurd fences
-               (gen/elements [:current :stale :absurd])
-               (gen/choose 1 5))
+               (gen/set (gen/elements process-ids)))
     (gen/tuple (gen/return :release)
                (gen/elements run-ids)
-               (gen/elements process-ids)
-               (gen/elements [:current :stale :absurd]))
+               (gen/elements process-ids))
     (gen/tuple (gen/return :close)
                (gen/elements run-ids)
-               (gen/elements process-ids)
-               (gen/elements [:current :stale :absurd]))
+               (gen/elements process-ids))
     (gen/tuple (gen/return :plan)
                (gen/elements run-ids)
                (gen/elements process-ids)
                (gen/elements ["digest-a" "digest-b"]))
     (gen/tuple (gen/return :receipt-start)
                (gen/elements run-ids)
-               (gen/choose 0 3)
-               (gen/elements [:current :stale :absurd]))
+               (gen/choose 0 3))
     ;; the settled kind names WHICH terminal fact the settle asserts:
     ;; :done → result-edn, :error → error, :interrupted → interrupted-at
     (gen/tuple (gen/return :receipt-settle)
                (gen/elements run-ids)
                (gen/choose 0 3)
-               (gen/elements [:current :stale :absurd])
                (gen/elements [:done :error :interrupted]))
     (gen/tuple (gen/return :recover)
                (gen/set (gen/elements process-ids)))]))
@@ -411,137 +395,135 @@
 (def ^:private commands-gen
   (gen/one-of
    [(gen/vector command-gen 1 15)
+    ;; the claim/takeover regression under presence: a live holder
+    ;; refuses the steal; a dead holder is taken over with its running
+    ;; receipt stamped in the same transaction
     (gen/return [[:open "r1" "a1"]
-                 [:claim "r1" "p1" 0]
-                 [:claim "r1" "p2" 5]
-                 [:heartbeat "r1" "p1" :stale 5]])]))
+                 [:claim "r1" "p1" #{"p1"}]
+                 [:receipt-start "r1" 0]
+                 [:claim "r1" "p2" #{"p1" "p2"}]
+                 [:claim "r1" "p2" #{"p2"}]
+                 [:receipt-settle "r1" 0 :done]])]))
 
-(defn- resolve-epoch [model run-id guess]
-  (let [current (get-in model [:runs run-id :epoch] 0)]
-    (case guess
-      :current (max current 1)
-      :stale (max (dec current) 1)
-      :absurd 99)))
+(defn- claim-live-set
+  "The live set a claim executes with: the claimant is always alive."
+  [process live]
+  (conj (set live) process))
 
 (defn- model-eligible?
-  "The pure oracle: must this command COMMIT against `model` at `now`?"
-  [model [op & args] now]
+  "The pure oracle: must this command COMMIT against `model`?"
+  [model [op & args]]
   (let [run-of #(get-in model [:runs %])]
     (case op
       :open (let [[run-id agent-id] args]
               (and (nil? (run-of run-id))
                    (nil? (get-in model [:pointers agent-id]))))
-      :claim (let [[run-id _process _span] args
-                   {:keys [closed process lease]} (run-of run-id)]
-               (and (some? (run-of run-id))
+      :claim (let [[run-id process live] args
+                   {:keys [closed] :as entry} (run-of run-id)
+                   holder (:process entry)]
+               (and (some? entry)
                     (not closed)
-                    (or (nil? process)
-                        (<= (inst-ms lease) (inst-ms now)))))
-      (:heartbeat :release :close)
-      (let [[run-id process guess] args
+                    (or (nil? holder)
+                        (not (contains? (claim-live-set process live)
+                                        holder)))))
+      (:release :close)
+      (let [[run-id process] args
             {:keys [closed] :as entry} (run-of run-id)]
         (and (some? entry)
              (not closed)
-             (= process (:process entry))
-             (= (resolve-epoch model run-id guess) (:epoch entry))
-             (> (inst-ms (:lease entry)) (inst-ms now))))
+             (= process (:process entry))))
       :plan (let [[run-id process _digest] args
                   {:keys [closed digest] :as entry} (run-of run-id)]
               (and (some? entry)
                    (not closed)
                    (= process (:process entry))
-                   (> (inst-ms (:lease entry)) (inst-ms now))
                    (nil? digest)))
       :receipt-start
-      (let [[run-id ordinal guess] args
-            entry (run-of run-id)
-            epoch (resolve-epoch model run-id guess)]
+      (let [[run-id ordinal] args
+            entry (run-of run-id)]
         (and (some? entry)
              (not (:closed entry))
-             (= epoch (:epoch entry))
-             (nil? (get-in model [:receipts [run-id ordinal epoch]]))))
+             (nil? (get-in model [:receipts [run-id ordinal]]))))
       :receipt-settle
-      (let [[run-id ordinal guess _kind] args
+      (let [[run-id ordinal _kind] args
             entry (run-of run-id)
-            epoch (resolve-epoch model run-id guess)
-            receipt (get-in model [:receipts [run-id ordinal epoch]])]
+            receipt (get-in model [:receipts [run-id ordinal]])]
         (and (some? entry)
              (not (:closed entry))
-             (= epoch (:epoch entry))
              ;; running IS the absence of a settled fact
              (some? receipt)
              (nil? (:settled receipt))))
       :recover true)))
 
+(defn- stamp-running-receipts
+  "Settle every running receipt of `run-id` as :interrupted."
+  [model run-id]
+  (update model :receipts
+          #(into {}
+                 (map (fn [[[receipt-run ordinal :as k] receipt]]
+                        [k (if (and (= receipt-run run-id)
+                                    (nil? (:settled receipt)))
+                             (assoc receipt :settled :interrupted)
+                             receipt)]))
+                 %)))
+
 (defn- model-apply
   "Advance the pure model by one COMMITTED command."
-  [model [op & args] now]
+  [model [op & args]]
   (case op
     :open (let [[run-id agent-id] args]
             (-> model
-                (assoc-in [:runs run-id]
-                          {:agent agent-id :epoch 0})
+                (assoc-in [:runs run-id] {:agent agent-id})
                 (assoc-in [:pointers agent-id] run-id)))
-    :claim (let [[run-id process span] args]
-             (update-in model [:runs run-id]
-                        #(-> %
-                             (update :epoch inc)
-                             (assoc :process process
-                                    :lease (at (+ (inst-ms now)
-                                                  (* span 60000)
-                                                  (- t0-ms)))))))
-    :heartbeat (let [[run-id _ _ span] args]
-                 (assoc-in model [:runs run-id :lease]
-                           (at (+ (inst-ms now) (* span 60000) (- t0-ms)))))
+    :claim (let [[run-id process _live] args
+                 holder (get-in model [:runs run-id :process])]
+             (cond-> model
+               ;; TAKEOVER = RECOVERY, one shape: a dead holder's
+               ;; running receipts are stamped in the same transition
+               (some? holder) (stamp-running-receipts run-id)
+               true (assoc-in [:runs run-id :process] process)))
     :release (let [[run-id] args]
-               (update-in model [:runs run-id] dissoc :process :lease))
+               (update-in model [:runs run-id] dissoc :process))
     :close (let [[run-id] args
                  agent-id (get-in model [:runs run-id :agent])]
              (-> model
                  (update-in [:runs run-id]
                             #(-> % (assoc :closed true)
-                                 (dissoc :process :lease)))
+                                 (dissoc :process)))
                  (update :pointers dissoc agent-id)))
     :plan (let [[run-id _ digest] args]
             (assoc-in model [:runs run-id :digest] digest))
-    :receipt-start (let [[run-id ordinal guess] args
-                         epoch (resolve-epoch model run-id guess)]
+    :receipt-start (let [[run-id ordinal] args]
                      ;; no :settled key: a started receipt is running
                      ;; by the absence of any terminal fact
-                     (assoc-in model [:receipts [run-id ordinal epoch]]
-                               {:id (pr-str [run-id ordinal epoch])
+                     (assoc-in model [:receipts [run-id ordinal]]
+                               {:id (pr-str [run-id ordinal])
                                 :run run-id
-                                :ordinal ordinal
-                                :epoch epoch}))
-    :receipt-settle (let [[run-id ordinal guess kind] args
-                          epoch (resolve-epoch model run-id guess)]
+                                :ordinal ordinal}))
+    :receipt-settle (let [[run-id ordinal kind] args]
                       (assoc-in model
-                                [:receipts [run-id ordinal epoch] :settled]
+                                [:receipts [run-id ordinal] :settled]
                                 kind))
     :recover (let [[live] args]
-               (-> model
-                   (update :receipts
-                           #(into {} (map (fn [[k receipt]]
-                                            [k (if (nil? (:settled receipt))
-                                                 (assoc receipt
-                                                        :settled :interrupted)
-                                                 receipt)]))
-                                  %))
-                   (update :runs
-                           #(into {}
-                                  (map (fn [[id entry]]
-                                         [id (if (and (:process entry)
-                                                      (not (contains?
-                                                            live
-                                                            (:process entry))))
-                                               (dissoc entry :process :lease)
-                                               entry)]))
-                                  %))))))
+               (reduce
+                (fn [acc [run-id entry]]
+                  (let [holder (:process entry)]
+                    (cond
+                      (:closed entry) acc
+                      ;; a live holder's run needs nothing — its
+                      ;; running receipts are its own business
+                      (contains? live holder) acc
+                      :else
+                      (cond-> (stamp-running-receipts acc run-id)
+                        (some? holder)
+                        (update-in [:runs run-id] dissoc :process)))))
+                model
+                (:runs model)))))
 
 (defn- execute!
   "Run one command against the real database. Returns ::committed or
-  refusal data. Recovery stays pure boot machinery."
-  [connection model [op & args :as command] now]
+  refusal data."
+  [connection [op & args] now]
   (case op
     :open (let [[run-id agent-id] args]
             (transact-or-refusal
@@ -549,75 +531,47 @@
              (run/open-tx {::run/id run-id
                            ::run/agent [:seon.cluster.agent/id agent-id]
                            ::run/opened-at now})))
-    :claim (let [[run-id process span] args]
+    :claim (let [[run-id process live] args]
              (transact-or-refusal
               connection
               (run/claim-tx {::run/id run-id
                              ::run/process process
-                             ::run/lease-until (at (+ (inst-ms now)
-                                                      (* span 60000)
-                                                      (- t0-ms)))
+                             ::run/live-processes
+                             (claim-live-set process live)
                              ::run/now now})))
-    :heartbeat (let [[run-id process guess span] args]
-                 (transact-or-refusal
-                  connection
-                  (run/heartbeat-tx
-                   {::run/id run-id
-                    ::run/process process
-                    ::run/claim-epoch (resolve-epoch model run-id guess)
-                    ::run/lease-until (at (+ (inst-ms now)
-                                             (* span 60000)
-                                             (- t0-ms)))
-                    ::run/now now})))
-    :release (let [[run-id process guess] args]
+    :release (let [[run-id process] args]
                (transact-or-refusal
                 connection
                 (run/release-tx
                  {::run/id run-id
-                  ::run/process process
-                  ::run/claim-epoch (resolve-epoch model run-id guess)
-                  ::run/now now})))
-    :close (let [[run-id process guess] args]
+                  ::run/process process})))
+    :close (let [[run-id process] args]
              (transact-or-refusal
               connection
               (run/close-tx
                {::run/id run-id
                 ::run/process process
-                ::run/claim-epoch (resolve-epoch model run-id guess)
-                ::run/closed-at now
-                ::run/now now})))
+                ::run/closed-at now})))
     :plan (let [[run-id process digest] args]
             (transact-or-refusal
              connection
              (run/plan-tx
               {::run/id run-id
                ::run/process process
-               ;; an UNCLAIMED run has no epoch, and the model writes 0
-               ;; for that — but 0 is not an epoch (`[:int {:min 1}]`),
-               ;; so sending it asks a malformed question instead of a
-               ;; wrong one. The refusal under test is "nobody holds
-               ;; this", which a valid non-matching epoch proves just as
-               ;; well. Instrumentation caught the malformed call.
-               ::run/claim-epoch (max 1 (get-in model [:runs run-id :epoch] 1))
                ::run/plan-digest digest
-               ::run/sources ["(+ 1 1)"]
-               ::run/now now})))
-    :receipt-start (let [[run-id ordinal guess] args]
+               ::run/sources ["(+ 1 1)"]})))
+    :receipt-start (let [[run-id ordinal] args]
                      (transact-or-refusal
                       connection
                       (run/receipt-start-tx
                        {::run/id run-id
-                        ::run/claim-epoch
-                        (resolve-epoch model run-id guess)
                         :seon.cluster.eval/ordinal ordinal
                         :seon.cluster.eval/at now})))
-    :receipt-settle (let [[run-id ordinal guess kind] args]
+    :receipt-settle (let [[run-id ordinal kind] args]
                       (transact-or-refusal
                        connection
                        (run/receipt-settle-tx
                         (merge {::run/id run-id
-                                ::run/claim-epoch
-                                (resolve-epoch model run-id guess)
                                 :seon.cluster.eval/ordinal ordinal}
                                ;; the settle IS the terminal fact
                                (case kind
@@ -625,29 +579,20 @@
                                  :error {:seon.cluster.eval/error "boom"}
                                  :interrupted
                                  {:seon.cluster.eval/interrupted-at now})))))
-    :recover (let [[live] args
-                   tx (into []
-                            (mapcat
-                             (fn [run-id]
-                               (when (some? (get-in model [:runs run-id]))
-                                 (run/recover-tx
-                                  {::run/run (run-entity connection run-id)
-                                   ::run/receipts
-                                   (mapv #(d/pull (d/db connection) '[*] %)
-                                         (d/q '[:find [?r ...]
-                                                :in $ ?run-id
-                                                :where
-                                                [?run :seon.cluster.run/id
-                                                 ?run-id]
-                                                [?r :seon.cluster.eval/run
-                                                 ?run]]
-                                              (d/db connection) run-id))
-                                   ::run/live-processes live
-                                   ::run/now now}))))
-                            run-ids)]
-               (if (seq tx)
-                 (transact-or-refusal connection tx)
-                 ::committed))))
+    :recover (let [[live] args]
+               (transact-or-refusal
+                connection
+                (into []
+                      (mapcat
+                       (fn [run-id]
+                         ;; recover-call reads the run and its receipts
+                         ;; AT TRANSACTION TIME; a missing or closed
+                         ;; run contributes nothing
+                         (run/recover-tx
+                          {::run/id run-id
+                           ::run/live-processes live
+                           ::run/now now})))
+                      run-ids)))))
 
 (defn- invariants-hold?
   "Durable-fact invariants checked after EVERY command."
@@ -666,9 +611,7 @@
                                              receipt))))]
                        (cond-> {:id (:seon.cluster.eval/id receipt)
                                 :run run-id
-                                :ordinal (:seon.cluster.eval/ordinal receipt)
-                                :epoch (:seon.cluster.eval/claim-epoch
-                                        receipt)}
+                                :ordinal (:seon.cluster.eval/ordinal receipt)}
                          (:seon.cluster.eval/result-edn receipt)
                          (assoc :settled :done)
                          (:seon.cluster.eval/error receipt)
@@ -690,11 +633,9 @@
          (= (:process entry) (::run/process entity))
          (= (boolean (:closed entry))
             (some? (::run/closed-at entity)))
-         (= (or (:epoch entry) 0) (or (::run/claim-epoch entity) 0))
          ;; a closed run holds no custody
          (or (not (:closed entry))
-             (and (nil? (::run/process entity))
-                  (nil? (::run/lease-until entity))))
+             (nil? (::run/process entity)))
          ;; the agent pointer exists exactly while its run is open
          (let [agent-id (:agent entry)
                pointer (agent-pointer connection agent-id)]
@@ -724,8 +665,8 @@
                    true
                    (let [command (first commands)
                          now (at (* (inc index) 60000))
-                         expected (model-eligible? model command now)
-                         result (execute! connection model command now)
+                         expected (model-eligible? model command)
+                         result (execute! connection command now)
                          committed? (= ::committed result)]
                      (cond
                        (not= expected committed?)
@@ -739,7 +680,7 @@
 
                        :else
                        (let [model' (if committed?
-                                      (model-apply model command now)
+                                      (model-apply model command)
                                       model)]
                          (if (invariants-hold? connection model')
                            (recur (rest commands) model' (inc index))
@@ -801,18 +742,17 @@
                  (d/transact connection
                              (run/claim-tx {::run/id run-id
                                             ::run/process holder
-                                            ::run/lease-until t2
+                                            ::run/live-processes #{holder}
                                             ::run/now t1}))
                  (d/transact
                   connection
                   (vec (map-indexed
                         (fn [ordinal state]
                           (cond-> {:seon.cluster.eval/id
-                                   (pr-str [run-id ordinal 1])
+                                   (pr-str [run-id ordinal])
                                    :seon.cluster.eval/run
                                    [:seon.cluster.run/id run-id]
                                    :seon.cluster.eval/ordinal ordinal
-                                   :seon.cluster.eval/claim-epoch 1
                                    :seon.cluster.eval/at t1}
                             (= :done state)
                             (assoc :seon.cluster.eval/result-edn
@@ -821,29 +761,75 @@
                             (assoc :seon.cluster.eval/error
                                    (str "boom-" ordinal))))
                         states)))
-                 (let [terminals-before (pull-terminals connection run-id)
+                 (let [receipts-before (pull-receipts connection run-id)
+                       terminals-before (pull-terminals connection run-id)
                        recovery
                        (run/recover-tx
-                        {::run/run (run-entity connection run-id)
-                         ::run/receipts (pull-receipts connection run-id)
+                        {::run/id run-id
                          ::run/live-processes #{"live-process"}
                          ::run/now t2})
-                       _ (when (seq recovery)
-                           (d/transact connection recovery))
+                       _ (d/transact connection recovery)
+                       ;; recovery is IDEMPOTENT: running it again from
+                       ;; current facts commits nothing new
+                       _ (d/transact connection recovery)
                        entity (run-entity connection run-id)]
                    (and
-                    ;; no receipt stays running: every one now carries
-                    ;; a terminal fact
-                    (every? run/terminal? (pull-receipts connection run-id))
                     ;; settled receipts are IDENTICAL, whole entities
                     (= terminals-before (pull-terminals connection run-id))
-                    ;; dead holders released; live holders keep custody
                     (if dead?
-                      (nil? (::run/process entity))
-                      (= "live-process" (::run/process entity)))))))))
+                      ;; a dead holder's running receipts are stamped
+                      ;; and its custody released
+                      (and (every? run/terminal?
+                                   (pull-receipts connection run-id))
+                           (nil? (::run/process entity)))
+                      ;; a live holder's run needs NOTHING: custody
+                      ;; kept, running receipts still running
+                      (and (= receipts-before
+                              (pull-receipts connection run-id))
+                           (= "live-process" (::run/process entity))))))))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "recovery property failed: " (pr-str check)))))
+
+(deftest recovery-cannot-stamp-a-settled-receipt
+  ;; the zombie audit's order-B soft spot, made unrepresentable
+  ;; (custody revision, Revision 4): `recover-call` reads the receipt
+  ;; AT TRANSACTION TIME, so there is no stale caller basis from which
+  ;; a settled receipt could be stamped `interrupted-at`.
+  (with-model-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.agent/id "orderer"}])
+      (d/transact connection
+                  (run/open-tx {::run/id "order-b"
+                                ::run/agent [:seon.cluster.agent/id "orderer"]
+                                ::run/opened-at t0}))
+      (d/transact connection
+                  (run/claim-tx {::run/id "order-b"
+                                 ::run/process "dead-process"
+                                 ::run/live-processes #{"dead-process"}
+                                 ::run/now t0}))
+      (d/transact connection
+                  (run/receipt-start-tx {::run/id "order-b"
+                                         :seon.cluster.eval/ordinal 0
+                                         :seon.cluster.eval/at t0}))
+      ;; the settle lands FIRST; recovery then runs against whatever
+      ;; the transaction sees — which includes that settle
+      (d/transact connection
+                  (run/receipt-settle-tx {::run/id "order-b"
+                                          :seon.cluster.eval/ordinal 0
+                                          :seon.cluster.eval/result-edn "2"}))
+      (d/transact connection
+                  (run/recover-tx {::run/id "order-b"
+                                   ::run/live-processes #{"live-process"}
+                                   ::run/now t2}))
+      (let [receipt (d/pull @connection '[*]
+                            [:seon.cluster.eval/id (pr-str ["order-b" 0])])]
+        (is (= "2" (:seon.cluster.eval/result-edn receipt)))
+        (is (nil? (:seon.cluster.eval/interrupted-at receipt))
+            "the settled receipt is byte-untouched — no contradiction
+             fact can exist"))
+      (is (nil? (::run/process (run-entity connection "order-b")))
+          "and the dead custody is released"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema admissibility — the model refuses what it must
@@ -880,7 +866,7 @@
       (d/transact connection
                   (run/claim-tx {::run/id "broken"
                                  ::run/process "p1"
-                                 ::run/lease-until t2
+                                 ::run/live-processes #{"p1"}
                                  ::run/now t1}))
       ;; sever the relation out from under the run
       (d/transact connection
@@ -890,9 +876,7 @@
                    (d/transact connection
                                (run/close-tx {::run/id "broken"
                                               ::run/process "p1"
-                                              ::run/claim-epoch 1
-                                              ::run/closed-at t2
-                                              ::run/now t1})))
+                                              ::run/closed-at t2})))
           "close refuses ::agent-pointer-broken")
       (is (nil? (::run/closed-at (run-entity connection "broken")))
           "the refused close committed nothing"))))

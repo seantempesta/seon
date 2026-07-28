@@ -407,10 +407,9 @@
   BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
   released immediately, and its dangling receipts — those carrying no
   terminal fact — get `interrupted-at` asserted (presence is the state;
-  there is no status) — the 60-second lease is not waited out, because the
-  lease exists to bound a holder we cannot ask about and here we can:
-  this process just started, so on this branch every other holder is
-  provably gone (one connection per branch, one process per store).
+  there is no status). No clock is consulted at all: this process just
+  started, so on this branch every other holder is provably gone (one
+  connection per branch, one process per store).
 
   Nothing here re-opens, re-plans, or re-executes. `recover-tx` is pure
   over the values it is handed and returns [] for a run needing
@@ -418,25 +417,21 @@
   [connection process]
   (let [db @connection
         now (java.util.Date.)
-        open-runs (d/q '[:find [(pull ?run [*]) ...]
+        open-runs (d/q '[:find [?run-id ...]
                          :where
-                         [?run :seon.cluster.run/id _]
+                         [?run :seon.cluster.run/id ?run-id]
                          (not [?run :seon.cluster.run/closed-at _])]
                        db)
-        receipts-of (fn [run-id]
-                      (d/q '[:find [(pull ?receipt [*]) ...]
-                             :in $ ?run-id
-                             :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?receipt :seon.cluster.eval/run ?run]]
-                           db run-id))
+        ;; the decision moved INSIDE the transaction (custody revision,
+        ;; Revision 4): `recover-call` reads each run's receipts at
+        ;; transaction time, so this caller only names the open runs —
+        ;; a stale-basis recovery stamping a settled receipt is
+        ;; unrepresentable
         operations (into []
                          (mapcat
-                          (fn [run]
+                          (fn [run-id]
                             (run/recover-tx
-                             {:seon.cluster.run/run run
-                              :seon.cluster.run/receipts
-                              (receipts-of (:seon.cluster.run/id run))
+                             {:seon.cluster.run/id run-id
                               :seon.cluster.run/live-processes #{process}
                               :seon.cluster.run/now now})))
                          open-runs)]

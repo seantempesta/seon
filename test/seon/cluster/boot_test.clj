@@ -416,10 +416,7 @@
                     [{:seon.cluster.run/id "run-crashed"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
                       :seon.cluster.run/opened-at now
-                      :seon.cluster.run/claim-epoch 1
                       :seon.cluster.run/process "99999-1"
-                      :seon.cluster.run/lease-until
-                      (java.util.Date. (+ (inst-ms now) 600000))
                       :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}
@@ -432,7 +429,6 @@
                      {:seon.cluster.eval/id "e-0"
                       :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
                       :seon.cluster.eval/ordinal 0
-                      :seon.cluster.eval/claim-epoch 1
                       :seon.cluster.eval/at now}])
         (cluster/stop! instance))
 
@@ -443,12 +439,10 @@
             connection (:seon.boot/cluster-connection instance)
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
         (try
-          (testing "the dead holder's custody is gone"
+          (testing "the dead holder's custody is gone — custody is
+                    presence, and no run holds any"
             (is (nil? (d/q (quote [:find ?p . :where
                                    [_ :seon.cluster.run/process ?p]])
-                           @connection)))
-            (is (nil? (d/q (quote [:find ?l . :where
-                                   [_ :seon.cluster.run/lease-until ?l]])
                            @connection))))
           (testing "its dangling receipt carries interrupted-at — the
                     one terminal fact recovery asserts"

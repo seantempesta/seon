@@ -422,11 +422,8 @@
         operation (some-> transition name (str/replace #"-call$" ""))
         run-id (or (:seon.cluster.run/id request)
                    (second (:seon.error/run fact)))
-        rule (:seon.cluster.run/rule source)
-        requested-epoch (:seon.cluster.run/claim-epoch request)]
+        rule (:seon.cluster.run/rule source)]
     (str "The " operation " of " run-id " was refused atomically by " rule
-         (when requested-epoch
-           (str " for requested claim epoch " requested-epoch))
          ". Nothing from this " operation " committed. Re-read the run before"
          " deciding whether a new transition is eligible. "
          (evidence-prose fact))))
@@ -590,9 +587,6 @@
        (when-let [rule (:seon.cluster.run/rule source)] (str "rule=" rule))
        (when-let [transition (:seon.cluster.run/transition source)]
          (str "transition=" transition))
-       (when-let [epoch (get-in source [:seon.cluster.run/request
-                                        :seon.cluster.run/claim-epoch])]
-         (str "requested-epoch=" epoch))
        (when (= kind :seon.cluster.run/refused) "committed=false")
        (when-let [phase (:seon.ai/error-class data)] (str "phase=" phase))
        (when (contains? data :seon.ai/request-transmitted?)

@@ -308,8 +308,7 @@
         (d/transact connection
                     [{:seon.cluster.run/id "run-crashed"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.run/opened-at (Date. 1000)
-                      :seon.cluster.run/claim-epoch 1}
+                      :seon.cluster.run/opened-at (Date. 1000)}
                      {:seon.cluster.agent/id "agent-a"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}])
         (testing "the agent is WEDGED: it is busy, and nothing is work"
@@ -979,6 +978,170 @@
                              [?e :seon.error/kind ?kind]]
                            @connection)))
               "and the refusal is a durable error fact with its own kind"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Custody precedes work — the two audit interleavings as regressions
+;;; (custody-revision-contracts-2026-07-28; probes P1 and P2)
+;;; ---------------------------------------------------------------------------
+
+(deftest a-recovered-unheld-planned-run-completes-without-error-facts
+  ;; P1, the unheld-resume disposition livelock, unrepresentable: a
+  ;; process died mid-fold, boot recovery released its custody, and the
+  ;; next pass derives `:resume` for the unheld planned run. The pass
+  ;; CLAIMS FIRST, so the disposition's terminal transaction commits,
+  ;; the run closes, and no error-fact storm exists. Before the custody
+  ;; revision this exact state hot-livelocked forever
+  ;; (`::not-the-holder` aborting the settle, then `::receipt-exists`
+  ;; on every rewake — research/zombie-constructibility-2026-07-28 §3).
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            dead "99999-1"]
+        ;; the dead process's history, built from the real transitions:
+        ;; open+claim on the trigger, a two-form plan whose SECOND form
+        ;; carries the disposition, form 0 settled — then it died
+        (d/transact connection
+                    {:tx-data (into (run/open-tx
+                                     {:seon.cluster.run/id "run-p1"
+                                      :seon.cluster.run/agent
+                                      [:seon.cluster.agent/id "agent-a"]
+                                      :seon.cluster.run/opened-at now})
+                                    (run/claim-tx
+                                     {:seon.cluster.run/id "run-p1"
+                                      :seon.cluster.run/process dead
+                                      :seon.cluster.run/live-processes #{dead}
+                                      :seon.cluster.run/now now}))
+                     :tx-meta {:seon.db/trigger
+                               [:seon.cluster.message/id "m-1"]}})
+        (d/transact connection
+                    (run/plan-tx {:seon.cluster.run/id "run-p1"
+                                  :seon.cluster.run/process dead
+                                  :seon.cluster.run/plan-digest
+                                  (apply str (repeat 64 "b"))
+                                  :seon.cluster.run/sources
+                                  ["(+ 1 2)" "(my.run/complete \"3\")"]}))
+        (d/transact connection
+                    (run/receipt-start-tx {:seon.cluster.run/id "run-p1"
+                                           :seon.cluster.eval/ordinal 0
+                                           :seon.cluster.eval/at now}))
+        (d/transact connection
+                    (run/receipt-settle-tx {:seon.cluster.run/id "run-p1"
+                                            :seon.cluster.eval/ordinal 0
+                                            :seon.cluster.eval/result-edn "3"}))
+        ;; boot recovery on the surviving process releases dead custody
+        (d/transact connection
+                    (run/recover-tx {:seon.cluster.run/id "run-p1"
+                                     :seon.cluster.run/live-processes
+                                     #{process}
+                                     :seon.cluster.run/now (Date.)}))
+        (is (= :resume (:seon.cluster.work/situation
+                        (work/next-work @connection (request connection))))
+            "the recovered planned run is ordinary :resume work")
+        (binding [*evaluation* {:seon.cluster.eval/result-edn
+                                (pr-str (my.run/complete "3"))
+                                :seon.sci.admit/value (my.run/complete "3")}]
+          (drive! cluster 6))
+        (testing "the disposition committed and the run closed"
+          (is (some? (d/q '[:find ?c . :in $ ?id :where
+                            [?r :seon.cluster.run/id ?id]
+                            [?r :seon.cluster.run/closed-at ?c]]
+                          @connection "run-p1")))
+          (is (nil? (work/next-work @connection (request connection)))
+              "and nothing re-derives — no livelock"))
+        (testing "no error facts — the old path committed one per pass"
+          (is (empty? (d/q '[:find ?e :where [?e :seon.error/id _]]
+                           @connection))))
+        (testing "form 1 was attempted exactly once, under (run, ordinal)
+                  identity"
+          (is (= 1 (count (d/q '[:find ?e :where
+                                 [?e :seon.cluster.eval/ordinal 1]]
+                               @connection)))))))))
+
+(deftest a-held-runs-paid-call-is-never-duplicated
+  ;; P2, the lapsed-lease re-pay cycle, re-expressed as CUSTODY
+  ;; MISMATCH now that no lease exists to lapse: across the whole
+  ;; open→call→fold interleaving there is exactly ONE provider
+  ;; dispatch, and a rewake seen by a DIFFERENT process derives no
+  ;; second `:call` for the held run
+  ;; (research/trigger-conservation-2026-07-28 §3.2).
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            requests (atom [])]
+        ;; pass 1: open + claim (the busy fence before the expensive part)
+        (let [work (work/next-work @connection (request connection))]
+          (is (= :open (:seon.cluster.work/situation work)))
+          (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                              :seon.cluster.work/next work}
+                             (Date.)))
+        (testing "the held run derives :call for its holder ONLY"
+          (is (= :call (:seon.cluster.work/situation
+                        (work/next-work @connection (request connection)))))
+          (is (nil? (work/next-work @connection
+                                    {:seon.cluster.run/process
+                                     "some-other-process"
+                                     :seon.cluster.work/now (Date.)}))
+              "custody mismatch: another process derives NO work for it"))
+        ;; the rest of the interleaving, arbitrarily later — there is
+        ;; no clock on custody, so the pass simply proceeds
+        (with-redefs [ai/complete
+                      (recording-completer
+                       requests
+                       [{:seon.ai/text "(my.run/complete \"one\")"}])]
+          (binding [*evaluation* {:seon.cluster.eval/result-edn
+                                  (pr-str (my.run/complete "one"))
+                                  :seon.sci.admit/value
+                                  (my.run/complete "one")}]
+            (drive! cluster 6)))
+        (is (= 1 (count @requests))
+            "zero duplicate provider dispatches across the interleaving")
+        (is (= 1 (count (attempt-rows @connection)))
+            "and the durable attempt chain agrees")
+        (is (some? (d/q '[:find ?c . :where
+                          [_ :seon.cluster.run/closed-at ?c]] @connection))
+            "the turn ran to completion")))))
+
+;;; ---------------------------------------------------------------------------
+;;; Nothing throws into the agent loop — the prompt refusal seam
+;;; ---------------------------------------------------------------------------
+
+(deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
+  ;; `seon.cluster.prompt/prompt` refuses by THROWING (`::no-trigger`,
+  ;; `::missing-input`). \"Nothing throws into the agent loop\" is law:
+  ;; the loop's one `:call` site catches it and records the flat error
+  ;; value, the turn ends `:error`, and no provider call is made.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            requests (atom [])]
+        ;; a held run whose creating transaction names NO trigger — the
+        ;; caller-bug state `::no-trigger` seals
+        (d/transact connection
+                    [{:seon.cluster.run/id "run-untriggered"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.run/opened-at now
+                      :seon.cluster.run/process process}
+                     {:seon.cluster.agent/id "agent-a"
+                      :seon.cluster.agent/run
+                      [:seon.cluster.run/id "run-untriggered"]}])
+        (with-redefs [ai/complete
+                      (recording-completer requests [{:seon.ai/text "unused"}])]
+          (let [report (cluster.loop/turn
+                        {:seon.cluster.loop/cluster cluster
+                         :seon.cluster.work/next
+                         {:seon.cluster.work/situation :call
+                          :seon.cluster.run/id "run-untriggered"
+                          :seon.cluster.agent/id "agent-a"}}
+                        (Date.))]
+            (is (= :error (:seon.cluster.loop/outcome report))
+                "the turn ends as a value — the throw never escapes")))
+        (is (empty? @requests) "no provider call without a prompt")
+        (is (empty? (attempt-rows @connection)) "and no attempt row")
+        (testing "the refusal is a durable error fact naming its rule"
+          (is (contains? (set (d/q '[:find [?kind ...] :where
+                                     [?e :seon.error/kind ?kind]]
+                                   @connection))
+                         :seon.cluster.prompt/refused)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The prompt's cause is the run's recorded trigger

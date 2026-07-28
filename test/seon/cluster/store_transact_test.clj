@@ -61,7 +61,7 @@
 
 (def ^:private attributes
   [:seon.cluster.agent/id :seon.cluster.run/id :seon.cluster.run/agent
-   :seon.cluster.run/opened-at :seon.cluster.run/claim-epoch])
+   :seon.cluster.run/opened-at :seon.cluster.eval/ordinal])
 
 (defn- with-connection [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -109,7 +109,7 @@
   (with-connection
     (fn [connection]
       (let [outcome (store/transact! connection
-                                     [{:seon.cluster.run/claim-epoch
+                                     [{:seon.cluster.eval/ordinal
                                        "not-an-int"}])]
         (is (= :seon.db/rejected (:seon.error/kind outcome)))
         (is (= :transact/schema (:error (:seon.error/data outcome)))
@@ -120,7 +120,7 @@
     (fn [connection]
       (doseq [tx-data [[{:seon.cluster.agent/id "agent-b"}]
                        [[:db.fn/call #'refusing-call {}]]
-                       [{:seon.cluster.run/claim-epoch "nope"}]
+                       [{:seon.cluster.eval/ordinal "nope"}]
                        [[:db/add "nonsense" :nothing/here 1]]]]
         (is (map? (store/transact! connection tx-data))
             "every outcome is a value the run loop can branch on")))))

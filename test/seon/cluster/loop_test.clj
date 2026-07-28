@@ -60,7 +60,6 @@
 (deftest the-terminal-transaction-is-one-transaction
   (let [base {:seon.cluster.run/id "run-1"
               :seon.cluster.run/process "process/one"
-              :seon.cluster.run/claim-epoch 1
               :seon.cluster.run.form/ordinal 0
               :seon.cluster.eval/result-edn "1"}
         without (cluster.loop/terminal-tx base now)
@@ -78,7 +77,7 @@
           "and it goes through a transition, so the run's own fence
            applies to the close as much as to the claim")
       (is (= [now]
-             (keep (comp :seon.cluster.run/now last)
+             (keep (comp :seon.cluster.run/closed-at last)
                    with))
           "the close receives the exact pass instant, not a second clock"))))
 
@@ -137,9 +136,7 @@
                                :seon.cluster.run/agent
                                [:seon.cluster.agent/id "alice"]
                                :seon.cluster.run/opened-at now
-                               :seon.cluster.run/claim-epoch 1
                                :seon.cluster.run/process "process/one"
-                               :seon.cluster.run/lease-until now
                                :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a"))}
                               {:seon.cluster.agent/id "alice"
@@ -160,7 +157,6 @@
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.eval/ordinal 0
-                                :seon.cluster.eval/claim-epoch 1
                                 :seon.cluster.eval/at now}])))
         (is (map? (d/transact connection
                               [{:seon.cluster.eval/id "e-0"
@@ -196,7 +192,6 @@
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.eval/ordinal 1
-                                :seon.cluster.eval/claim-epoch 1
                                 :seon.cluster.eval/at now
                                 :seon.cluster.eval/error "boom"
                                 :seon.cluster.eval/result-edn "{:seon.error/kind :x}"}]))))
@@ -220,12 +215,11 @@
   [:seon.cluster.agent/id :seon.cluster.agent/run
    :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at :seon.cluster.run/process
-   :seon.cluster.run/claim-epoch :seon.cluster.run/lease-until
    :seon.cluster.run/plan-digest :seon.cluster.run/forms
    :seon.cluster.run.form/id :seon.cluster.run.form/run
    :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
    :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
-   :seon.cluster.eval/claim-epoch :seon.cluster.eval/at
+   :seon.cluster.eval/at
    :seon.cluster.eval/interrupted-at :seon.cluster.eval/result-edn
    :seon.cluster.eval/error
    :seon.cluster.message/id :seon.cluster.message/to
@@ -259,11 +253,8 @@
    {:tx-data
     (cond-> [(cond-> {:seon.cluster.run/id "run-1"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.run/opened-at now
-                      :seon.cluster.run/claim-epoch 1}
-               held? (assoc :seon.cluster.run/process process
-                            :seon.cluster.run/lease-until
-                            (Date. (+ (inst-ms now) 60000)))
+                      :seon.cluster.run/opened-at now}
+               held? (assoc :seon.cluster.run/process process)
                planned? (assoc :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a")))
                closed? (assoc :seon.cluster.run/closed-at now))]
@@ -287,7 +278,6 @@
                             :seon.cluster.eval/run
                             [:seon.cluster.run/id "run-1"]
                             :seon.cluster.eval/ordinal ordinal
-                            :seon.cluster.eval/claim-epoch 1
                             :seon.cluster.eval/at now}
                      (= :done state)
                      (assoc :seon.cluster.eval/result-edn "2")

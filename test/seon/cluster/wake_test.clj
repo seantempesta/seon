@@ -30,7 +30,7 @@
    :seon.cluster.message/id :seon.cluster.message/to
    :seon.cluster.message/content :seon.cluster.message/at
    :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
-   :seon.cluster.run/claim-epoch])
+   :seon.cluster.run/plan-digest])
 
 (defn- with-connection [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -114,7 +114,8 @@
                                      :seon.cluster.run/agent
                                      [:seon.cluster.agent/id "agent-a"]
                                      :seon.cluster.run/opened-at (Date.)
-                                     :seon.cluster.run/claim-epoch 1}])
+                                     :seon.cluster.run/plan-digest
+                                     (apply str (repeat 64 "a"))}])
             (is (nil? (first (async/alts!! [channel (async/timeout 300)])))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection

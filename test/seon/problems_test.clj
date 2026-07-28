@@ -94,8 +94,7 @@
               [{:seon.cluster.run/id "run-wedged"
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                 :seon.cluster.run/opened-at now
-                :seon.cluster.run/process dead
-                :seon.cluster.run/claim-epoch 1}]))
+                :seon.cluster.run/process dead}]))
 
 (defn- commit-failed-run!
   [connection]
@@ -121,7 +120,6 @@
                {:seon.cluster.eval/id "receipt-1"
                 :seon.cluster.eval/run [:seon.cluster.run/id "run-with-receipt"]
                 :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/claim-epoch 1
                 :seon.cluster.eval/at now
                 ;; the error's presence IS the errored state
                 :seon.error/kind :seon.sci.eval/evaluation-failed

@@ -125,7 +125,6 @@
                   [{:seon.cluster.run/id "run-0"
                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
                     :seon.cluster.run/opened-at now
-                    :seon.cluster.run/claim-epoch 1
                     :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))
                     :seon.cluster.run/closed-at now}
                    {:seon.cluster.run.form/id "run-0-0"
@@ -139,13 +138,11 @@
                    {:seon.cluster.eval/id "e-0"
                     :seon.cluster.eval/run [:seon.cluster.run/id "run-0"]
                     :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at now
                     :seon.cluster.eval/result-edn "2"}
                    {:seon.cluster.eval/id "e-1"
                     :seon.cluster.eval/run [:seon.cluster.run/id "run-0"]
                     :seon.cluster.eval/ordinal 1
-                    :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at now
                     :seon.cluster.eval/interrupted-at now}])
       (open-run! connection)
@@ -167,7 +164,6 @@
                   [{:seon.cluster.run/id "run-0"
                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
                     :seon.cluster.run/opened-at now
-                    :seon.cluster.run/claim-epoch 1
                     :seon.cluster.run/closed-at now}])
       (open-run! connection)
       (is (str/includes? (str/lower-case (text-of connection)) "interrupt")
@@ -187,7 +183,6 @@
                   [{:seon.cluster.run/id "run-crashed"
                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
                     :seon.cluster.run/opened-at (Date. 1000)
-                    :seon.cluster.run/claim-epoch 2
                     :seon.cluster.run/closed-at (Date. 2000)}])
       ;; claim-early: the loop opens and claims the NEW run, and only
       ;; then derives the prompt for it
@@ -208,7 +203,6 @@
                   [{:seon.cluster.run/id "run-fine"
                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
                     :seon.cluster.run/opened-at (Date. 1000)
-                    :seon.cluster.run/claim-epoch 1
                     :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))
                     :seon.cluster.run/closed-at (Date. 2000)}
                    {:seon.cluster.run.form/id "ff-0"
@@ -218,7 +212,6 @@
                    {:seon.cluster.eval/id "ee-0"
                     :seon.cluster.eval/run [:seon.cluster.run/id "run-fine"]
                     :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/claim-epoch 1
                     :seon.cluster.eval/at (Date. 1500)
                     :seon.cluster.eval/result-edn "2"}])
       (open-run! connection)
@@ -308,7 +301,6 @@
         {:seon.cluster.eval/id "run-paused-0"
          :seon.cluster.eval/run [:seon.cluster.run/id "run-paused"]
          :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/claim-epoch 1
          :seon.cluster.eval/at (Date. 1500)
          :seon.cluster.eval/result-edn
          (pr-str {:my.run/disposition :wait
@@ -332,7 +324,6 @@
           {:seon.cluster.eval/id "run-done-0"
            :seon.cluster.eval/run [:seon.cluster.run/id "run-done"]
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/claim-epoch 1
            :seon.cluster.eval/at (Date. 1500)
            :seon.cluster.eval/result-edn
            (pr-str {:my.run/disposition :completed
@@ -353,7 +344,6 @@
           {:seon.cluster.eval/id "run-junk-0"
            :seon.cluster.eval/run [:seon.cluster.run/id "run-junk"]
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/claim-epoch 1
            :seon.cluster.eval/at (Date. 1500)
            :seon.cluster.eval/result-edn "#not-a-tag{"}])
         (open-run! connection)

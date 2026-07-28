@@ -174,14 +174,13 @@
   {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request :inst]
                   [:vector :some]]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
-           :seon.cluster.run/claim-epoch :seon.cluster.run.form/ordinal
+           :seon.cluster.run.form/ordinal
            :seon.cluster.eval/result-edn :seon.cluster.eval/error
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
-                         :seon.cluster.run/claim-epoch claim-epoch
                          :seon.cluster.eval/ordinal ordinal}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
                   error (assoc :seon.cluster.eval/error error)
@@ -200,13 +199,9 @@
           (case (:my.run/disposition value)
             :completed (run/close-tx {:seon.cluster.run/id id
                                       :seon.cluster.run/process process
-                                      :seon.cluster.run/claim-epoch claim-epoch
-                                      :seon.cluster.run/closed-at now
-                                      :seon.cluster.run/now now})
+                                      :seon.cluster.run/closed-at now})
             :wait (run/release-tx {:seon.cluster.run/id id
-                                   :seon.cluster.run/process process
-                                   :seon.cluster.run/claim-epoch claim-epoch
-                                   :seon.cluster.run/now now})
+                                   :seon.cluster.run/process process})
             nil))))
 
 ;;; ---------------------------------------------------------------------------
@@ -514,24 +509,21 @@
                  connection
                  (run/claim-tx {:seon.cluster.run/id run-id
                                 :seon.cluster.run/process process
-                                :seon.cluster.run/lease-until
-                                (Date. (+ (inst-ms now) 60000))
+                                ;; the only live process on this branch
+                                ;; is this one — flock + single writer
+                                :seon.cluster.run/live-processes #{process}
                                 :seon.cluster.run/now now}))]
     (if (:seon.error/kind claimed)
       false
-      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
-            closed (store/transact!
+      (let [closed (store/transact!
                     connection
                     (run/close-tx {:seon.cluster.run/id run-id
                                    :seon.cluster.run/process process
-                                   :seon.cluster.run/claim-epoch
-                                   (:seon.cluster.run/claim-epoch run)
                                    ;; the pass's ONE clock, not a second
                                    ;; reading of it — review-caught, and
                                    ;; the reason a state-machine property
                                    ;; over settlements can be exact
-                                   :seon.cluster.run/closed-at now
-                                   :seon.cluster.run/now now}))]
+                                   :seon.cluster.run/closed-at now}))]
         (not (:seon.error/kind closed))))))
 
 (defn turn
@@ -573,8 +565,8 @@
                                           :seon.cluster.run/opened-at now})
                             (run/claim-tx {:seon.cluster.run/id id
                                            :seon.cluster.run/process process
-                                           :seon.cluster.run/lease-until
-                                           (Date. (+ (inst-ms now) 60000))
+                                           :seon.cluster.run/live-processes
+                                           #{process}
                                            :seon.cluster.run/now now}))
                       :tx-meta {:seon.db/trigger
                                 [:seon.cluster.message/id
@@ -617,21 +609,16 @@
                     ;; evaporated — the drive sat claimed-with-no-plan
                     ;; for two minutes and the operator had to reproduce
                     ;; the call by hand to learn it was a missing key.
-                    (let [run (d/pull @connection '[*]
-                                      [:seon.cluster.run/id run-id])]
-                      (store/transact!
-                       connection
-                       (into [[:db/add [:seon.cluster.run/id run-id]
-                               :seon.cluster.run/error
-                               (:seon.error/message failure)]]
-                             (run/close-tx
-                              {:seon.cluster.run/id run-id
-                               :seon.cluster.run/process process
-                               :seon.cluster.run/claim-epoch
-                               (:seon.cluster.run/claim-epoch run)
-                               :seon.cluster.run/closed-at now
-                               :seon.cluster.run/now now})))
-                      (report :error 0)))
+                    (store/transact!
+                     connection
+                     (into [[:db/add [:seon.cluster.run/id run-id]
+                             :seon.cluster.run/error
+                             (:seon.error/message failure)]]
+                           (run/close-tx
+                            {:seon.cluster.run/id run-id
+                             :seon.cluster.run/process process
+                             :seon.cluster.run/closed-at now})))
+                    (report :error 0))
             freeze!
             (fn [completion]
               ;; the reply became a plan, or it did not: unchanged, and
@@ -640,19 +627,14 @@
               (let [sources (reply/sources (:seon.ai/text completion))]
                 (if (:seon.error/kind sources)
                   (fail! sources)
-                  (let [run (d/pull @connection '[*]
-                                    [:seon.cluster.run/id run-id])
-                        outcome (store/transact!
+                  (let [outcome (store/transact!
                                  connection
                                  (run/plan-tx
                                   {:seon.cluster.run/id run-id
                                    :seon.cluster.run/process process
-                                   :seon.cluster.run/claim-epoch
-                                   (:seon.cluster.run/claim-epoch run)
                                    :seon.cluster.run/plan-digest
                                    (digest sources)
-                                   :seon.cluster.run/sources sources
-                                   :seon.cluster.run/now now}))]
+                                   :seon.cluster.run/sources sources}))]
                     (report (if (refused! cluster outcome now
                                           {:seon.cluster.agent/id agent-id
                                            :seon.cluster.run/id run-id})
@@ -663,11 +645,25 @@
             ;; the trigger from the run's own creating transaction
             ;; (`message/trigger`), never a re-asked queue: the recorded
             ;; cause is the prompt's cause. One derivation, one owner.
-            rendered (prompt/prompt @connection
-                                    {:seon.cluster.run/id run-id
-                                     :seon.cluster.agent/id agent-id
-                                     :seon.sci.admit/caps
-                                     (:seon.sci.admit/caps cluster)})
+            ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
+            ;; refuses by throwing (`::no-trigger`, `::missing-input`),
+            ;; and this one call site turns that refusal into the flat
+            ;; error value the loop already records — the same shape a
+            ;; refused transaction takes through `store/transact!`.
+            rendered (try
+                       (prompt/prompt @connection
+                                      {:seon.cluster.run/id run-id
+                                       :seon.cluster.agent/id agent-id
+                                       :seon.sci.admit/caps
+                                       (:seon.sci.admit/caps cluster)})
+                       (catch #?(:clj Exception :cljs :default) failure
+                         ;; the kind fallback keeps this total: an
+                         ;; exception carrying no flat error data still
+                         ;; ends the turn as a recorded value rather
+                         ;; than falling through to a nil-prompt call
+                         (merge {:seon.error/kind ::prompt-failed
+                                 :seon.error/message (ex-message failure)}
+                                (error/refusal failure))))
             ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
             ;; exact prompt text, the rendered basis and the ordered
             ;; contribution records commit in ONE turn-owned transaction
@@ -678,11 +674,16 @@
             ;; REUSE this one capture — the same prompt bytes go out,
             ;; and the backup's system segment is re-derivable from the
             ;; committed primary error fact, never re-captured.
-            captured (store/transact!
-                      connection
-                      (context/capture-tx
-                       {:seon.cluster.run/id run-id
-                        :seon.cluster.prompt/rendered-context rendered}))
+            captured (if (:seon.error/kind rendered)
+                       ;; a refused prompt derivation IS the turn's
+                       ;; outcome — there is nothing to capture and no
+                       ;; provider call to make
+                       rendered
+                       (store/transact!
+                        connection
+                        (context/capture-tx
+                         {:seon.cluster.run/id run-id
+                          :seon.cluster.prompt/rendered-context rendered})))
             ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
             ;; text and alone places that string in `:seon.ai/prompt` —
             ;; the bytes the capture recorded are the bytes sent.
@@ -790,8 +791,23 @@
       ;; agent's next prompt carries the interrupted warning — not a
       ;; case to paper over with a persisted context.
       :resume
-      (let [run (d/pull @connection '[*] [:seon.cluster.run/id run-id])
-            epoch (:seon.cluster.run/claim-epoch run)
+      ;; CUSTODY PRECEDES WORK (custody revision, Revision 1): the pass
+      ;; claims the unheld run — CAS-on-absence inside the transaction —
+      ;; BEFORE folding, so the disposition's terminal transaction finds
+      ;; the holder present and the unheld-resume livelock is
+      ;; unrepresentable rather than caught. A lost claim is a QUIET
+      ;; skip: another pass owns the run, and that is not an error fact.
+      (let [held (d/pull @connection [:seon.cluster.run/process]
+                         [:seon.cluster.run/id run-id])
+            claimed (when-not (= process (:seon.cluster.run/process held))
+                      (store/transact!
+                       connection
+                       (run/claim-tx {:seon.cluster.run/id run-id
+                                      :seon.cluster.run/process process
+                                      :seon.cluster.run/live-processes
+                                      #{process}
+                                      :seon.cluster.run/now now})))
+            skipped? (some? (:seon.error/kind claimed))
             evaluate (requiring-resolve
                       (:seon.cluster.loop/evaluate cluster))
             ;; the message this run is answering, read ONCE per turn: it
@@ -802,13 +818,14 @@
             ctx (sci/fork (sci.eval/base))]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0]
-          (let [started (store/transact!
-                         connection
-                         (run/receipt-start-tx
-                          {:seon.cluster.run/id run-id
-                           :seon.cluster.run/claim-epoch epoch
-                           :seon.cluster.eval/ordinal ordinal
-                           :seon.cluster.eval/at now}))]
+          (if skipped?
+            (report :released ran)
+            (let [started (store/transact!
+                           connection
+                           (run/receipt-start-tx
+                            {:seon.cluster.run/id run-id
+                             :seon.cluster.eval/ordinal ordinal
+                             :seon.cluster.eval/at now}))]
             (if (refused! cluster started now
                           {:seon.cluster.agent/id agent-id
                            :seon.cluster.run/id run-id})
@@ -881,7 +898,6 @@
                     receipt
                     (cond-> {:seon.cluster.run/id run-id
                              :seon.cluster.run/process process
-                             :seon.cluster.run/claim-epoch epoch
                              :seon.cluster.run.form/ordinal ordinal}
                       (:seon.cluster.eval/result-edn evaluation)
                       (assoc :seon.cluster.eval/result-edn
@@ -942,7 +958,7 @@
                                     :released)
                                   ran)
                   next-ordinal (recur next-ordinal ran)
-                  :else (report :released ran)))))))
+                  :else (report :released ran))))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the
       ;; agent stops being busy.
@@ -961,30 +977,25 @@
       ;; makes "only the holder may close a run" a rule the loop can
       ;; keep rather than one it repeatedly breaks.
       :close
-      (let [held (d/pull @connection '[*] [:seon.cluster.run/id run-id])
+      (let [held (d/pull @connection [:seon.cluster.run/process]
+                         [:seon.cluster.run/id run-id])
             claimed (when-not (= process (:seon.cluster.run/process held))
                       (store/transact!
                        connection
                        (run/claim-tx {:seon.cluster.run/id run-id
                                       :seon.cluster.run/process process
-                                      :seon.cluster.run/lease-until
-                                      (Date. (+ (inst-ms now) 60000))
+                                      :seon.cluster.run/live-processes
+                                      #{process}
                                       :seon.cluster.run/now now})))
-            run (if claimed
-                  (d/pull @connection '[*] [:seon.cluster.run/id run-id])
-                  held)
             outcome (if (:seon.error/kind claimed)
-                      ;; somebody else holds it under a live lease: not
-                      ;; ours to close, and not an error of ours either
+                      ;; somebody else holds it: not ours to close, and
+                      ;; not an error of ours either
                       claimed
                       (store/transact!
                        connection
                        (run/close-tx {:seon.cluster.run/id run-id
                                       :seon.cluster.run/process process
-                                      :seon.cluster.run/claim-epoch
-                                      (:seon.cluster.run/claim-epoch run)
-                                      :seon.cluster.run/closed-at now
-                                      :seon.cluster.run/now now})))]
+                                      :seon.cluster.run/closed-at now})))]
         (report (if (refused! cluster outcome now
                               {:seon.cluster.agent/id agent-id
                                :seon.cluster.run/id run-id})
