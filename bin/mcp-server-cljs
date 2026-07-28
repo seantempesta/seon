@@ -3,5 +3,4 @@ set -euo pipefail
 
 SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export SEON_PROJECT_ROOT="$SEON_ROOT"
-exec bb --config "$SEON_ROOT/bb.edn" --deps-root "$SEON_ROOT" \
-  -m seon.dev.mcp "$@"
+exec bb --classpath "$SEON_ROOT/script" -m seon.dev.mcp "$@"
