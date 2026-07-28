@@ -94,19 +94,20 @@ lives in the blob archive behind a datom ref. The DB is never a text dump.
 
 ### Receipts are the crash-forensics spine
 
-The run's `:seon.agent.run/process`, claim epoch, heartbeat, turn phase,
+The run's `:seon.agent.run/process` custody, turn phase,
 provider attempts, and eval rows form one causally ordered record. They answer four different
 questions without consulting process memory:
 
-- **Who held authority?** Query `:seon.agent.run/process` and
-  `:seon.agent.run/claim-epoch` at the relevant database value.
+- **Who held authority?** Query `:seon.agent.run/process` at the
+  relevant database value — custody is that fact's presence
+  (2026-07-28 custody revision: epochs and leases are deleted).
 - **What step was admitted?** Read `:seon.agent.turn/phase` together with the
   attempt or eval receipt opened before dispatch.
 - **What finished?** Terminal receipt state uses Datahike's `:db.fn/cas` from
   the open/running state and carries the bounded result, error, output, usage,
   or response identity. `:db.fn/cas` is reserved for facts two processes race
   to win exactly once: plan freeze from absent to digest, and run claim from
-  no process to the process record together with a claim-epoch increment;
+  no process to the process record (CAS-on-absence);
   receipt settlement follows the same asserted old-value discipline under the
   run fence.
 - **What did takeover repair?** An abandoned provider attempt becomes
@@ -121,7 +122,7 @@ crossed guarded eval admission but did not terminalize. These distinctions gover
 recovery and remain visible to debug projections.
 
 Datahike temporal history supplies **claim archaeology**. An investigator can
-walk the run's process ref, epoch, and heartbeat changes; join each transition to
+walk the run's process-ref custody changes; join each transition to
 transaction provenance; inspect the cursor and receipts at the same database
 value; and identify the exact transaction that displaced a holder. Expiry
 itself is derived from the historical heartbeat and configured stale interval,
@@ -329,7 +330,7 @@ point: the value pinned for the interrupted phase and the current value at which
 takeover terminalizes or advances it. Their basis transactions and commit IDs
 show what the prior process saw and what committed before replacement. Process
 diagnostics stay in operator logs. Database forensics retain
-`:seon.agent.run/process`, epoch, phase cursor, attempt/eval receipts, and the
+`:seon.agent.run/process`, phase cursor, attempt/eval receipts, and the
 thin process-loss recovery fact. The next turn may state that replacement loaded the current
 database program and that transient tier-local values were lost. It never
 claims committed effects were undone or silently retries an effect contrary

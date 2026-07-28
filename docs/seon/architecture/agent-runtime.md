@@ -13,7 +13,7 @@ An agent is durable database state plus replaceable compute. A trigger opens a
 bounded **run**. The cluster JVM acquires that run through Datahike's
 `:db.fn/cas`, which is reserved for facts two processes race to win exactly
 once: plan freeze from absent to digest, and run claim from no process to the
-process record together with a claim-epoch increment. Opening and claiming
+process record (CAS-on-absence). Opening and claiming
 happen before prompt derivation or a paid model call, so the agent-busy fence
 exists before money leaves the database boundary. No process-local loop,
 promise registry, or attempt buffer is an authority.
@@ -57,34 +57,34 @@ fingerprint, schema-projected ordered arguments, subject refs, and
 `:seon.db/user` and `:seon.db/process`; it is not copied onto the interaction.
 Submission leaves the agent's current-run ref absent so multiple interactions
 can queue as database facts. First claim atomically CASes that absent pointer
-to the interaction run while acquiring claim epoch `1`. The same pointer
-and epoch fence then governs every receipt and terminal transition.
+to the interaction run. The same pointer and settle-once presence fences
+then govern every receipt and terminal transition.
 
-Custody lives on that run:
+Custody lives on that run as ONE fact (custody revision 2026-07-28 —
+epochs and leases are deleted; presence subsumes them, proven in
+`docs/prds/sci-execution-runtime/research/zombie-constructibility-2026-07-28.md`):
 
-- `:seon.agent.run/process` identifies the process record for the cluster JVM
-  instance holding the run, grounded by its generation and `(pid,
-  start-instant)` identity;
-- `:seon.agent.run/claim-epoch` is a monotonic fencing number.
+- `:seon.agent.run/process` present = held; absent = unheld. It names the
+  process record for the cluster JVM instance holding the run, grounded by
+  its generation and `(pid, start-instant)` identity.
 
-The first acquisition CASes an absent process ref and epoch to the current
-cluster JVM's process record and epoch `1`. Reacquisition of a cleanly released
-run CASes the absent process ref to the current process record and increments
-the observed epoch. Takeover CASes the observed process and epoch before
-replacement. A live foreign claim is not stealable.
+CUSTODY PRECEDES WORK: a pass acts on a run only under custody it verified
+or acquired in that same pass. Acquisition CASes the absent process ref to
+the current process record. Taking over from a dead holder (start-instant
+mismatch or absent process) first stamps that custody's running receipts
+`interrupted-at`, then swaps the process ref — one `:db.fn/call`
+transition, so the intermediate state never exists. A live foreign claim
+is not stealable.
 
 Every run mutation leads with two assertions:
 
 1. the agent still points to the observed run; and
-2. the run still has the cluster JVM's held epoch.
-
-The process record identifies custody for operators and archaeology; the epoch
-is the authority fence. A displaced cluster JVM cannot publish late work
-because its transaction fails at the transaction owner.
+2. the run's process ref is this cluster JVM's process record.
 
 Receipt settlement, release, interruption, and close all carry the same
-pointer-plus-epoch fence. A clean release retracts only the process ref and
-retains the monotonic epoch. Closing the run records the terminal facts,
+pointer-plus-custody fence, and terminal facts CAS from absence
+(settle-once). A clean release retracts only the process ref. Closing the
+run records the terminal facts,
 retracts the process ref, and retracts the agent's current-run ref in one
 transaction.
 
@@ -100,13 +100,13 @@ residue is only what database serialization cannot make disappear:
 - **crash custody** — the process ref records which process owns work that may
   die between transactions, so boot can derive dead custody from facts plus the
   live-process set; and
-- **the epoch** — after replacement, an old activity can still finish late.
-  Its observed epoch must fail before it can publish into the replacement's
-  run.
+- **settle-once** — terminal receipt facts CAS from absence, so late work
+  from a replaced holder refuses at the writer instead of publishing into
+  the replacement's run (this presence fence is what deleted the epoch).
 
 Without the first fence, serial commits can still follow two concurrent paid
-calls. Without the process ref, crash recovery has no fact to bury. Without the
-epoch, a stale pre-crash result can commit after replacement. Everything else
+calls. Without the process ref, crash recovery has no fact to bury. Without
+settle-once, a stale pre-crash result can commit after replacement. Everything else
 is already serialized by the database.
 
 ## The agent's graph — one control algorithm per agent
@@ -118,7 +118,7 @@ Each agent's flow graph hosts the one control algorithm:
 3. derive the next open, call, resume, close, or interruption value from facts;
 4. open and claim before any paid model work;
 5. execute only the work described by that value;
-6. commit receipts and dispositions under the run pointer and epoch fence; and
+6. commit receipts and dispositions under the run pointer-and-custody fence; and
 7. close, release for a later wake, or settle interrupted wreckage.
 
 There is nothing that routes by agent identity, because there is nothing
@@ -170,7 +170,7 @@ One model reply freezes into an ordered form plan exactly once. The agent's
 graph reduces that plan in order, carrying the prior transaction report's `:db-after`
 as the next form's database value. Every form receives a durable running receipt
 before SCI dispatch and one terminal receipt afterward. Terminal settlement and
-the interpreted disposition commit together under the run pointer and epoch
+the interpreted disposition commit together under the run pointer-and-custody
 fence, so no process can publish half a form outcome.
 
 The plan and receipts are the only execution cursor. A terminal receipt is
@@ -248,7 +248,7 @@ legitimate work; loud firing; no runtime numeric fallback.
 
 Recovery is fact-driven and never an automatic retry path. At boot, the cluster
 compares run custody with the live-process set and transactionally releases
-dead custody regardless of the abandoned lease's remaining wall time. The
+dead custody by the holder's liveness fact alone — no lease, no wall-clock wait. The
 re-derived agent graphs then find the resulting wreckage and bury their own dead:
 running receipts become interrupted, the run closes as interrupted, and the
 facts retain exactly where durable progress stopped.
@@ -261,7 +261,7 @@ manual nudge, its prompt derives one interruption warning from those facts and
 the agent adapts. Recovery itself does not manufacture that next trigger.
 
 Committed terminal receipts remain untouched. A stale pre-crash activity that
-finishes later fails the same pointer-and-epoch fence used during normal
+finishes later fails the same pointer-and-custody (settle-once) fence used during normal
 execution. Boot recovery and graph settlement are idempotent transactions, so a
 second crash during recovery merely leaves facts for the next boot to derive
 again.
@@ -353,13 +353,13 @@ without becoming part of the durable agent identity.
 
 - single-writer transactions establish one winner for a run-opening or claim;
 - immutable database values make each decision reproducible;
-- temporal history preserves trigger, claim, epoch, and receipt archaeology;
+- temporal history preserves trigger, claim, and receipt archaeology;
 - refs connect agents, runs, turns, attempts, evals, messages, and blobs;
 - replacement compute derives interruption and remaining work from facts; and
 - bitemporality enables historical prompt and policy reconstruction.
 
 Seon adds no external lock service, workflow queue, promise registry, or
-recovery log. The run process ref and epoch are custody and fence; plans and
+recovery log. The run process ref is custody and fence; plans and
 receipts are the execution record.
 
 ## See also

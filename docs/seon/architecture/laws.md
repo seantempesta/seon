@@ -49,7 +49,8 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   capacity. Supervision, bounded evals, and cheap flow-graph rebuilds protect
   the cluster JVM; process walls do not split its co-located responsibilities.
 - **Claims and receipts outrank process memory.** A run's
-  `:seon.agent.run/process`, epoch, and heartbeat establish custody; the turn
+  `:seon.agent.run/process` presence establishes custody (custody
+  revision 2026-07-28: epochs and leases are deleted); the turn
   phase and attempt/eval receipts establish admitted and completed work.
   Recovery derives from those facts.
 - **Same source or same artifact.** Cross-runtime policy is one portable
@@ -152,7 +153,7 @@ The full decision record is [[011-tests-find-design-issues]].
 - **Assertions target facts, transitions, envelopes, and Datahike
   `:db.fn/cas` outcomes.** `:db.fn/cas` is reserved for facts two processes
   race to win exactly once: plan freeze from absent to digest, and run claim
-  from no process to the process record together with a claim-epoch increment.
+  from no process to the process record (CAS-on-absence).
   Never exact prose.
 
 - **No datom string-size limit exists; amplification is the real cost.**

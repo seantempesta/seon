@@ -119,8 +119,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    than mutable application state; the writer arbitrates total order and late
    writes fail the Datahike `:db.fn/cas` work fence. `:db.fn/cas` is reserved
    for facts two processes race to win exactly once: plan freeze from absent
-   to digest, and run claim from no process to the process record together
-   with a claim-epoch increment. Anchors: [[agent-runtime]] and
+   to digest, and run claim from no process to the process record
+   (CAS-on-absence). Anchors: [[agent-runtime]] and
    [[observability]].
 7. **Capabilities cross tiers without mirrors.** Each capability family has one
    portable `.cljc` core containing its public request and response data,
@@ -233,7 +233,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   manages child agents through `/call`, writing `:seon.agent/parent`. See
   [[agent-runtime]].
 - **run / claim / turn / phase** — the bounded work entity a trigger opens,
-  its `:seon.agent.run/process` and epoch custody, one prompt/model/eval record, and that
+  its `:seon.agent.run/process` presence custody, one prompt/model/eval record, and that
   record's persisted recovery cursor. See [[agent-runtime]].
 - **cluster JVM / leaf runtime / database interest** — the transaction,
   agent-graph, guarded-eval, program-graph, render-pipeline, and HTTP/SSE JVM
@@ -264,7 +264,7 @@ Datastar's ID-aware morph. It contains no ClojureScript application or database
 logic.
 
 Every process may die. The operator restarts the cluster JVM for its store, and
-the run's `:seon.agent.run/process`, epoch, phase, and receipts let replacement
+the run's `:seon.agent.run/process`, phase, and receipts let replacement
 compute resume from database facts. The render graph and leaf runtimes are
 reconstructed from database, artifact, and configuration facts. On cluster-JVM
 restart, every pinned canvas renders once from current database truth. Remote
@@ -552,8 +552,10 @@ the block. Index every ns's valid forms; render `my.*` in full. See [[data-model
 
 ### Agent runtime — [[agent-runtime]]
 
-Runs are claimable database state. `:seon.agent.run/process`, monotonic epoch,
-and heartbeat lease live on the run; expiry is derived. Each agent's own flow
+Runs are claimable database state. `:seon.agent.run/process` presence IS
+custody (claimed by CAS-on-absence; recovery stamps dangling receipts
+`interrupted-at` and retracts it — no epoch, no lease, no expiry). Each
+agent's own flow
 graph reduces over the frozen form plan.
 Its basis accumulator begins at the plan transaction's `:db-after`; each
 form's transaction report supplies the next basis through its `:db-after`.

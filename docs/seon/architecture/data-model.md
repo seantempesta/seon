@@ -518,7 +518,6 @@ is produced (§3).
 | `:seon.agent.run/deadline` | `:inst` | instant / one | absolute clock bound |
 | `:seon.agent.run/last-beat-at` | `:inst` | instant / one | heartbeat |
 | `:seon.agent.run/process` | `:seon.db/ref` | ref / one | optional process record for the cluster JVM holding the run; absence means released |
-| `:seon.agent.run/claim-epoch` | `[:int {:min 1}]` | long / one | optional on first acquisition, then monotonic; every held-run mutation fences on the observed value |
 | `:seon.agent.run/paused-at` | `:inst` | instant / one | presence ⇒ derived `:paused` |
 | `:seon.agent.run/remaining-ms` | `:int` | long / one | banked at pause, re-extends deadline at resume |
 | `:seon.agent.run/status` | `[:enum :open :closed]` | keyword / one | value enum |
@@ -528,8 +527,9 @@ is produced (§3).
 | `:seon.agent.run/closed-at` | `:inst` | instant / one | present when the run closes |
 
 Claim expiry is not stored. It is derived from open/unpaused state,
-`:seon.agent.run/process`, epoch, `last-beat-at`, the observation instant, and
-the configured stale interval. The process record identifies custody; epoch
+`:seon.agent.run/process` presence and the holder's `(pid, start-instant)`
+liveness (custody revision 2026-07-28 — no epoch, no lease, no heartbeat).
+The process record identifies custody; presence
 fences authority. `turn-count` / `now` / `snapshot` are also derived-read
 scalars, not stored datoms. The claim and run model lives in [[agent-runtime]].
 
@@ -558,7 +558,7 @@ attributes exist.
 
 Datahike's `:db.fn/cas` is reserved for facts two processes race to win
 exactly once: plan freeze from absent to digest, and run claim from no process
-to the process record together with a claim-epoch increment. Phase and receipt
+to the process record (CAS-on-absence). Phase and receipt
 transitions reuse that asserted old-value discipline under the held run fence.
 
 | attribute | malli | datahike facet | notes |
@@ -566,7 +566,7 @@ transitions reuse that asserted old-value discipline under the held run fence.
 | `:seon.agent.turn/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | string / one / identity | compact |
 | `:seon.agent.turn/at` | `:inst` | instant / one | |
 | `:seon.agent.turn/status` | `[:enum :running :done :error :interrupted]` | keyword / one | value enum; `:interrupted` is asserted only by crash recovery when no runtime remains to close the committed turn normally |
-| `:seon.agent.turn/phase` | `[:enum :rendered :attempt-open :reply-ready :evaling :evaled :published]` | keyword / one | durable recovery cursor; every advance is an observed-phase `:db.fn/cas` composed with the run epoch fence |
+| `:seon.agent.turn/phase` | `[:enum :rendered :attempt-open :reply-ready :evaling :evaled :published]` | keyword / one | durable recovery cursor; every advance is an observed-phase `:db.fn/cas` composed with the run custody fence |
 | `:seon.agent.turn/run` | `:seon.db/ref` | ref / one | turn → its run |
 | `:seon.agent.turn/cause-message` | `:seon.db/ref` | ref / one | optional; exact inbound human message this turn is assigned to answer |
 | `:seon.agent.turn/rendered-tx` | `:seon.db/ref` | ref / one | basis transaction of the request-scoped database value captured before prompt rendering; historical rendering uses `as-of` |
@@ -699,7 +699,7 @@ name again before retrying.
 
 ### 4.5 process replacement recovery — `:seon.runtime.recovery/*`
 
-Claim recovery is already represented by claim epochs, the turn phase, and
+Claim recovery is already represented by custody presence, the turn phase, and
 attempt/eval receipts. Recovery adds one small process-loss anchor
 without becoming a second recovery state machine:
 

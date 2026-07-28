@@ -156,8 +156,8 @@
   `reference-code`-equivalent shape rather than reinvented:
   multiplicative growth, randomized by a jitter fraction, each delay
   clamped, the count bounded, and the CUMULATIVE budget bounded — the
-  last one is what actually binds, because a turn holds its run under a
-  lease and a backed-off turn that outlives its claim is worse than a
+  last one is what actually binds, because a turn holds its run's
+  custody and a backed-off turn that waits forever is worse than a
   turn that gave up.
 
   The result is a VALUE, not a control structure: the caller reduces

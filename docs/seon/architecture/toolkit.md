@@ -147,7 +147,7 @@ family result.
 values, native-shaped transaction reports, and Datahike `:db.fn/cas` work
 fences. `:db.fn/cas` is reserved for facts two processes race to win exactly
 once: plan freeze from absent to digest, and run claim from no process to the
-process record together with a claim-epoch increment. `seon.schema` owns
+process record (CAS-on-absence). `seon.schema` owns
 registered shapes and the
 Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
