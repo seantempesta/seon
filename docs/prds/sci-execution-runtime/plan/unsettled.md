@@ -579,12 +579,14 @@ EIGHT batched morning decisions) — falsification review lane running
 before any seal. ARCHITECTURE DOCS CURRENT (a237c51a2:
 observability/ui/agent-runtime updated with tonight's settled
 contracts, one durable law added, unsettled items correctly
-excluded). IN FLIGHT (four): N4 PACKAGE 2 (SSE/web layer, block
-pages, ref-following + /data, streaming exercises — local Qwen
-preferred for repeated checks); my.message Opus agent;
-context-blocks-review (falsification); test-design-review
-(report-only phase — the goal's dissolution clause; constructions
-implement after the morning read). MORNING BATCH accumulating:
+excluded). TEST-DESIGN REVIEW IN (55a28e8d7: 334 tests / 33 namespaces + six
+benchmarks swept; ELEVEN ranked findings with dissolution designs,
+collapsing tests named, a nine-unit implementation order —
+constructions implement AFTER the morning read, phase 2 of task
+#13). IN FLIGHT (three): N4 PACKAGE 2 (SSE/web layer, block pages,
+ref-following + /data, streaming exercises — local Qwen preferred
+for repeated checks); my.message Opus agent; context-blocks-review
+(falsification). MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
