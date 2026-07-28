@@ -60,6 +60,11 @@
   [_unit]
   (throw (ex-info "this block is broken" {::deliberate true})))
 
+(defn omitted-html
+  "Returns nil when this block has nothing to say."
+  [_unit]
+  nil)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture
 ;;; ---------------------------------------------------------------------------
@@ -333,6 +338,36 @@
         "an unchanged surface is not sent twice")
     (is (= (:seon.render.web/delivered first-pass)
            (:seon.render.web/delivered second-pass)))))
+
+(deftest a-nil-projection-keeps-the-blocks-identified-wrapper
+  (let [surface
+        (block/surface nil agent-id
+                       {:seon.block/name :optional
+                        :seon.block/priority 0
+                        :seon.render/html `omitted-html}
+                       :seon.render/html)
+        html (web/surface-html surface caps nil)]
+    (is (nil? (:seon.error/value surface))
+        "nil is an omitted projection, not malformed hiccup")
+    (is (= "<div id=\"surface-optional\"></div>" html)
+        "empty content keeps the block's stable morph target")))
+
+(deftest a-later-non-nil-render-patches-back-into-the-same-wrapper
+  (let [omitted {:seon.block/name :optional
+                 :seon.render/surface-id "surface-optional"
+                 :seon.render/kind :seon.render/html
+                 :seon.render/output nil}
+        visible (assoc omitted :seon.render/output
+                       [:div {:id "surface-optional"} "now visible"])
+        first-paint (web/changed {} [omitted] caps nil)
+        repaint (web/changed (:seon.render.web/delivered first-paint)
+                             [visible] caps nil)]
+    (is (= [["surface-optional" "<div id=\"surface-optional\"></div>"]]
+           (:seon.render.web/patches first-paint)))
+    (is (= 1 (count (:seon.render.web/patches repaint))))
+    (is (str/includes? (second (first (:seon.render.web/patches repaint)))
+                       "now visible")
+        "the stable id lets the later whole-element morph land")))
 
 (deftest the-data-drill-is-browsable-and-its-cursor-is-in-the-url
   ;; A drilled position is a LINK, so the proof is that following one

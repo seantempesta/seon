@@ -255,6 +255,15 @@
         (is (= [:body] (names :seon.render/ai))
             "the header declares no ai render and is not in the prompt")))))
 
+(deftest a-nil-render-key-is-omitted-like-an-absent-key
+  ;; Nil exists only on in-memory units; durable render declarations are
+  ;; nil-free. The router's declaration predicate is the one rule in both.
+  (with-redefs [block/blocks
+                (fn [_db _agent-id]
+                  [(block-map :nil-html 0 :seon.render/html nil)])]
+    (is (= [] (block/surfaces nil (html-request)))
+        "nil is omission, never a kind-not-declared error surface")))
+
 (deftest a-block-declaring-neither-kind-renders-nowhere-and-is-not-an-error
   (with-database [(block-map :data-only 5)]
     (fn [connection]
@@ -489,6 +498,14 @@
   (testing "it panels the unit itself when no value key is present"
     (is (hiccup/hiccup? (block/data-panel {:seon.block/name :x
                                            :seon.sci.admit/caps caps}))))
+  (testing "nil and absent render values panel the same unit"
+    (let [unit {:seon.block/name :x :seon.sci.admit/caps caps}]
+      (is (= (block/data-panel unit)
+             (block/data-panel (assoc unit :seon.render/value nil))))))
+  (testing "nil and absent declarations are equally absent from the panel"
+    (let [unit {:seon.block/name :x :seon.sci.admit/caps caps}]
+      (is (= (block/data-panel unit)
+             (block/data-panel (assoc unit :seon.render/html nil))))))
   (testing "and never prints the projection declarations back at the reader"
     ;; the SYMBOL, not the substring: the wrapper's own CSS class is
     ;; legitimately called seon-data-panel
@@ -507,6 +524,21 @@
     (let [refused (block/data-panel {:seon.render/value {:a 1}})]
       (is (hiccup/hiccup? refused))
       (is (re-find #"caps" (hiccup/->string refused))))))
+
+(deftest a-nil-entity-declaration-uses-the-generic-html-default
+  ;; Ref expansion follows the router's declaration rule too: a nil
+  ;; declaration is absent, so it cannot suppress the generic backstop.
+  (with-redefs [block/entity-unit
+                (fn [_db _lookup]
+                  {:seon.block/name :referenced
+                   :seon.render/html nil})]
+    (let [expanded
+          (block/expand (block/entity-slot 1)
+                        {:seon.render/surfaces []
+                         :seon.sci.admit/caps caps
+                         :seon.db/db ::database})]
+      (is (str/includes? (hiccup/->string expanded) "seon-data-panel")
+          "the nil declaration does not become a kind-not-declared note"))))
 
 (defn caps-panel
   "The generic default reached the way a producer reaches it: the block

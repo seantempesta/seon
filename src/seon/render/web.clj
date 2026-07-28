@@ -149,9 +149,8 @@
   "One surface as the HTML string that will be morphed into its id.
 
   A FAILED surface still paints, at its own id, as its error card: fail
-  loud, do not fall down. A block that cannot render must not be able to
-  remove itself from the page, because a silently missing surface is
-  indistinguishable from a working empty one."
+  loud, do not fall down. An omitted surface paints an empty wrapper at
+  its own id, so a later non-nil render still has a morph target."
   {:malli/schema [:=> [:cat :seon.render/surface :seon.sci.admit/caps :any]
                   :string]}
   [surface caps db]
@@ -162,10 +161,12 @@
        (str (:seon.block/name surface))]
       [:span {:class "seon-error-card-message"}
        (:seon.error/message failure)]]
-     (block/expand (:seon.render/output surface)
-                   {:seon.render/surfaces []
-                    :seon.sci.admit/caps caps
-                    :seon.db/db db}))))
+     (if-some [output (get surface :seon.render/output)]
+       (block/expand output
+                     {:seon.render/surfaces []
+                      :seon.sci.admit/caps caps
+                      :seon.db/db db})
+       [:div {:id (:seon.render/surface-id surface)} ""]))))
 
 (defn changed
   "The surfaces whose HTML differs from `delivered`, plus the new map.

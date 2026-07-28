@@ -205,9 +205,10 @@
   "Render one block into one kind. Never throws.
 
   Returns a `:seon.render/surface`: name, id, kind, and EITHER the
-  output OR a flat `:seon.error/value`. Failure is a sibling of success
-  rather than a key beside it, because `:seon.error/value` is a closed
-  shape registered once.
+  output OR a flat `:seon.error/value`. Nil output means the projection
+  omitted itself; the web consumer preserves its identified wrapper.
+  Failure is a sibling of success rather than a key beside it, because
+  `:seon.error/value` is a closed shape registered once.
 
   ISOLATION IS STRUCTURAL. Three failures are all values here, and none
   of them can reach a neighbour:
@@ -245,8 +246,10 @@
       (assoc base :seon.error/value rendered)
 
       ;; the ONE check the router cannot make: a kind's grammar belongs
-      ;; to the kind's consumer, and html's consumer is a browser
+      ;; to the kind's consumer, and html's consumer is a browser. Nil
+      ;; is omission, not malformed hiccup.
       (and (= :seon.render/html kind)
+           (some? (:seon.render/output rendered))
            (not (hiccup/hiccup? (:seon.render/output rendered))))
       (assoc base :seon.error/value
              {:seon.error/kind ::not-hiccup
@@ -267,9 +270,9 @@
 (defn surfaces
   "The agent's blocks rendered into one kind, in order.
 
-  PRESENCE DECIDES PLACEMENT — the whole selection mechanism, and the
+  A DECLARATION DECIDES PLACEMENT — the whole selection mechanism, and the
   reason no block carries a flag saying where it goes. A block that does
-  not declare the requested kind is OMITTED, so an html-only widget
+  not declare the requested kind (absent or nil) is OMITTED, so an html-only widget
   costs the prompt zero tokens and an ai-only warning occupies no pixels
   (`src-old/seon/agent/ctx.cljc:1675-1689`, whose inverse rule is the
   same rule).
@@ -284,9 +287,10 @@
   [db {:keys [:seon.cluster.agent/id :seon.render/kind]}]
   (into []
         (comp
-         ;; PRESENCE DECIDES PLACEMENT — omission, not an error. A block
-         ;; that says nothing about a kind has nothing to say there.
-         (filter (fn [block] (contains? block kind)))
+         ;; A DECLARATION DECIDES PLACEMENT — omission, not an error. A
+         ;; nil value and an absent key both say nothing about the kind.
+         (filter (fn [block]
+                   (render/declaration? (get block kind))))
          (map (fn [block] (surface db id block kind))))
         (blocks db id)))
 
@@ -459,7 +463,8 @@
                       ;; ref to something nobody wrote a renderer for is
                       ;; still legible, which is what makes /data work
                       ;; with zero authoring
-                      (let [declared (contains? unit :seon.render/html)
+                      (let [declared (render/declaration?
+                                      (get unit :seon.render/html))
                             rendered
                             (render/render
                              {:seon.render/unit
@@ -636,11 +641,12 @@
   producer has to write a renderer before it can be seen — which is the
   property that makes the pattern worth having.
 
-  Reads the value under `:seon.render/value` from the unit, so a
+  Reads a non-nil value under `:seon.render/value` from the unit, so a
   producer declaring `{:seon.render/html `data-panel :seon.render/value
-  x}` needs nothing else. A unit with no such key panels the unit
-  itself, minus its own projection declarations: a bare map is data too,
-  and printing a symbol back at a reader is noise.
+  x}` needs nothing else. A unit with no such value (absent or nil)
+  panels the unit itself, minus its own projection declarations and
+  omitted render keys: a bare map is data too, and printing a symbol
+  back at a reader is noise.
 
   Never throws and never prints an unbounded value: nesting beyond the
   configured depth and collections beyond the configured width render
@@ -660,11 +666,20 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (if-let [caps (:seon.sci.admit/caps unit)]
-    (let [value (if (contains? unit :seon.render/value)
-                  (:seon.render/value unit)
+    (let [value (if-some [value (get unit :seon.render/value)]
+                  value
                   ;; a bare unit is data too — but printing its own
-                  ;; projection symbols back at the reader is noise
-                  (apply dissoc unit :seon.db/db (render/kinds unit)))
+                  ;; projection symbols or nil-punned render keys back
+                  ;; at the reader is noise
+                  (let [omitted-render-keys
+                        (into []
+                              (comp
+                               (filter #(= "seon.render" (namespace %)))
+                               (filter #(nil? (get unit %))))
+                              (keys unit))]
+                    (apply dissoc unit :seon.db/db
+                           (concat (render/kinds unit)
+                                   omitted-render-keys))))
           ;; ONE bounding owner. `admit` already walks once, elides past
           ;; the configured depth and width, never dereferences an
           ;; IDeref and cannot loop on a cycle. Rebuilding any of that
