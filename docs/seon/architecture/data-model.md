@@ -363,6 +363,19 @@ The audit question for any `kind`/`type` field is therefore: does it SELECT the
 entity's schema (BANNED → make it presence-based) or is it a value-flavor /
 derived label / library shape (FINE → keep the enum)?
 
+**Clarified (owner, 2026-07-29): two more FINE categories, and the one
+test.** (a) A REQUEST ARGUMENT named kind (`:seon.render/kind` — "which
+projection do you want") is never stored on an entity and is exempt by
+construction. (b) An IDENTITY attribute on an entity family that is
+genuinely ABOUT kinds (`:seon.render.kind/*` rows — one per output
+channel, declaring what forms it accepts) is an identity, not a
+discriminator: every row obeys the same shape. The one test that
+decides every case: **does any consumer branch on the stored value to
+select a schema or a behavior that presence could express?** If yes,
+delete it (the 2026-07-28 presence rulings); if no — request argument,
+identity, derived label, library shape — the name "kind" is not the
+defect.
+
 **Third rule (owner, 2026-07-28): a stored STATUS that restates the presence
 of other facts on the same entity is also banned.** State is tested by
 attribute presence — `missing?`, `get-else`, an AEVT walk — never read back
