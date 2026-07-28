@@ -681,8 +681,31 @@ stop-vs-in-flight-transact race is FIXED the event-driven way
 stop! awaits it before releasing the connection; fault-committer
 shutdown awaits active commits and stops treating terminal-channel
 nil as a core fault; no sleeps, no SPI changes; kill -9 keeps crash
-semantics. **FINAL NIGHT GATE: 388/1509/0 VERIFIED. Board quiet —
-everything remaining waits on the owner's morning batch.** MORNING BATCH accumulating:
+semantics. **FINAL NIGHT GATE: 388/1509/0 VERIFIED.**
+**MORNING RULINGS (owner, 2026-07-28): THE USAGE RUNG.** Ports:
+derived-from-cluster-name hash into a fixed range (bookmarkable,
+restart-stable; collision → ephemeral + loud report; manifest
+override wins); names: unspecified → "default", else the given name,
+throwaways generated. Architecture confirmed: one JVM = one store +
+two executors; PER-CLUSTER web server stays (isolation is
+load-bearing); the HOME CLUSTER (stable port, root page = blocks
+over the advertisement inventory — every cluster listed/linked with
+liveness + problems rollup) is the single front door, a named later
+package. Operator v1 (babashka, ads as the ONLY truth, old bb
+operator as quarry, lands as bin/seon-fresh):
+start/status/open/stop/logs. Boot UX: full readiness banner (URL,
+agents, blocks, problems, instrumented count, boot time).
+**FLEET DIRECTION (owner): spin up as many clusters as needed — the
+owner wants MANY clusters on the same problem independently
+(experiments).** start takes multiple names + --count N (one JVM,
+N instances); a seed command transacts the same trigger into each;
+status readable at 40 clusters; funsearch/openevolve in
+reference-code are quarry for the evolution harness later.
+IN FLIGHT (two): the N4 agent (derived ports + URL-into-
+advertisement + boot banner + home-cluster design note); the
+fresh-operator sol lane (bin/seon-fresh with fleet semantics —
+NOTE: a resume with backticks got eaten by shell substitution once;
+single-quote resume payloads, scar recorded). MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
