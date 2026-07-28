@@ -54,10 +54,10 @@ of its conclusions move.
 
 ## 2. Package 1, sealed
 
-New files, all pure, all loading clean. Full gate **287 tests / 1170 assertions
-/ 6 failures / 57 errors**, from a 246/1095/0 baseline: every red traces to an
-`awaits implementation` stub in the two new namespaces, and no existing suite
-moved.
+New files, all pure. Drafted as contracts, then implemented to green in the
+same rung. Full gate **297 tests / 1227 assertions / 0 failures / 0 errors**,
+from a 246/1095/0 baseline, with the two new suites contributing 48 tests and
+110 assertions.
 
 - `src/seon/schema/block.edn` — the block family, the `:seon.render/html` kind,
   the surface/page shapes. A new file rather than an edit to sealed `render.edn`,
@@ -103,16 +103,28 @@ tree and re-sent it (`src-old/seon/web/datastar.cljs:127-141,175-190`;
 `src-old/seon/agent/ctx/driver.cljs:205-338`). A one-token transcript append
 cost a whole-page render, serialization and write.
 
-Measured on this machine (`bench/seon/render_bench.clj --trials 200`, JDK
-26.0.1, warmup 240):
+Measured, implemented, on this machine (`bench/seon/render_bench.clj
+--trials 2000`, JDK 26.0.1, warmup 600):
 
-| what | p50 | p99 |
-|---|---|---|
-| `hiccup?` over a 25-event transcript | 0.742 ms | 2.560 ms |
-| `hiccup?` over a whole page, 250-event transcript | 7.536 ms | 8.729 ms |
+| what | serialize p50 | serialize p99 | admit p50 | bytes |
+|---|---|---|---|---|
+| one activity row | 0.004 ms | 0.026 ms | — | 287 |
+| transcript, 25 events | 0.043 ms | 0.100 ms | 0.008 ms | 8,221 |
+| transcript, 250 events | 0.414 ms | 0.781 ms | — | 81,683 |
+| whole page, 25-event transcript | 0.056 ms | 0.112 ms | — | 9,431 |
+| whole page, 250-event transcript | 0.460 ms | 0.804 ms | 0.012 ms | 82,893 |
 
-Admission alone over a whole page is half the frame budget, before a byte is
-serialized or sent. Per-block morphs make the common frame the first row.
+**The thesis in one row pair:** the same one-row change costs 287 bytes and
+0.004 ms as a block morph, or 82,893 bytes and 0.460 ms as the whole-page morph
+the quarry actually sent — **289× the bytes and 115× the CPU**. Bytes are the
+half that decides survivability, because every morph is also a write and
+http-kit's pending queue is unbounded.
+
+Honest correction to the draft that preceded implementation: it reported
+admission at 7.5 ms p50 for a whole page and argued the block thesis from CPU.
+That number was real but it was measuring a BAD PREDICATE, not an inherent
+cost — see §3a. The thesis survives on bytes and on a 115× CPU ratio; the
+original framing did not, and is retracted rather than quietly restated.
 
 This costs one function (`surface-id`) and changes the shape of everything
 downstream: interest, registration memory and equality suppression are all keyed
@@ -125,11 +137,44 @@ block. Two consequences the seal must carry:
 - Datastar's client-side pane signal (`$selected`, `data-signals__ifmissing`)
   survives unchanged and is now more valuable, not less.
 
-**Measurement finding for the implementation lane:** admission and
-serialization are two walks over the same tree, and admission is not cheap.
-Fusing them — serialize while admitting, discard the buffer on refusal — is the
-obvious answer and is exactly the kind of thing that must be measured rather
-than assumed. The harness has the rows for both.
+## 3a. The fused-walk experiment, answered: NO
+
+The draft proposed fusing admission into serialization — one walk instead of
+two — on the strength of admission costing 7.5 ms against 0.45 ms to serialize
+the same tree. It was flagged as a contract delta to measure, never to assume.
+Measuring it killed it, and the way it died is the useful part.
+
+The 7.5 ms was not the cost of walking a tree. `hiccup?`'s first draft tested
+nine cheap predicates before `vector?` — so every element paid nine misses —
+and destructured with `[head & body]`, allocating a seq per element. The
+serializer, written for the budget from the start, indexed with `nth`/`subvec`
+and tested the hot shapes first. Same tree, same walk, 18× apart for reasons
+that had nothing to do with how many walks there were.
+
+Reordering the branches and indexing instead of destructuring:
+
+| `hiccup?` over a whole page, 250 events | p50 | p99 |
+|---|---|---|
+| before | 8.066 ms | 9.253 ms |
+| after | 0.012 ms | 0.037 ms |
+
+**~670×, implementation only — no contract change, no schema change, both
+suites unchanged and green.** Admission is now 2.6% of serialization, so fusing
+would save 2% of one walk in exchange for entangling the grammar with the
+emitter and giving `surface` a string where it needs a hiccup VALUE for slot
+expansion. Rejected on the measurement.
+
+The general lesson, recorded because it will recur: *an expensive-looking stage
+is a reason to read the stage, not a reason to restructure the pipeline around
+it.* The restructuring was the interesting answer and the boring answer was
+correct.
+
+One defect the harness itself had, caught by adding the byte column: the "one
+activity row" scenario indexed the transcript's ATTRIBUTE MAP, which the
+grammar rightly refuses, so it had been timing a refusal and reporting
+0.000 ms. The timing column read that as "very fast"; only the 0-byte reading
+made it obvious. A benchmark is a check, and a check that reports health when
+its subject is absent is worse than no check.
 
 ## 3b. Generic default + specialist, named as a reusable shape
 

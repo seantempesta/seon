@@ -54,7 +54,12 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything; a kill during a render loses hiccup nobody had sent,
   and the next render derives the same value from the same facts."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.render :as render]
+            [seon.render.hiccup :as hiccup]
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/block.edn
@@ -80,8 +85,28 @@
   `[A-Za-z0-9._-]` is escaped rather than dropped — dropping is what
   makes two different names one id."
   {:malli/schema [:=> [:cat :seon.block/name] :seon.render/surface-id]}
-  [_name]
-  (throw (ex-info "seon.render.block/surface-id awaits implementation" {})))
+  [name]
+  ;; `[A-Za-z0-9.-]` pass through, so the ordinary case is unchanged and
+  ;; a hyphenated name stays readable. `_` is the escape introducer and
+  ;; therefore doubles; everything else becomes `_<hex>_`. That is what
+  ;; makes the map injective — a scheme that DROPPED unsafe characters
+  ;; is exactly how two names become one id and two blocks morph over
+  ;; each other.
+  (let [text (subs (str name) 1)
+        builder (StringBuilder. (+ 8 (.length ^String text)))]
+    (.append builder "surface-")
+    (dotimes [index (.length ^String text)]
+      (let [character (.charAt ^String text index)]
+        (cond
+          (= \_ character) (.append builder "__")
+          (or (Character/isLetterOrDigit character)
+              (= \. character)
+              (= \- character)) (.append builder character)
+          :else (doto builder
+                  (.append "_")
+                  (.append (Integer/toHexString (int character)))
+                  (.append "_")))))
+    (.toString builder)))
 
 (defn slot
   "An empty hole for the block named `name`.
@@ -93,8 +118,11 @@
   paints holes first is a coherent intermediate page rather than a torn
   one."
   {:malli/schema [:=> [:cat :seon.block/name] :seon.render/hiccup]}
-  [_name]
-  (throw (ex-info "seon.render.block/slot awaits implementation" {})))
+  [name]
+  ;; the explicit `""` child is not decoration: it makes the hole a
+  ;; non-void element with a closing tag, so `<div id="surface-x"></div>`
+  ;; is a stable morph target from the first paint.
+  [:div {:id (surface-id name) :data-slot (subs (str name) 1)} ""])
 
 ;;; ---------------------------------------------------------------------------
 ;;; The derivation
@@ -119,8 +147,18 @@
   means no blocks."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
                   [:vector :seon.block/block]]}
-  [_db _agent-id]
-  (throw (ex-info "seon.render.block/blocks awaits implementation" {})))
+  [db agent-id]
+  (->> (d/q '[:find [(pull ?block [*]) ...]
+              :in $ ?agent-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?agent :seon.cluster.agent/blocks ?block]]
+            db agent-id)
+       ;; the entity id is Datahike's, not ours; a block carrying it
+       ;; would not validate as one
+       (map (fn [block] (dissoc block :db/id)))
+       (sort-by (juxt :seon.block/priority :seon.block/name))
+       vec))
 
 (defn unit
   "The unit `seon.render/render` receives for one block.
@@ -137,8 +175,10 @@
   reads `:seon.db/db` or reads nothing."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.block/block]
                   :seon.render/unit]}
-  [_db _agent-id _block]
-  (throw (ex-info "seon.render.block/unit awaits implementation" {})))
+  [db agent-id block]
+  (assoc block
+         :seon.db/db db
+         :seon.cluster.agent/id agent-id))
 
 (defn surface
   "Render one block into one kind. Never throws.
@@ -169,8 +209,39 @@
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.block/block
                        :seon.render/kind]
                   :seon.render/surface]}
-  [_db _agent-id _block _kind]
-  (throw (ex-info "seon.render.block/surface awaits implementation" {})))
+  [db agent-id block kind]
+  (let [name (:seon.block/name block)
+        base {:seon.block/name name
+              :seon.render/surface-id (surface-id name)
+              :seon.render/kind kind}
+        rendered (render/render {:seon.render/unit (unit db agent-id block)
+                                 :seon.render/kind kind})]
+    (cond
+      ;; the landed router already named what is broken; passing its
+      ;; value through unchanged is the difference between one error
+      ;; owner and two
+      (:seon.error/kind rendered)
+      (assoc base :seon.error/value rendered)
+
+      ;; the ONE check the router cannot make: a kind's grammar belongs
+      ;; to the kind's consumer, and html's consumer is a browser
+      (and (= :seon.render/html kind)
+           (not (hiccup/hiccup? (:seon.render/output rendered))))
+      (assoc base :seon.error/value
+             {:seon.error/kind ::not-hiccup
+              :seon.error/message
+              (str "The " name " block's html render returned something that "
+                   "is not hiccup.")
+              :seon.error/data
+              {:seon.block/name name
+               :seon.render/projection (get block kind)
+               ::shape (let [output (:seon.render/output rendered)]
+                         (if (nil? output)
+                           "nil"
+                           (.getName (class output))))}})
+
+      :else
+      (assoc base :seon.render/output (:seon.render/output rendered)))))
 
 (defn surfaces
   "The agent's blocks rendered into one kind, in order.
@@ -189,12 +260,34 @@
   block rather than one per projection."
   {:malli/schema [:=> [:cat :any :seon.render/surfaces-request]
                   :seon.render/surfaces]}
-  [_db _request]
-  (throw (ex-info "seon.render.block/surfaces awaits implementation" {})))
+  [db {:keys [:seon.cluster.agent/id :seon.render/kind]}]
+  (into []
+        (comp
+         ;; PRESENCE DECIDES PLACEMENT — omission, not an error. A block
+         ;; that says nothing about a kind has nothing to say there.
+         (filter (fn [block] (contains? block kind)))
+         (map (fn [block] (surface db id block kind))))
+        (blocks db id)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Placement
 ;;; ---------------------------------------------------------------------------
+
+(defn- error-card
+  "A failed surface, as hiccup that keeps the block's address.
+
+  It carries the block's own id, so the error occupies exactly the space
+  the working surface would have and the next successful render morphs
+  over it in place. Naming the block is the whole point: the quarry's
+  equivalent failure elided the content and the page looked fine."
+  [surface failure]
+  [:div {:id (:seon.render/surface-id surface)
+         :class "seon-error-card"
+         :data-block (subs (str (:seon.block/name surface)) 1)}
+   [:span {:class "seon-error-card-name"}
+    (str (:seon.block/name surface))]
+   [:span {:class "seon-error-card-message"}
+    (:seon.error/message failure)]])
 
 (defn expand
   "Replace every slot in `hiccup` with the named surface, to fixpoint.
@@ -219,8 +312,45 @@
     the observable fact."
   {:malli/schema [:=> [:cat :seon.render/hiccup :seon.render/surfaces]
                   :seon.render/hiccup]}
-  [_hiccup _surfaces]
-  (throw (ex-info "seon.render.block/expand awaits implementation" {})))
+  [hiccup surfaces]
+  (let [by-id (into {} (map (juxt :seon.render/surface-id identity)) surfaces)]
+    (letfn [(note [hole text]
+              ;; the HOLE stays, carrying why. Self-healing, the
+              ;; quarry's behaviour: name the block, and the next render
+              ;; fills it.
+              (conj (subvec hole 0 2) text))
+            (fill [hole visited]
+              (let [id (:id (nth hole 1))
+                    slot-name (:data-slot (nth hole 1))]
+                (cond
+                  (contains? visited id)
+                  (note hole (str "cycle: " slot-name
+                                  " is already being expanded on this path"))
+
+                  :else
+                  (if-let [found (by-id id)]
+                    (if-let [failure (:seon.error/value found)]
+                      (error-card found failure)
+                      (walk (:seon.render/output found) (conj visited id)))
+                    (note hole (str "no block named " slot-name
+                                    " — install one and this fills itself"))))))
+            (slot? [node]
+              (and (vector? node)
+                   (map? (nth node 1 nil))
+                   (contains? (nth node 1) :data-slot)))
+            (walk [node visited]
+              (cond
+                (slot? node) (fill node visited)
+                (vector? node) (mapv (fn [child] (walk child visited)) node)
+                ;; a seq child stays a SEQ — turning it into a vector
+                ;; would make it look like an element with a non-tag
+                ;; head, which the grammar rightly refuses. `doall`
+                ;; because a lazy page is a page that renders somewhere
+                ;; else, later, on a thread nobody chose.
+                (sequential? node)
+                (doall (map (fn [child] (walk child visited)) node))
+                :else node))]
+      (walk hiccup #{}))))
 
 (defn page
   "The agent's html page: the top-level surfaces, expanded, in order.
@@ -244,8 +374,37 @@
   never again: after that the pipeline patches the ONE block that
   changed."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id] :seon.render/page]}
-  [_db _agent-id]
-  (throw (ex-info "seon.render.block/page awaits implementation" {})))
+  [db agent-id]
+  (let [surfaces (surfaces db {:seon.cluster.agent/id agent-id
+                               :seon.render/kind :seon.render/html})
+        ;; every id some OTHER surface slots. Derived by looking at what
+        ;; the hiccup says, which is what makes `layout-vs-surface is a
+        ;; role` executable rather than aspirational.
+        slotted (into #{}
+                      (mapcat (fn [surface]
+                                (keep (fn [node]
+                                        (when (and (vector? node)
+                                                   (map? (nth node 1 nil))
+                                                   (contains? (nth node 1)
+                                                              :data-slot))
+                                          (:id (nth node 1))))
+                                      (tree-seq sequential? seq
+                                                (:seon.render/output surface)))))
+                      surfaces)
+        top (remove (fn [surface]
+                      (contains? slotted (:seon.render/surface-id surface)))
+                    surfaces)
+        ;; EVERY surface slotted and none top-level means the slots form
+        ;; a closed cycle. Rendering nothing would be the silent failure
+        ;; this design refuses, so every surface becomes top-level and
+        ;; `expand`'s visited set turns the cycle into a legible note in
+        ;; the hole that closes it.
+        roots (if (and (empty? top) (seq surfaces)) surfaces top)]
+    (mapv (fn [surface]
+            (if-let [failure (:seon.error/value surface)]
+              (error-card surface failure)
+              (expand (:seon.render/output surface) surfaces)))
+          roots)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Generic default + specialist — the reusable selection shape
@@ -286,8 +445,19 @@
   exception where a value was expected."
   {:malli/schema [:=> [:cat :any :seon.render/selection]
                   :seon.render/projection]}
-  [_value _selection]
-  (throw (ex-info "seon.render.block/select awaits implementation" {})))
+  [value {:seon.render/keys [default specialists]}]
+  (or (some (fn [[rule projection]]
+              ;; a rule that cannot answer has not accepted. Late
+              ;; resolution keeps the rule as hot-reloadable as the
+              ;; renderer it picks; the try makes a broken rule cost its
+              ;; own specialist and nothing else.
+              (when (try
+                      (when-let [accepts? (requiring-resolve rule)]
+                        (accepts? value))
+                      (catch Throwable _ false))
+                projection))
+            specialists)
+      default))
 
 (defn data-panel
   "`:seon.render/html`'s GENERIC default: any value, as a readable panel.
@@ -311,10 +481,64 @@
 
   It is the LOWEST-fidelity renderer on purpose. A panel that tried to
   be clever would compete with the specialists instead of backstopping
-  them."
+  them.
+
+  Caps are REQUIRED and there is no default here. A shipped constant
+  would be a second set of size dials drifting from the config facts,
+  and inventing one is the banned magic number — so a unit that supplies
+  none gets a card saying so, which is loud, legible, and impossible to
+  mistake for a rendered value."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [_unit]
-  (throw (ex-info "seon.render.block/data-panel awaits implementation" {})))
+  [unit]
+  (if-let [caps (:seon.sci.admit/caps unit)]
+    (let [value (if (contains? unit :seon.render/value)
+                  (:seon.render/value unit)
+                  ;; a bare unit is data too — but printing its own
+                  ;; projection symbols back at the reader is noise
+                  (apply dissoc unit :seon.db/db (render/kinds unit)))
+          ;; ONE bounding owner. `admit` already walks once, elides past
+          ;; the configured depth and width, never dereferences an
+          ;; IDeref and cannot loop on a cycle. Rebuilding any of that
+          ;; here would be a second codec to keep in step with the first.
+          {:seon.sci.admit/keys [value capped?]}
+          (admit/admit {:seon.sci.admit/value value
+                        :seon.sci.admit/caps caps
+                        ;; nothing is armed: this is not an eval, and
+                        ;; admission's bounds are the whole guard here
+                        :seon.sci.admit/interrupt-fn (fn [])
+                        :seon.config/on-core-error :log})]
+      [:div {:class "seon-data-panel"}
+       (letfn [(panel [node]
+                 (cond
+                   (map? node)
+                   [:dl {:class "seon-data-map"}
+                    (doall (mapcat (fn [[key setting]]
+                                     [[:dt {:class "seon-data-key"} (str key)]
+                                      [:dd {:class "seon-data-value"} (panel setting)]])
+                                   (sort-by (comp str first) (seq node))))]
+
+                   (set? node)
+                   [:ul {:class "seon-data-set"}
+                    (doall (map (fn [entry] [:li (panel entry)])
+                                (sort-by str (seq node))))]
+
+                   (sequential? node)
+                   [:ol {:class "seon-data-list"}
+                    (doall (map (fn [entry] [:li (panel entry)]) node))]
+
+                   (string? node) [:span {:class "seon-data-string"} node]
+                   (nil? node) [:span {:class "seon-data-nil"} "nil"]
+                   :else [:span {:class "seon-data-scalar"} (str node)]))]
+         (panel value))
+       (when capped?
+         ;; the honest signal, kept: a reader must never have to guess
+         ;; whether an elision marker was the value's own data
+         [:p {:class "seon-data-capped"}
+          "elided — this value is larger than the configured caps"])])
+    [:div {:class "seon-error-card"}
+     [:span {:class "seon-error-card-message"}
+      (str "This panel needs :seon.sci.admit/caps on the unit; without "
+           "them nothing bounds what it would print.")]]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writing a block set
@@ -343,5 +567,22 @@
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id
                        [:vector :seon.block/block]]
                   [:vector :any]]}
-  [_db _agent-id _blocks]
-  (throw (ex-info "seon.render.block/install-tx awaits implementation" {})))
+  [db agent-id blocks]
+  (if (empty? blocks)
+    []
+    (let [names (into #{} (map :seon.block/name) blocks)
+          replaced (d/q '[:find [?block ...]
+                          :in $ ?agent-id ?names
+                          :where
+                          [?agent :seon.cluster.agent/id ?agent-id]
+                          [?agent :seon.cluster.agent/blocks ?block]
+                          [?block :seon.block/name ?name]
+                          [(contains? ?names ?name)]]
+                        db agent-id names)]
+      ;; RETRACT then ADD, rather than merge: removing a key from a block
+      ;; must remove it from the block. A merge would make
+      ;; `:seon.render/ai` un-deletable and quietly keep a block in the
+      ;; prompt after its author took it out.
+      (-> (mapv (fn [entity] [:db/retractEntity entity]) (sort replaced))
+          (conj {:seon.cluster.agent/id agent-id
+                 :seon.cluster.agent/blocks (vec blocks)})))))

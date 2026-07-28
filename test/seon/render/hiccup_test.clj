@@ -164,7 +164,12 @@
   ;; siblings in the browser.
   (letfn [(non-void-count [value]
             (cond
-              (hiccup/raw? value) 0
+              ;; raw content is not parsed, so any `</` the AUTHOR wrote
+              ;; inside it appears in the output without this serializer
+              ;; having emitted an element. Counting it is exact; simply
+              ;; dropping raw from the generated domain would be the
+              ;; weakening this property exists to refuse.
+              (hiccup/raw? value) (count (re-seq #"</" (:string value)))
               (vector? value)
               (let [[head & body] value
                     tag (name head)

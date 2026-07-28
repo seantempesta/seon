@@ -447,6 +447,15 @@
        (block/select value (assoc selection :seon.render/specialists rules))))
     :seed 202607280203)))
 
+(def ^:private caps
+  "The four result dials, by the names `seon.sci.admit` already takes.
+  Supplied EXPLICITLY: a panel that invented its own bounds would be a
+  second set of size dials drifting from the config facts."
+  {:seon.config.eval.result/max-depth 12
+   :seon.config.eval.result/max-collection 64
+   :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-nodes 4096})
+
 (deftest the-generic-html-default-renders-anything
   ;; The kind's floor: nothing is unrenderable, and no producer has to
   ;; write a renderer before it can see its value.
@@ -455,24 +464,59 @@
    (tc/quick-check
     200
     (prop/for-all [value gen/any-printable]
-      (hiccup/hiccup? (block/data-panel {:seon.render/value value})))
+      (let [panelled (block/data-panel {:seon.render/value value
+                                        :seon.sci.admit/caps caps})]
+        (and (hiccup/hiccup? panelled)
+             ;; NOT vacuous: it must really panel, not answer with the
+             ;; missing-caps card. A totality property whose subject
+             ;; short-circuits is the absence-of-signal-as-health class.
+             (= "seon-data-panel" (:class (nth panelled 1))))))
     :seed 202607280204))
+  (testing "the value is actually in there"
+    (is (re-find #"widgets"
+                 (hiccup/->string
+                  (block/data-panel {:seon.render/value {:label "widgets"}
+                                     :seon.sci.admit/caps caps})))))
   (testing "it panels the unit itself when no value key is present"
-    (is (hiccup/hiccup? (block/data-panel {:seon.block/name :x}))))
+    (is (hiccup/hiccup? (block/data-panel {:seon.block/name :x
+                                           :seon.sci.admit/caps caps}))))
   (testing "and never prints the projection declarations back at the reader"
-    (is (not (re-find #"data-panel"
+    ;; the SYMBOL, not the substring: the wrapper's own CSS class is
+    ;; legitimately called seon-data-panel
+    (is (not (re-find #"seon\.render\.block/data-panel"
                       (pr-str (block/data-panel
                                {:seon.render/html `block/data-panel
-                                :seon.render/value {:a 1}})))))))
+                                :seon.sci.admit/caps caps
+                                :seon.render/value {:a 1}}))))))
+  (testing "an oversized value is elided and SAYS it was elided"
+    (let [panelled (block/data-panel
+                    {:seon.render/value (vec (range 500))
+                     :seon.sci.admit/caps caps})]
+      (is (re-find #"elided" (hiccup/->string panelled))
+          "a reader must never have to guess whether a marker was the data")))
+  (testing "no caps is a legible card, never an invented bound"
+    (let [refused (block/data-panel {:seon.render/value {:a 1}})]
+      (is (hiccup/hiccup? refused))
+      (is (re-find #"caps" (hiccup/->string refused))))))
+
+(defn caps-panel
+  "The generic default reached the way a producer reaches it: the block
+  points at a projection that supplies the caps it was configured with.
+  Package 2's pipeline threads those from config facts; here the seam is
+  explicit so the test proves the panel, not the fallback."
+  [unit]
+  (block/data-panel (assoc unit :seon.sci.admit/caps caps)))
 
 (deftest a-block-can-point-at-the-generic-default-like-any-other-symbol
   ;; The pattern needs no router change and no block change: the default
   ;; is an ordinary projection named by an ordinary symbol.
-  (with-database [(block-map :anything 0 :seon.render/html `block/data-panel)]
+  (with-database [(block-map :anything 0 :seon.render/html `caps-panel)]
     (fn [connection]
       (let [[surface] (block/surfaces (d/db connection) (html-request))]
         (is (nil? (:seon.error/value surface)))
-        (is (hiccup/hiccup? (:seon.render/output surface)))))))
+        (is (hiccup/hiccup? (:seon.render/output surface)))
+        (is (= "seon-data-panel" (:class (nth (:seon.render/output surface) 1)))
+            "it really panelled — the caps card would mean it did not")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writing a block set

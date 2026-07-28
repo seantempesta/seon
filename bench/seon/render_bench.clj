@@ -120,6 +120,20 @@
                   [:span {:class "font-mono shrink-0 text-success"} "done"]]))
              (range n))))
 
+(defn- activity-row
+  "One activity row, the smallest thing that morphs.
+
+  Indexed deliberately rather than with `(first (rest …))`: the
+  transcript's children begin at index 2, after the tag and the
+  attribute map, and odd children are activity rows. The first draft
+  took index 1 — the ATTRIBUTE MAP — which the grammar rightly refuses,
+  so the row measured a refusal and reported it as 0.000 ms and 0 bytes.
+  The timing column read that as \"very fast\"; the byte column made it
+  obvious. A check that reports health when its subject is absent is
+  worse than no check, and a benchmark is a check."
+  []
+  (nth (transcript-hiccup 2) 3))
+
 (defn- page-hiccup
   "A whole page: header, three sibling surfaces, one of them the
   transcript. The comparison that matters — this is what the OLD system
@@ -148,7 +162,7 @@
   [trials]
   (println "\n-- serialization (the innermost loop of every morph)")
   (doseq [[label value]
-          [["one activity row" (first (rest (transcript-hiccup 2)))]
+          [["one activity row" (activity-row)]
            ["transcript, 25 events" (transcript-hiccup 25)]
            ["transcript, 250 events" (transcript-hiccup 250)]
            ["whole page, 25-event transcript" (page-hiccup 25)]
@@ -166,6 +180,27 @@
           [["transcript, 25 events" (transcript-hiccup 25)]
            ["whole page, 250-event transcript" (page-hiccup 250)]]]
     (report! label (measure trials #(hiccup/hiccup? value)))))
+
+(defn- byte-scenarios!
+  [_trials]
+  (println "\n-- bytes on the wire per morph")
+  (doseq [[label value]
+          [["one activity row" (activity-row)]
+           ["transcript, 25 events" (transcript-hiccup 25)]
+           ["transcript, 250 events" (transcript-hiccup 250)]
+           ["whole page, 25-event transcript" (page-hiccup 25)]
+           ["whole page, 250-event transcript" (page-hiccup 250)]]]
+    (println (format "%-46s %8d bytes" label (count (hiccup/->string value)))))
+  (println (str "\n   CPU is only half the argument, and the cheaper half."
+                " Every morph is also a"))
+  (println (str "   write: the old design put the whole page on every tab's"
+                " socket for a"))
+  (println (str "   one-row change, and http-kit's pending queue is unbounded"
+                " (issue"))
+  (println (str "   http-kit-streaming-writes-have-an-unbounded-socket-queue),"
+                " so bytes are"))
+  (println (str "   the number that decides whether a slow reader is"
+                " survivable.")))
 
 (defn- page-scenarios!
   [_trials]
@@ -211,6 +246,7 @@
                   "  " (str/join " " (or (seq args) ["--trials" trials]))))
     (serialization-scenarios! trials)
     (admission-scenarios! trials)
+    (byte-scenarios! trials)
     (page-scenarios! trials)
     (churn-scenarios! trials)
     (println "\nRecord every number in the owning PRD's research/ directory.")
