@@ -6,6 +6,10 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
+**THE PROGRAM lives in README §3 ("THE PROGRAM, 2026-07-28 evening")**
+— the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
+collected owner decisions. This file stays the working edge below.
+
 **WORKING EDGE (2026-07-28 midday — the presence-not-kinds wave).**
 Gate 403/1566/0, independently verified. The morning decision session
 resolved into the "Rulings 2026-07-28" batch (README): omission =
