@@ -41,19 +41,15 @@
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared
   ;; output is `[:or … :seon.error/value]` and which returns a bare
-  ;; `{:seon.error/message …}` is outside its own contract — which is
-  ;; where `my.run` is today (filed:
-  ;; docs/seon/issues/my-run-error-values-omit-their-kind.md). This
-  ;; assertion is what stops the same hole opening here.
-  (doseq [value [(message/send "" "content") (message/send "bob" "")]]
+  ;; `{:seon.error/message …}` is outside its own contract. This
+  ;; assertion is what stops that hole opening here — and `my.run`'s
+  ;; own error values now satisfy the same schema (the canary that
+  ;; deliberately asserted its defect fired when 932ff55fb fixed it,
+  ;; exactly as designed, and was deleted with the issue's archival).
+  (doseq [value [(message/send "" "content") (message/send "bob" "")
+                 (run/complete "")]]
     (is (seon.schema/valid-candidate-value? :seon.error/value value)
-        "the error path keeps the output schema too"))
-  (testing "and the reference case is still broken, so the issue is live"
-    ;; deliberately asserting the DEFECT: when my.run is fixed this
-    ;; fails, and the failure is the reminder to close the issue and
-    ;; delete this testing block rather than a mystery.
-    (is (not (seon.schema/valid-candidate-value?
-              :seon.error/value (run/complete ""))))))
+        "the error path keeps the output schema too")))
 
 (deftest the-surface-is-exactly-one-function
   ;; countable, like the disposition ruling: fan-out is the vector, so

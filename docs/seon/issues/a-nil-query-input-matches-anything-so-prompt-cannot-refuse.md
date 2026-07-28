@@ -50,3 +50,14 @@ rather than per-site vigilance.
 `(prompt/prompt db {:seon.cluster.agent/id "a" :seon.cluster.message/id nil})`
 throws the documented `::refused`/`::no-trigger` ex-info with a
 database containing other messages; a regression asserts it.
+
+## Update (2026-07-28, custody revision — the consumer is sealed)
+
+The loop-side consumer is closed: `prompt` refuses `::no-trigger`
+before any query, and the loop's one `:call` site now catches that
+refusal and records it as a flat error value
+(`test/seon/cluster/turn_test.clj`
+`a-prompt-refusal-is-a-recorded-error-value-never-a-throw`). This note
+STAYS OPEN for the query-layer root cause — any `d/q` whose `:in`
+value can be nil still degrades from "match this" to "match any"; the
+choke-point fix (a query helper refusing nil inputs) is unowned.

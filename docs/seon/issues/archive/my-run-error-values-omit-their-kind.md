@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, agent-runtime, schema]
 ---
@@ -52,3 +52,12 @@ Both functions return values satisfying `:seon.error/value` — a registered
 `string?` on the message. The deliberate defect assertion in
 `my.message-test/the-error-value-is-the-registered-one` is deleted in the same
 commit, and this note moves to `archive/`.
+
+## Resolution (2026-07-28)
+
+Fixed by `932ff55fb` (`fix(run): disposition errors carry their kind`):
+`my.run/wait` and `my.run/complete` now return values satisfying
+`:seon.error/value`. The canary assertion in
+`test/my/message_test.clj` fired exactly as designed (the one baseline
+failure of the 2026-07-28 custody-revision gate) and is deleted with
+this note's archival.

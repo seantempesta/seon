@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent-runtime, architecture]
 ---
@@ -81,3 +81,19 @@ owned and out of the failover unit's boundary.
   provenanced config fact, not a number repeated at two transitions.
 - A falsifier drives a turn whose model work exceeds the lease and asserts the
   answer is not discarded.
+
+## Resolution (2026-07-28, custody revision)
+
+The lease is DELETED, not tuned — CUSTODY IS PRESENCE
+(`docs/prds/sci-execution-runtime/plan/custody-revision-contracts-2026-07-28.md`).
+`:seon.cluster.run/lease-until`, `:seon.cluster.run/claim-epoch`,
+`claimed?`, `expired?`, `heartbeat-tx`/`heartbeat-call`, and the
+`::lease-expired`/`::lease-live`/`::stale-epoch` refusal arms are gone;
+`:seon.cluster.run/process` presence is the whole custody model, so no
+clock exists for a turn's work to outlive. Every acceptance criterion is
+met by unrepresentability: no caller chooses a timeout, no 60-second
+literal exists, and the falsifier is
+`test/seon/cluster/turn_test.clj`
+`a-held-runs-paid-call-is-never-duplicated` (exactly one provider
+dispatch across the open→call→fold interleaving, plus custody-mismatch
+derives no work for another process).
