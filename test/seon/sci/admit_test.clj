@@ -29,8 +29,10 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
+            [seon.config :as config]
             [seon.sci.admit :as admit]
-            [seon.schema])
+            [seon.schema]
+            [seon.test-support :as test-support])
   (:import [java.util.concurrent TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
@@ -55,10 +57,7 @@
      :calls (fn [] @calls)}))
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 6
-   :seon.config.eval.result/max-collection 8
-   :seon.config.eval.result/max-string 32
-   :seon.config.eval.result/max-nodes 256})
+  (config/result-caps (config/defaults)))
 
 (defn- request
   ([value] (request value (:interrupt-fn (armed))))
@@ -214,8 +213,7 @@
                  (:seon.sci.admit/record admitted))
               (boolean? (:seon.sci.admit/capped? admitted)))))
          :seed 20260727)]
-    (is (true? (:result check))
-        (str "admission totality failed: " (pr-str check)))))
+    (test-support/assert-check! check "Admission totality failed.")))
 
 (deftest a-cyclic-value-projects-where-pr-str-dies
   ;; the class, stated once: pr-str of a self-referential structure raises

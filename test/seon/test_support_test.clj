@@ -1,15 +1,14 @@
 (ns seon.test-support-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.core.async :as async]
+            [clojure.test :refer [deftest is]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
-
-(def ^:private marker-schema
-  [{:db/ident ::marker
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}])
 
 (deftest a-canonical-database-is-the-production-ancestor-population
   (test-support/with-database
@@ -63,12 +62,32 @@
 
 (deftest explicit-synthetic-schema-rows-extend-only-that-database
   (test-support/with-database
-    {::test-support/extra-schema marker-schema}
+    {::test-support/extra-schema
+     (test-support/file-store-probe-schema ::marker)}
     (fn [connection]
       (d/transact connection [{::marker "installed"}])
-      (is (= "installed"
-             (d/q
-              '[:find ?value .
-                :where
-                [_ :seon.test-support-test/marker ?value]]
-              @connection))))))
+      (is (= #{"installed"}
+             (test-support/file-store-markers connection ::marker))))))
+
+(deftest shared-support-observes-events-refusals-and-cleanup
+  (let [events (async/chan 1)
+        path (str "tmp/test-support/" (random-uuid))
+        file (java.io.File. path "nested/value.edn")]
+    (.mkdirs (.getParentFile file))
+    (spit file "{}")
+    (async/>!! events ::published)
+    (is (= ::published
+           (test-support/await-event! events ::published)))
+    (is (= {::rule ::refused}
+           (test-support/refusal-data
+            #(throw (ex-info "refused" {::rule ::refused})))))
+    (test-support/delete-recursively! path)
+    (is (not (.exists (java.io.File. path))))))
+
+(deftest shared-property-reporting-is-a-clojure-test-assertion
+  (test-support/assert-check!
+   (tc/quick-check
+    10
+    (prop/for-all [value gen/int]
+      (= value value))
+    :seed 20260728)))

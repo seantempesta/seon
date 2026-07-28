@@ -42,6 +42,19 @@
   "The opaque reconcile scope owned by configuration."
   "seon.db.process/config")
 
+(def ^:private result-cap-attributes
+  [:seon.config.eval.result/max-depth
+   :seon.config.eval.result/max-collection
+   :seon.config.eval.result/max-string
+   :seon.config.eval.result/max-nodes])
+
+(defn result-caps
+  "Derive the value-admission caps from one effective configuration."
+  {:malli/schema
+   [:=> [:cat :seon.config/effective] :seon.sci.admit/caps]}
+  [effective]
+  (select-keys effective result-cap-attributes))
+
 (defn- dial-attributes
   []
   ; entries are the [attr props? schema] vectors; filtering by shape

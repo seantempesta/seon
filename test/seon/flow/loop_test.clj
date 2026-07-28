@@ -8,10 +8,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
-            [seon.flow :as sut])
-  (:import [java.util.concurrent TimeUnit]))
-
-(def ^:private event-backstop-seconds 20)
+            [seon.flow :as sut]
+            [seon.test-support :as test-support]))
 
 ;; PROTOTYPE ONLY. The production plan-lineage schema belongs to runtime step
 ;; 4. These raw Datahike attributes exist only in a throwaway test database.
@@ -133,20 +131,6 @@
         (d/release connection)
         (d/delete-database configuration)))))
 
-(defn- take-report!
-  [report-channel event]
-  (let [[value selected]
-        (async/alts!!
-         [report-channel
-          (async/timeout
-           (.toMillis TimeUnit/SECONDS event-backstop-seconds))])]
-    (when-not (= selected report-channel)
-      (throw
-       (ex-info
-        "The loop simulation did not publish its required report."
-        {::event event})))
-    value))
-
 (defn- create-lineage!
   [connection plan-id owners max-turns max-failures]
   (let [config-id (str plan-id "/budget")
@@ -234,28 +218,32 @@
 
 (defn- attempt-count
   [database plan-id]
-  (d/q
-   '[:find (count ?attempt) .
-     :in $ ?plan
-     :where
-     [?run :seon.flow.loop-test/fix-run-plan ?plan]
-     [?attempt :seon.flow.loop-test/attempt-run ?run]]
-   database
-   (plan-eid database plan-id)))
+  (or
+   (d/q
+    '[:find (count ?attempt) .
+      :in $ ?plan
+      :where
+      [?run :seon.flow.loop-test/fix-run-plan ?plan]
+      [?attempt :seon.flow.loop-test/attempt-run ?run]]
+    database
+    (plan-eid database plan-id))
+   0))
 
 (defn- failure-count
   [database plan-id]
-  (d/q
-   '[:find (count ?attempt) .
-     :in $ ?plan ?success
-     :where
-     [?run :seon.flow.loop-test/fix-run-plan ?plan]
-     [?attempt :seon.flow.loop-test/attempt-run ?run]
-     [?attempt :seon.flow.loop-test/attempt-outcome ?outcome]
-     [(not= ?outcome ?success)]]
-   database
-   (plan-eid database plan-id)
-   ::sut/fix-succeeds))
+  (or
+   (d/q
+    '[:find (count ?attempt) .
+      :in $ ?plan ?success
+      :where
+      [?run :seon.flow.loop-test/fix-run-plan ?plan]
+      [?attempt :seon.flow.loop-test/attempt-run ?run]
+      [?attempt :seon.flow.loop-test/attempt-outcome ?outcome]
+      [(not= ?outcome ?success)]]
+    database
+    (plan-eid database plan-id)
+    ::sut/fix-succeeds)
+   0))
 
 (defn- budget
   [database plan-id]
@@ -445,7 +433,7 @@
 (defn- inject-and-report!
   [graph report-channel coordinate message]
   @(flow/inject graph coordinate [message])
-  (take-report! report-channel coordinate))
+  (test-support/await-event! report-channel coordinate))
 
 (def ^:private property-seeds
   [7 17 41 73 101 211 307 401 509 997])
@@ -503,8 +491,9 @@
                  (contains? #{::sut/done ::sut/escalated} status)
                  (<= turn-count max-turns))))
              :seed 20260726)]
-        (is (true? (:result check))
-            (str "seeded terminal property failed: " (pr-str check)))
+        (test-support/assert-check!
+         check
+         "Seeded terminal property failed.")
         (is (= ::sut/iterating (derived-status @connection plan-id)))
         (d/transact
          connection

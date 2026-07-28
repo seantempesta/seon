@@ -35,10 +35,11 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.config :as config]
             [seon.error :as error]
             [seon.render :as render]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as test-support]
             [datahike.api :as d]))
 
 ;;; ---------------------------------------------------------------------------
@@ -46,10 +47,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 6
-   :seon.config.eval.result/max-collection 8
-   :seon.config.eval.result/max-string 64
-   :seon.config.eval.result/max-nodes 512})
+  (config/result-caps (config/defaults)))
 
 (def ^:private process "test-cluster-4242-1753650000000")
 
@@ -205,7 +203,7 @@
                  (= attributed? (contains? fact :seon.error/run))
                  (= attributed? (contains? fact :seon.error/agent)))))
          :seed 20260727)]
-    (is (:pass? result) (pr-str (:shrunk result)))))
+    (test-support/assert-check! result "Error normalization was not total.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The codec, and what must never escape
@@ -469,21 +467,13 @@
 ;;; because who-gets-told depends on which agents EXIST — and because
 ;;; `canonical-database-attributes` is the live boot derivation, not a
 ;;; hand-listed fixture set (the fixture-vs-live-boot class).
-(defn- with-db [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (seon.schema/canonical-database-attributes)))
+(defn- with-db
+  [body]
+  (test-support/with-database
+    (fn [connection]
       (d/transact connection [{:seon.cluster.agent/id "root"}
                               {:seon.cluster.agent/id "agent-3"}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- commit-request
   [source extra]

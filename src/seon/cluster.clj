@@ -497,11 +497,7 @@
                          :seon.store/connection connection
                          :seon.cluster.agent/id root-agent-id
                          :seon.sci.admit/caps
-                         (select-keys dials
-                                      [:seon.config.eval.result/max-depth
-                                       :seon.config.eval.result/max-collection
-                                       :seon.config.eval.result/max-string
-                                       :seon.config.eval.result/max-nodes])
+                         (config/result-caps dials)
                          :seon.config.render/coalesce-ms
                          (:seon.config.render/coalesce-ms dials)}))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
@@ -590,11 +586,7 @@
               :seon.cluster.loop/completion completion
               :seon.ai.retry/strategy (ai/retry-strategy dials)
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-              :seon.sci.admit/caps
-              (select-keys dials [:seon.config.eval.result/max-depth
-                                  :seon.config.eval.result/max-collection
-                                  :seon.config.eval.result/max-string
-                                  :seon.config.eval.result/max-nodes])
+              :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms dials)
               :seon.config/on-core-error (:seon.config/on-core-error dials)

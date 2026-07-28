@@ -1,8 +1,6 @@
 (ns seon.reconcile-test
   "Sealed acceptance draft for provenance-scoped exact reconciliation."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -10,31 +8,14 @@
             [datahike.api :as d]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
   (:import [java.nio.charset StandardCharsets]
            [java.util UUID]))
 
 (set! *warn-on-reflection* true)
 
-(defn- schema-resource
-  [path]
-  (with-open [reader (java.io.PushbackReader. (io/reader (io/resource path)))]
-    (edn/read reader)))
-
-; Load only this sealed suite's production declarations. The global loader is
-; separately sealed by seon.schema.edn-test; a fixture must not depend on
-; unrelated predicate-owning namespaces having loaded first.
-(schema/contribute-candidate-forms!
- (merge
-  (schema-resource "seon/schema/config.edn")
-  (schema-resource "seon/schema/provenance.edn")
-  (select-keys (schema-resource "seon/schema/flow.edn")
-               [:seon.config.flow.compute/queue-depth
-                :seon.config.flow.compute/concurrency])
-  (select-keys (schema-resource "seon/schema/boot.edn")
-               [:seon.boot/cluster-name])
-  (select-keys (schema-resource "seon/schema/run.edn")
-               [:seon.cluster.run/id])))
+(schema.edn/load! {::schema.edn/resource-dir "seon/schema"})
 
 (def ^:private managing-process
   "seon.db.process/config")
@@ -87,25 +68,6 @@
    :seon.config.flow.compute/queue-depth queue-depth
    :seon.config.flow.compute/concurrency 18
    :seon.config/on-core-error :panic})
-
-(defn- deepest-ex-data
-  [error]
-  (loop [throwable error
-         found nil]
-    (if throwable
-      (recur (ex-cause throwable)
-             (or (not-empty (ex-data throwable)) found))
-      found)))
-
-(defn- refusal-data
-  [f]
-  (try
-    (f)
-    (throw (ex-info "expected refusal" {::missing-refusal true}))
-    (catch Exception error
-      (when (.equals "awaits implementation" (ex-message error))
-        (throw error))
-      (deepest-ex-data error))))
 
 (deftest fixture-provenance-is-real-transaction-metadata
   (with-model-database
@@ -186,14 +148,14 @@
       (testing "no registered identity attribute"
         (is (= ::reconcile/no-identity
                (::reconcile/rule
-                (refusal-data
+                (test-support/refusal-data
                  #(reconcile/plan
                    @connection
                    (request [{:seon.config/on-core-error :panic}])))))))
       (testing "two registered identity attributes"
         (is (= ::reconcile/two-identities
                (::reconcile/rule
-                (refusal-data
+                (test-support/refusal-data
                  #(reconcile/plan
                    @connection
                    (request
@@ -202,7 +164,7 @@
       (testing "the same upsert handle appears twice"
         (is (= ::reconcile/duplicate-identity
                (::reconcile/rule
-                (refusal-data
+                (test-support/refusal-data
                  #(reconcile/plan
                    @connection
                    (request [(config-row "duplicate" 10)
@@ -213,7 +175,7 @@
                       [(config-row "outside" 77)])
         (is (= ::reconcile/identity-outside-scope
                (::reconcile/rule
-                (refusal-data
+                (test-support/refusal-data
                  #(reconcile/plan
                    @connection
                    (request [(config-row "outside" 10)]))))))))))
@@ -252,5 +214,6 @@
                          result)
                       (= before after))))))
          :seed 20260727)]
-    (is (true? (:result check))
-        (str "whole-domain idempotence failed: " (pr-str check)))))
+    (test-support/assert-check!
+     check
+     "Whole-domain reconciliation idempotence failed.")))

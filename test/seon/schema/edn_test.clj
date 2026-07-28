@@ -10,16 +10,8 @@
   `seon/schema` resource directory is never touched by a test."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
-
-(defn- refusal-data
-  "Run `thunk`, returning its refusal ex-data — or ::committed."
-  [thunk]
-  (try
-    (thunk)
-    ::committed
-    (catch Exception e
-      (ex-data e))))
+            [seon.schema.edn :as schema.edn]
+            [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The loader
@@ -42,7 +34,7 @@
                 :seon.schema.edn.fixture/name ""))))))
 
 (deftest duplicates-across-files-refuse-naming-both
-  (let [data (refusal-data
+  (let [data (test-support/refusal-data
               #(schema.edn/load!
                 {:seon.schema.edn/resource-dir
                  "seon/schema_edn_fixtures/duplicate"}))]
@@ -54,7 +46,7 @@
         "the refusal names BOTH contributing files")))
 
 (deftest unreadable-files-refuse-by-name
-  (let [data (refusal-data
+  (let [data (test-support/refusal-data
               #(schema.edn/load!
                 {:seon.schema.edn/resource-dir
                  "seon/schema_edn_fixtures/unreadable"}))]
@@ -85,7 +77,7 @@
             [:fn {:gen/schema :inst}
              'seon.schema.edn-test/fixture-instant?]}}))))
   (testing "an unresolved reference refuses, naming the key"
-    (let [data (refusal-data
+    (let [data (test-support/refusal-data
                 #(schema.edn/admit
                   {:seon.schema/forms
                    {:seon.schema.edn.gate/dangling
@@ -102,21 +94,21 @@
             [:fn {:gen/schema :inst}
              'seon.schema.edn-test-fixture/late-instant?]}}))))
   (testing "a [:fn] in a namespace that does not exist still refuses"
-    (is (map? (refusal-data
+    (is (map? (test-support/refusal-data
                #(schema.edn/admit
                  {:seon.schema/forms
                   {:seon.schema.edn.gate/phantom
                    [:fn {:gen/schema :inst}
                     'seon.schema.no-such-namespace/predicate?]}})))))
   (testing "a [:fn] naming no registered core predicate refuses"
-    (is (map? (refusal-data
+    (is (map? (test-support/refusal-data
                #(schema.edn/admit
                  {:seon.schema/forms
                   {:seon.schema.edn.gate/ghost
                    [:fn {:gen/schema :inst}
                     'seon.schema.edn-test/no-such-predicate?]}})))))
   (testing "a [:fn] with no honest generator refuses"
-    (is (map? (refusal-data
+    (is (map? (test-support/refusal-data
                #(schema.edn/admit
                  {:seon.schema/forms
                   {:seon.schema.edn.gate/dishonest
@@ -125,7 +117,7 @@
 (deftest register!-flows-through-the-same-gate
   (testing "the agent producer meets the same honesty bar — one gate,
             two producers"
-    (is (map? (refusal-data
+    (is (map? (test-support/refusal-data
                #(schema/register!
                  :seon.schema.edn.gate/agent-dishonest
                  [:fn 'seon.schema.edn-test/fixture-instant?])))))

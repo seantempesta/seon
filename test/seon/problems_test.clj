@@ -22,38 +22,28 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.config :as config]
             [seon.error :as error]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.test-support :as test-support]))
 
 (def ^:private live "9999-1785191833372")
 (def ^:private dead "1234-1700000000000")
 (def ^:private now #inst "2026-07-27T21:00:00.000-00:00")
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 6
-   :seon.config.eval.result/max-collection 8
-   :seon.config.eval.result/max-string 64
-   :seon.config.eval.result/max-nodes 512})
+  (config/result-caps (config/defaults)))
 
-(defn- with-db [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (seon.schema/canonical-database-attributes)))
+(defn- with-db
+  [body]
+  (test-support/with-database
+    (fn [connection]
       (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn problems-surface
   "The problems block as a producer wires it: a projection that supplies
@@ -270,7 +260,7 @@
                  (seon.schema/valid-candidate-value? :seon.problems/problems
                                                      value))))))
          :seed 20260727)]
-    (is (:pass? result) (pr-str (:shrunk result)))))
+    (test-support/assert-check! result "Absent facts produced entries.")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The log projection composes, and routes

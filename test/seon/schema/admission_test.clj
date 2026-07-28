@@ -7,7 +7,8 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as test-support]))
 
 (def ^:private boot-process-identity "seon.db.process/boot")
 (def ^:private runtime-core-process-identity "seon.db.process/core")
@@ -67,12 +68,6 @@
 (defn- source [connection tx]
   (:seon.schema.admission/source (admission connection tx)))
 
-(defn- delete-recursively! [path]
-  (let [file (.getCanonicalFile (io/file path))]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
-
 (defn- with-built-ancestor [body]
   (let [root (str "tmp/schema-admission-test/" (random-uuid))
         dir (str root "/store")]
@@ -94,7 +89,7 @@
               (d/release connection))))
         (finally
           (store/release-store! opened)
-          (delete-recursively! root))))))
+          (test-support/delete-recursively! root))))))
 
 (deftest genesis-process-identities-are-core-by-history
   (with-temporal-database

@@ -1,37 +1,16 @@
 (ns seon.config-test
   "Sealed acceptance draft for manifest-to-config-facts."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.config :as config]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (set! *warn-on-reflection* true)
 
-(defn- schema-resource
-  [path]
-  (with-open [reader (java.io.PushbackReader. (io/reader (io/resource path)))]
-    (edn/read reader)))
-
-; Load only this sealed suite's production declarations. The global loader is
-; separately sealed by seon.schema.edn-test; a fixture must not depend on
-; unrelated predicate-owning namespaces having loaded first.
-(schema/contribute-candidate-forms!
- (merge
-  (schema-resource "seon/schema/config.edn")
-  (schema-resource "seon/schema/provenance.edn")
-  (select-keys (schema-resource "seon/schema/flow.edn")
-               [:seon.config.flow.compute/queue-depth
-                :seon.config.flow.compute/concurrency])
-  (select-keys (schema-resource "seon/schema/boot.edn")
-               [:seon.boot/cluster-name])
-  (select-keys (schema-resource "seon/schema/admit.edn")
-               [:seon.config.eval.result/max-depth
-                :seon.config.eval.result/max-collection
-                :seon.config.eval.result/max-string
-                :seon.config.eval.result/max-nodes])))
+(schema.edn/load! {::schema.edn/resource-dir "seon/schema"})
 
 (def ^:private expected-dial-attributes
   #{:seon.config.flow.compute/queue-depth
@@ -92,25 +71,6 @@
                         (first entry)))))
         (drop 2 (schema/schema-definition :seon.config/effective))))
 
-(defn- deepest-ex-data
-  [error]
-  (loop [throwable error
-         found nil]
-    (if throwable
-      (recur (ex-cause throwable)
-             (or (not-empty (ex-data throwable)) found))
-      found)))
-
-(defn- refusal-data
-  [f]
-  (try
-    (f)
-    (throw (ex-info "expected refusal" {::missing-refusal true}))
-    (catch Exception error
-      (when (.equals "awaits implementation" (ex-message error))
-        (throw error))
-      (deepest-ex-data error))))
-
 (deftest the-default-document-has-one-canonical-location
   (is (.equals "config/default.edn" config/default-manifest-path))
   (is (.isFile (io/file config/default-manifest-path))))
@@ -142,6 +102,17 @@
             (pr-str (schema/explain-candidate-value dial (get manifest dial))))))
     (is (schema/valid-candidate-value? :seon.config/effective manifest))))
 
+(deftest result-caps-are-derived-from-the-effective-configuration
+  (let [effective (config/defaults)]
+    (is (= {:seon.config.eval.result/max-depth 12
+            :seon.config.eval.result/max-collection 64
+            :seon.config.eval.result/max-string 4096
+            :seon.config.eval.result/max-nodes 4096}
+           (config/result-caps effective)))
+    (is (schema/valid-candidate-value?
+         :seon.sci.admit/caps
+         (config/result-caps effective)))))
+
 (deftest read-manifest-resolves-one-override-against-the-default-document
   (let [directory (io/file "tmp/config-test")
         path (io/file directory "override.edn")]
@@ -162,7 +133,7 @@
 (deftest manifest-gate-refuses-unknown-keys-and-invalid-values
   (testing "unknown means no registered dial schema"
     (let [data
-          (refusal-data
+          (test-support/refusal-data
            #(config/desired-rows
              {:seon.config.flow.compute/queue-depth 10
               :seon.config.flow.compute/concurrency 18
@@ -174,7 +145,7 @@
              (::config/key data)))))
   (testing "a registered dial with the wrong value carries Malli's explanation"
     (let [data
-          (refusal-data
+          (test-support/refusal-data
            #(config/desired-rows
              {:seon.config.flow.compute/queue-depth 0
               :seon.config.flow.compute/concurrency 18
@@ -186,7 +157,7 @@
 
 (deftest unreadable-manifest-refuses-by-name
   (let [data
-        (refusal-data
+        (test-support/refusal-data
          #(config/read-manifest
            "tmp/config-test/this-manifest-does-not-exist.edn"))]
     (is (= ::config/manifest-unreadable (::config/rule data)))))

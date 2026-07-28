@@ -7,18 +7,14 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.core :as datahike]
-            [seon.flow :as sut])
+            [seon.flow :as sut]
+            [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net ServerSocket URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
             WebSocket WebSocket$Listener]
            [java.util.concurrent CountDownLatch ExecutorService Future
             TimeUnit]))
-
-(def ^:private event-backstop-seconds
-  ;; Every wait below has a real publisher. This clock turns a missing event
-  ;; into a named failure instead of wedging the recurring writer gate.
-  20)
 
 (def ^:private fault-schema
   [{:db/ident ::core-error-config-id
@@ -46,41 +42,11 @@
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}])
 
-(defn- await-latch!
-  [^CountDownLatch latch event]
-  (when-not (.await latch event-backstop-seconds TimeUnit/SECONDS)
-    (throw
-     (ex-info
-      "The Flow testbed did not observe its required event."
-      {::event event}))))
-
-(defn- take-event!
-  ([channel event]
-   (take-event! channel event (constantly true)))
-  ([channel event accept?]
-   (let [backstop
-         (async/timeout
-          (.toMillis TimeUnit/SECONDS event-backstop-seconds))]
-     (loop []
-       (let [[value selected] (async/alts!! [channel backstop])]
-         (cond
-           (= selected backstop)
-           (throw
-            (ex-info
-             "The Flow testbed channel did not publish its required event."
-             {::event event}))
-
-           (accept? value)
-           value
-
-           :else
-           (recur)))))))
-
 (defn- database-events
   [connection]
   (let [channel (async/chan 16)
         listener-key (random-uuid)]
-    (datahike/listen! connection listener-key #(async/>!! channel %))
+    (datahike/listen! connection listener-key #(async/put! channel %))
     {::channel channel
      ::listener-key listener-key}))
 
@@ -122,7 +88,7 @@
   [^ExecutorService executor]
   (.shutdownNow executor)
   (when-not (.awaitTermination
-             executor event-backstop-seconds TimeUnit/SECONDS)
+             executor test-support/event-backstop-seconds TimeUnit/SECONDS)
     (throw
      (ex-info
       "The bounded Flow compute executor did not terminate."
@@ -290,11 +256,11 @@
                (fn [{::sut/keys [started!]}]
                  (started!)
                  (.countDown wedge-started)
-                 (await-latch! release-wedges ::release-production-wedges)
+                 (test-support/await-event! release-wedges ::release-production-wedges)
                  ::released)})))
          wedge-ids)]
     (try
-      (await-latch! wedge-started ::production-wedges-started)
+      (test-support/await-event! wedge-started ::production-wedges-started)
       (is (every? #(= ::sut/time-limit (::sut/outcome @%)) wedges))
       (let [observer-state
             (::flow/state
@@ -325,7 +291,7 @@
       (finally
         (.countDown release-wedges)
         (dotimes [_ wedge-count]
-          (take-event!
+          (test-support/await-event!
            (get-in launcher [::sut/started :report-chan])
            ::production-wedge-released
            #(contains? wedge-ids (::sut/submission-id %))))
@@ -368,7 +334,7 @@
               (.countDown wedge-started)
               (when-not (.await
                          release-wedges
-                         event-backstop-seconds
+                         test-support/event-backstop-seconds
                          TimeUnit/SECONDS)
                 (throw
                  (ex-info
@@ -376,7 +342,7 @@
                   {::event ::wedge-release})))
               ::released)
             ::sut/wedged? true}]))
-      (await-latch! wedge-started ::wedges-started)
+      (test-support/await-event! wedge-started ::wedges-started)
 
       (testing "ping and report name every wedge and the exact capacity loss"
         (let [observer-state
@@ -387,7 +353,7 @@
                  (::sut/available-permits observer-state)))
           (is (true? (::sut/platform-threads? observer-state))))
         @(flow/inject graph [:observer ::sut/observe] [::observe])
-        (let [report (take-event! (:report-chan started) ::capacity-report)]
+        (let [report (test-support/await-event! (:report-chan started) ::capacity-report)]
           (is (= ::sut/capacity (::sut/event report)))
           (is (= wedged-pids (::sut/wedged-procs report))))
         (let [all-pings (flow/ping graph :timeout-ms 100)]
@@ -409,9 +375,9 @@
                 (.countDown remaining-work-finished)
                 ::completed)
               ::sut/wedged? false}]))
-        (await-latch! remaining-work-finished ::remaining-capacity)
+        (test-support/await-event! remaining-work-finished ::remaining-capacity)
         (dotimes [_ (- parallelism wedge-count)]
-          (take-event!
+          (test-support/await-event!
            (:report-chan started)
            ::normal-work-completed
            #(contains? #{:eval-2 :eval-3} (::sut/pid %))))
@@ -419,7 +385,7 @@
       (finally
         (.countDown release-wedges)
         (dotimes [_ wedge-count]
-          (take-event!
+          (test-support/await-event!
            (:report-chan started)
            ::wedged-work-released
            #(contains? wedged-pids (::sut/pid %))))
@@ -439,7 +405,7 @@
                [:eval ::sut/submission]
                (mapv #(work-message completed %) (range 2)))
               _ (.get ^Future filled
-                      event-backstop-seconds
+                      test-support/event-backstop-seconds
                       TimeUnit/SECONDS)
               injection
               (flow/inject
@@ -452,10 +418,10 @@
                   [:buffer :count])))
           (flow/resume graph)
           (.get ^Future injection
-                event-backstop-seconds
+                test-support/event-backstop-seconds
                 TimeUnit/SECONDS)
           (dotimes [_ 6]
-            (take-event!
+            (test-support/await-event!
              (:report-chan started)
              ::fixed-buffer-item-completed
              #(= ::sut/eval-complete (::sut/event %))))
@@ -492,7 +458,7 @@
                 (recur (unchecked-inc entries))))
             ::sut/interrupt-fn interrupt-fn
             ::sut/wedged? false}])
-        (let [report (take-event! report-chan ::interrupt-report)
+        (let [report (test-support/await-event! report-chan ::interrupt-report)
               result (::sut/result report)]
           (is (= :timeout (:seon.error/kind result)))
           (is (= :eval (get-in result
@@ -505,7 +471,7 @@
           graph
           [:eval ::sut/submission]
           [(work-message completed ::after-interrupt)])
-        (take-event!
+        (test-support/await-event!
          report-chan
          ::after-interrupt
          #(= ::after-interrupt (::sut/result %)))
@@ -529,7 +495,7 @@
             (fn [_]
               (throw (RuntimeException. "synthetic step failure")))
             ::sut/wedged? false}])
-        (let [error (take-event! error-chan ::flow-step-error)]
+        (let [error (test-support/await-event! error-chan ::flow-step-error)]
           (is (= :eval (::flow/pid error)))
           (is (= :step (::flow/op error)))
           (is (instance? Throwable (::flow/ex error))))
@@ -540,7 +506,7 @@
           graph
           [:eval ::sut/submission]
           [(work-message completed ::after-throw)])
-        (take-event!
+        (test-support/await-event!
          report-chan
          ::after-throw
          #(= ::after-throw (::sut/result %)))
@@ -602,7 +568,7 @@
                     graph
                     [:eval ::sut/submission]
                     [(throwing-work-message 0)])
-                  (take-event!
+                  (test-support/await-event!
                    monitor-messages
                    ::monitor-core-fault
                    (fn [{:keys [action data]}]
@@ -614,12 +580,12 @@
                     [:eval ::sut/submission]
                     [(work-message completed ::fanout-report)])
                   (let [application-copy
-                        (take-event!
+                        (test-support/await-event!
                          (::sut/application-report-channel fanout)
                          ::application-report-copy)]
                     (is (= ::fanout-report
                            (::sut/result application-copy))))
-                  (take-event!
+                  (test-support/await-event!
                    monitor-messages
                    ::monitor-report-copy
                    (fn [{:keys [action data]}]
@@ -627,7 +593,7 @@
                           (= ::fanout-report (::sut/result data)))))
                   (finally
                     (flow-monitor/stop-server monitor-state)))))
-            (take-event!
+            (test-support/await-event!
              (::channel transactions)
              ::core-fault-committed
              #(= #{[:eval
@@ -660,7 +626,7 @@
           ::sut/commit-fault!
           (fn [_fault]
             (.countDown commit-entered)
-            (await-latch! finish-commit ::finish-fault-commit))
+            (test-support/await-event! finish-commit ::finish-fault-commit))
           ::sut/commit-drop! (fn [_])
           ::sut/panic! (fn [_])})]
     (try
@@ -668,7 +634,7 @@
       @(flow/inject graph
                     [:eval ::sut/submission]
                     [(throwing-work-message 0)])
-      (await-latch! commit-entered ::fault-commit-entered)
+      (test-support/await-event! commit-entered ::fault-commit-entered)
       (let [stopped (future (sut/stop-error-fanout! fanout))]
         (is (= ::still-stopping
                (deref stopped 1000 ::still-stopping))
@@ -705,13 +671,13 @@
               [:eval ::sut/submission]
               (mapv throwing-work-message (range fault-count)))
             (dotimes [_ fault-count]
-              (take-event!
+              (test-support/await-event!
                (::sut/monitor-error-channel fanout)
                ::monitor-buffered-core-fault))
             (is (empty? (committed-faults @connection)))
             (is (zero? (committed-drop-count @connection)))
             (flow/resume-proc fault-graph ::sut/fault-committer)
-            (take-event!
+            (test-support/await-event!
              (::channel transactions)
              ::all-core-faults-committed
              #(<= fault-count
@@ -753,16 +719,16 @@
               [:eval ::sut/submission]
               (mapv throwing-work-message (range fault-count)))
             (dotimes [_ fault-count]
-              (take-event!
+              (test-support/await-event!
                (::sut/monitor-error-channel fanout)
                ::monitor-overflow-core-fault))
-            (take-event!
+            (test-support/await-event!
              (::channel transactions)
              ::fault-drops-committed
              #(<= (- fault-count fault-buffer-capacity)
                   (committed-drop-count (:db-after %))))
             (flow/resume-proc fault-graph ::sut/fault-committer)
-            (take-event!
+            (test-support/await-event!
              (::channel transactions)
              ::retained-core-faults-committed
              #(<= fault-buffer-capacity
@@ -795,14 +761,14 @@
                [:mailbox ::sut/mailbox]
                (vec (range 100)))]
           (.get ^Future injection
-                event-backstop-seconds
+                test-support/event-backstop-seconds
                 TimeUnit/SECONDS)
           (is (.isDone ^Future injection))
           (is (= {:type 'SlidingBuffer :count 1 :capacity 1}
                  (:buffer
                   (channel-data graph :mailbox ::sut/mailbox))))
           (flow/resume graph)
-          (is (= 99 (take-event! delivered ::latest-mail))))
+          (is (= 99 (test-support/await-event! delivered ::latest-mail))))
         (finally
           (flow/stop graph))))))
 
@@ -820,7 +786,7 @@
                 (interrupt-fn)
                 (when (= ordinal 3)
                   (.countDown mid-step)
-                  (await-latch! release-mid-step ::release-mid-step))
+                  (test-support/await-event! release-mid-step ::release-mid-step))
                 (swap! completed conj ordinal)
                 ordinal)
               ::sut/wedged? false})
@@ -833,13 +799,13 @@
                [:eval ::sut/submission]
                messages)]
           (.get ^Future injection
-                event-backstop-seconds
+                test-support/event-backstop-seconds
                 TimeUnit/SECONDS)
           (flow/resume graph)
-          (await-latch! mid-step ::load-mid-step)
+          (test-support/await-event! mid-step ::load-mid-step)
           (flow/pause graph)
           (.countDown release-mid-step)
-          (take-event!
+          (test-support/await-event!
            (:report-chan started)
            ::load-paused-after-current-step
            #(= 3 (::sut/result %)))
@@ -848,7 +814,7 @@
           (is (nil? (async/poll! (:report-chan started)))
               "the acknowledged pause publishes no next completion")
           (flow/resume graph)
-          (take-event!
+          (test-support/await-event!
            (:report-chan started)
            ::load-complete
            #(= 19 (::sut/result %)))
@@ -873,7 +839,7 @@
           graph-b
           [:eval ::sut/submission]
           [(work-message (::completed b) ::flow-b)])
-        (take-event!
+        (test-support/await-event!
          (:report-chan started-b)
          ::flow-b
          #(= ::flow-b (::sut/result %)))
@@ -944,11 +910,11 @@
                 ^java.util.List
                 ["kill" "-9" (str (.pid process))]))]
           (is (.waitFor kill-process
-                        event-backstop-seconds
+                        test-support/event-backstop-seconds
                         TimeUnit/SECONDS))
           (is (zero? (.exitValue kill-process))))
         (is (.waitFor process
-                      event-backstop-seconds
+                      test-support/event-backstop-seconds
                       TimeUnit/SECONDS))
         (is (false? (.isAlive process)))
         (let [connection (d/connect configuration)]
@@ -967,8 +933,7 @@
             (.destroyForcibly process))
           (when (d/database-exists? configuration)
             (d/delete-database configuration))
-          (.delete ready-file)
-          (.delete root))))))
+          (test-support/delete-recursively! root))))))
 
 (defn- free-port
   []
@@ -999,7 +964,7 @@
              (URI/create (str "ws://127.0.0.1:" port "/flow-socket"))
              listener)
             .join)]
-    (await-latch! initial-and-ping ::monitor-datafy-and-ping)
+    (test-support/await-event! initial-and-ping ::monitor-datafy-and-ping)
     [socket @complete-messages]))
 
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
@@ -1036,17 +1001,17 @@
             (fn [{::sut/keys [interrupt-fn]}]
               (interrupt-fn)
               (.countDown wedge-started)
-              (await-latch! release-wedge ::release-monitor-wedge)
+              (test-support/await-event! release-wedge ::release-monitor-wedge)
               ::released)
             ::sut/wedged? true}])
-        (await-latch! wedge-started ::monitor-wedge-started)
+        (test-support/await-event! wedge-started ::monitor-wedge-started)
         (let [filled-injection
               (flow/inject
                graph
                [:eval ::sut/submission]
                (mapv #(work-message post-wedge-results %) (range 2)))
               _ (.get ^Future filled-injection
-                      event-backstop-seconds
+                      test-support/event-backstop-seconds
                       TimeUnit/SECONDS)
               _ (is (= 2
                        (get-in
@@ -1100,9 +1065,9 @@
               (flow-monitor/stop-server monitor-state)
               (.countDown release-wedge)
               (.get ^Future parked-injection
-                    event-backstop-seconds
+                    test-support/event-backstop-seconds
                     TimeUnit/SECONDS)
-              (take-event!
+              (test-support/await-event!
                (::sut/application-report-channel fanout)
                ::monitor-post-wedge-drain
                #(= 2 (::sut/result %)))
