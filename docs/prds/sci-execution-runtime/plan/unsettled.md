@@ -635,11 +635,28 @@ string in perfect confidence — three candidate rulings in the note);
 my.run error values omit :seon.error/kind. SIX MORNING QUESTIONS in
 the proof doc §7 (bound currency, refusal visibility to sender, wait
 semantics, self-messaging keep/refuse, verbatim replies, Math/sqrt
-absent from base — N5's surface decision). IN FLIGHT (one): N4
-(streaming exercises via local Qwen; /data pager; NOW UNBLOCKED:
-root's seeded blocks + ui.md accretion — message units are live data
-for its pages, conversations derive from tx-meta walks never stored
-threads). MORNING BATCH accumulating:
+absent from base — N5's surface decision). STREAMING PROVEN LIVE (gate 385/1493/0 verified): both owner
+exercises in a real browser — 18 counter morphs climbing, text
+growing in place; 46 tokens → 18 morphs IS the coalescing design
+(presentation lags/drops, the producer never waits). seon.ai owns
+the wire, seon.ai.stream owns the database, one function between;
+the sink does NO work on the provider thread (2000-call hammer
+test); streamed and one-shot calls return the SAME completion shape
+(failover cannot tell). ofInputStream not ofLines. Suite needs no
+network (canned SSE over real http-kit). /DATA DRILL LIVE: windowed
+paging ("1-6 of 130"), URL = state (a drilled position is a
+sendable link), breadcrumbs = the path's prefixes,
+pay-only-for-what-is-opened as a TIMED sealed property, paging
+GENERATIVE (each entry exactly once), drilled pages carry NO feed
+(repaint moves the reader's ground). LOCAL QWEN RESTARTED by the
+orchestrator (the handoff PID died; command from
+local-provider-2026-07-28.md; serving on :8090 again).
+IN FLIGHT (one): N4's FINAL night slice — root's seeded block set
+(config/default.edn + boot; the bar: start! serves a REAL page, the
+owner opens localhost and sees the cluster's root view with alice
+and bob's conversation drillable) — then the night closes; the
+agent-transcript page (package 5, the owner's hard-to-follow chat
+causes) waits for morning rulings. MORNING BATCH accumulating:
 context-blocks decisions (8, post-review), no-auth provider
 admission, font licensing remedy, N4/N5 decision batches,
 my.message's conversation-loop dial, R41-recorder carve-out
