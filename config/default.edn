@@ -64,6 +64,22 @@
  ; cost of being wrong low is a delegation that dies mid-thought.
  :seon.config.message/max-chain 16
 
+ ; Unit: consecutive runs per idle→running episode — runs since (and
+ ; including) the one answering the last OUTSIDE trigger, derived
+ ; purely from committed facts (~34 µs on a 64-run history; no stored
+ ; counter, and an outside trigger's own run IS the reset).
+ ; Provenance: the F1 agent-graph contract
+ ; (docs/prds/sci-execution-runtime/plan/
+ ; f1-agent-graph-contracts-2026-07-28.md §7) and the owner ruling of
+ ; 2026-07-28 setting the shipped value at 100: the dial bounds
+ ; LEGITIMATE self-continuation, never a loop bug (any loop is a design
+ ; defect to dissolve), so it sits well above the deepest observed
+ ; useful chain while still ending an unattended runaway within one
+ ; sitting. When the dial is hit, deferred agent-sent triggers stay
+ ; conserved unanswered rows and the next outside trigger opens
+ ; normally — nothing is dropped and nothing is written.
+ :seon.config.run/max-episode-runs 100
+
  ; WHO hears what nobody else can be told about. It names the root agent
  ; because boot now SEEDS one — the reason this was absent when the dial
  ; landed was that a default naming an agent that may not exist would be
@@ -159,10 +175,12 @@
  :seon.config.ai.retry/maximum-retries 2
 
  ; Unit: milliseconds of TOTAL waiting across all retries.
- ; Provenance: THE BINDING BOUND, and it is bound by the run lease, not
- ; by patience. A turn holds its run under a 60 s lease and the model
- ; call itself may take the full 60 s deadline, so the waiting budget
- ; has to be small enough that a backed-off turn does not routinely
- ; outlive its own claim. Three seconds is under 5% of the lease and
- ; still covers the base + one doubled wait.
+ ; Provenance: THE BINDING BOUND, and it is bound by responsiveness,
+ ; not by patience. (It was originally sized against the 60 s run
+ ; lease; leases are DELETED — custody is presence, 2026-07-28 — and
+ ; the number survives on its own merits.) The model call itself may
+ ; take the full 60 s deadline, so the waiting budget has to stay small
+ ; against the one deadline a turn already carries; three seconds
+ ; covers the base + one doubled wait without making a backed-off turn
+ ; feel wedged.
  :seon.config.ai.retry/maximum-total-delay-ms 3000}

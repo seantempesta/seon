@@ -28,6 +28,10 @@
     :seon.config.web/port
     :seon.config.render/coalesce-ms
     :seon.config.message/max-chain
+    ;; THE EPISODE DIAL (F1, 2026-07-28): max consecutive runs per
+    ;; idle→running episode; absence is fail-closed for agent-sent
+    ;; triggers, and the shipped document carries the owner-ruled 100.
+    :seon.config.run/max-episode-runs
     :seon.config/on-core-error
     :seon.config.ai/endpoint
     :seon.config.ai/model

@@ -43,6 +43,19 @@
  ; installed.
  :seon.config.render/coalesce-ms [:int {:min 0 :max 1000}]
 
+ ; HOW LONG AN AGENT MAY RUN ON ITS OWN STEAM. Unit: consecutive runs
+ ; per idle→running episode — runs since (and including) the one
+ ; answering the last OUTSIDE trigger, derived purely from committed
+ ; facts (the run's opening transaction names its trigger; a trigger
+ ; with no :seon.cluster.message/from and no
+ ; :seon.cluster.message/about came from outside the population's
+ ; autonomous activity — a human, or a schedule fire). No stored
+ ; counter exists; an outside trigger's own run IS the reset. ABSENT is
+ ; FAIL-CLOSED for agent-sent triggers (the max-chain precedent):
+ ; nothing agent-triggered opens, outside triggers open normally.
+ :seon.config.run/max-episode-runs
+ [:int {:min 1}]
+
  ; HOW LONG A CONVERSATION MAY RUN WITHOUT A HUMAN. Unit: agent-to-agent
  ; hops in one causal chain. Delivery IS the wake, so alice messaging
  ; bob wakes bob, whose reply wakes alice — a polite infinite
@@ -165,6 +178,9 @@
   [:seon.config.message/max-chain
    {:optional true}
    :seon.config.message/max-chain]
+  [:seon.config.run/max-episode-runs
+   {:optional true}
+   :seon.config.run/max-episode-runs]
   [:seon.config/on-core-error
    {:optional true}
    :seon.config/on-core-error]
@@ -217,6 +233,12 @@
   [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
+  ; OPTIONAL because absence is a representable state with ruled
+  ; semantics (fail-closed for agent-sent triggers), never because the
+  ; shipped document may omit it — default.edn carries a provenanced
+  ; value.
+  [:seon.config.run/max-episode-runs
+   {:optional true} :seon.config.run/max-episode-runs]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
@@ -272,6 +294,8 @@
   [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
   [:seon.config.message/max-chain :seon.config.message/max-chain]
+  [:seon.config.run/max-episode-runs
+   {:optional true} :seon.config.run/max-episode-runs]
   [:seon.config/on-core-error
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]

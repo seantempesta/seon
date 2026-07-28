@@ -108,6 +108,13 @@
                    (schema/canonical-database-attributes)))
       (d/transact connection
                   [(agent-row "agent-a")
+                   ;; the episode dial, planted the way production
+                   ;; ships it (config/default.edn): an ABSENT dial is
+                   ;; FAIL-CLOSED for agent-sent triggers, so the
+                   ;; delegation fixtures need the fact the defaults
+                   ;; document provides
+                   {:seon.config/cluster "turn-test"
+                    :seon.config.run/max-episode-runs 100}
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "count the widgets"
@@ -455,16 +462,16 @@
                 "the run closed in the SAME transaction as its receipt")))))))
 
 (deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note
-  ;; REPLACES a test that asserted the run stays open after a wait. It
-  ;; did stay open — because the close REFUSED, forever: `next-work`
-  ;; derives `:close` for the released run, `close-call` refuses a run
-  ;; the process does not hold, and the self-rewake fires again. Twelve
-  ;; passes produced nine error facts and `next-work` still said
-  ;; `:close`. A hot livelock is not "waiting"; the loop now takes
-  ;; custody before closing, and what a wait really means is that the
-  ;; run ENDS with no reply and the agent is free to be triggered again.
+  ;; REVISED TWICE, each time toward one commit. First: a wait used to
+  ;; leave the run open forever because the close refused (the measured
+  ;; `:close` livelock — twelve passes, nine error facts). Then the F1
+  ;; seal folded in the ruled `my.run/wait` revision (README
+  ;; owner-decisions #4): the wait's terminal transaction settles the
+  ;; receipt AND closes the run in ONE commit, so the
+  ;; unheld-open-planned intermediate state — the P1 feeder — never
+  ;; exists at any basis and no separate `:close` pass runs at all.
   ;; Nothing could ever have resumed that run: its plan was fully
-  ;; executed.
+  ;; executed, and what resumes is the AGENT, on its next trigger.
   (with-cluster
     (fn [cluster]
       (with-redefs [ai/complete
@@ -474,10 +481,10 @@
                                :seon.sci.admit/value (my.run/wait "need input")}]
           (let [connection (:seon.store/branch-connection cluster)
                 reports (drive! cluster 12)]
-            (is (= [:open :call :resume :close]
+            (is (= [:open :call :resume]
                    (mapv :seon.cluster.work/situation reports))
-                "four passes and then IDLE — the loop stops looking")
-            (is (= [:released :released :released :closed]
+                "three passes and then IDLE — no separate close pass")
+            (is (= [:released :released :closed]
                    (mapv :seon.cluster.loop/outcome reports)))
             (is (nil? (work/next-work @connection (request connection)))
                 "and nothing is derivable afterwards: no spin")

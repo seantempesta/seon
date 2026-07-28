@@ -195,13 +195,19 @@
     (into (run/receipt-settle-tx receipt)
           ;; ONE transaction: the disposition's own transition rides
           ;; here, so the receipt and what it means are never two
-          ;; commits with a window between them.
+          ;; commits with a window between them. A `wait` CLOSES the
+          ;; run exactly as `complete` does (README owner-decisions #4,
+          ;; folded into F1): releasing instead left an
+          ;; unheld-open-planned run at a committed basis — the P1
+          ;; feeder state — and nothing could ever resume it, because
+          ;; its plan was fully executed. What differs is only what
+          ;; rides beside the close: a completion delivers a reply, a
+          ;; wait delivers nothing and leaves its note in the receipt.
           (case (:my.run/disposition value)
-            :completed (run/close-tx {:seon.cluster.run/id id
-                                      :seon.cluster.run/process process
-                                      :seon.cluster.run/closed-at now})
-            :wait (run/release-tx {:seon.cluster.run/id id
-                                   :seon.cluster.run/process process})
+            (:completed :wait)
+            (run/close-tx {:seon.cluster.run/id id
+                           :seon.cluster.run/process process
+                           :seon.cluster.run/closed-at now})
             nil))))
 
 ;;; ---------------------------------------------------------------------------
@@ -940,23 +946,29 @@
                               {:seon.db/trigger
                                [:seon.cluster.message/id trigger]})))
                     ran (inc ran)
+                    ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
+                    ;; §5.2): asking the GLOBAL derivation here was the
+                    ;; conservation audit's verified defect — wrong the
+                    ;; moment two agents run, because another agent's
+                    ;; earlier work would answer this run's question.
                     next-ordinal
                     (when-not (or settled (:seon.error/kind outcome))
                       (:seon.cluster.run.form/ordinal
-                       (work/next-work @connection
-                                       {:seon.cluster.run/process process
-                                        :seon.cluster.work/now now})))]
+                       (work/next-agent-work
+                        @connection
+                        {:seon.cluster.agent/id agent-id
+                         :seon.cluster.run/process process
+                         :seon.cluster.work/now now})))]
                 (cond
                   (refused! cluster outcome now
                             {:seon.cluster.agent/id agent-id
                              :seon.cluster.run/id run-id})
                   (report :error ran)
 
-                  settled (report (if (= :completed
-                                         (:my.run/disposition settled))
-                                    :closed
-                                    :released)
-                                  ran)
+                  ;; both dispositions CLOSE the run in the terminal
+                  ;; transaction now, so a settled fold always reports
+                  ;; the run closed
+                  settled (report :closed ran)
                   next-ordinal (recur next-ordinal ran)
                   :else (report :released ran))))))))
 
