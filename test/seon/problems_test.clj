@@ -133,7 +133,7 @@
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/claim-epoch 1
                 :seon.cluster.eval/at now
-                :seon.cluster.eval/status :error
+                ;; the error's presence IS the errored state
                 :seon.error/kind :seon.sci.eval/evaluation-failed
                 :seon.cluster.eval/error "Unable to resolve symbol: widgets"}]))
 
