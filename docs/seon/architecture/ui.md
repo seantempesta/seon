@@ -281,13 +281,33 @@ every context band renders an html representation for inspectability.
   and the cycle is reported in the hole that closes it, because rendering
   nothing would be the silent failure this design refuses.
 
+**Expansion is BOUNDED, by a node budget and a depth budget, not only by a
+visited set.** A visited set is per path: it refuses cycles and permits fan-out,
+and a block set with no cycle anywhere can still expand exponentially. The
+budgets are the same `:seon.sci.admit/caps` dials the value codec takes, because
+a graph that fans out and can cycle is the problem that codec already solved and
+a second set of dials would drift from the first. Node and depth are separate
+budgets, because a long thin chain and a wide DAG are different ways to be too
+big. The walk is depth-first and left to right, so one input always elides the
+same holes — equality suppression depends on it.
+
+**Recursive unit rendering is this same mechanism.** A unit's rendered form
+embeds its refs as units, and following a connection is the same act as filling
+a slot: ask the router for a node, descend, count it, stop at the budget or at a
+node already on the path. The entity graph can genuinely cycle where a value
+tree could not, so the visited set is load-bearing and the budget bounds the
+fan-out. The `/data` browser is the purest case: paged `get-in` navigation into
+any nested value is bounded expansion whose cursor says where to resume instead
+of eliding.
+
 Expansion refuses in place rather than throwing, so one bad slot costs one hole
 and not the page: a slot naming a block the agent does not own keeps the hole
 and names the missing block (install it and the next render fills it); a slot
 naming a block whose surface FAILED gets that surface's error card, so the
 failure appears where it belongs; and a cycle is refused at the hole that
-closes it. The visited set along the path is the observable fact — a depth
-counter would be a magic number standing in for it.
+closes it; and an exhausted budget keeps the hole and says which budget ran
+out. The visited set along the path is the observable fact for a CYCLE; the
+budgets are what bound a graph that merely fans out.
 
 ## Pages — agent view, root view, debug view, app
 
