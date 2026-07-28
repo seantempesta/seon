@@ -115,3 +115,46 @@ the in-flight context-blocks implementation lane. This package
 DISPATCHES AFTER that lane returns — same-file ownership is never
 split. `run.cljc`/schema deletions do not start earlier either: the
 revision is one coherent wave, not two half-states.
+
+## Implemented (2026-07-28, one wave — `435b343ac`)
+
+Landed exactly as sealed, one commit for the whole cut plus its ~76
+re-grounded test references, one follow-up for the issue closures
+(`100159309`).
+
+- Deletions: all three schema attributes + the terminal-request epoch
+  field; `claimed?`/`expired?`/`heartbeat-tx`/`heartbeat-call`; the
+  four refusal arms; the three 60-second constants; the `error.clj`
+  epoch prose; receipt identity now `(pr-str [id ordinal])`.
+- Revisions 1-5: `:resume` claims before folding (lost CAS = quiet
+  skip, never an error fact); `:call` custody is `next-work`'s
+  presence+process match with nothing left to lapse; `claim-call`'s
+  dead-holder arm IS recovery (stamp running receipts, swap custody,
+  one `:db.fn/call`); `recover-tx` became `recover-call` — the
+  settled-receipt guard reads at transaction time, and the boot caller
+  (`recover-runs!`) now passes only run ids; the prompt's
+  `::no-trigger`/`::missing-input` throws are caught at the loop's one
+  `:call` site and recorded as flat error values (the standing-law
+  violation the context-blocks lane flagged).
+- Probe evidence: the two audit probes ran RED before the cut
+  (livelock chain `::not-the-holder` → `::receipt-exists`; `:call`
+  re-derived after `::lease-expired`; order-B stamped a settled
+  receipt). After: `tmp/custody-revision-green-probe.clj` — P1 run
+  closes and derives nothing, P2 one freeze + custody mismatch derives
+  no work for another process, order-B receipt byte-untouched. The old
+  probes no longer compile: their requests are unrepresentable.
+- Recurring regressions: `run_test`
+  (takeover-stamps/settle-refuses/`::receipt-exists`-forever,
+  `recovery-cannot-stamp-a-settled-receipt`, recovery idempotence, and
+  the state-machine property's claim/takeover alphabet under presence);
+  `turn_test` (`a-recovered-unheld-planned-run-completes-without-error-facts`,
+  `a-held-runs-paid-call-is-never-duplicated`,
+  `a-prompt-refusal-is-a-recorded-error-value-never-a-throw`).
+- Issues: `a-turns-model-work-can-outlive-its-own-run-lease` and
+  `my-run-error-values-omit-their-kind` resolved → archive;
+  `a-nil-query-input-matches-anything-so-prompt-cannot-refuse` stays
+  open for the query-layer fix, consumer sealed.
+- Gate: full `bin/test` green (the baseline's one failure was the
+  my.run canary firing as designed; one transient `schema.edn-test`
+  failure during the mid-wave gate was a concurrent lane's in-flight
+  edit and re-runs green).
