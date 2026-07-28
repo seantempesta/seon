@@ -457,7 +457,7 @@
    mode invokes the supplied development panic function."
   {:malli/schema
    [:=> [:catn [::request ::fault-committer-proc-request]] ::launcher]}
-  [{::keys [fault-channel read-core-error-mode commit-fault! panic!]}]
+  [{::keys [fault-channel completion read-core-error-mode commit-fault! panic!]}]
   (flow/process
    (flow/map->step
     {:describe
@@ -469,23 +469,35 @@
        {::flow/in-ports {::core-fault fault-channel}
         ::committed 0
         ::panicked 0})
+     :transition
+     (fn [state transition]
+       (when (= ::flow/stop transition)
+         ;; Flow observes this transition only after an active transform
+         ;; returns, so the marker joins an in-flight durable commit without
+         ;; inventing a clock.
+         (async/put! completion ::stopped))
+       state)
      :transform
      (fn [state _input fault]
-       (case (read-core-error-mode)
-         :record
-         (do
-           (commit-fault! fault)
-           [(update state ::committed inc) nil])
+       ;; A closed source error channel presents one terminal nil before
+       ;; Flow removes that input. It is lifecycle, not a core fault.
+       (if (nil? fault)
+         [state nil]
+         (case (read-core-error-mode)
+           :record
+           (do
+             (commit-fault! fault)
+             [(update state ::committed inc) nil])
 
-         :panic
-         (do
-           (panic! fault)
-           [(update state ::panicked inc) nil])
+           :panic
+           (do
+             (panic! fault)
+             [(update state ::panicked inc) nil])
 
-         (throw
-          (ex-info
-           "Unknown fake :seon.config/on-core-error value."
-           {::core-error-mode (read-core-error-mode)}))))})))
+           (throw
+            (ex-info
+             "Unknown fake :seon.config/on-core-error value."
+             {::core-error-mode (read-core-error-mode)})))))})))
 
 (defn- monitor-graph
   [graph report-channel error-channel]
@@ -534,13 +546,15 @@
         fault-channel
         (async/chan
          (counted-dropping-buffer fault-buffer-capacity commit-drop!))
+        completion (async/promise-chan)
         fault-graph
         (flow/create-flow
          {:procs
           {::fault-committer
            {:proc
-            (fault-committer-proc
+             (fault-committer-proc
              {::fault-channel fault-channel
+              ::completion completion
               ::read-core-error-mode read-core-error-mode
               ::commit-fault! commit-fault!
               ::panic! panic!})}}
@@ -562,16 +576,20 @@
      ::application-report-channel application-report-channel
      ::monitor-report-channel monitor-report-channel
      ::monitor-error-channel monitor-error-channel
-     ::fault-channel fault-channel}))
+     ::fault-channel fault-channel
+     ::completion completion}))
 
 (defn stop-error-fanout!
   "Detach and stop one error fan-out without stopping its source graph."
   {:malli/schema
    [:=> [:catn [::fanout ::error-fanout]] :boolean]}
-  [{::keys [fault-graph report-mult error-mult
+  [{::keys [fault-graph report-mult error-mult completion
             application-report-channel monitor-report-channel
             monitor-error-channel fault-channel]}]
   (let [stopped? (boolean (flow/stop fault-graph))]
+    ;; Join the proc's lifecycle event before its caller can release the
+    ;; database connection used by an active fault commit.
+    (async/<!! completion)
     (async/untap report-mult application-report-channel)
     (async/untap report-mult monitor-report-channel)
     (async/untap error-mult monitor-error-channel)

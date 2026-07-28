@@ -554,7 +554,7 @@
   Everything in it comes from the instance and the effective dials, so
   the assembly the live drives were doing by hand happens once, here,
   where production does it."
-  [connection cluster-name process wake-channel]
+  [connection cluster-name process wake-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> (merge
              ;; MERGED WHOLE, never re-keyed: `seon.ai/targets` owns the
@@ -566,6 +566,7 @@
              {:seon.store/branch-connection connection
               :seon.cluster.run/process process
               :seon.cluster.wake/channel wake-channel
+              :seon.cluster.loop/completion completion
               :seon.ai.retry/strategy (ai/retry-strategy dials)
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
               :seon.sci.admit/caps
@@ -607,7 +608,9 @@
   [instance connection cluster-name]
   (let [process (process-identity (:seon.boot/advertisement instance))
         wake-channel (async/chan (async/sliding-buffer 1))
-        handle (loop-handle connection cluster-name process wake-channel)
+        completion (async/promise-chan)
+        handle (loop-handle connection cluster-name process wake-channel
+                            completion)
         drops (atom 0)
         graph (flow.core/create-flow
                {:procs {:seon.cluster.loop/loop
@@ -679,23 +682,26 @@
   fan-out detaches its taps. Each layer is released only if it stands —
   a degraded instance disarms the same way.
 
-  A STOP DURING AN IN-FLIGHT TURN IS A KILL, and it is treated as one
-  rather than waited out. `flow/stop` sends `::flow/stop` and closes
-  the channels (`flow/impl.clj:177-182`); it does not join the proc's
-  thread, and flow exposes no completion to wait for. So a transaction
-  already dispatched when the connection is released fails in
-  Datahike's own writer thread and is LOST — which is precisely a crash
-  row: nothing re-executes, the next boot's `recover-tx` settles the
-  dangling receipt, and the agent adapts. Do not paper this over with a
-  sleep; if it ever needs to be clean, the honest fix is a completion
-  the proc publishes, not a clock."
+  ORDERLY STOP WAITS FOR THE ACTIVE PASS. `flow/stop` only queues
+  `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
+  The proc therefore publishes its own completion from the stop
+  transition, which Flow invokes only after the active transform
+  returns. This wait honestly includes a seconds-long model call and
+  any transaction it starts; only then may the branch connection be
+  released. There is no sleep or deadline standing in for that event.
+
+  This is orderly-stop behavior only. A process kill cannot await a
+  completion and may lose an in-flight transaction by design; the crash
+  model owns that row and the next boot settles its durable wreckage."
   [instance]
   ;; the VIEW goes first: it is the newest layer and the only one
   ;; holding sockets belonging to somebody outside this process
   (when-let [served (:seon.render.web/served instance)]
     (web/stop! served))
   (when-let [graph (:seon.flow/graph instance)]
-    (flow.core/stop graph))
+    (flow.core/stop graph)
+    (async/<!! (:seon.cluster.loop/completion
+                (:seon.cluster.loop/cluster instance))))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]

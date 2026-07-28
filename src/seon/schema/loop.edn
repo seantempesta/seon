@@ -3,7 +3,7 @@
  ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed
@@ -29,6 +29,7 @@
  ; it is declared here rather than hidden behind an open map: the state
  ; is ours, only the channel objects inside it are foreign.
  :seon.cluster.loop/state [:map {:closed true} [:clojure.core.async.flow/in-ports [:map-of :keyword :seon.flow/channel]] [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.loop/turns [:int {:min 0}]]]
+ :seon.cluster.loop/completion :seon.flow/channel
  :seon.cluster.loop/turns [:int {:min 0}]
 
  ; One completed turn, for observation only. The run id is OPTIONAL

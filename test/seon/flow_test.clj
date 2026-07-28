@@ -622,6 +622,41 @@
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
+(deftest stopping-the-fanout-awaits-an-active-fault-commit
+  (let [{::keys [graph] :as testbed} (single-eval-testbed 1)
+        started (flow/start graph)
+        commit-entered (CountDownLatch. 1)
+        finish-commit (CountDownLatch. 1)
+        fanout
+        (sut/start-error-fanout!
+         {::sut/graph graph
+          ::sut/started started
+          ::sut/fault-buffer-capacity 1
+          ::sut/monitor-buffer-capacity 1
+          ::sut/read-core-error-mode (constantly :record)
+          ::sut/commit-fault!
+          (fn [_fault]
+            (.countDown commit-entered)
+            (await-latch! finish-commit ::finish-fault-commit))
+          ::sut/commit-drop! (fn [_])
+          ::sut/panic! (fn [_])})]
+    (try
+      (flow/resume graph)
+      @(flow/inject graph
+                    [:eval ::sut/submission]
+                    [(throwing-work-message 0)])
+      (await-latch! commit-entered ::fault-commit-entered)
+      (let [stopped (future (sut/stop-error-fanout! fanout))]
+        (is (= ::still-stopping
+               (deref stopped 1000 ::still-stopping))
+            "the fanout keeps its database dependency while commit is active")
+        (.countDown finish-commit)
+        (is (true? (deref stopped 5000 ::stop-stuck))
+            "the fault proc publishes completion after the commit returns"))
+      (finally
+        (.countDown finish-commit)
+        (stop-testbed! testbed)))))
+
 (deftest fault-tap-retains-every-fault-under-capacity
   (testing "N admitted faults below the bounded tap capacity lose nothing"
     (with-fault-database

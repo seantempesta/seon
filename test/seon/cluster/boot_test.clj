@@ -9,6 +9,8 @@
   fixture. Filesystem fixtures live under the project-local tmp/
   (never a system temp dir)."
   (:require [clojure.edn :as edn]
+            [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -18,9 +20,11 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
+            [seon.cluster.work :as work]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
-            [seon.schema]))
+            [seon.schema])
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
@@ -256,6 +260,61 @@
                 "the replacement's advertisement survived")
             (finally
               (cluster/stop! replacement)))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest orderly-stop-awaits-the-active-loop-pass
+  (let [root (fresh-root)
+        pass-entered (CountDownLatch. 1)
+        finish-pass (CountDownLatch. 1)
+        stop-commanded (CountDownLatch. 1)
+        transaction-outcome (promise)
+        original-transact! store/transact!
+        original-stop flow/stop]
+    (try
+      (let [instance (cluster/start! {:seon.boot/cluster-name "stopping"
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)]
+        (try
+          (with-redefs
+            [store/transact!
+             (fn [conn tx-data]
+               (.countDown pass-entered)
+               (.await finish-pass)
+               (let [outcome (original-transact! conn tx-data)]
+                 (deliver transaction-outcome outcome)
+                 outcome))
+             work/next-work
+             (fn [_db _request]
+               (store/transact! connection
+                                [{:seon.cluster.agent/id "root"}])
+               nil)
+             flow/stop
+             (fn [graph]
+               (let [stopped? (original-stop graph)]
+                 (.countDown stop-commanded)
+                 stopped?))]
+            (async/offer! (:seon.cluster.wake/channel
+                           (:seon.cluster.loop/cluster instance))
+                          ::in-flight-transaction)
+            (is (.await pass-entered 5 TimeUnit/SECONDS)
+                "the loop pass reached its transaction boundary")
+            (let [stopped (future (cluster/stop! instance))]
+              (is (.await stop-commanded 5 TimeUnit/SECONDS)
+                  "stop! sent Flow's stop command")
+              (is (= ::still-stopping
+                     (deref stopped 1000 ::still-stopping))
+                  "orderly stop waits for the active pass")
+              (.countDown finish-pass)
+              (is (nil? (:seon.error/kind
+                         (deref transaction-outcome 5000
+                                {:seon.error/kind ::transaction-stuck})))
+                  "the in-flight transaction commits before release")
+              (is (nil? (deref stopped 5000 ::stop-stuck))
+                  "stop! finishes after the pass publishes completion")))
+          (finally
+            (.countDown finish-pass)
+            (cluster/stop! instance))))
       (finally
         (delete-recursively! root)))))
 

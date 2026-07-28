@@ -390,7 +390,10 @@
   and using it means there is no out to leave unconnected.
   `(args)` returns initial state carrying `::flow/in-ports {::wake ch}`
   and the cluster handle captured at `create-flow`.
-  `(state transition)` unlistens on `::flow/stop`.
+  `(state transition)` unlistens on `::flow/stop`, then publishes the
+  orderly-stop completion. Flow invokes that lifecycle arity only after
+  the active transform has returned, so the marker means the whole pass
+  — including a model call or transaction — has ended.
   `(state input-id message)` runs ONE pass: pin a database value, derive
   work, do it, rewake if more remains."
   ;; The zero-arity return is core.async.flow's OWN descriptor shape —
@@ -427,7 +430,13 @@
      (let [cluster (:seon.cluster.loop/cluster state)]
        (wake/unlisten! {:seon.cluster.wake/connection
                         (:seon.store/branch-connection cluster)
-                        :seon.cluster.wake/key ::wake})))
+                        :seon.cluster.wake/key ::wake})
+       ;; Publish exactly once from the stop transition, never after each
+       ;; pass: an old pass marker could otherwise let orderly stop release
+       ;; the connection while a newer pass was active. A promise channel
+       ;; retains this value for the disarm even though Flow has already
+       ;; closed its own report and error channels.
+       (async/put! (:seon.cluster.loop/completion cluster) ::stopped)))
    state)
 
   ([state _input-id _message]
