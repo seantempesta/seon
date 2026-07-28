@@ -80,6 +80,36 @@
 
 (schema.edn/load! {})
 
+(defn- var-process
+  [step-var workload args & [options]]
+  (when-not (var? step-var)
+    (throw
+     (ex-info
+      "A Flow proc step must be a Var so running graphs hot reload."
+      {::step step-var})))
+  (when-not (contains? #{:io :compute} workload)
+    (throw
+     (ex-info
+      "A Flow proc must declare either :io or :compute workload."
+      {::step step-var
+       ::workload workload})))
+  (let [launcher
+        (flow/process
+         step-var
+         (assoc (or options {}) :workload workload))]
+    (reify
+      core.protocols/Datafiable
+      (datafy [_]
+        (datafy/datafy launcher))
+
+      flow.spi/ProcLauncher
+      (describe [_]
+        (flow.spi/describe launcher))
+      (start [_ start-options]
+        (flow.spi/start
+         launcher
+         (update start-options :args #(merge args %)))))))
+
 (defn bounded-platform-executor
   "Create a bounded executor whose workers are platform threads."
   {:malli/schema [:=> [:catn [::parallelism ::parallelism]] ::executor]}
@@ -111,25 +141,29 @@
      ::platform-threads?
      (every? ::platform-thread? (vals compute-active))}))
 
+(defn- capacity-observer-step
+  ([]
+   {:ins {::observe "A process-local request to refresh observations."}
+    :workload :compute
+    :ping-map-fn
+    (fn [{::keys [parallelism active-work]}]
+      (capacity-facts parallelism active-work))})
+  ([args]
+   (assoc args ::observations 0))
+  ([state _transition]
+   state)
+  ([{::keys [parallelism active-work] :as state} _input _message]
+   [(update state ::observations inc)
+    {::flow/report
+     [(assoc (capacity-facts parallelism active-work)
+             ::event ::capacity)]}]))
+
 (defn capacity-observer-proc
   "Create a responsive proc that reports current compute occupancy."
   {:malli/schema
    [:=> [:catn [::request ::capacity-observer-request]] ::launcher]}
-  [{::keys [parallelism active-work]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::observe "A process-local request to refresh observations."}
-        :ping-map-fn
-        (fn [_state] (capacity-facts parallelism active-work))})
-     :init (fn [_] {::observations 0})
-     :transform
-     (fn [state _input _message]
-       [(update state ::observations inc)
-        {::flow/report
-         [(assoc (capacity-facts parallelism active-work)
-                 ::event ::capacity)]}])})))
+  [request]
+  (var-process #'capacity-observer-step :compute request))
 
 (defn- launcher-ping
   [pid status count ins outs parallelism active-work]
@@ -212,17 +246,23 @@
        {::submission-id submission-id
         ::workload :compute}))))
 
+(defn- work-launcher-description
+  []
+  {:ins {::compute-submission
+         "One disposable compute submission backed by durable work."}
+   :workload :io})
+
 (defn- work-launcher-proc
   [{::keys [parallelism active-work]}]
   (reify
     core.protocols/Datafiable
     (datafy [_]
-      {::launcher ::work-launcher})
+      {::launcher ::work-launcher
+       :desc (work-launcher-description)})
 
     flow.spi/ProcLauncher
     (describe [_]
-      {:ins {::compute-submission
-             "One disposable compute submission backed by durable work."}})
+      (work-launcher-description))
     (start [_ {:keys [pid ins outs resolver]}]
       (let [control (::flow/control ins)
             submission (::compute-submission ins)
@@ -307,6 +347,24 @@
          ::missing-config-facts (vec missing)})))
     selected))
 
+(defn- work-launcher-graph-definition
+  [{::keys [parallelism active-work queue-depth compute-executor]}]
+  {:procs
+   {::work-launcher
+    {:proc
+     (work-launcher-proc
+      {::parallelism parallelism
+       ::active-work active-work})
+     :chan-opts
+     {::compute-submission {:buf-or-n queue-depth}}}
+    ::capacity-observer
+    {:proc
+     (capacity-observer-proc
+      {::parallelism parallelism
+       ::active-work active-work})}}
+   :conns []
+   :compute-exec compute-executor})
+
 (defn start-work-launcher!
   "Start the one bounded work launcher from acquired config facts."
   [{::keys [configuration]}]
@@ -319,21 +377,11 @@
         compute-executor (bounded-platform-executor parallelism)
         graph
         (flow/create-flow
-         {:procs
-          {::work-launcher
-           {:proc
-            (work-launcher-proc
-             {::parallelism parallelism
-              ::active-work active-work})
-            :chan-opts
-            {::compute-submission {:buf-or-n queue-depth}}}
-           ::capacity-observer
-           {:proc
-            (capacity-observer-proc
-             {::parallelism parallelism
-              ::active-work active-work})}}
-          :conns []
-          :compute-exec compute-executor})
+         (work-launcher-graph-definition
+          {::parallelism parallelism
+           ::active-work active-work
+           ::queue-depth queue-depth
+           ::compute-executor compute-executor}))
         started (flow/start graph)]
     (flow/resume graph)
     {::graph graph
@@ -449,6 +497,44 @@
   [capacity drop!]
   (CountedDroppingBuffer. (LinkedList.) (long capacity) drop!))
 
+(defn- fault-committer-step
+  ([]
+   {:workload :io
+    :ping-map-fn #(select-keys % [::committed ::panicked])})
+  ([{::keys [fault-channel] :as args}]
+   (assoc args
+          ::flow/in-ports {::core-fault fault-channel}
+          ::committed 0
+          ::panicked 0))
+  ([{::keys [completion] :as state} transition]
+   (when (= ::flow/stop transition)
+     ;; Flow observes this transition only after an active transform
+     ;; returns, so the marker joins an in-flight durable commit without
+     ;; inventing a clock.
+     (async/put! completion ::stopped))
+   state)
+  ([{::keys [read-core-error-mode commit-fault! panic!] :as state}
+    _input fault]
+   ;; A closed source error channel presents one terminal nil before
+   ;; Flow removes that input. It is lifecycle, not a core fault.
+   (if (nil? fault)
+     [state nil]
+     (case (read-core-error-mode)
+       :record
+       (do
+         (commit-fault! fault)
+         [(update state ::committed inc) nil])
+
+       :panic
+       (do
+         (panic! fault)
+         [(update state ::panicked inc) nil])
+
+       (throw
+        (ex-info
+         "Unknown fake :seon.config/on-core-error value."
+         {::core-error-mode (read-core-error-mode)}))))))
+
 (defn fault-committer-proc
   "Create the Flow proc that turns core faults into durable facts.
 
@@ -457,47 +543,8 @@
    mode invokes the supplied development panic function."
   {:malli/schema
    [:=> [:catn [::request ::fault-committer-proc-request]] ::launcher]}
-  [{::keys [fault-channel completion read-core-error-mode commit-fault! panic!]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:workload :io
-        :ping-map-fn #(select-keys % [::committed ::panicked])})
-     :init
-     (fn [_]
-       {::flow/in-ports {::core-fault fault-channel}
-        ::committed 0
-        ::panicked 0})
-     :transition
-     (fn [state transition]
-       (when (= ::flow/stop transition)
-         ;; Flow observes this transition only after an active transform
-         ;; returns, so the marker joins an in-flight durable commit without
-         ;; inventing a clock.
-         (async/put! completion ::stopped))
-       state)
-     :transform
-     (fn [state _input fault]
-       ;; A closed source error channel presents one terminal nil before
-       ;; Flow removes that input. It is lifecycle, not a core fault.
-       (if (nil? fault)
-         [state nil]
-         (case (read-core-error-mode)
-           :record
-           (do
-             (commit-fault! fault)
-             [(update state ::committed inc) nil])
-
-           :panic
-           (do
-             (panic! fault)
-             [(update state ::panicked inc) nil])
-
-           (throw
-            (ex-info
-             "Unknown fake :seon.config/on-core-error value."
-             {::core-error-mode (read-core-error-mode)})))))})))
+  [request]
+  (var-process #'fault-committer-step :io request))
 
 (defn- monitor-graph
   [graph report-channel error-channel]
@@ -522,6 +569,13 @@
       (flow.graph/command-proc graph pid command more-kvs))
     (inject [_ coordinate messages]
       (flow.graph/inject graph coordinate messages))))
+
+(defn- fault-graph-definition
+  [request]
+  {:procs
+   {::fault-committer
+    {:proc (fault-committer-proc request)}}
+   :conns []})
 
 (defn start-error-fanout!
   "Own report/error fan-out for one already-started Flow graph.
@@ -549,16 +603,12 @@
         completion (async/promise-chan)
         fault-graph
         (flow/create-flow
-         {:procs
-          {::fault-committer
-           {:proc
-             (fault-committer-proc
-             {::fault-channel fault-channel
-              ::completion completion
-              ::read-core-error-mode read-core-error-mode
-              ::commit-fault! commit-fault!
-              ::panic! panic!})}}
-          :conns []})
+         (fault-graph-definition
+          {::fault-channel fault-channel
+           ::completion completion
+           ::read-core-error-mode read-core-error-mode
+           ::commit-fault! commit-fault!
+           ::panic! panic!}))
         _ (flow/start fault-graph)
         _ (flow/resume fault-graph)
         monitor-view
@@ -636,198 +686,204 @@
   (or (>= turn-count max-turns)
       (>= failure-count max-failures)))
 
+(defn- planner-step
+  ([]
+   {:ins {::planner-wake "A fact-derived planner wake value."}
+    :workload :io
+    :ping-map-fn #(select-keys % [::attempts])})
+  ([args]
+   (assoc args ::attempts 0))
+  ([state _transition]
+   state)
+  ([{::keys [plan-step-fn] :as state} _input message]
+   (let [result (plan-step-fn message)]
+     [(update state ::attempts inc)
+      {::flow/report
+       [{::event ::planner-attempt
+         ::result result}]}])))
+
 (defn planner-proc
   "Create a fake planner proc whose supplied step returns ordinary data."
   {:malli/schema
    [:=> [:catn [::request ::planner-proc-request]] ::launcher]}
-  [{::keys [plan-step-fn]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::planner-wake "A fact-derived planner wake value."}
-        :workload :io
-        :ping-map-fn #(select-keys % [::attempts])})
-     :init (fn [_] {::attempts 0})
-     :transform
-     (fn [state _input message]
-       (let [result (plan-step-fn message)]
-         [(update state ::attempts inc)
-          {::flow/report
-           [{::event ::planner-attempt
-             ::result result}]}]))})))
+  [request]
+  (var-process #'planner-step :io request))
+
+(defn- namespace-owner-step
+  ([]
+   {:ins {::owner-step
+          "An initial fact-derived wake or open-run continuation."}
+    :workload :io
+    :ping-map-fn #(select-keys % [::attempts])})
+  ([args]
+   (assoc args ::attempts 0))
+  ([state _transition]
+   state)
+  ([{::keys [fix-step-fn] :as state} _input message]
+   (let [outcome (fix-step-fn message)]
+     [(update state ::attempts inc)
+      {::flow/report
+       [{::event ::owner-attempt
+         ::outcome outcome}]}])))
 
 (defn namespace-owner-proc
   "Create a fake namespace-owner proc returning one scripted outcome."
   {:malli/schema
    [:=> [:catn [::request ::namespace-owner-proc-request]] ::launcher]}
-  [{::keys [fix-step-fn]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::owner-step
-              "An initial fact-derived wake or open-run continuation."}
-        :workload :io
-        :ping-map-fn #(select-keys % [::attempts])})
-     :init (fn [_] {::attempts 0})
-     :transform
-     (fn [state _input message]
-       (let [outcome (fix-step-fn message)]
-         [(update state ::attempts inc)
-          {::flow/report
-           [{::event ::owner-attempt
-             ::outcome outcome}]}]))})))
+  [request]
+  (var-process #'namespace-owner-step :io request))
+
+(defn- source-enumerator-step
+  ([]
+   {:ins {::source-event
+          "A full-drain request or one changed namespace source."}
+    :outs {::index-request
+           "One namespace source submitted to the indexer."}
+    :workload :io
+    :ping-map-fn #(select-keys % [::emitted ::sources])})
+  ([{::keys [read-sources]}]
+   {::sources (read-sources)
+    ::emitted 0})
+  ([state _transition]
+   state)
+  ([state _input message]
+   (let [changed-namespace (::changed-namespace message)
+         sources
+         (cond-> (::sources state)
+           changed-namespace
+           (assoc changed-namespace (::changed-source message)))
+         selected
+         (if changed-namespace
+           [changed-namespace]
+           (sort (keys sources)))
+         requests
+         (mapv
+          (fn [namespace]
+            {::changed-namespace namespace
+             ::changed-source (get sources namespace)})
+          selected)]
+     [(-> state
+          (assoc ::sources sources)
+          (update ::emitted + (count requests)))
+      {::index-request requests
+       ::flow/report
+       [{::event ::source-enumerated
+         ::namespaces (set selected)}]}])))
 
 (defn source-enumerator-proc
   "Create an I/O proc that emits fixture namespaces and changed events."
   {:malli/schema
    [:=> [:catn [::request ::source-enumerator-proc-request]] ::launcher]}
-  [{::keys [read-sources]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::source-event
-              "A full-drain request or one changed namespace source."}
-        :outs {::index-request
-               "One namespace source submitted to the indexer."}
-        :workload :io
-        :ping-map-fn #(select-keys % [::emitted ::sources])})
-     :init
-     (fn [_]
-       {::sources (read-sources)
-        ::emitted 0})
-     :transform
-     (fn [state _input message]
-       (let [changed-namespace (::changed-namespace message)
-             sources
-             (cond-> (::sources state)
-               changed-namespace
-               (assoc changed-namespace (::changed-source message)))
-             selected
-             (if changed-namespace
-               [changed-namespace]
-               (sort (keys sources)))
-             requests
-             (mapv
-              (fn [namespace]
-                {::changed-namespace namespace
-                 ::changed-source (get sources namespace)})
-              selected)]
-         [(-> state
-              (assoc ::sources sources)
-              (update ::emitted + (count requests)))
-          {::index-request requests
-           ::flow/report
-           [{::event ::source-enumerated
-             ::namespaces (set selected)}]}]))})))
+  [request]
+  (var-process #'source-enumerator-step :io request))
+
+(defn- indexer-step
+  ([]
+   {:ins {::index-request "One namespace source to compile."}
+    :outs {::tx-page "Transaction data for the database committer."}
+    :workload :compute
+    :ping-map-fn #(select-keys % [::compiled])})
+  ([args]
+   (assoc args ::compiled 0))
+  ([state _transition]
+   state)
+  ([{::keys [compile-namespace-fn] :as state} _input request]
+   (let [page (compile-namespace-fn request)]
+     [(update state ::compiled inc)
+      {::tx-page [page]
+       ::flow/report
+       [{::event ::namespace-indexed
+         ::namespace (::changed-namespace request)}]}])))
 
 (defn indexer-proc
   "Create a compute proc that compiles one namespace into transaction data."
   {:malli/schema
    [:=> [:catn [::request ::indexer-proc-request]] ::launcher]}
-  [{::keys [compile-namespace-fn compute-timeout-ms]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::index-request "One namespace source to compile."}
-        :outs {::tx-page "Transaction data for the database committer."}
-        :workload :compute
-        :ping-map-fn #(select-keys % [::compiled])})
-     :init (fn [_] {::compiled 0})
-     :transform
-     (fn [state _input request]
-       (let [page (compile-namespace-fn request)]
-         [(update state ::compiled inc)
-          {::tx-page [page]
-           ::flow/report
-           [{::event ::namespace-indexed
-             ::namespace (::changed-namespace request)}]}]))})
-   {:workload :compute
-    :compute-timeout-ms compute-timeout-ms}))
+  [{::keys [compute-timeout-ms] :as request}]
+  (var-process
+   #'indexer-step :compute request
+   {:compute-timeout-ms compute-timeout-ms}))
+
+(defn- eval-step
+  ([]
+   {:ins {::submission "A process-local evaluation submission."}
+    :outs {::result "The disposable result delivered downstream."}
+    :workload :compute
+    :ping-map-fn
+    (fn [{::keys [pid active-evals] :as state}]
+      (assoc (select-keys state [::pid ::completed])
+             ::active? (contains? @active-evals pid)))})
+  ([{pid ::flow/pid :as args}]
+   (assoc args
+          ::pid pid
+          ::completed 0))
+  ([state transition]
+   (assoc state ::transition transition))
+  ([{::keys [pid active-evals] :as state} _input
+    {::keys [work-fn wedged? interrupt-fn]}]
+   (let [armed? (atom true)
+         deadline-interrupt-fn (or interrupt-fn (constantly nil))
+         armed-interrupt-fn
+         (fn []
+           (deadline-interrupt-fn)
+           (when-not @armed?
+             (throw
+              (ex-info
+               "The fake interrupt function was called after disarm."
+               {::pid pid}))))]
+     (swap! active-evals
+            assoc pid
+            {::workload :compute
+             ::interrupt-fn armed-interrupt-fn
+             ::platform-thread? (not (.isVirtual (Thread/currentThread)))
+             ::wedged? (true? wedged?)})
+     (try
+       (armed-interrupt-fn)
+       (let [result
+             (try
+               (work-fn {::interrupt-fn armed-interrupt-fn})
+               (catch clojure.lang.ExceptionInfo throwable
+                 (if (::interrupted? (ex-data throwable))
+                   {:seon.error/message "Synthetic interrupt fired."
+                    :seon.error/kind :timeout
+                    :seon.error/data {::pid pid}}
+                   (throw throwable))))
+             next-state (update state ::completed inc)]
+         [next-state
+          {::flow/report
+           [{::pid pid
+             ::event ::eval-complete
+             ::result result}]
+           ::result [result]}])
+       (finally
+         (reset! armed? false)
+         (swap! active-evals dissoc pid))))))
 
 (defn eval-proc
   "Create a compute proc that simulates one guarded evaluation."
   {:malli/schema
    [:=> [:catn [::request ::eval-proc-request]] ::launcher]}
-  [{::keys [parallelism active-evals compute-timeout-ms]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::submission "A process-local evaluation submission."}
-        :outs {::result "The disposable result delivered downstream."}
-        :workload :compute
-        :ping-map-fn
-        (fn [state]
-          (assoc (select-keys state [::pid ::completed])
-                 ::active? (contains? @active-evals (::pid state))))})
-     :init
-     (fn [{pid ::flow/pid}]
-       {::pid pid
-        ::completed 0})
-     :transition
-     (fn [state transition]
-       (assoc state ::transition transition))
-     :transform
-     (fn [state _input
-          {::keys [work-fn wedged? interrupt-fn]}]
-       (let [pid (::pid state)
-             armed? (atom true)
-             deadline-interrupt-fn (or interrupt-fn (constantly nil))
-             armed-interrupt-fn
-             (fn []
-               (deadline-interrupt-fn)
-               (when-not @armed?
-                 (throw
-                  (ex-info
-                   "The fake interrupt function was called after disarm."
-                   {::pid pid}))))]
-         (swap! active-evals
-                assoc pid
-                {::workload :compute
-                 ::interrupt-fn armed-interrupt-fn
-                 ::platform-thread? (not (.isVirtual (Thread/currentThread)))
-                 ::wedged? (true? wedged?)})
-         (try
-           (armed-interrupt-fn)
-           (let [result
-                 (try
-                   (work-fn {::interrupt-fn armed-interrupt-fn})
-                   (catch clojure.lang.ExceptionInfo throwable
-                     (if (::interrupted? (ex-data throwable))
-                       {:seon.error/message "Synthetic interrupt fired."
-                        :seon.error/kind :timeout
-                        :seon.error/data {::pid pid}}
-                       (throw throwable))))
-                 next-state (update state ::completed inc)]
-             [next-state
-              {::flow/report
-               [{::pid pid
-                 ::event ::eval-complete
-                 ::result result}]
-               ::result [result]}])
-           (finally
-             (reset! armed? false)
-             (swap! active-evals dissoc pid)))))})
-   {:workload :compute
-    :compute-timeout-ms compute-timeout-ms}))
+  [{::keys [compute-timeout-ms] :as request}]
+  (var-process
+   #'eval-step :compute request
+   {:compute-timeout-ms compute-timeout-ms}))
+
+(defn- mailbox-step
+  ([]
+   {:ins {::mailbox "A presentation (sliding-buffer 1) tap."}
+    :workload :io
+    :ping-map-fn #(select-keys % [::delivered])})
+  ([args]
+   (assoc args ::delivered 0))
+  ([state _transition]
+   state)
+  ([{::keys [deliver!] :as state} _input message]
+   (deliver! message)
+   [(update state ::delivered inc) nil]))
 
 (defn mailbox-proc
   "Create a proc that delivers each message to a supplied sink."
   {:malli/schema
    [:=> [:catn [::request ::mailbox-request]] ::launcher]}
-  [{::keys [deliver!]}]
-  (flow/process
-   (flow/map->step
-    {:describe
-     (fn []
-       {:ins {::mailbox "A presentation (sliding-buffer 1) tap."}
-        :ping-map-fn #(select-keys % [::delivered])})
-     :init (fn [_] {::delivered 0})
-     :transform
-     (fn [state _input message]
-       (deliver! message)
-       [(update state ::delivered inc) nil])})))
+  [request]
+  (var-process #'mailbox-step :io request))

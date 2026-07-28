@@ -739,6 +739,48 @@
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
+(deftest re-evaluated-step-var-changes-a-running-graph
+  (let [delivered (async/chan 2)
+        step-var (ns-resolve 'seon.flow 'mailbox-step)
+        original-step @step-var
+        graph
+        (flow/create-flow
+         {:procs
+          {:mailbox
+           {:proc
+            (sut/mailbox-proc
+             {::sut/deliver! #(async/put! delivered %)})
+            :chan-opts
+            {::sut/mailbox {:buf-or-n 1}}}}
+          :conns []})]
+    (try
+      (flow/start graph)
+      (flow/resume graph)
+      @(flow/inject graph [:mailbox ::sut/mailbox] [::before-reload])
+      (is (= ::before-reload
+             (test-support/await-event! delivered ::before-reload)))
+
+      (alter-var-root
+       step-var
+       (constantly
+        (fn
+          ([] (original-step))
+          ([args] (original-step args))
+          ([state transition] (original-step state transition))
+          ([state _input message]
+           ((::sut/deliver! state) [::reloaded message])
+           [(update state ::sut/delivered inc) nil]))))
+
+      @(flow/inject graph [:mailbox ::sut/mailbox] [::after-reload])
+      (is (= [::reloaded ::after-reload]
+             (test-support/await-event! delivered ::after-reload))
+          "the already-running graph invokes the Var's new root")
+      (is (= 2 (::flow/count (flow/ping-proc graph :mailbox))))
+      (finally
+        (alter-var-root step-var (constantly original-step))
+        (flow/stop graph)
+        (async/close! delivered)))))
+
 (deftest sliding-mailbox-is-nonblocking-bounded-and-latest-only
   (testing "a paused sliding buffer of one retains only the latest snapshot"
     (let [delivered (async/promise-chan)

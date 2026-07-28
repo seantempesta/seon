@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent-runtime, flow]
 ---
@@ -46,3 +46,23 @@ probes (2026-07-28):
 - No proc rides the `:mixed` default: each declares `:io` or `:compute`
   explicitly, and the classification is a computed/asserted rule (a proc
   construction that refuses a missing workload), not a hand-audited list.
+
+## Resolution
+
+Every ordinary proc now has one named four-arity step function and is
+constructed through `var-process` with that function's Var. The constructor
+passes callback/config values as init args, refuses a non-Var step, and refuses
+anything other than explicit `:io` or `:compute`. The custom work launcher
+describes and runs its loop as `:io`; the cluster loop remains
+`#'seon.cluster.loop/step` with explicit `:io`.
+
+`re-evaluated-step-var-changes-a-running-graph` changes the mailbox step Var's
+root after the graph is already running and observes the new behavior on the
+next message without rebuilding. `every-built-graph-proc-declares-a-specific-workload`
+walks the work-launcher, fault, and cluster graph definitions and derives each
+proc's workload from `flow.spi/describe`; the companion constructor regression
+proves `:mixed` is refused.
+
+The planner/namespace-owner testbed fakes remain because
+`test/seon/flow/loop_test.clj` still calls them. The complete `bin/test` gate
+passes at 407 tests, 1580 assertions, 0 failures, and 0 errors.

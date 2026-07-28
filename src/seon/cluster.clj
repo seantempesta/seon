@@ -602,6 +602,14 @@
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))
 
+(defn- loop-graph-definition
+  [handle]
+  {:procs {:seon.cluster.loop/loop
+           {:proc (flow.core/process #'cluster.loop/step
+                                     {:workload :io})
+            :args handle}}
+   :conns []})
+
 (defn- arm-loop!
   "Start the run loop for this cluster: graph, fan-out, listener, wake.
   ARMED AND IDLE. The graph is running and the wake channel is primed
@@ -626,11 +634,7 @@
                             completion)
         drops (atom 0)
         graph (flow.core/create-flow
-               {:procs {:seon.cluster.loop/loop
-                        {:proc (flow.core/process #'cluster.loop/step
-                                                  {:workload :io})
-                         :args handle}}
-                :conns []})
+               (loop-graph-definition handle))
         started (flow.core/start graph)
         _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!
