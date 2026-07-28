@@ -19,6 +19,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.cluster.agent]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.render.block :as block]
@@ -284,7 +285,7 @@
                (let [outcome (original-transact! conn tx-data)]
                  (deliver transaction-outcome outcome)
                  outcome))
-             work/next-work
+             work/next-agent-work
              (fn [_db _request]
                (store/transact! connection
                                 [{:seon.cluster.agent/id "root"}])
@@ -294,8 +295,13 @@
                (let [stopped? (original-stop graph)]
                  (.countDown stop-commanded)
                  stopped?))]
+            ;; the pass under stop is ROOT'S TURN PROC now (F1): the
+            ;; wake goes into root's own mailbox through the routing
+            ;; entry, exactly where the listener would deliver it
             (async/offer! (:seon.cluster.wake/channel
-                           (:seon.cluster.loop/cluster instance))
+                           (seon.cluster.agent/armed
+                            (:seon.cluster.agent/routing instance)
+                            "root"))
                           ::in-flight-transaction)
             (is (.await pass-entered 5 TimeUnit/SECONDS)
                 "the loop pass reached its transaction boundary")

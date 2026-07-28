@@ -3,6 +3,7 @@
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.test :refer [deftest is]]
             [seon.cluster]
+            [seon.cluster.agent]
             [seon.flow :as sut])
   (:import [java.util.concurrent ExecutorService]))
 
@@ -53,7 +54,14 @@
                 ::sut/commit-fault! identity
                 ::sut/panic! identity})]
              [:cluster
-              ((private-var 'seon.cluster 'loop-graph-definition) {})]]
+              ((private-var 'seon.cluster 'cluster-graph-definition)
+               {} (atom {}))]
+             [:agent
+              (seon.cluster.agent/graph-definition
+               {:seon.cluster.loop/cluster
+                {:seon.cluster.wake/channel
+                 (async/chan (async/sliding-buffer 1))}
+                :seon.cluster.agent/id "census"})]]
             proc-facts
             (into
              []
