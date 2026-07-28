@@ -72,7 +72,7 @@ coinages are called out where they were removed.
 | `:seon.render.walk/remaining` | request key | `expand`'s landed node budget (`block.clj:528`) | shared node budget |
 | `:seon.render/distance` | unit / request key | **owner-ruled name** | optional, default 1, 0 = name only. Supersedes the first draft's `:seon.render/depth` |
 | `seon.data` | namespace | the owner's own phrasing ("a namespace `seon.data` whose job is understanding and explaining all the data") | census, resolution chain, completeness, entity enrichment, the code floor |
-| `seon.data/code-ai` | function | mirrors the landed `seon.context/identity-ai`, `peers-ai`, … naming | the AI floor (§3.4) |
+| `seon.data/source (renamed: owner VETOED code-ai, 2026-07-29 — the declaration site names the kind, the fn names the content)` | function | mirrors the landed `seon.context/identity-ai`, `peers-ai`, … naming | the AI floor (§3.4) |
 | `:seon.fn/arities` | attribute | Clojure's own word for a function's argument-count variants (`arglists`); Malli's `:function` holds one `:=>` per arity | replaces the first draft's `:seon.fn/arms` — "arm" is neither Clojure's nor Malli's word |
 | `:seon.fn.arity/{ordinal,arg-count,variadic?,input-form,input-schema,output-form,output-schema}` | attributes | Clojure arity vocabulary + Malli's `:=>` input/output positions | colocated under the owning code namespace per the 2026-07-28 attribute ruling |
 | `:seon.render.kind/{kind,outputs}` | attributes | `render/kinds` is the landed computed kind vocabulary | one row per kind, registered beside the kind's own schema |
@@ -415,7 +415,7 @@ does not exist produces the floor.
 
 There is no generic AI floor: `seon.error/ai-prose` accepts
 `:seon.error/notice`, not an arbitrary unit. Ruling #3 names what it should
-be — **code**. N5 builds `seon.data/code-ai`, the AI twin of `data-panel`:
+be — **code**. N5 builds `seon.data/source`, the AI twin of `data-panel`:
 signatures + docstrings, bodies by budget, mined from the quarry's namespace
 context render and never reinvented. With both floors, rung 4 is total for both
 kinds — which it is not today.
@@ -764,12 +764,12 @@ above.
    (§3.1). Recommended: yes — it dissolves multi-schema ambiguity instead of
    arbitrating it.
 10. **The floor is a selection fallback, never a failure fallback** (§3.3), and
-    the AI floor (`seon.data/code-ai`) is built in N5.5 (§3.4). Recommended:
+    the AI floor (`seon.data/source`) is built in N5.5 (§3.4). Recommended:
     yes; a broken projection must stay loud, and code is the ruled floor.
 11. **Delegation ships behind its four preconditions** (§7.2), owned outside
     N5. Recommended: yes — saying otherwise is the overclaim SB-6 caught.
 12. **The name table** (above) — every introduced name, for veto before
-    contracts seal. `seon.render.walk`, `seon.data/code-ai`,
+    contracts seal. `seon.render.walk`, `seon.data/source`,
     `:seon.fn/arities` + `:seon.fn.arity/*`, `:seon.render.kind/*`,
     `:seon.render.walk/{edges,path,remaining}`.
 
