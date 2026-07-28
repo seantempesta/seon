@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (10)
+## Blocker (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -23,12 +23,14 @@ See `README.md` for the convention.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
+| [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (12)
+## Friction (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [A failed ephemeral bind NPEs instead of saying what happened](web-start-npe-when-an-ephemeral-bind-fails.md) | friction | UI |
 | [A failed form does not stop the fold, so a run can complete with a lie](a-failed-form-does-not-stop-the-fold.md) | friction | general |
 | [A nil query input matches anything, so prompt cannot refuse a nil trigger](a-nil-query-input-matches-anything-so-prompt-cannot-refuse.md) | friction | Core |
 | [A self-referential registered schema overflows the stack instead of refusing](a-self-referential-schema-overflows-the-stack.md) | friction | Core |
