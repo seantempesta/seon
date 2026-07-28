@@ -10,6 +10,30 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**WORKING EDGE (2026-07-28 night).** Gate 425/1675/0 (context-blocks
+landing; independent verification in flight). LANDED tonight:
+context-blocks rung complete (082370df9/6d89d9107/f31d63e39/e377688e2
+— schema, seon.context + pre-provider capture, membership/omission,
+loop :call wiring, the :seon.render.block/* rename ruling, all 14
+sealed deftests); F0(a) var step-fns + pinned workloads (1b72cc8da,
+construction refuses :mixed); F0(b) codec totality regression
+(ad7a488f7); no-auth provider state (1a8184a56); both audits
+(b205f55fd trigger-conservation — P1 livelock + P2 duplicate-paid-call
+REPL-proven, episode query ~34 µs zero new facts; 5c5b4fda1 zombie —
+none constructible, presence subsumes epochs, deletion slice sized);
+custody contract SEALED (ce3ae1c89); F1 blueprint contract SEALED
+(e578c4125 + c0cd2705d — two seal corrections: recorder never resets
+the episode; cap-hit selection skips deferred self-triggers).
+IN FLIGHT: custody-revision implementation (Opus — epochs/leases
+deleted, custody-precedes-work, the two probes as regressions, the
+thrown-prompt-refusal catch). NEXT after it: F1 implementation
+(sealed contract ready), then F2 transport conversions + central-loop
+deletion. Owner-gated: episode-cap default (F4 evidence), test units
+4–9, N4 transcript page (messaging rulings done except verbatim-reply
+confirm). Frictions queued from context-blocks: schema/digest helper
+ownership; the load-order scar (register! in leaf require chains);
+`:seon.block/count` boot residual rename.
+
 **WORKING EDGE (2026-07-28 midday — the presence-not-kinds wave).**
 Gate 403/1566/0, independently verified. The morning decision session
 resolved into the "Rulings 2026-07-28" batch (README): omission =
