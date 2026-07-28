@@ -327,9 +327,10 @@
         (html-report found)))))
 
 (defn ai-prose
-  "`:seon.render/ai` — concise steering for failed plan forms, plus the
-  episode-cap line for a deferred agent (F1 §7): present exactly while
-  the derivation says so, gone the moment an outside trigger resets it."
+  "`:seon.render/ai` — concise steering, derived from the families.
+  Failed plan forms keep their lines; a deferred agent gains the
+  episode-cap line (F1 §7), present exactly while the derivation says
+  so and gone the moment an outside trigger resets it."
   {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
   [found]
   (->> (concat
