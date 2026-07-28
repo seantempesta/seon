@@ -518,6 +518,20 @@ may reintroduce a shadow build into the dev feedback path.
   model servers get an EXPLICIT no-auth state on the one provider
   target shape (header omitted when declared; hosted targets still
   fail closed) — never a dummy credential (lane `no-auth-provider`).
+  **Ruling 2026-07-28 late night (owner, conversational — NAMESPACE-
+  CENTERED AGENTS, the discoverable system):** an agent lives inside
+  the RENDERED VIEW of its own namespace. Blocks are simply registered
+  functions returning data the one router renders; membership derives
+  from the namespace (installed rows now; every render-declaring
+  reachable defn at N5 — the sealed contract's derived-membership edge
+  is this ruling's mechanism). Default renders layer: process-level
+  generic (the /data panel), family specialists, unit-specific. The
+  census enumerates all possible views AS DATA and is itself a
+  renderable unit; rendering is lazy — you pay only for the kinds you
+  request. Ping is the process-local half of that census and must TELL
+  A STORY, visible in the html view: build the fleet-oversight block
+  (queued in unsettled.md) as the first application — root sees
+  parked/mid-turn/current-run/episode per agent live.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
