@@ -40,6 +40,7 @@
             [seon.context :as context]
             [seon.render :as render]
             [seon.render.block :as block]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -82,6 +83,12 @@
         output (get rendered :seon.render/output)
         failure (cond
                   (:seon.error/kind rendered) rendered
+
+                  ;; a projection may FAIL BY VALUE: a returned closed
+                  ;; flat error rides through EXACTLY — the record
+                  ;; names its block but adds no key to that shape
+                  (schema/valid-candidate-value? :seon.error/value output)
+                  output
 
                   ;; the one check the router cannot make: the ai
                   ;; kind's grammar is prose, and this is its consumer
