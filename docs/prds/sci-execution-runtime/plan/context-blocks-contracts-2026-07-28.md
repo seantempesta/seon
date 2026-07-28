@@ -53,11 +53,19 @@ rendered-context value; every prose piece it owns today becomes a named block.
    blob-backed (see §9 for the blob-archive dependency).
 
 One distinction ruling 1 does NOT dissolve: the landed
-"presence decides placement" filter in `seon.render.block/surfaces`
-(`contains? block kind` over the block's DECLARATION keys) tests whether a
-block can render a kind at all — a property of the stored block, not a render
-result. It stays `contains?`. Nil-punning governs reading render RESULTS
+"presence decides placement" filter in `seon.render.block/surfaces` tests
+whether a block can render a kind at all — a property of the stored block,
+not a render result. Nil-punning governs reading render RESULTS
 (`:seon.render/output`, contribution text), never declaration presence.
+**Seal correction (orchestrator, 2026-07-28):** that placement test is
+`(render/declaration? (get block kind))`, NOT `contains?` — the router's
+one rule applied at the selector. On a pulled durable entity the two are
+equivalent (the bridge forces absence), but in-memory-constructed units can
+carry nil, and `contains?` there is the exact defect filed in
+`a-nil-render-key-paints-an-error-card-instead-of-omitting.md` (the
+render-nil-unification lane is landing the `declaration?` form). The
+carve-out's own worry — nobody may make a stored nil meaningful — is
+enforced by `declaration?` too, since nil fails it.
 
 ## 2. Schema additions — exact EDN
 
