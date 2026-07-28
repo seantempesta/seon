@@ -568,6 +568,21 @@ may reintroduce a shadow build into the dev feedback path.
   re-centers on this at its post-falsification revision; the PILOT —
   one agent'''s prompt derived as its namespace view at entity-graph
   distance — dispatches when the distance accretion lands.
+  **Ruling 2026-07-28 post-midnight #3 (owner — override resolution +
+  code is the floor):** per-slot renderer resolution, most-specific
+  first: (1) explicit slot redirect by the delegating renderer; (2)
+  the VIEWER'''s local override for the data type — and the viewer is
+  constant through the whole walk (hop 3 renders through the original
+  agent'''s overrides; perspective never silently shifts to
+  intermediate namespaces); (3) the owning namespace'''s default; (4)
+  the floor: code/data panels — "code is a good fallback as it'''s the
+  truth of the system." A NAMESPACE is itself a rendered data type:
+  default = the quarry'''s namespace context render (signatures +
+  docstrings, bodies by budget — mine it, never reinvent);
+  distance 1 = signatures+docstrings, deeper = bodies, 0 = the name.
+  Mostly this is about writing REALLY GOOD DEFAULT RENDERERS;
+  overrides exist for the special cases and their impact is
+  provenance-captured.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
