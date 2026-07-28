@@ -66,11 +66,11 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Build once, fork everywhere.** Expensive values are derived once and
   forked by consumers — never rebuilt, never shared mutably: the sci base
   `ctx` forks per evaluation; a database value at a basis is a free fork
-  (`as-of`/`since` are temporal forks); the template store clones per
-  cluster reset (APFS copy-on-write); a proc restart forks from facts at
-  `init` state 0. Structural sharing makes every fork O(1); divergence is
-  local by construction. Mutation exists in exactly one place per store —
-  the writer's serial transaction path.
+  (`as-of`/`since` are temporal forks); every cluster branch forks from the
+  same immutable bootstrap ancestor containing indexed code and initialization
+  pages; and a proc restart derives from facts at `init` state 0. Structural
+  sharing keeps the ancestor single while branch divergence remains local.
+  Mutation exists in exactly one serial transaction path per physical store.
 - **Reset, never migrate.** A cluster reconciles to current code and schema by
   resetting and reinstalling from the manifest and program facts. No data
   migration path exists; a live proof runs on a freshly reset cluster at the
@@ -135,14 +135,12 @@ The full decision record is [[011-tests-find-design-issues]].
   from no process to the process record together with a claim-epoch increment.
   Never exact prose.
 
-- **No datom string-size limit exists; amplification is the real cost.** Datahike
-  validates `:db.type/string` with `string?` alone; a 10 MB value transacts in
-  ~62 ms on a file store and reopens byte-exact. The measured tax is ~2.2×
-  storage across the paired EAVT/AEVT indexes plus retained trees, on every
-  query touching the attribute. Bulk content therefore belongs in the
-  content-addressed blob store with a small ref fact; the folkloric 65k limit
-  is Fressian's chunk buffer, not a bound
-  (`prds/sci-execution-runtime/research/datom-size-limits-2026-07-26.md`).
+- **No datom string-size limit exists; amplification is the real cost.**
+  Datahike validates `:db.type/string` as a string rather than imposing a Seon
+  byte ceiling. Indexed values amplify storage and query work, so bulk content
+  belongs in the content-addressed blob store behind a small ref fact.
+  Fressian's chunk buffer is not a database value bound. Measurements and
+  conditions live in the active PRD research.
 
 ## Process
 

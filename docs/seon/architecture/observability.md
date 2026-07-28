@@ -70,7 +70,7 @@ flag:
   absent and rendered as unmeasured, never as zero. Optional detailed spans and
   database resource evidence belong in one bounded diagnostic blob rather than
   expanding ordinary turn datoms.
-- **Provider attempts as facts** — every retry attempt connects to the turn
+- **Provider attempts as facts** — every provider attempt connects to the turn
   with its ordinal, resolved non-secret
   transport projection, adapter and outer timeout layers, outcome, and present
   response model/fingerprint/request identity. The adapter consumes that one
@@ -209,62 +209,97 @@ Search runs at two ends, one function boundary each, and nothing in between:
   scopes KNN by a datalog `:where`. No second index or separate FTS engine —
   exact regex and semantic KNN cover the spectrum.
 
-## Error recording — fault-tagged datoms + the strict gate
+## Error facts — one normalizer, one fault path
 
-Errors join turn replay as first-class DB objects. `seon.error/record!`
-is the catch-site function (the iron rule as a fn: nothing is caught without
-becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
-the agent's learning signal; `:core` — our bug), stamps the complete ordinary
-database value under `:seon.error/db` live at the catch site—the
-resolved immutable db is the frozen state the failing code saw, composing directly with
-`agent-debug/turn` replay), parses the stack into `:seon.error/frames`
-component entities (Datalog-queryable traces), and keeps the full args
-of malli contract violations as bounded `:seon.error/args-edn`.
-Persistence is fire-and-forget (never throws, never awaits; a bounded
-drop-oldest buffer rides out conn-less windows) and one caught failure yields
-one deduplicated error record in one recording transaction (propagating
-rejections are dedup-tagged).
+`seon.error/normalize` is the one normalizer. Any value that means something
+went wrong — a flat `:seon.error` value, a transaction refusal, a Flow error
+report, a bare `Throwable`, or an unrecognized value — becomes the same
+canonical durable error fact. The function is total and pure. It derives the
+source family structurally, takes `:seon.error/kind` from the deepest site data
+that supplied one, and fails closed to an unclassified kind. Kinds are therefore
+computed from producing sites, never maintained as an enum or blame table.
 
-Two capture layers need zero per-site work: the Malli instrumentation
-wrapper's async arms (rejections and resolved-value output violations) and the process net
-(`uncaughtException`/`unhandledRejection` → fault `:core`).
+The normalizer projects the complete source through the one value-admission
+codec before any printing. Every committed error fact validates the same
+`:seon.error/value` contract and carries enough bounded provenance to join back
+to the process, proc, run, agent, and immutable database value involved. Full
+diagnostic bytes may live in the blob archive; the fact remains the bounded,
+queryable authority.
 
-Expected-test classification and the error-write recursion fence are
-invocation-scoped facts. They follow only the asynchronous work spawned by that
-invocation, are never persisted as runtime modes, and cannot suppress another
-agent's concurrent fault.
+Recurrence is also derived. Each fact carries a signature over stable
+diagnostic content — process, exception class, kind, and top frame — and the
+signature deliberately excludes the message. Paths, ids, timestamps, and other
+changing prose therefore cannot make every occurrence look unique. Counts are
+queries over facts, never mutable counters.
 
-`:seon.config/on-core-error` governs `:core` faults only. Agent faults remain
-values in every mode. A failed program publication or readiness transition
-records one bounded core fault and fails development admission; a production
-render boundary may return the configured bounded fallback after recording the
-same occurrence. An outer boundary does not record an error already recorded by
-its inner owner, so a derived rerender cannot create an error-invalidation loop.
+There are two error classes, separated by construction:
 
-Persisted messages name the deepest available real cause rather than a generic
-wrapper. Root context may derive one concise current fault signal; detailed
-frames, arguments, and reproduction data remain on-demand forensic views.
+- An agent or eval mistake is a flat value returned by guarded evaluation. Its
+  terminal eval receipt records it. It never throws into the run loop and never
+  rides Flow's error channel.
+- A core fault is a `Throwable` that escaped a proc onto Flow's error channel.
+  The fault-committer consumes that channel, normalizes the report, and commits
+  the error fact together with one explanation **message** to the responsible
+  agent in a single transaction. Responsibility derives from the fact's
+  provenance and namespace ownership; there is no router or subscription
+  registry. The message is ordinary delivery, so its commit is also the wake.
 
-Triage runs through three `seon.agent.debug` functions, three altitudes over
-the same datoms:
+The explanation is an AI projection selected through the one render contract
+and frozen as message content because it records what the agent was told. Log
+and HTML projections remain derived. An escalation-recipient config fact
+controls where otherwise unowned or recurring faults are explained.
 
-- **`errors`** — compact recent list, newest first (optional
-  `:seon.error/fault` filter + limit): per row the error eid, fault, complete
-  ordinary database value,
-  deepest-cause short message, top stack frame, and the recording agent.
-- **`error`** — one full envelope by eid (message, fault, database value, frames
-  table, args-edn, data-edn, stack) plus the JOINS: the recording agent and
-  the turn active at that database value (derived from the agent's turn windows and
-  ordinary domain refs) — the turn eid composes with `agent-debug/turn`
-  inspection.
-- **`repro`** — the work-backwards bundle: the LIVE immutable db value resolved
-  from the error's ordinary database value (REPL material—render `:t` + abbreviated commit,
-  never print the db),
-  the failing fn sym + args-edn when the malli envelope captured them, the
-  linked turn, a ready-to-eval reproduction expression string built from
-  what is actually stored (an honest note when args were not captured —
-  nothing fabricated), and the `::fork-hint` — the exact supervisor command
-  that boots this error's view as a live cluster (below).
+Delivery makes an error capable of waking the code path that produced it, so
+the fault path has a structural storm bound. Occurrences continue to commit as
+facts. Explanation messages are emitted only through the configured recurrence
+limit, followed by one recurring-fault escalation; later facts with the same
+signature are silent. An error fact by itself is not a wake attribute. Thus the
+record remains complete without allowing
+error → message → wake → error to become an unbounded loop.
+
+### Fail loud does not mean fall down
+
+`:seon.config/on-core-error :panic` makes development failures immediately
+visible: the offending call, eval, turn, or proc activity halts; the durable
+fact commits; and the UI, logs, and REPL expose it. The cluster JVM, REPL, and
+web UI remain alive so the failure can be investigated. Production uses the
+same fact path and degrades on the configured dial.
+
+The recorder itself never panics. Normalization and admission run in recording
+mode even when the failing activity uses `:panic`, because losing the original
+fact while reporting it would turn the fire alarm into the fire. Projection
+holes become bounded markers on the fact and remain visible to
+`seon.problems`.
+
+### Problems are a current derivation
+
+`seon.problems/problems` is pure over one database value plus the observed set
+of live process identities. It derives what is wrong now: recurring error
+signatures, runs held by dead processes, failed runs, and errored eval receipts.
+Families are map keys, not stored kinds; empty families are absent; a healthy
+cluster returns exactly `{}`. One hundred occurrences of one signature are one
+problem with a recurrence count and the latest fact, not one hundred rows.
+Nothing is acknowledged, marked seen, or copied into a health table.
+
+Triage and reproduction tools query these same facts. Compact lists render the
+latest normalized facts; detail views join a fact to its process, run, agent,
+turn, and immutable database value; reproduction resolves that historical
+value and reports honestly when bounded evidence is absent. They do not build a
+second error envelope or replay log.
+
+### Instrumentation composes into the same path
+
+`seon.instrument/apply!` explicitly collects every loaded public var carrying a
+`:malli/schema` and applies the configured input/output instrumentation. The
+selection is computed from vars and schemas, never namespace prefixes or an
+allowlist. `apply!` is idempotent and is run again after a `defn` is
+re-evaluated, because replacing a var root removes its instrumentation wrapper.
+
+In development, an instrumentation violation throws the canonical flat
+violation value from the offending activity. If it escapes a Flow proc, the
+ordinary fault-committer path turns it into the durable fact, explanation
+message, and `seon.problems` entry. Instrumentation does not own another
+recorder, formatter, or notification channel.
 
 The as-of db is read-only; when the fix needs a WRITABLE view—re-running
 safe code, patching data, letting a forensic agent act—the fourth step is

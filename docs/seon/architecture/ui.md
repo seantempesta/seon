@@ -129,10 +129,11 @@ own `surface-id`, so a transcript append repaints the transcript and the header
 is not recomputed. This is the difference between the block set being a
 convenient grouping and being the unit of live update: interest, registration
 memory and equality suppression are all keyed by block, and "32 tabs, one
-authored evaluation" is one evaluation of one block. Measured: the same one-row
-change is 287 bytes and 0.004 ms as a block morph, or 82,893 bytes and 0.460 ms
-as a whole-page morph — 289× the bytes and 115× the CPU, and the bytes are the
-half that decides whether a slow reader is survivable.
+authored evaluation" is one evaluation of one block. Whole-page morphing is not
+the live-update fallback: initial paint builds the page once, then every change
+targets the smallest stable block whose value changed. Serialization, authored
+evaluation, and slow-reader pressure therefore scale with changed content
+rather than page size.
 
 ## Seed-copy — one collection, no merge
 
@@ -261,6 +262,20 @@ namespace-as-location model, and the cache gradient live in [[context]] —
 this doc owns the shared block/render machinery and the human-facing twin:
 every context band renders an html representation for inspectability.
 
+### Render coverage converges on blocks
+
+A domain value becomes broadly observable by accreting projections on the same
+unit: AI for agent context, HTML for a surface, log for operations, and later
+kinds without a router change. Consumers never rebuild or reclassify it. A new
+consumer asks the router for its kind; a producer that knows more selects a
+specialist while building the unit.
+
+Prompt assembly follows the same convergence. Context sections are AI renders
+of blocks, not strings assembled beside the renderer. As domains gain AI, HTML,
+and log projections, prompt, page, and operational views become different
+bounded projections of the same units rather than parallel presentation
+systems.
+
 ## Slots and layouts
 
 - **slot** — `(slot :name)` emits
@@ -291,14 +306,14 @@ budgets, because a long thin chain and a wide DAG are different ways to be too
 big. The walk is depth-first and left to right, so one input always elides the
 same holes — equality suppression depends on it.
 
-**Recursive unit rendering is this same mechanism.** A unit's rendered form
-embeds its refs as units, and following a connection is the same act as filling
-a slot: ask the router for a node, descend, count it, stop at the budget or at a
-node already on the path. The entity graph can genuinely cycle where a value
-tree could not, so the visited set is load-bearing and the budget bounds the
-fan-out. The `/data` browser is the purest case: paged `get-in` navigation into
-any nested value is bounded expansion whose cursor says where to resume instead
-of eliding.
+**Pages are bounded folds over the entity graph.** A page begins with its root
+units and recursively reduces their rendered refs through this same mechanism.
+Following a connection is the same act as filling a slot: ask the router for a
+node, descend, count it, stop at the budget or at a node already on the path.
+The entity graph can genuinely cycle where a value tree could not, so the
+visited set is load-bearing and the budget bounds the fan-out. The `/data`
+browser is the purest case: paged `get-in` navigation into any nested value is
+bounded expansion whose cursor says where to resume instead of eliding.
 
 Expansion refuses in place rather than throwing, so one bad slot costs one hole
 and not the page: a slot naming a block the agent does not own keeps the hole
