@@ -453,11 +453,32 @@ lease; honest fix is a claim-contract interface change, N2/N3-owned);
 stop-may-leave-the-prepl-server-name-registered (unverified Gemini
 flag, same-JVM same-name restart). Datahike scar: :db.type/long is
 EXACTLY java.lang.Long — an Integer refuses the WHOLE transaction.
-IN FLIGHT: the N4 agent drafts render-pipeline contracts (problems
-page in a browser). NEXT QUEUE: two-cluster proof (+ the failover
-live drive can ride it — a bogus primary endpoint + real backup);
-projection-review experiment (the failover prose is exhibit one);
-released-connection family; dispatcher lands post-measurement. THEN: two-cluster proof; projection-review experiment;
+OWNER RENDERING RULINGS (night, binding on N4): root is PER-CLUSTER
+(one root agent each; multi-cluster root someday); PORT the old root
+interface — "it's really just different context blocks that return
+:seon.render/ai and :seon.render/html" so BLOCKS are central to N4
+and root/agent views are one mechanism; translate the old UI's
+interaction (don't reinvent), FASTER + MORE RESPONSIVE as named
+goals; canvas unified — all renders through the guarded sci door now
+(the old infinite-loop special-casing comes free from N3), target =
+agent picks ANY function returning hiccup, order is orchestrator's
+pick (problems → block pages → canvas); LOOK: port the old design
+language + named polish acceptance rows (blinking cursors, paste-
+friendly input box, a chat display that's easy to follow). NOTE: the
+first N4 drafting agent was STOPPED BY THE OWNER mid-draft — do not
+resume it; a fresh N4 launch bakes these rulings in, pending owner
+go. AGENT MESSAGING: the substrate is live-proven (escalation
+messages open real runs); the missing 5% is the agent-facing
+my.message hands — one small rung, queue with the gold order.
+QUARRY GOLD INVENTORY IN (7f403bace: 155 files/75k lines censused,
+36-row crosswalk): the remaining gold is the continuity/composition
+layer — turn evidence + blobs, derived context, plans + memory,
+collaboration, canvas/tools, schedules, Inspect integration;
+pod/self-host/CLJS stays lead. IN FLIGHT: projection-review
+experiment (real outputs for owner critique). NEXT QUEUE:
+fresh N4 launch (owner go pending); two-cluster proof (+ failover
+live drive rides it); released-connection family; dispatcher lands
+post-measurement; my.message rung. THEN: two-cluster proof; projection-review experiment;
 steps 3-5. Earlier step-1 note follows:
 IN FLIGHT: the same agent applies authorized seal revisions
 (:seon.config.fault/*→error dial rename across five files; admit
