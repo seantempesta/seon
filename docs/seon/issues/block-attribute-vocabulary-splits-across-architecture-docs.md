@@ -39,8 +39,35 @@ stated identically in `architecture.md` and `ui.md`, matching whatever the
 fresh `src/` owner registers (or the ruled target if not yet built). The
 losing vocabulary is deleted from the docs in the same change.
 
+## Ruling (owner, 2026-07-28 evening)
+
+The canonical set is decided: **block attributes take the owning code
+namespace** — `:seon.render.block/name`, `:seon.render.block/priority`,
+`:seon.render.block/band`, entity slot `:seon.render.block/block` —
+per the existing colocation rule (attributes live with the code namespace
+that owns them, here `seon.render.block`). The agent link keeps its name
+(`:seon.cluster.agent/blocks` — its owner is the agent entity), and the
+`:seon.context/*` capture/contribution attributes are unchanged
+(`seon.context` is their code owner). `:seon.agent.ctx/*` and bare
+`:seon.block/*` are both losing vocabularies.
+
+Source and tests were renamed in the context-blocks wave (2026-07-28):
+`src/seon/schema/block.edn`, `src/seon/schema/context.edn`,
+`src/seon/render/block.clj`, `src/seon/render/web.clj`,
+`src/seon/render/root.clj`, and the block/web/problems/stream/boot tests.
+Residual noted for the boot owner: `:seon.block/count`
+(`src/seon/schema/boot.edn`, `src/seon/cluster.clj`) is boot's readiness
+count, not a block entity attribute — colocation names it under boot's own
+namespace when that owner next touches it.
+
+## Remaining
+
+The architecture-doc rewrite (`architecture.md` + `ui.md` adopting
+`:seon.render.block/*`, deleting `:seon.agent.ctx/*` and the imperative
+`install!`/`remove!` drift) stays with the architecture-doc owner; the
+source rename above is the vocabulary it must match.
+
 ## Owner
 
-Architecture docs + the fresh block/render owner. Needs the owner (or the
-top-level orchestrator) to pick the canonical set; not decidable inside a
-documentation lane.
+Architecture docs (rewrite pending). The fresh block/render owner's half is
+done — source registers `:seon.render.block/*` only.

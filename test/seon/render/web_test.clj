@@ -94,8 +94,8 @@
 
 (defn- block-map
   [name priority projection]
-  {:seon.block/name name
-   :seon.block/priority priority
+  {:seon.render.block/name name
+   :seon.render.block/priority priority
    :seon.render/html projection})
 
 (def ^:private two-blocks
@@ -326,7 +326,7 @@
 (deftest suppression-compares-bytes
   ;; Bytes are what the socket costs and what the browser diffs, and the
   ;; serializer is deterministic, so this is sound.
-  (let [surface {:seon.block/name :x
+  (let [surface {:seon.render.block/name :x
                  :seon.render/surface-id "surface-x"
                  :seon.render/kind :seon.render/html
                  :seon.render/output [:div {:id "surface-x"} "same"]}
@@ -342,8 +342,8 @@
 (deftest a-nil-projection-keeps-the-blocks-identified-wrapper
   (let [surface
         (block/surface nil agent-id
-                       {:seon.block/name :optional
-                        :seon.block/priority 0
+                       {:seon.render.block/name :optional
+                        :seon.render.block/priority 0
                         :seon.render/html `omitted-html}
                        :seon.render/html)
         html (web/surface-html surface caps nil)]
@@ -353,7 +353,7 @@
         "empty content keeps the block's stable morph target")))
 
 (deftest a-later-non-nil-render-patches-back-into-the-same-wrapper
-  (let [omitted {:seon.block/name :optional
+  (let [omitted {:seon.render.block/name :optional
                  :seon.render/surface-id "surface-optional"
                  :seon.render/kind :seon.render/html
                  :seon.render/output nil}

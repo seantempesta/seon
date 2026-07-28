@@ -158,7 +158,7 @@
    (if-let [failure (:seon.error/value surface)]
      [:div {:id (:seon.render/surface-id surface) :class "seon-error-card"}
       [:span {:class "seon-error-card-name"}
-       (str (:seon.block/name surface))]
+       (str (:seon.render.block/name surface))]
       [:span {:class "seon-error-card-message"}
        (:seon.error/message failure)]]
      (if-some [output (get surface :seon.render/output)]

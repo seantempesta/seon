@@ -85,7 +85,7 @@
   so `:a/x` and `:b/x` cannot collide, and every character outside
   `[A-Za-z0-9._-]` is escaped rather than dropped — dropping is what
   makes two different names one id."
-  {:malli/schema [:=> [:cat :seon.block/name] :seon.render/surface-id]}
+  {:malli/schema [:=> [:cat :seon.render.block/name] :seon.render/surface-id]}
   [name]
   ;; `[A-Za-z0-9.-]` pass through, so the ordinary case is unchanged and
   ;; a hyphenated name stays readable. `_` is the escape introducer and
@@ -118,7 +118,7 @@
   SAME id, so a morph replaces the hole in place and a reconnect that
   paints holes first is a coherent intermediate page rather than a torn
   one."
-  {:malli/schema [:=> [:cat :seon.block/name] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render.block/name] :seon.render/hiccup]}
   [name]
   ;; the explicit `""` child is not decoration: it makes the hole a
   ;; non-void element with a closing tag, so `<div id="surface-x"></div>`
@@ -149,7 +149,7 @@
 (defn blocks
   "The agent's complete block set at `db`, ordered.
 
-  ORDER IS DERIVED: `:seon.block/priority` ascending, with the block
+  ORDER IS DERIVED: `:seon.render.block/priority` ascending, with the block
   name as a stable tiebreaker, so two derivations of one database value
   are the same value. The stored collection is a SET and has no order to
   lose.
@@ -164,7 +164,7 @@
   an error and not a cue to substitute defaults: an absent block tree
   means no blocks."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
-                  [:vector :seon.block/block]]}
+                  [:vector :seon.render.block/block]]}
   [db agent-id]
   (->> (d/q '[:find ?block
               :in $ ?agent-id
@@ -178,7 +178,7 @@
               ;; the entity id is Datahike's, not ours; a block carrying
               ;; it would not validate as one
               (dissoc (d/pull db '[*] entity) :db/id)))
-       (sort-by (juxt :seon.block/priority :seon.block/name))
+       (sort-by (juxt :seon.render.block/priority :seon.render.block/name))
        vec))
 
 (defn unit
@@ -194,7 +194,7 @@
   of the page was not rendered at, and \"what the agent saw at turn N\"
   would stop being re-derivable. Every projection this repository ships
   reads `:seon.db/db` or reads nothing."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.block/block]
+  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.render.block/block]
                   :seon.render/unit]}
   [db agent-id block]
   (assoc block
@@ -228,12 +228,12 @@
   serializer elided a bare map child and the page looked fine
   (`src-old/seon/ui/html.cljc`, `render-content`'s map branch and its
   own flag). Here the block gets an error card with its name on it."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.block/block
+  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id :seon.render.block/block
                        :seon.render/kind]
                   :seon.render/surface]}
   [db agent-id block kind]
-  (let [name (:seon.block/name block)
-        base {:seon.block/name name
+  (let [name (:seon.render.block/name block)
+        base {:seon.render.block/name name
               :seon.render/surface-id (surface-id name)
               :seon.render/kind kind}
         rendered (render/render {:seon.render/unit (unit db agent-id block)
@@ -257,7 +257,7 @@
               (str "The " name " block's html render returned something that "
                    "is not hiccup.")
               :seon.error/data
-              {:seon.block/name name
+              {:seon.render.block/name name
                :seon.render/projection (get block kind)
                ::shape (let [output (:seon.render/output rendered)]
                          (if (nil? output)
@@ -335,9 +335,9 @@
   [surface failure]
   [:div {:id (:seon.render/surface-id surface)
          :class "seon-error-card"
-         :data-block (subs (str (:seon.block/name surface)) 1)}
+         :data-block (subs (str (:seon.render.block/name surface)) 1)}
    [:span {:class "seon-error-card-name"}
-    (str (:seon.block/name surface))]
+    (str (:seon.render.block/name surface))]
    [:span {:class "seon-error-card-message"}
     (:seon.error/message failure)]])
 
@@ -749,18 +749,18 @@
   Empty `blocks` yields empty tx-data. Nothing to say is no transaction,
   the same rule `seon.reconcile` proved: converged means zero writes."
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id
-                       [:vector :seon.block/block]]
+                       [:vector :seon.render.block/block]]
                   [:vector :any]]}
   [db agent-id blocks]
   (if (empty? blocks)
     []
-    (let [names (into #{} (map :seon.block/name) blocks)
+    (let [names (into #{} (map :seon.render.block/name) blocks)
           replaced (d/q '[:find [?block ...]
                           :in $ ?agent-id ?names
                           :where
                           [?agent :seon.cluster.agent/id ?agent-id]
                           [?agent :seon.cluster.agent/blocks ?block]
-                          [?block :seon.block/name ?name]
+                          [?block :seon.render.block/name ?name]
                           [(contains? ?names ?name)]]
                         db agent-id names)]
       ;; RETRACT then ADD, rather than merge: removing a key from a block

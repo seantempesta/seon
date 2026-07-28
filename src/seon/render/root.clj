@@ -139,17 +139,17 @@
   block set is a collection of entities. `ui.md` says the manifest
   declares the initial block data, and it should — that is an accretion
   to the reconciler, not something to fake with an unstorable dial."
-  [{:seon.block/name :header
-    :seon.block/priority 0
+  [{:seon.render.block/name :header
+    :seon.render.block/priority 0
     :seon.render/html `header-html}
-   {:seon.block/name :problems
-    :seon.block/priority 10
+   {:seon.render.block/name :problems
+    :seon.render.block/priority 10
     :seon.render/html `problems-html}
-   {:seon.block/name :agents
-    :seon.block/priority 20
+   {:seon.render.block/name :agents
+    :seon.render.block/priority 20
     :seon.render/html `agents-html}
-   {:seon.block/name :messages
-    :seon.block/priority 30
+   {:seon.render.block/name :messages
+    :seon.render.block/priority 30
     :seon.render/html `messages-html}])
 
 (defn seed-tx
@@ -162,10 +162,10 @@
   {:malli/schema [:=> [:cat :any :seon.cluster.agent/id] [:vector :any]]}
   [db agent-id]
   (let [installed (into {}
-                        (map (juxt :seon.block/name identity))
+                        (map (juxt :seon.render.block/name identity))
                         (block/blocks db agent-id))]
     (if (every? (fn [wanted]
-                  (= wanted (get installed (:seon.block/name wanted))))
+                  (= wanted (get installed (:seon.render.block/name wanted))))
                 blocks)
       []
       (block/install-tx db agent-id blocks))))

@@ -101,7 +101,7 @@
 
 (def ^:private attributes
   [:seon.cluster.agent/id :seon.cluster.agent/blocks
-   :seon.block/name :seon.block/priority
+   :seon.render.block/name :seon.render.block/priority
    :seon.render/ai :seon.render/html])
 
 (def ^:private agent-id "agent-a")
@@ -126,7 +126,7 @@
 
 (defn- block-map
   [name priority & {:as slots}]
-  (merge {:seon.block/name name :seon.block/priority priority} slots))
+  (merge {:seon.render.block/name name :seon.render.block/priority priority} slots))
 
 (def ^:private two-blocks
   [(block-map :header 0 :seon.render/html `header-html)
@@ -200,7 +200,7 @@
      (block-map :first 0 :seon.render/html `body-html)]
     (fn [connection]
       (is (= [:first :alpha :zebra]
-             (mapv :seon.block/name (block/blocks (d/db connection) agent-id)))
+             (mapv :seon.render.block/name (block/blocks (d/db connection) agent-id)))
           "priority ascending, name as the stable tiebreak"))))
 
 (deftest an-agent-with-no-blocks-derives-nothing
@@ -219,7 +219,7 @@
   (with-database [(block-map :transcript 0 :seon.render/html `body-html)]
     (fn [connection]
       (let [db (d/db connection)]
-        (is (= [:transcript] (mapv :seon.block/name (block/blocks db agent-id))))
+        (is (= [:transcript] (mapv :seon.render.block/name (block/blocks db agent-id))))
         (is (= [] (block/blocks db other-agent-id)))))))
 
 (deftest the-unit-carries-the-exact-database-value
@@ -248,7 +248,7 @@
     (fn [connection]
       (let [db (d/db connection)
             names (fn [kind]
-                    (mapv :seon.block/name
+                    (mapv :seon.render.block/name
                           (block/surfaces db {:seon.cluster.agent/id agent-id
                                               :seon.render/kind kind})))]
         (is (= [:header :body] (names :seon.render/html)))
@@ -268,7 +268,7 @@
   (with-database [(block-map :data-only 5)]
     (fn [connection]
       (let [db (d/db connection)]
-        (is (= [:data-only] (mapv :seon.block/name (block/blocks db agent-id))))
+        (is (= [:data-only] (mapv :seon.render.block/name (block/blocks db agent-id))))
         (is (= [] (block/surfaces db (html-request))))))))
 
 (deftest one-block-is-evaluated-once-per-render
@@ -291,7 +291,7 @@
       (let [rendered (block/surfaces (d/db connection) (html-request))
             [broken body] rendered]
         (is (= 2 (count rendered)) "the broken block keeps its place")
-        (is (= :broken (:seon.block/name broken)))
+        (is (= :broken (:seon.render.block/name broken)))
         (is (= "surface-broken" (:seon.render/surface-id broken))
             "and keeps its address, so its error has somewhere to go")
         (is (seon.schema/valid-candidate-value?
@@ -318,7 +318,7 @@
       (let [[surface] (block/surfaces (d/db connection) (html-request))
             failure (:seon.error/value surface)]
         (is (seon.schema/valid-candidate-value? :seon.error/value failure))
-        (is (= :sloppy (:seon.block/name surface))
+        (is (= :sloppy (:seon.render.block/name surface))
             "the block is named, because the block is what is broken")))))
 
 (deftest every-surface-validates-whatever-the-projection-did
@@ -496,14 +496,14 @@
                   (block/data-panel {:seon.render/value {:label "widgets"}
                                      :seon.sci.admit/caps caps})))))
   (testing "it panels the unit itself when no value key is present"
-    (is (hiccup/hiccup? (block/data-panel {:seon.block/name :x
+    (is (hiccup/hiccup? (block/data-panel {:seon.render.block/name :x
                                            :seon.sci.admit/caps caps}))))
   (testing "nil and absent render values panel the same unit"
-    (let [unit {:seon.block/name :x :seon.sci.admit/caps caps}]
+    (let [unit {:seon.render.block/name :x :seon.sci.admit/caps caps}]
       (is (= (block/data-panel unit)
              (block/data-panel (assoc unit :seon.render/value nil))))))
   (testing "nil and absent declarations are equally absent from the panel"
-    (let [unit {:seon.block/name :x :seon.sci.admit/caps caps}]
+    (let [unit {:seon.render.block/name :x :seon.sci.admit/caps caps}]
       (is (= (block/data-panel unit)
              (block/data-panel (assoc unit :seon.render/html nil))))))
   (testing "and never prints the projection declarations back at the reader"
@@ -530,7 +530,7 @@
   ;; declaration is absent, so it cannot suppress the generic backstop.
   (with-redefs [block/entity-unit
                 (fn [_db _lookup]
-                  {:seon.block/name :referenced
+                  {:seon.render.block/name :referenced
                    :seon.render/html nil})]
     (let [expanded
           (block/expand (block/entity-slot 1)
@@ -572,8 +572,8 @@
                                   (block-map :extra 5 :seon.render/html `body-html)])]
         (d/transact connection tx)
         (let [after (block/blocks (d/db connection) agent-id)]
-          (is (= [:extra :body] (mapv :seon.block/name after)))
-          (is (= 99 (:seon.block/priority (second after)))
+          (is (= [:extra :body] (mapv :seon.render.block/name after)))
+          (is (= 99 (:seon.render.block/priority (second after)))
               "the same name was replaced, not duplicated"))))))
 
 (deftest install-replaces-a-block-wholesale
@@ -608,7 +608,7 @@
   [depth]
   (let [names (mapv (fn [index] (keyword (str "b" index))) (range depth))]
     (mapv (fn [index]
-            {:seon.block/name (names index)
+            {:seon.render.block/name (names index)
              :seon.render/surface-id (block/surface-id (names index))
              :seon.render/kind :seon.render/html
              :seon.render/output
@@ -652,7 +652,7 @@
   ;; A long thin chain spends few nodes and still must stop, because
   ;; depth and fan-out are different ways to be too big.
   (let [deep (mapv (fn [index]
-                     {:seon.block/name (keyword (str "d" index))
+                     {:seon.render.block/name (keyword (str "d" index))
                       :seon.render/surface-id
                       (block/surface-id (keyword (str "d" index)))
                       :seon.render/kind :seon.render/html

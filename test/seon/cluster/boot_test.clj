@@ -519,8 +519,8 @@
               (is (= (count root-render/blocks) (count relation))))
             (testing "the derivation agrees with the facts, one for one"
               (is (= (count relation) (count derived)))
-              (is (= (into #{} (map :seon.block/name) root-render/blocks)
-                     (into #{} (map :seon.block/name) derived))))
+              (is (= (into #{} (map :seon.render.block/name) root-render/blocks)
+                     (into #{} (map :seon.render.block/name) derived))))
             (testing "every index answers the same, so no read is privileged"
               (let [agent-eid (:e (first (d/datoms db :avet
                                                    :seon.cluster.agent/id agent-id)))]

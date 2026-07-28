@@ -375,8 +375,8 @@
       (d/transact connection
                   [{:seon.cluster.agent/id "root"
                     :seon.cluster.agent/blocks
-                    [{:seon.block/name :problems
-                      :seon.block/priority 10
+                    [{:seon.render.block/name :problems
+                      :seon.render.block/priority 10
                       :seon.render/html `problems-surface}]}])
       (let [[surface] (block/surfaces @connection
                                       {:seon.cluster.agent/id "root"

@@ -1,5 +1,25 @@
-{; The derived prompt: a pure function of a database value. Nothing is
- ; stored — a prompt is a projection, and the context-block machinery is
- ; a later rung.
- :seon.cluster.prompt/request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]
- :seon.cluster.prompt/text [:string {:min 1}]}
+{; The derived prompt: a pure function of a database value, assembled
+ ; from the agent's blocks through the ONE router. The request names the
+ ; HELD RUN — never a message id: the run's creating transaction records
+ ; its exact trigger as :seon.db/trigger tx-meta, and
+ ; seon.cluster.message/trigger reads it back, so a later queued message
+ ; can never replace the recorded cause (review finding 6, repaired).
+ :seon.cluster.prompt/request
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ :seon.cluster.prompt/text [:string {:min 1}]
+
+ ; The rendered context: the exact text the loop sends, the ordered
+ ; contribution records every other consumer (capture, debug, token
+ ; accounting, cache measurement) reads WITHOUT rerunning a projection,
+ ; and the exact database value it was derived at. In-memory only.
+ :seon.cluster.prompt/rendered-context
+ [:map {:closed true}
+  [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+  [:seon.context/contributions :seon.context/contributions]
+  [:seon.db/db :any]]}

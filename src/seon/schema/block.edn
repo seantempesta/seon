@@ -30,7 +30,7 @@
  ; each own a `:transcript` block, and making the name unique across the
  ; store would forbid exactly the arrangement the design requires.
  ; Uniqueness is per agent and is enforced by the upsert, not by Datahike.
- :seon.block/name :keyword
+ :seon.render.block/name :keyword
 
  ; ORDER IS DERIVED FROM DATA, never from position. Cardinality-many is a
  ; SET in Datahike (persistent_set.cljc:133), so a block set has no
@@ -38,7 +38,23 @@
  ; stable tiebreaker, which makes two derivations of one database value
  ; the same value. Lower sorts first, so a header can sit at 0 without
  ; anybody renumbering the rest.
- :seon.block/priority :int
+ :seon.render.block/priority :int
+
+ ; The semantic cache band, AUTHORED like priority: an installer's
+ ; ordering decision, not a derived classification (no name→band table
+ ; anywhere — R34). Absent = :dynamic, the free tail, so most blocks
+ ; declare nothing. Ordering is (band ordinal, priority, name); the band
+ ; order is the enum's own order and bands never cross.
+ :seon.render.block/band [:enum :anchor :program :authored :continuity :dynamic]
+
+ ; DECLARED trusted runtime inputs — the request keys this block's
+ ; projections read beyond the database value. The interface expresses
+ ; its dependency (the timeouts-ruling corollary): the request builder
+ ; refuses AT CONSTRUCTION when a membership needs an absent input,
+ ; before any projection runs, instead of every consumer growing its own
+ ; fence card. Post-N5 this becomes derivable from the program graph;
+ ; the attribute stays as the declaration the derivation must match.
+ :seon.context/inputs [:set :qualified-keyword]
 
  ; THE BLOCK ENTITY. `:seon.db/entity true` is load-bearing rather than
  ; decorative: `canonical-database-attributes` installs entity-map
@@ -53,12 +69,14 @@
  ; carrying neither is legal and renders nowhere — it is data the agent
  ; owns and nothing displays, and refusing it would be inventing a rule
  ; the design does not need.
- :seon.block/block
+ :seon.render.block/block
  [:map {:seon.db/entity true}
-  [:seon.block/name :seon.block/name]
-  [:seon.block/priority :seon.block/priority]
+  [:seon.render.block/name :seon.render.block/name]
+  [:seon.render.block/priority :seon.render.block/priority]
   [:seon.render/ai {:optional true} :seon.render/ai]
-  [:seon.render/html {:optional true} :seon.render/html]]
+  [:seon.render/html {:optional true} :seon.render/html]
+  [:seon.render.block/band {:optional true} :seon.render.block/band]
+  [:seon.context/inputs {:optional true} :seon.context/inputs]]
 
  ; EACH AGENT OWNS ITS COMPLETE SET, seeded at creation. There is no
  ; render-time merge with a default set and no fallback: every block an
@@ -117,12 +135,12 @@
  :seon.render/surface
  [:or
   [:map {:closed true}
-   [:seon.block/name :seon.block/name]
+   [:seon.render.block/name :seon.render.block/name]
    [:seon.render/surface-id :seon.render/surface-id]
    [:seon.render/kind :seon.render/kind]
    [:seon.render/output :seon.render/output]]
   [:map {:closed true}
-   [:seon.block/name :seon.block/name]
+   [:seon.render.block/name :seon.render.block/name]
    [:seon.render/surface-id :seon.render/surface-id]
    [:seon.render/kind :seon.render/kind]
    [:seon.error/value :seon.error/value]]]
@@ -134,10 +152,24 @@
  ; What a caller asks for. The database value is a positional argument
  ; rather than a key, matching the landed `seon.problems/problems`
  ; signature — one convention for "pure over a database value", not two.
+ ; caps + trusted inputs now ride the request — the ONE builder threads
+ ; them into every projection (review finding 3).
  :seon.render/surfaces-request
  [:map {:closed true}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.render/kind :seon.render/kind]]
+  [:seon.render/kind :seon.render/kind]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ ; the unit builder's input — one shape for prompt, page, debug, capture
+ :seon.render/unit-request
+ [:map {:closed true}
+  [:seon.db/db :any]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
 
  ; What one bounded expansion needs. The database value is OPTIONAL
  ; because block-slot expansion needs none; an entity ref without one is
@@ -157,7 +189,9 @@
  :seon.render/page-request
  [:map {:closed true}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
 
  ; A page is the html surfaces with every slot expanded, in the order
  ; the top-level blocks sort. Top-level is DERIVED (a block no other

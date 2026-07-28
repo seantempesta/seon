@@ -40,6 +40,9 @@
  ; real right now. Absent set = nothing is known to be live, which
  ; honestly makes every held run wedged — the caller that cannot answer
  ; must not get a quieter answer than the truth.
- :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes [:set :seon.cluster.run/process]]]
+ ; `live-processes` references the ONE global registration (context.edn)
+ ; — the same set, by the same name, as the capture and every request
+ ; builder carry (§9 of the context-blocks contract package).
+ :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
 
  :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]}

@@ -57,6 +57,18 @@ One distinction ruling 1 does NOT dissolve: the landed
 whether a block can render a kind at all — a property of the stored block,
 not a render result. Nil-punning governs reading render RESULTS
 (`:seon.render/output`, contribution text), never declaration presence.
+**Seal revision (owner ruling, 2026-07-28 evening): block attributes take
+the owning code namespace.** Everywhere this contract writes
+`:seon.block/name`, `:seon.block/priority`, `:seon.block/block`, or the new
+`:seon.block/band`, the canonical registered attribute is the
+`:seon.render.block/*` spelling — attributes are colocated with their owning
+code namespace (`seon.render.block`), the rule the rest of the tree already
+follows. `:seon.cluster.agent/blocks` keeps its name (the agent entity owns
+it), and every `:seon.context/*` / `:seon.context.capture/*` /
+`:seon.context.contribution/*` attribute is unchanged (`seon.context` is
+their owner). The EDN excerpts below are otherwise exact; read
+`:seon.block/*` as `:seon.render.block/*` throughout.
+
 **Seal correction (orchestrator, 2026-07-28):** that placement test is
 `(render/declaration? (get block kind))`, NOT `contains?` — the router's
 one rule applied at the selector. On a pulled durable entity the two are

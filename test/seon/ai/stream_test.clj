@@ -325,9 +325,9 @@
       (d/transact connection
                   [{:seon.cluster.agent/id agent-id
                     :seon.cluster.agent/blocks
-                    [{:seon.block/name :tokens :seon.block/priority 0
+                    [{:seon.render.block/name :tokens :seon.render.block/priority 0
                       :seon.render/html `stream/tokens-html}
-                     {:seon.block/name :reply :seon.block/priority 10
+                     {:seon.render.block/name :reply :seon.render.block/priority 10
                       :seon.render/html `stream/text-html}]}])
       (testing "before anything streams, they render idle rather than absent"
         (let [surfaces (block/surfaces (d/db connection)
