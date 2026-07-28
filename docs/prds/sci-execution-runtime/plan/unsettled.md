@@ -6,6 +6,41 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
+**COMPACTION HANDOFF (2026-07-28 morning — read FIRST).** The owner
+is PRESENT and wants the MORNING DECISION SESSION run next — batch
+his rulings via AskUserQuestion (plain language, options+recommenda-
+tions, ≤4 questions per call) from these docs, in this order:
+1. CONTEXT-BLOCKS (4 decisions): context-blocks-plan-2026-07-28.md
+   §"Owner decisions required before contract seal" — omission
+   semantics, invocation shape, collision precedence, capture
+   ownership. After ruling → draft contracts (fresh Opus, the plan
+   is falsified+revised, cite the review dispositions).
+2. TEST DISSOLUTIONS (11 ranked, 9-unit order):
+   test-design-review-2026-07-28.md — he approves the order/scope,
+   then implementation lanes.
+3. MESSAGING (6 questions): my-message-proof-2026-07-28.md §7 —
+   chain-bound currency, refusal visibility to sender, wait
+   semantics, self-messaging keep/refuse, verbatim replies,
+   Math/sqrt-absent-from-base (N5's surface decision).
+4. PROJECTION OUTPUTS: projection-review-2026-07-28.md "After
+   revisions" section — he re-reads, approves or iterates (each fix
+   is a hot-reloadable defn).
+5. SMALL: no-auth local-provider admission
+   (local-provider-2026-07-28.md); font licensing
+   (the filed issue carries the remedy); MCP RESTART (task #3 — asks
+   HIM to restart the MCP client; unblocks live eval_clj).
+IN FLIGHT RIGHT NOW (review on return, then refill): the N4 agent
+(SendMessage a1862bb9eb02818eb — derived ports, URL into the
+advertisement, boot banner, home-cluster design note); the
+fresh-operator sol lane (bin/codex-agent, name fresh-operator —
+bin/seon-fresh in bb with FLEET semantics: start multi-name/--count,
+seed, status at 40 clusters; single-quote resume payloads, backticks
+get eaten). Gate baseline 388/1509/0 (+ the two lanes' additions).
+The local Qwen server runs as background task (harness) on :8090 —
+it never exits by design; the owner knows. Agent A/B lessons +
+long-lived-lane pattern are in auto-memory. The N4 agent also owes
+package 5 (agent-transcript page) AFTER the messaging rulings.
+
 **SEALED (owner, s3 close): schema definitions leave code files.**
 Attribute/entity schemas are EDN data under `src/seon/schema/*.edn` —
 the schema OWNER's folder, on the classpath so runtime inspection and
