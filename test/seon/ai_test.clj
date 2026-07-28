@@ -10,12 +10,14 @@
   runs once by hand; a suite that needs a paid call to be green is a
   suite nobody runs."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.ai :as ai]
             [seon.config :as config]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test-support :as test-support]))
 
 (def ^:private base
   {:seon.ai/endpoint "http://127.0.0.1:1/chat/completions"
@@ -320,89 +322,99 @@
    :seon.error/message "probe"
    :seon.error/data evidence})
 
-(deftest output-evidence-is-always-terminal
-  ;; a 2xx body we could not parse is generated text somebody paid for
-  (doseq [backup? [true false]]
-    (is (= :fail
-           (disposed (failure :seon.ai/unparseable-body
-                              {:seon.ai/error-class :response
-                               :seon.ai/http-status 200
-                               :seon.ai/request-transmitted? true
-                               :seon.ai/response-started? true
-                               :seon.ai/output-observed? true})
-                     backup?))
-        "no backup and no backoff re-calls a call that produced output")))
+(def ^:private evidence-partitions
+  [{::error-class :credential
+    ::kind :seon.ai/no-credential
+    ::transmitted? false}
+   {::error-class :transport-before-send
+    ::kind :seon.ai/transport-failure
+    ::transmitted? false}
+   {::error-class :transport-unknown
+    ::kind :seon.ai/transport-failure
+    ::transmitted? true}
+   {::error-class :timeout
+    ::kind :seon.ai/timeout
+    ::transmitted? true}
+   {::error-class :rate-limit
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :server
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :authentication
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :authorization
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :model
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :request
+    ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :response
+    ::kind :seon.ai/unparseable-body
+    ::transmitted? true}
+   {::error-class :response
+    ::kind :seon.ai/unparseable-body
+    ::transmitted? true
+    ::output? true}])
 
-(deftest a-transmitted-request-with-no-answer-is-ambiguously-paid
-  ;; the strictest reading of the ruling rather than the convenient one:
-  ;; "cannot prove it was free" is not "it was free"
-  (doseq [backup? [true false]]
-    (is (= :fail
-           (disposed (failure :seon.ai/timeout
-                              {:seon.ai/error-class :timeout
-                               :seon.ai/request-transmitted? true
-                               :seon.ai/response-started? false
-                               :seon.ai/output-observed? false})
-                     backup?))
-        "a deadline that fired after transmission does NOT fail over")
-    (is (= :fail
-           (disposed (failure :seon.ai/transport-failure
-                              {:seon.ai/error-class :transport-unknown
-                               :seon.ai/request-transmitted? true
-                               :seon.ai/response-started? false
-                               :seon.ai/output-observed? false})
-                     backup?))
-        "and neither does a transport loss of unknown phase")))
+(defn- expected-disposition
+  [{::keys [error-class output?]} backup?]
+  (cond
+    output? :fail
+    (contains? #{:rate-limit :server :transport-before-send} error-class)
+    (if backup? :failover-now :backoff)
+    (contains? #{:credential :authentication :authorization :model}
+               error-class)
+    (if backup? :failover-now :fail)
+    :else :fail))
 
-(deftest a-call-that-never-left-the-machine-costs-nothing
-  (doseq [error-class [:credential :transport-before-send]]
-    (let [value (failure :seon.ai/transport-failure
-                         {:seon.ai/error-class error-class
-                          :seon.ai/request-transmitted? false
-                          :seon.ai/response-started? false
-                          :seon.ai/output-observed? false})]
-      (is (= :failover-now (disposed value true))
-          "a backup is called immediately — no retry, no sleep"))))
+(defn- partition-value
+  [{::keys [error-class kind transmitted? output?]}]
+  (failure kind
+           (cond-> {:seon.ai/error-class error-class
+                    :seon.ai/request-transmitted? transmitted?
+                    :seon.ai/response-started? (boolean
+                                                (contains?
+                                                 #{:rate-limit :server
+                                                   :authentication
+                                                   :authorization :model
+                                                   :request :response}
+                                                 error-class))
+                    :seon.ai/output-observed? (boolean output?)}
+             (contains? #{:rate-limit :server :authentication
+                          :authorization :model :request :response}
+                        error-class)
+             (assoc :seon.ai/http-status
+                    (if (= :response error-class) 200 503)))))
 
-(deftest a-free-rejection-splits-by-what-the-provider-said
-  (let [rejection (fn [error-class]
-                    (failure :seon.ai/provider-error
-                             {:seon.ai/error-class error-class
-                              :seon.ai/request-transmitted? true
-                              :seon.ai/response-started? true
-                              :seon.ai/output-observed? false}))]
-    (testing "not now — fail over, else wait"
-      (doseq [error-class [:rate-limit :server]]
-        (is (= :failover-now (disposed (rejection error-class) true)))
-        (is (= :backoff (disposed (rejection error-class) false)))))
-    (testing "not here — a different target may work, the same one never
-    will, so this is the one free class that must not back off"
-      (doseq [error-class [:authentication :authorization :model]]
-        (is (= :failover-now (disposed (rejection error-class) true)))
-        (is (= :fail (disposed (rejection error-class) false)))))
-    (testing "not this — a backup would reject the same request"
-      (is (= :fail (disposed (rejection :request) true)))
-      (is (= :fail (disposed (rejection :request) false))))))
+(deftest every-cost-evidence-partition-has-one-derived-disposition
+  (test-support/assert-check!
+   (tc/quick-check
+    160
+    (prop/for-all [partition (gen/elements evidence-partitions)
+                   backup? gen/boolean]
+      (let [value (partition-value partition)
+            request {:seon.error/value value :seon.ai/backup? backup?}]
+        (and (schema/valid-candidate-value? :seon.error/value value)
+             (schema/valid-candidate-value? :seon.ai/disposition-request
+                                            request)
+             (= (expected-disposition partition backup?)
+                (ai/disposition request)))))
+    :seed 202607280401)
+   "Every registered cost-evidence partition must derive one action."))
 
-(deftest backoff-happens-only-where-repeating-can-help
-  ;; the whole point of the split: `:backoff` appears for exactly the
-  ;; classes where the same target, later, is a different answer
-  (let [backoff-classes
-        (into #{}
-              (filter (fn [error-class]
-                        (= :backoff
-                           (disposed (failure :seon.ai/provider-error
-                                              {:seon.ai/error-class error-class
-                                               :seon.ai/request-transmitted?
-                                               (not= :transport-before-send
-                                                     error-class)
-                                               :seon.ai/response-started? false
-                                               :seon.ai/output-observed? false})
-                                     false))))
-              [:credential :transport-before-send :transport-unknown :timeout
-               :rate-limit :server :authentication :authorization :model
-               :request :response])]
-    (is (= #{:rate-limit :server :transport-before-send} backoff-classes))))
+(deftest possibly-paid-work-never-repeats
+  (let [value (partition-value
+               {::error-class :response
+                ::kind :seon.ai/unparseable-body
+                ::transmitted? true
+                ::output? true})]
+    (is (= [:fail :fail]
+           (mapv #(disposed value %) [false true])))))
 
 (deftest the-leaf-records-phase-from-the-jdks-own-taxonomy
   ;; a real call to a port nothing listens on: the JDK raises

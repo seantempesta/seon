@@ -12,6 +12,9 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
@@ -26,7 +29,8 @@
             [sci.core :as sci.core]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as test-support])
   (:import [java.util Date]))
 
 ;;; NO explicit attribute list. The live boot path installs whatever
@@ -534,16 +538,6 @@
             :seon.ai/response-started? false
             :seon.ai/output-observed? false}))
 
-(def ^:private transient-rejection
-  "A provider saying \"not now\" and nothing else: transmitted, but it
-  told us it did no work."
-  (failure :seon.ai/provider-error
-           {:seon.ai/error-class :server
-            :seon.ai/http-status 503
-            :seon.ai/request-transmitted? true
-            :seon.ai/response-started? true
-            :seon.ai/output-observed? false}))
-
 (defn- recording-completer
   "A stub `ai/complete` that records every request and answers in order.
   The recorded vector is the countable attempt log: one entry is one
@@ -698,184 +692,184 @@
                               [_ :seon.cluster.run/plan-digest ?d]]
                             @connection)))))))))
 
-(deftest a-request-that-may-have-been-paid-for-never-fails-over
-  ;; the strictest reading of the ruling, with a backup sitting right
-  ;; there unused: ambiguity is terminal
-  (doseq [[label value]
-          [["a deadline that fired after transmission"
-            (failure :seon.ai/timeout
-                     {:seon.ai/error-class :timeout
-                      :seon.ai/request-transmitted? true
-                      :seon.ai/response-started? false
-                      :seon.ai/output-observed? false})]
-           ["a transport loss of unknown phase"
-            (failure :seon.ai/transport-failure
-                     {:seon.ai/error-class :transport-unknown
-                      :seon.ai/request-transmitted? true
-                      :seon.ai/response-started? false
-                      :seon.ai/output-observed? false})]
-           ["a 2xx body we could not read — somebody paid for that text"
-            (failure :seon.ai/unparseable-body
-                     {:seon.ai/error-class :response
-                      :seon.ai/http-status 200
-                      :seon.ai/request-transmitted? true
-                      :seon.ai/response-started? true
-                      :seon.ai/output-observed? true})]
-           ["a request the provider rejected on its merits"
-            (failure :seon.ai/provider-error
-                     {:seon.ai/error-class :request
-                      :seon.ai/http-status 400
-                      :seon.ai/request-transmitted? true
-                      :seon.ai/response-started? true
-                      :seon.ai/output-observed? false})]]]
-    (with-cluster
-      (fn [cluster]
-        (let [cluster (assoc cluster :seon.ai/backup backup-target)
-              connection (:seon.store/branch-connection cluster)
-              requests (atom [])]
-          (with-redefs [ai/complete (recording-completer requests [value])]
-            (drive! cluster 4))
-          (is (= 1 (count @requests)) (str label ": exactly one call"))
-          (let [rows (attempt-rows @connection)]
-            (is (= 1 (count rows)) (str label ": exactly one attempt row"))
-            (is (= :fail (derived-disposition @connection
-                                              (first rows) true))
-                (str label ": the terminal decision is derivable from"
-                     " the evidence")))
-          (is (nil? (d/q '[:find ?d . :where
-                           [_ :seon.cluster.run/plan-digest ?d]] @connection))
-              (str label ": no plan"))
-          (is (some? (d/q '[:find ?c . :where
-                            [_ :seon.cluster.run/closed-at ?c]] @connection))
-              (str label ": the run closed with the error")))))))
+(def ^:private turn-evidence-partitions
+  [{::error-class :credential ::kind :seon.ai/no-credential
+    ::transmitted? false}
+   {::error-class :transport-before-send ::kind :seon.ai/transport-failure
+    ::transmitted? false}
+   {::error-class :transport-unknown ::kind :seon.ai/transport-failure
+    ::transmitted? true}
+   {::error-class :timeout ::kind :seon.ai/timeout ::transmitted? true}
+   {::error-class :rate-limit ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :server ::kind :seon.ai/provider-error ::transmitted? true}
+   {::error-class :authentication ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :authorization ::kind :seon.ai/provider-error
+    ::transmitted? true}
+   {::error-class :model ::kind :seon.ai/provider-error ::transmitted? true}
+   {::error-class :request ::kind :seon.ai/provider-error ::transmitted? true}
+   {::error-class :response ::kind :seon.ai/unparseable-body
+    ::transmitted? true}
+   {::error-class :response ::kind :seon.ai/unparseable-body
+    ::transmitted? true ::output? true}])
 
-(deftest with-no-backup-an-unpaid-transient-failure-backs-off-a-bounded-number-of-times
+(def ^:private turn-outcome-generator
+  (gen/frequency
+   [[1 (gen/return {::outcome :success})]
+    [4 (gen/fmap #(assoc % ::outcome :failure)
+                 (gen/elements turn-evidence-partitions))]]))
+
+(def ^:private turn-scenario-generator
+  (gen/let [outcomes (gen/vector turn-outcome-generator 1 4)
+            backup? gen/boolean
+            maximum-retries (gen/choose 0 2)]
+    {::outcomes outcomes
+     ::backup? backup?
+     ::maximum-retries maximum-retries}))
+
+(defn- turn-failure-value
+  [{::keys [error-class kind transmitted? output?]}]
+  (failure kind
+           (cond-> {:seon.ai/error-class error-class
+                    :seon.ai/request-transmitted? transmitted?
+                    :seon.ai/response-started?
+                    (boolean
+                     (contains? #{:rate-limit :server :authentication
+                                  :authorization :model :request :response}
+                                error-class))
+                    :seon.ai/output-observed? (boolean output?)}
+             (contains? #{:rate-limit :server :authentication
+                          :authorization :model :request :response}
+                        error-class)
+             (assoc :seon.ai/http-status
+                    (if (= :response error-class) 200 503)))))
+
+(defn- turn-completion
+  [{::keys [outcome] :as generated}]
+  (if (= :success outcome)
+    {:seon.ai/text "(my.run/complete \"generated\")"}
+    (turn-failure-value generated)))
+
+(defn- oracle-disposition
+  [{::keys [error-class output?]} backup?]
+  (cond
+    output? :fail
+    (contains? #{:rate-limit :server :transport-before-send} error-class)
+    (if backup? :failover-now :backoff)
+    (contains? #{:credential :authentication :authorization :model}
+               error-class)
+    (if backup? :failover-now :fail)
+    :else :fail))
+
+(defn- expected-attempt-trace
+  [{::keys [outcomes backup? maximum-retries]}]
+  (let [waits (mapv #(bit-shift-left 1 %) (range maximum-retries))
+        answer (fn [ordinal]
+                 (nth outcomes ordinal (last outcomes)))]
+    (loop [ordinal 0
+           target :primary
+           failover? false
+           delay nil
+           remaining-waits (if backup? [] waits)
+           trace []]
+      (let [{::keys [outcome] :as generated} (answer ordinal)
+            failed? (= :failure outcome)
+            row (cond-> {::model target ::failed? failed?}
+                  failover? (assoc ::failover? true)
+                  delay (assoc ::delay-ms delay))
+            trace (conj trace row)
+            disposition (when failed?
+                          (oracle-disposition generated
+                                              (and backup?
+                                                   (not failover?))))]
+        (cond
+          (not failed?) {::attempts trace ::succeeded? true}
+          (= :failover-now disposition)
+          (recur (inc ordinal) :backup true nil [] trace)
+          (and (= :backoff disposition) (seq remaining-waits))
+          (recur (inc ordinal) target false (first remaining-waits)
+                 (rest remaining-waits) trace)
+          :else {::attempts trace ::succeeded? false})))))
+
+(defn- actual-attempt-shape
+  [row]
+  (cond-> {::model (if (= "backup-probe" (:seon.ai/model row))
+                     :backup
+                     :primary)
+           ::failed? (contains? row :seon.ai.attempt/error)}
+    (contains? row :seon.ai.attempt/failover-from)
+    (assoc ::failover? true)
+    (contains? row :seon.ai.attempt/delay-ms)
+    (assoc ::delay-ms (:seon.ai.attempt/delay-ms row))))
+
+(defn- generated-turn-agrees-with-durable-facts?
+  [scenario]
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.ai.retry/strategy
-                           {:seon.ai.retry/base-delay-ms 1
+      (let [{::keys [attempts succeeded?]} (expected-attempt-trace scenario)
+            connection (:seon.store/branch-connection cluster)
+            retry-strategy {:seon.ai.retry/base-delay-ms 1
                             :seon.ai.retry/multiplier 2.0
                             :seon.ai.retry/jitter-fraction 0.0
                             :seon.ai.retry/maximum-delay-ms 4
-                            :seon.ai.retry/maximum-retries 2
-                            :seon.ai.retry/maximum-total-delay-ms 1000})
-            connection (:seon.store/branch-connection cluster)
-            requests (atom [])]
-        (with-redefs [ai/complete
-                      (recording-completer requests [transient-rejection])]
-          (drive! cluster 4))
-        (testing "the SCHEDULE's count, not a number this branch chose:
-        one attempt plus exactly the two configured retries"
-          (is (= 3 (count @requests))))
-        (let [rows (attempt-rows @connection)]
-          (is (= 3 (count rows)))
-          (is (= [:backoff :backoff :backoff]
-                 (mapv #(derived-disposition @connection % false) rows))
-              "every one of them is derivable from its own evidence,
-               and the last one had no wait left to spend")
-          (is (= [1 2] (keep :seon.ai.attempt/delay-ms rows))
-              "each retry records the wait that preceded it — the
-               doubling is readable back out of the facts")
-          (is (every? #(not (contains? % :seon.ai.attempt/failover-from)) rows)
-              "and nothing failed over: a retry is not a failover"))
-        (is (some? (d/q '[:find ?c . :where
-                          [_ :seon.cluster.run/closed-at ?c]] @connection))
-            "an exhausted schedule ends where :fail ends")))))
+                            :seon.ai.retry/maximum-retries
+                            (::maximum-retries scenario)
+                            :seon.ai.retry/maximum-total-delay-ms 1000}
+            cluster (cond-> (assoc cluster
+                                   :seon.ai.retry/strategy retry-strategy)
+                      (::backup? scenario)
+                      (assoc :seon.ai/backup backup-target))
+            completions (mapv turn-completion (::outcomes scenario))
+            requests (atom [])
+            committed-prefixes (atom [])
+            complete! (fn [request]
+                        (swap! committed-prefixes
+                               conj
+                               (mapv actual-attempt-shape
+                                     (attempt-rows @connection)))
+                        (let [ordinal (count @requests)]
+                          (swap! requests conj request)
+                          (nth completions ordinal (last completions))))]
+        (with-redefs [ai/complete complete!]
+          (binding [*evaluation*
+                    {:seon.cluster.eval/result-edn
+                     (pr-str (my.run/complete "generated"))
+                     :seon.sci.admit/value
+                     (my.run/complete "generated")}]
+            (drive! cluster 12)))
+        (let [rows (attempt-rows @connection)
+              actual (mapv actual-attempt-shape rows)
+              run-row (d/q '[:find (pull ?run [*]) .
+                             :where [?run :seon.cluster.run/id _]]
+                           @connection)]
+          (and
+           (= attempts actual)
+           (= (mapv #(subvec attempts 0 %)
+                    (range (count attempts)))
+              @committed-prefixes)
+           (= (mapv ::model attempts)
+              (mapv #(if (= "backup-probe" (:seon.ai/model %))
+                       :backup
+                       :primary)
+                    @requests))
+           (= (vec (range (count rows)))
+              (mapv :seon.ai.attempt/ordinal rows))
+           (every? #(not (contains? % :seon.ai/disposition)) rows)
+           (contains? run-row :seon.cluster.run/closed-at)
+           (not (contains? run-row :seon.cluster.run/process))
+           (= 1 (work/episode-runs @connection "agent-a"))
+           (= succeeded?
+              (contains? run-row :seon.cluster.run/plan-digest))))))))
 
-(deftest a-configured-backup-turns-the-backoff-path-off-entirely
-  ;; the no-backup rule, held by DATA: with a backup the schedule is
-  ;; empty, so a transient rejection fails over once and stops — it
-  ;; never falls through into retrying the backup
-  (with-cluster
-    (fn [cluster]
-      (let [cluster (assoc cluster
-                           :seon.ai/backup backup-target
-                           :seon.ai.retry/strategy
-                           {:seon.ai.retry/base-delay-ms 1
-                            :seon.ai.retry/multiplier 2.0
-                            :seon.ai.retry/jitter-fraction 0.0
-                            :seon.ai.retry/maximum-delay-ms 4
-                            :seon.ai.retry/maximum-retries 5
-                            :seon.ai.retry/maximum-total-delay-ms 1000})
-            connection (:seon.store/branch-connection cluster)
-            requests (atom [])]
-        (with-redefs [ai/complete
-                      (recording-completer requests [transient-rejection])]
-          (drive! cluster 4))
-        (is (= 2 (count @requests))
-            "primary, backup, stop — five configured retries bought
-             nothing, because the backoff path is the NO-backup path")
-        (let [rows (attempt-rows @connection)]
-          (is (= 2 (count rows)))
-          (is (= [:failover-now :backoff]
-                 (mapv #(derived-disposition @connection % true) rows))
-              "and the SECOND row is the interesting one. `disposition`
-               is pure and says what it always says about a 503 with no
-               further target (the backup row's failover-from connection
-               removes the backup from ITS decision): waiting could
-               help. What decides that nothing waits is the SCHEDULE,
-               which is empty because this cluster configured a backup
-               — the two facts are separate on purpose, and both remain
-               derivable from the evidence rather than laundered into a
-               stored label")
-          (is (every? #(not (contains? % :seon.ai.attempt/delay-ms)) rows)
-              "so no wait was ever spent, and the rows say so"))))))
-
-(deftest the-whole-failover-story-is-one-query
-  ;; the operator falsifier: which target ran, why the second call was
-  ;; allowed, and what failure text the backup saw — from facts, with no
-  ;; logs and no reproduction by hand
-  (with-cluster
-    (fn [cluster]
-      (let [cluster (assoc cluster :seon.ai/backup backup-target)
-            connection (:seon.store/branch-connection cluster)
-            requests (atom [])]
-        (with-redefs [ai/complete
-                      (recording-completer
-                       requests
-                       [unpaid {:seon.ai/text "(my.run/complete \"ok\")"}])]
-          (binding [*evaluation* {:seon.cluster.eval/result-edn
-                                  (pr-str (my.run/complete "ok"))
-                                  :seon.sci.admit/value (my.run/complete "ok")}]
-            (drive! cluster 10)))
-        (let [story (d/q '[:find ?model ?message
-                           :where
-                           [?backup :seon.ai.attempt/failover-from ?primary]
-                           [?backup :seon.ai/model ?model]
-                           [?primary :seon.ai.attempt/error ?error]
-                           [?error :seon.error/message ?message]]
-                         @connection)
-              [primary-row] (attempt-rows @connection)]
-          (is (= #{["backup-probe" "probe failure: transport-failure"]}
-                 story))
-          (is (= :failover-now
-                 (derived-disposition @connection primary-row true))
-              "and WHY is one derivation over the same facts — no
-               stored label required to tell the story"))))))
-
-(deftest a-failed-model-call-ends-the-turn-without-a-plan
-  (with-cluster
-    (fn [cluster]
-      (with-redefs [ai/complete
-                    (fn [_] {:seon.error/kind :seon.ai/timeout
-                             :seon.error/message "slow"
-                             :seon.error/data {}})]
-        (let [connection (:seon.store/branch-connection cluster)
-              reports (drive! cluster 4)]
-          (is (= :error (:seon.cluster.loop/outcome (last reports))))
-          (is (nil? (d/q '[:find ?d . :where
-                           [_ :seon.cluster.run/plan-digest ?d]] @connection))
-              "no plan was frozen — and NOTHING re-called the model"))))))
-
-(deftest an-unreadable-reply-ends-the-turn-without-a-plan
-  (with-cluster
-    (fn [cluster]
-      (with-redefs [ai/complete (fn [_] {:seon.ai/text "I'd rather not."})]
-        (let [connection (:seon.store/branch-connection cluster)
-              reports (drive! cluster 4)]
-          (is (= :error (:seon.cluster.loop/outcome (last reports))))
-          (is (nil? (d/q '[:find ?d . :where
-                           [_ :seon.cluster.run/plan-digest ?d]] @connection))))))))
+(deftest generated-model-attempt-traces-preserve-presence-and-episode-laws
+  (test-support/assert-check!
+   (tc/quick-check
+    48
+    (prop/for-all [scenario turn-scenario-generator]
+      (generated-turn-agrees-with-durable-facts? scenario))
+    :seed 202607280402)
+   "Generated model attempts diverged from durable turn facts."))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The second agent-facing value: a form that sends
