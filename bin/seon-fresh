@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fresh JVM-only operator. This replaces bin/seon after the old system dies.
+set -euo pipefail
+
+SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bb --config "$SEON_ROOT/bb.edn" --deps-root "$SEON_ROOT" \
+  --classpath "$SEON_ROOT/script" \
+  -m seon.fresh-operator --seon-root "$SEON_ROOT" "$@"
