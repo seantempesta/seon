@@ -46,7 +46,7 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Process jobs stay narrow.** The cluster JVM performs transactions, runs
   agents and guarded renders, owns the program graph and render flow, and
   serves HTTP/SSE for its one store. Leaf runtimes are disposable native-effect
-  capacity. Supervision, bounded evals, and Integrant component restart protect
+  capacity. Supervision, bounded evals, and cheap flow-graph rebuilds protect
   the cluster JVM; process walls do not split its co-located responsibilities.
 - **Claims and receipts outrank process memory.** A run's
   `:seon.agent.run/process`, epoch, and heartbeat establish custody; the turn
@@ -61,8 +61,28 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   run loops, renderers, or capability surfaces violate the architecture.
 - **Scheduling is Flow.** Runtime owners are `core.async.flow` procs with
   `step-fn`s, bounded workload channels, `conns`, a `graph-def`, and a report
-  channel. Custom launchers implement `flow.spi/ProcLauncher`; flow-monitor is
-  the operational surface. Database facts remain the durable work record.
+  channel; every agent is its own graph and the cluster keeps a few shared
+  plumbing graphs. flow-monitor is the operational surface. Database facts
+  remain the durable work record.
+- **Idle agents are nearly free.** A parked agent graph is one parked virtual
+  thread and ~8.5 KB of heap; a thousand idle agents cost ~8 MB and zero
+  platform threads — provided every proc pins `:io` or `:compute`. A `:mixed`
+  proc pins one platform thread for its lifetime and is the one measured
+  scaling cliff. (`flow-mechanics-2026-07-28.md`.)
+- **Graph lifecycle is not a cost.** A full create → start → resume → stop
+  cycle of a small graph measures 0.084 ms with no heap or thread leak, so
+  rebuilding topology freely is the design, never an optimization target.
+  (`flow-mechanics-2026-07-28.md`.)
+- **Pause lands between transforms.** `pause`/`resume`/`stop` are buffered
+  control puts observed only between transforms: an in-flight blocking `:io`
+  call always runs to completion and its output buffers before the proc
+  parks. The eval door's `:interrupt-fn` remains the only real stop for
+  running agent code. (`flow-mechanics-2026-07-28.md`.)
+- **Large transients ride channels.** An 8 MB value crosses a channel as one
+  pointer pass (~0.01 ms), roughly 7,000× faster than a durable file-store
+  transact of the same bytes. Streamed tokens and multi-MB in-flight values
+  belong on channels with loss-encoding buffers; the database gets the
+  settled fact. (`flow-mechanics-2026-07-28.md`.)
 - **Build once, fork everywhere.** Expensive values are derived once and
   forked by consumers — never rebuilt, never shared mutably: the sci base
   `ctx` forks per evaluation; a database value at a basis is a free fork

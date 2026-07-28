@@ -18,9 +18,11 @@ happen before prompt derivation or a paid model call, so the agent-busy fence
 exists before money leaves the database boundary. No process-local loop,
 promise registry, or attempt buffer is an authority.
 
-The runtime has one run-loop proc. Platform leaves supply only native transport
-work. The proc derives work from database facts on each wake; it never treats
-the wake payload as work or keeps a private queue.
+Every agent is its own flow graph, created with the agent from one blueprint
+and parked between episodes; there is no central run-loop proc, dispatcher, or
+scheduler. Platform leaves supply only native transport work. An agent's graph
+derives work from database facts on each wake; it never treats the wake
+payload as work or keeps a private queue.
 
 ## State is derived
 
@@ -30,8 +32,10 @@ answeredness, and current work are queries over runs, receipts, messages, and
 transaction metadata. There is no stored `running?`, `answered?`, recovery
 status, or process-alive bit.
 
-Pause, resume, terminate, and start are not disposition values. They require a
-separate agent-lifecycle entity and do not exist until that domain exists.
+Pause, resume, terminate, and start are not disposition values and never
+stored discriminators. Pause and resume act on the agent's own flow graph —
+a paused graph parks and stops taking episodes; state remains presence, not a
+stored lifecycle label.
 
 ## Runs are claimable database state
 
@@ -105,9 +109,9 @@ calls. Without the process ref, crash recovery has no fact to bury. Without the
 epoch, a stale pre-crash result can commit after replacement. Everything else
 is already serialized by the database.
 
-## The run loop
+## The agent's graph — one control algorithm per agent
 
-`seon.cluster.loop` owns the control algorithm:
+Each agent's flow graph hosts the one control algorithm:
 
 1. receive a coalesced wake that means only “look”;
 2. acquire one immutable database value;
@@ -117,33 +121,40 @@ is already serialized by the database.
 6. commit receipts and dispositions under the run pointer and epoch fence; and
 7. close, release for a later wake, or settle interrupted wreckage.
 
-The loop does not route by agent identity or keep a private queue of runs.
-Database interests are ephemeral wakeups that request another derivation; the
-query and transaction transition determine authority.
+There is nothing that routes by agent identity, because there is nothing
+central to route: each agent's graph wakes only for its own triggers and keeps
+no private queue of runs. Database interests are ephemeral wakeups that request
+another derivation; the query and transaction transition determine authority.
 
 Phase eligibility says who may claim; the derived execution plan says whether
 the cluster JVM can run this particular work. After parsing a proposed
-invocation and before entering the eval phase, the run loop derives the plan at
+invocation and before entering the eval phase, the graph derives the plan at
 the claim database value, verifies schema and capability coverage against its
 own inventory, and provisions any permitted remote leaves. If no tier can
 satisfy the execution plan, the result is one flat error value naming the
 missing leaves, schemas, or unresolved edges. See [[architecture]]
 §Transparent distribution.
 
-The cluster JVM uses `core.async.flow` as its one scheduling substrate. The run
-loop is a proc behind a `flow.spi/ProcLauncher` so it can select over Flow
-control and a bounded database-interest wake channel. Its `step-fn`, `conns`,
-and bounded workload-class channels live in the `graph-def`; current status
-and metrics reach `flow-monitor` through the ordinary report channel and ping
-surface. Database facts, never Flow channels, remain the durable work record.
+The cluster JVM uses `core.async.flow` as its one scheduling substrate. Each
+agent's graph is instantiated from one blueprint at agent creation, its
+in-ports fed by the wake conn; parked between episodes it is one parked
+virtual thread, and messages on its in-ports kick episodes. Beside the agent
+graphs the cluster keeps a few shared plumbing graphs — the render pipeline,
+the fault committer, and schedule fires. An agent graph's `step-fn`s are vars,
+so re-evaluating a `defn` changes running agents; its `conns` and bounded
+channels live in the `graph-def`; current status and metrics reach
+`flow-monitor` through the ordinary report and ping surfaces, and each graph's
+error channel feeds the cluster's one fault committer tagged with the agent.
+Database facts, never Flow channels, remain the durable work record.
 
-Each workload class uses core.async's `executor-for :io` or
-`executor-for :compute`. The eval seam runs on a `:compute` platform thread,
-arms the one `:interrupt-fn`, and holds its admitted permit until settlement.
-The run loop reduces over the frozen form plan: the accumulator is the current
-basis, initialized from the plan transaction report's `:db-after`; after each
-form, that form's transaction report supplies the next basis through
-`:db-after`.
+Every proc pins `:io` or `:compute` explicitly; classification is derived
+per function from `:seon.workload` leaf metadata and call-graph reachability
+([[architecture]] §Scheduling). The eval seam runs on a `:compute` platform
+thread, arms the one `:interrupt-fn`, and holds its admitted permit until
+settlement. The graph reduces over the frozen form plan: the accumulator is
+the current basis, initialized from the plan transaction report's `:db-after`;
+after each form, that form's transaction report supplies the next basis
+through `:db-after`.
 
 For an interaction, the cluster JVM first CASes `:pending → :running` under the
 held run fence. Only that committed receipt admits the pinned handler through
@@ -155,8 +166,8 @@ does not replay the authored handler.
 
 ## Plans and receipts
 
-One model reply freezes into an ordered form plan exactly once. The run loop
-reduces that plan in order, carrying the prior transaction report's `:db-after`
+One model reply freezes into an ordered form plan exactly once. The agent's
+graph reduces that plan in order, carrying the prior transaction report's `:db-after`
 as the next form's database value. Every form receives a durable running receipt
 before SCI dispatch and one terminal receipt afterward. Terminal settlement and
 the interpreted disposition commit together under the run pointer and epoch
@@ -177,7 +188,7 @@ in-memory attempt ledger and no generic turn-phase machine beside these facts.
 Hosted providers are descriptor rows selecting one of the two wire cores,
 `:openai-compat` or `:anthropic`. A primary descriptor may have one backup
 defined as overrides; choosing a backup never introduces a provider-specific
-branch in the run loop.
+branch in the turn body.
 
 Disposition is a pure function of the failure and transport-phase evidence:
 whether the request was transmitted, whether a response started, and whether
@@ -238,12 +249,12 @@ legitimate work; loud firing; no runtime numeric fallback.
 Recovery is fact-driven and never an automatic retry path. At boot, the cluster
 compares run custody with the live-process set and transactionally releases
 dead custody regardless of the abandoned lease's remaining wall time. The
-normal loop then derives the resulting wreckage and buries its own dead:
+re-derived agent graphs then find the resulting wreckage and bury their own dead:
 running receipts become interrupted, the run closes as interrupted, and the
 facts retain exactly where durable progress stopped.
 
 A process death after claim but before plan freeze loses that model call. The
-loop does not call the model again, refire an effect, or synthesize the missing
+graph does not call the model again, refire an effect, or synthesize the missing
 reply. The triggering message remains answered by its original run-opening
 transaction; the run records interruption. On the agent's next real trigger or
 manual nudge, its prompt derives one interruption warning from those facts and
@@ -251,7 +262,7 @@ the agent adapts. Recovery itself does not manufacture that next trigger.
 
 Committed terminal receipts remain untouched. A stale pre-crash activity that
 finishes later fails the same pointer-and-epoch fence used during normal
-execution. Boot recovery and loop settlement are idempotent transactions, so a
+execution. Boot recovery and graph settlement are idempotent transactions, so a
 second crash during recovery merely leaves facts for the next boot to derive
 again.
 
@@ -269,6 +280,14 @@ deadline, interrupted eval, exhausted provider policy, or failed fence cannot
 masquerade as successful completion. The terminal reason and receipts preserve
 which boundary fired.
 
+Runaway protection is one per-agent **episode dial**: the maximum number of
+consecutive runs within one idle→running episode. An outside trigger — a
+message from another agent or the human, a due schedule — starts a new
+episode; self-messaging within an episode is legitimate continuation and
+counts against the dial. The dial is a backstop, not a design tool: any race
+that could loop agents forever is a design defect to dissolve, never a thing
+to cap around.
+
 ## Triggering, schedules, and orchestration
 
 Creation transacts one complete idle agent: identity, optional run defaults,
@@ -277,7 +296,7 @@ Creation does not start a process or spend model tokens.
 
 Messages are delivery. A message row points at its recipient through the one
 wake attribute. Committing it offers a coalesced wake; the wake carries no
-payload and the loop re-derives unanswered triggers from the new database
+payload and the agent's graph re-derives unanswered triggers from the new database
 value. There is no inbox cursor, acknowledgement flag, or side-channel
 delivery. Agent-facing `my.message` functions produce these ordinary durable
 message facts through the guarded effect owner.
@@ -287,7 +306,7 @@ message ref as `:seon.db/trigger` on that transaction. A message is unanswered
 exactly while no run-opening transaction points at it. Crash recovery never
 changes that answer by copying a flag onto either entity.
 
-The run loop interprets exactly two pure `my.run` disposition values:
+The agent's graph interprets exactly two pure `my.run` disposition values:
 
 - `my.run/complete` closes the run with the reply text; and
 - `my.run/wait` releases custody with a note explaining what is awaited, so a
@@ -297,9 +316,10 @@ They transact nothing themselves. A blank or wrong-shaped argument is a flat
 error value, not a throw. Start, pause, resume, and terminate are deliberately
 absent.
 
-One schedule proc derives due work from schedule facts and opens runs through
-the same Flow graph and transaction transitions. Its `step-fn` does not own
-agent execution or custody state. Root and subagents use the same message
+One schedule proc, in a shared cluster plumbing graph, derives the earliest
+fire from schedule facts, parks until it, and commits the fire as an ordinary
+trigger message — which wakes the recipient agent's graph through the one
+delivery path. Its `step-fn` never owns agent execution or custody state. Root and subagents use the same message
 delivery and wake mechanism; roles are capability sets, not stored kinds.
 `:seon.agent/parent` remains the orchestration connection.
 
@@ -321,7 +341,7 @@ program reconstruction.
 The cluster JVM executes agent code, owns transactions and the
 committed-transaction feed for its store, evaluates renders through
 `seon.sci.eval/evaluate`, and serves its own web UI. Disposable leaf runtimes
-run packages and selected platform workers, not the run loop. See
+run packages and selected platform workers, never an agent's graph. See
 [[architecture]] for the complete topology.
 
 One cluster has one cluster JVM because Datahike's `:self` writer permits one

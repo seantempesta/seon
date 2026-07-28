@@ -21,12 +21,13 @@ symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent’s view, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
 
-The web UI runs inside the **cluster JVM** beside the writer and run loop. It
+The web UI runs inside the **cluster JVM** beside the writer and the agent
+graphs. It
 serves HTTP through http-kit, frames SSE through the Datastar Clojure SDK, and
 reads the cluster's current immutable database values directly. Agent-authored
 renderers run through the one `seon.sci.eval/evaluate` path: a fresh `fork`,
 the one `:interrupt-fn`, value admission, and bounded output. Supervision,
-bounded evals, and Integrant component restart protect the process; the UI does
+bounded evals, and cheap flow-graph rebuilds protect the process; the UI does
 not rely on a process wall.
 
 ## Interactions are database transactions
@@ -36,7 +37,7 @@ arguments. The route validates the handler's exact committed schema and source
 identity, transacts one pending interaction/run fact, and acknowledges
 immediately. The HTTP response is never an execution-result channel.
 
-The cluster JVM's run loop acquires and executes the interaction. Its
+The agent's own flow graph acquires and executes the interaction. Its
 result or flat error becomes committed interaction facts. A normal HTML block
 queries the latest terminal outcome for the page's agent and returns no render
 when no such fact exists. The existing database interest, equality
@@ -196,7 +197,7 @@ render yields a flat error value (see [[data-model]] §6) for that render only;
 siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
-turn's complete ordinary database value. The run loop acquires and formats
+turn's complete ordinary database value. The turn acquires and formats
 the AI renders in `:seon.block/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
@@ -297,26 +298,31 @@ systems.
 ## Streamed replies — the one high-churn path
 
 A streamed reply is the only genuinely high-churn thing the UI shows, and it
-rides the ONE database path rather than a side channel. Partials land on
-cardinality-one, unindexed attributes carrying `:seon.db/no-history?`, written
-as COALESCED COMPLETE VALUES by an isolated non-blocking sink and retracted at
-the terminal in the same transaction that settles the real fact.
+rides a channel, never the writer. Partials are COALESCED COMPLETE VALUES
+offered onto one `(sliding-buffer 1)` conn from the turn's provider fold into
+the render proc's in-port; only the settled reply becomes a database fact (its
+bytes a blob behind the turn's reply ref). Streamed partials never touch a
+database attribute. (This supersedes the 2026-07-23 no-history-attribute
+streaming design, per the 2026-07-28 transport-law ruling: the one database
+path is for facts; in-flight transients ride channels with loss-encoding
+buffers.)
 
 Each clause is load-bearing. Complete values rather than deltas, because a
 consumer that missed a delta is permanently wrong while one that missed a
-snapshot is briefly behind. No history, because a token-by-token record of a
-reply that already exists in full is pure index amplification. Retracted at the
-terminal, so there is never an instant in which a partial and a settled reply
-both exist and something has to decide which is real.
+snapshot is briefly behind. A channel rather than the writer, because a
+token-by-token record of a reply that already exists in full is pure churn
+through the durable store. Latest-wins, so there is never a queue of stale
+prefixes between the model and the eye, and the settled fact simply supersedes
+the last snapshot.
 
-**The sink is isolated because it runs on the provider's socket thread.** It
-replaces one slot in a latest-wins mailbox and returns; a separate thread
-commits at a configured cadence. Presentation may lag and may DROP intermediate
-snapshots — both are correct — and it may never slow the model call. The
-governing invariant is the provider reference's own: partial display cannot
-affect transport, parsing, usage, or evaluation. A streamed call and a one-shot
-call return the same completion value, so nothing downstream can tell which
-transport ran.
+**The producer side is isolated because it runs on the provider's socket
+thread.** The fold offers the newest complete prefix onto the sliding-1 conn
+and returns; the put never parks. Presentation may lag and may DROP
+intermediate snapshots — both are correct — and it may never slow the model
+call. The governing invariant is the provider reference's own: partial display
+cannot affect transport, parsing, usage, or evaluation. A streamed call and a
+one-shot call return the same completion value, so nothing downstream can tell
+which transport ran.
 
 The live token count derives from the SAME fold that produces the text, never a
 second mechanism counting the same thing twice: the provider's own usage once it
@@ -645,15 +651,17 @@ The live channel uses `core.async.flow` graphs inside the cluster JVM:
    process-local snapshot using `=` and suppresses equal output;
 4. a `mult` fans each changed stable-ID element patch to one per-tab
    `(sliding-buffer 1)` tap for each visible render unit; and
-5. one `:io` writer proc per tab batches available Datastar element patches
-   onto that tab's single SSE connection, with bounded writes.
+5. one connection-owned virtual thread per tab reads its tap and batches
+   available Datastar element patches onto that tab's single SSE connection,
+   with bounded writes.
 
 Flow topology is static within each `graph-def`. The cluster render graph names
 the interest and render procs, their `step-fn`s, bounded channels, and `conns`.
-Opening a tab creates one small tab graph whose fixed input is that tab's tap
-and whose sole writer proc owns the SSE connection; closing the tab stops that
-graph and untaps it. Core.async's `executor-for :compute` runs guarded render
-work; `executor-for :io` owns bounded socket writes. Each graph's report
+A tab is deliberately NOT a graph: connections churn with browsers while graph
+topology is static, so opening a tab taps the `mult` and starts one virtual
+thread that owns the SSE connection; closing the tab untaps and ends it.
+Core.async's `executor-for :compute` runs guarded render work; socket writes
+park their virtual threads. Each graph's report
 channel and unmodified `flow-monitor` are the operational and visualization
 surfaces. Flow channels are disposable in-process scheduling state, never a
 second database work ledger.
@@ -663,12 +671,12 @@ registration's memory. Restart discards it and performs one render for every
 pinned canvas at boot. There is no stored render snapshot, presentation
 attribute, or replay log for display output.
 
-Streamed reply partials enter this same flow as another producer. The provider
-proc reduces its byte stream for the durable terminal reply while offering
-coalesced complete prefixes to the render graph; a full tap drops intermediate
-prefixes rather than delaying inference. The terminal reply blob and attempt
-receipt remain the forensic facts. A reconnect paints current database truth
-and does not replay transient prefixes.
+Streamed reply partials enter this same flow as another producer. The turn's
+provider fold reduces its byte stream for the durable terminal reply while
+offering coalesced complete prefixes onto the render proc's sliding-1 in-port;
+a full buffer drops intermediate prefixes rather than delaying inference. The
+terminal reply blob and attempt receipt remain the forensic facts. A reconnect
+paints current database truth and does not replay transient prefixes.
 
 ### Fine-grained Datastar element patches
 
@@ -695,7 +703,8 @@ from current transaction wakes. Reconnect performs an initial paint from the
 resolved current or historical database value; there is no numeric replay.
 
 The hard invariant is unchanged: no agent code touches an SSE connection.
-Agent-authored renderers return admitted values; writer procs alone serialize
+Agent-authored renderers return admitted values; connection-owned writer
+threads alone serialize
 and write patches. Browser actions become database facts or guarded callback
 results, and the same render flow derives the visible consequence.
 
@@ -737,7 +746,7 @@ link and read it.
 
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
 - [[data-model]] — the block, route, and flat error schemas these renders read, and the `my.*` domains.
-- [[agent-runtime]] — the loop that assembles the prompt, fact-first agent initialization, and the run-status block's data source (`derive-status`).
+- [[agent-runtime]] — the agent graph that assembles the prompt, fact-first agent initialization, and the run-status block's data source (`derive-status`).
 - [[toolkit]] — `my.canvas` and the agent functions that drive the canvas.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
   state-gated teaching + pull); imported `my.skills` bodies remain explicit

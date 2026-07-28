@@ -22,7 +22,7 @@ that database** evaluated reactively. Streamed presentation prefixes are
 process-local render-flow values and never durable facts. Isolation,
 aggregation, and recovery all fall out of that one choice:
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
-and restart cleanly from the DB (which is itself reversible). The run-loop cursor is data; the
+and restart cleanly from the DB (which is itself reversible). The run cursor is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
 unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
@@ -30,9 +30,9 @@ and the **root agent's** view (`/`) are each a derivation of the same blocks.
 Seon is a supervised set of isolated clusters.
 Each cluster is one store: its own `data/clusters/<name>/`, process directory,
 ports, and mutable state. Datahike's `:self` writer requires exactly one writer
-process per store, so one **cluster JVM** owns transactions, the run loop,
-guarded evals, the program graph, the render pipeline, and the web UI for that
-cluster. Agent evals and rendering are co-located with the database: a read is
+process per store, so one **cluster JVM** owns transactions, the per-agent
+flow graphs, guarded evals, the program graph, the render pipeline, and the web
+UI for that cluster. Agent evals and rendering are co-located with the database: a read is
 a pointer into an immutable database value and a write is a function call.
 Disposable **leaf runtimes** contain package and worker effects. The browser
 receives static assets and morphed HTML.
@@ -235,23 +235,23 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **run / claim / turn / phase** — the bounded work entity a trigger opens,
   its `:seon.agent.run/process` and epoch custody, one prompt/model/eval record, and that
   record's persisted recovery cursor. See [[agent-runtime]].
-- **cluster JVM / leaf runtime / database interest** — the transaction, run
-  loop, guarded-eval, program-graph, render-pipeline, and HTTP/SSE JVM for one
-  store; a disposable native-effect process; and one session-owned selective
-  wakeup.
+- **cluster JVM / leaf runtime / database interest** — the transaction,
+  agent-graph, guarded-eval, program-graph, render-pipeline, and HTTP/SSE JVM
+  for one store; a disposable native-effect process; and one session-owned
+  selective wakeup.
 
 ## Deployment topology
 
 One operator supervises two process kinds per active cluster:
 
 - **Cluster JVM** — owns Datahike transactions, durable mutation receipts, the
-  committed-transaction feed, the run loop, model I/O, SCI agent evals, the
-  program graph, the render pipeline, http-kit, and Datastar SSE. It runs SCI
+  committed-transaction feed, the per-agent flow graphs, model I/O, SCI agent
+  evals, the program graph, the render pipeline, http-kit, and Datastar SSE. It runs SCI
   on `:compute` platform threads under the one `:interrupt-fn`; database reads
   dereference the current immutable database value and writes call the
   co-located transaction owner directly. Render evaluation uses the same
   `seon.sci.eval/evaluate` path as every guarded invocation. Supervision,
-  bounded evals, and Integrant component restart protect the process; a
+  bounded evals, and cheap flow-graph rebuilds protect the process; a
   process wall is not the isolation mechanism.
 - **Leaf runtimes** — run packages and selected platform workers on demand.
   They have no durable authority and are reaped freely. A lost in-flight call
@@ -276,7 +276,7 @@ same protocols and may implement only the leaves their platform supports.
 ```mermaid
 flowchart TB
   Supervisor["Babashka supervisor\nstart · observe · stop · restart"]
-  Cluster["cluster JVM\ntransactions · run loop · guarded evals\nprogram graph · renders · HTTP/SSE"]
+  Cluster["cluster JVM\ntransactions · agent graphs · guarded evals\nprogram graph · renders · HTTP/SSE"]
   Leaf["disposable leaf runtimes\npackages · workers"]
   Browser["static browser\nDatastar morph"]
   Models["model providers"]
@@ -300,9 +300,9 @@ connection remains ambient inside the owning database leaf.
 One committed transaction report is sufficient to wake every matching
 database interest. The in-process render flow derives affected render units
 from the report's exact `:db-after` and publishes patches through
-`(sliding-buffer 1)` taps. The run loop uses the same committed changes to
-rescan claimable runs; Datahike's `:db.fn/cas`, not delivery order, decides
-custody.
+`(sliding-buffer 1)` taps. A committed message wakes the recipient agent's own
+graph through the same interest mechanism; Datahike's `:db.fn/cas`, not
+delivery order, decides custody.
 
 Datastar owns the browser's ID-aware morph. Datahike owns immutable indexed
 database values; the writer owns committed transaction reports. http-kit owns
@@ -360,8 +360,8 @@ The reactive loop, end to end: a browser action submits a fact → the owning
 database writer commits → `listen!` wakes an interest through a
 `(sliding-buffer 1)` channel → the render proc derives affected stable-ID
 elements at the report's exact `:db-after` → a `mult` fans them to per-tab
-`(sliding-buffer 1)` taps → each tab's `:io` writer proc batches Datastar
-element patches onto its one bounded SSE connection. Reads, writes, heavy
+`(sliding-buffer 1)` taps → each tab's connection-owned virtual thread batches
+Datastar element patches onto its one bounded SSE connection. Reads, writes, heavy
 capabilities, cancellation, and selective interests stay inside the cluster
 JVM or cross to disposable leaves as ordinary values. **No agent code ever
 touches an SSE connection**—agents write facts; the render flow derives and
@@ -374,16 +374,42 @@ explicit measured transport option.
 real Flow graph and public API with zero forked Flow files. Long-lived runtime
 owners are procs; their behavior is a `step-fn`; `conns` and bounded channels
 form the `graph-def`; the report channel carries bounded operational evidence.
-Custom launchers implement `flow.spi/ProcLauncher` when a proc must select over
-a database-interest channel as well as Flow control. `flow-monitor` consumes
-the unmodified graph as the operations and visualization surface.
+`flow-monitor` consumes the unmodified graph as the operations and
+visualization surface.
 
-Each workload class has a bounded input channel and uses core.async's
-`executor-for :io` or `executor-for :compute`. The eval seam additionally arms
-the one `:interrupt-fn`, runs on a platform thread, and holds the admitted
-permit until settlement. Flow channels are process-local scheduling and
-backpressure state; database facts and transaction receipts remain the durable
-work record.
+**Every agent is its own flow graph.** The graph is created with the agent from
+one blueprint, parked between episodes, pausable and resumable per agent, and
+kicked off by the messages it receives. There is no central loop, dispatcher,
+or scheduler entity — parallelism across agents holds by construction, and
+per-agent pause is a Flow command, not a fact a router consults. Beside the
+agent graphs, the cluster keeps a few shared plumbing graphs — the render
+pipeline, the fault committer, and schedule fires — and the process root owns
+one bounded `:compute` executor and one `:io` (virtual-thread) executor shared
+by every graph. A per-tab SSE connection is a tap plus a connection-owned
+virtual thread, deliberately not a graph: connections churn with browsers while
+graph topology is static.
+
+Every proc pins `:io` or `:compute` explicitly; the `:mixed` default pins a
+platform thread per proc and is the one scaling cliff ([[laws]]). Workload
+classification is per-function and derived, never declared per call site: key
+capability leaves carry `:seon.workload` defn metadata lifted into the program
+graph at index time, chains classify by reachability over the indexed call
+edges — only-compute ⇒ `:compute`, only-io ⇒ `:io`, both in one chain ⇒
+`:mixed`, unresolved ⇒ `:mixed` fail-closed — and the classification acts at
+exactly two seams: proc workload tags and the eval/capability door. The eval
+seam additionally arms the one `:interrupt-fn`, runs on a platform thread, and
+holds the admitted permit until settlement.
+
+**The transport law.** Anything recovery or another process could ever need is
+a database fact — identities, receipts, messages, errors, the settled reply —
+with bulky payloads as blobs whose row carries identity, digest, and size.
+Everything in flight between procs rides channels, however large, provided its
+loss is free by construction: re-derivable from facts at a basis, or superseded
+by a newer complete value. The buffer encodes the loss semantics —
+`(sliding-buffer 1)` for latest-wins, a fixed buffer for backpressure, a
+counted-dropping buffer for observation — and a design where channel loss
+breaks recovery is wrong by definition. Database facts and transaction receipts
+remain the durable work record.
 
 ### Capability seam
 
@@ -527,8 +553,8 @@ the block. Index every ns's valid forms; render `my.*` in full. See [[data-model
 ### Agent runtime — [[agent-runtime]]
 
 Runs are claimable database state. `:seon.agent.run/process`, monotonic epoch,
-and heartbeat lease live on the run; expiry is derived. The State A run loop,
-implemented in `src-old/seon/agent/driver.clj`, reduces over the frozen form plan.
+and heartbeat lease live on the run; expiry is derived. Each agent's own flow
+graph reduces over the frozen form plan.
 Its basis accumulator begins at the plan transaction's `:db-after`; each
 form's transaction report supplies the next basis through its `:db-after`.
 Provider and eval receipts open before dispatch and terminalize through
