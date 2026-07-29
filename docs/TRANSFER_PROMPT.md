@@ -185,7 +185,23 @@ Nothing here is hidden and nothing is a surprise waiting for you. All of it is
 filed with evidence and acceptance criteria in `docs/seon/issues/`; this is the
 honest shape of the debt as of 2026-07-29 night.
 
-**Blockers (4).**
+**Blockers (5).**
+- `resolve-namespace-changes-by-executable-operator-identity`, with
+  `account-for-declarations-inside-executable-top-level-forms` and
+  `make-function-coverage-independent-and-cardinality-preserving` — the code
+  graph's reader recognizes declarations by matching an operator's LOCAL NAME,
+  so `(foo/defn ghost [] 1)` mints a phantom function row, `(other/in-ns 'x)`
+  misattributes every declaration below it, a `defn` inside a top-level `do`
+  vanishes with no row and no refusal, and `'(in-ns 'x)` in inert quoted data
+  makes an entire real source file unindexable. The recurring coverage test
+  shares the reader's own event stream and set-collapses declarations, so it
+  agrees with all of it. This is the single most important open item, because
+  everything in Seon queries the program graph. A fix lane is dispatched;
+  `research/indexer-review-2026-07-29.md` is the evidence. Read the lesson at
+  the end of the code-graph block in `plan/unsettled.md` before touching that
+  reader — the day produced a hand-maintained allowlist, its replacement by
+  hand-maintained name matching, and a coverage test blind to both, and all
+  three passed a green gate.
 - `priming-indexes-with-the-live-jvms-loaded-code` — `bin/seon index` reads
   source files from disk but interprets them with the reader the target JVM
   loaded at BOOT, then records the ancestor digest from the disk files. So the
