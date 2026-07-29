@@ -16,7 +16,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.io File]
-           [java.net ServerSocket URI]
+           [java.net URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
             WebSocket WebSocket$Listener]
             [java.util.concurrent CountDownLatch ExecutorService Future
@@ -713,8 +713,6 @@
         "The record-mode testbed unexpectedly selected panic."
         {::fault fault})))}))
 
-(declare free-port)
-
 (deftest core-fault-fanout-commits-and-copies-without-competition
   (testing "one throwing step reaches durable facts and the monitor tap"
     (with-fault-database
@@ -733,7 +731,7 @@
               (let [monitor-state
                     (flow-monitor/start-server
                      {:flow (::sut/graph fanout)
-                      :port (free-port)})]
+                      :port 0})]
                 (try
                   (flow/resume graph)
                   @(flow/inject
@@ -1149,11 +1147,6 @@
             (d/delete-database configuration))
           (test-support/delete-recursively! root))))))
 
-(defn- free-port
-  []
-  (with-open [socket (ServerSocket. 0)]
-    (.getLocalPort socket)))
-
 (defn- monitor-websocket-messages
   [^HttpClient client port]
   (let [complete-messages (atom [])
@@ -1191,7 +1184,6 @@
           ::active-evals active-evals
           ::deliver! (fn [_])})
         graph (create-testbed-flow procs compute-executor)
-        port (free-port)
         client (HttpClient/newHttpClient)
         wedge-started (CountDownLatch. 1)
         release-wedge (CountDownLatch. 1)
@@ -1239,9 +1231,10 @@
               monitor-state
               (flow-monitor/start-server
                {:flow (::sut/graph fanout)
-                :port port})]
+                :port 0})]
           (try
-            (let [request
+            (let [port (:port @monitor-state)
+                  request
                   (-> (HttpRequest/newBuilder)
                       (.uri (URI/create
                              (str "http://127.0.0.1:"
