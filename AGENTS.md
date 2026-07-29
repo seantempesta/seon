@@ -118,6 +118,16 @@ the lanes immediately after the checkpoint ends. If an interrupted operator
 leaves a recorded child alive, use `bin/seon down` so the supervisor reaps its
 own processes rather than killing the child directly.
 
+After every big landing wave (a rung completing, a multi-lane day, a
+deletion wave), commission an INDEPENDENT adversarial audit of the
+changed tree — an agent that trusts no lane'''s report, sweeps for the
+past'''s known failure modes (second mechanisms, hand lists,
+stored-derived creep, unjustified clocks, symptom patches, lying
+docstrings), REPL-falsifies suspicions, files ranked issues, and
+reports what is genuinely in good shape (calibration, not just alarm).
+Fix lanes dispatch on its return; blockers at the newest seams are the
+expected yield (owner-ruled standing cadence, 2026-07-29).
+
 Run the same control loop after every returned lane, material discovery, or
 completed commit:
 
