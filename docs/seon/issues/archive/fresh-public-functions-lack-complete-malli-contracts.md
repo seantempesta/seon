@@ -92,4 +92,8 @@ Ran 35 tests containing 184 assertions.
 bin/test seon.public-contract-test seon.instrument-test
 Ran 11 tests containing 40 assertions.
 0 failures, 0 errors.
+
+bin/test
+Ran 548 tests containing 2310 assertions.
+0 failures, 0 errors.
 ```
