@@ -103,25 +103,6 @@
 
 (schema.edn/load! {})
 
-(def not-yet
-  "What this namespace does NOT do, stated so nobody reads its absence
-  as health. The F2 census (contract §1.3): `::shared-registration` and
-  `::isolated-sink` LANDED with the render proc and the stream conn;
-  `::per-tab-graph` is REJECTED, not deferred — a tab is a tap and a
-  virtual thread, never a graph and never a listener (the inventory's
-  ruling, reconciled into `ui.md` in the same wave).
-
-  - ATTRIBUTE-INTEREST MATCHING. The render wake fires on EVERY commit;
-    a pass re-derives every WATCHED agent's blocks rather than only the
-    blocks whose read attributes changed. The wire is already exact
-    (suppression means only changed blocks are sent) and the CPU is
-    bounded (~0.5 ms per watched page). Matching commits against block
-    read-sets needs the program graph's `:seon.fn/calls`-era facts (N5)
-    to be a COMPUTED rule; a hand-list of read attributes per block now
-    would be the hand-list class (F2 R6). Named so its absence is a
-    decision, not a silence."
-  [::interest-matching])
-
 ;;; ---------------------------------------------------------------------------
 ;;; The shell
 ;;; ---------------------------------------------------------------------------

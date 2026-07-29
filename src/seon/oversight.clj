@@ -100,10 +100,8 @@
              ;; While the turn transform is active it cannot pong. The
              ;; mailbox's out is the same direct 1:1 channel, so occupancy
              ;; remains observable without inventing another counter.
-             (get-in mailbox [::flow/outs ::agent/episode])))
-        state (if (or run-id (nil? turn)) :mid-turn :parked)]
+             (get-in mailbox [::flow/outs ::agent/episode])))]
     (cond-> {:seon.cluster.agent/id agent-id
-             :seon.oversight/state state
              :seon.cluster.work/episode-runs
              (work/episode-runs db agent-id)}
       run-id
@@ -130,7 +128,6 @@
      (fn [pid]
        (if-let [reply (get ping pid)]
          {:seon.oversight/proc pid
-          :seon.oversight/state :responsive
           :seon.oversight/passes (::flow/count reply)
           :seon.oversight/buffers
           (into []
@@ -142,8 +139,7 @@
          ;; pass: it cannot answer until the projection returns. Presence
          ;; of the proc in the graph definition plus absence of a pong is
          ;; the story; no stored busy flag is needed.
-         {:seon.oversight/proc pid
-          :seon.oversight/state :mid-pass}))
+         {:seon.oversight/proc pid}))
      pids)))
 
 (defn- fleet-value
@@ -189,6 +185,14 @@
                    "th"))]
     (str n suffix)))
 
+(defn- agent-story-text
+  "The presentation implied by run and turn-ping presence."
+  [agent]
+  (if (and (nil? (:seon.cluster.run/id agent))
+           (contains? agent :seon.oversight/turn-passes))
+    "parked"
+    "mid-turn"))
+
 (defn ai-story
   "Tell the fleet's current story in one concise line."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
@@ -201,12 +205,12 @@
        (map
         (fn [agent]
           (let [agent-id (:seon.cluster.agent/id agent)
-                state (:seon.oversight/state agent)
+                story (agent-story-text agent)
                 run-id (:seon.cluster.run/id agent)
                 episode-runs (:seon.cluster.work/episode-runs agent)]
-            (if (= :parked state)
+            (if (= "parked" story)
               (str agent-id ": parked")
-              (str agent-id ": mid-turn"
+              (str agent-id ": " story
                    (when run-id (str " on run " run-id))
                    (when (pos? episode-runs)
                      (str ", " (ordinal episode-runs)
@@ -243,14 +247,15 @@
         [:th "turn buffer"]]]
       [:tbody
        (for [agent agents]
-         [:tr {:data-agent (:seon.cluster.agent/id agent)
-               :data-state (name (:seon.oversight/state agent))}
-          [:td (:seon.cluster.agent/id agent)]
-          [:td (name (:seon.oversight/state agent))]
-          [:td (or (:seon.cluster.run/id agent) "—")]
-          [:td (:seon.cluster.work/episode-runs agent)]
-          [:td (occupancy-text (:seon.oversight/mailbox agent))]
-          [:td (occupancy-text (:seon.oversight/turn-buffer agent))]])]]
+         (let [story (agent-story-text agent)]
+           [:tr {:data-agent (:seon.cluster.agent/id agent)
+                 :data-state story}
+            [:td (:seon.cluster.agent/id agent)]
+            [:td story]
+            [:td (or (:seon.cluster.run/id agent) "—")]
+            [:td (:seon.cluster.work/episode-runs agent)]
+            [:td (occupancy-text (:seon.oversight/mailbox agent))]
+            [:td (occupancy-text (:seon.oversight/turn-buffer agent))]]))]]
      [:dl
       [:dt "plumbing passes"]
       [:dd
@@ -260,7 +265,7 @@
                (str (:seon.oversight/proc proc)
                     " "
                     (or (:seon.oversight/passes proc)
-                        (name (:seon.oversight/state proc)))))
+                        "mid-pass")))
              plumbing))]]]))
 
 (defn- projection

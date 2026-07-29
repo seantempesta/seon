@@ -221,10 +221,10 @@ its own readiness:
    current code and pages; there is no data migration.
 4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH (owner ruling
    2026-07-28), created with the agent from one blueprint, parked
-   between episodes (one virtual thread, ~8.5 KB — measured in
+   between episodes (two procs, ~8.5 KB per parked proc — measured in
    `flow-mechanics-2026-07-28.md`), kicked off by the messages it
    receives, pausable/resumable per agent. Per cluster, a few shared
-   plumbing graphs: render pipeline, fault committer, schedule fires.
+   plumbing graphs: render pipeline and fault committer.
    There is NO central loop, dispatcher, or scheduler — that shape is
    rejected as "a JavaScript event loop inside Clojure." The process
    root owns one bounded `:compute` executor and one `:io` (virtual

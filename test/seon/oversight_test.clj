@@ -60,7 +60,12 @@
           (is (= ["root"]
                  (mapv :seon.cluster.agent/id
                        (:seon.oversight/agents value))))
-          (is (= :parked (:seon.oversight/state root)))
+          (is (not (contains? root :seon.cluster.run/id)))
+          (is (contains? root :seon.oversight/turn-passes)
+              "parked is implied by no run plus a responsive turn proc")
+          (is (not-any? #(contains? % :seon.oversight/state)
+                        (concat (:seon.oversight/agents value) plumbing))
+              "the process-local story carries presence, not an enum")
           (is (= 0 (:seon.cluster.work/episode-runs root)))
           (is (= {:seon.oversight/count 0
                   :seon.oversight/capacity 1}
@@ -94,11 +99,10 @@
                   {:seon.render/value
                    {:seon.oversight/agents
                     [{:seon.cluster.agent/id "agent-b"
-                      :seon.oversight/state :mid-turn
                       :seon.cluster.run/id "run-3"
                       :seon.cluster.work/episode-runs 3}
                      {:seon.cluster.agent/id "agent-c"
-                      :seon.oversight/state :parked
+                      :seon.oversight/turn-passes 0
                       :seon.cluster.work/episode-runs 0}]}}))))
         (testing "the seeded block reaches the real root-page wire"
           (let [^HttpResponse response (fetch-root instance)

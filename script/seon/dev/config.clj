@@ -54,7 +54,7 @@
       (:seon.dev.config/writer-max-heap configuration)))
 
 (defn claim-driver-heap-mb
-  "Return the resolved JVM claimant heap ceiling in MiB."
+  "Return the resolved JVM heap ceiling in MiB."
   [configuration]
   (get-in configuration
           [:seon.dev.config/resolved-configuration
@@ -62,7 +62,7 @@
           4096))
 
 (defn claim-driver-pool-wait-timeout-ms
-  "Return the resolved claimant database-pool wait ceiling."
+  "Return the resolved database-pool wait ceiling."
   [configuration]
   (get-in configuration
           [:seon.dev.config/resolved-configuration
