@@ -145,6 +145,40 @@ transaction-outcome fence, the three-writer census, gate 552/2360/0.
    the named settlement core fault, so the honest fault is masked by
    its own guardrail.
 
+## Live lane state (2026-07-29 evening, end of the owner-present day)
+
+Two Opus lanes died mid-implementation on upstream Anthropic API errors
+(500, 529) — not their work's fault. Their reports COMMITTED
+(`research/repl-workflows-2026-07-29.md`: cross-cluster workflows, the
+observation harness, the cold-resume dissolution reasoning); their fixes
+were left uncommitted and ENTANGLED in the tree, leaving the gate at
+**557 tests / 8 failures**. A sol lane
+(`finish-inherited-recovery-and-quarantine`) adopted the whole state
+with orders to review it critically rather than adopt it, and to land
+ruling 25's settle-and-close recovery and the derived quarantine
+recognition as separate coherent commits.
+
+Also running: `skills-independent-verify` (the blast-radius law's
+adversarial pass — trusts neither the orchestrator's authored skill nor
+the authoring lane's corrections, executes what the skills teach, and
+deletes what it cannot verify) and `skill-test-datahike-planner` (the
+owner's skill evaluation: fix the vendored planner's
+variable-symbol-dependent plan selection, alpha-renaming as the
+falsifier, with a blunt per-skill critique as a first-class
+deliverable).
+
+Skills first pass LANDED (`e587c8b7a` + the authoring lane's sweep):
+`seon-flow-architecture` authored with `references/`, the five pod-era
+skills rewritten for the fresh JVM system, `clojurescript` retained as
+explicitly historical quarry guidance with a narrowed trigger, one
+stale `datahike` reference fixed. Corrections to the orchestrator's
+draft worth remembering: the process-root executor pair serves ONLY the
+work-launcher graph; evaluation tasks get their own virtual-thread
+executor; current rendering is complete snapshots plus per-tab deltas
+(packages/keyframes are TARGET); URLs come from cluster advertisements.
+The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
+which is why the independent pass exists.
+
 ## Awaiting the owner only
 
 - **Read**: `render-pipeline-design-2026-07-29.md` (the composite
