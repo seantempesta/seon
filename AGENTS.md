@@ -399,19 +399,32 @@ existing wikilink targets, and no bare URLs.
 
 ## Model, research, and source policy
 
-The top-level Fable orchestrator designs, grounds specs, reviews diffs,
-rules on stops, and runs serial integration gates; implementation goes to
-codex sol lanes. Haiku is only for quick reads. Never haiku for coding.
-Codex uses its configured coding model—Claude aliases are not portable
-model names.
+The top-level orchestrator designs, grounds specs, reviews diffs, rules on
+stops, and runs serial integration gates; implementation goes to capable code
+agents. Haiku is only for quick reads. Never haiku for coding. Codex uses its
+configured coding model—Claude aliases are not portable model names.
 
-Launch every codex lane through `bin/codex-agent` as a harness-tracked
-background command (Bash `run_in_background: true`, description naming
-the lane — never `nohup`/`&`, never hand-rolled shell):
+**Delegation follows the orchestrator's native agent system.** A Codex
+orchestrator launches and manages its own lanes with Codex's collaboration
+tools (`spawn_agent`, `send_message`, `followup_task`, `interrupt_agent`, and
+`wait_agent`). It MUST NOT launch its own agents through `bin/codex-agent`.
+The native task tree is the ownership and supervision surface; give every
+agent the same bounded paths, protected paths, grounding, and exact deliverable
+required of any lane.
+
+A Claude orchestrator has no Codex-native collaboration tree, so it launches
+Codex code agents through `bin/codex-agent` as harness-tracked background
+commands (Bash `run_in_background: true`, description naming the lane — never
+`nohup`/`&`, never hand-rolled shell):
 
 ```bash
 bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
 ```
+
+A Codex orchestrator inheriting a Claude-started `bin/codex-agent` lane may
+inspect, stop, or collect that existing lane for a safe handoff, but launches
+all NEW work through its native collaboration tools. A Claude orchestrator
+uses the harness lifecycle below for every lane it owns.
 
 **NEVER SANDBOX A LANE** (owner ruling 2026-07-26). There is no sandbox
 dial and there must not be one: a read-only audit finished a 63-file
@@ -423,8 +436,8 @@ enforced by NAMING OWNED PATHS in the spec, path-limited commits, and
 your review of the diff. An audit is kept read-only by its spec and
 proven by its diff.
 
-The script owns the conventions: model/effort dials (`LANE_MODEL`,
-`LANE_EFFORT`), the `-o` summary
+For Claude-started lanes, the script owns the conventions: model/effort dials
+(`LANE_MODEL`, `LANE_EFFORT`), the `-o` summary
 in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
 the user's task panel shows the live transcript while
 `<name>-stdout.log` persists. Tracked means lane exit re-invokes the
@@ -436,11 +449,12 @@ resume <name> "<followup>"` (resume auto-reads the session id and keeps
 the lane's full context).
 
 Never let a lane keep working on a direction that new information has
-invalidated (owner ruling 2026-07-24): spot-check running lanes'
-transcripts selectively, and on a wrong turn `stop` the lane, then
-`resume` it with the correction — stopping is cheap because resume
-loses nothing but the in-flight turn. Full mechanics, resume recipe,
-and model dials: `docs/seon/reference/driving-codex-agents.md`.
+invalidated (owner ruling 2026-07-24). A Codex orchestrator uses its native
+message/interrupt/follow-up tools; a Claude orchestrator spot-checks the
+harness transcript selectively and uses `stop` then `resume` with the
+correction. Stopping is cheap because resume loses nothing but the in-flight
+turn. Claude harness mechanics, resume recipe, and model dials:
+`docs/seon/reference/driving-codex-agents.md`.
 
 For research, use one agent with the complete relevant context rather than many
 agents with slivers. Independent source domains may run in parallel, but one
