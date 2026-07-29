@@ -783,7 +783,13 @@ details.tool-call-details[open] .tool-preview {
   padding: 1.5rem 1.25rem 3rem;
   display: flex;
   flex-direction: column;
-  gap: 1.4rem;
+}
+/* Section spacing is a MARGIN rather than a `gap`, and the reason is
+   the stream strip below: `gap` is uniform by definition, so one pair
+   of surfaces that belong together cannot be drawn closer without a
+   negative margin fighting it. */
+.seon-main > * + * {
+  margin-top: 1.15rem;
 }
 
 /* --- the masthead ------------------------------------------------- */
@@ -1030,9 +1036,13 @@ details.tool-call-details[open] .tool-preview {
   border-top: 1px solid var(--color-base-800);
   padding-top: 0.7rem;
 }
-.seon-stream-reply.seon-stream-strip {
-  min-height: 1.5rem;
-  padding-top: 0;
+/* The reply sits DIRECTLY under its counter — they are one reading of
+   one model call, and a section-sized gap between them read as two
+   unrelated things. */
+.seon-main > .seon-stream-reply.seon-stream-strip {
+  margin-top: 0;
+  min-height: 1.6rem;
+  padding-top: 0.1rem;
 }
 
 /* --- problems, in the page's rhythm --------------------------------- */
