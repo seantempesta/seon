@@ -43,6 +43,44 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**THE FRAMED QUEUE (2026-07-29 morning — every pending unit with its
+pre-dispatch thought, written BEFORE dispatch per the /goal
+discipline).** Format: unit — what we'd learn if unnecessary | the
+dissolution preferred over completion.
+
+1. owner-fixed derivation (OWNER RULING FIRST) — unnecessary would mean
+   receipts aren't the problem source | dissolve: derive problems from
+   the observable condition (var unbound / test failing), no new state.
+2. historical-routing scope (in noise-fixes lane) — unnecessary would
+   mean arming self-scopes | dissolve: S8 caused-by scoping, already
+   designed, no filter bolted on.
+3. dial-authority derivation — unnecessary would mean dials stop being
+   added (false: 3 hand-syncs in 12h) | IS itself the dissolution of
+   the cross-check test + 9 sync sites.
+4. integer boundary coercion — unnecessary would mean no JDK API ever
+   returns Integer again | dissolve: one coercion at the transact choke
+   point, deletes per-site fixes.
+5. planner prompting/eval (thinking-bound) — unnecessary would mean
+   qwen plans well raw (disproven: prose drafts, false 'deployment
+   ready') | dissolve FIRST via max-tokens budget + namespace-view
+   context before any prompt engineering.
+6. test-smell implementation (the 65-test dissolution) — unnecessary
+   would mean the suite doesn't mind knowing runtime assembly |
+   dissolve: expose the production handle construction (change 1 of 3).
+7. N5 contracts authoring — unnecessary would mean rendering/ownership
+   work without code-as-facts (they don't: discovery, code-hops,
+   signals all wait on it) | the rung IS a dissolution (registries,
+   second readers, hand lists all die into corpus queries).
+8. UI slices 4-7 — unnecessary would mean old-system capabilities
+   already live better (the quarry table says 60+ pieces don't yet) |
+   per-slice: prefer walk/renderer reuse over new components (slice 2
+   proved the walk gives most of it).
+9. fleet-oversight extensions (cost/tokens per agent) — unnecessary
+   would mean the fleet table suffices; WAIT for real fleet usage to
+   argue need (no speculative columns).
+10. audit cadence next wave — fires automatically after this landing
+    wave completes; unnecessary never (owner-ruled standing).
+
 **V0 SEAL REVIEW (orchestrator, ~04:15 — the loop is REAL, three finds
 for morning).** Landed+accepted: parse-time ns attribution live at
 freeze (the splitter now reads through the ONE reader — a second
