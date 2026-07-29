@@ -50,7 +50,7 @@ Reverification:
 rg -n "launchctl submit|LaunchOnlyOnce|KeepAlive" \
   script bin src test \
   docs/prds/sci-execution-runtime/research/load-testing-2026-07-29.md
-# no matches
+(no matches)
 
 git ls-files tmp/load-testing/scripts/run.sh \
   docs/prds/sci-execution-runtime/research/load-testing-2026-07-29.md
