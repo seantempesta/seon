@@ -22,7 +22,7 @@ See `README.md` for the convention.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (5)
+## Friction (4)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -30,7 +30,6 @@ See `README.md` for the convention.
 | [Name database-value and transaction-data contracts](database-and-transaction-boundaries-use-anonymous-any-contracts.md) | friction | Core |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [The issues-index checker disagrees with the schedule convention](issues-index-checker-disagrees-with-the-schedule-convention.md) | friction | general |
-| [Three smaller defects in the vendored Datahike, found beside the card-many scan bug](datahike-planner-and-caches-carry-three-smaller-defects.md) | friction | Core |
 
 ## Cleanup (2)
 
