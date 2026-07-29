@@ -915,6 +915,43 @@ When exercising a real agent, use long-term planning plus database-backed
 memory: a multi-step plan that survives restart, and schema'd facts stored then
 queried in a later turn. Do not use old workout/trading toy scenarios.
 
+## Resiliency — churn is weather, not a blocker (owner ruling 2026-07-29)
+
+The shared tree and the shared machine are the normal collaboration model.
+Clusters, JVMs, ports, and advertisements come and go WHILE YOU WORK — another
+lane stops a JVM, the owner bounces a cluster, a shared JVM takes a SIGTERM, a
+build churns, a database is reset. None of that is a failure. **ADAPT AND
+CONTINUE.** An agent that stops and reports "blocked" because its environment
+moved has misread the situation; stop only for a genuine implementation
+dependency (something live still needs a path whose owner cannot serve it yet),
+and say exactly what that dependency is.
+
+Concretely, when the ground moves under you:
+
+- **Your cluster vanished** (advertisement gone, prepl refused, pid dead):
+  re-derive from `bin/seon status`, start a fresh one, and re-run your probe.
+  Nothing durable was in that process — facts live in the store, and a cluster
+  is a fork away.
+- **A stale advertisement** names a dead pid: it is a leftover file, not a
+  live claim. Clear it and proceed.
+- **`bin/seon start` adds to an EXISTING JVM** when one is running, so your
+  cluster may share a process with another lane's and die with it. For work
+  that must survive, boot your OWN operator root — that is the isolation
+  pattern the seam re-audits use.
+- **A long-lived JVM serves the code it loaded at start**, not the code in the
+  tree. If correct code fails there, suspect staleness before suspecting the
+  code (this trap cost a lane an entire chunk chasing a phantom).
+- **Another lane's in-flight edits made the gate red**: name whose failures
+  they are and carry on with your own boundary; do not fix or steer their work.
+- **Your own long operation died** (API error, killed wrapper, machine load):
+  the work committed so far stands. Re-read the tree, resume from what is
+  actually there, and never assume your uncommitted state survived.
+
+The rule behind all of it: derive current state from the system rather than
+remembering it, keep your own work committed in small coherent slices so churn
+can only ever cost you minutes, and treat every restart as the free resilience
+drill it is.
+
 ## Operating the system
 
 `bin/seon` is the one development operator:
