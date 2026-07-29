@@ -19,7 +19,6 @@ See `README.md` for the convention.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
-| [Terminalize a receipt when its terminal transaction is refused](refused-terminal-transaction-leaves-a-running-receipt-hot-loop.md) | blocker | agent |
 
 ## Friction (16)
 

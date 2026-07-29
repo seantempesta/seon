@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, database]
 ---
@@ -63,3 +63,19 @@ fences or teaching work derivation to ignore a running receipt.
 - Restart recovery is idempotent over that already-terminal receipt.
 - The namespace and function docstrings describe the behavior the live proof
   observes.
+
+## Resolution
+
+Commit `e7d9f14c3` adds one total receipt-refusal transaction function. After
+the original terminal transaction refuses atomically, the separate minimal
+transaction commits the admitted flat error as the receipt result, commits one
+durable error fact, and closes the run. It carries no program row, disposition,
+or delivery message, so the event derives no further work and cannot re-fire.
+
+The focused real-SCI regression proves one refusal leaves exactly one terminal
+receipt and one error fact, with the program row and SCI context unchanged,
+the production self-rewake predicate false, no error-delivery wake, and no
+second provider call. A genuinely new peer trigger sees
+`program-delete-not-owned` in the next prompt below the episode cap; at the cap
+the trigger is deferred and the episode ends. The focused cluster gate passes
+45 tests and 260 assertions.
