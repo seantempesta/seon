@@ -835,6 +835,30 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (14) THE UNIVERSAL DATA RENDERER + FINAL PRECEDENCE (owner): ANY
+  piece of data — not just entities — renders through a default
+  renderer. The old system's structural value renderer
+  (src-old/seon/render/value.cljc — bounded depth/breadth skeleton,
+  navigation-preserving, lazy-safe, opaque handles, controllable
+  caps; used for every REPL eval return) is PORTED, NEVER LOST, and
+  becomes the floor default for everything when nothing more specific
+  exists. Precedence, most→least specific: (1) render keys ON THE
+  VALUE ITSELF (:seon.render/ai, :seon.render/html, any other kind) —
+  always honored, overriding everything; (2) namespace-defined
+  override functions (a namespace's own defns overriding the
+  schema-attached default); (3) the schema-attached default renderer;
+  (4) the ported structural floor. The port must reconcile with
+  seon.sci.admit's bounded projection honestly — one walk discipline,
+  no second-walker duplication without a named reason (admission =
+  safety caps at the eval door; rendering = presentation skeleton).
+  UNIFICATION (owner, same session): "the graph db walking is just an
+  extension of these ideas" — the entity/distance walk IS the value
+  renderer's bounded-skeleton discipline applied where nesting is
+  REFS: depth↔distance, breadth caps↔per-hop budgets, elision
+  markers↔distance-0 names, preserved indices↔preserved entity
+  identities (the drill stays navigable). One concept, two edge
+  kinds; the walker and the value renderer share the discipline and
+  the marker vocabulary.
   (12) UI TABLED (owner): the proper UI cannot be built until the
   context rendering system is understood — table UI restoration; FOCUS
   everything on reaching that understanding. The path: (a) code-graph
