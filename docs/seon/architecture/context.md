@@ -11,7 +11,7 @@ tags: [architecture, agent]
 > that constrain this in [[laws]]. Implementation state lives in [[roadmap]]. This doc keeps
 > to Clojure primitives — `ns`, `defn`, `require`, var metadata, a db value
 > — and reserves only the names backed by real code (`block` =
-> `:seon.agent.ctx/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
+> `:seon.render.block/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
 
 The prompt is nothing more than **functions applied to one immutable db value,
 in a stable order**:
@@ -293,9 +293,8 @@ every execution scope receives the accepted program delta and can resolve the
 same function with normal Clojure semantics. Context then selects relevant
 namespace source and function contracts from that one graph. Capabilities
 therefore accumulate as the application grows instead of remaining private to
-the process that first authored them. These facts retain the current
-`:seon.fn`/`:seon.ns`/`:seon.schema` attributes until their pending owner rename
-to `seon.code.fn`/`seon.code.ns`/`seon.code.schema`/`seon.code.test`.
+the process that first authored them. These facts use the settled top-level
+`:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` attribute namespaces.
 
 A resident namespace steward is another database-derived consumer of this
 graph. Its context can include the namespace's current source, dependents,
@@ -314,10 +313,11 @@ what makes the fn visible:
   `defn` in the namespace it belongs to; move to that `ns` (`in-ns`, plain
   REPL) and its renderers run. Nothing stored — pure derivation from
   code-in-the-graph + `*ns*`.
-- **`install!` (explicit override).** Pins a render fn to run *regardless* of
-  `*ns*`, at a chosen priority, in a chosen agent's scope. Storage is the
-  exception, for the non-derivable: always-on blocks (the plan anchor,
-  warnings, the transcript), a hand-set priority, seeding another scope.
+- **Installed block (explicit override).**
+  `seon.render.block/install-tx` returns transaction data that pins a render
+  function at a chosen priority in one agent's block collection. Storage is
+  the exception for the non-derivable: always-on blocks (the plan anchor,
+  warnings, the transcript), a hand-set priority, or seeding another scope.
 
 Rule: **derive the derivable, store only the overrides.** Both paths resolve
 into one ordered list of `(render-fn, position)` the renderer walks — never
@@ -434,8 +434,9 @@ Users may import standard `SKILL.md` content into canonical `my.skills` database
 facts, but skill-fact availability and prompt placement are independent. Default and
 test context trees omit the skills block. Namespace cards, current-namespace
 source, state-gated blocks, and pull references remain the normal discovery
-path. An explicit `my.skills/load` uses the ordinary `install!` override when the
-full skill body is actually wanted; loaded state is derived from block presence.
+path. An explicit `my.skills/load` uses the ordinary installed-block override
+when the full skill body is actually wanted; loaded state is derived from block
+presence.
 
 ## Order = stability, so the cache holds
 
@@ -598,7 +599,7 @@ the worked example: it `#include`s `system.edn` and INHERITS the current v3.1
 system-text (the one source `system.edn` carries), supplying only a
 minimal block tree (namespaces + transcript) — the base the `repl` capability
 milestone measures from. Its companion rule:
-**a manifest that supplies an explicit `:seon.agent/ctx` declares the COMPLETE
+**a manifest that supplies explicit block data declares the COMPLETE
 block tree** — nothing (identity file-blocks included) is auto-prepended onto
 an enumerated tree.
 
@@ -615,8 +616,8 @@ re-resolves live config after the prompt database value has been chosen.
 
 ## See also
 
-- [[ui]] — the block, its two renders, the surface catalog, `install!`/`remove!`,
-  the live channel.
+- [[ui]] — the block, its two renders, the surface catalog,
+  `seon.render.block/install-tx`, and the live channel.
 - [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
   twin an agent sees and the human watches), the `my.*` schemas.
 - [[observability]] — turn record, replay functions, the blob archive.

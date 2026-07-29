@@ -24,7 +24,7 @@ aggregation, and recovery all fall out of that one choice:
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
 and restart cleanly from the DB (which is itself reversible). The run cursor is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
-unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
+unit is the **block** (`:seon.render.block/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
 Seon is a supervised set of isolated clusters.
@@ -92,7 +92,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    awareness is structural, not messaged (canvas-first mitigates fabrication —
    prose is where agents lie, [[laws]]). Every specced fn an agent writes
    teaches the system when to surface it. Anchors: the render twins,
-   `install!`/`remove!`, current-ns auto-run — [[context]].
+   `seon.render.block/install-tx`, current-ns auto-run — [[context]].
    Authorship provenance remains on the source transaction for attribution,
    maintenance, and policy without making that agent's home namespace a
    permanent silo. Published agent-authored functions are shared capabilities;
@@ -158,9 +158,10 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
 One vocabulary, each name grounded in a namespace + a schema/fn.
 
 - **block** — the context unit: a function-of-the-DB map with up to two renders,
-  seeded into the agent's own `:seon.agent/ctx` and rendered in
-  `:seon.agent.ctx/priority` order. `:seon.agent.ctx/block` in `seon.agent.ctx`.
-  `:seon.agent.ctx/name` is a plain `:keyword` — the app-level upsert key (prompt
+  owned through the agent's `:seon.cluster.agent/blocks` component ref and
+  rendered in `:seon.render.block/priority` order.
+  `:seon.render.block/block` in `seon.render.block`.
+  `:seon.render.block/name` is a plain `:keyword` — the app-level upsert key (prompt
   header = DOM `#surface-<name>`), NOT a datahike identity.
 - **render** — a block's output; the one word for the projection. Engine:
   `seon.render`. A render is never stored.
@@ -183,7 +184,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   object or persisted entity.
 - **slot** — a named, DB-keyed hole in a layout: `(slot :name)` →
   `[:div {:id "surface-<name>" :data-slot :name}]`, keyed on
-  `:seon.agent.ctx/name`.
+  `:seon.render.block/name`.
 - **layout** — a render whose hiccup contains slots (it nests surfaces); a role,
   not a stored kind. A render with no slots is a leaf surface.
 - **canvas** — the focal, agent-controlled surface in an agent view: the
@@ -217,18 +218,18 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   readiness failure instead records one `:seon.error/fault :core` and fails
   admission in development or returns the configured bounded production fallback. See
   [[data-model]] and [[observability]].
-- **seed-copy** — the seed/override mechanism: ALL blocks are copied into the agent's
-  own `:seon.agent/ctx` at creation; render reads that COMPLETE set sorted by
-  priority. There is no render-merge, no separate default set, no provider.
-- **`install!` / `remove!`** — the sole seed/override functions, in `seon.agent.ctx`.
-  `install!` is scope-aware + variadic (a single map OR a vector-of-maps); idempotent
-  upsert-by-`:seon.agent.ctx/name`; at boot/no-scope it builds the default seed set,
-  in an agent's scope it targets that agent's `:seon.agent/ctx`. `remove!` drops by
-  name (component cascade). Override = `install!`/`remove!`, period — for core,
-  downstream namespaces, and agents themselves.
+- **seed-copy** — the seed/override mechanism: ALL blocks are copied through
+  the agent's `:seon.cluster.agent/blocks` component ref at creation; render
+  reads that COMPLETE set sorted by priority. There is no render-merge, no
+  separate default set, and no provider.
+- **`seon.render.block/install-tx`** — the sole block-set derivation. It returns
+  transaction data that replaces same-named blocks wholesale within one
+  agent's `:seon.cluster.agent/blocks` collection. Removal retracts the block
+  entity and follows the component cascade; callers commit through the one
+  database owner.
 - **program graph** — the collective `:seon.fn`, `:seon.ns`, `:seon.schema`,
-  and `:seon.test` facts. Their pending owning attribute namespaces are
-  `seon.code.fn`, `seon.code.ns`, `seon.code.schema`, and `seon.code.test`.
+  and `:seon.test` facts. Those established top-level attribute namespaces are
+  their settled owners.
 - **orchestrator-root** — the lifecycle facet of the root agent: it `start!`s and
   manages child agents through `/call`, writing `:seon.agent/parent`. See
   [[agent-runtime]].
@@ -504,12 +505,13 @@ covered by the owning runner.
 
 ### Seed-copy, not merge
 
-ALL blocks are copied into the agent's own `:seon.agent/ctx` at creation; render
-reads that complete set sorted by `:seon.agent.ctx/priority` and stops. There is no
-render-merge over a separate default set, no provider, no central catalog. Override
-is `install!`/`remove!` against a scope (boot scope builds the default seed set;
-agent scope targets that agent). The `my.*` nses define the render fns + block data
-and are batch-installed at seed. See [[ui]].
+ALL blocks are copied through the agent's `:seon.cluster.agent/blocks`
+component ref at creation; render reads that complete set sorted by
+`:seon.render.block/priority` and stops. There is no render-time merge over a
+separate default set, no provider, and no central catalog.
+`seon.render.block/install-tx` purely derives replacement transaction data for
+one agent's collection; the database owner commits it. The `my.*` namespaces
+define the render functions and block data seeded at creation. See [[ui]].
 
 ### Roles are capabilities
 
@@ -525,9 +527,9 @@ discriminator (see [[data-model]]).
 ### Code as data
 
 The core's source, the agent's eval log, and the analyzer state are three views
-of one program graph. Agent-defining forms persist today as `:seon.fn` /
-`:seon.ns` / `:seon.schema` entities; their pending owning attribute namespaces
-are `seon.code.fn`, `seon.code.ns`, `seon.code.schema`, and `seon.code.test`.
+of one program graph. Agent-defining forms are `:seon.fn`, `:seon.ns`,
+`:seon.schema`, and `:seon.test` entities; those top-level namespaces own their
+attributes.
 The DB IS the running system (query → reconstitute →
 topo-sort by `:seon.ns/require-edges` → load; redefine = upsert). Agent birth
 commits its context components, home namespace/require rows, and safe declaration
@@ -586,8 +588,8 @@ results, and fans stable-ID element patches through per-tab
 `(sliding-buffer 1)` taps. Reconnect resolves the current database value and
 repaints current truth. The doc owns
 block/render/canvas/slot/layout, the page tree, reitit + the gate, the SSE
-channel, and the seed-copy + variadic `install!`/`remove!` override model. See
-[[ui]].
+channel, and the seed-copy + pure `seon.render.block/install-tx` override
+model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
 
@@ -626,7 +628,7 @@ order, dates, measurements, and acceptance evidence.
   receipt recovery, creation-as-idle, and orchestrator-root lifecycle.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
-  seed-copy + `install!`/`remove!` override.
+  seed-copy + `seon.render.block/install-tx` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — historical turn reconstruction (database value + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the

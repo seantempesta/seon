@@ -354,7 +354,7 @@ saw**, not by a human reading logs:
   for these runs, so forensic passes are routine, not precious.
 
 This is a composition of existing mechanisms—cluster isolation, Datahike branch
-roots, seed-copy ctx override via `install!`, as-of reconstruction,
+roots, seed-copy block override via `seon.render.block/install-tx`, as-of reconstruction,
 per-agent provider routing — not a new runtime. A forensic pass is cheap
 enough to run on every puzzling drive.
 

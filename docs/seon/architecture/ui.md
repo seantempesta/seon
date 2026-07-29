@@ -106,7 +106,7 @@ re-evaluating a rule or a renderer changes the next render.
 
 ## The block and its two renders
 
-A **block** (`:seon.block/block`, owned by `seon.render.block`) is the UI's
+A **block** (`:seon.render.block/block`, owned by `seon.render.block`) is the UI's
 unit, and it declares two of the kinds above — selected by key presence, with
 no stored discriminator:
 
@@ -127,7 +127,7 @@ html-render-only = a surface only (zero prompt tokens); both = both. A block
 declaring neither is legal and renders nowhere — it is data the agent owns and
 nothing displays.
 
-`:seon.block/name` is one keyword in three roles — the prompt header, the
+`:seon.render.block/name` is one keyword in three roles — the prompt header, the
 per-agent upsert key, and (through `seon.render.block/surface-id`) the DOM
 element id — always in sync, which is what makes "the agent edits the same
 thing the human sees" true. `surface-id` is the ONE derivation, so the hole and
@@ -150,9 +150,11 @@ rather than page size.
 ## Seed-copy — one collection, no merge
 
 Each agent OWNS its complete block set in `:seon.cluster.agent/blocks`, seeded at creation.
-Render reads that complete collection sorted by `:seon.block/priority` and
+Render reads that complete collection sorted by
+`:seon.render.block/priority` and
 stops: there is no render-time merge and no separate default set — every block an
-agent renders, it owns. The set is deduped app-level by `:seon.block/name` (a
+agent renders, it owns. The set is deduped app-level by
+`:seon.render.block/name` (a
 plain `:keyword`, NOT a datahike identity, so two agents can each own a
 `:transcript` block); priority sorts with a stable by-name tiebreaker.
 
@@ -170,7 +172,8 @@ is PURE: it returns transaction data and the caller commits it, so the
 derivation stays a function of a database value and one owner does the writing.
 
 - It takes a vector of blocks and targets one agent's
-  `:seon.cluster.agent/blocks`. Idempotent **upsert by `:seon.block/name`**.
+  `:seon.cluster.agent/blocks`. Idempotent **upsert by
+  `:seon.render.block/name`**.
 - The upsert REPLACES a same-named block wholesale rather than merging it,
   because removing a key from a block must remove it from the block — a merge
   would make `:seon.render/ai` un-deletable and quietly keep a block in the
@@ -187,9 +190,10 @@ The cluster manifest declares the initial block data. Agents may later install
 and remove against the same database-owned collection. A pure ADD needs nothing
 more: name a block and its render symbols; the symbols resolve late.
 
-**Pinning a fn is a block; config shapes the seed.** Any render fn an agent wants
-always-on is nothing but a block — `install!` at a chosen priority pins it,
-`remove!` drops it, so the agent dials context in and the cost is derived at
+**Pinning a function is a block; config shapes the seed.** Any render function
+an agent wants always-on is nothing but a block. `install-tx` at a chosen
+priority returns replacement transaction data; retracting the component block
+drops it. The agent therefore dials context in and the cost is derived at
 render. (`my.skills` explicit load/unload reuses this exact override; importing
 skill source alone installs no block—see [[data-model]] §5.5 + [[context]].)
 The per-cluster `seon.config`
@@ -209,7 +213,7 @@ siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
 turn's complete ordinary database value. The turn acquires and formats
-the AI renders in `:seon.block/priority` order; the web UI places
+the AI renders in `:seon.render.block/priority` order; the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
 
@@ -350,7 +354,7 @@ exercises that prove the design.
 
 - **slot** — `(slot :name)` emits
   `[:div {:id "surface-<name>" :data-slot :name}]`, a
-  named, DB-keyed EMPTY hole keyed on `:seon.block/name`. It does not resolve
+  named, DB-keyed EMPTY hole keyed on `:seon.render.block/name`. It does not resolve
   `:name`; it marks a hole. Resolution happens at expansion: render the named
   block's html, and if THAT output contains more slots, recurse to fixpoint.
 - **layout** — a render whose hiccup contains slots; it queries the db (the
@@ -734,8 +738,9 @@ middleware.
 ## Downstream composition
 
 A downstream cluster composes the same public mechanisms: route facts choose
-page handlers, block facts choose renderers, `install!`/`remove!` reconcile a
-block collection, canvas facts select focal content, and an explicitly selected
+page handlers, block facts choose renderers, `seon.render.block/install-tx`
+derives block-collection replacement transaction data, canvas facts select
+focal content, and an explicitly selected
 manifest supplies brand and route populations. Consumer-specific files,
 launchers, and wiring remain in the downstream repository. Mutable global
 `set!` seams are not target state; a reusable customization becomes a public

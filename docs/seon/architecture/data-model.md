@@ -20,8 +20,9 @@ agent calls over them.
 ## 1. TL;DR — the entity graph in one paragraph
 
 The **agent** (`:seon.agent/id`, identity) is the root. It OWNS, by
-cascade-retract component relationships, its **blocks** (`:seon.agent/ctx` →
-`:seon.agent.ctx/block` children — the context units, each up to two renders)
+cascade-retract component relationships, its **blocks**
+(`:seon.cluster.agent/blocks` → `:seon.render.block/block` children — the
+context units, each up to two renders)
 and its **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron
 maps). It POINTS (plain ref) at its current **run** (`:seon.agent/run`) and at
 the agent that started it (`:seon.agent/parent`), and uniquely POINTS at its
@@ -84,12 +85,14 @@ retract:** on `[:db.fn/retractEntity parent]`, datahike's `retract-components`
 (in `db/transaction.cljc`) maps every component-attr datom to a child
 `retractEntity`, so retracting the agent retracts every owned block and schedule,
 and retracting a turn retracts its evals. The owned-children attrs:
-`:seon.agent/ctx`, `:seon.agent/schedules`, `:seon.agent.turn/evals`,
+`:seon.cluster.agent/blocks`, `:seon.agent/schedules`,
+`:seon.agent.turn/evals`,
 `:seon.render/children`. **Ground in** `transaction.cljc:730` (`retract-components`)
 and our bridge `src-old/seon/db/internal.cljs:344-350` (the component/identity facet) —
 [[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
-To REPLACE a whole component relationship (reconcile, `install!`/`remove!`) so its owned
+To REPLACE a whole component relationship (reconcile or block install/remove)
+so its owned
 children match a desired set, retract the attribute with **`:db.fn/retractAttribute`**
 — only `retractAttribute` and `retractEntity` run `retract-components`; a plain
 `:db/retract` on the attribute severs the parent→child edges but leaves the child
@@ -199,7 +202,8 @@ attribute. The request ID remains on the transaction response and receipt
 recovery operations. Selective database events carry their interest's existing
 request ID and never expose the mutation receipt or rebuild a local replica.
 
-`:seon.agent.ctx/name` is NOT an identity (see §4.2): it is a plain `:keyword`, a
+`:seon.render.block/name` is NOT an identity (see §4.2): it is a plain
+`:keyword`, a
 per-agent upsert key, not a global identity.
 
 ### 2.3 symbol-as-value — late binding to the program graph (NOT a ref)
@@ -465,7 +469,7 @@ bridge-storable. See [[library-grounding]].
 | `:seon.agent.runtime/wake?` | `:boolean` | boolean / one | optional; false suppresses the process-local inbound listener while preserving manual hosting; absence means true |
 | `:seon.eval/home-requires` | serialized require-spec vector | string (EDN) / one | optional; exact per-agent home namespace declaration selected at birth and read during runtime reconstruction |
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
-| `:seon.agent/ctx` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
+| `:seon.cluster.agent/blocks` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.render.block/priority` at render |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
 | `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; generic entity-render override, not the focal canvas pin |
 | `:seon.render.canvas/content` | `:seon.render.canvas/content` | string (EDN) / one | optional; literal hiccup or qualified renderer symbol explicitly pinning the focal canvas; absence derives focus |
@@ -478,36 +482,39 @@ everything else optional. **State is derived, never stored** — there is no
 `:seon.agent/run` / `:seon.agent/parent` / `:seon.agent/terminated-at` lives in
 [[agent-runtime]].
 
-### 4.2 block — `:seon.agent.ctx/block`
+### 4.2 block — `:seon.render.block/block`
 
 A block is one context unit: a function-of-the-DB map with up to two renders.
-Blocks live in the `seon.agent.ctx` namespace and are owned by the agent via
-`:seon.agent/ctx`.
+Block attributes live with their code owner, `seon.render.block`, and each
+agent owns its complete component collection through
+`:seon.cluster.agent/blocks`.
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
-| `:seon.agent.ctx/name` | `:keyword` | keyword / one | per-agent upsert key; prompt header + DOM `#surface-<name>` — **NOT a datahike identity** |
-| `:seon.agent.ctx/priority` | `:int` | long / one | prompt order AND default scroll order |
+| `:seon.render.block/name` | `:keyword` | keyword / one | per-agent upsert key; prompt header + DOM `#surface-<name>` — **NOT a datahike identity** |
+| `:seon.render.block/priority` | `:int` | long / one | prompt order AND default scroll order |
+| `:seon.render.block/band` | `[:enum :anchor :program :authored :continuity :dynamic]` | keyword / one | optional semantic cache/order band; absent means `:dynamic` |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the prompt-text render |
 | `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; present ⇒ a surface |
 
 ```clojure
-;; ns seon.agent.ctx
-(schema/register! :seon.agent.ctx/block
+;; ns seon.render.block
+(schema/register! :seon.render.block/block
   [:map
-   [:seon.agent.ctx/name     :seon.agent.ctx/name]
-   [:seon.agent.ctx/priority :seon.agent.ctx/priority]
-   [:seon.render/ai          {:optional true} :seon.render/ai]
-   [:seon.render/html        {:optional true} :seon.render/html]])
+   [:seon.render.block/name     :seon.render.block/name]
+   [:seon.render.block/priority :seon.render.block/priority]
+   [:seon.render/ai             {:optional true} :seon.render/ai]
+   [:seon.render/html           {:optional true} :seon.render/html]
+   [:seon.render.block/band     {:optional true} :seon.render.block/band]])
 ```
 
 **Seed-copy, one collection.** ALL blocks are seeded into the agent's own
-`:seon.agent/ctx` at creation; render reads the agent's COMPLETE `:seon.agent/ctx`
-sorted by `:seon.agent.ctx/priority`. There is no render-time merge over a
-separate default set — each agent owns its complete block set. Each block is its
-own component entity, so it cascade-retracts with the agent. The install/remove
-and variadic seed mechanism
-and the priority-sort render are owned by [[ui]].
+`:seon.cluster.agent/blocks` component collection at creation; render reads
+that COMPLETE collection sorted by `:seon.render.block/priority`. There is no
+render-time merge over a separate default set — each agent owns its complete
+block set. Each block is its own component entity, so it cascade-retracts with
+the agent. The pure `seon.render.block/install-tx` derivation and the
+priority-sort render are owned by [[ui]].
 
 **Name is a plain `:keyword`, not a datahike identity.** If it were
 `{:seon.db/identity true}` the uniqueness would be GLOBAL, and two agents could
@@ -853,10 +860,8 @@ maps to `["/agent/{id}" {:get {:handler <sym> :middleware […]}}]`. `db->routes
 ### 4.11 program graph — `:seon.fn` / `:seon.ns` / `:seon.schema` / `:seon.test`
 
 Blocks, routes, and schedules reference these members BY SYMBOL VALUE (§2.3), so
-only the identities and core refs matter here. The current attributes remain
-`:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test` until the pending
-owner rename to `seon.code.fn`, `seon.code.ns`, `seon.code.schema`, and
-`seon.code.test`.
+only the identities and core refs matter here. The settled owning attribute
+namespaces are `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test`.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
@@ -986,7 +991,8 @@ datahike's `retract-entity` (`transaction.cljc:897`) also retracts every
 incoming v-datom — the scoping edges vanish and the rows are ORPHANED: their own
 datoms survive, they match no agent-scoped read, and history keeps everything
 (`db/as-of` recovers). Component cascade is reserved for OWNED bounded sets
-(`:seon.agent/ctx`, `:seon.agent/schedules`), never for open-ended domain data.
+(`:seon.cluster.agent/blocks`, `:seon.agent/schedules`), never for open-ended
+domain data.
 
 ### 5.2 my.kb — the global knowledge base (no agent ref)
 
@@ -1119,7 +1125,7 @@ mechanism are refined in place rather than replaced:
 - tx metadata records who/process imported it; no provenance attributes are
   duplicated on the skill entity; and
 - `load`/`unload` remain explicit overrides over the one
-  `install!`/`remove!` block collection. Loaded state is derived from block
+  installed block collection. Loaded state is derived from block
   presence, never stored as a flag.
 
 The default and test context trees contain no skills context block. Importing
@@ -1382,7 +1388,7 @@ source.
   quietness, and the one execution-service contract.
 - [[ui]] — block / render / surface / slot / layout, view / root-agent-view / app,
   reitit routing + the capability gate, the gzip-morph SSE channel, the
-  seed-copy + variadic `install!`/`remove!` override model.
+  seed-copy + pure `seon.render.block/install-tx` override model.
 - [[toolkit]] — the `my.*` function catalog (the agent's action surface over these
   schemas).
 - [[roadmap]] — implementation state, gaps, work order, and evidence.
