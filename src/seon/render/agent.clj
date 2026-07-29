@@ -102,14 +102,20 @@
         state (cond
                 (nil? (:seon.cluster.agent/id agent)) :missing
                 (:seon.cluster.agent/run agent) :running
-                :else :idle)]
+                :else :idle)
+        namespace (some->> (get-in agent
+                                   [:seon.cluster.agent/namespace :db/id])
+                           (d/q '[:find ?name .
+                                  :in $ ?namespace
+                                  :where [?namespace :seon.ns/name ?name]]
+                                db))]
     [:header {:id (block/surface-id :agent-header)
               :class "seon-agent-header"
               :data-agent-state (name state)}
      [:div {:class "seon-agent-heading"}
       [:a {:class "seon-agent-back" :href "/"} "← agents"]
       [:span {:class "seon-agent-name"} (or agent-id "unknown agent")]
-      (when-let [namespace (:seon.cluster.agent/namespace agent)]
+      (when namespace
         [:span {:class "seon-agent-namespace"} (str namespace)])]
      [:span {:class "seon-agent-state"}
       [:span {:class "seon-agent-state-dot" :aria-hidden "true"} "●"]
@@ -124,40 +130,42 @@
 
 (defn- transcript-entity-ids
   "Entity ids in one agent's conversation, in commit order."
-  [db agent-id]
+  [db agent-id limit]
   (when-let [agent (agent-entity-id db agent-id)]
-    (into
-     (sorted-set)
-     (map first)
-     (concat
-      (d/q '[:find ?message
-             :in $ ?agent
-             :where [?message :seon.cluster.message/to ?agent]]
-           db agent)
-      (d/q '[:find ?message
-             :in $ ?agent
-             :where [?message :seon.cluster.message/from ?agent]]
-           db agent)
-      (d/q '[:find ?run
-             :in $ ?agent
-             :where [?run :seon.cluster.run/agent ?agent]]
-           db agent)
-      (d/q '[:find ?receipt
-             :in $ ?agent
-             :where
-             [?run :seon.cluster.run/agent ?agent]
-             [?receipt :seon.cluster.eval/run ?run]]
-           db agent)
-      (d/q '[:find ?error
-             :in $ ?agent
-             :where [?error :seon.error/agent ?agent]]
-           db agent)
-      (d/q '[:find ?error
-             :in $ ?agent
-             :where
-             [?run :seon.cluster.run/agent ?agent]
-             [?error :seon.error/run ?run]]
-           db agent)))))
+    (->> (concat
+          (d/q '[:find ?message
+                 :in $ ?agent
+                 :where [?message :seon.cluster.message/to ?agent]]
+               db agent)
+          (d/q '[:find ?message
+                 :in $ ?agent
+                 :where [?message :seon.cluster.message/from ?agent]]
+               db agent)
+          (d/q '[:find ?run
+                 :in $ ?agent
+                 :where [?run :seon.cluster.run/agent ?agent]]
+               db agent)
+          (d/q '[:find ?receipt
+                 :in $ ?agent
+                 :where
+                 [?run :seon.cluster.run/agent ?agent]
+                 [?receipt :seon.cluster.eval/run ?run]]
+               db agent)
+          (d/q '[:find ?error
+                 :in $ ?agent
+                 :where [?error :seon.error/agent ?agent]]
+               db agent)
+          (d/q '[:find ?error
+                 :in $ ?agent
+                 :where
+                 [?run :seon.cluster.run/agent ?agent]
+                 [?error :seon.error/run ?run]]
+               db agent))
+         (into (sorted-set) (map first))
+         reverse
+         (take limit)
+         reverse
+         vec)))
 
 (defn- render-node
   [db caps entity-id distance]
@@ -226,7 +234,9 @@
         agent-entity (when (and db agent-id)
                        (agent-entity-id db agent-id))
         entity-ids (when agent-entity
-                     (transcript-entity-ids db agent-id))]
+                     (transcript-entity-ids
+                      db agent-id
+                      (:seon.config.eval.result/max-collection caps)))]
     [:section {:id (block/surface-id :transcript)
                :class "seon-transcript"}
      [:h2 {:class "seon-agent-section-label"} "transcript"]
@@ -282,9 +292,9 @@
     :else (str "entity " (:db/id unit))))
 
 (defn- focus-entity-ids
-  [db agent-id]
+  [db agent-id limit]
   (when-let [agent (agent-entity-id db agent-id)]
-    (into [agent] (transcript-entity-ids db agent-id))))
+    (into [agent] (transcript-entity-ids db agent-id limit))))
 
 (defn- focal-panel
   [unit distance]
@@ -323,7 +333,10 @@
         agent-id (:seon.cluster.agent/id unit)
         distance (:seon.render/distance unit 1)
         entity-ids (when (and db agent-id)
-                     (focus-entity-ids db agent-id))
+                     (focus-entity-ids
+                      db agent-id
+                      (:seon.config.eval.result/max-collection
+                       (:seon.sci.admit/caps unit))))
         units (mapv #(assoc (d/pull db '[*] %)
                             :seon.db/db db
                             :seon.sci.admit/caps (:seon.sci.admit/caps unit))
@@ -448,6 +461,12 @@
     :seon.render.block/band :anchor
    :seon.render.block/priority 20
     :seon.render/ai 'seon.context/peers-ai}
+   ;; what this agent asked another for, and whether the facts call it
+   ;; done — absent for an agent that has asked for nothing
+   {:seon.render.block/name :settlement
+    :seon.render.block/band :dynamic
+    :seon.render.block/priority 84
+    :seon.render/ai 'seon.context/settlement-ai}
    ;; the routed problems this agent owns — absent for an agent with
    ;; none, which is every agent until one is assigned
    {:seon.render.block/name :assignments

@@ -439,6 +439,15 @@
                       (work/plan-settlement db run-id)))
              "and the facts contradict it — an unsettled routed problem
               keeps the plan open no matter what the reply says")
+         (let [root-sees (context/settlement-ai
+                          {:seon.db/db db :seon.cluster.agent/id "root"})]
+           (is (str/includes? root-sees "NOT settled")
+               "root reads the derivation beside the claim, so the wrong
+                answer has nowhere to hide")
+           (is (str/includes? root-sees "owned by alpha")))
+         (is (nil? (context/settlement-ai
+                    {:seon.db/db db :seon.cluster.agent/id "alpha"}))
+             "an agent that asked for nothing is told nothing")
          (is (= #{:routed}
                 (set (vals (select-keys (states db run-id) [2 5]))))
              "both red forms are routed and neither owner answered"))))))

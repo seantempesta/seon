@@ -45,6 +45,7 @@
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
+            [seon.cluster.work :as work]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]))
@@ -110,6 +111,63 @@
            "comes back to you later as a new request, so pause "
            "with my.run/wait after asking. Return a vector of "
            "sends to message several."))))
+
+(defn- unsettled-sentence
+  "One plan's settlement, as the sentence its asker reads."
+  [settlement]
+  (let [run-id (:seon.cluster.run/id settlement)
+        open (remove :seon.cluster.work/settled?
+                     (:seon.cluster.work/forms settlement))]
+    (if (empty? open)
+      (str "  " run-id " — settled.")
+      (str "  " run-id " — NOT settled: "
+           (str/join ", "
+                     (map (fn [form]
+                            (str "form "
+                                 (:seon.cluster.run.form/ordinal form)
+                                 " is "
+                                 (name (:seon.cluster.work/form-state form))
+                                 ", owned by "
+                                 (:seon.cluster.agent/id form)))
+                          open))
+           "."))))
+
+(defn settlement-ai
+  "Whether the work this agent ASKED FOR is settled, beside its answer.
+  A completion is not an acceptance claim: it means the agent had
+  nothing further to say this turn. Doneness is PLAN SETTLEMENT —
+  derived from every form of the plan, assertable by nobody — so the
+  agent that asked reads the derivation next to the sentence it was
+  told, and a \"done\" reply beside an unsettled plan is visibly one
+  agent's prose next to the facts.
+
+  Present exactly while the facts are: an agent that has asked for
+  nothing sees nothing."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [db (get unit :seon.db/db)
+        agent-id (get unit :seon.cluster.agent/id)
+        asked-for
+        (for [run-id (sort (d/q '[:find [?run-id ...]
+                                  :where
+                                  [?run :seon.cluster.run/id ?run-id]
+                                  [?run :seon.cluster.run/plan-digest _]]
+                                db))
+              :let [trigger (message/trigger db run-id)
+                    asker (when trigger
+                            (d/q '[:find ?from-id .
+                                   :in $ ?message-id
+                                   :where
+                                   [?m :seon.cluster.message/id ?message-id]
+                                   [?m :seon.cluster.message/from ?from]
+                                   [?from :seon.cluster.agent/id ?from-id]]
+                                 db trigger))]
+              :when (= agent-id asker)]
+          (work/plan-settlement db run-id))]
+    (when (seq asked-for)
+      (str "Work you asked for, and whether its plan is SETTLED — every "
+           "form succeeded, repaired, or explicitly declined:\n"
+           (str/join "\n" (map unsettled-sentence asked-for))))))
 
 (defn assignment-ai
   "The problems routed to this agent, and the two ways to answer them.
