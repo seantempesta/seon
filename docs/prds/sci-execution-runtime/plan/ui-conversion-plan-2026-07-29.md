@@ -22,6 +22,16 @@ This document sequences only its own slices. `plan/README.md` remains
 the one ordering authority for the program; where a ruling and this plan
 disagree, the ruling wins.
 
+**Revised 2026-07-29 after falsification**
+([../research/ui-plan-falsification-2026-07-29.md](../research/ui-plan-falsification-2026-07-29.md),
+`8a08a211f`). Slice 1's four plan-changing claims — the reverse-ref echo,
+the constant-bar suppression, the basis-derived identity, and the outside
+episode reset — were each attacked directly and survived; slice 1 is
+SEALED and implementing, and nothing in it changes here except the
+reitit alignment of §1.2, §1.3, and §1.8 required by R-1. Slice 3 was
+REJECTED FOR SEAL (SB-1) and is redesigned in place below. R-1 (D4) and
+R-2 (the refusal surface) are folded.
+
 **Seal (orchestrator, 2026-07-29): SLICE 1 SEALED with two falsification
 corrections — the single POST route is hand-rolled in web.clj's existing
 routing (reitit deferred; D4 answered: not for one route), and the
@@ -32,6 +42,19 @@ attributes that bypass the callback gate and POST directly — the render
 pipeline must make ungated actions unrepresentable (sanitize/refuse at
 the one place agent hiccup is admitted), not merely gate the blessed
 path. Slice 2 may proceed after slice 1's live proof.**
+
+**Revision landed (2026-07-29, this lane): slice 3 redesigned in §3.0-3.5
+— the unrepresentability mechanism, the provenance seam, the two
+smuggling paths the probe did not reach (`raw` and the literal
+declaration arm), the property, and the 16 adversarial cases. Awaiting
+re-seal. ONE DELIBERATE DIVERGENCE from the seal note's wording, flagged
+for veto: the redesign REFUSES and does not SANITIZE. A stripped
+attribute silently renders something other than what the agent asked
+for and teaches it nothing, which is the symptom-side containment layer
+the repository forbids; refusal reuses the landed error-card path
+(`block.clj:412-426`) and the agent reads the refusal in its own
+context. If the owner wants stripping, it is a one-line change at the
+same seam.**
 
 ## The law
 
@@ -46,7 +69,7 @@ distance is a query, presence is state, and the bar is *write a function
 to change it*. A conversion that keeps a piece's old SHAPE while moving
 its address is a ported defect, not a conversion.
 
-## 0. The four reconceptions this plan makes
+## 0. The five reconceptions this plan makes
 
 Stated up front, because they are what distinguishes this from a port.
 
@@ -75,7 +98,14 @@ Stated up front, because they are what distinguishes this from a port.
    distance 1 renders it through `seon.cluster.message/render-html`. The
    commit's render wake is unconditional (`wake.cljc:137-145`). Slice 1
    therefore ships a working conversation with zero new render code.
-4. **Focus and rail are blocks at distance, not a surface registry.**
+4. **An ungated action is unrepresentable, not merely refused.** (Added
+   2026-07-29 by SB-1.) The quarry gated a route and let every other
+   attribute through; that gates the door of a building with no walls.
+   The conversion puts the boundary where authored hiccup is ADMITTED,
+   as a closed grammar, and orders it before the one rewrite that may
+   produce an action — so the gate protects the only expressible path
+   rather than the most likely one. See §3.0.
+5. **Focus and rail are blocks at distance, not a surface registry.**
    The quarry's `surface.cljc` materialized compact/expanded faces with
    touch-history selection (C06, U02). That machinery is retired whole:
    the focal panel is one block rendered at distance N, the rail is the
@@ -103,8 +133,7 @@ unsubmitted text and caret position survive unrelated morphs.
 
 | File | Change |
 |---|---|
-| `deps.edn` | reitit coordinate (`:local/root reference-code/reitit/modules/reitit-core` + `…/reitit-ring`) — owner decision D4 |
-| `src/seon/render/web.clj` | the reitit route tree replaces `handler`'s `cond`; the inbound POST handler; the bar's render fn and its block seed entry |
+| `src/seon/render/web.clj` | one exact method-discriminated branch in the existing `handler`; the inbound POST handler; the bar's render fn and its block seed entry |
 | `src/seon/cluster/message.cljc` | `inbound-tx` — pure tx-data for a message from outside the agent population |
 | `src/seon/schema/message.edn` | `:seon.cluster.message/inbound-request` |
 | `src/seon/schema/web.edn` | `:seon.render.web/routes`, `:seon.render.web/inbound` |
@@ -117,14 +146,26 @@ Protected, not to be touched by this slice: `src/seon/render/block.clj`,
 `src/seon/cluster/agent.clj`. The delivery chain is finished; slice 1
 adds a producer, not a path.
 
-### 1.3 The route tree
+### 1.3 The route — in the existing dispatcher (revised, R-1)
 
-Slice 1 lands the ONE reitit tree, because slice 1 is the first request
-where the `cond` is actually wrong: it discriminates on URI prefix only,
-so `GET /agent/bob` and `POST /agent/bob/message` are the same branch and
-a path parameter is `subs`. Method dispatch, path params, and build-time
-conflict detection are exactly what the tree is for
-(`reference-code/reitit/modules/reitit-ring/src/reitit/ring.cljc:121-151,360-404`).
+**Reitit is DEFERRED.** The first draft made the route tree a slice-1
+dependency; the falsifier showed that overstated
+(`ui-plan-falsification-2026-07-29.md:146-174`). `seon.render.web/handler`
+is already the one Ring dispatcher and already receives `:request-method`
+alongside `:uri` (`web.clj:531-614`) — it ignores the method only because
+every live route is a GET. One exact branch ahead of the `/agent/` GET
+prefix expresses this route correctly:
+
+```clojure
+(and (= :post (:request-method request))
+     (= (str "/agent/" target-id "/message") (:uri request)))
+```
+
+That strengthens the existing dispatcher in place; it does not add a
+second one. Reitit remains the target router and lands when `/call`,
+nested route data, and capability middleware make the tree pay for
+itself — slice 3 is where that case is real. The target shape, unchanged
+as a target:
 
 ```
 ["" {:middleware [::same-origin]}
@@ -143,17 +184,17 @@ conflict detection are exactly what the tree is for
 (owner decision D1). Three reasons: "chat" is not this system's
 vocabulary — the fact is a message and the family that owns it is
 `seon.cluster.message`; the target is a RESOURCE, and a resource
-identified by a query parameter is the shape reitit exists to retire;
-and the agent-scoped tree is where `/call` and `/app/{x}` already belong
-per `ui.md:551-559`, so one nesting carries route-data (`:seon.route/
-owner`, middleware) down to all three.
+identified by a query parameter is the shape the route tree exists to
+retire; and the agent-scoped path is where `/call` and `/app/{x}`
+already belong per `ui.md:551-559`, so one nesting will carry route-data
+(`:seon.route/owner`, middleware) down to all three when the tree lands.
 
-Same-origin is ONE middleware on the tree root rather than a check per
-handler (P14's lesson, kept). The no-match default handler 302s to `/`
-(P15, `ui.md:528-535`) — the redirect is route data, not a `cond` arm.
-Route DATOMS (`:seon.route/*`) are deliberately NOT in this slice: the
-tree is seeded from code today and accretes to facts when an agent first
-needs to add `/agent/{id}/app/{x}`. One dispatcher either way.
+Same-origin is ONE check applied to every state-changing branch, written
+once (P14's lesson, kept), and it becomes tree middleware unchanged in
+meaning when reitit arrives. **Same-origin is a necessary and grossly
+insufficient control** — SB-1 below is precisely an attack that arrives
+same-origin. The no-match redirect to `/` (P15, `ui.md:528-535`) is
+unchanged. Route DATOMS (`:seon.route/*`) are not in this slice.
 
 ### 1.4 The fact
 
@@ -289,14 +330,18 @@ series established by the F2 suite in `test/seon/render/web_test.clj:407`.
 6. `the-bar-is-never-patched-test` (seed 2026072904) — WIRE LEVEL: drive
    ten unrelated commits against an open feed; the bar's surface id is
    absent from every patch set. §1.7's falsifier.
-7. `route-conflicts-are-build-time-test` — the tree's method/path
-   conflict detection refuses a duplicate at construction, which is the
-   class the `cond` shadowed silently.
+7. `the-inbound-route-is-method-discriminated-test` (revised, R-1) — a
+   `GET /agent/bob/message` does not reach the inbound handler and a
+   `POST /agent/bob` does not reach the page handler; the exact-URI
+   branch does not match `/agent/bob/message/extra` or
+   `/agent/bob/messages`. This is the class the prefix `cond` shadowed,
+   asserted directly rather than delegated to a router's conflict
+   detection.
 8. `a-refusal-emits-no-morph-test` — a 422 response carries no SSE
    patch; only the feed paints.
-
-Deleted in the same commit as they are superseded: the `cond`-shaped
-assertions in `web_test.clj:300-315` that pin URI-prefix dispatch.
+9. `a-cross-origin-inbound-is-refused-test` — the same-origin check
+   applies to the state-changing branch. It proves the check runs; it
+   proves nothing about SB-1, which arrives same-origin by construction.
 
 ### 1.9 The live proof — THIS IS THE ACCEPTANCE
 
@@ -402,11 +447,99 @@ Selecting a rail card moves the focal panel without disturbing the bar.
 
 ## Slice 3 — AGENT-AUTHORED CONTROLS
 
-An agent's html render may contain controls; clicking one crosses ONE
-guarded boundary and becomes a durable fact. This is the capability-door
-discipline applied to the browser: the control is not an authority, the
-POST boundary is (L12's lesson, and the reason the old gate is the one
-piece of `reactive/` worth keeping conceptually).
+> **REDESIGNED 2026-07-29 after SB-1.** The first draft gated the blessed
+> path — a postwalk that rewrites recognized Clojure handler slots into a
+> `@post` at `/agent/{id}/call`, and a capability gate on that route —
+> and explicitly required "ordinary attributes to pass through
+> untouched". The falsifier showed that is not a boundary at all: the
+> fresh Hiccup grammar accepts every attribute map without classifying
+> browser behavior (`hiccup.clj:89-147`) and the serializer emits them
+> (`hiccup.clj:371-391`), so an authored render can simply emit
+> `[:form {:method "post" :action "/agent/victim/message"} …]` or a raw
+> `data-on:submit` and POST straight at slice 1's inbound route. The
+> human clicks; the browser supplies a same-origin request; the row
+> commits with no `from` and is indistinguishable from a human message.
+> **The callback gate cannot refuse a request it never receives.**
+> Slice 3 is therefore no longer "add a gated route". It is: make an
+> ungated action UNREPRESENTABLE in authored output, and the gated route
+> is what remains once nothing else can be expressed.
+
+### 3.0 The unrepresentability mechanism
+
+Agent-authored hiccup is admitted against a CLOSED grammar — an
+allowlist of presentational tags and attributes carrying no browser
+execution or network authority — so no action-bearing attribute can be
+present in authored output at all; anything outside the allowlist is
+refused loudly as that block's error card, never stripped. The trusted
+handler-slot rewrite runs strictly AFTER that refusal, and it is the
+only code in the system that emits an action attribute — so every action
+attribute reaching a browser was produced by the rewrite, targets
+`/agent/{id}/call`, and passes the gate, as an ordering invariant rather
+than an inspection.
+
+That two-phase ordering is the whole argument, and it is worth stating
+as a sequence because its soundness is entirely in the order:
+
+1. **Refuse.** The authored value is checked against the closed grammar.
+   Any tag or attribute outside the allowlist refuses the block. At this
+   instant the tree provably contains ZERO action-bearing attributes.
+2. **Rewrite.** The trusted postwalk converts declarative Clojure
+   handler slots — VALUES like `:on-click (list handler data)`, never
+   strings — into Datastar `@post` attributes at `/agent/{id}/call`.
+3. **Therefore.** Since (1) left none and (2) is the only producer,
+   every action attribute in the output came from (2). No inspection of
+   the rewritten tree is needed to know its provenance; a revalidation
+   pass is still specified in §3.4 as a cheap standing assertion that
+   the invariant holds, not as the thing that establishes it.
+
+This is the same shape as the landed path-traversal refusal
+(`web.clj:521-522`): the path must MATCH a conservative pattern, so `..`
+never reaches `io/resource` at all. Refuse by construction, do not
+sanitize. An allowlist is not the forbidden hand-list — a hand list
+enumerates the BAD and drifts as attackers find the next attribute; a
+closed grammar enumerates the GOOD and fails closed on everything
+nobody thought of, which is exactly the property SB-1 needs.
+
+**Refuse, do not strip.** A stripped attribute silently renders
+something other than what the agent asked for, teaches the agent
+nothing, and is the symptom-side containment layer this repository
+forbids. The refusal needs no new mechanism: `block/surface` already
+returns a flat `:seon.error/value` for output that is not hiccup, and
+the block paints its own error card and spares the page
+(`block.clj:412-426`). The authored-grammar refusal is one more arm of
+that same check, naming the offending tag or attribute so the agent's
+next render fixes it — and the agent reads that error through its own
+context, which is how it learns to write a handler slot instead.
+
+### 3.0.1 Who is "authored", computed and not named
+
+Provenance is COMPUTED at the one projection-invocation seam the ruling
+already establishes — compiled Var or SCI Var, same result union
+(README ruling 3, 2026-07-28). The router invokes the projection
+(`render.clj:145-161`); the seam labels the result with which kind of
+Var produced it. A namespace-prefix or symbol-list rule would be the
+hand-list class (R34) and is refused.
+
+Today every projection is a compiled Var, so no agent-authored html
+reaches a page at all — **slice 3 is the slice that introduces it**,
+which is precisely why the boundary must exist before the first authored
+render is admitted and not after.
+
+Two smuggling paths follow from the same seam and must be closed in the
+same change, because both bypass the grammar rather than violating it:
+
+- **the literal arm.** `render/render` treats a non-symbol declaration
+  as its own output (`render.clj:137-143`), so a unit whose
+  `:seon.render/html` IS a literal hiccup vector never invokes anything.
+  A literal is inert but not trusted: when the unit's provenance is
+  authored, the literal is authored output and takes the authored
+  grammar. (The durable slot is a qualified symbol only —
+  `ui.md:118-123` — so this cannot arrive from the database; it can
+  arrive on a runtime unit.)
+- **`raw`.** `hiccup/raw` bypasses escaping entirely
+  (`hiccup.clj:80-83,139`), so one raw string is a complete escape from
+  any attribute-level grammar. Authored output may not contain a `raw`
+  value, full stop. Trusted core renderers keep it.
 
 ### 3.1 The shape
 
@@ -421,11 +554,17 @@ piece of `reactive/` worth keeping conceptually).
   old-engine residue the standing goal names explicitly. An agent
   changes what the human sees by writing a render fn and installing a
   block, which is the bar restated: write a function to change it.
-- **One render-time postwalk** rewrites `:on-click`/`:on-submit` slots
-  carrying a fn-call or fn-ref into a Datastar `@post` at
-  `/agent/{id}/call` (L10). Agent code authors ordinary Clojure values
-  and never a URL. Bare symbols resolve in the authoring namespace;
-  qualified symbols pass through.
+- **The closed authored grammar** of §3.0 runs FIRST, at
+  `block/surface`'s existing html check. Presentational tags and
+  attributes only; no `raw`; the literal arm included. A refusal is that
+  block's error card.
+- **One render-time postwalk** then rewrites `:on-click`/`:on-submit`
+  slots carrying a fn-call or fn-ref into a Datastar `@post` at
+  `/agent/{id}/call` (L10). Agent code authors ordinary Clojure VALUES
+  and never a URL or an attribute string. Bare symbols resolve in the
+  authoring namespace; qualified symbols pass through. The first draft's
+  "ordinary attributes pass through untouched" is DELETED — it was the
+  sentence SB-1 walked through.
 - **One POST handler** validates before it invokes anything: the route
   agent is live, the named function is public, its committed schema
   admits the argument map, and its source transaction was authored
@@ -451,39 +590,137 @@ BLOCKS on it and names it — it does not define an interaction attribute
 at the web boundary. That is the consumer-invents-the-contract failure
 the program ledger exists to prevent.
 
-### 3.3 Owned files, accretions, suite
+The closed grammar of §3.0 is NOT one of those dependencies: it depends
+on nothing unlanded, and it is the precondition for admitting the first
+authored render rather than a consequence of it. If the interaction
+owner slips, the grammar can still land alone — and should, because
+SB-1's exposure begins the moment authored html reaches a page, not the
+moment controls work.
 
-Owned: a new `src/seon/render/control.clj` (constructors and the
-postwalk — the confinement guardrail says machinery lives in the render
-family), `src/seon/render/web.clj` (the `::call` handler),
-`src/seon/schema/control.edn`, `resources/public/css/input.css`,
-`test/seon/render/control_test.clj`.
+### 3.3 Owned files and accretions
+
+Owned: `src/seon/render/hiccup.clj` (the closed authored grammar,
+colocated with `hiccup?` because it is the same kind's grammar and one
+namespace owns it), `src/seon/render/block.clj` (the provenance-selected
+arm of the existing html check), `src/seon/render.clj` (the seam's
+provenance label and the literal arm), a new
+`src/seon/render/control.clj` (constructors and the postwalk),
+`src/seon/render/web.clj` (the `::call` handler and, by D4, the reitit
+tree that now pays for itself), `src/seon/schema/control.edn`,
+`resources/public/css/input.css`, `test/seon/render/control_test.clj`,
+`test/seon/render/hiccup_test.clj`.
+
+This slice touches `block.clj`, `render.clj`, and `hiccup.clj`, which
+slices 1 and 2 deliberately protect. It therefore may not run
+concurrently with them; see review point 5.
 
 Schema accretions: the interaction request/outcome shapes, owned by
 whichever namespace owns the fact — NOT by the render family. Presence
 doctrine: a pending action has no terminal facts; an outcome is the
 presence of a result or an error, never a stored status enum.
 
-Sealed suite — seeds 2026072910-2026072912:
+### 3.4 The property the sealed suite must prove
 
-1. `a-control-is-a-value-test` — the constructors are pure; the same
-   request yields the same hiccup.
-2. `the-postwalk-rewrites-only-handler-slots-test` — ordinary attributes
-   pass through untouched; a fn-call becomes exactly one `@post`.
-3. `the-gate-refuses-before-it-invokes-test` (seed 2026072910) — a
-   private fn, a schema-violating argument map, and a fn whose source
-   was not authored through the REPL process are each refused, and the
-   invocation counter is zero in all three.
-4. `the-response-is-not-the-result-test` — the POST returns 204 with the
-   action still pending; the outcome arrives on the feed.
-5. `the-outcome-survives-reconnect-test` (seed 2026072911) — WIRE LEVEL:
-   a tab that disconnects before the outcome commits sees it on
-   reconnect, because it was derived.
+> **No sequence of agent-authored hiccup reaches a state-changing route
+> except through the gate.**
 
-Live proof: an agent writes a render fn containing a button, installs it
-as a block, and the owner clicks it in his browser; the action's outcome
-appears without a reload, and a deliberately broken handler shows its
-failure at the control rather than blanking the page.
+Stated so it is mechanically checkable: for every authored value `v`,
+the bytes `web/surface-html` produces for `v` contain no element or
+attribute capable of issuing an HTTP request or executing script, EXCEPT
+action attributes emitted by the trusted rewrite, whose target is
+exactly `/agent/{id}/call` for the page's own agent. Equivalently, and
+this is the form the suite asserts: **driving the serialized page — by
+clicking every clickable node, submitting every form, and firing every
+load-time hook — produces requests to `/agent/{id}/call` and to no other
+state-changing route.**
+
+Both rails, on every adversarial case: (a) the offending construct never
+serializes into executable bytes, and (b) the request count at every
+state-changing route other than `/call` is zero. Plus one positive
+control, so the suite cannot pass by refusing everything: a recognized
+Clojure handler slot still reaches the guarded `/call` boundary and
+still executes.
+
+#### 3.4.1 The adversarial cases, enumerated
+
+Seeds 2026072913-2026072916. Each is a crafted authored value driven
+through the real admission pipeline and the real serializer.
+
+**Direct action authority**
+
+1. Raw Datastar action: `{(keyword "data-on:submit") "@post('/agent/victim/message', …)"}` — the falsifier's exact probe.
+2. Native form: `[:form {:method "post" :action "/agent/victim/message"} …]` — needs no Datastar at all.
+3. `formaction` on a submit button, overriding an enclosing trusted form's target.
+4. Inline DOM handlers: `:onclick`, and `:onerror` on an `[:img]` guaranteed to fail loading.
+5. `[:a {:href "/agents"}]` and `:href "javascript:…"` — navigation and script as attribute values.
+
+**No-human-interaction paths** (the worst class: these fire on paint)
+
+6. `data-init` and load-time Datastar hooks — the very mechanism the shell uses for the feed opener (`web.clj:165-168`). An authored `data-init` POSTs with no click at all.
+7. `[:meta {:http-equiv "refresh" …}]`, `[:iframe {:src …}]`, `[:img {:src …}]` as a request-on-paint beacon.
+8. `[:script]`, `[:object]`, `[:embed]`, `[:base]`, `[:link]`, and `[:svg [:script]]` / `[:svg [:use {:href …}]]` — SVG carries its own script and fetch surface.
+
+**Escapes from the grammar rather than violations of it**
+
+9. `hiccup/raw` carrying a complete `<form>` or `<script>` — one string defeats any attribute-level check (§3.0.1).
+10. The literal arm: a unit whose `:seon.render/html` is a literal hiccup vector rather than a symbol (§3.0.1).
+11. Smuggling through the other kind: an authored `:seon.render/ai` string that a later renderer embeds as html.
+
+**Evasion of the checker itself**
+
+12. Tag and attribute casing and type: `["FORM" …]`, `:ONCLICK`, string attribute keys `"data-on:submit"`, namespaced keys `:data/on-click`.
+13. Tag shorthand: `:form#x.y`, so the allowlist must apply to the PARSED tag name and not the literal keyword.
+14. Placement: the offending node deep in a tree, inside a `for` fragment, or as a child of a trusted wrapper — the check is over the whole tree, not the root.
+15. `:style` as a string rather than a map, carrying `url(…)`. Authored `:style` is admitted as a MAP of scalars only; the string form is refused. A residual `url()` inside a map value is a NOTE for the owner, not a blocker.
+
+**Injection through the blessed path**
+
+16. A handler slot whose argument DATA, once encoded into the action attribute, closes the quoting and appends a second expression — the rewrite's output must be unforgeable by its input.
+
+#### 3.4.2 The gate's refusal surface (R-2)
+
+For a request that does reach `/agent/{id}/call`, the suite asserts every
+refusal class in the falsifier's table
+(`ui-plan-falsification-2026-07-29.md:185-197`), each with BOTH rails —
+invocation count zero AND no pending interaction fact committed:
+
+| boundary | refused condition | expected |
+|---|---|---|
+| origin | cross-origin state-changing request | refused before handler |
+| descriptor parse | missing route agent id or function symbol | 400 |
+| route agent | missing, terminated, or not live | 403 |
+| function row | unknown, private, or not registered | 403 |
+| source provenance | no agent author, or not from the REPL process | 403 |
+| source identity | missing committed fingerprint or incomplete schema | core-unavailable, never invoke |
+| argument codec | malformed, non-vector, or code-shaped values | 422 |
+| exact contract | args violate the committed schema, incl. stale source/schema mismatch | 422 |
+| durable admission | the pending interaction cannot be committed | unavailable, no invoke |
+
+**An ownership-equality check must NOT be added.** Public agent-authored
+functions are deliberately shared cluster capabilities, so caller and
+original author may differ (`ui.md:564-577`, and R-2 says so
+explicitly). The gate proves capability, never authorship-equality.
+
+#### 3.4.3 The remaining suite
+
+1. `a-control-is-a-value-test` — the constructors are pure; the same request yields the same hiccup.
+2. `the-postwalk-rewrites-only-handler-slots-test` — a fn-call becomes exactly one `@post`; presentational attributes survive; no attribute outside the allowlist ever reaches the rewrite, because §3.0 already refused it.
+3. `the-response-is-not-the-result-test` — the POST returns 204 with the action still pending; the outcome arrives on the feed.
+4. `the-outcome-survives-reconnect-test` (seed 2026072917) — WIRE LEVEL: a tab that disconnects before the outcome commits sees it on reconnect, because it was derived.
+5. `trusted-renderers-keep-the-full-grammar-test` — the shell's own `data-init`, the bar's `data-on:submit`, and core `raw` still serialize. The boundary must not cost the system its own mechanisms; a suite that passes by breaking the feed opener has proved nothing.
+
+### 3.5 Live proof
+
+An agent writes a render fn containing a button, installs it as a block,
+and the owner clicks it in his browser; the action's outcome appears
+without a reload, and a deliberately broken handler shows its failure at
+the control rather than blanking the page.
+
+Then the adversarial half, run by hand once: an agent is asked to author
+a render containing a native form posting to another agent's message
+route. The page shows that block's error card naming the refused
+attribute, the network panel shows no request to
+`/agent/{victim}/message`, and the victim's fact count is unchanged.
 
 ---
 
@@ -579,7 +816,7 @@ and is extended, never re-themed.
 | D1 | The inbound route's name | `POST /agent/{id}/message` | `/chat?agent=` keeps a vocabulary we do not use and puts the resource in a query parameter; a bare `/message` loses the nesting that `/call` and `/app/{x}` need. |
 | D2 | How an inbound message gets its id | Derive from the basis inside a `:db.fn/call` owned by `seon.cluster.message`: `inbound-<t>-<index>` | A uuid is honest but underived and unrelated to anything; a boundary allocator is a new mechanism for one row. Falsified by the §1.8 probe BEFORE the handler is written. |
 | D3 | Is the message bar a block or shell chrome? | A block, with the constant-render argument and its falsifier | Shell chrome is provably safe but forecloses "write a function to change it" for the single most-used surface in the system. |
-| D4 | Land reitit in slice 1? | Yes — one coordinate from the vendored `reference-code/reitit` | Deferring means the first method-discriminated route lives in the `cond`, which is the dispatcher the quarry told us not to grow twice. |
+| D4 | Land reitit in slice 1? | **SETTLED: no — deferred to slice 3** (revised by R-1) | Reitit is the target router and architectural prepayment, not a slice-1 correctness dependency: the existing `handler` already receives `:request-method` and can express one exact POST without a second dispatcher (`web.clj:531-614`). It lands when `/call`, nested route data, and capability middleware make the tree pay for itself. |
 | D5 | Durable focal pin (slice 2) | Defer; selection stays tab-local | A stored pin needs the web-session facts that do not exist in fresh `src/`; inventing them at the render tier is the consumer-invents-the-contract failure. |
 
 ## Name table
@@ -589,29 +826,45 @@ and is extended, never re-themed.
 | `POST /agent/{id}/message` | the one inbound human-message boundary | `ui.md:551-559` route family; `:seon.cluster.message/*` |
 | `seon.cluster.message/inbound-tx` | pure tx-data for a message from outside the agent population | sibling of the landed `delivery` (`message.cljc:201`) |
 | `:seon.cluster.message/inbound-request` | what that function is asked | `message.edn`'s `delivery-request` shape |
-| `:seon.render.web/routes` | the reitit route tree value | reitit's own `router`/route-data vocabulary |
+| `:seon.render.web/routes` | the reitit route tree value (slice 3, by D4) | reitit's own `router`/route-data vocabulary |
 | `:message-bar` | the bar block's `:seon.render.block/name` | `block/surface-id`, one keyword in three roles |
 | `:transcript`, `:agent-header`, `:focus` | slice 2's three block names | `render/block.clj` seed vectors |
 | `seon.render.control` | slice 3's constructors and the handler-slot postwalk | confinement guardrail (2026-07-28 close) |
+| `seon.render.hiccup/authored?` | the CLOSED grammar for agent-authored output | sibling of the landed `hiccup?` (`hiccup.clj:89`), one namespace owning one kind's grammar |
+| authored / trusted | whether a projection's output came from an SCI Var or a compiled Var | the seam's own union (README ruling 3, 2026-07-28); COMPUTED, never a name list |
 | `inbound` | a message whose origin is outside the agent population | the schema's own words at `message.edn:14-25` |
 
 Deliberately NOT introduced: "chat", "bubble", "surface registry",
-"mailbox" (as a UI noun), "optimistic update", "compact face".
+"mailbox" (as a UI noun), "optimistic update", "compact face",
+"sanitize" (authored output is REFUSED, never cleaned), "trusted
+attribute list" (the grammar is closed, so there is no list of bad
+things to maintain).
 
 ## Orchestrator review points
 
-1. **Before slice 1 is dispatched** — D1-D4 answered. D2 in particular:
-   the identity probe is cheap and falsifies a design, so it runs first.
-2. **After the reitit tree, before the POST handler** — review the diff
-   for exactly one dispatcher and no surviving `cond` arm.
+1. **Before slice 1 is dispatched** — D1-D4 answered. SETTLED: D2 was
+   probed and survived, D4 is deferred, and slice 1 is sealed and
+   implementing.
+2. **In slice 1's diff** — one dispatcher, strengthened in place: an
+   exact method-discriminated branch, no reitit coordinate, and no
+   prefix arm that could also match the POST.
 3. **After slice 1's live proof** — the owner types into the bar. This
    is the gate for everything after it; a slice-2 dispatch before it is
    out of order.
 4. **Before slice 2 touches `render/agent.clj`** — that file is also the
    pilot's owner (`namespace-ai`). Confirm no other lane holds it.
-5. **Before slice 3** — confirm the interaction fact owner exists. If it
-   does not, slice 3 blocks and says so rather than defining attributes
-   at the web boundary.
-6. **At every slice's end** — the reconciliation the repository requires:
+5. **Before slice 3 is dispatched** — three gates, all of them hard:
+   (a) the interaction fact owner exists, or slice 3 blocks and says so
+   rather than defining attributes at the web boundary; (b) the closed
+   authored grammar and its §3.4 adversarial suite are written and green
+   BEFORE the first authored render is admitted to a page — the boundary
+   is not a follow-up to the feature, it is the precondition for it; and
+   (c) slices 1 and 2 are done, because slice 3 edits `block.clj`,
+   `render.clj`, and `hiccup.clj`, which they protect.
+6. **In slice 3's diff specifically** — that the refusal is a refusal
+   and not a strip, that the allowlist enumerates the permitted rather
+   than the forbidden, and that no trusted mechanism (the feed opener's
+   `data-init`, the bar's submit, core `raw`) was broken to achieve it.
+7. **At every slice's end** — the reconciliation the repository requires:
    compare against the program ledger, update this file's state, and
    name the next dependency-ready refill.
