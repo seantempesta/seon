@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, render, concurrency]
 ---
@@ -48,3 +48,24 @@ hardening this render test before the walk’s real design exists.
 **RUNNING — `small-correctness-batch`.** The final owner schedule explicitly
 pulls this bounded proof race into the batch despite the earlier draft-surface
 hold.
+
+## Resolution
+
+Resolved by `365ad9489` (`Make render readiness and bind failures explicit`).
+The render proc now recognizes a settlement message on its existing interest
+channel, completes that message only after its fact-only derivation, and
+returns the exact resulting pass count. The slow-tab proof fences the initial
+socket wake with that event and uses the returned count as its baseline, so it
+cannot sample before a late initial derivation.
+
+No polling loop, timing constant, or relaxed assertion was added. The
+regression still exercises real sockets, the real Flow proc, the real routing
+listener, and the sliding-1 slow tap.
+
+Focused proof on 2026-07-29:
+
+```text
+bin/test seon.render.web-test
+Ran 32 tests containing 125 assertions.
+0 failures, 0 errors.
+```

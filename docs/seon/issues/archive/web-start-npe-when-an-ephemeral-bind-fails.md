@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web]
 ---
@@ -54,3 +54,26 @@ web-render design.
 **RUNNING — `small-correctness-batch`.** The final owner schedule explicitly
 pulls this data-losing failure classification into the bounded correctness
 batch despite the earlier draft-surface hold.
+
+## Resolution
+
+Resolved by `365ad9489` (`Make render readiness and bind failures explicit`).
+When a requested ephemeral bind fails, `start!` now shuts down the worker
+executor and throws `ExceptionInfo` with
+`:seon.render.web/attempted-port 0`, preserving the original
+`BindException` as its cause. The nonzero taken-port path still retries port 0
+and reports both requested and bound ports.
+
+`failed-ephemeral-bind-preserves-the-bind-failure` injects the bind exception
+at http-kit's boundary and proves the failure is the named ex-info rather than
+a `NullPointerException`. The existing real-socket
+`a-taken-port-serves-anyway-and-says-so` regression continues to prove the
+fallback path.
+
+Focused proof on 2026-07-29:
+
+```text
+bin/test seon.render.web-test
+Ran 32 tests containing 125 assertions.
+0 failures, 0 errors.
+```
