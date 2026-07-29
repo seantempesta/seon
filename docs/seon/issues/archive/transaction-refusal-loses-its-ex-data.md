@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, testing]
 ---
@@ -95,3 +95,6 @@ The `datahike` and `clojure-testing` skills carry the same cause-chain guidance.
   `src/seon/cluster/store.clj:317-345` still has no application transaction
   wrapper, and `test/seon/cluster/run_test.clj:73-81` still catches only the
   outer exception data.
+
+Resolved by `93aa9d6de` and completed by `e1f7262c6`: `store/transact!` now
+uses the shared deepest-non-empty-`ex-data` walk and returns classified values.

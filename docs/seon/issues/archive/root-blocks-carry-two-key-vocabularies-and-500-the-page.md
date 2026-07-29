@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, render, boot]
 ---
@@ -61,3 +61,7 @@ still installs the superseded attribute family.
 Instrumentation is the DETECTOR here, not the cause — `seon.instrument/remove!`
 makes the page render again and is emergency recovery only. The stale rows
 would otherwise reach the browser as duplicate morph targets.
+
+Superseded by plan law L18: clusters reset to current code and pages with no
+data migration. Current source installs only `:seon.render.block/*`, so an old
+mixed-vocabulary branch is discarded rather than repaired in place.

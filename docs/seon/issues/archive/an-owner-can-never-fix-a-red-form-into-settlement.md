@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent-runtime, run-loop, generate-code]
 ---
@@ -78,3 +78,7 @@ fix must choose between (this note does not pick one):
 
 Whichever lands, `every-form-has-exactly-one-of-the-seven-derived-states` must
 reach the state through a receipt shape the loop can actually commit.
+
+Superseded by the owner’s “Rulings 2026-07-29 late morning,” item 1:
+goal-done is now the observable condition that the namespace’s tests pass, not
+an `:owner-fixed` derivation over the original immutable receipt.

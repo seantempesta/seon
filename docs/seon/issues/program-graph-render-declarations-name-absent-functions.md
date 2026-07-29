@@ -41,3 +41,9 @@ The N5 program-graph projection builders, composed with the one
   `seon.render/render`.
 - A catalog-wide regression constructs each advertised family, renders every
   declared kind, and observes no unresolvable projection.
+
+## Triage 2026-07-29
+
+**PRESSING — current N5/program-graph render blocker.** `src/seon/schema.cljc`
+still publishes all six `seon.render.handlers.{fn,schema,ns}` symbols, no such
+namespace exists, and the router still returns `:seon.render/unresolvable`.

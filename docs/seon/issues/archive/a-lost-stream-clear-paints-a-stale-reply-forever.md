@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, stream, flow, transport]
 ---
@@ -73,3 +73,7 @@ class: it never exercises a retained in-process `::streams` entry.
   the ended agent's page carries no partial text while the other still streams.
 - Whatever survives, no channel carries a value whose loss is neither
   re-derivable nor superseded; state that plainly in the surviving docstring.
+
+Resolved by `fb1ce96d8`: clear entries were deleted, terminal facts now
+supersede cached partials, and the lost-clear ordering has a recurring
+regression.

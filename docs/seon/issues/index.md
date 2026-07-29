@@ -11,7 +11,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention. The severity projection below remains the
 complete open inventory while each row receives current-tree verification.
 
-## Verified triage — slice 1
+## Verified triage
 
 | Rank | Classification | Issue | Why now | Owner / rung |
 |------|----------------|-------|---------|--------------|
@@ -19,24 +19,26 @@ complete open inventory while each row receives current-tree verification.
 | 2 | PRESSING | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | `submit!!` still waits on `@started` before its timed result wait; this must fold into rank 1. | Same bounded-compute fix wave |
 | 3 | PRESSING | [`seon.flow/submit!!` awaits `started` with no bound](submit-awaits-started-with-no-bound.md) | Duplicate evidence for rank 2's startup wait; preserve until the shared fix closes both. | Same bounded-compute fix wave |
 | 4 | PRESSING | ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | Config admission, database installation, and defaults still require separate registration edits; a fix lane is relaunching. | Config/schema reconciliation rung |
+| 5 | PRESSING | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | The catalog still advertises six absent projection functions, so every advertised family can return `:seon.render/unresolvable`. | N5 / program-graph render rung |
 
-Thirty-five open notes remain to be verified against current source. Their
+Thirty open notes remain to be verified against current source. Their
 severity grouping below is inventory, not a completed triage classification.
 
-## Closed by current-tree verification — slice 1
+## Closed by current-tree verification
 
 | Classification | Issue | What dissolved it |
 |----------------|-------|-------------------|
 | DISSOLVED | [An ordinary agent's block set has no production caller](archive/an-ordinary-agents-block-set-has-no-production-caller.md) | `df160158f` made `creation-tx` install the block set with the agent. |
 | DISSOLVED | [Fresh-corpus render retains a removed my.store reference](archive/fresh-corpus-render-retains-my-store-reference.md) | The reset-only cluster ruling discards stale program rows; current source has no `my.store` row. |
+| DISSOLVED | [A lost stream clear paints a stale reply forever](archive/a-lost-stream-clear-paints-a-stale-reply-forever.md) | `fb1ce96d8` deleted clear entries and made terminal facts supersede cached partials. |
+| DISSOLVED | [A refused transaction needs value-based classification at the transact wrapper](archive/transaction-refusal-loses-its-ex-data.md) | `93aa9d6de` and `e1f7262c6` landed the transaction wrapper and shared cause-chain classifier. |
+| DISSOLVED | [An owner can never fix a red form into settlement](archive/an-owner-can-never-fix-a-red-form-into-settlement.md) | The 2026-07-29 late-morning ruling replaced `:owner-fixed` with test-based goal completion. |
+| DISSOLVED | [Root blocks carry two key vocabularies, so the page 500s](archive/root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | Plan law L18 resets clusters to current pages; current source installs only `:seon.render.block/*`. |
 
-## Blocker (14)
+## Blocker (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [A lost stream clear paints a stale reply forever](a-lost-stream-clear-paints-a-stale-reply-forever.md) | blocker | Core |
-| [A refused transaction needs value-based classification at the transact wrapper](transaction-refusal-loses-its-ex-data.md) | blocker | Core |
-| [An owner can never fix a red form into settlement](an-owner-can-never-fix-a-red-form-into-settlement.md) | blocker | general |
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
 | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | blocker | general |
@@ -45,7 +47,6 @@ severity grouping below is inventory, not a completed triage classification.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
-| [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | blocker | agent |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
