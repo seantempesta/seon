@@ -55,12 +55,14 @@ effective, and database-entity composites from the leaf registrations.
 a second dial roster (`src/seon/schema/edn.clj:87-111`;
 `src/seon/config.cljc:137-229`).
 
-**The complete source graph and selective runtime publication are different
-admission domains:** source indexing records every `defn` and `defn-`, including
-private and uncontracted helpers, because call reachability cannot cross a
-missing node (`src/seon/fn.clj:21-48,68-125`). Agent runtime publication admits
-only fully contracted functions, plus schema and test declarations
-(`src/seon/sci/eval.clj:321-347`). Arbitrary evals, scratch defs, and atoms are
+**Direct source inventory and selective runtime publication are different
+admission domains:** source indexing records every directly read top-level
+`defn` and `defn-`, including private and uncontracted helpers
+(`src/seon/fn.clj:22-26,46-83`; `src/seon/program.cljc:64-83`). Declarations
+inside executable top-level forms remain an open blocker; call reachability is
+`[TARGET]`, not implemented. Agent runtime publication admits only fully
+contracted functions, plus schema and test declarations
+(`src/seon/sci/eval.clj:303-327`). Arbitrary evals, scratch defs, and atoms are
 process-local. Receipts retain history but never reconstruct code.
 
 ## The reflexes, and what to write instead

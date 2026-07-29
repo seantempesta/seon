@@ -138,9 +138,13 @@ The ordered repair is:
 5. the recurring matrix covering parity, redefinition, deletion, refusal,
    reopen, and two incompatible clusters in one JVM.
 
-The first implementation slice is in flight through native Codex delegation.
-The inherited Claude-started `indexer-adversarial-review` remains read-only on
-source/test and will be collected under the revised delegation law. Root
+The first implementation slice landed in `52423e362`, `4c37aac33`, and
+`80a4f0fdc`: `seon.program` is now the one pure owner of declaration identities,
+owned attributes, canonical rows, deterministic exact replacement, explicit
+build/runtime function policy, and typed function-plus-test deletion. Focused
+gates are green; the independent recurring tests are in flight. The inherited
+Claude-started `indexer-adversarial-review` remains read-only on source/test and
+will be collected under the revised delegation law. Root
 `AGENTS.md` now says Codex orchestrators use native collaboration tools while
 Claude orchestrators use `bin/codex-agent` (`6e5b0a925`).
 

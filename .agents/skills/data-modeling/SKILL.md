@@ -233,14 +233,16 @@ than relying only on runtime checks.
 
 ### Source-graph completeness and runtime admission
 
-Source indexing records every `defn` and `defn-`, including private and
-uncontracted helpers, so workload and call reachability never stop at a missing
-node (`src/seon/fn.clj:21-48,68-125`). Runtime publication is deliberately
-stricter: an agent-authored function needs a complete Malli contract, while
-schema and test declarations use their own admitted row shapes
-(`src/seon/sci/eval.clj:321-347`). Arbitrary evals, scratch defs, and atoms
-remain context-local; receipts preserve history but never reconstruct code.
-This distinction is producer admission, never a stored durability flag.
+Source indexing records every directly read top-level `defn` and `defn-`,
+including private and uncontracted helpers (`src/seon/fn.clj:22-26,46-83`;
+`src/seon/program.cljc:64-83`). Declarations nested in executable top-level
+forms are not yet accounted for, and call reachability remains `[TARGET]`.
+Runtime publication is deliberately stricter: an agent-authored function needs
+a complete Malli contract, while schema and test declarations use their own
+admitted row shapes (`src/seon/sci/eval.clj:303-327`). Arbitrary evals, scratch
+defs, and atoms remain context-local; receipts preserve history but never
+reconstruct code. This distinction is producer admission, never a stored
+durability flag.
 
 ## The schema IS the generator — generative testing
 

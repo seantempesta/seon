@@ -19,12 +19,14 @@ and asserts the resulting row. A proof that exists only in a lane transcript
 counts as not covered.
 
 Six-generation git archaeology established that this is not merely a missing
-test. `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
-`seon.cluster.run/program-row-tx` independently restate the declaration-row
-contract. The resulting drift is live: runtime schemas persist unevaluated
-syntax, tests are committed but never materialized or acquired, `ns-unmap`
-deletes only function identities, and one database's schema projection replaces
-process-global state used by every cluster. Runtime schema rows also omit the
+test. Before `52423e362`, `seon.fn/durable-row`,
+`seon.sci.eval/program-row`, and `seon.cluster.run/program-row-tx`
+independently restated the declaration-row contract. `seon.program` now owns
+canonical identity, row attributes, exact replacement, and typed
+function/test deletion. The remaining drift is live: runtime schemas persist
+unevaluated syntax, tests are committed but never materialized or acquired,
+and one database's schema projection replaces process-global state used by
+every cluster. Runtime schema rows also omit the
 Datahike schema transaction data required to make their attributes usable;
 source reconciliation exempts every schema row from stale removal; and the
 reader mistakes any operator named `deftest` for `clojure.test/deftest`. The

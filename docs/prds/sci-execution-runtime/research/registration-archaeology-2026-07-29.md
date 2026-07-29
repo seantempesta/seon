@@ -34,7 +34,7 @@ producer admission, not permission for two row formats.
 | dependency or mechanism | selected revision | maintained source | boundary established |
 |---|---|---|---|
 | SCI | submodule `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/core.cljc`, `reference-code/sci/doc/interrupt.md` | one ctx/fork and post-commit interpreted installation |
-| Datahike | submodule `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `writing.cljc`, `writer.cljc` | identity upsert, exact retraction, one serial transaction, `db-after` |
+| Datahike | submodule `19f5cdd950dc3c5ad2c8777a176d2ec4cb18c0bb` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `writing.cljc`, `writer.cljc` | identity upsert, exact retraction, one serial transaction, `db-after` |
 | Malli | `0.20.0`, vendored revision `80138076960e7820523b4cb932c5b5d1936d4e7f` | `reference-code/malli/src/malli/registry.cljc`, `malli/core.cljc` | registries can be supplied explicitly; Malli's default registry is process-global |
 | fresh reader | current tree | `src/seon/sci/reader.cljc` | literal form-head classification and exact source spans |
 | pure schema projection | current tree | `src/seon/schema.cljc` | complete projection derivation from committed rows without database mutation |
@@ -69,9 +69,10 @@ The primary historical source anchors are
 - `fa327214e` added a `schema/register!` self-tee because registrations outside
   the eval wrapper vanished. It fixed an omission by creating a second
   publication route.
-- `fbde4283b` restored the schema registry after failed eval. `c7c04247a` then
-  narrowed that repair because restoring a whole process snapshot corrupted
-  concurrent registration. Isolation must be per evaluation.
+- `fbde4283b` rolled back newly registered keys after failed eval;
+  `57e85dbc7` introduced exact whole-registry snapshot restoration; and
+  `c7c04247a` replaced that broad restoration with isolated per-eval deltas
+  after concurrency made whole-process rollback unsafe.
 - Analyzer digests omitted function bodies, so body-only function and test
   redefinitions stayed stale. Exact source is the durable input.
 - Lookup refs to absent namespace rows aborted whole terminal transactions.
@@ -91,15 +92,16 @@ The primary historical source anchors are
 therefore produces `(quote fn?)`, although `register!` receives `fn?`.
 Computed schema expressions have the same defect. Runtime currently skips the
 declaration's evaluation entirely and commits raw syntax
-(`src/seon/sci/eval.clj:321-347,522-533`). The existing isolated registration
-delta at `src/seon/schema.cljc:1768-1819` is the maintained seam for obtaining
-the evaluated value without publishing process state before commit.
+(`src/seon/sci/eval.clj:303-327,506-518`). The isolated registration delta at
+`src/seon/schema.cljc:1768-1819` is an available primitive for staging an
+evaluated value without publishing process state before commit; the SCI base
+does not yet expose `register!`, so this is not an integrated runtime seam.
 
 ### Schema projection is not cluster-sovereign
 
 `seon.sci.eval/activate-program-schemas!` reads one database and calls the
 process-global `seon.schema/activate-projection!`
-(`src/seon/sci/eval.clj:411-439`; `src/seon/schema.cljc:325-332,1702-1716`).
+(`src/seon/sci/eval.clj:396-424`; `src/seon/schema.cljc:325-332,1702-1716`).
 Malli's default registry is likewise process-global
 (`reference-code/malli/src/malli/registry.cljc:40-52`), while Malli compilation
 accepts an explicit registry (`reference-code/malli/src/malli/core.cljc:309-333`).
@@ -136,14 +138,14 @@ schema rows from stale removal, so deleting a source registration can leave its
 old row indefinitely. Canonical resource rows and agent-authored rows must be
 preserved by provenance, not by exempting the entire identity family.
 
-### Three current owners can disagree
+### The three duplicate owners were consolidated
 
-`seon.fn/durable-row`, `seon.sci.eval/program-row`, and
-`seon.cluster.run/program-row-tx` separately define identities, required and
-owned attributes, schema parsing, deletion, and exact replacement. Runtime
-deletion names only `:seon.fn/delete`, although historical `ns-unmap`
-retracted both function and test identities. This duplication is the repair's
-first boundary.
+Before `52423e362`, `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
+`seon.cluster.run/program-row-tx` separately defined identities, owned
+attributes, deletion, and exact replacement. `seon.program` now owns those
+shared facts and typed function/test deletion. Producer-specific Malli
+admission remains outside it, and the evaluated-schema, cluster-projection,
+test-materialization, and source-reconciliation gaps remain open.
 
 ## Required recurring proof
 
