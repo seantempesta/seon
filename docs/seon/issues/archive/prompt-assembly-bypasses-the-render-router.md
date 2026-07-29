@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, render, agent]
 ---
@@ -44,3 +44,20 @@ the cluster render pipeline.
   block mechanism, with presence deciding whether each output exists.
 - A regression proves that changing one block's projection symbol changes both
   its prompt contribution and its human surface without editing a consumer.
+
+## Resolution
+
+Resolved by the context-blocks wave and verified before this archival commit.
+`seon.cluster.prompt/prompt` derives one ordered membership at one immutable
+database value and calls `seon.render/render` for every AI declaration.
+Identity, execution, peers, namespace, and trigger prose are block projections;
+`seon.render.root/blocks` and `seon.render.agent/blocks` are data consumed by
+the same membership, unit, router, and surface functions.
+
+The standing context placement property derives prompt contributions and HTML
+surfaces from the same planted membership across AI-only, HTML-only, twin, and
+omitting declarations. Together with the wholesale block replacement
+regression, it proves that projection presence and replacement change the next
+consumer derivations without consumer edits. Verification:
+`bin/test seon.context-test seon.cluster.prompt-test
+seon.render.block-test` — 57 tests, 186 assertions, 0 failures, 0 errors.
