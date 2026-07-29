@@ -102,3 +102,25 @@ normalized and an inter-form comment is attributed to the following event), S2
 and S3 (localized read-error events and recovery), S5, and S6 (closed request
 and event schemas). None of them caused this defect; all remain in the
 parser-merge plan.
+
+## Post-resolution falsification
+
+The independent review in
+`docs/prds/sci-execution-runtime/research/indexer-review-2026-07-29.md`
+confirmed that removing the contract gate and the old namespace-stable
+allowlist repaired the current tree's 1,242 direct declarations. It falsified
+the broader namespace and proof claims above:
+
+- the replacement still recognizes special operations through hard-coded
+  local names and silently misattributes qualified lookalikes; see
+  [[../resolve-namespace-changes-by-executable-operator-identity]];
+- an executable nested declaration can still disappear without a row or
+  refusal; see
+  [[../account-for-declarations-inside-executable-top-level-forms]]; and
+- the recurring coverage test shares the production reader's event stream and
+  set-collapses occurrences; see
+  [[../make-function-coverage-independent-and-cardinality-preserving]].
+
+This archived issue remains the historical owner of the old allowlist and
+contract-gate incident. The three narrower open issues own the falsified
+follow-on guarantees.
