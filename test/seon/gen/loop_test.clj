@@ -445,6 +445,8 @@
              run-id (planner-run db)
              state (states db run-id)]
          (is (= :routed (get state 1))
+             "the failed def itself is red and routed")
+         (is (= :routed (get state 2))
              "the unbound-var result is red at the one admission gate and
               routes like any other red form — no string matching, and no
               run completing on a value that references nothing")
