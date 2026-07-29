@@ -54,10 +54,11 @@ arm.
 ## Resolution
 
 Resolved by `335764cd2` plus the clean-process population repair
-`ca7a5e458`. The positive `:seon.config.ai/max-tokens` dial is admitted by
-the closed manifest, installed on the config entity, required by the effective
-configuration, projected through `seon.ai/targets`, required by descriptor and
-request schemas, and emitted as the compatible wire field `max_tokens`.
+`ca7a5e458` and exact loopback-wire proof `5a74e1892`. The positive
+`:seon.config.ai/max-tokens` dial is admitted by the closed manifest, installed
+on the config entity, required by the effective configuration, projected
+through `seon.ai/targets`, required by descriptor and request schemas, and
+emitted as the compatible wire field `max_tokens`.
 
 The shipped value is 8,192, with the real Qwen calibration as its provenance.
 The owner narrowed this blocker to bounding thinking through the one request
@@ -66,8 +67,9 @@ not part of the closure and no second provider mechanism was added.
 
 ## Proof
 
-`seon.ai-test` asserts the shipped descriptor carries 8,192 and
-`request-body` emits `"max_tokens" 8192`. `seon.config-test` proves the dial is
-admitted, installable, defaulted, and valid in a clean process. The complete
-`bin/test` gate passed 480 tests and 2,039 assertions with zero failures or
-errors on 2026-07-29.
+`a-loopback-provider-receives-the-descriptor-output-budget` runs the real JDK
+client against a compatible loopback server, parses the exact received request
+document, and observes `"max_tokens" 8192`. `seon.config-test` proves the dial
+is admitted, installable, defaulted, and valid in a clean process. The
+complete `bin/test` gate passed 480 tests and 2,039 assertions with zero
+failures or errors on 2026-07-29.
