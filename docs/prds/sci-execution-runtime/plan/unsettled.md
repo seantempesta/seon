@@ -177,6 +177,40 @@ executor; current rendering is complete snapshots plus per-tab deltas
 The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
 which is why the independent pass exists.
 
+## Where the tree is (2026-07-29 late evening)
+
+RULING 25 IS BUILT (`811ec4356`): interrupted runs close atomically,
+custody and pointer clear, NO plan suffix resumes, unanswered messages
+still start new episodes, and interruption evidence reaches the agent's
+context. The cold-resume path is DELETED and both its issues archived.
+Live `kill -9` proof: one receipt interrupted, run closed and unlinked,
+no suffix receipt, no capability message. QUARANTINE RECOGNITION landed
+too (`bd6e09402`) — and the adopting lane REJECTED the dead Opus lane's
+"all closed channels are fenced" shape because it would have hidden
+broken render delivery; only the exact still-routed closed mailbox is
+benign, saturated mailboxes and closed render routes stay loud. Gate at
+that commit: 554/2378/0.
+
+SKILLS COLLAPSED TO ONE REAL DIRECTORY (ruling 29): `.agents/skills` is
+real; `.claude/skills` and `seon-skills` are links. Drift is now
+unrepresentable rather than detected — `script/seon/dev/skills.clj` and
+the old operator's adapter check are obsolete and being deleted.
+`browser-automation` is deleted everywhere (built-in browser
+instructions already cover it). All remaining skills rated high-trust by
+the independent verification pass, which DELETED four unverifiable
+claims rather than hedging them (sub-millisecond memory reads, a
+fabricated 494-assertion count, a no-history-overhead claim, a citation
+to a document that does not exist) and corrected the scheduling probe
+numbers the orchestrator had wrong.
+
+THE TREE IS RED AGAIN and that is expected weather: three lanes are
+mid-surgery (cluster-priming in `src/seon/fn.clj` + `schema.cljc`,
+operator-reconciliation in `fresh_operator.clj`, tool-sharpening in
+`bin/test` + deleting the obsolete skills generator). Each owes a green
+gate at its own exit. GRADUATION ATTEMPT 7 WAITS FOR A QUIET TREE —
+both attempt-6 blockers are fixed, and the lesson of attempts 2 and 3
+is that auditing a moving tree measures other lanes' half-finished work.
+
 ## Awaiting the owner only
 
 - **Read**: `render-pipeline-design-2026-07-29.md` (the composite
