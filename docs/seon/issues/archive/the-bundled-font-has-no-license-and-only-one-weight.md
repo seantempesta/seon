@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, web, build]
 ---
@@ -99,3 +99,24 @@ the release build.
 
 Found 2026-07-27 while porting the Tailwind build (`bin/css`) for N4. The port
 itself is complete and independent of this.
+
+## Resolution 2026-07-29
+
+Superseded as a compound issue after identifying the actual artifact. Durable
+verification lives in
+`docs/prds/sci-execution-runtime/research/jetbrains-mono-license-verification-2026-07-29.md`.
+
+The binary with SHA-256
+`e7842e5e71de83b9b21b7858311a4f95f621d24421f6b968a3e04b561ce17187`
+identifies itself as JetBrains Mono 2.211, Regular, OS/2 weight 400, licensed
+under SIL OFL 1.1. It is licensable, so this lane did not file or make a
+font-swap decision. The `jetbrains-mono-500.woff2` filename is inaccurate: the
+file is Regular 400, not Medium 500.
+
+The original packaging evidence remains valid: historical packages omit the
+accompanying OFL text, and the fresh source tree does not yet own the declared
+font files or every selected weight. Those are now one explicit N4 packaging
+exit in the active program ledger: source-controlled, provenance-pinned weights
+with honest names; accompanying OFL text; and a release-inventory fence that
+rejects an unlicensed font member. That implementation work is not a reason to
+keep a duplicate hygiene issue open.

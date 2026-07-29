@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, architecture, render, error, runtime]
 ---
@@ -52,3 +52,26 @@ units and the export owner supplying an ordinary warning unit.
 - Only recursion-fence output remains direct, and a regression proves a fault's
   ordinary stderr bytes come from the same log projection used by
   `seon.problems`.
+
+## Resolution 2026-07-29
+
+Superseded as a boundary-classification error. `:seon.render/log` remains the
+one reusable human projection of a renderable notice. The direct stderr sites
+cited here are process-control annunciators rather than competing projections:
+
+- `commit-fault!` reports that the durability path itself failed and cannot
+  depend recursively on that path;
+- the counted-dropping callback reports a fault that was not admitted and
+  therefore has no durable notice to render;
+- development panic first commits the fault, then announces the selected
+  process-control disposition without making that line durable;
+- the instrumentation zero-count line is a startup invariant failure; and
+- the export warning announces selection of a slow fallback path, not a
+  projection of domain or fault data.
+
+Routing those lines through the projection contract would manufacture units for
+control events or make the failed machinery a dependency of its own
+annunciator. The architecture now states this boundary explicitly. Durable
+fault notices still declare `:seon.render/log`, route through
+`seon.render/render`, and share that derived projection with `seon.problems`;
+the existing error and render suites prove the reusable path.

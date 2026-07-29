@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, architecture, schema]
 ---
@@ -71,3 +71,18 @@ source rename above is the vocabulary it must match.
 
 Architecture docs (rewrite pending). The fresh block/render owner's half is
 done — source registers `:seon.render.block/*` only.
+
+## Resolution 2026-07-29
+
+Resolved by `f77c4066e`. Every active architecture document now uses the fresh
+block owner's vocabulary:
+
+- `:seon.render.block/block`, `/name`, `/priority`, and `/band`;
+- the agent component ref `:seon.cluster.agent/blocks`; and
+- pure `seon.render.block/install-tx` transaction-data derivation, with
+  removal expressed as component-entity retraction.
+
+The losing `:seon.agent.ctx/*` and `:seon.block/*` attribute names and the
+imperative `install!`/`remove!` surface are absent from active architecture
+prose. The markdown hook validated all five changed architecture documents,
+and the fresh schema and block owner remain the matching source authority.

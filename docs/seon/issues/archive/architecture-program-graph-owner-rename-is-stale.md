@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, architecture, schema]
 ---
@@ -55,3 +55,17 @@ The program-graph vocabulary in `docs/seon/architecture/architecture.md` and
   `docs/seon/architecture/data-model.md:821-822`, while the current ruling at
   `docs/prds/sci-execution-runtime/plan/README.md:384-386` keeps the program
   graph owners top-level.
+
+## Resolution 2026-07-29
+
+Resolved by `f77c4066e`. The architecture map, context target, and data-model
+target now name `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test` as the
+settled owning attribute namespaces. The program-graph glossary and code-as-data
+sections no longer describe a future owner migration.
+
+Proof after the change:
+
+- a search of active `docs/seon/architecture/*.md` finds no
+  `seon.code.fn`, `seon.code.ns`, `seon.code.schema`, or `seon.code.test`;
+- the current roadmap names that migration only as superseded history; and
+- fresh source continues to register the established top-level identities.

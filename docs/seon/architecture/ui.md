@@ -75,6 +75,16 @@ being projected — derived when the projection depends on who is asking, as an
 error notice's steering prose does — and never as a stored symbol repeated on
 every row.
 
+The log kind governs projecting a renderable unit for a log sink; it does not
+turn process-control annunciators into render units. A recursion-fence failure,
+an overflow callback with no admitted fault fact, a development panic
+annunciator, or a startup/export invariant warning writes a brief direct stderr
+diagnostic because it reports the state of the projection or durability
+machinery itself. Once a durable fault exists, its reusable human
+representation is still only the notice's `:seon.render/log` projection. A
+direct annunciator never becomes another stored presentation or a consumer
+call to the fault's projection function.
+
 Failures are flat `:seon.error` values, never throws: the router runs on the
 error path, so an undeclared kind, an unresolvable symbol, and a projection
 that throws are each a value naming what is broken.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, tooling, architecture, testing]
 ---
@@ -122,3 +122,27 @@ script-only classpath. The failed `--help` proof therefore narrows the defect:
 the resource classpath is present, but the default Babashka graph still
 combines owners that require incompatible dependency closures. The existing
 owner and acceptance criteria remain current.
+
+## Resolution 2026-07-29
+
+Superseded as a standalone hygiene fix and transferred to the program's
+old-system deletion boundary. Re-verification proved the root-only `bb.edn`
+edit is still unsafe:
+
+- plain `bb` loads quarry-only `seon.time`, while plain Clojure rejects it;
+- `bin/seon --help` already fails because the mixed path resolves fresh
+  `seon.schema` from the quarry configuration chain without Datahike in
+  Babashka's dependency closure;
+- putting `src-old` before fresh `src` reaches Datahike JVM source and fails
+  instead on native-image reflection; and
+- the maintained edit hook dynamically loads `seon.dev.markdown`,
+  `seon.dev.docstring`, and `seon.ai.tokens` from `src-old`, so simply removing
+  the path would silently disable its Markdown/docstring checks.
+
+No `bb.edn` change landed. The active program ledger now names the exact
+dependency and exit: delete or port those consumers, route every surviving
+operator command through the fresh operator, then remove `src-old` once and
+prove plain `bb` isolation, the edit hook, and the surviving operator surface
+together. Keeping that ordered deletion in the program ledger avoids carrying
+a duplicate hygiene issue whose proposed local edit is known to break
+maintained tooling.
