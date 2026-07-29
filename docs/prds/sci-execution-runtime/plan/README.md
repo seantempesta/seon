@@ -628,6 +628,16 @@ may reintroduce a shadow build into the dev feedback path.
   audit dispatched (parse-serve-duplication-2026-07-29.md), the
   condensation plan follows the armed pipeline (plan → falsify → seal
   → pre-authorized implementation).
+  **Rulings 2026-07-29 (owner, batch 3):** AGENT BIRTH: every created
+  agent is seeded with the distance-based namespace view — own
+  namespace in full, required namespaces partial, exactly the old
+  namespace-context renderer'''s shape reconceived under distance —
+  plus system instructions and the scaffold; default renderers for all
+  namespaces, overridden and improved as we go (quarry the old
+  namespace renderer BEFORE building — the owner: "there'''s good
+  stuff in there"). FACTS LINK: an agent row'''s facts link opens the
+  /data drill rooted at THAT AGENT'''S ENTITY, drillable; the schema
+  vocabulary stays on /data'''s front page.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
