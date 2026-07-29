@@ -358,6 +358,26 @@
          :seon.config.eval.result/max-string
          :seon.config.eval.result/max-nodes])})))
 
+(defn- refresh-instrument-form
+  []
+  (let [instances (gensym "instances")
+        anchor (gensym "anchor")
+        anchor-name (gensym "anchor-name")]
+    `(let [~instances
+           @@(ns-resolve 'seon.cluster (symbol "running-instances"))
+           ~anchor
+           (first
+            (filter
+             (fn [instance#]
+               (and (map? instance#)
+                    (:seon.boot/cluster-connection instance#)))
+             (vals ~instances)))
+           ~anchor-name
+           (get-in ~anchor
+                   [:seon.boot/advertisement :seon.boot/cluster-name])]
+       (when ~anchor
+         ~(instrument-form anchor anchor-name)))))
+
 (defn- launch-form
   [name manifest ready-port]
   (let [instance (gensym "instance")]
@@ -386,6 +406,12 @@
     (pr-str
      `(do
         (require 'seon.cluster 'seon.config 'seon.instrument)
+        ;; The live JVM may still carry wrappers compiled from a schema
+        ;; that source reload has replaced. Refresh against one already
+        ;; running cluster's effective dial BEFORE current `start!`
+        ;; enters that process-global wrapper. The selected new cluster
+        ;; still reapplies its own dial after its config facts commit.
+        ~(refresh-instrument-form)
         (let [~instance
               (seon.cluster/start!
                {:seon.boot/cluster-name ~name

@@ -2,7 +2,11 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]])
+            [clojure.test :refer [deftest is testing]]
+            [malli.instrument :as mi]
+            [seon.cluster :as cluster]
+            [seon.config :as config]
+            [seon.instrument :as instrument])
   (:import [java.net ServerSocket]
            [java.util Date]
            [java.util.concurrent TimeUnit]))
@@ -92,15 +96,16 @@
     (edn/read-string output)))
 
 (defn- operator-private-value
-  [function-name arguments]
+  [function-name & arguments]
   (let [code
         (pr-str
          `(do
             (require 'seon.fresh-operator)
             (prn
-             ((var-get
+             (apply
+              (var-get
                (ns-resolve 'seon.fresh-operator '~function-name))
-              ~arguments))))
+              ~(vec arguments)))))
         process
         (.start
          (doto
@@ -144,6 +149,66 @@
           :seon.fresh-operator/force? true}
          (operator-private-value
           'parse-stop-arguments ["--force" "beta"]))))
+
+(deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
+  (let [form (operator-private-value 'add-form "scratch" {})
+        start-var #'cluster/start!
+        start-meta (meta start-var)
+        instances-var
+        (ns-resolve 'seon.cluster (symbol "running-instances"))
+        instances-before @(var-get instances-var)
+        connection (atom nil)
+        current-request
+        {:seon.boot/cluster-name "scratch"
+         :seon.config/manifest {}}
+        stale-schema
+        [:=> [:cat
+              [:map {:closed true}
+               [:seon.boot/cluster-name :string]]]
+         :map]
+        current-schema
+        [:=> [:cat
+              [:map {:closed true}
+               [:seon.boot/cluster-name :string]
+               [:seon.config/manifest :map]]]
+         :map]
+        start-calls (atom [])
+        start-filter (mi/-filter-var #{start-var})
+        apply-current!
+        (fn [_]
+          (mi/clj-collect! {:ns ['seon.cluster]})
+          (mi/instrument! {:filters [start-filter]})
+          {:seon.instrument/registered 1
+           :seon.instrument/instrumented 1})]
+    (try
+      (with-redefs
+       [cluster/start!
+        (fn [request]
+          (swap! start-calls conj request)
+          {:seon.boot/cluster-connection connection})
+        config/effective
+        (fn [_ _]
+          {:seon.config/on-core-error :panic})
+        instrument/apply! apply-current!]
+        (alter-meta! start-var assoc :malli/schema stale-schema)
+        (mi/clj-collect! {:ns ['seon.cluster]})
+        (mi/instrument! {:filters [start-filter]})
+        (alter-meta! start-var assoc :malli/schema current-schema)
+        (is (thrown? Exception (cluster/start! current-request))
+            "the installed wrapper still enforces the old closed request")
+        (reset!
+         (var-get instances-var)
+         {"live"
+          {:seon.boot/cluster-connection connection
+           :seon.boot/advertisement
+           {:seon.boot/cluster-name "live"}}})
+        (is (= "scratch" (eval (read-string form))))
+        (is (= [current-request] @start-calls)
+            "the pre-start apply! replaced the stale wrapper before start"))
+      (finally
+        (mi/unstrument! {:filters [start-filter]})
+        (alter-meta! start-var (constantly start-meta))
+        (reset! (var-get instances-var) instances-before)))))
 
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)
