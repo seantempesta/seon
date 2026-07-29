@@ -1,5 +1,6 @@
 (ns seon.dev.fresh-operator-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import [java.net ServerSocket]
@@ -57,6 +58,53 @@
    "-m" "seon.fresh-operator"
    "--seon-root" (str root)
    "stop" name])
+
+(defn- child-environment
+  [root]
+  (let [code
+        (str "(do (require 'seon.fresh-operator)"
+             " (let [environment ((var-get (ns-resolve"
+             " 'seon.fresh-operator 'child-environment))"
+             " (System/getenv \"SEON_FRESH_OPERATOR_TEST_ROOT\"))]"
+             " (prn (select-keys environment"
+             " [\"SEON_FRESH_OPERATOR_TEST_CREDENTIAL\" \"PATH\"]))))")
+        command
+        ["bb"
+         "--config" (str (io/file project-root "bb.edn"))
+         "--deps-root" (str project-root)
+         "--classpath" (str (io/file project-root "script"))
+         "-e" code]
+        builder
+        (doto (ProcessBuilder. ^java.util.List command)
+          (.directory project-root)
+          (.redirectErrorStream true))
+        _ (.put (.environment builder)
+                "SEON_FRESH_OPERATOR_TEST_ROOT" (str root))
+        process (.start builder)
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The fresh operator environment probe failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    (edn/read-string output)))
+
+(deftest child-environment-loads-dotenv-beneath-shell-overrides
+  (let [root (fresh-root)
+        dotenv (io/file root ".env")]
+    (try
+      (spit dotenv
+            (str "# parsed as data, not sourced\n"
+                 "export SEON_FRESH_OPERATOR_TEST_CREDENTIAL='test-only'\n"
+                 "PATH=must-not-replace-the-invoking-path\n"))
+      (let [environment (child-environment root)]
+        (is (= "test-only"
+               (get environment "SEON_FRESH_OPERATOR_TEST_CREDENTIAL")))
+        (is (= (System/getenv "PATH") (get environment "PATH"))
+            "the invoking environment wins over the repository dotenv"))
+      (finally
+        (delete-recursively! root)))))
 
 (deftest eval-failure-falls-back-to-sigterm
   (let [root (fresh-root)

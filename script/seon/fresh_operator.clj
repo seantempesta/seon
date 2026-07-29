@@ -50,6 +50,39 @@
   [root name]
   (fs/path (cluster-directory root name) "logs" log-name))
 
+(defn- unquote-value
+  [value]
+  (let [value (str/trim value)]
+    (if (and (<= 2 (count value))
+             (#{\' \"} (first value))
+             (= (first value) (last value)))
+      (subs value 1 (dec (count value)))
+      value)))
+
+(defn- dotenv-entry
+  [line]
+  (let [line (str/trim line)
+        line (if (str/starts-with? line "export ")
+               (subs line 7)
+               line)]
+    (when (and (not (str/blank? line))
+               (not (str/starts-with? line "#")))
+      (when-let [[_ env-key value]
+                 (re-matches #"([A-Za-z_][A-Za-z0-9_]*)=(.*)" line)]
+        [env-key (unquote-value value)]))))
+
+(defn- dotenv
+  [root]
+  (let [path (fs/path root ".env")]
+    (if (fs/regular-file? path)
+      (into {} (keep dotenv-entry) (str/split-lines (slurp (str path))))
+      {})))
+
+(defn- child-environment
+  [root]
+  ;; The invoking environment wins. The file is data, never shell code.
+  (merge (dotenv root) (into {} (System/getenv))))
+
 (defn- valid-name!
   [name]
   (when-not (and (string? name)
@@ -287,10 +320,11 @@
         command ["python3" "-c" detach-python
                  (str (fs/path root)) (str log)
                  "clojure" "-M:dev" "-e" (launch-form name ready-port)]
-        process (.start
-                 (doto (ProcessBuilder. ^java.util.List command)
-                   (.directory (.toFile (fs/path root)))
-                   (.redirectErrorStream true)))
+        builder (doto (ProcessBuilder. ^java.util.List command)
+                  (.directory (.toFile (fs/path root)))
+                  (.redirectErrorStream true))
+        _ (.putAll (.environment builder) (child-environment root))
+        process (.start builder)
         output (str/trim (slurp (.getInputStream process)))
         exit (.waitFor process)]
     (when-not (zero? exit)
