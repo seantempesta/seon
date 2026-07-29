@@ -36,6 +36,38 @@ wait on and no live process to contend with.
 test in any other location is invisible to the gate, which means **not
 covered** however green it looked when you ran it by hand.
 
+### Root suite plus an owned vendored fork
+
+A change crossing Seon and a maintained dependency has two owners and needs
+both discovered suites:
+
+```bash
+# Seon's acceptance boundary, from the repository root
+bin/test seon.datahike-fork-test
+
+# Datahike's direct owner regression, from the submodule root
+(cd reference-code/datahike &&
+  bb kaocha --focus datahike.test.query-planner-test)
+```
+
+Derive the submodule command instead of importing the root runner by habit:
+its `bb kaocha` task forwards arbitrary arguments to
+`clojure -M:test -m kaocha.runner`
+(`reference-code/datahike/bb.edn:46-51`;
+`reference-code/datahike/bb/src/tools/test.clj:8-13`), `tests.edn` declares the
+Kaocha suites and namespace pattern
+(`reference-code/datahike/tests.edn:1-30`), and the test file's `ns` form gives
+the focus value
+(`reference-code/datahike/test/datahike/test/query_planner_test.clj:1-9`).
+The planner repair proved this exact split: the root acceptance test and the
+96-test/396-assertion fork focus both passed
+(`docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
+“Evidence”).
+
+Run the root test to prove Seon pins the behavior it depends on; run the fork
+focus to prove the implementation in its owning project. One does not replace
+the other.
+
 Two honesty facts about the gate itself:
 
 - **A namespace with zero `deftest`s reports green.** `run-tests` returns
@@ -153,7 +185,7 @@ failure, never an expected refusal; do not fall back to message matching.
 | "Unregistered attributes" from a Seon boundary | missing `resources/seon/schema/*.edn` declaration or activation | add it to the owning EDN file and use the production population owner |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
 | A property passes but the code is wrong | the property observes only the returned value, or its checker never reads the facts the command wrote | observe durable facts independently of the return; extend the checker |
-| Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per generative trial; nothing global to restore |
+| Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per mutating generative trial; nothing global to restore |
 | A property fails differently on rerun | a random or wall-clock input inside the property body | derive every input from the seed |
 | The suite is green and a reviewer still finds blockers | the failure class has no representative: teardown faults, concurrency, interactions | add the missing class, not more cases of a covered one |
 | `:malli.core/invalid-input/output` | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
@@ -161,9 +193,23 @@ failure, never an expected refusal; do not fall back to message matching.
 ## Generative checks stay inside the same suite
 
 Malli generators do not create a third test mechanism. Put the property in a
-normal `clojure.test` namespace and run it through `bin/test`. Database
-properties use a fresh connection and exercise the same EDN population →
-install → transact → read-back boundary as the application.
+normal `clojure.test` namespace and run it through `bin/test`.
+
+Database isolation follows the operation:
+
+- A **mutating state-transition property** creates a fresh connection inside
+  each trial because commits from trial 1 would otherwise contaminate trial 2
+  and every shrink step.
+- A **pure property over one immutable database value** may build that value
+  once outside `quick-check` and reuse it for every trial. Reopening 100
+  connections adds setup but no isolation when the property never transacts.
+  The planner acceptance property does exactly this with one `db/empty-db`
+  value (`test/seon/datahike_fork_test.clj:12-49`; failure analysis:
+  `docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
+  “Skill evaluation” / `clojure-testing`).
+
+Only the mutating case must exercise the complete EDN population → install →
+transact → read-back boundary as the application.
 
 A generator gate is three separate assertions, never one:
 
@@ -198,13 +244,15 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
 
 ### Four rules that decide whether the property is worth anything
 
-1. **One database per TRIAL, not per property.** Create the connection INSIDE
-   `prop/for-all`. The pure model resets every trial and every shrink step, so
-   the world it reasons about must too. Receipt: a sealed property was
-   unsatisfiable by *any* implementation because `with-model-database` wrapped
-   `quick-check` instead of the body — from trial 2 the oracle reasoned about
-   an empty world against a database still holding trial 1's runs
-   (`c2d3a96af`, fixed `1d6947069`).
+1. **For MUTATING state transitions, one database per TRIAL, not per
+   property.** Create the connection INSIDE `prop/for-all`. The pure model
+   resets every trial and every shrink step, so the mutable test world it
+   compares against must too. A pure property that only reads one immutable
+   database value is the explicit exception above. Receipt: a sealed mutating
+   property was unsatisfiable by *any* implementation because
+   `with-model-database` wrapped `quick-check` instead of the body — from trial
+   2 the oracle reasoned about an empty world against a database still holding
+   trial 1's runs (`c2d3a96af`, fixed `1d6947069`).
 2. **Every generated input is a function of the seed.** No `random-uuid`, no
    `System/currentTimeMillis`, no unordered-set iteration inside a property
    body. A `:seed` with a random input is decoration: the trial cannot be
