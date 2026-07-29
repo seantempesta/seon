@@ -50,3 +50,9 @@ can finish teardown without weakening the instance-generation fence.
   `src/seon/cluster.clj:522-527` still makes a stop-time release failure
   unaddressable; this root cause was separated from the resolved flock-release
   issue during second-pass triage.
+
+## Triage 2026-07-29
+
+**PRESSING — live lifecycle correctness.** Current `cluster/stop!` still
+removes the stop marker in `finally` after `d/release` or root-store release
+can throw, leaving the still-live generation unavailable for retry.

@@ -50,3 +50,9 @@ original-source span rather than reconstructing one.
 - `seon.cluster.reply/sources` produces no extra plan source for CRLF input.
 - A recurring reader test combines comments, multiple forms, CRLF, and a
   surrogate-pair character.
+
+## Triage 2026-07-29
+
+**PRESSING — parser-merge wave.** The current reader still combines SCI’s
+normalized source text with original-input offsets, and the parser-merge audit
+reproduces the bogus trailing source.

@@ -65,3 +65,10 @@ the owner of computation coalescing and equality suppression.
   `src/seon/web/feed.clj`, and N4 must measure the still-unbounded dependency
   queue at `reference-code/http-kit/src/java/org/httpkit/server/ServerAtta.java:7`
   before adopting or forking that transport.
+
+## Triage 2026-07-29
+
+**PRESSING — live web transport correctness.** Fresh
+`seon.render.web` now calls Datastar over http-kit, while the vendored
+`ServerAtta.toWrites` remains an unbounded `LinkedList`; the old “quarry only”
+triage is stale, but the underlying claim is current.

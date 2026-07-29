@@ -18,10 +18,16 @@ complete open inventory while each row receives current-tree verification.
 | 1 | PRESSING | [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | Confirmed spine blocker: production turns still evaluate SCI inline on an `:io` proc. | Agent-flow bounded-compute fix wave |
 | 2 | PRESSING | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | `submit!!` still waits on `@started` before its timed result wait; this must fold into rank 1. | Same bounded-compute fix wave |
 | 3 | PRESSING | [`seon.flow/submit!!` awaits `started` with no bound](submit-awaits-started-with-no-bound.md) | Duplicate evidence for rank 2's startup wait; preserve until the shared fix closes both. | Same bounded-compute fix wave |
-| 4 | PRESSING | ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | Config admission, database installation, and defaults still require separate registration edits; a fix lane is relaunching. | Config/schema reconciliation rung |
+| 4 | PRESSING | ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | The registration split remains, but config patching is frozen pending the `config-aero-quarry` mining return. | Config/schema reconciliation rung |
 | 5 | PRESSING | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | The catalog still advertises six absent projection functions, so every advertised family can return `:seon.render/unresolvable`. | N5 / program-graph render rung |
+| 6 | PRESSING | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | A release failure still removes the registry marker and strands the live generation. | Cluster lifecycle transition |
+| 7 | PRESSING | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | Fresh Datastar writes reach http-kit’s still-unbounded `toWrites` list. | Web transport boundary |
+| 8 | PRESSING | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | Resume still forks without the evaluated prefix and cannot replay effects. | Parser-merge wave |
+| 9 | PRESSING | [Preserve original line endings in SCI reader source spans](sci-reader-normalizes-crlf-but-reply-uses-original-offsets.md) | CRLF source and original offsets still produce a bogus trailing form. | Parser-merge wave |
+| 10 | REAL-BUT-QUEUED | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | The documented codec half is absent, but no live heterogeneous attribute consumer is evidenced. | Schema-EDN transaction boundary |
+| 11 | REAL-BUT-QUEUED | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | Ten process-local callback schemas remain bare `fn?`; honest but not spine-blocking work. | Flow/schema honesty rung |
 
-Thirty-one open notes remain to be verified against current source. Their
+Twenty-three open notes remain to be verified against current source. Their
 severity grouping below is inventory, not a completed triage classification.
 
 ## Closed by current-tree verification
@@ -34,8 +40,10 @@ severity grouping below is inventory, not a completed triage classification.
 | DISSOLVED | [A refused transaction needs value-based classification at the transact wrapper](archive/transaction-refusal-loses-its-ex-data.md) | `93aa9d6de` and `e1f7262c6` landed the transaction wrapper and shared cause-chain classifier. |
 | DISSOLVED | [An owner can never fix a red form into settlement](archive/an-owner-can-never-fix-a-red-form-into-settlement.md) | The 2026-07-29 late-morning ruling replaced `:owner-fixed` with test-based goal completion. |
 | DISSOLVED | [Root blocks carry two key vocabularies, so the page 500s](archive/root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | Plan law L18 resets clusters to current pages; current source installs only `:seon.render.block/*`. |
+| DISSOLVED | [Keep evaluation failures inside total admission](archive/sci-eval-failure-bypasses-total-admission.md) | `1c7abb6a7` routes failure values through total admission before persistence. |
+| STALE/WRONG | [`bin/seon up` exits 0 after a readiness timeout](archive/operator-up-exits-zero-on-readiness-timeout.md) | Current `wait-ready!` throws and the CLI exits 1; `bin/seon` preserves that exit. |
 
-## Blocker (11)
+## Blocker (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -43,13 +51,11 @@ severity grouping below is inventory, not a completed triage classification.
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
 | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | blocker | general |
 | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | blocker | Core |
-| [Keep evaluation failures inside total admission](sci-eval-failure-bypasses-total-admission.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Preserve original line endings in SCI reader source spans](sci-reader-normalizes-crlf-but-reply-uses-original-offsets.md) | blocker | general |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | blocker | agent |
-| [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
 ## Friction (20)
 

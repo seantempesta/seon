@@ -45,6 +45,9 @@ requires a dial to be registered separately for schema admission, database
 installation, and shipped defaults; the owner is the config/schema
 reconciliation rung.
 
+Config patching is FROZEN pending the `config-aero-quarry` mining lane’s
+return. This classification cross-references that mining; it is not a fix plan.
+
 ## Analysis 2026-07-29 — chunk 1
 
 ### Current synchronization sites

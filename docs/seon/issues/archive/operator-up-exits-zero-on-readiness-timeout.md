@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, runtime, cleanup]
 ---
@@ -44,3 +44,7 @@ before this is fixed, close this with that commit.
   machinery to the explicit quarry alias and fresh boot is now
   `seon.cluster/start!` (`src/seon/cluster.clj:392-467`); archive only when the
   condemned `bin/seon up` path is deleted or its exit contract is fixed.
+
+Stale against the current tree: `b8216c27a` makes readiness timeout throw and
+the `d1c9c709a` CLI boundary exits 1 for that throwable; `bin/seon` preserves
+the exit through `exec`.

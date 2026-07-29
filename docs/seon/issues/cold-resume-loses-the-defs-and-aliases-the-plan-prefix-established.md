@@ -80,3 +80,10 @@ contract the answer needs.
   question about what the fold does after a red form.
 - `docs/prds/sci-execution-runtime/plan/parse-primitives-plan-2026-07-29.md`
   §1.6 — the reading-context half, and D8's frozen starting context.
+
+## Triage 2026-07-29
+
+**PRESSING — parser-merge wave.** Resume still forks a fresh SCI context while
+durable form rows retain source rather than the evaluated prefix environment.
+The reading-context half and this no-reexecution constraint must be settled
+together by the parser-merge wave.

@@ -41,3 +41,9 @@ runtime-boundary exclusion. No bare `fn?` registration remains in schema EDN.
 - **OPEN-CURRENT.** `src/seon/schema/flow.edn:12-14,17,27,41,43,45-47,52-53,57`
   still declares all thirteen callback shapes as bare `fn?`, outside the
   `[:fn ...]` honesty check in `src/seon/schema/edn.clj:193-248`.
+
+## Triage 2026-07-29
+
+**REAL-BUT-QUEUED — Flow/schema honesty rung.** Ten bare `fn?` declarations
+remain in the current file (the note’s count of thirteen is stale), but these
+are process-local callback boundaries and do not block today’s live spine.

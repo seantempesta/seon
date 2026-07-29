@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, error, durability]
 ---
@@ -37,3 +37,6 @@ These paths remain unchanged after commits `21215ce28`, `ba723b2d1`, and
   dereferencing or printing live host objects.
 - A regression with SCI location and call-stack data proves the durable result
   is finite, readable EDN within configured caps.
+
+Resolved by `1c7abb6a7`: the failure value now passes through
+`seon.sci.admit/admit` before `result-edn` is returned for persistence.

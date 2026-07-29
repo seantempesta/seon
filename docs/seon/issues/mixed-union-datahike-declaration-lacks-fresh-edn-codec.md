@@ -60,3 +60,10 @@ single declaration bridge.
   maps heterogeneous unions to `:db.type/string` while documenting the absent
   fresh codec, and `test/seon/schema/datahike_test.clj:16-20` proves only the
   declaration rather than a heterogeneous logical-value round trip.
+
+## Triage 2026-07-29
+
+**REAL-BUT-QUEUED — schema-EDN transaction boundary.** The fallback and its
+explicit missing-codec comment remain, but no live heterogeneous attribute
+consumer is evidenced; close it at the fresh transaction-normalization owner,
+not as an interrupt to the execution spine.
