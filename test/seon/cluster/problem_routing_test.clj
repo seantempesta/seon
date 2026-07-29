@@ -139,6 +139,46 @@
        (is (schema/valid-candidate-value?
             :seon.problems/form-problem attributed))))))
 
+(deftest an-author-owned-red-form-remains-unsettled-without-self-assignment
+  (with-routing-database
+   (fn [connection]
+     (d/transact
+      connection
+      [(dissoc (form-row 0) :seon.cluster.run.form/ns)
+       (receipt-row
+        0
+        {:seon.cluster.eval/result-edn
+         (pr-str {:seon.error/kind :probe/self-owned-red})
+         :seon.cluster.eval/error "self-owned red"
+         :seon.error/kind :probe/self-owned-red})])
+     (let [problem
+           (problems/form-problem
+            @connection
+            {:seon.cluster.run/id run-id
+             :seon.cluster.run.form/ordinal 0
+             :seon.sci.eval/evaluation
+             (evaluation-error "self-owned red")})]
+       (is (= "planner" (:seon.cluster.agent/id problem)))
+       (is (= "planner" (:seon.problems/author problem)))
+       (when-let [assignment (problems/assignment-value problem)]
+         (deliver! connection "planner" "self-assignment" assignment))
+       (is (empty?
+            (d/q '[:find ?message
+                   :in $ ?problem-id
+                   :where
+                   [?message :seon.cluster.message/about ?problem]
+                   [?problem :seon.problems/id ?problem-id]]
+                 @connection
+                 (:seon.problems/id problem)))
+           "the ordinary loop shape emits no author-to-author message")
+       (is (= {:seon.cluster.work/form-state :unrouted-red
+               :seon.cluster.work/settled? false}
+              (select-keys
+               (work/form-settlement @connection "form-0")
+               [:seon.cluster.work/form-state
+                :seon.cluster.work/settled?]))
+           "the red problem still keeps its plan unsettled")))))
+
 (deftest historical-reds-are-outside-the-live-attempt-chain
   (with-routing-database
    (fn [connection]

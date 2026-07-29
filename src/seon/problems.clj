@@ -203,17 +203,23 @@
          :seon.cluster.eval/error error}))))
 
 (defn assignment-value
-  "The E3 message value routing one problem to its derived owner."
+  "The E3 message value routing one problem to its derived owner.
+
+  Nil when the derived owner is the author: assigning an agent its own
+  red form carries no information, while the problem remains an
+  unrouted-red settlement fact."
   {:malli/schema [:=> [:cat :seon.problems/form-problem]
-                  :my.message/message]}
+                  [:maybe :my.message/message]]}
   [problem]
-  {:my.message/to (:seon.cluster.agent/id problem)
-   :my.message/about (:seon.problems/id problem)
-   :my.message/content
-   (str "Repair problem " (:seon.problems/id problem)
-        " from run " (:seon.cluster.run/id problem)
-        ", form " (:seon.cluster.run.form/ordinal problem)
-        ": " (:seon.cluster.eval/error problem))})
+  (when-not (= (:seon.cluster.agent/id problem)
+               (:seon.problems/author problem))
+    {:my.message/to (:seon.cluster.agent/id problem)
+     :my.message/about (:seon.problems/id problem)
+     :my.message/content
+     (str "Repair problem " (:seon.problems/id problem)
+          " from run " (:seon.cluster.run/id problem)
+          ", form " (:seon.cluster.run.form/ordinal problem)
+          ": " (:seon.cluster.eval/error problem))}))
 
 (defn- deferred-agents
   "Agents whose pending triggers the episode cap is deferring (F1 §7).
