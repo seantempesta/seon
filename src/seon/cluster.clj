@@ -329,11 +329,12 @@
             (some-> (d/pull db schema-row-pattern
                             [:seon.schema/key schema-key])
                     (dissoc :db/id))
+            current-created-at (:seon.schema/created-at current)
             desired
             (cond-> desired
-              current
+              current-created-at
               (assoc :seon.schema/created-at
-                     (:seon.schema/created-at current)))]
+                     current-created-at))]
         (when-not (= desired (select-keys current (keys desired)))
           desired))))
    (schema/canonical-schema-rows now)))
