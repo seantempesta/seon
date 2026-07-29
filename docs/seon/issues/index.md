@@ -26,12 +26,13 @@ See `README.md` for the convention.
 | [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (16)
+## Friction (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [A failed ephemeral bind NPEs instead of saying what happened](web-start-npe-when-an-ephemeral-bind-fails.md) | friction | UI |
 | [A failed form does not stop the fold, so a run can complete with a lie](a-failed-form-does-not-stop-the-fold.md) | friction | general |
+| [A frozen disposition can close a run against facts newer than the basis it was written at](a-frozen-disposition-can-close-against-newer-facts.md) | friction | general |
 | [A nil query input matches anything, so prompt cannot refuse a nil trigger](a-nil-query-input-matches-anything-so-prompt-cannot-refuse.md) | friction | Core |
 | [A self-referential registered schema overflows the stack instead of refusing](a-self-referential-schema-overflows-the-stack.md) | friction | Core |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
