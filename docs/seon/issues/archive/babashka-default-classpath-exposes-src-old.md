@@ -146,3 +146,24 @@ prove plain `bb` isolation, the edit hook, and the surviving operator surface
 together. Keeping that ordered deletion in the program ledger avoids carrying
 a duplicate hygiene issue whose proposed local edit is known to break
 maintained tooling.
+
+## Operator-collapse follow-up 2026-07-29
+
+Commit `c073093e2` discharged the operator half: `bin/seon` now invokes the
+fresh operator for every supported command, `bin/seon-fresh` is only an alias,
+and the broken `bb operator-test` task is gone. `bin/seon --help` and
+`bin/seon status` no longer load `seon.dev.cli` or Datahike through Babashka.
+
+The ambient-classpath half remains real and is now narrower:
+
+- `bb.edn:1` still includes `src-old`;
+- `bin/seon-hook:246-299` still loads quarry Markdown and docstring linters;
+- a real post-edit hook proof logged `MARKDOWN_LINT_ERROR` and
+  `DOCSTRING_LINT_ERROR` after Babashka's dynamic dependency addition found
+  incompatible DataStar dependency descriptions; and
+- `script/seon/dev/changed_test.clj:483-486` still launches the unavailable
+  Babashka `seon.dev.test-runner` instead of the fresh JVM gate.
+
+Those retained-tooling consumers are the remaining deletion boundary, now
+tracked by
+[[../finish-deleting-the-old-operator-classpath-from-retained-tooling]].
