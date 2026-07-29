@@ -7,8 +7,10 @@
   precedence defaults → overlay → environment, validates the closed result,
   and derives one canonical effective map, digest, and desired row.
 
-  Runtime consumers read only the database row. Explicit absence is the
-  `:seon.config/absent` compiler decision and never becomes nil or a datom."
+  Runtime consumers read only the database row. Omission from a sparse overlay
+  inherits the shipped decision; it does not retract a defaulted optional
+  attribute. `:seon.config/absent` is the one explicit retraction form, is
+  refused for required attributes, and never becomes nil or a datom."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -27,7 +29,11 @@
   "seon.db.process/config")
 
 (def absent
-  "The explicit compiler decision that an optional config attribute is absent."
+  "The sole explicit retraction decision for an optional config attribute.
+
+  Omitting an overlay entry inherits its shipped decision. This marker instead
+  removes a defaulted optional attribute from the effective map and desired
+  database row; the marker itself is never stored."
   :seon.config/absent)
 
 (def ^:private available-processors

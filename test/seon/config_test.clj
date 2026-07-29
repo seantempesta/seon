@@ -72,12 +72,19 @@
        {:seon.config.error/escalate-to config/absent})
       "the derived manifest schema admits explicit absence for an optional dial")
   (let [baseline (config/compile-manifest {})
+        omitted (config/compile-manifest {:seon.config/manifest {}})
         absent
         (config/compile-manifest
          {:seon.config/manifest
           {:seon.config.error/escalate-to config/absent}})
         effective (:seon.config/effective absent)
         row (:seon.config/desired-row absent)]
+    (is (= "root"
+           (:seon.config.error/escalate-to
+            (:seon.config/effective baseline))
+           (:seon.config.error/escalate-to
+            (:seon.config/effective omitted)))
+        "omission inherits the shipped default; it never means retraction")
     (is (not (contains? effective :seon.config.error/escalate-to)))
     (is (not (contains? row :seon.config.error/escalate-to)))
     (is (not-any? nil? (vals row)))

@@ -311,6 +311,14 @@ selector, defaults reader, or apply mechanism.
 
 ### One fresh semantic contradiction to resolve
 
+**Resolved 2026-07-29.** Omission from a sparse overlay inherits the shipped
+decision. `:seon.config/absent` is the one explicit retraction form for an
+optional config attribute; the compiler refuses it for required attributes
+and removes it before deriving the effective map and desired database row.
+`test/seon/config_test.clj` pins the report's concrete
+`:seon.config.error/escalate-to` case: omission retains `"root"`, while the
+marker retracts it without storing nil or the marker.
+
 Fresh comments say an optional dial with a shipped default can be explicitly
 absent, but the current reader cannot express that:
 
