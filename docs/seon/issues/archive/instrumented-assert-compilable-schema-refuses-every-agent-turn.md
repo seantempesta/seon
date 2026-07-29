@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, instrumentation, runtime, agent]
 ---
@@ -89,3 +89,37 @@ to. Widening to `:any` is not acceptable.
   the current green gate (549 tests / 2314 assertions) passes precisely
   because no test covers that combination.
 - No run is left open, held and planned with no receipt after an agent pass.
+
+## Resolution
+
+Activation legitimately consumes bound schema forms. Predicate binding is the
+construction that prevents Malli from creating a second SCI evaluator while
+compiling the acquired database population, so moving the assertion before
+binding would have checked a different value from the one activation compiles.
+
+`seon.schema.internal/assert-compilable-schema!` now names that activation-time
+boundary as `::bound-definition`. The schema admits the ordinary outer Malli
+forms whose nested predicate and generator slots may already contain function
+objects; it does not widen the boundary to `:any`. Source declarations retain
+their separate `:seon.schema/definition` contract and remain EDN-readable.
+
+The source-definition predicate now compiles a decoded declaration after
+binding its core predicate symbols. This validates the same source meaning that
+activation will compile while preserving the EDN round-trip requirement.
+
+## Proof
+
+`an-instrumented-dev-cluster-completes-one-agent-turn` starts a real scratch
+cluster under `tmp/instrumented-acquire-test/`, stubs only the hosted model
+response, arms `seon.instrument/apply!` at `:panic`, and proves that
+`assert-compilable-schema!` is wrapped. It then transacts a message to the root
+agent and observes one settled receipt, a closed run, released process custody,
+and zero `:seon.instrument/contract-violated` facts. The test always removes
+instrumentation and stops and deletes its scratch cluster.
+
+The regression alone passes 1 test and 7 assertions. The focused schema,
+instrumentation, and SCI eval gate passes 21 tests and 89 assertions. After the
+terminal-refusal settlement fence landed at `6ab646eb6`, the full `bin/test`
+gate passes 552 tests and 2,360 assertions, with zero failures and zero errors.
+The full gate runs both the settlement-fence regressions and the instrumented
+scratch-cluster turn, proving there is no interaction between those boundaries.

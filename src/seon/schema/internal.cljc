@@ -252,8 +252,19 @@
    without depending on declaration order or Malli's process-global default."
   {:malli/schema
    [:function
-    [:=> [:cat :map :keyword :seon.schema/definition] :nil]
-    [:=> [:cat :map :keyword :seon.schema/definition :map] :nil]]}
+    {:registry
+     {::bound-definition
+      [:or :nil :boolean
+       [:fn clojure.core/number?]
+       [:fn clojure.core/char?]
+       :string :keyword :symbol :uuid
+       [:fn clojure.core/inst?]
+       [:fn clojure.core/map?]
+       [:fn clojure.core/vector?]
+       [:fn clojure.core/set?]
+       [:fn clojure.core/sequential?]]}}
+    [:=> [:cat :map :keyword ::bound-definition] :nil]
+    [:=> [:cat :map :keyword ::bound-definition :map] :nil]]}
   ([schemas k v]
    (assert-compilable-schema! schemas k v {}))
   ([schemas k v compile-options]

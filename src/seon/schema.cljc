@@ -612,7 +612,11 @@
     (let [encoded (pr-str value)
           decoded (#?(:clj edn/read-string :cljs reader/read-string) encoded)]
       (and (= value decoded)
-           (some? (m/schema value {:registry (candidate-registry)}))))
+           (some? (m/schema
+                   (bind-predicates
+                    decoded
+                    (core-predicate-functions))
+                   {:registry (candidate-registry)}))))
     (catch #?(:clj Exception :cljs :default) _
       false)))
 
