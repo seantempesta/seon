@@ -602,6 +602,22 @@ may reintroduce a shadow build into the dev feedback path.
   render family + seon.data + schema EDN + the N5 indexer is
   misdesigned. Every new name gets a stated name table for owner veto
   before contracts seal.
+  **Rulings 2026-07-29 early (owner, decision batches 1+2):** renderer
+  eligibility = registered input schema name + public + same-namespace
+  duplicates refuse (cross-namespace same-signature = DIFFERENT renders,
+  possibly distance-differentiated — never duplicates). Precedence by
+  SPECIFICITY: slot redirect → viewer'''s own defn → owner'''s defn →
+  schema-attached default (general, optional) → the generic floor.
+  Function contracts/docstrings/tests are corpus facts by construction
+  (not a separate decision); the corpus updates at INDEX time and
+  DYNAMICALLY at eval. Ambiguous bare values: no refusal — cheap schema
+  FINGERPRINTING upgrades confident matches, the generic floor takes
+  the rest. The competent generic walker ALREADY EXISTS: seon.sci.admit'''s
+  bounded projection (the eval-result renderer) — the panel layers
+  presentation over it, no second walker. seon.data = brains
+  (census/fingerprint/explain), render family = floor. MESSAGE DELIVERY
+  IS A RENDER APPLICATION: the envelope is facts; the delivered body
+  renders per boundary kind (ai to agents, html to browsers).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
