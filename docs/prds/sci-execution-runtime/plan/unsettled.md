@@ -99,7 +99,7 @@ wakes/0 false vs 60/40; two-agent dedupe proven),
 `context-walk/s0-baseline` + `s1-shadow` (six verbatim side-by-sides —
 **await owner read**).
 
-## The checkpoint — NOT graduated, one lane from it
+## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under
 every ruled scenario**: one refused terminal commit → exactly one
@@ -108,26 +108,27 @@ being the trigger commit itself; first-form and mid-plan refusals,
 below-cap (next turn carries the refusal) and at-cap (episode ends
 clean) all correct; `kill -9` recovery marks `interrupted-at`, nothing
 re-executes, ready in 968 ms; one settlement path, three fenced
-writers, no second mechanism. It found two blockers standing in front
-of the claim:
+writers, no second mechanism. It found two blockers in front of the
+claim — **both now fixed and landed**:
 
 1. **`terminal-refusal-never-checks-its-own-settlement-commit`** —
-   FIXED AND LANDED (`6ab646eb6`): settlement data bounded and
-   validated before construction, the transaction's own outcome
-   checked, refusal raises a named core fault instead of returning
-   true, reboot recovery marks `interrupted-at`. Gate 552/2360/0.
-   Follow-on filed: `closed-agent-mailbox-turns-durable-fault-notice-into-core-fault`.
+   FIXED (`6ab646eb6`): settlement data bounded and validated before
+   construction, the transaction's own outcome checked, refusal raises
+   a named core fault instead of returning true, reboot recovery marks
+   `interrupted-at`. Follow-on filed:
+   `closed-agent-mailbox-turns-durable-fault-notice-into-core-fault`.
 2. **`instrumented-assert-compilable-schema-refuses-every-agent-turn`**
-   — fix complete in tree, UNCOMMITTED (a bound-definition named schema
-   at the activation boundary + source-form binding before Malli
-   compilation + an instrumented `:panic` scratch-cluster turn
-   regression). Its lane stopped honestly because the full gate was
-   blocked by lane 1's in-flight test; lane 1 has since landed, and the
-   lane is resumed to gate + commit + archive.
+   — FIXED (`6be7f1fb2`): a named bound-definition schema at the
+   activation boundary (never `:any`), source-form validation binds
+   predicate symbols before Malli compilation, and an instrumented
+   `:panic` scratch cluster completes a real agent turn. This closed
+   the class the green gate had never exercised.
 
-**Graduation = that commit + re-audit attempt 6** (the attempt-5 spec,
-on an isolated root — never the owner's JVM on 7994). Then the joint
-debt review.
+Full gate **552 tests / 2,360 assertions / 0 failures**, tree clean.
+**Re-audit attempt 6 is running** with instrumentation armed (an
+instrumentation violation during the drive is now itself a finding),
+on an isolated root. Green verdict = CHECKPOINT GRADUATED → then the
+joint debt review.
 
 ## Awaiting the owner only
 
