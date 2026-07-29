@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, boot]
 ---
@@ -59,3 +59,27 @@ Bootstrap config stays tiny: the selection is a path, never dials.
 applies only `config/default.edn`; the quarry report confirms that selected
 startup plus explicit apply/repair is the missing owner workflow. Config
 patching remains frozen; this is a cross-reference, not a fix plan.
+
+## Resolution 2026-07-29
+
+Resolved by the one fresh compiler and operator path:
+
+- `68a5de51f` made a selected file a sparse overlay over the complete shipped
+  defaults and made `seon.config/apply!` the single compile-and-reconcile
+  boundary.
+- `f219d96da` passed that sparse manifest through `seon.cluster/start!`, applied
+  it before the work launcher and agent graphs arm, and proved locked-state
+  repair plus two distinct cluster configurations in one JVM.
+- `ce2d8535d` landed `bin/seon start [cluster] [--config PATH]` and
+  `bin/seon config apply [cluster] PATH`; absent cluster means `default`, and
+  both surfaces reach the same `seon.config/apply!`.
+- `48f8bae83` proves every one of the 30 shipped config entries reaches a
+  running consumer, including provider descriptors and the live render/episode
+  reads.
+
+The regressions are `seon.cluster.boot-test/
+selected-config-repairs-locked-state-before-consumers-arm`,
+`seon.dev.fresh-operator-test/
+config-command-selection-defaults-cluster-and-start-accepts-config`, and
+`seon.config-application-test`. The final schema-resource checkpoint ran 531
+tests / 2,183 assertions with zero failures and zero errors.

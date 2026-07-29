@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, architecture]
 ---
@@ -208,3 +208,27 @@ observes that default applied, and then proves a sparse override can replace
 it. Focused config, schema, boot, and instrumentation gates are green. The
 issue remains open until the complete config wave supplies its final live
 proof and archive commit.
+
+## Resolution 2026-07-29
+
+Resolved by derivation from one registration:
+
+- `42887d234` introduced schema-loader derivation of manifest admissibility,
+  effective shape, and database installability from config attribute
+  registrations.
+- `68a5de51f` repaired the public runtime `schema/register!` path so the leaf
+  and all derived composites are contributed atomically. Its scratch-dial
+  regression performs one public registration and proves manifest admission,
+  exact explicit-absence entry shape, effective membership, config-entity
+  membership, canonical Datahike installation, and attached default—with zero
+  other registration edits—then removes the scratch dial.
+- The old honest-population and cross-check fences are gone because their
+  failure class is no longer constructible.
+- `48f8bae83` adds the remaining semantic half: its application ledger is
+  exactly equal to the shipped registered key set, and scratch-cluster proofs
+  show that every applied entry reaches a running consumer.
+- `79cef0144` moved all 33 schema EDN files to the classpath resource authority
+  without merging their editorial boundaries.
+
+The final schema-resource checkpoint ran 531 tests / 2,183 assertions with
+zero failures and zero errors.
