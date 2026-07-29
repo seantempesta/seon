@@ -293,9 +293,6 @@
     {:seon.cluster.work/assignment? assignment?
      :seon.cluster.work/declination? declination?}))
 
-(def ^:private settled-states
-  #{:succeeded :owner-fixed :owner-declared-cant})
-
 (defn form-settlement
   "One frozen form's exactly-one derived state at this database value."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -314,22 +311,23 @@
                         (form-run-id db form)
                         (:seon.cluster.run.form/ordinal form)
                         (boolean (:seon.cluster.eval/interrupted-at receipt))))
-        state (cond
-                (nil? receipt) :unevaluated
-                (not (terminal-receipt? receipt)) :running
-                declination? :owner-declared-cant
-                artifact? :unrouted-red
-                (and red? assignment?) :routed
-                red? :unrouted-red
-                assignment? :owner-fixed
-                :else :succeeded)]
+        [state settled?]
+        (cond
+          (nil? receipt) [:unevaluated false]
+          (not (terminal-receipt? receipt)) [:running false]
+          declination? [:owner-declared-cant true]
+          artifact? [:unrouted-red false]
+          (and red? assignment?) [:routed false]
+          red? [:unrouted-red false]
+          assignment? [:owner-fixed true]
+          :else [:succeeded true])]
     (cond-> {:seon.cluster.run.form/id
              (:seon.cluster.run.form/id form)
              :seon.cluster.run.form/ordinal
              (:seon.cluster.run.form/ordinal form)
              :seon.cluster.agent/id owner-id
              :seon.cluster.work/form-state state
-             :seon.cluster.work/settled? (contains? settled-states state)}
+             :seon.cluster.work/settled? settled?}
       receipt
       (assoc :seon.cluster.eval/id (:seon.cluster.eval/id receipt))
       (:seon.problems/id receipt)

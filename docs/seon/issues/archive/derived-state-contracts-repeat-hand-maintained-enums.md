@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, schema, architecture]
 ---
@@ -45,3 +45,16 @@ Replacing the context enum with the render-band schema reference and deriving
 `settled?` from `form-settlement` both require code-form edits; the lane
 explicitly prohibited code-form changes. This issue remains open for that
 behavior-preserving source change.
+
+## Resolution
+
+Re-verification confirmed both duplicate authorities. The durable contribution
+schema now references `:seon.render.block/band`, and `form-settlement` derives
+`state` and `settled?` as one pair in the evidence `cond`; the second literal
+settled-state set is gone.
+
+`seon.context-test` asserts the schema reference directly, while the existing
+exhaustive `seon.cluster.work-test` state table proves every settlement pair.
+`bin/test seon.context-test seon.cluster.work-test` ran 21 tests and 129
+assertions with zero failures or errors. Resolved in the commit that archives
+this note.

@@ -44,6 +44,10 @@
   reduction and identity oracles read."
   nil)
 
+(deftest contribution-band-references-the-block-band-owner
+  (is (= :seon.render.block/band
+         (schema/schema-definition :seon.context.contribution/band))))
+
 (defn- note!
   [name db]
   (when *invocations*

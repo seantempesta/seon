@@ -78,7 +78,7 @@
  ; The semantic cache band the ordering acted on. Fixed set, bands never
  ; cross; within a band, priority is a prior and name breaks ties.
  :seon.context.contribution/band
- [:enum :anchor :program :authored :continuity :dynamic]
+ :seon.render.block/band
  ; The bounded message of the flat error value, when the block failed.
  ; The full flat value stays in memory on the rendered-context record;
  ; the durable row keeps the open :seon.error/kind (already registered,
