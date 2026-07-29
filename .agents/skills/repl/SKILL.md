@@ -1,107 +1,110 @@
 ---
 name: repl
-description: "How the Seon REPL reads, repairs, and evaluates the Clojure forms you write. Use when an eval fails to parse, when your form comes back as a :read error, when a value you typed didn't run, when you're unsure whether to write a `(` form vs `;` prose vs a `{}` map, when a paren/bracket is unbalanced, or when you want your forms to land correctly on the first try."
+description: "How fresh Seon splits a model/agent reply into ordered plan-form sources. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, source fidelity, or namespace attribution through seon.cluster.reply and seon.sci.reader. Do not load it merely for a generic JVM REPL problem: io-prepl/MCP eval_clj and raw clojure -M:dev use ordinary Clojure read/eval semantics, which this skill distinguishes but does not replace."
 ---
 
-# REPL — how your forms are read, repaired, and run
+# REPL — distinguish the three surfaces
 
-Every reply you write is split into top-level forms by a **real reader**
-(rewrite-clj), not string-splitting. Knowing how it segments and repairs your
-text lets you write forms that land on the first try. The segmenter is
-`seon.repl.parse/parse-forms`; the repair layer is `seon.repl.parse.repair`.
+Three surfaces share Clojure syntax but not a reader contract:
 
-## What EVALUATES vs what is DROPPED (forms-and-prose-only)
+- **The Seon agent-form reader** splits a model's text reply into ordered plan
+  source strings. This is what this skill is mostly about. Fresh Seon uses
+  `seon.cluster.reply/sources` over `seon.sci.reader/read`; the retired
+  `src-old/seon/repl/parse.cljc` repair system is not on this path
+  (`src/seon/cluster/reply.cljc:1-48,307-354`).
+- **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
+  JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
+  structured envelope; a bare value evaluates normally, and the agent-reply
+  prose classifier is absent (`src/seon/cluster.clj:926-986`;
+  `reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
+  `script/seon/dev/mcp.clj:532-548`).
+- **A raw `clojure -M:dev` JVM REPL** is Clojure's ordinary
+  read-eval-print loop. Bare values evaluate and print, and there is no Seon
+  repair layer (`reference-code/clojure/src/clj/clojure/main.clj:368-467`).
 
-The reader keeps exactly one thing as a runnable form: a **list** `(…)` (and the
-list-shaped reader macros `'x` `@x` `#(…)` `` `(…) `` `#'x`). Everything else is
-prose.
+If a generic REPL probe behaves differently from an agent reply, that is not a
+contradiction; first name which surface you are on.
 
-- `(db/transact! …)` `(message/user "hi")` `(let [x 1] …)` → **evaluated**.
-- A bare atom / number / string / keyword / sentence → **dropped** (not echoed).
-- A top-level **data literal** `{…}` / `[…]` / `#{…}` → **dropped** with one
-  warning. If you mean to RUN a value, wrap it in a call: `(db/transact! :seon
-  [{…}])`, not a bare `{…}`.
+## The agent-reply surface
 
-## `#code` — raw foreign-source blocks with ZERO escaping
+The one SCI reader returns ordered events with exact source spans. It rejects
+`#=` and unknown tags, returns flat error values for malformed input, and
+tracks the namespace in effect while reading
+(`src/seon/sci/reader.cljc:28-116,296-405`).
 
-To pass a chunk of another language (Python, Rust, Go, YAML, a diff…) as data
-WITHOUT escaping its quotes and backslashes, write a `#code` heredoc:
+`seon.cluster.reply/sources` then decides which events are code:
 
+- Structured top-level lists, vectors, maps, and sets are plan forms.
+- A bare symbol is a plan form only when it occupies its own source line and
+  the reply also contains structured code.
+- Other text becomes single-`;` source comments attached to the next form;
+  trailing or pure prose becomes a comment-only source.
+- Markdown fence lines are stripped before reading because backticks otherwise
+  read as plausible symbols.
+
+Those classifications and the exact-source return contract are current at
+`src/seon/cluster/reply.cljc:20-48,143-240,307-354`. There is no delimiter
+auto-repair in this path. Unbalanced or malformed code returns
+`:seon.cluster.reply/unreadable`; an empty reply returns
+`:seon.cluster.reply/no-forms` (`src/seon/cluster/reply.cljc:307-354`).
+
+Practical rule: write code as ordinary balanced Clojure. Use single-`;`
+comments for prose you intentionally want preserved beside a form, and do not
+expect parinfer or a repair pass to guess missing delimiters.
+
+## Probing a live or raw JVM
+
+Use one form, then read the whole returned envelope. `io-prepl` distinguishes
+`:ret`, output, tap, namespace, timing, and exception data
+(`reference-code/clojure/src/clj/clojure/core/server.clj:228-296`).
+
+### Call an internal/private var
+
+Var-quote bypasses public resolution and gives the Var itself; invoke it in
+function position:
+
+```clojure
+(#'datahike.query/create-plan-via-ir db clauses #{} nil nil)
 ```
-(seon.agent.fs/replace!
-  {:seon.agent.fs/path "app.py"
-   :seon.agent.fs/find #code/python <<PY
-def f(x):
-    """Docs with "quotes" and \d regexes."""
-    return x
-PY
-   :seon.agent.fs/replace #code/python <<PY
-def f(x):
-    return x + 1
-PY
-   })
+
+This is the exact planner probe retained by Seon
+(`test/seon/datahike_fork_test.clj:31-33`). For a private atom, remember that
+`@#'ns/private-atom` yields the atom and `@@#'ns/private-atom` yields its
+contents; the observed trap is recorded in
+`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
+§6.
+
+### Reload before rerunning the same probe
+
+After editing a namespace, load the edited definition into the JVM before
+claiming the probe still fails:
+
+```clojure
+(require 'datahike.query :reload)
+(#'datahike.query/create-plan-via-ir db clauses #{} nil nil)
 ```
 
-- Opener `#code/<lang> <<SENTINEL`, then the payload on the next lines, then a
-  line that is **exactly** `SENTINEL` (you pick the word — any `[A-Za-z0-9_-]+`
-  that won't appear alone on a line in your payload). It reads to the inert
-  value `{:seon.code/lang :python :seon.code/text "…"}` — DATA, never run as
-  Clojure. The text is byte-faithful: no quote/backslash escaping, ever.
-- Use it **nested inside a call form** (an argument or map value), as above —
-  that's the point. A bare top-level `#code` is a lone value and gets dropped
-  like any bare literal.
-- Forget the closing `SENTINEL` line and you get a `:read` error naming the
-  sentinel it's still waiting for — fix it the same way you'd close a paren.
+`:reload` forces the named lib to load again; `:reload-all` also reloads libs
+it loads directly or indirectly
+(`reference-code/clojure/src/clj/clojure/core.clj:6149-6205`). Rerun the exact
+same form against the same immutable inputs so the before/after comparison
+changes only the edited code. The planner repair used this sequence
+(`docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
+“Evidence”).
 
-**Comment levels carry meaning** (your context renders as eval'able Clojure):
-`;` = prose to your human, `;;` = a code comment above a form, `;;;` = runtime
-structure (don't author these). Write your reasoning as `;` lines — never type
-`;;` when you actually mean data.
+For a running flow proc whose step function is stored as a Var, re-evaluating
+the `defn` updates the next step without rebuilding topology
+(`src/seon/flow.clj:83-115`;
+`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
+§4). Reloading is evidence only after the re-run; the edit on disk alone does
+not change an already-running JVM.
 
-## What the REPL AUTO-FIXES for you (don't sweat these)
+## Fast diagnosis
 
-A delimiter mistake is repaired in place via parinfer indent-mode and then
-re-validated before it runs — so these recover automatically:
-
-- a **missing trailing closer**: `(defn mean [xs] (/ (reduce + xs) (count xs))`
-  → the `)` is added.
-- a **surplus closer**: `(foo))` → the extra `)` is dropped.
-- a **wrong closer type** indent makes obvious: `]` where a `)` was meant.
-
-Keep your indentation honest — it's the signal parinfer uses. A pure orphan
-closer on its own line (`}` / `]`) is treated as recovery noise and dropped, so
-one stray delimiter never shreds your whole block.
-
-## What the REPL does NOT guess — you must fix these
-
-When the fix would require guessing your intent, the form comes back as a
-`:read` error showing your broken text, and you correct it next turn. These are
-NOT auto-repaired:
-
-- **invalid token**: `3x`, a lone `:` — `(map inc [1 2 3x])` is wrong; did you
-  mean `3`? `30`? The REPL won't guess.
-- **odd map**: `{:a 1 :b}` — a value is missing; only you know what.
-- **bad metadata**: `^123 (foo)` — metadata must be a map/keyword/symbol/string.
-
-These are exactly the cases where checking a fn/arg name against the codebase
-(query the program graph) before re-writing pays off — the reader can flag the
-shape, but not the right name.
-
-## How a failure reaches you
-
-A broken form records a `:read` eval whose value is your own text plus the
-parser message — you see it on your next turn's transcript and self-correct.
-Forms BEFORE and AFTER a broken one still run; one mistake doesn't abort the
-batch. An incomplete final form (EOF mid-form, e.g. `(db/transact! :seon [{:a
-1}` with no closer) is ONE honest error, not a cascade.
-
-## Write forms that land
-
-1. **One form, then read the result.** An eval returns the envelope; read it —
-   an eval can succeed yet carry `:seon.db/ok? false`. Don't batch ten forms
-   blind.
-2. **Balanced delimiters matter less than honest indentation** — parinfer closes
-   what your indentation implies, but a misleading indent fixes the wrong thing.
-3. **Wrap values you mean to run** — a bare `{…}` is dropped; `(do {…})` or the
-   call that consumes it runs.
-4. **Reasoning is `;` prose**, data is data — never `;;`-disguise a value.
+| Symptom | Surface and next move |
+|---|---|
+| Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` on the exact text. |
+| `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
+| Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |
+| A private function is unresolved | JVM probe: invoke `#'fully.qualified.ns/var`. |
+| The same old result appears after an edit | Reload/re-evaluate the owning namespace, then rerun the identical probe. |
