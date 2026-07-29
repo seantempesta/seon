@@ -50,6 +50,8 @@ Read the progressive-disclosure references when the map is not enough:
 - `references/render-delivery.md` — the current snapshot/delta renderer,
   target packages/keyframes, buffer laws, http-kit drain state, and frame
   budgets.
+- `references/degraded-start.md` — tower-layer diagnosis, advertisements,
+  scratch-JVM cleanup, stale code, and the in-memory fallback boundary.
 - `references/decisions.md` — the rulings, rationale, and rejected
   predecessors.
 
@@ -81,6 +83,25 @@ supports it, cached platform `:compute`, and cached platform `:mixed`
 (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`).
 The work launcher separately owns a virtual-per-task executor for evaluation
 tasks (`src/seon/flow.clj:402-432`).
+
+## Degraded start and stale JVMs
+
+When a scratch cluster fails partway up the tower, read
+`references/degraded-start.md` before retrying. The short version:
+
+- inspect the carried `:seon.boot/instance`; absent keys identify the last
+  published layer (`src/seon/cluster.clj:845-924,926-1023`);
+- inspect the advertisement and prove both the named cluster and any detached
+  operator JVM are gone; until the open
+  `docs/seon/issues/bin-seon-status-cannot-load-datahike-through-babashka.md`
+  blocker is resolved, use `bin/seon-fresh status`;
+- remember that `bin/seon start <name>` adds to an already-running JVM when
+  one is advertised, so its Var roots may predate the source edit
+  (`script/seon/fresh_operator.clj:495-522`); use a lane-owned operator root
+  with no advertisements to force a fresh JVM from current source; and
+- if boot is blocked by shared-tree churn but the subject is a pure
+  transformation, fall back to a separate `clojure -M:dev` JVM with immutable
+  in-memory inputs and make no live-tower claim.
 
 ## Building a proc
 
