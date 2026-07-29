@@ -1487,3 +1487,20 @@ Orchestrator-verified ordering defect between two correct fixes;
 instrumentation-order-fix lane dispatched (schema load precedes
 refresh; both regressions must survive + a fresh-process boot
 regression). Re-audit attempt 3 relaunches on its landing.
+
+**GRADUATION ATTEMPT 5 (Opus, 80b12d8f3): the SEAM IS GREEN under
+every ruled scenario (wrappers stripped; one terminal receipt + one
+error fact + closed run; the only wake = the trigger commit; crash
+recovery 968ms, nothing re-executes; one settlement path, three
+fenced writers) — but NOT GRADUATED: two NEW blockers found.
+(1) instrumented-assert-compilable-schema-refuses-every-agent-turn —
+acquire!'s activation hands BOUND forms to a contract declaring EDN
+forms; armed :panic instrumentation kills every agent turn (the green
+gate never exercised acquisition under armed instrumentation).
+(2) terminal-refusal-never-checks-its-own-settlement-commit — the
+minimal settlement commit CAN refuse and terminal-refused! returns
+true anyway (latent hot-loop precondition; un-refusable was an
+argument, not a fence). BOTH FIX LANES DISPATCHED (test-forward from
+the audit's reproductions; disjoint owners). Attempt 6 after both
+land. Owner-recommended: bounce the default JVM (morning code) at
+convenience — non-destructive reopen, facts survive, schemas accrete.
