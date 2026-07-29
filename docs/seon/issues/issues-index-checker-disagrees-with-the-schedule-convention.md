@@ -15,6 +15,17 @@ overwrite it. `bin/issues-index --check` still validates against the
 generated shape and now reports the hand-built schedule as stale
 (observed by the lane-tooling-fix lane, 2026-07-29 evening).
 
+## Evidence
+
+- `docs/seon/issues/AGENTS.md` and `README.md` require one named running lane or
+  future wave for every open note and explicitly forbid the old severity
+  projection from overwriting that schedule.
+- `bin/issues-index --check` exited 1 on the current schedule with only
+  `Issue index is stale; run bin/issues-index.`
+- The generated form cannot preserve destinations: its rows collapse work to
+  generic `Core` or `general` labels, and it retained the already archived
+  five-skills issue while omitting open retained-tooling work.
+
 ## Owner
 
 `bin/issues-index` — align the checker with the schedule convention
