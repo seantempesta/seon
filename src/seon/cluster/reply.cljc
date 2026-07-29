@@ -20,15 +20,16 @@
     symbol, so an unstripped ```` ```clojure ```` reply yields three
     \"forms\" — the failure is silent and produces plausible garbage.
 
-  PROSE IS A WHOLE-REPLY VERDICT, never a per-form filter. Every
-  English word can read as a symbol, so successful reading alone
-  cannot distinguish prose from code. A code reply has at least one
-  structured top-level form (a list, vector, map or set); a bare symbol
-  is retained only when it occupies its own source line inside that
-  structured reply. Any other atomic form makes the WHOLE original
-  reply text. This preserves `(def a 1)` then `a` while making partial
-  admission unrepresentable: a terminal list after an English sentence
-  cannot turn every preceding word into executable history.
+  PROSE BECOMES SOURCE COMMENTS, never forms. Every English word can
+  read as a symbol, so successful reading alone cannot distinguish
+  prose from code. Structured top-level forms (lists, vectors, maps and
+  sets) remain plan forms; a bare symbol remains a form only when it
+  occupies its own source line in a reply that also has structure.
+  Everything else is coalesced back into its original prose span,
+  prefixed with the agent-facing single-`;` comment grammar, and
+  attached to the next form. Trailing or pure prose becomes one
+  comment-only plan source: SCI reads that as nil, so the prose is
+  recorded but no prose token is resolved or invoked.
 
   SOURCES, NOT FORMS. The return is a vector of strings. The evaluator
   parses each one inside its own armed context, so the reply is read
@@ -62,32 +63,41 @@
 
 ;;; A fence is presentation. Backticks read as an ordinary symbol, so an
 ;;; unstripped ```clojure reply yields plausible garbage rather than an
-;;; error. Only whole fence lines are removed, so a backtick inside a
-;;; string literal is untouched.
-(defn- fenced-blocks
-  "The contents of every fenced block, or nil when the text has none."
-  [text]
-  (let [lines (str/split-lines text)
-        fenced? (fn [line] (re-matches #"[ \t]*```.*" line))]
-    (when (some fenced? lines)
-      (->> lines
-           (reduce (fn [{:keys [inside? blocks] :as state} line]
-                     (if (fenced? line)
-                       (assoc state :inside? (not inside?)
-                              :blocks (if inside? blocks (conj blocks [])))
-                       (cond-> state
-                         inside? (update-in [:blocks (dec (count blocks))]
-                                            conj line))))
-                   {:inside? false :blocks []})
-           :blocks
-           (map #(str/join "\n" %))
-           (str/join "\n\n")))))
+;;; error. Outside-fence Markdown is prose, so retain it as comments
+;;; instead of either parsing it or dropping it.
+(defn- fence-line?
+  "True for one Markdown backtick or tilde fence line."
+  [line]
+  (boolean (re-matches #"[ \t]*(?:```|~~~).*" line)))
+
+(defn- prose-line
+  "One nonblank prose line in the agent-facing comment grammar."
+  [line]
+  (let [line (str/trim line)]
+    (when-not (str/blank? line)
+      (if (str/starts-with? line ";")
+        line
+        (str "; " line)))))
 
 (defn- unfenced
-  "`text` with code fences removed: the fenced code when the reply has
-  fences, the text itself when it does not."
+  "Remove fence lines while retaining outside Markdown as prose comments."
   [text]
-  (or (fenced-blocks text) text))
+  (let [lines (str/split-lines text)
+        fenced? (some fence-line? lines)]
+    (if-not fenced?
+      text
+      (->> lines
+           (reduce (fn [{:keys [inside? output]} line]
+                     (if (fence-line? line)
+                       {:inside? (not inside?) :output output}
+                       {:inside? inside?
+                        :output (conj output
+                                      (if inside?
+                                        line
+                                        (or (prose-line line) "")))}))
+                   {:inside? false :output []})
+           :output
+           (str/join "\n")))))
 
 (defn- refused
   "The ONE registered flat error value (`:seon.error/value`).
@@ -98,23 +108,172 @@
    :seon.error/message message
    :seon.error/data data})
 
-(defn- code-reply?
-  "Whether every parsed form belongs to one whole code reply."
-  [source parsed]
-  (let [lines (str/split-lines source)
-        standalone-symbol?
-        (fn [[form form-source]]
-          (when (symbol? form)
-            (let [line (:line (meta form))
-                  source-line (when line (nth lines (dec line) nil))
-                  form-line (last (str/split-lines form-source))]
-              (and source-line
-                   (= (str/trim source-line) (str/trim form-line))))))]
-    (and (some (comp coll? first) parsed)
-         (every? (fn [[form :as parsed-form]]
-                   (or (coll? form)
-                       (standalone-symbol? parsed-form)))
-                 parsed))))
+(defn- parsed-events
+  "SCI forms with exact source spans in `source`."
+  [source]
+  (let [ctx (sci/init {})
+        reader (sci/source-reader source)]
+    (loop [search-from 0
+           events []]
+      (let [[form form-source] (sci/parse-next+string ctx reader
+                                                      {:eof ::eof})]
+        (if (= ::eof form)
+          events
+          (let [start (.indexOf source form-source search-from)]
+            (when (neg? start)
+              (throw (ex-info "SCI source span was not present in its input."
+                              {::text source
+                               ::form-source form-source})))
+            (let [end (+ start (count form-source))]
+              (recur end
+                     (conj events
+                           {::form form
+                            ::source form-source
+                            ::start start
+                            ::end end})))))))))
+
+(defn- standalone-symbol?
+  "True when an event is a bare symbol occupying its whole source line."
+  [whole-source {form ::form form-source ::source}]
+  (when (symbol? form)
+    (let [line (:line (meta form))
+          source-line (when line
+                        (nth (str/split-lines whole-source) (dec line) nil))
+          form-line (last (str/split-lines form-source))]
+      (and source-line
+           (= (str/trim source-line) (str/trim form-line))))))
+
+(defn- form-start
+  "Absolute source offset of an event's form, excluding leading comments."
+  [source event]
+  (let [{:keys [line column]} (meta (::form event))]
+    (if (and line column)
+      (loop [line-start 0
+             remaining-lines (dec line)]
+        (if (zero? remaining-lines)
+          (+ line-start (dec column))
+          (let [newline (.indexOf source "\n" line-start)]
+            (if (neg? newline)
+              (::start event)
+              (recur (inc newline) (dec remaining-lines))))))
+      (::start event))))
+
+(defn- structured-code-indexes
+  "Structured forms beginning a code line or following code on that line."
+  [source events]
+  (first
+   (reduce
+    (fn [[indexes code-events] [index event]]
+      (let [start (form-start source event)
+            line-start (inc (.lastIndexOf source "\n" (dec start)))
+            begins-line? (str/blank? (subs source line-start start))
+            follows-code? (some (fn [code-event]
+                                  (let [previous-end (::end code-event)]
+                                    (and (<= previous-end start)
+                                         (not (str/includes?
+                                               (subs source previous-end start)
+                                               "\n"))
+                                         (str/blank?
+                                          (subs source previous-end start)))))
+                                code-events)]
+        (if (and (coll? (::form event))
+                 (or begins-line? follows-code?))
+          [(conj indexes index) (conj code-events event)]
+          [indexes code-events])))
+    [#{} []]
+    (map-indexed vector events))))
+
+(defn- code-event-indexes
+  "Indexes of structured forms and established standalone-symbol forms."
+  [source events]
+  (let [structured-indexes (structured-code-indexes source events)
+        structured? (seq structured-indexes)]
+    (into structured-indexes
+          (keep-indexed
+           (fn [index event]
+             (when (and structured?
+                        (standalone-symbol? source event))
+               index)))
+          events)))
+
+(defn- comment-source
+  "Coalesce prose into safe single-`;` source comments."
+  [text]
+  (->> (str/split-lines (str/trim text))
+       (keep prose-line)
+       (str/join "\n")))
+
+(defn- plan-sources
+  "Attach prose spans to the next form and retain trailing prose."
+  [source events]
+  (let [code-indexes (code-event-indexes source events)
+        code-events (keep-indexed (fn [index event]
+                                    (when (contains? code-indexes index)
+                                      event))
+                                  events)]
+    (loop [cursor 0
+           remaining (seq code-events)
+           sources []]
+      (if-let [{::keys [start end] form-source ::source} (first remaining)]
+        (let [prose (comment-source (subs source cursor start))
+              plan-source (str (when-not (str/blank? prose)
+                                 (str prose "\n"))
+                               form-source)]
+          (recur end (next remaining) (conj sources plan-source)))
+        (let [prose (comment-source (subs source cursor))]
+          (cond-> sources
+            (not (str/blank? prose)) (conj prose)))))))
+
+(def ^:private prose-read-failure
+  #"^Invalid (?:number|symbol|keyword|token)")
+
+(defn- code-line?
+  "True when a line begins with reader syntax rather than prose."
+  [line]
+  (boolean (re-find #"^[\(\[\{\)\]\}\#'`~@^]" (str/triml line))))
+
+(defn- readable-code-suffix
+  "A structured all-code suffix beginning later on one prose line."
+  [line]
+  (some (fn [offset]
+          (let [suffix (subs line offset)]
+            (try
+              (let [events (parsed-events suffix)]
+                (when (and (seq events)
+                           (some (comp coll? ::form) events)
+                           (every? (fn [event]
+                                     (or (coll? (::form event))
+                                         (standalone-symbol? suffix event)))
+                                   events))
+                  suffix))
+              (catch #?(:clj Throwable :cljs :default) _ nil))))
+        (keep-indexed (fn [index character]
+                        (when (#{\( \[ \{} character) index))
+                      line)))
+
+(defn- comment-prose-failure
+  "Comment one reader-failing prose line, preserving a valid code suffix."
+  [source failure recovered-lines]
+  (let [message (or (ex-message failure) (str failure))
+        failure-data (ex-data failure)
+        line-number (or (:line failure-data) (:row failure-data))
+        lines (vec (str/split source #"\n" -1))
+        line (when line-number (nth lines (dec line-number) nil))]
+    (when (and line
+               (not (contains? recovered-lines line-number))
+               (re-find prose-read-failure message)
+               (nil? (:opened-delimiter failure-data))
+               (nil? (:opened-delimiter-loc failure-data))
+               (not (code-line? line)))
+      (let [suffix (readable-code-suffix line)
+            prefix (when suffix
+                     (subs line 0 (- (count line) (count suffix))))
+            replacement (if suffix
+                          (str (prose-line prefix) "\n" suffix)
+                          (or (prose-line line) ""))]
+        {:source (str/join "\n"
+                           (assoc lines (dec line-number) replacement))
+         :line line-number}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract
@@ -130,38 +289,31 @@
   - `::unreadable` — unbalanced or malformed input, carrying the
     reader's own position so the agent can see where;
   - `::refused-tag` — `#=` or an unknown reader tag, named;
-  - `::no-forms` — the reply carried prose only. This is a real agent
-    outcome, not a parse failure, and it must be distinguishable."
+  - `::no-forms` — the reply was empty or whitespace only. Prose is a
+    successful comment source, not a refusal."
   {:malli/schema [:=> [:cat :seon.cluster.reply/text]
                   [:or :seon.cluster.reply/sources :seon.error/value]]}
   [text]
-  (let [source (unfenced text)
-        ; parsing is not evaluation: a throwaway context with no
-        ; bindings and no interrupt-fn is all a reader needs, and it is
-        ; all model text should ever be handed
-        ctx (sci/init {})
-        reader (sci/source-reader source)]
-    (try
-      (loop [parsed []]
-        (let [[form form-source] (sci/parse-next+string ctx reader
-                                                        {:eof ::eof})]
-          (cond
-            (= ::eof form)
-            (if (code-reply? source parsed)
-              (mapv second parsed)
-              (refused ::no-forms
-                       "The reply carried no Clojure forms to run."
-                       {::text text}))
-
-            (str/blank? form-source)
-            (recur parsed)
-
-            :else (recur (conj parsed [form form-source])))))
-      (catch #?(:clj Throwable :cljs :default) failure
+  (loop [source (unfenced text)
+         recovered-lines #{}]
+    (let [attempt (try
+                    {:sources (plan-sources source (parsed-events source))}
+                    (catch #?(:clj Throwable :cljs :default) failure
+                      {:failure failure}))]
+      (if-let [failure (:failure attempt)]
         ; sci's reader refuses #= and unknown tags by itself — there is
         ; no blocklist here, and there must never be one
         (let [message (or (ex-message failure) (str failure))]
           (if (or (str/includes? message "EvalReader")
                   (str/includes? message "reader function for tag"))
             (refused ::refused-tag message {::text text})
-            (refused ::unreadable message {::text text})))))))
+            (if-let [{recovered-source :source line :line}
+                     (comment-prose-failure source failure recovered-lines)]
+              (recur recovered-source (conj recovered-lines line))
+              (refused ::unreadable message {::text text}))))
+        (let [sources (:sources attempt)]
+          (if (seq sources)
+            (vec sources)
+            (refused ::no-forms
+                     "The reply carried no Clojure forms or prose notes."
+                     {::text text})))))))

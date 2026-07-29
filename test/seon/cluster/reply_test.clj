@@ -7,9 +7,8 @@
   The property is a ROUND TRIP over generated forms: print a vector of
   forms, split the printed text, and the sources must read back as
   equivalent forms in the same order. That is what makes this a codec
-  rather than a regex — and the same property with fences wrapped
-  around the text must produce the identical vector, because a fence is
-  presentation and must not survive into a plan.
+  rather than a regex. Markdown fences are presentation and never reach
+  the plan; surrounding explanation survives as source comments.
 
   The refusal cases are the ones probe C measured on real model-shaped
   text, and they are the reason nothing here calls
@@ -31,9 +30,6 @@
 
 (defn- error? [value]
   (and (map? value) (string? (:seon.error/message value))))
-
-(defn- no-forms? [value]
-  (= :seon.cluster.reply/no-forms (:seon.error/kind value)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The round trip
@@ -71,7 +67,9 @@
                         language (gen/elements ["" "clojure" "clj" "edn"])]
            (let [body (str/join "\n" (map pr-str forms))
                  fenced (str "Here you go:\n\n```" language "\n" body "\n```\n")]
-             (= (reply/sources body) (reply/sources fenced))))
+             (let [sources (reply/sources fenced)]
+               (and (= forms (mapv read-back sources))
+                    (not-any? #(str/includes? % "```") sources)))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "fenced input differed: " (pr-str check)))))
@@ -88,13 +86,16 @@
     (is (= ["(println \"a ) b\")" "(inc 1)"]
            (reply/sources "(println \"a ) b\")\n(inc 1)")))
     (is (= ["(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))"]
-           (reply/sources "(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))")))))
+           (reply/sources "(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))"))))
+  (testing "parenthesized code mentioned in prose is still prose"
+    (is (= ["; I will run (+ 1 2) now.\n(+ 1 2)"]
+           (reply/sources "I will run (+ 1 2) now.\n(+ 1 2)")))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Code or text — the whole reply, never token salad
+;;; Forms and prose — comments record text, only forms run
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-reply-is-entirely-code-or-entirely-text
+(deftest forms-run-and-prose-becomes-source-comments
   (testing "pure code keeps its exact ordered top-level sources"
     (let [text (str "(def widgets (map inc (range 3)))\n"
                     "widgets\n"
@@ -104,23 +105,42 @@
               "(my.run/complete \"counted 6\")"]
              (reply/sources text)))))
 
-  (testing "pure prose stays exact reply text and yields no forms"
+  (testing "pure prose is one recorded comment source, never a form"
     (let [text "I explained what I had done. The result was fifty-five."
           result (reply/sources text)]
-      (is (no-forms? result))
-      (is (= text (get-in result
-                          [:seon.error/data :seon.cluster.reply/text])))))
+      (is (= ["; I explained what I had done. The result was fifty-five."]
+             result))
+      (is (nil? (read-back (first result)))
+          "SCI reads a comment-only source as nil; no prose token resolves")))
 
-  (testing "the live word-salad reply freezes none of its 23 tokens"
+  (testing "mixed prose attaches to the next form and trailing prose survives"
+    (let [text (str "First I will add the values.\n"
+                    "(+ 1 2)\n"
+                    "Then I will finish.\n"
+                    "(my.run/complete \"3\")\n"
+                    "That is all.")]
+      (is (= ["; First I will add the values.\n(+ 1 2)"
+              "; Then I will finish.\n(my.run/complete \"3\")"
+              "; That is all."]
+             (reply/sources text)))))
+
+  (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
     (let [text (str "I defined a function to sum integers from 1 to n, "
                     "called it with 10 to get 55, and reported the action.\n"
                     "(my.run/complete \"reported\")")
           result (reply/sources text)]
-      (is (no-forms? result))
-      (is (not (vector? result))
-          "neither `get` nor the trailing list becomes a plan form")
-      (is (= text (get-in result
-                          [:seon.error/data :seon.cluster.reply/text]))))))
+      (is (= [(str "; I defined a function to sum integers from 1 to n, "
+                   "called it with 10 to get 55, and reported the action.\n"
+                   "(my.run/complete \"reported\")")]
+             result))
+      (is (= '(my.run/complete "reported") (read-back (first result))))
+      (is (not-any? #{"I" "defined" "1" "10" "get" "55"} result)
+          "none of the live prose tokens becomes its own plan source")))
+
+  (testing "invalid prose tokens are comments while a same-line form survives"
+    (is (= ["; denied /etc/hosts now.\n(my.run/complete \"denied\")"]
+           (reply/sources
+            "denied /etc/hosts now.(my.run/complete \"denied\")")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws
@@ -133,6 +153,10 @@
       (is (= :seon.cluster.reply/unreadable (:seon.error/kind refused)))
       (is (str/includes? (:seon.error/message refused) "1")
           "the reader's own position reaches the agent")))
+  (testing "an invalid token inside a structured form is malformed code"
+    (let [refused (reply/sources "(+ 1\n  80s)")]
+      (is (error? refused))
+      (is (= :seon.cluster.reply/unreadable (:seon.error/kind refused)))))
   (testing "read-eval is refused by the reader, not by a blocklist"
     (let [refused (reply/sources "#=(System/exit 1)")]
       (is (error? refused))
@@ -141,17 +165,19 @@
                      (:seon.error/kind refused)))))
   (testing "an unknown reader tag is refused by name"
     (is (error? (reply/sources "#foo/bar [1 2]"))))
-  (testing "prose with no forms is its own outcome, not a parse failure"
-    (let [refused (reply/sources "I think we should consider the options.")]
-      (is (error? refused))
-      (is (no-forms? refused))))
-  (testing "an empty reply is the same outcome"
+  (testing "an empty reply has neither a form nor a prose note"
     (is (= :seon.cluster.reply/no-forms
            (:seon.error/kind (reply/sources "   \n\n  "))))))
 
-(deftest a-fenced-reply-with-prose-around-it-still-splits
-  (is (= ["(def a 1)" "(my.run/complete \"done\")"]
+(deftest a-fenced-reply-retains-surrounding-prose-as-comments
+  (is (= ["; Sure — here is the plan.\n\n(def a 1)"
+          "(my.run/complete \"done\")"
+          "; Let me know if that works."]
          (reply/sources
           (str "Sure — here is the plan.\n\n"
                "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
                "Let me know if that works.")))))
+
+(deftest tilde-fences-have-the-same-presentation-semantics
+  (is (= ["; Here:\n(+ 1 2)" "; Done."]
+         (reply/sources "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."))))

@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: high
-tags: [issue, agent, runtime, ai]
+tags: [issue, agent, runtime]
 ---
 
 # A prose reply was tokenized into garbage forms instead of refused
@@ -52,18 +52,18 @@ The two-word token `", and"` shows the split is not even a clean tokenizer.
 ## Why this is not the agent's mistake
 
 An agent mistake becomes a flat `:seon.error` value the agent sees, which is
-working correctly per receipt. What is wrong is one level up: a reply that
-contains no readable form is a REFUSAL condition for the reader, and the run
-should carry one `:seon.cluster.run/error` saying the reply was not forms —
-the shape `interruption`'s retired doctrine and the run family's lens already
-know how to present. Instead the reader manufactures a plan, so "nothing
-re-executes" is honoured while "nothing meaningless executes" is not.
+working correctly per receipt. What is wrong is one level up: prose tokens are
+note content, never individual forms. The reader must preserve any real forms
+in source order without manufacturing executable history from the surrounding
+English.
 
 Note the archived
 `archive/prose-token-line-recovery-swallowed-same-line-forms.md`: a previous
-system had a prose-token recovery path and its own defect. This is the same
-class re-appearing in the fresh tree, and the fix is not another recovery
-heuristic — it is a reader that either reads forms or refuses.
+system had a prose-token recovery path and its own defect. The quarry
+comparison in
+`docs/prds/sci-execution-runtime/research/reply-parser-quarry-2026-07-29.md`
+showed that its useful property was per-span classification: prose became
+narration and real forms survived.
 
 ## Owner
 
@@ -72,33 +72,38 @@ downstream consumer, and `seon.cluster.loop` for the refusal's disposition.
 
 ## Resolution
 
-Resolved by the commit that archives this note. `seon.cluster.reply/sources`
-still uses SCI's `source-reader` and `parse-next+string` for every boundary;
-there is no whitespace splitter and no new Markdown parser.
+The first resolution in `2a49cbd75` killed the word-salad class but made one
+whole-reply decision. Quarry review then found the measured regression: the
+retained live reply was one prose sentence followed by the valid completion
+form the prompt requested.
 
-Admission is one whole-reply decision:
+`seon.cluster.reply/sources` still uses SCI's `source-reader` and
+`parse-next+string`; there is no whitespace splitter and no restored
+rewrite-clj/parinferish stack. Its revised admission is:
 
-- A code reply has at least one structured top-level form.
-- A bare symbol remains valid only when it occupies its own source line inside
-  that structured reply. This preserves the established `(def widgets ...)`,
-  `widgets`, completion plan.
-- Any other atomic form makes the whole original reply text. Nothing before or
-  after it is partially admitted, and the exact text remains in the
-  `::no-forms` error value.
+- Structured top-level forms beginning a code line, or following another form
+  on that line, remain ordered plan sources. A parenthesized expression
+  mentioned inside an English line remains prose.
+- A bare symbol remains a form only on its own source line in a reply that also
+  contains structure, preserving `(def widgets ...)`, `widgets`, completion.
+- Every other readable atom coalesces back into prose, uses the single-`;`
+  comment grammar, and attaches to the next form.
+- Trailing or pure prose becomes a comment-only source. SCI reads it as nil,
+  so no prose token resolves or invokes anything.
+- Invalid prose tokens are commented and re-read; malformed code still returns
+  `::unreadable` with the SCI reader's position.
 
-The live reply therefore returns `::no-forms`: neither `get` nor its trailing
-completion list becomes a plan source, so the run freezes zero forms and
-commits zero eval receipts.
+The live reply now freezes ONE source: the sentence as a comment followed by
+`(my.run/complete "reported")`. None of `I`, `1`, `10`, `get`, or `55` becomes
+an independent form or receipt.
 
 ## Proof
 
-- `bin/test seon.cluster.reply-test seon.cluster.turn-test`:
-  25 tests, 126 assertions, 0 failures, 0 errors.
-- Changed-test gate generation 664:
-  116 tests, 552 assertions, 0 failures, 0 errors.
-- `bin/test` on the integrated current tree:
-  422 tests, 1,683 assertions, 0 failures, 0 errors. The suite grew from the
-  requested 418/1,651 baseline while this bounded lane was running.
-- `test/seon/cluster/reply_test.clj` covers pure code with its standalone
-  `widgets` form, pure prose with exact text retention, and the exact live
-  word-salad reply reconstructed from the retained log.
+- `bin/test seon.cluster.reply-test seon.cluster.turn-test`: 26 tests, 130
+  assertions, 0 failures, 0 errors.
+- `test/seon/cluster/reply_test.clj` covers pure code, pure prose, mixed
+  prose/forms, invalid-token same-line recovery, unbalanced code, fenced
+  Markdown, and the exact live word-salad reply reconstructed from the retained
+  log.
+- `bin/test`: 430 tests, 1,703 assertions, 0 failures, 0 errors (the shared
+  tree had advanced from the requested 422/1,683 baseline).
