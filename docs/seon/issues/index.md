@@ -21,7 +21,7 @@ complete open inventory while each row receives current-tree verification.
 | 4 | PRESSING | ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | Config admission, database installation, and defaults still require separate registration edits; a fix lane is relaunching. | Config/schema reconciliation rung |
 | 5 | PRESSING | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | The catalog still advertises six absent projection functions, so every advertised family can return `:seon.render/unresolvable`. | N5 / program-graph render rung |
 
-Thirty open notes remain to be verified against current source. Their
+Thirty-one open notes remain to be verified against current source. Their
 severity grouping below is inventory, not a completed triage classification.
 
 ## Closed by current-tree verification
@@ -35,7 +35,7 @@ severity grouping below is inventory, not a completed triage classification.
 | DISSOLVED | [An owner can never fix a red form into settlement](archive/an-owner-can-never-fix-a-red-form-into-settlement.md) | The 2026-07-29 late-morning ruling replaced `:owner-fixed` with test-based goal completion. |
 | DISSOLVED | [Root blocks carry two key vocabularies, so the page 500s](archive/root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | Plan law L18 resets clusters to current pages; current source installs only `:seon.render.block/*`. |
 
-## Blocker (10)
+## Blocker (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -46,6 +46,7 @@ severity grouping below is inventory, not a completed triage classification.
 | [Keep evaluation failures inside total admission](sci-eval-failure-bypasses-total-admission.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
+| [Preserve original line endings in SCI reader source spans](sci-reader-normalizes-crlf-but-reply-uses-original-offsets.md) | blocker | general |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | blocker | agent |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
