@@ -6,6 +6,17 @@ tags: [prd, agent, architecture, runtime]
 
 # generate-code v0 — the whole loop on the local model (2026-07-29)
 
+> **REVISION 2026-07-29 (rev 4, D10 ruled — FINALIZED).** The last open owner
+> decision is closed: **a can't-fix is a STRUCTURED REPLY, no new
+> disposition** — the owner agent completes, its reply is a registered
+> schema'd value naming which problem and why, and settlement reads the
+> reply's shape. The two-disposition seal stands untouched. Rev 4 therefore
+> **specifies E5 exactly** (§12.3, so no lane invents it), records that **E3
+> is in flight** with its remainder named (§12.2), names the **one-form probe**
+> that gates E2′'s unbound rule (§12.1), keeps X2 as recorded, and states the
+> **final seal condition with its dispatch order** (§14). No owner decision
+> remains open.
+>
 > **REVISION 2026-07-29 (rev 3, owner rulings batch 4).** Two owner rulings
 > (plan README, `4193c3f91`) resolve rev 2's two blockers, and both go
 > *against* rev 2's design:
@@ -257,12 +268,21 @@ problem stops deriving at the current basis — the same "a problem stops being
 a problem when the facts stop saying so" rule `seon.problems` is already built
 on. Completion stays evidence-derived, as the quarry's hardest lesson demands.
 
-**What "owner-declared-can't" is.** The one place a claim is irreducible:
-nothing observable distinguishes "I cannot fix this" from "I have not fixed
-this yet". It needs an explicit **value** — never prose the driver parses —
-and it collides with the sealed two-disposition surface, where "adding a third
-disposition is a design change, not a convenience". **Rev 3 does not invent
-it**: §12 E5 names the unit and §11 D10 puts the collision to the owner.
+**What "owner-declared-can't" is — RULED [rev 4].** The one place a claim is
+irreducible: nothing observable distinguishes "I cannot fix this" from "I have
+not fixed this yet". Rev 3 put the collision with the sealed two-disposition
+surface to the owner as D10. **The ruling: a can't-fix is a STRUCTURED REPLY,
+no new disposition** — the owner agent simply completes, its reply is a
+registered schema'd value naming which problem and why, and the settlement
+derivation **reads the reply's shape**. One new value schema, zero new
+lifecycle. The exact shape is specified in §12 E5, so no implementing lane
+invents it.
+
+The consequence for this model is that the third arm needs **no** new
+machinery: `owner-declared-can't` is presence of a declination value whose
+`about` refs the routed problem and whose sender is that assignment's
+recipient. It joins exactly like every other fact — no prose is parsed
+anywhere, which is what "reads the reply's shape" means.
 
 ---
 
@@ -430,14 +450,14 @@ Every proof is claimed by `bin/test`; a live-only proof counts as NOT COVERED.
 
 | primitive | state | v0's use |
 |---|---|---|
-| `my.message/send` | **needs E3** | the surface and the assignment |
+| `my.message/send` | **E3 in flight [rev 4]** | the surface and the assignment |
 | `seon.cluster.message/reply` | landed | the repair-turn trigger |
 | `caused-by` chain | landed | goal scoping |
 | F1 graphs, custody-as-presence | landed | four agents, no dispatcher |
 | the fold + receipts | landed; **needs E2′** (routing + the unbound rule) | the attempt |
 | the ONE reader's `:seon.sci.reader/ns` | **parse-primitives plan, in flight** | attribution |
 | the evaluator's namespace | **E1, non-blocking complement** | anomaly detection |
-| the can't-fix value | **needs E5** | settlement's third arm |
+| the declination value | **E5, specified §12.3** | settlement's third arm |
 | P2 test facts, P3 assignment | landed | red facts and the ownership join |
 | render walk + distance, `seon.problems` | landed (gains a family) | root's block; the derivation |
 
@@ -524,7 +544,7 @@ complete no matter what any agent said.
 
 ---
 
-## 11. Owner decisions **[rev 3 — D8 resolved, D10 new]**
+## 11. Owner decisions **[rev 4 — D8 and D10 both resolved; none open]**
 
 **D1 — `generate-code` as a name?** *Yes for the loop, no for any code.*
 
@@ -548,22 +568,17 @@ evaluation-truth complement and is **no longer blocking**. v0-B is withdrawn.
 
 **D9 — one live goal per planner at v0.** *Recommendation: accept and record.*
 
-**D10 — how does an owner say "I can't fix this"? [new]** The settled-form
-model needs its third arm, and it collides with the sealed two-disposition
-surface. Options, recommendation first:
-
-1. **A third disposition** (`my.run` gains one member). Honest, minimal, and
-   symmetric with `complete`/`wait` — but it breaks a seal the owner set
-   deliberately ("adding a third disposition is a design change").
-2. **A resolution value on the assignment** — a distinct agent-facing value
-   meaning "this assignment is declined", leaving `my.run` sealed. Costs a
-   fourth agent-facing value family.
-3. **Derive it from silence plus a bound** — **rejected**: a timeout standing
-   in for a declaration is exactly the tuned constant the standing ruling
-   bans, and it resurrects the silent-loss class S6 named.
-
-*Recommendation: option 1*, because the fact being expressed genuinely is a
-run disposition. Either way it is **E5**, its own unit.
+**D10 — how does an owner say "I can't fix this"? RESOLVED [rev 4].** The
+owner ruled **option 2, sharpened**: a can't-fix is a **structured reply**,
+not a disposition. The owner agent simply completes; its reply is a registered
+schema'd value naming which problem and why; the settlement derivation reads
+the reply's **shape**. One new value schema, zero new lifecycle, and the
+two-disposition seal stands untouched. My recommendation (option 1, a third
+disposition) was **not** taken, and the ruling is the better call: the fact
+being expressed is about *an assignment*, not about *a run*, so it belongs
+with the message shapes rather than in `my.run` — which also keeps
+declination on the same delivery path, the same `about` identity, and the same
+join as everything else. Specified exactly in §12.3.
 
 ### Name table
 
@@ -573,24 +588,133 @@ run disposition. Either way it is **E5**, its own unit.
 | `:seon.cluster.run.form/ns` | the projected ref at plan freeze | **restored [rev 3]**; sits beside `/id`, `/run`, `/ordinal`, `/source` |
 | evaluated namespace on the receipt | evaluation truth, the complement | `sci/eval.clj`'s own `sci/ns` binding |
 | **settled** / **routed** / **owner-fixed** / **owner-declared-can't** | the form states of §2.4 | the owner's own words in ruling 1 |
+| `my.message/decline`, `:my.message/declination`, `:my.message/reason` | the structured can't-fix reply | the D10 ruling; colocated with the message shapes it rides |
 | the assignment identity | derived `(about, recipient)`, upsert-based | the existing derived-identity idiom |
 | **"residue"** | *retired* — say **author-owned red form** | R34; §1.1 |
 | ~~"stop-at-first-red"~~ | **superseded by ruling 1** | — |
 
 ---
 
-## 12. Preconditions — separate units with owners **[rev 3 — E2 replaced, E5 new]**
+## 12. Preconditions — separate units with owners **[rev 4 — E5 specified, E3 in flight]**
 
 | id | unit | owner | status |
 |---|---|---|---|
-| **E2′** | **owner-routed fold [replaces E2]**: a red form emits a routed problem to its namespace owner (author fallback); plus the **unbound-var result is red** rule at the admission gate. Closes `a-failed-form-does-not-stop-the-fold` by routing, per ruling 1. | `seon.cluster.loop` + `seon.sci.admit` (the unbound rule) | **BLOCKING** |
-| **E3** | `about`-carrying sends + commit-time `(about, recipient)` assignment identity | `my.message` + `seon.cluster.message` + `schema/message.edn` | **BLOCKING** (S4, S5) |
-| **E5** | **the can't-fix value [new]** — settlement's third arm; see D10 | `my.run` (or a new value family), owner-ruled | **BLOCKING** — without it, a plan containing an unfixable form can never settle |
+| **E2′** | **owner-routed fold [replaces E2]**: a red form emits a routed problem to its namespace owner (author fallback); plus the **unbound-var result is red** rule at the admission gate; plus X2's resume-artifact exclusion. Closes `a-failed-form-does-not-stop-the-fold` by routing, per ruling 1. | `seon.cluster.loop` + `seon.sci.admit` (the unbound rule) | **BLOCKING**; the unbound half is **gated on the §12.1 probe** |
+| **E3** | `about`-carrying sends + commit-time `(about, recipient)` assignment identity | `my.message` + `seon.cluster.message` + `schema/message.edn` | **IN FLIGHT [rev 4]** — see §12.2 |
+| **E5** | **the declination value [rev 4, specified below]** — settlement's third arm, per the D10 ruling | `my.message` + `schema/message.edn` (colocation: it is a message shape) | **BLOCKING**, and **serialized after E3** (same files) |
 | **E1** | evaluated-namespace on the receipt | `seon.sci.eval` + `schema/run.edn` | **no longer blocking [rev 3]** — the complement that makes parse/eval disagreement detectable. Until it lands, v0 reports the disagreement rather than detecting it per-form. |
 | **E4** | trigger coalescing — one run answers every unanswered trigger at its basis | `seon.cluster.work` | not blocking (S9) |
 | **I1** | issue: a frozen disposition can close against newer facts | the run-closing owner | not blocking under §10 |
 | **X1** | **coordination**: the parse-primitives plan keeps `:seon.sci.reader/ns`; this plan keeps the freeze projection; neither re-derives the other's half | both plans | in flight, same rulings |
-| **X2** | **dependency [rev 3]**: `cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established` (blocker, filed by another lane). Either it lands, or E2′'s routing excludes resume-artifact failures — otherwise a process death is misattributed to a namespace owner (§2.3) | that issue's owner | **blocks correct attribution**, not the loop's shape |
+| **X2** | **dependency [rev 3]**: `cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established` (blocker, filed by another lane). Either it lands, or E2′'s routing excludes resume-artifact failures — otherwise a process death is misattributed to a namespace owner (§2.3) | that issue's owner | **stands [rev 4]**; the recommendation is the exclusion inside E2′ so this never gates dispatch |
+
+### 12.1 The E2′ probe — run this one form before designing the unbound rule **[rev 4]**
+
+The unbound-var-result rule is gated on the `seon.sci.admit` owner confirming
+that the marker is visible at that seam. **The implementing lane runs this
+first, before writing anything:**
+
+```clojure
+(do (declare zz) zz)
+```
+
+`declare` creates a var with no root binding, so the form's value IS an
+unbound var reference — the open issue's exact condition, in one form, with no
+plan, no model, and no second agent. Evaluate it through the production
+`seon.sci.eval/evaluate` and inspect the **admitted** value:
+
+- if it arrives as a structured reference (the codec's
+  `:seon.sci.admit/reference` shape), the rule is a predicate over the
+  admitted value and E2′ implements it directly;
+- if it arrives as a **string** carrying `"Unbound: #'…"` — which is what the
+  issue's live evidence shows reaching the agent — then detection at the
+  admitted value would be **string matching, which this plan refuses**. The
+  rule must then move upstream of stringification, inside the codec, and that
+  is the `seon.sci.admit` owner's contract change, not this plan's.
+
+**The probe decides which of those two it is. Do not design the rule before
+running it** — the difference is a predicate versus another owner's contract
+change, and guessing wrong is a wasted lane.
+
+### 12.2 E3 is in flight — verify, do not re-implement **[rev 4]**
+
+`about`-carrying sends are being implemented right now by another lane
+(working-tree changes in `src/my/message.cljc`, `src/seon/cluster/message.cljc`
+and `src/seon/schema/message.edn` at the time of this revision; check
+`git log` on return). The landing shape matches this plan's E3 request
+exactly:
+
+```clojure
+(my.message/send to content about)   ; about = a string identity
+;; → {:my.message/to … :my.message/content … :my.message/about "<identity>"}
+```
+
+with a flat `::no-about` error value for a blank or non-string identity, and
+the driver resolving the identity to the ref — agents hold names, never entity
+ids, exactly as they do for recipients.
+
+**Two things this plan still owes E3 and must verify on landing rather than
+assume:** the **commit-time `(about, recipient)` assignment identity** (S5 —
+a render-time read is not a fence, and the landing send alone does not supply
+one), and the latched-concurrency proof (§6.3). If the landed work stops at
+the value shape, the identity half remains E3's open remainder.
+
+### 12.3 E5 — the declination value, specified **[rev 4]**
+
+Per the D10 ruling: a can't-fix is a **structured reply**, not a disposition.
+The owner completes normally; the shape below is what its reply carries, and
+the settlement derivation reads that shape.
+
+**Owner: `my.message` + `src/seon/schema/message.edn`** — colocation, because
+this is a message shape, it rides the delivery path E3 is building, and its
+`about` is the same driver-resolved string identity. `my.run` is **not**
+touched: the two-disposition seal stands, `:my.run/disposition` keeps its two
+members, and no lifecycle changes.
+
+The value:
+
+```clojure
+(my.message/decline to about reason)
+;; → {:my.message/to      "planner"        ; the delegator that assigned it
+;;    :my.message/about   "<problem-id>"   ; WHICH problem — string identity
+;;    :my.message/reason  "…"}             ; WHY — for readers, never parsed
+```
+
+Registered beside the existing message shapes:
+
+```clojure
+:my.message/reason [:string {:min 1}]
+:my.message/declination
+[:map {:closed true}
+ [:my.message/to :my.message/to]
+ [:my.message/about :my.message/about]
+ [:my.message/reason :my.message/reason]]
+;; admitted alongside a message, so a form may return either, or a vector
+:my.message/value
+[:or :my.message/message :my.message/declination
+     [:vector {:min 1} [:or :my.message/message :my.message/declination]]]
+```
+
+Rules the implementing lane does not have to invent:
+
+- **blank or non-string `to`/`about`/`reason` returns the ONE registered flat
+  error value**, never throws — identical to `send`'s three arms, with kinds
+  `::no-recipient`, `::no-about`, `::no-reason`;
+- **`about` is required.** A declination that does not name its problem is
+  unjoinable, and the whole point of the ruling is that settlement reads shape
+  rather than prose. This is the one place `about` is mandatory;
+- **delivery is the ordinary path** — same row, same derived id, same
+  recipient check, same chain bound. A declination IS a message; it carries
+  one extra fact;
+- **settlement reads it as**: a routed problem is `owner-declared-can't` when
+  a declination exists whose `about` refs that problem **and** whose sender is
+  the recipient of that problem's live assignment. Presence, joined, total;
+- **it does not close the run and does not retire the problem's red facts.**
+  The form stays red; it is *settled* because its owner answered. That
+  distinction is the model's whole point and must survive implementation.
+
+**Crash walk:** pure, like `send`. A kill loses a map on a dead thread;
+nothing was declined, because nothing is ever delivered from inside an eval.
 
 ---
 
@@ -619,7 +743,7 @@ falsification (attribution owner; fold semantics).
 
 ---
 
-## 14. Seal assessment **[rev 3]**
+## 14. Seal assessment **[rev 4 — final]**
 
 **Both of rev 2's blockers are resolved by the rulings; one new blocker
 appears from the ruling itself (E5).**
@@ -629,27 +753,44 @@ appears from the ruling itself (E5).**
 | 1. what triggers the first repair turn? | yes, landed | §3.2 |
 | 2. does one run execute several namespaces? | **resolved differently [rev 3]** — attribution is parse-time REPL semantics; execution truth is the complement, and disagreement is reported | §2.2, D8 |
 | 3. what scopes one goal across runs? | yes, landed | §3.1 |
-| 4. at-most-once, and delivered/outstanding/repaired? | **design given, needs E3 + E5** | §3.3, §2.4 |
+| 4. at-most-once, and delivered/outstanding/repaired/declined? | **fully specified [rev 4]**; needs E3's identity half + E5 built | §3.3, §2.4, §12.3 |
 | 5. what prevents a stale disposition closing? | **plan settlement**; class filed | §10 |
 | 6. what fold ruling closes the false-completion issue? | **RULED** — owner-routed fold | §2.3 |
 | 7. what fan-out bound composes with the cap? | yes, derived | §9 |
 
-**Seal requires three contracts authored by their owners: E2′** (routing plus
-the unbound-var rule — needs the admit owner's confirmation that the marker is
-visible at that seam), **E3** (about-carrying sends and the assignment
-identity), and **E5** (the can't-fix value, gated on D10). E1 is no longer
-blocking; D8 is closed.
+**Every owner decision is now closed [rev 4].** D8 by ruling 2, D10 by the
+structured-reply ruling. Nothing in this plan waits on a taste call, and no
+element is left to an implementing lane's invention: the E5 shape is written
+out in §12.3, the E2′ probe is one named form in §12.1, and E3's remainder is
+named in §12.2.
 
-**One element is deliberately left open rather than guessed:** D10, because it
-touches a surface the owner sealed on purpose. Everything else is landed,
-derived from landed facts, or owned by a named unit.
+### The seal condition, precisely **[rev 4]**
+
+**Implementation dispatches when E2′, E3 (including its assignment-identity
+half) and E5 are green, with X2 discharged either by the cold-resume blocker
+landing or by E2′ carrying the resume-artifact exclusion.**
+
+Order and parallelism — three tracks, only one of which is serialized:
+
+| when | unit | why this position |
+|---|---|---|
+| **now, parallel** | **the §12.1 probe** `(do (declare zz) zz)` | depends on nothing; decides whether E2′'s unbound half is a predicate or another owner's contract change. Cheapest thing here, and it gates design rather than code. |
+| **now, parallel** (other lanes) | **E3** landing; the parse reader landing `:seon.sci.reader/ns` (X1) | both already in flight; this plan verifies rather than implements |
+| **after E3** | **E5** | **serialized, not parallel** — E5 touches `src/my/message.cljc` and `src/seon/schema/message.edn`, the same files E3 is editing right now. Running them together is a shared-file conflict, and the ordering costs nothing because E5 is small. |
+| **after the probe + the reader** | **E2′** | its routing needs the parse-time namespace to attribute with, and its unbound half needs the probe's answer. Carries X2's exclusion. |
+| **after all three** | the loop itself, then the §5 drive | — |
+
+**The critical path is E3 → E5**, because it is the only serialized pair;
+E2′'s two gates (probe, reader) both resolve in parallel with it. Nothing here
+waits on E1, P1, N5, the effect door, or E4.
 
 ---
 
 ## 15. Sequencing
 
-**Blocked on E2′, E3, E5.** Not blocked on P1, N5, E1, or the effect door, and
+**Blocked on E2′, E3, E5**, in §14's order — the only serialized pair is
+E3 → E5 (shared files). Not blocked on P1, N5, E1, E4, or the effect door, and
 must not acquire those dependencies during implementation. Coordinated with
-the parse-primitives plan through X1. It occupies a parallel product slot,
-never the F-series spine; its first honest v1 begins when N5's corpus round
-trip makes accepted code callable.
+the parse-primitives plan through X1 and with the cold-resume blocker through
+X2. It occupies a parallel product slot, never the F-series spine; its first
+honest v1 begins when N5's corpus round trip makes accepted code callable.
