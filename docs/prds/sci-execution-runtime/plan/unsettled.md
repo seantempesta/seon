@@ -103,6 +103,24 @@ JVM restart, zero-overlay config + single-registration dial + explicit
 absence, the fork's bound holding (239,188 bytes vs the 524,288
 bound), full gate 531/2183/0 independently green. The checkpoint
 graduates when the hot-loop fix lands + re-audit of that seam passes.
+**EVERYTHING SCHEDULED (owner order, 2026-07-29 evening).** Ruling 23
+(nothing re-fires; the episode turn cap is the only retry budget)
+corrected the hot-loop fix mid-flight. NINE lanes running:
+refusal-hotloop-fix (corrected), renderer-config-fact-fix,
+skills-update (priority — agents consume skills), seondb-facade-quarry
+(ruling 22a — mine the three old generations, dual-arity auto-db),
+small-correctness-batch (9 issues), contracts-quality-batch (5),
+hygiene-batch (5), lane-tooling-fix (codex-agent stop/resume
+verification), issue-triage final chunks (rebuilding index.md as THE
+SCHEDULE — every open issue gets a running lane, a named future wave,
+or dies with evidence). Future-wave assignments: parser merge
+(cold-resume), render implementation (walk-overlap +
+program-graph-render-declarations — UNBLOCKED, graph data exists),
+test-dissolution (polled transitions), deps/vendor review (datahike
+planner defects, malli vendor), config follow-up (flow-dials
+two-owners — possibly dissolved by the derivation). OWNER PENDING
+unchanged: render-design read, S1 shadow read, upstream PR go,
+generate-code conversation.
 
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
