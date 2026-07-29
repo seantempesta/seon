@@ -15,7 +15,6 @@
             [seon.dev.release :as release]
             [seon.dev.restore :as restore]
             [seon.dev.restore-state :as restore-state]
-            [seon.dev.skills :as skills]
             [seon.dev.state :as state]
             [seon.launch :as launch]))
 
@@ -1262,22 +1261,6 @@
                     :cmd argv})))
   nil)
 
-(defn- skills! [configuration arguments]
-  (let [root (:seon.dev.config/root configuration)]
-    (case (vec arguments)
-      ["sync"]
-      (let [result (skills/sync! root)]
-        (println (str "● generated "
-                      (count (:seon.dev.skills/synced result))
-                      " shared skills into both tool adapters")))
-
-      ["check"]
-      (do (skills/check! root)
-          (println "● generated skill adapters match seon-skills"))
-
-      (throw (ex-info "Choose `skills sync` or `skills check`."
-                      {:seon.dev.cli/arguments (vec arguments)})))))
-
 (defn- help! []
   (println
     (str "Usage: bin/seon [up] [--open] [--config PATH]\n\n"
@@ -1294,7 +1277,6 @@
          "                            build runtime and optional downstream SDK\n"
          "  test changed --path PATH...  run affected tests from the warm graph\n"
          "  test pod|database|operator|all [selector]\n"
-         "  skills sync|check        generate or verify tool-facing skill adapters\n"
          "  cluster apply NAME       apply release, config, and initial agent\n"
          "  cluster open|restart|close|status NAME [--edn]\n"
          "  cluster reset <name>     drain and reset one named database\n"
@@ -1322,7 +1304,6 @@
           "doctor" (doctor! configuration command-arguments)
           "release" (release! configuration command-arguments)
           "test" (test! configuration command-arguments)
-          "skills" (skills! configuration command-arguments)
           "config" (config! configuration command-arguments)
           "cluster" (cluster! configuration command-arguments)
           ("help" "--help" "-h") (help!)

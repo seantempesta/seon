@@ -675,7 +675,7 @@ steps 1-4 as one orchestrator-owned unit during a lane freeze: code
 identities (`client`/`cluster` mapping, `pod.js` -> `client.js`,
 `pod-events.log` -> `client-events.log`, `:seon.dev.process/pod` ->
 `/client`), then `acme`/`src-inspect-ai`, then living docs, localized
-`AGENTS.md` authorities, and skills (resync adapters), then the sweep.
+`AGENTS.md` authorities, and the one linked skill tree, then the sweep.
 Prerequisite (plan's freeze gate 3): quiesce both clusters under PRE-rename
 code (`bin/seon down`, `bin/acme down`) with recorded absence evidence —
 the rename cannot cross persisted `:seon.dev.process/pod` records, restore
@@ -694,9 +694,9 @@ branch clusters retain `processes/pod.edn`; ten worktrees need explicit
 merge/discard/translate dispositions; and every existing `tmp/package-v*`
 artifact predates the rename and must be invalidated. Recent SCI-host files
 add active terminology absent from the dated inventory, so the exact sweep is
-recomputed only at the recorded freeze HEAD. Skill sources are edited first,
-then adapters regenerated with `bin/seon skills sync`/`skills check`; the MCP
-client restarts before its renamed round-trip can count as proof.
+recomputed only at the recorded freeze HEAD. Skill sources are edited in the
+one real `.agents/skills` tree; `seon-skills` and `.claude/skills` are links.
+The MCP client restarts before its renamed round-trip can count as proof.
 
 The original delta is
 [[research/stage2-freeze-readiness-delta-2026-07-20]] (`4fb2aa53`), refreshed

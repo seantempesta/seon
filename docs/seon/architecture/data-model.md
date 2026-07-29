@@ -1132,9 +1132,9 @@ The default and test context trees contain no skills context block. Importing
 skill source therefore consumes no standing prompt tokens. Dynamic context, namespace
 cards/current source, and state-gated blocks remain responsible for normal
 capability discovery; explicit loading is available when a user or agent truly
-wants the source in context. `seon-skills` is the shipped skill-source authority, while
-`.agents/skills` and `.claude/skills` are generated or mechanically validated
-adapter views.
+wants the source in context. `.agents/skills`, `seon-skills`, and
+`.claude/skills` resolve to one checked-in skill tree. The latter two paths are
+links for their runtime and Claude consumers, so no copied adapter can drift.
 
 ### 5.6 config manifest — an optional desired-state input
 

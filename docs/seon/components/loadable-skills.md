@@ -65,26 +65,20 @@ does not contain a skills context block.
 The system instruction may mention the qualified `my.skills/load` escape hatch,
 but that is a pull reference, not injected skill content.
 
-## Corpus and development-tool adapters
+## One corpus at three consumer paths
 
-The directories currently serve different consumers:
+The paths serve different consumers but resolve to the same checked-in bytes:
 
-| Directory | Consumer |
+| Path | Consumer |
 |---|---|
-| `seon-skills/` | runtime import corpus selected by the shipped manifest |
-| `.agents/skills/` | Codex project-skill discovery |
-| `.claude/skills/` | Claude Code project-skill discovery and the unconfigured runtime fallback |
+| `.agents/skills/` | the one real directory; Codex project-skill discovery |
+| `seon-skills/` | link used by the runtime import corpus |
+| `.claude/skills/` | link used by Claude Code project-skill discovery |
 
-Runtime-importable skills originate in `seon-skills/`; `bin/seon skills sync`
-generates their exact `.agents` and `.claude` adapter trees. Codex-only operator
-skills originate in `.agents/skills/` and generate their matching Claude
-adapters. Claude-only skills are outside that graph and remain untouched.
-
-`bin/seon skills check` reports every changed, missing, or extra adapter file.
-The operator suite runs the same check, so a tool-facing copy cannot quietly
-become another authority. A symlink is not assumed safe because project-skill
-discovery is owned by external tools whose link traversal contracts Seon does
-not control.
+Edit `.agents/skills/`; both other consumers see those bytes through their
+links. There is no generator, adapter copy, or drift checker. Whether a skill
+is runtime-importable or development-only is content metadata rather than a
+property of which duplicate directory happened to contain it.
 
 ## Remaining database-ownership gap
 

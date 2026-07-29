@@ -132,8 +132,8 @@ Translate current source prose, tests, root and localized `AGENTS.md` files,
 living `docs/seon/` architecture, component, reference, vision, concept, and
 process-management documents, active program roadmaps, and skill sources.
 Fold `docs/seon/pod/REPL-WORKFLOW.md` into the architecture tree. Edit skill
-sources first, then regenerate adapters with `bin/seon skills sync` and prove
-them with `bin/seon skills check`; generated adapters are never hand-edited.
+sources first in the one real `.agents/skills` tree; `seon-skills` and
+`.claude/skills` resolve to the same bytes by link.
 
 The already-ruled vocabulary riders share the freeze:
 
@@ -255,7 +255,7 @@ The required correctness gates are:
 - complete `bin/seon test operator`;
 - affected `src-inspect-ai` Python tests;
 - Markdown structure tests; and
-- `bin/seon skills sync` followed by `bin/seon skills check`.
+- the repository's linked-skill-tree check.
 
 The live proof must falsify partial identity cuts:
 

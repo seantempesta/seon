@@ -10,8 +10,8 @@ Deletion plan: `docs/prds/sci-execution-runtime/research/pod-cut-verdict-2026-07
 routing + page tree), `observability.md` (cluster lifecycle, the
 `/agents/run` door + debug surfaces), and `resources/public/css/input.css`
 (maintained Phosphor Terminal theme tokens). Skills:
-`datastar-web-ui` (SSE/morph/signals), `browser-automation` (verification —
-note the browser 503s long-lived SSE; verify feeds with a server-side client).
+`datastar-web-ui` (SSE/morph/signals). Verify long-lived feeds with a
+server-side client when a browser bridge cannot hold SSE.
 
 ## Systems at play
 
