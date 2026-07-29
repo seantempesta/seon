@@ -22,6 +22,7 @@
 (def ^:private base
   {:seon.ai/endpoint "http://127.0.0.1:1/chat/completions"
    :seon.ai/model "probe-model"
+   :seon.ai/max-tokens 8192
    :seon.ai/api-key-variable "SEON_AI_TEST_KEY_ABSENT"
    :seon.ai/prompt "say hello"
    :seon.ai/timeout-ms 250})
@@ -45,6 +46,7 @@
     (is (schema/valid-candidate-value? :seon.ai/targets targets))
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
             :seon.ai/model (:seon.config.ai/model @dials)
+            :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
@@ -61,6 +63,7 @@
 (deftest no-auth-is-an-explicit-exclusive-target-shape
   (let [target {:seon.ai/endpoint "http://127.0.0.1:8090/v1/chat/completions"
                 :seon.ai/model "local-model"
+                :seon.ai/max-tokens 8192
                 :seon.config.ai/no-auth true
                 :seon.ai/timeout-ms 300000}]
     (is (schema/valid-candidate-value? :seon.ai/target target))
@@ -123,6 +126,7 @@
                            :seon.config.ai.backup/timeout-ms 30000))]
     (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
             :seon.ai/model "claude-probe"
+            :seon.ai/max-tokens 8192
             :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
             :seon.ai/timeout-ms 30000}
            backup))
@@ -234,6 +238,8 @@
     ;; is the one :any third-party document and we project out of it
     ;; immediately rather than pretending it is Clojure data
     (is (= "probe-model" (get body "model")))
+    (is (= 8192 (get body "max_tokens"))
+        "the descriptor's positive output budget reaches the wire")
     (is (vector? (get body "messages"))
         "one non-streaming chat completion, nothing else")
     (is (false? (get body "stream")))))

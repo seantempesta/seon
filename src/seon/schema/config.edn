@@ -81,6 +81,12 @@
  :seon.config.ai/model
  [:string {:min 1}]
 
+ ; The positive output budget sent to the provider. It bounds thinking
+ ; and visible completion together; the HTTP deadline remains only the
+ ; backstop for genuinely unobservable remote state.
+ :seon.config.ai/max-tokens
+ :seon.ai/max-tokens
+
  :seon.config.ai/api-key-variable
  [:string {:min 1}]
 
@@ -186,6 +192,8 @@
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint {:optional true} :seon.config.ai/endpoint]
   [:seon.config.ai/model {:optional true} :seon.config.ai/model]
+  [:seon.config.ai/max-tokens
+   {:optional true} :seon.config.ai/max-tokens]
   [:seon.config.ai/api-key-variable
    {:optional true} :seon.config.ai/api-key-variable]
   ; the declared no-auth state (local servers) — admitted here so a
@@ -246,6 +254,7 @@
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
+  [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
   ; The explicit unauthenticated target shape. Literal true is optional:
   ; absence selects the credential-variable shape, while false is not a
@@ -308,6 +317,7 @@
    :seon.config/on-core-error]
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
+  [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
   [:seon.config.ai/no-auth
    {:optional true} :seon.config.ai/no-auth]

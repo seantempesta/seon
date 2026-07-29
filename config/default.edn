@@ -122,6 +122,12 @@
  ; Unit: the provider's own model name.
  :seon.config.ai/model "deepseek-chat"
 
+ ; Unit: maximum provider completion tokens, including reasoning tokens.
+ ; Provenance: the 2026-07-29 real thinking-model calibration exhausted
+ ; 4,096 tokens without visible content; 8,192 completed three consecutive
+ ; ordinary Seon task shapes while preserving thinking.
+ :seon.config.ai/max-tokens 8192
+
  ; Unit: the NAME of an environment variable. Never the credential —
  ; the key is read at the leaf, never becomes a datom, never enters Git.
  :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"

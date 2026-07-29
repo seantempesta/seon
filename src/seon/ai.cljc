@@ -113,6 +113,7 @@
         (merge
          {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
           :seon.ai/model (:seon.config.ai/model dials)
+          :seon.ai/max-tokens (:seon.config.ai/max-tokens dials)
           :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
          (if (:seon.config.ai/no-auth dials)
            {:seon.config.ai/no-auth true}
@@ -206,12 +207,14 @@
   shape is right and survives; what dies with the quarry is everything
   around it (streaming, thinking modes, provider dispatch)."
   {:malli/schema [:=> [:cat :seon.ai/request] [:map]]}
-  [{:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
+  [{:keys [:seon.ai/model :seon.ai/max-tokens
+           :seon.ai/system :seon.ai/prompt]
     stream? :seon.ai/stream?}]
   ;; STRING keys: this is the wire document, not Clojure data. It is
   ;; built as strings and read back as strings, so nothing in between
   ;; has to remember which side of the boundary it is on.
   (cond-> {"model" model
+           "max_tokens" max-tokens
            "stream" (boolean stream?)
            "messages" (cond-> []
                         system (conj {"role" "system" "content" system})

@@ -157,6 +157,7 @@
   [endpoint extra]
   (merge {:seon.ai/endpoint endpoint
           :seon.ai/model "fixture"
+          :seon.ai/max-tokens 8192
           :seon.ai/api-key-variable "PATH"
           :seon.ai/prompt "hello"
           :seon.ai/timeout-ms 5000}
