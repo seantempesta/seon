@@ -778,12 +778,27 @@ Use a matching `.agents/skills/*/SKILL.md` before specialized work. Skills are
 workflows, not substitutes for source reading. Especially:
 
 - `data-oriented-clojure` before any Seon Clojure;
+- `seon-flow-architecture` before touching a proc, graph, channel, buffer,
+  workload, wake, or fault — or before designing any new runtime mechanism;
 - `data-modeling` plus `datahike` for schemas, queries, and transactions;
-- `clojurescript` for pod/self-host/async behavior;
-- `datastar-web-ui` and `browser-automation` for Seon's web UI;
-- `clojure-testing` for CLJS/Datahike test mechanics;
-- `seon-context-config` for manifests/context blocks;
-- `ui-canvas` for `my.canvas`.
+- `clojure-testing` for test mechanics and the database fixture;
+- `repl` for how an agent's own forms are read and evaluated.
+
+**A SKILL'S BLAST RADIUS IS EVERY AGENT THAT LOADS IT** (owner ruling
+2026-07-29). A wrong line in code fails one lane; a wrong line in a skill
+silently poisons the context of everyone who invokes it, and they will
+trust it precisely because it is the curated guidance. So:
+
+- every factual claim in a skill carries a `file:line` or a named research
+  document, and is verified against CURRENT source when written OR touched;
+- a claim that cannot be verified is DELETED, never hedged — "probably" in a
+  skill is worse than silence;
+- designs that are ruled but unbuilt are marked explicitly (`[TARGET]`) so no
+  one writes code against them;
+- a skill that no longer matches the system is a HIGH-PRIORITY defect, not
+  documentation debt: fix or retire it the day it is noticed;
+- new or substantially changed skills get an INDEPENDENT verification pass
+  that trusts nothing — the same adversarial standard as a landing wave.
 
 Use `rg`/`rg --files` for search and `apply_patch` for edits. If repeated patch
 attempts fail, the function or document is too complex—refactor it.
