@@ -3,7 +3,7 @@
  ;; lights green. The old system lives under `src-old/`/`test-old/` as the
  ;; quarry (git is the archive) and is DISABLED by default: it loads only
  ;; through the explicitly old-facing aliases below.
- ;; resources joins the classpath for the render pipeline's assets
+ ;; resources is the classpath authority for schema EDN and render assets
  ;; (css build products, bundled fonts once licensed).
  :paths ["src" "resources"]
 

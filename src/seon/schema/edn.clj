@@ -42,6 +42,10 @@
   [::files ::files]
   [::keys ::keys]])
 
+(def default-resource-dir
+  "Classpath directory backed by `resources/seon/schema/` in a source checkout."
+  "seon/schema")
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
@@ -215,8 +219,9 @@
 
 (defn load!
   "Merge every `<resource-dir>/*.edn` on the classpath into candidates.
-  Default resource-dir is \"seon/schema\". Each
-  file is one EDN map of registry key → schema form. Refuses
+  The default is `default-resource-dir`, physically
+  `resources/seon/schema/` in a source checkout. Each file is one EDN map of
+  registry key → schema form. Refuses
   `::duplicate-attribute` (one key contributed by two files, both
   named), `::unreadable-file` (not EDN, file named), and
   `::not-a-map` (a file whose top level is not a map). Contributes
@@ -225,7 +230,7 @@
   loaded."
   {:malli/schema [:=> [:cat ::load-request] ::loaded]}
   [{::keys [resource-dir]}]
-  (let [resource-dir (or resource-dir "seon/schema")
+  (let [resource-dir (or resource-dir default-resource-dir)
         resources (resource-files resource-dir)
         {::keys [forms files-by-key]} (merge-schema-files resources)
         forms (derive-config-forms forms)]

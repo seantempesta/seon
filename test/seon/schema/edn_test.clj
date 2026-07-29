@@ -8,7 +8,8 @@
   Fixture EDN lives under test/seon/schema_edn_fixtures/ (on the :test
   classpath), one directory per scenario, so the production
   `seon/schema` resource directory is never touched by a test."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -21,6 +22,13 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The loader
 ;;; ---------------------------------------------------------------------------
+
+(deftest production-schema-edn-is-a-resource-not-source
+  (let [loaded (schema.edn/load! {})
+        files (:seon.schema.edn/files loaded)]
+    (is (seq files))
+    (is (every? #(str/includes? % "/resources/seon/schema/") files)
+        "all production schema EDN comes from the dedicated resource root")))
 
 (deftest a-directory-of-files-is-one-population
   (let [loaded (schema.edn/load!
