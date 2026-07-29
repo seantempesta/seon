@@ -215,7 +215,8 @@
         (seon.flow/submit!!
          {::seon.flow/submission-id submission-id
           ::seon.flow/workload :compute
-          ::seon.flow/time-limit-ms (:seon.sci.eval/time-limit-ms request)
+          ::seon.flow/time-limit-ms
+          (* 2 (:seon.sci.eval/time-limit-ms request))
           ::seon.flow/work-fn
           (fn [{::seon.flow/keys [started!]}]
             (started!)

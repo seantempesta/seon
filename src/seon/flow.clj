@@ -475,6 +475,7 @@
   (let [{::keys [graph active-work]} (current-work-launcher)
         result (promise)
         status (atom ::queued)
+        work-fn (bound-fn* work-fn)
         submitted-at (System/nanoTime)
         injection
         (flow/inject
