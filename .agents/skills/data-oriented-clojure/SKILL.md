@@ -1,6 +1,6 @@
 ---
 name: data-oriented-clojure
-description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljc, designing a data model, or implementing a capability, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored derived state, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, or a parallel namespace to house a fix. Use before guessing library behavior instead of reading reference-code/. For EAV mechanics see datahike; for schema EDN design see data-modeling."
+description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY Seon .clj/.cljc OR maintaining a vendored Clojure fork that Seon owns under reference-code/; this does not trigger for unrelated third-party work. Also use it when designing a data model or capability, or whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored derived state, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, an unordered collection driving a tied decision, or a parallel namespace to house a fix. Use before guessing library behavior instead of reading reference-code/. For EAV mechanics see datahike; for schema EDN design see data-modeling."
 ---
 
 # Data-Oriented Clojure — the Seon mindset
@@ -206,6 +206,30 @@ An in-body `atom` or `loop`/`recur` to accumulate pure traversal state is a
 place-oriented tell. Reach for `into` with a transducer, `reduce` (+ `reduced`
 for early exit), or a pure recursive helper with accumulator args. State lives in
 the call, not a mutable cell — output depends only on input.
+
+### Unordered collections never decide order or break ties
+
+A set is honest membership data and dishonest ordering data. The same applies
+to a hash map when its entry walk controls a sequence. If a cost, score, or
+priority comparison can tie, preserve an existing semantic order in a vector
+or add an explicit domain tie-break; never let “first” mean the first value
+encountered while walking a set or hash map.
+
+The failure mode is deceptive: hash iteration can leak a symbol's or object's
+hash into the chosen plan. Equivalent input then changes behavior after a
+rename or between JVM boots, making a deterministic defect look intermittent.
+Datahike's planner did exactly this by converting source-ordered operations to
+a set before stable cost sorting; the repair preserves the operation vector and
+removes the selected identical operation
+(`reference-code/datahike/src/datahike/query/plan.cljc:1544-1599`,
+`:1607-1663`; full failure and repair:
+`docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
+“Stable equal-cost selection”).
+
+Audit every tie-break, “pick the first”, `min-key`/`max-key`, plan selection,
+priority choice, and ordered output derived by walking a set or hash map. Ask:
+when primary keys tie, which declared order decides? If the answer is collection
+iteration, the transformation is not deterministic.
 
 ### Concurrency: plain synchronous Clojure, `core.async.flow` for owners
 
