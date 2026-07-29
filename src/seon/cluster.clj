@@ -390,14 +390,81 @@
   named an existing ancestor and `ensure-cluster!` refuses if it is not
   in the roster. Absent, the ancestor of this source tree is ensured
   (idempotent; the roster is the whole cache)."
-  [store config]
+  [store config current-digest]
   (or (:seon.boot/ancestor-branch config)
       (:seon.ancestor/branch
        (ancestor/ensure!
         {:seon.store/store store
-         :seon.ancestor/digest (ancestor/digest
-                                {:seon.ancestor/roots seon.fn/source-roots})
+         :seon.ancestor/digest current-digest
          :seon.ancestor/populate `populate-ancestor!}))))
+
+(defn- count-installed
+  [db attribute]
+  (if (contains? (:schema db) attribute)
+    (or
+     (d/q '[:find (count ?entity) .
+            :in $ ?attribute
+            :where [?entity ?attribute]]
+          db
+          attribute)
+     0)
+    0))
+
+(defn- program-currentness
+  [db current-digest]
+  (let [recorded-digests
+        (if (contains? (:schema db) :seon.ancestor/digest)
+          (into
+           #{}
+           (d/q '[:find [?digest ...]
+                  :where [_ :seon.ancestor/digest ?digest]]
+                db))
+          #{})
+        namespace-count (count-installed db :seon.ns/name)
+        function-count (count-installed db :seon.fn/sym)
+        partial? (and (pos? namespace-count) (zero? function-count))
+        populated? (and (pos? namespace-count) (pos? function-count))
+        digest-current? (= #{current-digest} recorded-digests)]
+    {:seon.ancestor/current? (and digest-current? populated?)
+     :seon.ancestor/partial? partial?
+     :seon.ancestor/recorded-digests recorded-digests
+     :seon.ancestor/current-digest current-digest
+     :seon.ancestor/namespace-count namespace-count
+     :seon.ancestor/function-count function-count}))
+
+(defn- require-current-program!
+  [connection cluster-name current-digest]
+  (let [currentness (program-currentness @connection current-digest)]
+    (when-not (:seon.ancestor/current? currentness)
+      (let [condition
+            (cond
+              (:seon.ancestor/partial? currentness)
+              (str "partial ("
+                   (:seon.ancestor/namespace-count currentness)
+                   " namespace rows and no function rows)")
+
+              (empty? (:seon.ancestor/recorded-digests currentness))
+              "unprimed (no recorded source digest)"
+
+              (not= #{current-digest}
+                    (:seon.ancestor/recorded-digests currentness))
+              (str "stale (recorded "
+                   (pr-str (:seon.ancestor/recorded-digests currentness))
+                   ", current " current-digest ")")
+
+              :else
+              "unprimed (the source-owned program rows are absent)")]
+        (refused!
+         (str
+          "Cluster `" cluster-name "` was not started because its program "
+          "graph is " condition ". "
+          "`bin/seon index " cluster-name "` preserves history: it refreshes "
+          "source-owned namespace, function, schema, and test facts while "
+          "leaving messages, runs, agents, and agent-authored facts intact. "
+          "`bin/seon reset " cluster-name "` destroys history and reforks a "
+          "clean cluster from the current ancestor.")
+         currentness))))
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
@@ -853,15 +920,23 @@
   [instance publish! config-request]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
+        current-digest
+        (ancestor/digest {:seon.ancestor/roots seon.fn/source-roots})
         store (acquire-root-store! (:seon.boot/store-dir config))
         instance (publish! (assoc instance :seon.store/store store))
         forked (registry/ensure-cluster!
                 {:seon.store/store store
                  :seon.boot/cluster-name cluster-name
-                 :seon.ancestor/branch (ancestor-branch! store config)})
+                 :seon.ancestor/branch
+                 (ancestor-branch! store config current-digest)})
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance :seon.boot/cluster-connection connection))
+        ;; The source tree is consulted only for its digest. Indexing remains
+        ;; an explicit fork/index operation and never runs on this reopen path.
+        ;; This gate precedes schema accretion, recovery, config, and arming:
+        ;; a stale or partial program graph gets no runtime semantics.
+        _ (require-current-program! connection cluster-name current-digest)
         ;; A branch may predate this process's additive schema population.
         ;; Install it before recovery or config can transact a newly added
         ;; attribute. This is the same population that creates an ancestor;
@@ -934,7 +1009,8 @@
   process-root store (first instance; siblings reuse the held store) →
   ancestor/ensure! (population from :seon.boot/ancestor-branch when
   supplied, else the default schema population) → registry/
-  ensure-cluster! → store/open-branch! → accrete the current schema
+  ensure-cluster! → store/open-branch! → require the recorded source
+  digest and complete program graph → accrete the current schema
   population → config/apply! with the shipped defaults → return the complete
   instance. A later-layer failure THROWS
   with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance

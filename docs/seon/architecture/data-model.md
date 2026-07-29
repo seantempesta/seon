@@ -865,7 +865,7 @@ namespaces are `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test`.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:symbol {:seon.db/identity true}]` | symbol | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :symbol, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source at boot), `:seon.ns/source :string` |
+| `:seon.ns` | `:seon.ns/name` `[:symbol {:seon.db/identity true}]` | symbol | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :symbol, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source during explicit ancestor population or cluster priming), `:seon.ns/source :string` |
 
 Render-time consumers never reparse `:seon.ns/source` to recover aliases or
 refers. Namespace source and require-edge facts are committed together; the
@@ -893,14 +893,16 @@ registry generation from those canonical forms. It is process-local projection
 data consumed directly by the renderer, not a second append-only schema
 decomposition in Datahike.
 
-**Index compiled declarations; tee authored declarations.** At boot, the
-analyzer-derived snapshot reconciles every compiled namespace, public function,
-and registered schema into the program graph. Agent-authored namespace,
-function, schema, and test forms enter through the eval analyzer tee. The
-platform test suite belongs only to the dedicated test build; it is not loaded
-into a product artifact or copied into the database at boot. The whole live
-program graph is therefore queryable without a second test registry. Agent context
-renders only `my.*` members in full source while compiled members stay
+**Index source declarations explicitly; tee authored declarations.** The source
+snapshot exact-reconciles source-owned namespaces, contracted functions,
+schemas, and tests during ancestor population or an operator-invoked cluster
+prime. Startup never indexes: it compares the recorded source digest with the
+current digest and refuses a stale, empty, or partial program graph. Priming
+preserves messages, runs, agents, and agent-authored rows; reset is the
+destructive refork. Agent-authored namespace, function, schema, and test forms
+enter through the eval analyzer tee. The whole live program graph is therefore
+queryable without a second test registry. Agent context renders only `my.*`
+members in full source while source-owned members stay
 indexed-but-summarized. The render policy is owned by [[ui]]; the declaration
 facts are owned here.
 

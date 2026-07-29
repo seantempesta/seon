@@ -38,10 +38,12 @@
                          :seon.error/kind ::refused
                          ::rule rule))))
 
-;;; The two facts the ancestor writes about ITSELF, so a descendant can
-;;; answer \"what was I born from?\" as a query with no file read. Their
-;;; Datahike declarations are DERIVED from the registered schema, never
-;;; hand-written.
+;;; The two facts the ancestor writes about ITSELF. On the immutable ancestor
+;;; branch the digest answers "what was this built from?" A descendant starts
+;;; with that value, but an explicit `seon.fn/index!` may advance it; there it
+;;; means "which source corpus was last synchronized while authored facts were
+;;; preserved." `built-at` remains the birth fact. Their Datahike declarations
+;;; are DERIVED from the registered schema, never hand-written.
 (def ^:private ancestor-attributes
   [:seon.ancestor/digest :seon.ancestor/built-at])
 

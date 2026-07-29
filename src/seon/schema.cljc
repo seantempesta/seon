@@ -414,13 +414,22 @@
 (defn- ancestor-seal-tx [db history]
   (when (and history
              (installed-attribute? db :seon.ancestor/digest))
-    (let [seal-datoms
-          (d/q '[:find ?ancestor ?digest ?tx
-                 :where
-                 [?ancestor :seon.ancestor/digest ?digest ?tx true]]
-               history)]
-      (when (= 1 (count seal-datoms))
-        (nth (first seal-datoms) 2)))))
+    (let [current-ancestors
+          (d/q '[:find [?ancestor ...]
+                 :where [?ancestor :seon.ancestor/digest _]]
+               db)]
+      (when (= 1 (count current-ancestors))
+        ;; Priming advances the ONE ancestor entity's current digest. The
+        ;; original positive assertion remains the genesis boundary: later
+        ;; digest values describe explicit source synchronization, not a new
+        ;; ancestor or a new trust boundary. Multiple current ancestor
+        ;; entities still fail closed.
+        (d/q '[:find (min ?tx) .
+               :in $ ?ancestor
+               :where
+               [?ancestor :seon.ancestor/digest _ ?tx true]]
+             history
+             (first current-ancestors))))))
 
 (defn- first-process-id-tx [history process-ref process-id]
   (when (and history process-ref process-id)

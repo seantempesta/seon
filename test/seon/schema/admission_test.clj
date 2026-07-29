@@ -155,6 +155,33 @@
                    (:seon.schema.admission/process-id
                     (admission connection tx))))))))))
 
+(deftest advancing-one-clusters-current-digest-preserves-its-genesis-seal
+  (with-temporal-database
+    (fn [connection]
+      (seed-process! connection boot-process-identity)
+      (let [seal-tx (seal! connection seal-digest)
+            ancestor
+            (d/q '[:find ?ancestor .
+                   :where [?ancestor :seon.ancestor/digest _]]
+                 @connection)]
+        (d/transact
+         connection
+         [[:db.fn/retractAttribute ancestor :seon.ancestor/digest]
+          {:db/id ancestor :seon.ancestor/digest second-seal-digest}])
+        (let [tx
+              (transact-row!
+               connection
+               :test.schema.admission/after-explicit-prime
+               [:seon.db.process/id boot-process-identity])]
+          (is (= :core (source connection tx)))
+          (is (= seal-tx
+                 (d/q '[:find (min ?tx) .
+                        :in $ ?ancestor
+                        :where
+                        [?ancestor :seon.ancestor/digest _ ?tx true]]
+                      (d/history @connection)
+                      ancestor))))))))
+
 (deftest missing-and-malformed-genesis-provenance-fails-closed
   (testing "a transaction without process provenance"
     (with-temporal-database

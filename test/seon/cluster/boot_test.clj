@@ -20,10 +20,12 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
+            [seon.cluster.ancestor :as ancestor]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
@@ -435,6 +437,118 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The composed tower — store, ancestor, fork, config, one start!
 ;;; ---------------------------------------------------------------------------
+
+(defn- start-refusal
+  [request]
+  (try
+    (cluster/start! request)
+    nil
+    (catch Throwable failure
+      failure)))
+
+(defn- stop-refused-instance!
+  [failure]
+  (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
+
+(deftest start-denies-a-stale-source-digest-with-both-explicit-remedies
+  (let [root (fresh-root)
+        cluster-name "stale-program"
+        request {:seon.boot/cluster-name cluster-name
+                 :seon.boot/root root}
+        stale-digest (apply str (repeat 64 "f"))]
+    (try
+      (let [instance (cluster/start! request)
+            connection (:seon.boot/cluster-connection instance)
+            ancestor-eid
+            (d/q '[:find ?ancestor .
+                   :where [?ancestor :seon.ancestor/digest _]]
+                 @connection)]
+        (d/transact
+         connection
+         [[:db.fn/retractAttribute ancestor-eid :seon.ancestor/digest]
+          {:db/id ancestor-eid :seon.ancestor/digest stale-digest}])
+        (cluster/stop! instance))
+      (let [failure (start-refusal request)
+            message (ex-message failure)
+            refused-instance (:seon.boot/instance (ex-data failure))]
+        (try
+          (is (some? failure))
+          (is (str/includes? message
+                             (str "bin/seon index " cluster-name)))
+          (is (str/includes? message
+                             (str "bin/seon reset " cluster-name)))
+          (is (str/includes? message "preserves history"))
+          (is (str/includes? message "destroys history"))
+          (is (nil? (:seon.cluster.agent/routing refused-instance))
+              "the program-currentness gate runs before agents arm")
+          (finally
+            (stop-refused-instance! failure))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest explicit-index-repairs-a-partial-cluster-and-fresh-clusters-are-current
+  (let [root (fresh-root)
+        cluster-name "partial-program"
+        request {:seon.boot/cluster-name cluster-name
+                 :seon.boot/root root}
+        current-digest
+        (ancestor/digest {:seon.ancestor/roots seon.fn/source-roots})]
+    (try
+      (let [instance (cluster/start! request)
+            connection (:seon.boot/cluster-connection instance)]
+        (testing "a fresh fork is born at the current source digest"
+          (is (= current-digest
+                 (d/q '[:find ?digest .
+                        :where [_ :seon.ancestor/digest ?digest]]
+                      @connection)))
+          (is (pos? (d/q '[:find (count ?function) .
+                           :where [?function :seon.fn/sym]]
+                         @connection))))
+        (d/transact
+         connection
+         (mapv (fn [eid] [:db.fn/retractEntity eid])
+               (d/q '[:find [?function ...]
+                      :where [?function :seon.fn/sym]]
+                    @connection)))
+        (cluster/stop! instance))
+      (let [failure (start-refusal request)
+            refused-instance (:seon.boot/instance (ex-data failure))
+            connection (:seon.boot/cluster-connection refused-instance)]
+        (try
+          (testing "namespaces without functions are denied despite a current digest"
+            (is (str/includes? (ex-message failure) "partial"))
+            (is (str/includes? (ex-message failure)
+                               (str "bin/seon index " cluster-name)))
+            (is (pos? (d/q '[:find (count ?namespace) .
+                             :where [?namespace :seon.ns/name]]
+                           @connection)))
+            (is (zero? (or
+                        (d/q '[:find (count ?function) .
+                               :where [?function :seon.fn/sym]]
+                             @connection)
+                        0))))
+          (testing "the explicit index procedure repairs the refused branch"
+            (is (pos?
+                 (:seon.reconcile/operations
+                  (seon.fn/index!
+                   {:seon.store/branch-connection connection
+                    :seon.db/process
+                    [:seon.db.process/id cluster/boot-process-identity]
+                    :seon.fn/roots seon.fn/source-roots
+                    :seon.ancestor/digest current-digest}))))
+            (is (pos? (d/q '[:find (count ?function) .
+                             :where [?function :seon.fn/sym]]
+                           @connection))))
+          (finally
+            (stop-refused-instance! failure))))
+      (let [restarted (cluster/start! request)]
+        (try
+          (is (some? (:seon.cluster.agent/routing restarted))
+              "a primed cluster passes the gate and completes boot")
+          (finally
+            (cluster/stop! restarted))))
+      (finally
+        (delete-recursively! root)))))
 
 (deftest reopen-accretes-a-new-config-attribute-before-config-applies
   (let [root (fresh-root)
