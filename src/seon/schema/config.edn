@@ -155,5 +155,20 @@
  [:map {:closed true}
   ; A live Datahike connection is a genuine third-party boundary.
   [:seon.config/connection :any]
-  [:seon.config/manifest :seon.config/manifest]
-  [:seon.boot/cluster-name :seon.boot/cluster-name]]}
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
+
+ :seon.config/compile-request
+ [:map {:closed true}
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
+
+ :seon.config/compiled
+ [:map {:closed true}
+  [:seon.config/effective :seon.config/effective]
+  [:seon.config/applied-manifest-digest
+   :seon.config/applied-manifest-digest]
+  [:seon.config/desired-row :seon.config/entity]
+  [:seon.config/resolved-attributes [:set :qualified-keyword]]]}

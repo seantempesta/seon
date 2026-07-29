@@ -1,37 +1,21 @@
 (ns seon.config
-  "Database configuration contracts: one manifest, one singleton row.
+  "The one compiler and database reconcile boundary for configuration.
 
-  CONTRACT LAYER (drafted 2026-07-27, ORCHESTRATOR-SEALED same day —
-  one revision at seal: the machine-derived concurrency default moved
-  from a shipped literal into `defaults`' computed half). The
-  implementation lane fills the stub bodies until the sealed suites
-  are green and may not loosen a schema or a test.
+  `config/default.edn` makes one explicit decision for every registered config
+  attribute. A selected manifest is a sparse overlay. The caller may pass one
+  more explicit, typed environment map; compilation applies exactly the
+  precedence defaults → overlay → environment, validates the closed result,
+  and derives one canonical effective map, digest, and desired row.
 
-  `config/default.edn` is THE defaults document. It is complete and explicit;
-  user manifests are override maps whose absent keys inherit that document.
-  Runtime consumers read only the database singleton identified by
-  `:seon.config/cluster`; they never reread a manifest file.
-
-  The closed gate is the global schema population. A manifest key without a
-  registered dial schema refuses as `::unknown-key`; a registered dial whose
-  value does not validate refuses as `::invalid-value` and carries the Malli
-  explanation. Files that cannot be read as one EDN map refuse as
-  `::manifest-unreadable`.
-
-  Config reconciliation is provenance-scoped. `apply!` delegates to
-  `seon.reconcile/reconcile!` with `managing-process-identity`, the config
-  member of `seon.schema`'s owner-ruled literal three-name core trust list.
-  Deriving that trust is a separate follow-up; this namespace does not create
-  a second copy of the list.
-
-  Crash walk: parsing and row derivation are pure. A non-empty apply is the
-  one atomic reconcile transaction; a converged apply issues no transaction."
+  Runtime consumers read only the database row. Explicit absence is the
+  `:seon.config/absent` compiler decision and never becomes nil or a datom."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [datahike.api :as d]
             [seon.reconcile :as reconcile]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form])
   (:import [java.nio.charset StandardCharsets]))
 
 (def default-manifest-path
@@ -41,6 +25,13 @@
 (def managing-process-identity
   "The opaque reconcile scope owned by configuration."
   "seon.db.process/config")
+
+(def absent
+  "The explicit compiler decision that an optional config attribute is absent."
+  :seon.config/absent)
+
+(def ^:private available-processors
+  :seon.config/available-processors)
 
 (def ^:private result-cap-attributes
   [:seon.config.eval.result/max-depth
@@ -55,41 +46,44 @@
   [effective]
   (select-keys effective result-cap-attributes))
 
-(defn- dial-attributes
-  []
-  ; entries are the [attr props? schema] vectors; filtering by shape
-  ; instead of position keeps this correct whether or not the :map
-  ; form carries a properties map
+(defn- map-attributes
+  [schema-key]
   (into #{}
         (comp (filter vector?) (map first))
-        (schema/schema-definition :seon.config/manifest)))
+        (schema/schema-definition schema-key)))
+
+(defn- dial-attributes
+  []
+  (map-attributes :seon.config/manifest))
 
 (defn- required-dial-attributes
-  "The dials the defaults document must carry a value for.
-  A dial the EFFECTIVE shape marks `{:optional true}` MAY be absent from
-  `config/default.edn`, and absence is then the state; an optional dial
-  that does have an honest default carries one. The case that shaped
-  this rule is `:seon.config.error/escalate-to`: it shipped absent while
-  a cluster had no agent to name, and it ships as `\"root\"` now that boot
-  seeds one — the requiredness question and the has-a-default question
-  are DIFFERENT questions, and conflating them is what made an optional
-  dial unrepresentable before. Every REQUIRED dial must still carry a
-  provenanced value; that is the completeness rule that matters.
-
-  READ FROM `:seon.config/effective`, NOT THE MANIFEST. Every manifest
-  entry is `{:optional true}` by design — a user manifest declares only
-  overrides — so deriving requiredness from it makes the rule vacuously
-  empty and a defaults document missing every dial would pass. The
-  effective shape is where a dial is required unless it genuinely is
-  not, which is exactly the question being asked."
   []
   (into #{}
-        (comp (filter vector?)
-              (keep (fn [entry]
-                      (when-not (and (map? (second entry))
-                                     (:optional (second entry)))
-                        (first entry)))))
+        (comp
+         (filter vector?)
+         (keep
+          (fn [entry]
+            (when-not (and (map? (second entry))
+                           (:optional (second entry)))
+              (first entry)))))
         (schema/schema-definition :seon.config/effective)))
+
+(defn- registration-defaults
+  []
+  (let [required (required-dial-attributes)]
+    (into {}
+          (keep
+           (fn [attribute]
+             (let [properties
+                   (schema.form/attr-form-properties
+                    (schema/schema-definition attribute))]
+               (cond
+                 (contains? properties :seon.config/default)
+                 [attribute (:seon.config/default properties)]
+
+                 (not (contains? required attribute))
+                 [attribute absent])))
+          (dial-attributes)))))
 
 (defn- refuse!
   [rule data cause]
@@ -118,113 +112,158 @@
     (catch Throwable error
       (refuse! ::manifest-unreadable {::path path} error))))
 
-(defn- validate-manifest
-  [manifest]
+(defn- validate-layer
+  [layer]
   (let [dials (dial-attributes)]
-    (doseq [key (keys manifest)]
+    (doseq [key (keys layer)]
       (when-not (contains? dials key)
         (refuse! ::unknown-key {::key key} nil)))
-    (doseq [[key value] manifest]
-      (when-not (schema/valid-candidate-value? key value)
+    (doseq [[key value] layer]
+      (when-not (or (= absent value)
+                    (schema/valid-candidate-value? key value))
         (refuse!
          ::invalid-value
          {::key key
           ::explanation (schema/explain-candidate-value key value)}
          nil)))
-    manifest))
+    layer))
 
-(defn- computed-defaults
-  []
-  {:seon.config.flow.compute/concurrency
-   (long (.availableProcessors (Runtime/getRuntime)))})
+(defn default-decisions
+  "Read the complete shipped decision map.
 
-(defn defaults
-  "The complete default manifest — THE defaults document.
-  The static half is `config/default.edn` (every constant with units
-  and provenance); the computed half fills machine-derived dials —
-  `:seon.config.flow.compute/concurrency` = available processors —
-  because a shipped literal is only right on the machine that shipped
-  it. The returned manifest is COMPLETE: every registered dial has a
-  value."
-  {:malli/schema [:=> [:cat] :seon.config/manifest]}
+  An optional registration's generic floor is explicit absence; a
+  registration-attached default overrides that floor. The shipped EDN document
+  must decide every production attribute explicitly; symbolic machine and
+  absence decisions are resolved only by `compile-manifest`."
+  {:malli/schema [:=> [:cat] :map]}
   []
-  (let [manifest
-        (validate-manifest
-         (merge (read-edn-map default-manifest-path)
-                (computed-defaults)))
-        dials (required-dial-attributes)]
-    (when-not (empty? (set/difference dials (set (keys manifest))))
+  (let [document (read-edn-map default-manifest-path)
+        dials (dial-attributes)
+        decisions (merge (registration-defaults) document)
+        missing (set/difference dials (set (keys decisions)))]
+    (doseq [key (keys document)]
+      (when-not (contains? dials key)
+        (refuse! ::unknown-key {::key key} nil)))
+    (when (seq missing)
       (refuse!
-       ::invalid-value
-       {::explanation
-        {:seon.config/missing
-         (set/difference dials (set (keys manifest)))}}
+       ::missing-default
+       {::explanation {:seon.config/missing missing}}
        nil))
-    manifest))
+    (doseq [[key decision] decisions]
+      (when-not (or (= absent decision)
+                    (and (= key :seon.config.flow.compute/concurrency)
+                         (= available-processors decision))
+                    (schema/valid-candidate-value? key decision))
+        (refuse!
+         ::invalid-value
+         {::key key
+          ::explanation (schema/explain-candidate-value key decision)}
+         nil)))
+    decisions))
 
 (defn read-manifest
-  "Read one override manifest and resolve absent keys from defaults.
-
-  Refuses `::manifest-unreadable`, `::unknown-key`, and `::invalid-value`.
-  The invalid-value refusal includes the Malli explanation."
+  "Read and validate one sparse plain-EDN overlay without compiling it."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (validate-manifest
-   (merge (defaults)
-          (read-edn-map path))))
+  (validate-layer (read-edn-map path)))
 
-(defn desired-rows
-  "Derive the exact config singleton row for one cluster.
+(defn- resolve-smart-decision
+  [key decision]
+  (if (and (= key :seon.config.flow.compute/concurrency)
+           (= decision available-processors))
+    (long (.availableProcessors (Runtime/getRuntime)))
+    decision))
 
-  The manifest is validated through the registered dial schemas. The row
-  carries `:seon.config/cluster`, every effective dial, and the canonical
-  `:seon.config/applied-manifest-digest`. Refuses `::unknown-key` and
-  `::invalid-value` with the Malli explanation."
+(defn compile-manifest
+  "Compile defaults + sparse manifest + explicit typed environment map once.
+
+  The optional cluster name defaults to `default`. The digest covers only the
+  canonical effective config, so equal configs in distinct clusters have the
+  same digest."
   {:malli/schema
-   [:=> [:cat :seon.config/manifest :seon.boot/cluster-name]
-    [:vector :map]]}
-  [manifest cluster-name]
-  (let [effective-manifest
-        (validate-manifest (merge (defaults) manifest))]
-    [(assoc effective-manifest
-            :seon.config/cluster cluster-name
-            :seon.config/applied-manifest-digest
+   [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
+  [request]
+  (let [manifest (validate-layer (or (:seon.config/manifest request) {}))
+        environment
+        (validate-layer (or (:seon.config/environment request) {}))
+        decisions (merge (default-decisions) manifest environment)
+        required (required-dial-attributes)]
+    (doseq [[key decision] decisions]
+      (when (and (= absent decision) (contains? required key))
+        (refuse! ::required-absent {::key key} nil)))
+    (let [effective
+          (into {}
+                (comp
+                 (remove (comp #{absent} val))
+                 (map
+                  (fn [[key decision]]
+                    [key (resolve-smart-decision key decision)])))
+                decisions)]
+      (when-not (schema/valid-candidate-value?
+                 :seon.config/effective effective)
+        (refuse!
+         ::invalid-value
+         {::explanation
+          (schema/explain-candidate-value
+           :seon.config/effective effective)}
+         nil))
+      (let [digest
             (schema/sha-256
              [(.getBytes
-               ^String (schema/canonical-data-string effective-manifest)
-               StandardCharsets/UTF_8)]))]))
+               ^String (schema/canonical-data-string effective)
+               StandardCharsets/UTF_8)])
+            row
+            (assoc effective
+                   :seon.config/cluster
+                   (or (:seon.boot/cluster-name request) "default")
+                   :seon.config/applied-manifest-digest digest)]
+        {:seon.config/effective effective
+         :seon.config/applied-manifest-digest digest
+         :seon.config/desired-row row
+         :seon.config/resolved-attributes (set (keys decisions))}))))
+
+(defn defaults
+  "Compile the zero-overlay shipped defaults into one effective config."
+  {:malli/schema [:=> [:cat] :seon.config/effective]}
+  []
+  (:seon.config/effective (compile-manifest {})))
 
 (defn apply!
-  "Reconcile one manifest into the cluster's config singleton.
-
-  Uses `seon.reconcile/reconcile!` with `managing-process-identity`; the
-  literal trust list already owned by `seon.schema` remains the admission
-  input until its separately ruled computed replacement lands."
+  "Compile once and exact-reconcile the one desired config row."
   {:malli/schema
    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
   [request]
-  (reconcile/reconcile!
-   (:seon.config/connection request)
-   {::reconcile/desired
-    (desired-rows
-     (:seon.config/manifest request)
-     (:seon.boot/cluster-name request))
-    ::reconcile/process managing-process-identity}))
+  (let [compiled
+        (compile-manifest
+         (select-keys
+          request
+          [:seon.config/manifest
+           :seon.config/environment
+           :seon.boot/cluster-name]))]
+    (reconcile/reconcile!
+     (:seon.config/connection request)
+     {::reconcile/desired [(:seon.config/desired-row compiled)]
+      ::reconcile/process managing-process-identity})))
 
 (defn effective
-  "The effective dial map derived from one cluster singleton."
+  "Read the effective config for one cluster; absent cluster means `default`."
   {:malli/schema
-   [:=> [:cat :any :seon.boot/cluster-name] :seon.config/effective]}
-  [db cluster-name]
-  (select-keys
-   (dissoc
-    (or
-     (d/pull
-      db
-      '[*]
-      [:seon.config/cluster cluster-name])
-     {})
-    :db/id
-    :seon.config/cluster
-    :seon.config/applied-manifest-digest)
-   (dial-attributes)))
+   [:function
+    [:=> [:cat :any] [:or :seon.config/effective [:map {:closed true}]]]
+    [:=> [:cat :any :seon.boot/cluster-name]
+     [:or :seon.config/effective [:map {:closed true}]]]]}
+  ([db]
+   (effective db "default"))
+  ([db cluster-name]
+   (select-keys
+    (dissoc
+     (or
+      (d/pull
+       db
+       '[*]
+       [:seon.config/cluster (or cluster-name "default")])
+      {})
+     :db/id
+     :seon.config/cluster
+     :seon.config/applied-manifest-digest)
+    (dial-attributes))))

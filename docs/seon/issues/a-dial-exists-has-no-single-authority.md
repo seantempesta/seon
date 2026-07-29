@@ -191,3 +191,20 @@ Acceptance remains unchanged: every supported registration producer must feed
 the one derivation before manifest admission and canonical database-attribute
 selection, and the regression must exercise that public producer rather than
 calling the derivation helper directly.
+
+## Chunk 2 repair
+
+The verifier's three false claims are repaired in the following compiler
+chunk. Runtime `schema/register!` admission now derives the config composites
+and contributes the leaf plus all changed composites in one candidate-state
+update. The regression uses that public producer, proves manifest, effective,
+entity, canonical database-attribute, and default-decision visibility, then
+restores the scratch registration. It also asserts the exact three-element
+Malli entry so optionality cannot overwrite the explicit-absence schema again.
+
+The reopen regression no longer widens the three composites by hand. It
+registers one config attribute with a smart default, reopens the database,
+observes that default applied, and then proves a sparse override can replace
+it. Focused config, schema, boot, and instrumentation gates are green. The
+issue remains open until the complete config wave supplies its final live
+proof and archive commit.

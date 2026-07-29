@@ -332,7 +332,7 @@
 (deftest reopen-accretes-a-new-config-attribute-before-config-applies
   (let [root (fresh-root)
         cluster-name "schema-reopen"
-        dial :seon.cluster.boot-test/reopen-dial
+        dial :seon.config.boot-test/reopen-dial
         schema-state (schema/snapshot-state)]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
@@ -340,17 +340,11 @@
         (cluster/stop! instance))
 
       ;; This is the source-accretion boundary in miniature: the store is
-      ;; closed before today's population gains one persisted dial and the
-      ;; three config shapes widen to admit it.
-      (schema/register! dial [:int {:seon.db/index true}])
-      (doseq [config-shape
-              [:seon.config/manifest
-               :seon.config/effective
-               :seon.config/entity]]
-        (schema/register!
-         config-shape
-         (conj (schema/schema-definition config-shape)
-               [dial {:optional true} dial])))
+      ;; closed before today's population gains one persisted config attribute.
+      ;; Its one registration derives every composite and its boot default.
+      (schema/register!
+       dial
+       [:int {:seon.db/index true :seon.config/default 7}])
 
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
@@ -367,14 +361,17 @@
                           [?schema :seon.schema/form ?form]]
                         @connection
                         dial))))
-          (testing "config/apply! can transact the newly admitted dial"
+          (testing "zero-overlay boot applies the newly admitted default"
+            (is (= 7 (get (config/effective @connection cluster-name)
+                          dial))))
+          (testing "config/apply! can override the newly admitted dial"
             (let [result
                   (config/apply!
                    {:seon.config/connection connection
-                    :seon.config/manifest {dial 7}
+                    :seon.config/manifest {dial 8}
                     :seon.boot/cluster-name cluster-name})]
               (is (pos? (:seon.reconcile/operations result)))
-              (is (= 7 (get (config/effective @connection cluster-name)
+              (is (= 8 (get (config/effective @connection cluster-name)
                             dial)))))
           (finally
             (cluster/stop! instance))))

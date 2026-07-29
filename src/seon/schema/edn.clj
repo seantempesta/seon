@@ -72,9 +72,13 @@
 
 (defn- config-map-entry
   [{::keys [identity optional?]} manifest?]
-  (cond-> [identity identity]
-    (or manifest? optional?)
-    (assoc 1 {:optional true})))
+  (let [schema-spec
+        (if manifest?
+          [:or identity [:= :seon.config/absent]]
+          identity)]
+    (if (or manifest? optional?)
+      [identity {:optional true} schema-spec]
+      [identity schema-spec])))
 
 (defn ^:no-doc derive-config-forms
   "Derive every config composite from registered config attributes."
@@ -319,34 +323,59 @@
   {:malli/schema [:=> [:cat [:map [:seon.schema/forms :map]]]
                   [:vector :map]]}
   [{:seon.schema/keys [forms identity admission]}]
-  (assert-predicates! forms)
-  (try
-    (if identity
-      ;; Runtime registration admits the new declaration against the complete
-      ;; candidate registry. Unrelated bootstrap declarations may still await
-      ;; their owning namespace during module loading, so they are not
-      ;; recompiled merely because this producer added one independent key.
-      (schema/assert-complete-contract!
-       {:seon.schema/identity identity
-        :seon.schema/definition (get forms identity)
-        :seon.schema/forms forms
-        :seon.schema/admission
-        (or admission {:seon.schema.admission/source :agent})})
-      ;; Activation has no distinguished producer: every declaration must
-      ;; compile and resolve in the complete population before publication.
-      (schema/build-projection forms))
-    (catch Exception e
-      (let [data (ex-data e)
-            offending (or (:seon.schema/identity data)
-                          (:seon.schema/key data)
-                          identity)
-            definition (get forms offending)]
-        (if (or (:seon.schema/missing-reference data)
-                (= :malli.core/invalid-schema (:type data)))
-          (refusal! ::unresolved-reference offending definition
-                    {::cause data})
-          (throw e)))))
-  (mapv (fn [[identity definition]]
-          {:seon.schema/key identity
-           :seon.schema/definition definition})
-        (sort-by key forms)))
+  (let [original-forms forms
+        forms (if identity (derive-config-forms forms) forms)]
+    (assert-predicates! forms)
+    (try
+      (if identity
+        ;; Runtime registration admits the new declaration against the complete
+        ;; candidate registry. Unrelated bootstrap declarations may still await
+        ;; their owning namespace during module loading, so they are not
+        ;; recompiled merely because this producer added one independent key.
+        (schema/assert-complete-contract!
+         {:seon.schema/identity identity
+          :seon.schema/definition (get forms identity)
+          :seon.schema/forms forms
+          :seon.schema/admission
+          (or admission {:seon.schema.admission/source :agent})})
+        ;; Activation has no distinguished producer: every declaration must
+        ;; compile and resolve in the complete population before publication.
+        (schema/build-projection forms))
+      (catch Exception e
+        (let [data (ex-data e)
+              offending (or (:seon.schema/identity data)
+                            (:seon.schema/key data)
+                            identity)
+              definition (get forms offending)]
+          (if (or (:seon.schema/missing-reference data)
+                  (= :malli.core/invalid-schema (:type data)))
+            (refusal! ::unresolved-reference offending definition
+                      {::cause data})
+            (throw e)))))
+    ;; `schema/register!` owns the leaf write. When that one registration
+    ;; changes a derived config composite, contribute only those projections
+    ;; after admission succeeds; no hand-written caller can fall between the
+    ;; leaf and its manifest/effective/database shapes.
+    (when identity
+      (let [composites
+            [:seon.config/manifest
+             :seon.config/effective
+             :seon.config/entity]
+            changed
+            (into {}
+                  (keep
+                   (fn [composite]
+                     (when (not= (get original-forms composite)
+                                 (get forms composite))
+                       [composite (get forms composite)])))
+                  composites)]
+        (when (seq changed)
+          ;; Contribute the leaf and all three projections in one atom update.
+          ;; `schema/register!`'s following leaf assoc is then idempotent; no
+          ;; observer can see either half of the registration on its own.
+          (schema/contribute-candidate-forms!
+           (assoc changed identity (get forms identity))))))
+    (mapv (fn [[registered-identity definition]]
+            {:seon.schema/key registered-identity
+             :seon.schema/definition definition})
+          (sort-by key forms))))

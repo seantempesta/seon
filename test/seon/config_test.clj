@@ -1,6 +1,7 @@
 (ns seon.config-test
-  "Sealed acceptance draft for manifest-to-config-facts."
-  (:require [clojure.java.io :as io]
+  "Acceptance proofs for the one manifest compiler and config apply."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.config :as config]
@@ -17,101 +18,129 @@
         (map first)
         (drop 2 (schema/schema-definition :seon.config/manifest))))
 
-;;; The dials the defaults document must carry, read from the EFFECTIVE
-;;; shape: every manifest entry is optional by design, so deriving this
-;;; from the manifest would make the rule vacuous. A dial the effective
-;;; shape marks optional may be absent, and absence is the state. The
-;;; case that shaped the rule is :seon.config.error/escalate-to: it may
-;;; be dropped by a manifest, and it nonetheless ships with a value now
-;;; that boot seeds the root agent it names — requiredness and
-;;; has-a-default are different questions.
-(def ^:private required-dial-attributes
-  (into #{}
-        (comp (filter vector?)
-              (keep (fn [entry]
-                      (when-not (and (map? (second entry))
-                                     (:optional (second entry)))
-                        (first entry)))))
-        (drop 2 (schema/schema-definition :seon.config/effective))))
-
-(deftest the-default-document-has-one-canonical-location
+(deftest the-default-document-has-one-canonical-complete-location
   (is (.equals "config/default.edn" config/default-manifest-path))
-  (is (.isFile (io/file config/default-manifest-path))))
+  (is (.isFile (io/file config/default-manifest-path)))
+  (is (= dial-attributes
+         (set
+          (keys
+           (edn/read-string (slurp config/default-manifest-path)))))
+      "the shipped EDN itself, not a second registry, covers every production attribute")
+  (is (= dial-attributes
+         (set (keys (config/default-decisions))))
+      "the shipped document makes one decision for every registered config attribute"))
 
-(deftest defaults-are-complete-and-valid-for-every-dial
-  (let [manifest (config/defaults)]
-    (is (empty? (remove (set (keys manifest)) required-dial-attributes))
-        "every REQUIRED dial has a value")
-    (is (empty? (remove dial-attributes (keys manifest)))
-        "and no operational quarry key leaks in")
-    (testing "an optional dial is still representable BOTH ways — the two
-    questions are separate, and conflating them is what made an optional
-    dial impossible to express before"
-      (is (not (contains? required-dial-attributes
-                          :seon.config.error/escalate-to))
-          "the effective shape marks it optional")
-      (is (schema/valid-candidate-value?
-           :seon.config/effective
-           (dissoc manifest :seon.config.error/escalate-to))
-          "so a manifest that drops it is valid — absence is the state")
-      (is (= "root" (:seon.config.error/escalate-to manifest))
-          "and the shipped document names the root agent boot seeds"))
-    (doseq [dial dial-attributes]
-      (is (schema/registered? dial) (str dial " has one registered schema"))
-      (when (contains? manifest dial)
-        (is (schema/valid-candidate-value? dial (get manifest dial))
-            (pr-str (schema/explain-candidate-value dial (get manifest dial))))))
-    (is (schema/valid-candidate-value? :seon.config/effective manifest))))
+(deftest zero-overlay-compilation-resolves-every-registered-config-attribute
+  (let [compiled (config/compile-manifest {})
+        effective (:seon.config/effective compiled)
+        row (:seon.config/desired-row compiled)]
+    (is (= dial-attributes (:seon.config/resolved-attributes compiled))
+        "this is the standing zero-overlay completeness proof")
+    (is (= effective (select-keys row dial-attributes)))
+    (is (= "default" (:seon.config/cluster row))
+        "cluster name is optional everywhere")
+    (is (schema/valid-candidate-value? :seon.config/effective effective))
+    (is (schema/valid-candidate-value? :seon.config/entity row))
+    (is (= (long (.availableProcessors (Runtime/getRuntime)))
+           (:seon.config.flow.compute/concurrency effective)))
+    (is (not (contains? effective :seon.config.web/port))
+        "an explicit absence decision resolves without storing nil")
+    (is (not (contains? effective :seon.config.ai.backup/model)))))
 
-(deftest result-caps-are-derived-from-the-effective-configuration
-  (let [effective (config/defaults)]
-    (is (= {:seon.config.eval.result/max-depth 12
-            :seon.config.eval.result/max-collection 64
-            :seon.config.eval.result/max-string 4096
-            :seon.config.eval.result/max-nodes 4096}
-           (config/result-caps effective)))
-    (is (schema/valid-candidate-value?
-         :seon.sci.admit/caps
-         (config/result-caps effective)))))
+(deftest one-compiler-applies-default-overlay-environment-precedence
+  (let [compiled
+        (config/compile-manifest
+         {:seon.config/manifest
+          {:seon.config.flow.compute/queue-depth 11
+           :seon.config/on-core-error :record}
+          :seon.config/environment
+          {:seon.config.flow.compute/queue-depth 12}
+          :seon.boot/cluster-name "alpha"})
+        effective (:seon.config/effective compiled)]
+    (is (= 12 (:seon.config.flow.compute/queue-depth effective))
+        "explicit environment wins over the selected sparse overlay")
+    (is (= :record (:seon.config/on-core-error effective))
+        "the sparse overlay wins over shipped defaults")
+    (is (= 4096 (:seon.config.eval.result/max-nodes effective))
+        "an unmentioned entry inherits its shipped decision")
+    (is (= "alpha"
+           (:seon.config/cluster (:seon.config/desired-row compiled))))))
 
-(deftest read-manifest-resolves-one-override-against-the-default-document
+(deftest explicit-absence-is-a-decision-never-a-stored-value
+  (is (schema/valid-candidate-value?
+       :seon.config/manifest
+       {:seon.config.error/escalate-to config/absent})
+      "the derived manifest schema admits explicit absence for an optional dial")
+  (let [baseline (config/compile-manifest {})
+        absent
+        (config/compile-manifest
+         {:seon.config/manifest
+          {:seon.config.error/escalate-to config/absent}})
+        effective (:seon.config/effective absent)
+        row (:seon.config/desired-row absent)]
+    (is (not (contains? effective :seon.config.error/escalate-to)))
+    (is (not (contains? row :seon.config.error/escalate-to)))
+    (is (not-any? nil? (vals row)))
+    (is (not= (:seon.config/applied-manifest-digest baseline)
+              (:seon.config/applied-manifest-digest absent)))
+    (testing "a required entry cannot be removed"
+      (let [data
+            (test-support/refusal-data
+             #(config/compile-manifest
+               {:seon.config/manifest
+                {:seon.config.flow.compute/queue-depth config/absent}}))]
+        (is (= ::config/required-absent (::config/rule data)))
+        (is (= :seon.config.flow.compute/queue-depth
+               (::config/key data)))))))
+
+(deftest canonical-digest-is-independent-of-map-construction-order
+  (let [left
+        (config/compile-manifest
+         {:seon.config/manifest
+          (array-map
+           :seon.config/on-core-error :record
+           :seon.config.flow.compute/queue-depth 22)})
+        right
+        (config/compile-manifest
+         {:seon.config/manifest
+          (array-map
+           :seon.config.flow.compute/queue-depth 22
+           :seon.config/on-core-error :record)
+          :seon.boot/cluster-name "other"})]
+    (is (= (:seon.config/effective left)
+           (:seon.config/effective right)))
+    (is (= (:seon.config/applied-manifest-digest left)
+           (:seon.config/applied-manifest-digest right))
+        "cluster identity is not part of the effective-config digest")))
+
+(deftest sparse-file-reading-does-not-compile-a-second-time
   (let [directory (io/file "tmp/config-test")
         path (io/file directory "override.edn")]
     (.mkdirs directory)
     (spit path "{:seon.config/on-core-error :record}\n")
     (try
-      (let [manifest (config/read-manifest (str path))]
-        (is (= (set (keys (config/defaults))) (set (keys manifest)))
-            "an override resolves against the whole shipped document —
-             every default it did not mention is still there")
-        (is (= :record (:seon.config/on-core-error manifest)))
-        (is (= 10 (:seon.config.flow.compute/queue-depth manifest)))
-        (is (= 18 (:seon.config.flow.compute/concurrency manifest))))
+      (is (= {:seon.config/on-core-error :record}
+             (config/read-manifest (str path)))
+          "selection reads a sparse overlay; compile owns all merging")
       (finally
         (.delete path)
         (.delete directory)))))
 
-(deftest manifest-gate-refuses-unknown-keys-and-invalid-values
-  (testing "unknown means no registered dial schema"
+(deftest compiler-gate-refuses-unknown-keys-and-invalid-values
+  (testing "unknown means no registered config attribute schema"
     (let [data
           (test-support/refusal-data
-           #(config/desired-rows
-             {:seon.config.flow.compute/queue-depth 10
-              :seon.config.flow.compute/concurrency 18
-              :seon.config/on-core-error :panic
-              :seon.config.old/transport-timeout-ms 60000}
-             "default"))]
+           #(config/compile-manifest
+             {:seon.config/manifest
+              {:seon.config.old/transport-timeout-ms 60000}}))]
       (is (= ::config/unknown-key (::config/rule data)))
-      (is (= :seon.config.old/transport-timeout-ms
-             (::config/key data)))))
-  (testing "a registered dial with the wrong value carries Malli's explanation"
+      (is (= :seon.config.old/transport-timeout-ms (::config/key data)))))
+  (testing "a registered attribute with the wrong value carries Malli's explanation"
     (let [data
           (test-support/refusal-data
-           #(config/desired-rows
-             {:seon.config.flow.compute/queue-depth 0
-              :seon.config.flow.compute/concurrency 18
-              :seon.config/on-core-error :panic}
-             "default"))]
+           #(config/compile-manifest
+             {:seon.config/environment
+              {:seon.config.flow.compute/queue-depth 0}}))]
       (is (= ::config/invalid-value (::config/rule data)))
       (is (= :seon.config.flow.compute/queue-depth (::config/key data)))
       (is (map? (::config/explanation data))))))
@@ -123,33 +152,28 @@
            "tmp/config-test/this-manifest-does-not-exist.edn"))]
     (is (= ::config/manifest-unreadable (::config/rule data)))))
 
-(deftest desired-rows-is-one-complete-identified-singleton
-  (let [manifest {:seon.config.flow.compute/queue-depth 10
-                  :seon.config.flow.compute/concurrency 18
-                  :seon.config/on-core-error :panic}
-        rows (config/desired-rows manifest "alpha")
-        row (first rows)]
-    (is (= 1 (count rows)))
-    (is (.equals "alpha" (:seon.config/cluster row)))
-    (is (= (merge (config/defaults) manifest)
-           (select-keys row dial-attributes))
-        "the row is the COMPLETE effective manifest — the override
-         merged over defaults, never the override alone")
-    (is (re-matches #"[0-9a-f]{64}"
-                    (:seon.config/applied-manifest-digest row)))
-    (is (schema/valid-candidate-value? :seon.config/entity row))))
-
-(deftest apply-defaults-round-trips-through-database-facts
+(deftest apply-compiles-once-and-round-trips-through-database-facts
   (test-support/with-database
     (fn [connection]
-      (let [manifest (config/defaults)
-            result
+      (let [result
             (config/apply!
              {:seon.config/connection connection
-              :seon.config/manifest manifest
-              :seon.boot/cluster-name "default"})]
+              :seon.config/manifest
+              {:seon.config/on-core-error :record}})
+            committed-basis (:max-tx @connection)
+            converged
+            (config/apply!
+             {:seon.config/connection connection
+              :seon.config/manifest
+              {:seon.config/on-core-error :record}})]
         (is (false? (:seon.reconcile/converged? result)))
-        (is (= manifest (config/effective @connection "default")))
+        (is (true? (:seon.reconcile/converged? converged)))
+        (is (zero? (:seon.reconcile/operations converged)))
+        (is (= committed-basis (:max-tx @connection))
+            "a converged apply writes no transaction")
+        (is (= :record
+               (:seon.config/on-core-error
+                (config/effective @connection))))
         (is (= config/managing-process-identity
                (d/q
                 '[:find ?process-id .
@@ -159,3 +183,29 @@
                   [?tx :seon.db/process ?process]
                   [?process :seon.db.process/id ?process-id]]
                 @connection)))))))
+
+(deftest two-clusters-on-one-jvm-have-no-config-bleed
+  (test-support/with-database
+    (fn [alpha]
+      (test-support/with-database
+        (fn [beta]
+          (config/apply!
+           {:seon.config/connection alpha
+            :seon.config/manifest
+            {:seon.config.flow.compute/queue-depth 11}
+            :seon.boot/cluster-name "alpha"})
+          (config/apply!
+           {:seon.config/connection beta
+            :seon.config/manifest
+            {:seon.config.flow.compute/queue-depth 22}
+            :seon.boot/cluster-name "beta"})
+          (is (= 11
+                 (:seon.config.flow.compute/queue-depth
+                  (config/effective @alpha "alpha"))))
+          (is (= 22
+                 (:seon.config.flow.compute/queue-depth
+                  (config/effective @beta "beta"))))
+          (is (= {}
+                 (config/effective @alpha "beta")))
+          (is (= {}
+                 (config/effective @beta "alpha"))))))))

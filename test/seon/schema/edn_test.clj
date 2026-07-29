@@ -12,6 +12,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
@@ -160,33 +161,34 @@
 
 (deftest one-config-registration-derives-every-structural-contract
   (let [scratch :seon.config.scratch/enabled
-        forms
-        {:seon.config/cluster
-         [:string {:min 1 :seon.db/identity true}]
-         :seon.config/applied-manifest-digest :string
-         :seon.config/on-core-error
-         [:enum {:seon.config/dial true} :record :panic]
-         scratch
-         [:boolean {:seon.config/default false}]
-         :seon.config/apply-request
-         [:map
-          [:seon.config/manifest :seon.config/manifest]]}
-        derived (schema.edn/derive-config-forms forms)
+        state (schema/snapshot-state)
         entries
         (fn [schema-key]
           (into {} (map (juxt first identity))
-                (schema.form/map-entries (get derived schema-key))))]
-    (testing "the scratch registration is admitted everywhere with no roster"
-      (is (contains? (entries :seon.config/manifest) scratch))
-      (is (contains? (entries :seon.config/effective) scratch))
-      (is (contains? (entries :seon.config/entity) scratch))
-      (is (contains? (set (schema.form/database-attributes derived)) scratch)))
-    (testing "structural config attributes never become manifest entries"
-      (is (not (contains? (entries :seon.config/manifest)
-                          :seon.config/cluster)))
-      (is (not (contains? (entries :seon.config/manifest)
-                          :seon.config/applied-manifest-digest))))
-    (testing "one registration also carries its smart default"
-      (is (= false
-             (get (schema.edn/config-registration-defaults derived)
-                  scratch))))))
+                (schema.form/map-entries
+                 (schema/schema-definition schema-key))))]
+    (try
+      (schema/register!
+       scratch
+       [:boolean {:seon.config/default false}])
+      (testing "the public registration producer derives every contract"
+        (is (contains? (entries :seon.config/manifest) scratch))
+        (is (contains? (entries :seon.config/effective) scratch))
+        (is (contains? (entries :seon.config/entity) scratch))
+        (is (contains? (set (schema/canonical-database-attributes)) scratch))
+        (is (= [scratch
+                {:optional true}
+                [:or scratch [:= :seon.config/absent]]]
+               (get (entries :seon.config/manifest) scratch))
+            "manifest derivation retains both optionality and explicit absence")
+        (is (= false (get (config/default-decisions) scratch))
+            "the same registration is defaults-checkable"))
+      (testing "structural config attributes never become manifest entries"
+        (is (not (contains? (entries :seon.config/manifest)
+                            :seon.config/cluster)))
+        (is (not (contains? (entries :seon.config/manifest)
+                            :seon.config/applied-manifest-digest))))
+      (finally
+        (schema/restore-state! state)))
+    (is (not (schema/registered? scratch))
+        "the scratch registration is removed")))

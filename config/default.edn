@@ -4,12 +4,12 @@
  ; submitter and loses no work.
  :seon.config.flow.compute/queue-depth 10
 
- ; :seon.config.flow.compute/concurrency is deliberately ABSENT here:
- ; its default is COMPUTED at (seon.config/defaults) — the machine's
+ ; This symbolic decision is resolved by the manifest compiler to the machine's
  ; available processors — because a shipped literal is only ever right
  ; on the machine that shipped it. A manifest may override with an
  ; explicit integer. (Calibration context: 2026-07-25 measured 18 cores
  ; here; 22 concurrent evals queued 4 with 71 ms max wait.)
+ :seon.config.flow.compute/concurrency :seon.config/available-processors
 
  ; The eval result caps: how much of an agent value `seon.sci.admit`
  ; projects into a receipt's result-edn. Units below; provenance: the
@@ -97,7 +97,7 @@
  ; loudly and production to degrade only by explicit configuration.
  :seon.config/on-core-error :panic
 
- ; THE VIEW'S PORT IS DELIBERATELY ABSENT, and absence is the state: with
+ ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
  ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
  ; over the name — `seon.render.web/derived-port`), so every named
  ; cluster is bookmarkable and answers on the same port after every
@@ -105,6 +105,7 @@
  ; somebody's decision that outranks a derivation.
  ; Unit: TCP port. A derived port that is already taken falls back to an
  ; ephemeral one and reports BOTH numbers.
+ :seon.config.web/port :seon.config/absent
 
  ; Unit: milliseconds between repaints of one tab. Provenance: 16 ms is
  ; one frame at 60 fps, the owner's stated bar, and it is a FLOOR rather
@@ -132,12 +133,16 @@
  ; the key is read at the leaf, never becomes a datom, never enters Git.
  :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
 
+ ; Authentication is credential-backed by default, so the mutually exclusive
+ ; literal no-auth fact is explicitly absent.
+ :seon.config.ai/no-auth :seon.config/absent
+
  ; Unit: milliseconds. Provenance: the live drives measured a real plan
  ; reply at 2.7 s; sixty seconds is the deadline on an unobservable
  ; remote call, not a target.
  :seon.config.ai/timeout-ms 60000
 
- ; THE BACKUP DESCRIPTOR ROW IS DELIBERATELY ABSENT. A shipped backup
+ ; THE BACKUP DESCRIPTOR ROW IS EXPLICITLY ABSENT. A shipped backup
  ; would be a second provider this repository picked for everybody, and
  ; the honest default is "one target, no failover": with no
  ; :seon.config.ai.backup/model, `disposition` never returns
@@ -145,6 +150,10 @@
  ; there is. A cluster that wants failover sets ONE dial when the backup
  ; is another model at the same provider, or three more when it is not.
  ; Absence is the state; there is no nil to read.
+ :seon.config.ai.backup/model :seon.config/absent
+ :seon.config.ai.backup/endpoint :seon.config/absent
+ :seon.config.ai.backup/api-key-variable :seon.config/absent
+ :seon.config.ai.backup/timeout-ms :seon.config/absent
 
  ; THE BACKOFF STRATEGY, and it runs on exactly one path: a
  ; conclusively UNPAID transient failure with no backup configured.
