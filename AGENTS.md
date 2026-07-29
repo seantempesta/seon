@@ -120,8 +120,8 @@ own processes rather than killing the child directly.
 
 After every big landing wave (a rung completing, a multi-lane day, a
 deletion wave), commission an INDEPENDENT adversarial audit of the
-changed tree — an agent that trusts no lane'''s report, sweeps for the
-past'''s known failure modes (second mechanisms, hand lists,
+changed tree — an agent that trusts no lane's report, sweeps for the
+past's known failure modes (second mechanisms, hand lists,
 stored-derived creep, unjustified clocks, symptom patches, lying
 docstrings), REPL-falsifies suspicions, files ranked issues, and
 reports what is genuinely in good shape (calibration, not just alarm).
@@ -790,61 +790,74 @@ attempts fail, the function or document is too complex—refactor it.
 
 ## REPL-driven development
 
-Develop Clojure from the running system outward. The REPL is the first design
-and diagnosis surface; checked-in source and tests remain the durable authority
-today. The future ability to persist every successful edit directly from the
-REPL is aspirational and must not be described as current behavior.
+**Start every Clojure change at a running system, not at a file.** The REPL is
+the first design and diagnosis surface; checked-in source and tests remain the
+durable authority. A plan written without a probe is a hypothesis — this
+program has repeatedly had six-of-six assumptions falsified in one sitting.
 
-For each Clojure change:
+If you are spinning up fresh, this is the loop:
 
-1. Select the exact cluster and runtime. Use cluster-qualified `eval_cljs` for
-   pod behavior and the selected cluster's `eval_clj` for writer behavior.
-2. Reproduce the failure with one small form. Inspect the complete returned
-   envelope, live database facts, installed schema, and immutable database
-   value before inferring a cause.
-3. Call the existing pure transformation or owning function directly with
-   representative data. Probe dependency behavior from `reference-code/` at
-   this boundary instead of rebuilding its semantics from memory.
-4. Define and evaluate the proposed data shape or transformation in the REPL.
-   Prefer immutable examples that expose inputs and outputs; perform database
-   writes only when the experiment requires them, then inspect `::db/ok?` and
-   the resulting datoms.
-5. Edit the one owning namespace, let hot reload apply it, and rerun the same
-   form against the same live evidence. Restart only for load-time config,
-   bootstrap, process, or artifact behavior that hot reload cannot exercise.
-6. Persist the behavioral regression, run the smallest affected gate, then
-   verify the user-visible page/feed, database fact, log, or process transition.
+1. **Get a live system.** `bin/seon status` shows running clusters. Boot your
+   OWN scratch cluster for anything you intend to change (`bin/seon start
+   <your-name>`); never reset, bounce, or write to a cluster someone else is
+   using — clusters are sovereign and cheap (a fork is ~17 ms). Load-only
+   probes need no cluster at all: `clojure -M:dev` gives you the namespaces.
+2. **Reach it.** `mcp__seon_cljs__runtime_status` lists live clusters and their
+   ports; `mcp__seon_cljs__eval_clj` evaluates in the selected cluster's JVM.
+   Qualify the cluster when more than one is live — ambiguity must fail, never
+   silently pick. The default session is right for disposable probes; use a
+   named `session_id` only when later forms intentionally depend on `*1`/`*2`.
+   A named-session restart loses process-local values only, never database
+   truth: choose a fresh session id and continue.
+3. **Reproduce with one small form**, and read the COMPLETE returned envelope —
+   not just the value. Inspect live facts, the installed schema, and the
+   immutable database value before inferring a cause.
+4. **Call the owning function directly** with representative data. When the
+   question is about a dependency, read its source in `reference-code/` at that
+   boundary rather than rebuilding its semantics from memory.
+5. **Design in the REPL**: evaluate the proposed shape or transformation on
+   immutable examples that expose inputs and outputs. Write to the database
+   only when the experiment requires it, then inspect the transaction result
+   and the resulting datoms.
+6. **Edit the one owning namespace**, let hot reload apply it, and rerun the
+   same form against the same live evidence. Re-evaluating a `defn` changes
+   running behavior immediately — including flow proc behavior, because procs
+   reference their step-fns as vars. Restart only for load-time config,
+   bootstrap, process, or artifact behavior hot reload cannot exercise.
+7. **Persist the regression**, run the smallest affected gate, then verify the
+   user-visible fact, page, log line, or process transition. A change proven
+   only by a passing test is not proven.
 
-Use one form at a time unless batch semantics are the subject of the probe.
-Do not leave speculative definitions, sessions, or mutations as hidden proof;
-record the decisive form and result in the active PRD when it changes the plan.
-Losing a named REPL session loses only process-local values, not database truth.
+Use one form at a time unless batch semantics are the subject of the probe. Do
+not leave speculative definitions, sessions, or mutations as hidden proof:
+record the decisive form and its result in the active PRD when it changes the
+plan, and put reusable probe scripts in `tmp/` (project-local, visible to
+everyone) rather than a private scratch directory.
 
 ## Dev feedback and testing
 
 Live diagnosis and narrow behavioral verification start through the repository
 MCP server loaded by `.codex/config.toml` and `.mcp.json`:
 
-- use `eval_cljs` for the running Bun pod, keeping `agent_id` cluster-qualified
-  when more than one live pod can host the id;
-- use `eval_clj` for the selected JVM writer's stateful `io-prepl` session;
+- use `runtime_status` to see which clusters are live and reachable;
+- use `eval_clj` against the selected cluster's JVM (its stateful `io-prepl`
+  session), qualifying the cluster whenever more than one is live — an
+  ambiguous selection must FAIL rather than silently pick;
 - use the default session for disposable probes and a named `session_id` only
   when later forms intentionally depend on `*1`/`*2`/`*3`;
 - treat a named-session restart error as lost process-local REPL state and
-  choose a fresh session id; never infer that the underlying database state was
-  lost; and
-- keep correctness tests in `bin/test-cljs`, `bin/test-writer`, and
-  `bin/seon test operator`. MCP eval is the first probe, not another test
-  runner.
+  choose a fresh session id; never infer that database state was lost; and
+- keep correctness tests in `bin/test`. MCP eval is the first probe, not
+  another test runner.
 
-The server derives every supported artifact flavor's Shadow cache coordinate
-from `seon.dev.config`, discovers each live dynamic nREPL port, and resolves
-cluster-qualified agents across the combined advertisements. A bare id present
-in several clusters must fail as ambiguous; never select Shadow's latest
-runtime. CLJ discovery uses the selected cluster's dynamic writer port file.
-After changing MCP code or client registration, restart the Codex or Claude
-task: already-running clients do not reload stdio server definitions or tool
-schemas.
+`eval_cljs` and the pod it addressed are GONE (CLJS off, owner ruling
+2026-07-27); nothing in the fresh system evaluates ClojureScript.
+
+The server discovers live clusters from their advertisements and resolves the
+selected cluster's prepl coordinate. A bare id present in several clusters
+must fail as ambiguous. After changing MCP code or client registration,
+restart the Codex or Claude task: already-running clients do not reload stdio
+server definitions or tool schemas.
 
 The edit hook parses changed Clojure files and requests conservative affected
 tests through one public operation:
@@ -880,15 +893,8 @@ There are two testing surfaces:
 
 Do not restore the gym, add bespoke drive scripts, or create another runner.
 Use focused tests while iterating, then one relevant complete checkpoint at the
-natural unit boundary. Never run overlapping CLJS suites inside the live pod.
-Tests assert facts, transitions, envelopes, DOM identity, omission,
-idempotency, and structure—not exact context prose.
-
-The default Shadow watcher is the sole owner of the canonical `test` build and
-`out/test` artifact. A downstream artifact flavor watches only its own client
-build; ACME owns `acme-client`, never `test`. Separate cache roots do not make a
-shared output safe. Build selection, readiness, failure detection, publishing,
-and pruning must consume the same flavor-owned build vector.
+natural unit boundary. Tests assert facts, transitions, envelopes, DOM
+identity, omission, idempotency, and structure—not exact context prose.
 
 When exercising a real agent, use long-term planning plus database-backed
 memory: a multi-step plan that survives restart, and schema'd facts stored then
