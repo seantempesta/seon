@@ -6,10 +6,10 @@ tags: [research, database, render]
 
 # Query invalidation for context-walk S4
 
-This is the evidence ledger for deciding how a rendered piece can know that
-its inputs changed without re-deriving the piece. Chunk 1 establishes the
-selected dependency sources and measures Datahike's existing caches. Old-system
-precedent, read tracing, and the S4 verdict remain intentionally pending.
+This evidence settles how a rendered piece can know that its inputs changed
+without first re-deriving the piece. It covers the selected dependency
+sources, measured Datahike caches, old-system precedent, a concrete read-trace
+falsifier, and the context-walk S4 verdict.
 
 ## Dependency ledger
 
@@ -64,8 +64,9 @@ precedent, read tracing, and the S4 verdict remain intentionally pending.
   `reference-code/konserve/src/konserve/cache.cljc:19-40`.
 - Persistent-set node LRU and storage reads:
   `reference-code/datahike/src/datahike/index/persistent_set.cljc:409-466`.
-- Listener implementation will be read with the read-tracing chunk; it is not
-  evidence for this chunk's cache timing.
+- Listener and commit-time matching:
+  `reference-code/datahike/src/datahike/connector.cljc` and
+  `src-old/seon/db/writer.clj:2756-3205`.
 
 ### Fresh render read seams
 
@@ -80,8 +81,7 @@ Fresh render code currently calls Datahike directly rather than through a
 - `src/seon/render/root.clj:79-82,107,139` uses `d/q`.
 - Current behavioral coverage is concentrated in
   `test/seon/render/agent_test.clj`, `block_test.clj`, `root_test.clj`,
-  `value_test.clj`, and `web_test.clj`. Exact tests for the chosen trace seam
-  are reserved for the read-tracing chunk.
+  `value_test.clj`, and `web_test.clj`.
 
 ## Datahike caching truth
 
@@ -178,13 +178,117 @@ the ratio.
 
 ## Old precedent
 
-Pending chunk 2. No claim about designed versus built old behavior is made
-here.
+The Posh idea existed at three different levels; collapsing them into “Posh
+was built” loses the important distinction.
+
+1. **Posh itself was reference-only.** `.gitmodules:113-115` vendors
+   `reference-code/posh`, but `deps.edn` contains no Posh coordinate and
+   `git log --all -Sposh -- deps.edn` returns no dependency history. The June
+   PRD explicitly ruled “no Posh on the classpath” and proposed porting only
+   its matcher lessons
+   (`docs/prds/archive/agent-runtime/reactive-interface-prd-2026-06-03.md:71-79`).
+2. **Exact E/A/V pattern interests were built, but were not the automatic
+   render path.** The old writer accepts explicit datom patterns and matches
+   entity, attribute, value, and addedness
+   (`src-old/seon/db/writer.clj:2982-3002`). Its reverse candidate index is
+   attribute-addressed (`:2773-2810,3174-3200`), and the standing test proves
+   one exact pattern addresses one of 1,000 interests
+   (`test-old/seon/db/writer_interest_test.clj:802-860`). That is real
+   Posh-style infrastructure, not merely a design memory.
+3. **Automatic render invalidation used captured Datahike dependency plans,
+   normally at attribute granularity.** `seon.db` recorded the dependency plan
+   returned by each query or pull (`src-old/seon/db.cljc:320-348`), while
+   `seon.reactive` owned registration, the newest database value,
+   recomputation, and equality suppression
+   (`src-old/seon/reactive.cljc:1-7,120-128,252-349`). The writer reduced
+   captured plans to dependency attributes and installed those interests
+   (`src-old/seon/db/writer.clj:2847-2899`). This computes attributes from the
+   real read forms; it does not reconstruct concrete E/A/V pairs from returned
+   rows.
+
+The UI therefore did not have one coarse behavior:
+
+- the main Datastar path wrapped rendering in `db/with-read-evidence`, returned
+  the aggregate evidence, and registered it through `reactive/observe!`
+  (`src-old/seon/web/datastar.cljs:395-446`);
+- equal serialized output was suppressed and one computation fanned out to
+  equivalent sockets, proven in
+  `test-old/seon/web/datastar_test.cljs:341-408`;
+- the generic JVM data feed explicitly returned `::db/read-evidence :all`, so
+  it woke and re-rendered coarsely
+  (`src-old/seon/web/feed.clj:145-153`).
+
+Verdict on precedent: source proves a built selective dependency-matched render
+path plus a coarse fallback. It does **not** prove automatic Posh-grade
+entity/value pattern extraction for ordinary render queries.
 
 ## Read-tracing feasibility
 
-Pending a later chunk.
+`tmp/query-invalidation/read_trace_probe.clj` uses the actual fresh
+`seon.render.agent/agent-header-html` renderer. It temporarily wraps the
+renderer’s direct `d/pull`/`d/q` vars, records concrete `(e,a)` pairs present
+in pulled results, installs a real Datahike listener, and intersects listener
+`:tx-data` with that set.
+
+The constructed results were:
+
+| Transaction | Render dependency | Trace decision | Correct? |
+|---|---|---|---|
+| change the already returned agent id | `(8, :seon.cluster.agent/id)` recorded | wake | yes |
+| change an unrelated noise entity | no intersection | skip | yes |
+| change the namespace name read by `d/q` | query result has no E/A provenance | skip | **no**; rendered output changed |
+| add a previously absent queried attribute | positive read-set is empty | skip | **no**; query changed from empty to entity 8 |
+
+There is another failure in the renderer itself: it pulled
+`:seon.cluster.agent/run`, but because that attribute was absent, a
+returned-datom tracer did not record it. Adding the run would also be skipped.
+Wildcard pull, reverse refs, rules, predicates, `not`, `or`, database
+functions, and dynamic selectors broaden the same problem. A result-level
+wrapper can observe values that came back; it cannot recover the index ranges
+and negative facts whose absence affected the result.
+
+The wrapper’s 12 warmed batches of 400 existing-renderer calls measured p50
+19.20 µs/render without capture and 22.09 µs with concrete-pair capture,
+about 1.15×. This small local cost does not rescue correctness.
+
+The “one seam” is not currently present in fresh Seon: all five render owners
+call `datahike.api` directly (dependency-ledger call sites above). The old
+`seon.db` facade was the one capture seam, but the fresh-tree skill correctly
+notes that facade has not landed yet. If selective piece invalidation is
+implemented, the seam must cover every `q`, `pull`, and `entity` read and
+capture Datahike’s parsed dependency plans—not infer positive `(e,a)` pairs
+afterward. `entity` access is open-ended unless the access operation itself
+records each requested attribute; touching the whole entity must widen to
+`:all`.
 
 ## S4 verdict
 
-Pending completion of the old-precedent and read-tracing falsifiers.
+Recommend **runtime registration of Datahike-computed query/pull dependency
+plans, with `:all` as the fail-open case**, backed by the existing per-attribute
+commit revisions and query-result cache. Do not build concrete returned-datom
+read tracing, and do not build a Seon query parser.
+
+| Mechanism | Can skip whole piece safely? | Absence-safe? | Existing support | Honest cost |
+|---|---|---|---|---|
+| Concrete returned `(e,a)` trace | no | no | none | ~1.15× wrapper overhead here, plus false skips |
+| Seon-authored pattern parser/registration | potentially | only if fully conservative | old exact-pattern matcher only | duplicates Datahike semantics; rules and dynamic forms require continuing maintenance |
+| Captured Datahike dependency plans | yes, conservatively between relevant commits | yes, at attribute granularity | `q-with-evidence`, `pull-with-evidence`, plan widening, attribute revisions; old Seon precedent | false wakes for same-attribute unrelated entities; wildcard/dynamic reads become `:all` |
+| Datahike result cache alone | no; caller/render still runs | yes for cached `q` | fully built | warm `q` is cheap, but pull/composition/serialization still run |
+| Unconditional report wake + equality suppression | only after re-render | yes | current `wake/route!` | simplest and soundest; pays every render on every commit |
+
+For S4, first measure the current unconditional path and Datahike cache evidence
+on the real S0-S3 pieces. Add piece-level selective registration only if render
+cost or churn measurements justify it. A registration remains process-local
+derived memory: after restart the first render computes its plan again. On a
+relevant report, render fresh from the one loop-start database value and retain
+byte-equality suppression/digests; on an irrelevant report, reuse the prior
+bytes because the dependency revision proof says its inputs did not change.
+Freshness still outranks cache.
+
+`src/seon/cluster/wake.cljc:112-118` says the unconditional wake survives until
+the program graph can compute the read attributes. The prototype’s concrete
+pair tracing is **not** that computation: it under-approximates real reads.
+Datahike’s execution-aware dependency plan is the computation already present
+in the selected dependency. Capturing that plan dynamically at the one read
+seam eliminates the hand-list class; authoring a second parser or maintaining
+renderer-declared lists would reintroduce it.
