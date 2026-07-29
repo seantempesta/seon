@@ -32,6 +32,7 @@
     ;; idle→running episode; absence is fail-closed for agent-sent
     ;; triggers, and the shipped document carries the owner-ruled 100.
     :seon.config.run/max-episode-runs
+    :seon.config.ai/no-auth
     :seon.config/on-core-error
     :seon.config.ai/endpoint
     :seon.config.ai/model
