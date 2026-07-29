@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, runtime, config]
 ---
@@ -61,3 +61,25 @@ cluster when needed rather than inventing a second instrumentation mode.
   after config facts commit.
 - A regression exercises a genuinely stale wrapper; a fresh-process-only test
   is insufficient.
+
+## Resolution
+
+Resolved by `79d02f6fd` (`Refresh stale instrumentation before cluster add`).
+The add operation now derives the effective instrumentation dial from a fully
+started sibling cluster and calls `seon.instrument/apply!` before entering the
+new cluster's `start!`; it reapplies the new cluster's own selected dial after
+its config facts commit.
+
+`add-refreshes-a-genuinely-stale-wrapper-before-current-start` installs a
+Malli wrapper from an old closed request schema, changes the Var metadata to
+the current schema, proves the stale wrapper still rejects the current
+request, and then evaluates the generated add form. The request reaches the
+fake `start!` only after the pre-start refresh replaces that wrapper.
+
+Focused proof on 2026-07-29:
+
+```text
+bin/test seon.dev.fresh-operator-test
+Ran 5 tests containing 25 assertions.
+0 failures, 0 errors.
+```
