@@ -69,19 +69,8 @@
 ;;; The one function
 ;;; ---------------------------------------------------------------------------
 
-(defn send
-  "Address `content` to the agent named `to`. Returns the message VALUE.
-  Nothing is delivered by calling this. Return the value — as a form's
-  result, alone or in a vector with others — and the run loop commits
-  it, which wakes the recipient. Shadowing `clojure.core/send` is
-  deliberate: that function addresses a Clojure agent, this one
-  addresses a Seon agent, and having both callable under one plain verb
-  in an agent's namespace is the confusion, not the fix.
-  A blank or non-string argument returns the ONE registered flat error
-  value — an agent mistake answers, never throws."
-  {:malli/schema [:=> [:cat :my.message/to :my.message/content]
-                  [:or :my.message/message :seon.error/value]]}
-  [to content]
+(defn- send-value
+  [to content about? about]
   (cond
     ;; agent-facing: a wrong TYPE is an agent mistake too, and
     ;; `str/blank?` on a non-string would throw out of the one place
@@ -96,5 +85,38 @@
      :seon.error/message
      "send needs the message to deliver, as a string."}
 
-    :else {:my.message/to to
-           :my.message/content content}))
+    (and about?
+         (or (not (string? about)) (str/blank? about)))
+    {:seon.error/kind ::no-about
+     :seon.error/message
+     "send's about argument must be a non-blank identity string."}
+
+    :else
+    (cond-> {:my.message/to to
+             :my.message/content content}
+      about? (assoc :my.message/about about))))
+
+(defn send
+  "Address `content` to `to`, optionally naming what it concerns.
+  Nothing is delivered by calling this. Return the value — as a form's
+  result, alone or in a vector with others — and the run loop commits
+  it, which wakes the recipient. The optional third argument is the
+  string identity of the fact the message is about; the driver resolves
+  that identity and commits the ref in the terminal transaction.
+
+  Shadowing `clojure.core/send` is deliberate: that function addresses
+  a Clojure agent, this one addresses a Seon agent, and having both
+  callable under one plain verb in an agent's namespace is the
+  confusion, not the fix. A blank or non-string argument returns the
+  ONE registered flat error value — an agent mistake answers, never
+  throws."
+  {:malli/schema
+   [:function
+    [:=> [:cat :my.message/to :my.message/content]
+     [:or :my.message/message :seon.error/value]]
+    [:=> [:cat :my.message/to :my.message/content :my.message/about]
+     [:or :my.message/message :seon.error/value]]]}
+  ([to content]
+   (send-value to content false nil))
+  ([to content about]
+   (send-value to content true about)))

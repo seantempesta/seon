@@ -49,11 +49,11 @@
   recorder's own rule (a returned VALUE tells nobody; only a Throwable
   that interrupted a run does) already says so.
 
-  Crash walk: nothing here holds state. Message ids are DERIVED from
-  (run, ordinal, index) exactly as receipt ids are, so the same form
-  delivering twice would upsert the same rows rather than double-send —
-  a property the crash model does not need today (nothing re-executes)
-  and would need the moment anything did."
+  Crash walk: nothing here holds state. Ordinary message ids are DERIVED
+  from (run, ordinal, index) exactly as receipt ids are. An assignment
+  message carrying `about` instead derives its identity from the resolved
+  (about entity, recipient), so concurrent terminal transactions upsert
+  one assignment at Datahike's serial commit point."
   (:require [datahike.api :as d]
             [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
@@ -199,6 +199,56 @@
   [run-id ordinal index]
   (str run-id "-" ordinal "-message-" index))
 
+(defn- identified-entities
+  "Entities whose installed unique identity attribute equals `identity`.
+
+  An agent holds the ordinary string identity, never an entity id or an
+  attribute-specific lookup ref. Resolve against every installed
+  `:db.unique/identity` attribute, then make ambiguity a value instead of
+  guessing which fact the agent meant."
+  [db identity]
+  (into
+   #{}
+   (keep
+    (fn [[entity attribute]]
+      (when (= :db.unique/identity
+               (get-in db [:schema attribute :db/unique]))
+        entity)))
+   (d/q '[:find ?entity ?attribute
+          :in $ ?identity
+          :where [?entity ?attribute ?identity]]
+        db identity)))
+
+(defn- resolve-about
+  [db identity]
+  (let [entities (identified-entities db identity)]
+    (cond
+      (empty? entities)
+      {:seon.error/kind ::unknown-about
+       :seon.error/message
+       (str "There is no identified fact named \"" identity
+            "\", so nothing was assigned about it.")
+       :seon.error/data {:my.message/about identity}}
+
+      (< 1 (count entities))
+      {:seon.error/kind ::ambiguous-about
+       :seon.error/message
+       (str "More than one identified fact is named \"" identity
+            "\", so the assignment target is ambiguous.")
+       :seon.error/data {:my.message/about identity}}
+
+      :else
+      {:seon.cluster.message/about (first entities)})))
+
+(defn- assignment-message-id
+  "One assignment's commit-time unique identity.
+
+  `pr-str` preserves the pair boundary for arbitrary recipient strings;
+  the resolved entity id is stable within the database where the unique
+  message id performs the upsert."
+  [about recipient]
+  (str "assignment-" (pr-str [about recipient])))
+
 (defn- inbound-message-id
   "One outside message's identity, derived at the serial writer basis."
   [db index]
@@ -329,15 +379,35 @@
                       :seon.error/data {:my.message/to to
                                         :seon.cluster.agent/id sender
                                         :seon.cluster.run/id run-id}})
-             (update delivered :seon.cluster.message/rows conj
-                     {:seon.cluster.message/id
-                      (message-id run-id ordinal index)
-                      :seon.cluster.message/to [:seon.cluster.agent/id to]
-                      :seon.cluster.message/from
-                      [:seon.cluster.agent/id sender]
-                      :seon.cluster.message/content
-                      (:my.message/content candidate)
-                      :seon.cluster.message/at at}))))
+             (let [about-identity (:my.message/about candidate)
+                   about (when about-identity
+                           (resolve-about db about-identity))]
+               (if (:seon.error/kind about)
+                 (update delivered :seon.error/values conj
+                         (update about :seon.error/data
+                                 merge
+                                 {:seon.cluster.agent/id sender
+                                  :seon.cluster.run/id run-id}))
+                 (update
+                  delivered
+                  :seon.cluster.message/rows
+                  conj
+                  (cond->
+                   {:seon.cluster.message/id
+                    (if about
+                      (assignment-message-id
+                       (:seon.cluster.message/about about) to)
+                      (message-id run-id ordinal index))
+                    :seon.cluster.message/to
+                    [:seon.cluster.agent/id to]
+                    :seon.cluster.message/from
+                    [:seon.cluster.agent/id sender]
+                    :seon.cluster.message/content
+                    (:my.message/content candidate)
+                    :seon.cluster.message/at at}
+                    about
+                    (assoc :seon.cluster.message/about
+                           (:seon.cluster.message/about about)))))))))
        {:seon.cluster.message/rows []
         :seon.error/values []}
        (map-indexed vector candidates)))))

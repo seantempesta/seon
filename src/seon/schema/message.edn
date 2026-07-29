@@ -1,6 +1,6 @@
 {; THE TRIGGER. The run loop needs exactly one thing to wake on that it
  ; does not itself commit (L8 disjointness); the smallest honest one is
- ; an inbound message. Four attributes, no delivery/ack/read semantics —
+ ; an inbound message. No delivery/ack/read semantics —
  ; the messaging rung owns that shape when it exists (n3-plan §11.8).
  :seon.cluster.message/at :inst
  :seon.cluster.message/content [:string {:min 1}]
@@ -41,7 +41,13 @@
   [:seon.cluster.message/to :seon.cluster.message/to]
   [:seon.cluster.message/content :seon.cluster.message/content]
   [:seon.cluster.message/at :seon.cluster.message/at]
-  [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]]
+  [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]
+  ; The referenced fact this message assigns to the recipient. The
+  ; attribute is declared with its persistence facet in error.edn,
+  ; where the error recorder first established the same relation.
+  [:seon.cluster.message/about
+   {:optional true}
+   :seon.cluster.message/about]]
 
  ; --------------------------------------------------------------------
  ; THE AGENT-FACING VALUE — `my.message/send` returns this and nothing
@@ -59,10 +65,15 @@
  ; of a lookup ref that would fail the whole terminal transaction.
  :my.message/to [:string {:min 1}]
  :my.message/content [:string {:min 1}]
+ :my.message/about [:string {:min 1}]
  :my.message/message
  [:map {:closed true}
   [:my.message/to :my.message/to]
-  [:my.message/content :my.message/content]]
+  [:my.message/content :my.message/content]
+  ; Optional identity of the fact this message concerns. Agent code
+  ; carries the string; the driver resolves the ref and derives the
+  ; assignment's unique `(about, recipient)` message id.
+  [:my.message/about {:optional true} :my.message/about]]
 
  ; What a FORM may evaluate to and the loop will deliver: one message,
  ; or several. The vector arm is not a convenience — a form's value is

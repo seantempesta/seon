@@ -20,6 +20,13 @@
       (is (= "how many primes under 100?" (:my.message/content value)))
       (is (= #{:my.message/to :my.message/content} (set (keys value)))
           "no id, no timestamp, no sender — the driver owns all three")))
+  (testing "the optional third argument carries a fact identity"
+    (let [value (message/send "bob" "repair this" "failure-17")]
+      (is (seon.schema/valid-candidate-value? :my.message/message value))
+      (is (= {:my.message/to "bob"
+              :my.message/content "repair this"
+              :my.message/about "failure-17"}
+             value))))
   (testing "one send and a vector of sends both validate as the union"
     (is (seon.schema/valid-candidate-value?
          :my.message/value (message/send "bob" "hello")))
@@ -37,6 +44,10 @@
             "and the loop cannot mistake it for a delivery")))
     (testing (str "content " (pr-str bad))
       (is (string? (:seon.error/message (message/send "bob" bad)))))))
+  (doseq [bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
+    (testing (str "about " (pr-str bad))
+      (is (string? (:seon.error/message
+                    (message/send "bob" "content" bad))))))
 
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared
@@ -47,6 +58,7 @@
   ;; deliberately asserted its defect fired when 932ff55fb fixed it,
   ;; exactly as designed, and was deleted with the issue's archival).
   (doseq [value [(message/send "" "content") (message/send "bob" "")
+                 (message/send "bob" "content" "")
                  (run/complete "")]]
     (is (seon.schema/valid-candidate-value? :seon.error/value value)
         "the error path keeps the output schema too")))
