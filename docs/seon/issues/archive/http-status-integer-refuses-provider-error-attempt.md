@@ -60,5 +60,5 @@ The recurring `a-real-jdk-provider-status-commits-with-its-attempt` test runs
 the JDK client against a real loopback 502 response, asserts the normalized
 status is a `Long`, then invokes the production attempt recorder against a
 canonical in-memory database. The attempt and its referenced error fact commit
-together with status 502 intact. The complete `bin/test` gate passed 480 tests
-and 2,039 assertions with zero failures or errors on 2026-07-29.
+together with status 502 intact. The complete `bin/test` gate passed 481 tests
+and 2,042 assertions with zero failures or errors on 2026-07-29.

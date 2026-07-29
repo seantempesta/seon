@@ -71,5 +71,5 @@ not part of the closure and no second provider mechanism was added.
 client against a compatible loopback server, parses the exact received request
 document, and observes `"max_tokens" 8192`. `seon.config-test` proves the dial
 is admitted, installable, defaulted, and valid in a clean process. The
-complete `bin/test` gate passed 480 tests and 2,039 assertions with zero
+complete `bin/test` gate passed 481 tests and 2,042 assertions with zero
 failures or errors on 2026-07-29.
