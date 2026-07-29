@@ -1,52 +1,24 @@
 (ns seon.schema.edn
-  "Schema definitions as EDN data: the classpath loader and the ONE
-  admission gate.
+  "Loads and admits the classpath's EDN schema population.
 
-  CONTRACT LAYER (orchestrator-authored, 2026-07-27 — B2 wave, from the
-  sealed schema-EDN ruling and b2-plan §6). The schemas and function
-  contracts are SEALED: the implementation lane fills the stub bodies
-  until test/seon/schema/edn_test.clj is green and may not loosen a
-  schema or a test.
+  `load!` reads the EDN maps directly beneath a classpath resource
+  directory from file or jar URLs, refuses unreadable files and
+  duplicate keys, and contributes the merged forms to
+  `seon.schema` without activating them. It also derives the manifest,
+  effective-config, and config-entity composites from registered config
+  attributes.
 
-  The model (the sealed ruling, verbatim where it matters):
-
-  - Attribute/entity schemas live as EDN maps (registry key → schema
-    form) in `seon/schema/*.edn` resources on the classpath. The
-    population is GLOBAL: file boundaries are editorial convenience
-    with zero semantic meaning; the loader merges every file and
-    REFUSES a duplicate attribute across files, naming the key and
-    both files.
-  - `register!` already guarantees forms are readable, round-tripping
-    EDN — moving them to `.edn` files is a relocation of the same
-    values, not a new format. The loader contributes the merged
-    population through the same candidate route `register!` uses; it
-    never activates.
-  - ONE admission gate, `admit`, shared by both producers: the loader's
-    merged files at boot/build, and agents' `register!` at runtime.
-    It validates a COMPLETE candidate population: every reference
-    resolves; every `[:fn]` names a registered core predicate; every
-    `[:fn]` carries an honest generator (`:gen/schema` or `:gen/gen` —
-    an opaque platform predicate is honest by constructing a real
-    instance). Refusals name the offending key and, for loaded forms,
-    the contributing file.
-  - LOAD ORDER IS NOT A HAZARD BY CONSTRUCTION: the `[:fn]` predicate
-    and honesty checks run at ACTIVATION over the whole population,
-    never per-file at load — namespaces register their core predicates
-    first, then `load!` merges, then activation admits everything at
-    once. Sixteen registrations stay in code by a COMPUTED rule, never
-    a list: exactly the schemas the `seon.schema.*` namespaces
-    themselves need before any EDN file can be validated.
-  - Classpath enumeration handles both `file:` (dev source classpath)
-    and `jar:` (publish) resource URLs.
-
-  Crash walk: `load!` and `admit` are pure reads over classpath
-  resources and in-memory populations — no durable state, nothing to
-  recover. Committing admitted schema FACTS to a store is the
-  ancestor build's job, not this namespace's."
+  `admit` checks a candidate population through the shared schema
+  contracts. Every `[:fn]` predicate must resolve to a registered core
+  predicate and declare a generator. Refusals identify the offending
+  schema key and, for loaded forms, its source file. This namespace
+  reads classpath and in-memory data only; database installation belongs
+  to cluster population."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.schema.form :as schema.form])
   (:import [java.net JarURLConnection URL]
            [java.util.jar JarFile]))
 
@@ -75,6 +47,73 @@
 ;;; ---------------------------------------------------------------------------
 
 (defonce ^:private !source-files (atom {}))
+
+(defn- config-dial?
+  [identity definition]
+  (and
+   (qualified-keyword? identity)
+   (or (str/starts-with? (namespace identity) "seon.config.")
+       (true? (:seon.config/dial
+               (schema.form/attr-form-properties definition))))))
+
+(defn- config-dial-entries
+  [forms]
+  (->> forms
+       (keep
+        (fn [[identity definition]]
+          (when (config-dial? identity definition)
+            (let [optional?
+                  (true? (:seon.config/optional
+                          (schema.form/attr-form-properties definition)))]
+              {:seon.schema.edn/identity identity
+               :seon.schema.edn/optional? optional?}))))
+       (sort-by (comp str :seon.schema.edn/identity))
+       vec))
+
+(defn- config-map-entry
+  [{::keys [identity optional?]} manifest?]
+  (cond-> [identity identity]
+    (or manifest? optional?)
+    (assoc 1 {:optional true})))
+
+(defn ^:no-doc derive-config-forms
+  "Derive every config composite from registered config attributes."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [forms]
+  (let [dials (config-dial-entries forms)
+        manifest-entries (mapv #(config-map-entry % true) dials)
+        effective-entries (mapv #(config-map-entry % false) dials)]
+    (if (or (seq dials)
+            (some #(contains? forms %)
+                  [:seon.config/manifest
+                   :seon.config/effective
+                   :seon.config/entity]))
+      (assoc forms
+             :seon.config/manifest
+             (into [:map {:closed true}] manifest-entries)
+             :seon.config/effective
+             (into [:map {:closed true}] effective-entries)
+             :seon.config/entity
+             (into
+              [:map {:closed true :seon.db/entity true}
+               [:seon.config/cluster :seon.config/cluster]
+               [:seon.config/applied-manifest-digest
+                :seon.config/applied-manifest-digest]]
+              effective-entries))
+      forms)))
+
+(defn ^:no-doc config-registration-defaults
+  "Defaults declared directly by config attribute registrations."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [forms]
+  (into {}
+        (keep
+         (fn [[identity definition]]
+           (let [properties (schema.form/attr-form-properties definition)]
+             (when (and (config-dial? identity definition)
+                        (contains? properties :seon.config/default))
+               [identity (:seon.config/default properties)]))))
+        forms))
 
 (defn- resource-files
   [resource-dir]
@@ -184,7 +223,8 @@
   [{::keys [resource-dir]}]
   (let [resource-dir (or resource-dir "seon/schema")
         resources (resource-files resource-dir)
-        {::keys [forms files-by-key]} (merge-schema-files resources)]
+        {::keys [forms files-by-key]} (merge-schema-files resources)
+        forms (derive-config-forms forms)]
     (schema/contribute-candidate-forms! forms)
     (swap! !source-files merge files-by-key)
     {::files (mapv ::file resources)

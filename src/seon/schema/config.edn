@@ -5,7 +5,7 @@
  [:re "^[0-9a-f]{64}$"]
 
  :seon.config/on-core-error
- [:enum :record :panic]
+ [:enum {:seon.config/dial true} :record :panic]
 
  ; THE ONE LIMIT on an agent evaluation, as a dial. The evaluator takes
  ; it in its request and never defaults it: a deadline literal in code
@@ -21,7 +21,7 @@
  ; absence is then the state — the error fact is committed and no
  ; escalation message is sent.
  :seon.config.error/escalate-to
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/optional true}]
 
  ; How many faults of one SIGNATURE since this process started before
  ; the same fault also escalates. Counted by query over committed
@@ -32,7 +32,8 @@
  ; THE VIEW. Port 0 means the operating system chooses and the chosen
  ; port is reported — a second cluster just works, and nobody has to
  ; know a number in advance. Pin it when a stable bookmark is wanted.
- :seon.config.web/port [:int {:min 0 :max 65535}]
+ :seon.config.web/port
+ [:int {:min 0 :max 65535 :seon.config/optional true}]
 
  ; How often a tab is willing to be repainted. A coalescing FLOOR, not
  ; a timer standing in for an unobservable event: the observable event
@@ -54,7 +55,7 @@
  ; FAIL-CLOSED for agent-sent triggers (the max-chain precedent):
  ; nothing agent-triggered opens, outside triggers open normally.
  :seon.config.run/max-episode-runs
- [:int {:min 1}]
+ [:int {:min 1 :seon.config/optional true}]
 
  ; HOW LONG A CONVERSATION MAY RUN WITHOUT A HUMAN. Unit: agent-to-agent
  ; hops in one causal chain. Delivery IS the wake, so alice messaging
@@ -116,16 +117,16 @@
  ; role or per-agent overrides arrive, THAT is the change that earns the
  ; entity rows.
  :seon.config.ai.backup/model
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/optional true}]
 
  :seon.config.ai.backup/endpoint
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/optional true}]
 
  :seon.config.ai.backup/api-key-variable
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/optional true}]
 
  :seon.config.ai.backup/timeout-ms
- [:int {:min 1}]
+ [:int {:min 1 :seon.config/optional true}]
 
  ; ---------------------------------------------------------------------
  ; THE BACKOFF STRATEGY. It runs on exactly ONE path — an unpaid,
@@ -149,197 +150,6 @@
 
  :seon.config.ai.retry/maximum-total-delay-ms
  :seon.ai.retry/maximum-total-delay-ms
-
- :seon.config/manifest
- [:map {:closed true}
-  [:seon.config.flow.compute/queue-depth
-   {:optional true}
-   :seon.config.flow.compute/queue-depth]
-  [:seon.config.flow.compute/concurrency
-   {:optional true}
-   :seon.config.flow.compute/concurrency]
-  [:seon.config.eval.result/max-depth
-   {:optional true}
-   :seon.config.eval.result/max-depth]
-  [:seon.config.eval.result/max-collection
-   {:optional true}
-   :seon.config.eval.result/max-collection]
-  [:seon.config.eval.result/max-string
-   {:optional true}
-   :seon.config.eval.result/max-string]
-  [:seon.config.eval.result/max-nodes
-   {:optional true}
-   :seon.config.eval.result/max-nodes]
-  [:seon.config.eval/time-limit-ms
-   {:optional true}
-   :seon.config.eval/time-limit-ms]
-  [:seon.config.error/escalate-to
-   {:optional true} :seon.config.error/escalate-to]
-  [:seon.config.error/recurrence-limit
-   {:optional true}
-   :seon.config.error/recurrence-limit]
-  [:seon.config.web/port {:optional true} :seon.config.web/port]
-  [:seon.config.render/coalesce-ms
-   {:optional true} :seon.config.render/coalesce-ms]
-  [:seon.config.message/max-chain
-   {:optional true}
-   :seon.config.message/max-chain]
-  [:seon.config.run/max-episode-runs
-   {:optional true}
-   :seon.config.run/max-episode-runs]
-  [:seon.config/on-core-error
-   {:optional true}
-   :seon.config/on-core-error]
-  [:seon.config.ai/endpoint {:optional true} :seon.config.ai/endpoint]
-  [:seon.config.ai/model {:optional true} :seon.config.ai/model]
-  [:seon.config.ai/max-tokens
-   {:optional true} :seon.config.ai/max-tokens]
-  [:seon.config.ai/api-key-variable
-   {:optional true} :seon.config.ai/api-key-variable]
-  ; the declared no-auth state (local servers) — admitted here so a
-  ; manifest can actually CONFIGURE it; hosted stays fail-closed
-  [:seon.config.ai/no-auth {:optional true} :seon.config.ai/no-auth]
-  [:seon.config.ai/timeout-ms {:optional true} :seon.config.ai/timeout-ms]
-  [:seon.config.ai.backup/model
-   {:optional true} :seon.config.ai.backup/model]
-  [:seon.config.ai.backup/endpoint
-   {:optional true} :seon.config.ai.backup/endpoint]
-  [:seon.config.ai.backup/api-key-variable
-   {:optional true} :seon.config.ai.backup/api-key-variable]
-  [:seon.config.ai.backup/timeout-ms
-   {:optional true} :seon.config.ai.backup/timeout-ms]
-  [:seon.config.ai.retry/base-delay-ms
-   {:optional true} :seon.config.ai.retry/base-delay-ms]
-  [:seon.config.ai.retry/multiplier
-   {:optional true} :seon.config.ai.retry/multiplier]
-  [:seon.config.ai.retry/jitter-fraction
-   {:optional true} :seon.config.ai.retry/jitter-fraction]
-  [:seon.config.ai.retry/maximum-delay-ms
-   {:optional true} :seon.config.ai.retry/maximum-delay-ms]
-  [:seon.config.ai.retry/maximum-retries
-   {:optional true} :seon.config.ai.retry/maximum-retries]
-  [:seon.config.ai.retry/maximum-total-delay-ms
-   {:optional true} :seon.config.ai.retry/maximum-total-delay-ms]]
-
- :seon.config/effective
- [:map {:closed true}
-  [:seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/queue-depth]
-  [:seon.config.flow.compute/concurrency
-   :seon.config.flow.compute/concurrency]
-  [:seon.config.eval.result/max-depth
-   :seon.config.eval.result/max-depth]
-  [:seon.config.eval.result/max-collection
-   :seon.config.eval.result/max-collection]
-  [:seon.config.eval.result/max-string
-   :seon.config.eval.result/max-string]
-  [:seon.config.eval.result/max-nodes
-   :seon.config.eval.result/max-nodes]
-  [:seon.config.eval/time-limit-ms
-   :seon.config.eval/time-limit-ms]
-  [:seon.config.error/escalate-to
-   {:optional true} :seon.config.error/escalate-to]
-  [:seon.config.error/recurrence-limit
-   :seon.config.error/recurrence-limit]
-  [:seon.config.web/port {:optional true} :seon.config.web/port]
-  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
-  [:seon.config.message/max-chain :seon.config.message/max-chain]
-  ; OPTIONAL because absence is a representable state with ruled
-  ; semantics (fail-closed for agent-sent triggers), never because the
-  ; shipped document may omit it — default.edn carries a provenanced
-  ; value.
-  [:seon.config.run/max-episode-runs
-   {:optional true} :seon.config.run/max-episode-runs]
-  [:seon.config/on-core-error
-   :seon.config/on-core-error]
-  [:seon.config.ai/endpoint :seon.config.ai/endpoint]
-  [:seon.config.ai/model :seon.config.ai/model]
-  [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
-  [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
-  ; The explicit unauthenticated target shape. Literal true is optional:
-  ; absence selects the credential-variable shape, while false is not a
-  ; second spelling for it.
-  [:seon.config.ai/no-auth
-   {:optional true} :seon.config.ai/no-auth]
-  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
-  ; OPTIONAL, and absence is the whole contract: no backup dial means no
-  ; backup target, which means `disposition` never returns
-  ; `:failover-now`. `model` is the one that decides — the other three
-  ; inherit the primary's when absent.
-  [:seon.config.ai.backup/model
-   {:optional true} :seon.config.ai.backup/model]
-  [:seon.config.ai.backup/endpoint
-   {:optional true} :seon.config.ai.backup/endpoint]
-  [:seon.config.ai.backup/api-key-variable
-   {:optional true} :seon.config.ai.backup/api-key-variable]
-  [:seon.config.ai.backup/timeout-ms
-   {:optional true} :seon.config.ai.backup/timeout-ms]
-  [:seon.config.ai.retry/base-delay-ms :seon.config.ai.retry/base-delay-ms]
-  [:seon.config.ai.retry/multiplier :seon.config.ai.retry/multiplier]
-  [:seon.config.ai.retry/jitter-fraction
-   :seon.config.ai.retry/jitter-fraction]
-  [:seon.config.ai.retry/maximum-delay-ms
-   :seon.config.ai.retry/maximum-delay-ms]
-  [:seon.config.ai.retry/maximum-retries
-   :seon.config.ai.retry/maximum-retries]
-  [:seon.config.ai.retry/maximum-total-delay-ms
-   :seon.config.ai.retry/maximum-total-delay-ms]]
-
- :seon.config/entity
- [:map {:closed true :seon.db/entity true}
-  [:seon.config/cluster :seon.config/cluster]
-  [:seon.config/applied-manifest-digest
-   :seon.config/applied-manifest-digest]
-  [:seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/queue-depth]
-  [:seon.config.flow.compute/concurrency
-   :seon.config.flow.compute/concurrency]
-  [:seon.config.eval.result/max-depth
-   :seon.config.eval.result/max-depth]
-  [:seon.config.eval.result/max-collection
-   :seon.config.eval.result/max-collection]
-  [:seon.config.eval.result/max-string
-   :seon.config.eval.result/max-string]
-  [:seon.config.eval.result/max-nodes
-   :seon.config.eval.result/max-nodes]
-  [:seon.config.eval/time-limit-ms
-   :seon.config.eval/time-limit-ms]
-  [:seon.config.error/escalate-to
-   {:optional true} :seon.config.error/escalate-to]
-  [:seon.config.error/recurrence-limit
-   :seon.config.error/recurrence-limit]
-  [:seon.config.web/port {:optional true} :seon.config.web/port]
-  [:seon.config.render/coalesce-ms :seon.config.render/coalesce-ms]
-  [:seon.config.message/max-chain :seon.config.message/max-chain]
-  [:seon.config.run/max-episode-runs
-   {:optional true} :seon.config.run/max-episode-runs]
-  [:seon.config/on-core-error
-   :seon.config/on-core-error]
-  [:seon.config.ai/endpoint :seon.config.ai/endpoint]
-  [:seon.config.ai/model :seon.config.ai/model]
-  [:seon.config.ai/max-tokens :seon.config.ai/max-tokens]
-  [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
-  [:seon.config.ai/no-auth
-   {:optional true} :seon.config.ai/no-auth]
-  [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
-  [:seon.config.ai.backup/model
-   {:optional true} :seon.config.ai.backup/model]
-  [:seon.config.ai.backup/endpoint
-   {:optional true} :seon.config.ai.backup/endpoint]
-  [:seon.config.ai.backup/api-key-variable
-   {:optional true} :seon.config.ai.backup/api-key-variable]
-  [:seon.config.ai.backup/timeout-ms
-   {:optional true} :seon.config.ai.backup/timeout-ms]
-  [:seon.config.ai.retry/base-delay-ms :seon.config.ai.retry/base-delay-ms]
-  [:seon.config.ai.retry/multiplier :seon.config.ai.retry/multiplier]
-  [:seon.config.ai.retry/jitter-fraction
-   :seon.config.ai.retry/jitter-fraction]
-  [:seon.config.ai.retry/maximum-delay-ms
-   :seon.config.ai.retry/maximum-delay-ms]
-  [:seon.config.ai.retry/maximum-retries
-   :seon.config.ai.retry/maximum-retries]
-  [:seon.config.ai.retry/maximum-total-delay-ms
-   :seon.config.ai.retry/maximum-total-delay-ms]]
 
  :seon.config/apply-request
  [:map {:closed true}

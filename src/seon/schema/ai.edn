@@ -6,7 +6,8 @@
  ; Literal true rather than boolean: false would be a second spelling
  ; for the authenticated shape. The target/request unions below make
  ; both and neither unrepresentable.
- :seon.config.ai/no-auth [:= true]
+ :seon.config.ai/no-auth
+ [:= {:seon.config/optional true} true]
  :seon.ai/endpoint [:string {:min 1}]
  :seon.ai/model [:string {:min 1}]
  ; The provider's output budget. This bounds reasoning and visible

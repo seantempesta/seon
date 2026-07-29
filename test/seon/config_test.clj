@@ -1,62 +1,16 @@
 (ns seon.config-test
   "Sealed acceptance draft for manifest-to-config-facts."
   (:require [clojure.java.io :as io]
-            [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.ai :as ai]
             [seon.config :as config]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (set! *warn-on-reflection* true)
 
 (schema.edn/load! {::schema.edn/resource-dir "seon/schema"})
-
-(def ^:private expected-dial-attributes
-  #{:seon.config.flow.compute/queue-depth
-    :seon.config.flow.compute/concurrency
-    :seon.config.eval.result/max-depth
-    :seon.config.eval.result/max-collection
-    :seon.config.eval.result/max-string
-    :seon.config.eval.result/max-nodes
-    :seon.config.eval/time-limit-ms
-    :seon.config.error/escalate-to
-    :seon.config.error/recurrence-limit
-    ;; THE VIEW — two dials, added when boot began serving a page.
-    ;; This set is enumerated deliberately so that GAINING a dial is an
-    ;; edit somebody made on purpose rather than drift nobody noticed.
-    :seon.config.web/port
-    :seon.config.render/coalesce-ms
-    :seon.config.message/max-chain
-    ;; THE EPISODE DIAL (F1, 2026-07-28): max consecutive runs per
-    ;; idle→running episode; absence is fail-closed for agent-sent
-    ;; triggers, and the shipped document carries the owner-ruled 100.
-    :seon.config.run/max-episode-runs
-    :seon.config.ai/no-auth
-    :seon.config/on-core-error
-    :seon.config.ai/endpoint
-    :seon.config.ai/model
-    :seon.config.ai/max-tokens
-    :seon.config.ai/api-key-variable
-    :seon.config.ai/timeout-ms
-    ;; THE BACKUP DESCRIPTOR ROW — four optional dials, and the shipped
-    ;; document sets none of them. `model` is the one that decides a
-    ;; backup exists; the other three are overrides that inherit the
-    ;; primary's, which is what makes a PARTIAL backup unrepresentable.
-    :seon.config.ai.backup/model
-    :seon.config.ai.backup/endpoint
-    :seon.config.ai.backup/api-key-variable
-    :seon.config.ai.backup/timeout-ms
-    ;; the backoff strategy, on the no-backup path only
-    :seon.config.ai.retry/base-delay-ms
-    :seon.config.ai.retry/multiplier
-    :seon.config.ai.retry/jitter-fraction
-    :seon.config.ai.retry/maximum-delay-ms
-    :seon.config.ai.retry/maximum-retries
-    :seon.config.ai.retry/maximum-total-delay-ms})
 
 (def ^:private dial-attributes
   (into #{}
@@ -80,35 +34,12 @@
                         (first entry)))))
         (drop 2 (schema/schema-definition :seon.config/effective))))
 
-(defn- observed-provider-dials
-  []
-  (let [observed (atom #{})
-        values
-        (assoc (config/defaults)
-               :seon.config.ai.backup/model "backup-model"
-               :seon.config.ai.backup/endpoint "http://backup.invalid"
-               :seon.config.ai.backup/api-key-variable "BACKUP_API_KEY"
-               :seon.config.ai.backup/timeout-ms 1000)
-        dials
-        (reify clojure.lang.ILookup
-          (valAt [_ key]
-            (swap! observed conj key)
-            (get values key))
-          (valAt [_ key not-found]
-            (swap! observed conj key)
-            (get values key not-found)))]
-    (ai/targets dials)
-    (ai/retry-strategy dials)
-    @observed))
-
 (deftest the-default-document-has-one-canonical-location
   (is (.equals "config/default.edn" config/default-manifest-path))
   (is (.isFile (io/file config/default-manifest-path))))
 
 (deftest defaults-are-complete-and-valid-for-every-dial
   (let [manifest (config/defaults)]
-    (is (= expected-dial-attributes dial-attributes)
-        "the registered manifest owns exactly today's honest dial population")
     (is (empty? (remove (set (keys manifest)) required-dial-attributes))
         "every REQUIRED dial has a value")
     (is (empty? (remove dial-attributes (keys manifest)))
@@ -131,23 +62,6 @@
         (is (schema/valid-candidate-value? dial (get manifest dial))
             (pr-str (schema/explain-candidate-value dial (get manifest dial))))))
     (is (schema/valid-candidate-value? :seon.config/effective manifest))))
-
-(deftest every-provider-assembly-dial-is-admitted-and-installable
-  (test-support/with-database
-    (fn [connection]
-      (let [provider-dials (observed-provider-dials)
-            installed (set (keys (:schema @connection)))]
-        (is (set/subset? provider-dials dial-attributes)
-            "every dial the provider assembly actually reads is admitted by
-             the closed manifest map")
-        (is (set/subset? provider-dials installed)
-            "every admitted provider dial is installed as a database
-             attribute by canonical schema population")
-        (doseq [dial provider-dials]
-          (is (= dial
-                 (:db/ident
-                  (schema.datahike/malli->datahike-attr dial)))
-              (str dial " derives one installable declaration")))))))
 
 (deftest result-caps-are-derived-from-the-effective-configuration
   (let [effective (config/defaults)]

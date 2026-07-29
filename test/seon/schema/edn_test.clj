@@ -14,6 +14,7 @@
             [clojure.test.check.properties :as prop]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
@@ -156,3 +157,36 @@
      [:fn {:gen/schema :inst}
       'seon.schema.edn-test/fixture-instant?])
     (is (schema/registered? :seon.schema.edn.gate/agent-honest))))
+
+(deftest one-config-registration-derives-every-structural-contract
+  (let [scratch :seon.config.scratch/enabled
+        forms
+        {:seon.config/cluster
+         [:string {:min 1 :seon.db/identity true}]
+         :seon.config/applied-manifest-digest :string
+         :seon.config/on-core-error
+         [:enum {:seon.config/dial true} :record :panic]
+         scratch
+         [:boolean {:seon.config/default false}]
+         :seon.config/apply-request
+         [:map
+          [:seon.config/manifest :seon.config/manifest]]}
+        derived (schema.edn/derive-config-forms forms)
+        entries
+        (fn [schema-key]
+          (into {} (map (juxt first identity))
+                (schema.form/map-entries (get derived schema-key))))]
+    (testing "the scratch registration is admitted everywhere with no roster"
+      (is (contains? (entries :seon.config/manifest) scratch))
+      (is (contains? (entries :seon.config/effective) scratch))
+      (is (contains? (entries :seon.config/entity) scratch))
+      (is (contains? (set (schema.form/database-attributes derived)) scratch)))
+    (testing "structural config attributes never become manifest entries"
+      (is (not (contains? (entries :seon.config/manifest)
+                          :seon.config/cluster)))
+      (is (not (contains? (entries :seon.config/manifest)
+                          :seon.config/applied-manifest-digest))))
+    (testing "one registration also carries its smart default"
+      (is (= false
+             (get (schema.edn/config-registration-defaults derived)
+                  scratch))))))
