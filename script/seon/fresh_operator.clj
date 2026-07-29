@@ -706,7 +706,7 @@
   []
   (println
    (str
-    "Usage: bin/seon-fresh COMMAND\n\n"
+    "Usage: bin/seon COMMAND\n\n"
     "  start [CLUSTER] [--config PATH]\n"
     "                 start one cluster; absent cluster means default\n"
     "  config apply [CLUSTER] PATH\n"

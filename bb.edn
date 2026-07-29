@@ -4,8 +4,4 @@
         metosin/malli {:mvn/version "0.20.0"}
         nrepl/bencode {:mvn/version "1.2.0"}
         org.replikativ/datalog-parser {:mvn/version "0.2.37"}
-        parinferish/parinferish {:mvn/version "0.8.0"}}
- :tasks
- {operator-test
-  {:doc "Run the isolated Seon operator lifecycle tests."
-   :task (shell "bb -m seon.dev.test-runner")}}}
+        parinferish/parinferish {:mvn/version "0.8.0"}}}
