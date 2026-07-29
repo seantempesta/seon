@@ -29,6 +29,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
+            [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [sci.core :as sci.core]
             [seon.sci.eval :as sci.eval]
@@ -263,6 +264,67 @@
                         {:seon.cluster.loop/cluster cluster
                          :seon.cluster.work/next work}
                         (:seon.cluster.work/now request)))))))))
+
+(defn- running-refusal-receipt!
+  "Create one held run with ordinal zero running, for the terminal seam."
+  [cluster tag]
+  (let [connection (:seon.store/branch-connection cluster)
+        run-id (str "terminal-refusal-" tag)
+        at (Date.)]
+    (d/transact
+     connection
+     (into
+      (run/open-tx {:seon.cluster.run/id run-id
+                    :seon.cluster.run/agent
+                    [:seon.cluster.agent/id "agent-a"]
+                    :seon.cluster.run/opened-at at})
+      (run/claim-tx {:seon.cluster.run/id run-id
+                     :seon.cluster.run/process process
+                     :seon.cluster.run/live-processes #{process}
+                     :seon.cluster.run/now at})))
+    (d/transact
+     connection
+     (run/receipt-start-tx {:seon.cluster.run/id run-id
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/at at}))
+    {:seon.cluster.run/id run-id
+     :seon.cluster.run/process process
+     :seon.cluster.run.form/ordinal 0}))
+
+(defn- terminal-refused!
+  [cluster outcome receipt]
+  ((deref (ns-resolve 'seon.cluster.loop 'terminal-refused!))
+   cluster outcome (Date.)
+   {:seon.cluster.agent/id "agent-a"
+    :seon.cluster.run/id (:seon.cluster.run/id receipt)}
+   receipt))
+
+(defn- transition-transaction?
+  [transaction transition]
+  (let [tx-data (if (map? transaction)
+                  (:tx-data transaction)
+                  transaction)]
+    (boolean
+     (some (fn [operation]
+             (and (vector? operation)
+                  (= :db.fn/call (first operation))
+                  (= transition (second operation))))
+           tx-data))))
+
+(defn- recover-terminal-refusal!
+  [cluster receipt]
+  (let [connection (:seon.store/branch-connection cluster)
+        recovered-process "terminal-refusal-recovery"
+        recovered-cluster
+        (assoc cluster :seon.cluster.run/process recovered-process)]
+    (d/transact
+     connection
+     (run/recover-tx
+      {:seon.cluster.run/id (:seon.cluster.run/id receipt)
+       :seon.cluster.run/live-processes #{recovered-process}
+       :seon.cluster.run/now (Date.)}))
+    (cluster.loop/settle-interruption!
+     recovered-cluster (:seon.cluster.run/id receipt) (Date.))))
 
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
   ;; the injection seam, proven: the same qualified symbol the cluster
@@ -566,6 +628,128 @@
                                :where [?error :seon.error/id _]]
                              @connection)))
                     "later work never re-records the original event"))))))))))
+
+(deftest terminal-refusal-settlement-is-bounded-checked-and-recoverable
+  ;; Attempt-5's exact hostile matrix. The first four values are valid
+  ;; refusal sources after admission and must settle. The fifth cannot
+  ;; produce a valid registered error fact, so it must become a core
+  ;; fault before Datahike sees a transaction. A separately injected
+  ;; commit refusal proves the returned outcome is checked too.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            passing
+            [["ordinary"
+              {:seon.error/kind :seon.cluster.run/refused
+               :seon.error/message
+               "receipt-settle-call was refused by program-delete-not-owned."
+               :seon.cluster.run/rule
+               :seon.cluster.run/program-delete-not-owned}]
+             ["huge-message"
+              {:seon.error/kind :seon.db/rejected
+               :seon.error/message (apply str (repeat 200000 "X"))
+               :seon.error/data {:big (vec (range 20000))}}]
+             ["empty-message"
+              {:seon.error/kind :seon.db/unknown-failure
+               :seon.error/message ""}]
+             ["absent-message"
+              {:seon.error/kind :seon.db/unknown-failure}]]]
+        (doseq [[tag outcome] passing]
+          (let [receipt (running-refusal-receipt! cluster tag)
+                run-id (:seon.cluster.run/id receipt)]
+            (is (true? (terminal-refused! cluster outcome receipt))
+                (str tag " settled"))
+            (let [settled
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])])
+                  run (d/pull @connection '[*]
+                              [:seon.cluster.run/id run-id])]
+              (is (run/terminal? settled) (str tag " terminalized receipt"))
+              (is (some? (:seon.cluster.run/closed-at run))
+                  (str tag " closed run"))
+              (is (nil? (:seon.cluster.run/process run))
+                  (str tag " released custody")))))
+        (testing "the bounded admission codec owns hostile payload size"
+          (is (every?
+               #(<= (count (:seon.error/message %)) 4096)
+               (d/q '[:find [(pull ?error
+                                   [:seon.error/message]) ...]
+                      :where [?error :seon.error/id _]]
+                    @connection))
+              "no unbounded source string reaches the settlement"))
+
+        (testing "attempt 5: a schema-invalid admitted error faults closed"
+          (let [receipt
+                (running-refusal-receipt! cluster "string-kind")
+                run-id (:seon.cluster.run/id receipt)
+                failure
+                (try
+                  (terminal-refused!
+                   cluster
+                   {:seon.error/kind "not-a-keyword"
+                    :seon.error/message "hostile kind"}
+                   receipt)
+                  nil
+                  (catch clojure.lang.ExceptionInfo exception
+                    exception))]
+            (is (= :seon.cluster.loop/terminal-refusal-settlement-refused
+                   (:seon.error/kind (ex-data failure)))
+                "invalid construction is a named core fault, not true")
+            (is (false?
+                 (run/terminal?
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])]))))
+            (is (true?
+                 (recover-terminal-refusal! cluster receipt))
+                "boot-shape recovery marks interruption then closes the run")
+            (is (some?
+                 (:seon.cluster.eval/interrupted-at
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])]))))))
+
+        (testing "even a post-construction commit refusal cannot return true"
+          (let [receipt
+                (running-refusal-receipt! cluster "injected-commit")
+                run-id (:seon.cluster.run/id receipt)
+                transact! store/transact!
+                failure
+                (with-redefs
+                  [store/transact!
+                   (fn [target transaction]
+                     (if (transition-transaction?
+                          transaction #'run/receipt-refusal-call)
+                       {:seon.error/kind :seon.db/rejected
+                        :seon.error/message "injected settlement refusal"
+                        :seon.error/data {:error :transact/schema}}
+                       (transact! target transaction)))]
+                  (try
+                    (terminal-refused!
+                     cluster
+                     {:seon.error/kind :seon.cluster.run/refused
+                      :seon.error/message "ordinary terminal refusal"}
+                     receipt)
+                    nil
+                    (catch clojure.lang.ExceptionInfo exception
+                      exception)))]
+            (is (= :seon.cluster.loop/terminal-refusal-settlement-refused
+                   (:seon.error/kind (ex-data failure)))
+                "the settlement transaction's own outcome is checked")
+            (is (= :seon.db/rejected
+                   (:seon.error/kind
+                    (:seon.cluster.loop/settlement (ex-data failure)))))
+            (is (false?
+                 (run/terminal?
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])]))))
+            (is (true? (recover-terminal-refusal! cluster receipt)))
+            (let [recovered
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])])
+                  run (d/pull @connection '[*]
+                              [:seon.cluster.run/id run-id])]
+              (is (some? (:seon.cluster.eval/interrupted-at recovered)))
+              (is (some? (:seon.cluster.run/closed-at run)))
+              (is (nil? (:seon.cluster.run/process run))))))))))
 
 (deftest evaluation-follows-the-readers-parse-time-namespace
   (with-cluster

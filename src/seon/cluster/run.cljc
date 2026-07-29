@@ -534,9 +534,12 @@
 
 (defn receipt-refusal-tx
   "Transaction data terminalizing a receipt after its settlement refused.
-  The admitted flat error has no program row or disposition that can
-  repeat the original refusal. This transition also closes the receipt's
-  run, so the event derives no follow-up close pass."
+  The caller supplies a bounded, registered-schema-valid flat error;
+  there is no program row or disposition that can repeat the original
+  refusal. This transition also closes the receipt's run, so the event
+  derives no follow-up close pass. `terminal-refused!` checks the
+  transaction's returned outcome rather than treating construction as
+  proof that it committed."
   {:malli/schema
    [:=> [:cat
          [:map {:closed true}
@@ -678,12 +681,14 @@
 
 (defn receipt-refusal-call
   "Terminalize a running receipt after its terminal transaction refused.
-  Never refuses: a missing or already-terminal receipt contributes no
-  transaction data, so the durable error recorder sharing this
-  transaction still commits. A running receipt gets the same terminal
-  assertions as ordinary settlement and its run closes in this same
-  transaction. Presence prevents overwrite, and closing here leaves no
-  derived `:close` work whose wake could be mistaken for a retry."
+  Never refuses on database STATE: a missing or already-terminal receipt
+  contributes no transaction data, so the durable error recorder sharing
+  this transaction still commits. The caller's bounded request already
+  satisfies the registered attribute schemas. A running receipt gets the
+  same terminal assertions as ordinary settlement and its run closes in
+  this same transaction. Presence prevents overwrite, and closing here
+  leaves no derived `:close` work whose wake could be mistaken for a
+  retry."
   {:malli/schema
    [:=> [:cat :any
          [:map {:closed true}

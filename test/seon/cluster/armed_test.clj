@@ -29,8 +29,11 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.run :as run]
+            [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.schema]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]
            [java.util.concurrent CountDownLatch]))
@@ -82,6 +85,18 @@
          [?agent :seon.cluster.agent/id ?agent-id]
          [?message :seon.cluster.message/to ?agent]]
        db agent-id))
+
+(defn- transition-transaction?
+  [transaction transition]
+  (let [tx-data (if (map? transaction)
+                  (:tx-data transaction)
+                  transaction)]
+    (boolean
+     (some (fn [operation]
+             (and (vector? operation)
+                  (= :db.fn/call (first operation))
+                  (= transition (second operation))))
+           tx-data))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; What boot leaves standing
@@ -232,6 +247,147 @@
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts
 ;;; ---------------------------------------------------------------------------
+
+(deftest refused-refusal-settlement-faults-and-recovers-on-reboot
+  (let [name "terminal-refusal-fault"
+        root (str "tmp/armed-test/" name)
+        run-id (atom nil)]
+    (doseq [file (reverse (file-seq (io/file root)))]
+      (.delete ^java.io.File file))
+    (let [instance (cluster/start! {:seon.boot/cluster-name name
+                                    :seon.boot/root root})]
+      (try
+        (let [connection (:seon.boot/cluster-connection instance)
+              routing (:seon.cluster.agent/routing instance)
+              entry (agent/armed routing "root")
+              transact! store/transact!]
+          (with-redefs
+            [ai/complete
+             (fn [_]
+               {:seon.ai/text "(identity 1)"})
+             ;; This regression owns the run/loop settlement seam, not
+             ;; acquisition. The evaluator remains an ordinary value.
+             sci.eval/acquire! (fn [_] nil)
+             sci.eval/evaluate
+             (fn [_]
+               {:seon.sci.admit/value 1
+                :seon.cluster.eval/result-edn "1"})
+             store/transact!
+             (fn [target transaction]
+               (cond
+                 (transition-transaction?
+                  transaction #'run/receipt-settle-call)
+                 {:seon.error/kind :seon.cluster.run/refused
+                  :seon.error/message "injected original terminal refusal"}
+
+                 (transition-transaction?
+                  transaction #'run/receipt-refusal-call)
+                 {:seon.error/kind :seon.db/rejected
+                  :seon.error/message "injected refusal settlement rejection"
+                  :seon.error/data {:error :transact/schema}}
+
+                 :else
+                 (transact! target transaction)))]
+            (d/transact
+             connection
+             [{:seon.cluster.message/id "terminal-refusal-trigger"
+               :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+               :seon.cluster.message/content "exercise the terminal seam"
+               :seon.cluster.message/at (Date.)}])
+            ;; The database fact is downstream of the agent graph's own
+            ;; error channel, the shared fault channel, and the R41
+            ;; committer. No test code touches those channels.
+            (let [fact
+                  (first
+                   (await-fact
+                    connection
+                    (fn [db]
+                      (seq
+                       (filter
+                        #(= :seon.cluster.loop/terminal-refusal-settlement-refused
+                            (:seon.error/kind %))
+                        (errors db))))))
+                  rid
+                  (d/q '[:find ?run-id .
+                         :in $ ?error-id
+                         :where
+                         [?error :seon.error/id ?error-id]
+                         [?error :seon.error/run ?run]
+                         [?run :seon.cluster.run/id ?run-id]]
+                       @connection (:seon.error/id fact))]
+              (reset! run-id rid)
+              (is (some? fact) "the refused settlement became a fault fact")
+              (is (= "clojure.lang.ExceptionInfo"
+                     (:seon.error/class fact)))
+              (is (= :seon.cluster.agent/turn (:seon.error/proc fact))
+                  "it traversed the agent graph's error channel")
+              (is (pos?
+                   (:seon.flow/panicked
+                    (:clojure.core.async.flow/state
+                     (flow/ping-proc
+                      (:seon.flow/fault-graph
+                       (:seon.flow/error-fanout instance))
+                      :seon.flow/fault-committer))))
+                  "the shipped :panic dial took R41's loud path")
+              (let [receipt
+                    (d/q '[:find (pull ?receipt [*]) .
+                           :in $ ?run-id
+                           :where
+                           [?run :seon.cluster.run/id ?run-id]
+                           [?receipt :seon.cluster.eval/run ?run]]
+                         @connection rid)
+                    run
+                    (d/pull @connection '[*]
+                            [:seon.cluster.run/id rid])]
+                (is (false? (run/terminal? receipt))
+                    "the function never reported a settlement that did not land")
+                (is (nil? (:seon.cluster.run/closed-at run)))
+                (is (some? (:seon.cluster.run/process run))
+                    "the held state is left for boot recovery")))))
+        (finally
+          (cluster/stop! instance))))
+
+    (with-redefs
+      [ai/complete (fn [_] {:seon.ai/text "(identity 1)"})
+       ;; `start!` twice in one test JVM has the same real
+       ;; (pid,start-instant). A reboot has a new process identity; make
+       ;; that fact explicit so the production recovery transition sees
+       ;; the prior holder as dead.
+       cluster/process-identity
+       (fn [_] "terminal-refusal-recovery-process")
+       sci.eval/acquire! (fn [_] nil)
+       sci.eval/evaluate
+       (fn [_]
+         {:seon.sci.admit/value 1
+          :seon.cluster.eval/result-edn "1"})]
+      (let [restarted (cluster/start! {:seon.boot/cluster-name name
+                                       :seon.boot/root root})]
+        (try
+          (let [connection (:seon.boot/cluster-connection restarted)
+                recovered
+                (await-fact
+                 connection
+                 (fn [db]
+                   (let [receipt
+                         (d/q '[:find (pull ?receipt [*]) .
+                                :in $ ?run-id
+                                :where
+                                [?run :seon.cluster.run/id ?run-id]
+                                [?receipt :seon.cluster.eval/run ?run]]
+                              db @run-id)
+                         run (d/pull db '[*]
+                                     [:seon.cluster.run/id @run-id])]
+                     (when (:seon.cluster.eval/interrupted-at receipt)
+                       {:receipt receipt :run run}))))]
+            (is (some? recovered)
+                "reboot marked the dangling receipt interrupted")
+            (is (nil? (:seon.cluster.run/closed-at
+                       (:run recovered)))
+                "recovery does not invent a successful run close")
+            (is (pos? (:seon.boot/recovered-runs restarted)))
+            (is (zero? @(:seon.error/drops restarted))))
+          (finally
+            (cluster/stop! restarted)))))))
 
 (deftest an-escaped-throwable-becomes-a-fact-and-a-message
   (with-cluster

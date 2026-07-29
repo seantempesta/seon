@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, database]
 ---
@@ -79,3 +79,43 @@ that it happened.
   receipt's non-terminal state is reported rather than silently returned as
   success.
 - The docstring stops asserting atomic settlement that the code does not check.
+
+## Resolution
+
+`terminal-refused!` now passes the refusal through the one bounded admission
+codec before constructing its minimal transaction. The normalized durable fact
+and its flat receipt value must satisfy their registered schemas before
+Datahike sees them. Valid keyword kinds remain exact; an invalid kind therefore
+cannot become a schema-rejected database operation.
+
+The function retains and checks `store/transact!`'s returned outcome. An
+invalid construction or any remaining refused settlement raises
+`:seon.cluster.loop/terminal-refusal-settlement-refused` as a core fault. The
+affected agent's process-local mailbox closes before that exception escapes,
+so no later live pass can select the still-running receipt; every trigger
+remains a database fact for the fresh mailbox. Flow's existing fault channel
+commits the fault and the R41 `:panic` path is loud. A reboot with a new process
+identity marks the dangling receipt `interrupted-at`; it does not invent a
+successful run close or re-execute the form.
+
+`receipt-refusal-tx` and `receipt-refusal-call` now state the actual boundary:
+they never refuse on database state, while their caller owns bounded,
+schema-valid construction and checks the commit.
+
+## Proof
+
+`terminal-refusal-settlement-is-bounded-checked-and-recoverable` pins the four
+passing audit inputs: ordinary transition refusal, a 200 KB message carrying a
+20,000-element payload, empty message, and absent message. It also pins the
+attempt-5 string-kind falsifier as a pre-transaction core fault and injects a
+post-construction settlement refusal to prove the returned outcome cannot be
+discarded.
+
+`refused-refusal-settlement-faults-and-recovers-on-reboot` drives the real
+agent graph and shared fault committer. It observes the named durable fault,
+the `:seon.cluster.agent/turn` proc attribution, R41's panic counter, a
+non-terminal receipt in its open held run, and `interrupted-at` after a
+new-process boot recovery.
+
+The focused gate passes 44 tests and 296 assertions. The full `bin/test` gate
+passes 552 tests and 2,360 assertions, with zero failures and zero errors.

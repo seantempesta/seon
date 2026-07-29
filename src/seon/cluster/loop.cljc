@@ -51,6 +51,7 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -302,47 +303,110 @@
         (error-tx cluster db outcome now attribution)))
      kind)))
 
+(defn- terminal-settlement-fault!
+  "Stop this agent's passes and raise one named core settlement fault."
+  [cluster message data]
+  ;; This agent may not take another pass over the still-running receipt
+  ;; before boot recovery marks it interrupted. Closing its process-local
+  ;; mailbox loses no work — wakes are re-derivable from database facts
+  ;; and arm! creates a fresh channel after reboot — while leaving Flow's
+  ;; independent error channel alive to carry this fault.
+  (async/close! (:seon.cluster.wake/channel cluster))
+  (throw
+   (ex-info
+    message
+    (merge
+     {::terminal-refusal-settlement-failed true
+      :seon.error/kind ::terminal-refusal-settlement-refused}
+     data))))
+
 (defn- terminal-refused!
   "Settle and record a refused terminal transaction, and say it refused.
 
   The original transaction remains commit-first: its program row,
   disposition, receipt, and context installation all stay absent when
-  the database refuses any one of them. This second transaction carries
-  only the SAME presence-fenced receipt settlement, the run close, and
-  the normalized durable error record. `error/commit-tx` admits the
-  refusal in record mode; `error/value` projects the flat value stored
-  on the receipt. There is no program row or disposition left for this
+  the database refuses any one of them. Before the second transaction
+  exists, the refusal passes through the one bounded admission codec and
+  the resulting error fact plus flat value must satisfy their registered
+  shapes. This second transaction therefore carries only the SAME
+  presence-fenced receipt settlement, the run close, and a pre-admitted
+  normalized durable error record. There is no program row, disposition,
+  unbounded source value, or schema-invalid error value left for this
   minimal transaction to refuse.
 
   The receipt terminal fact, run close, and error fact commit together.
-  The event therefore derives no later pass: no re-execution, no
-  redelivery, and no separate close wake."
+  Success is checked rather than assumed. If construction is invalid or
+  the commit still refuses, a named Throwable escapes as a core fault
+  into Flow's error channel; this function never returns silent success.
+  The receipt remains running in its held run, which boot recovery marks
+  interrupted without re-executing it."
   [cluster outcome now attribution receipt]
   (boolean
    (when-let [kind (:seon.error/kind outcome)]
      (let [connection (:seon.store/branch-connection cluster)
            db @connection
+           admitted
+           (admit/admit
+            {:seon.sci.admit/value outcome
+             :seon.sci.admit/interrupt-fn (constantly nil)
+             :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+             ;; Error-path admission is total. R41 applies if the
+             ;; resulting settlement is invalid or refuses below.
+             :seon.config/on-core-error :record})
+           source
+           (select-keys
+            (:seon.sci.admit/value admitted)
+            [:seon.error/kind
+             :seon.error/message
+             :seon.error/data
+             :seon.cluster.run/rule
+             :seon.cluster.run/transition])
            ;; The receipt is the run provenance for this eval result.
            ;; Keeping a second run ref on the recorder fact would store
            ;; the same connection twice; agent attribution is the one
            ;; connection the next prompt needs to reach the fact.
-           recording (error-tx cluster db outcome now
+           recording (error-tx cluster db source now
                                (dissoc attribution :seon.cluster.run/id))
-           failure (error/value (first recording))
+           fact (first recording)
+           failure (error/value fact)
+           valid?
+           (and
+            (schema/valid-candidate-value?
+             :seon.error/fact
+             (dissoc fact :db/id))
+            (schema/valid-candidate-value?
+             :seon.error/value
+             failure))
            terminal
-           (run/receipt-refusal-tx
-            {:seon.cluster.run/id (:seon.cluster.run/id receipt)
-             :seon.cluster.eval/ordinal
-             (:seon.cluster.run.form/ordinal receipt)
-             :seon.cluster.run/closed-at now
-             :seon.cluster.eval/result-edn (pr-str failure)
-             :seon.cluster.eval/error (:seon.error/message failure)
-             :seon.error/kind (:seon.error/kind failure)})]
-       ;; The recorder never panics or recursively records its own
-       ;; outcome. The construction above has removed the only refused
-       ;; payload (program row/disposition), so this terminal commit is
-       ;; the end of this event rather than another retry rail.
-       (store/transact! connection (into terminal recording)))
+           (when valid?
+             (run/receipt-refusal-tx
+              {:seon.cluster.run/id (:seon.cluster.run/id receipt)
+               :seon.cluster.eval/ordinal
+               (:seon.cluster.run.form/ordinal receipt)
+               :seon.cluster.run/closed-at now
+               :seon.cluster.eval/result-edn (pr-str failure)
+               :seon.cluster.eval/error (:seon.error/message failure)
+               :seon.error/kind (:seon.error/kind failure)}))]
+       (when-not valid?
+         (terminal-settlement-fault!
+          cluster
+          "Terminal refusal settlement could not be constructed."
+          {::admitted-outcome
+           (:seon.sci.admit/value admitted)}))
+       (let [settlement
+             (store/transact! connection (into terminal recording))]
+         (when (:seon.error/kind settlement)
+           ;; The fault committer may itself write an explanation
+           ;; message. Fence that message from re-entering this exact
+           ;; dangling receipt before recovery; its durable row remains
+           ;; available to the fresh mailbox after reboot.
+           (terminal-settlement-fault!
+            cluster
+            "Terminal refusal settlement was refused."
+            {::admitted-outcome
+             (:seon.sci.admit/value admitted)
+             ::settlement settlement}))
+         true))
      kind)))
 
 (defn- attempt-id
