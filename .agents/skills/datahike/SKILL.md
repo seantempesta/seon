@@ -18,6 +18,27 @@ provenance, discovery, and history.
 > bare keys) → **`data-oriented-clojure`**; what shape to declare and why →
 > **`data-modeling`**; test fixtures/generators → **`clojure-testing`**.
 
+## Maintaining the Datahike fork
+
+When the defect is inside `reference-code/datahike/`, that fork is ours to
+fix; do not work around it in Seon. The branch-roster repair `357ffc87` and the
+planner repair `19f5cdd9` are the standing precedents, recorded in
+`docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
+“Resolution”.
+
+Read `references/fork-maintenance.md` before editing the fork. It maps:
+
+- the planner's `create-plan-via-ir` → logical IR → lower →
+  `order-plan-ops` path and the private-Var REPL probe;
+- the distinction between the plan cache and result cache, plus
+  `q-with-evidence`, `*query-result-cache?*`, cache clearing, and metrics for a
+  clean measurement; and
+- the fork's own Kaocha focus command plus Seon's separate
+  `seon.datahike-fork-test` acceptance gate.
+
+Those mechanics are grounded in the current fork at `19f5cdd9` and its Seon
+pin `4dc963e2e`; do not derive them from upstream memory.
+
 ## The runtime: co-located, synchronous, one writer per store
 
 Everything runs in the **cluster JVM**, which embeds Datahike. There is no wire
@@ -452,5 +473,7 @@ sanctioned alternative to polling or a tuned timeout.
 
 - `references/querying.md` — aggregates, rules, `not`/`or`, predicates, the
   `:with` footgun, performance.
+- `references/fork-maintenance.md` — planner internals, private-Var probes,
+  cache evidence, reloads, and the fork/root test boundary.
 For modeling decisions, use the separate `data-modeling` skill. For dependency
 semantics, read `reference-code/datahike/` directly.
