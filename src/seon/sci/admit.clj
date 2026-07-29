@@ -1,141 +1,19 @@
 (ns seon.sci.admit
-  "Value admission: the ONE thing that leaves a sci evaluation.
+  "Projects values leaving SCI into bounded, printable ordinary data.
 
-  CONTRACT LAYER (drafted + ORCHESTRATOR-SEALED 2026-07-27 — the N3
-  rung's one genuinely new mechanism, ruled a small package of its own
-  landing BEFORE the run loop; grounded in
-  research/n3-plan-2026-07-27.md §6.1, §10 row C7, §11 risk 1 and the
-  2026-07-27 late ruling). The implementation lane fills the stub
-  bodies until test/seon/sci/admit_test.clj is green and may not
-  loosen a schema or a test. Seal dispositions on the drafted taste
-  calls: the activation seam died at the gate itself
-  (seon.schema.edn `requiring-resolve`s a predicate's owner — the
-  computed rule, no boot require added); the four cap dials are wired
-  into :seon.config/manifest and config/default.edn; caps stay
-  CHARACTER counts (they are storage/projection bounds — the
-  tokens-for-display rule governs rendering, which converts, and is
-  untouched); the one projection (raw graph never escapes) and
-  sci.impl.types naming stand as drafted; diagnostics register here as
-  :seon.eval/* per the vocabulary table while receipt attributes stay
-  :seon.cluster.eval/* — the prefix unification is a queued rename
-  question, not this package's. OPEN OWNER QUESTION (reversible in one
-  line, drafted choice stands meanwhile): a projection failure is a
-  marker, never a dev-panic — hostile agent values are agent INPUT,
-  not system degradation, so R41's dev-panic dial does not fire here.
+  `admit` walks the supplied value once and calls the supplied
+  `:interrupt-fn` before projecting every node. Scalars pass through;
+  maps, sets, records, sequences, and host collections are rebuilt
+  within the configured depth, width, string, and node caps. Sequences
+  become vectors. Reference types and arrays are never entered, and
+  other opaque values become descriptive data markers.
 
-  THE ONE OPERATION. `admit` runs INSIDE the armed boundary, before
-  disarm, and is the only door a value uses to leave. It realizes and
-  projects in ONE pass; `ordinary-wire-value?` from the quarry collapses
-  into it and there is NO second predicate (n3-plan §6.1). What it fixes
-  is a measured defect, not a theory: `terminal-receipt-data`
-  (`src-old/seon/agent/driver.clj:160-173`) `pr-str`s the raw value
-  unbounded and drops `fn-entries`/`allocated-bytes`, and lazy values
-  escape the boundary unrealized.
-
-  WHAT ADMISSION OWNS, AND WHAT IT DOES NOT. It forces and size-caps
-  values leaving the sandbox — that is the whole scope (owner ruling,
-  2026-07-27 late). Allocation is watched by the O4 heap watermark, NOT
-  here; `:seon.eval/allocated-bytes` and `:seon.eval/fn-entries` ride
-  through as RECORDED DIAGNOSTICS and are never limits. Time is the only
-  limit and it belongs to the `:interrupt-fn`, which admission is
-  handed rather than owning.
-
-  REALIZATION MUST PARTICIPATE IN THE ARMED BOUNDARY, and this is the
-  finding the design turns on (probe
-  `tmp/n3-admission-probe/escape_probe.clj`). Sci calls the
-  `:interrupt-fn` at every interpreted function-body entrance — but a
-  lazy sequence built by NATIVE `clojure.core` enters no interpreted
-  body at all. Measured: walking 200,000 elements of a native
-  `(iterate inc 0)` fired the interrupt-fn ZERO times and could not be
-  stopped; the identical walk with the realizer calling the
-  interrupt-fn itself was interrupted at the first element. sci's own
-  `sci.interrupt/clojure-core` overrides exist for exactly this reason
-  (`reference-code/sci/src/sci/interrupt.cljc:1-20`) and also stop it —
-  but only for sequences its own producers made, never for one a host
-  capability returned. THEREFORE: the walk calls `interrupt-fn` at
-  EVERY node it visits. An infinite sequence dies at the time limit, on
-  the compute thread, inside the boundary — never in the receipt
-  writer.
-
-  THE CODEC IS TOTAL, and its totality is structural rather than
-  enumerated:
-
-  - ORDINARY VALUES pass through: nil, booleans, integers, floating
-    point, ratios, characters, strings, keywords, symbols, and the two
-    EDN-readable host scalars `#inst` and `#uuid` (probed: both read
-    back through `clojure.edn/read-string`; a regex prints but does NOT
-    read back, so it is opaque).
-  - COLLECTIONS are walked and rebuilt bounded: maps, sets, vectors,
-    and sequences (a sequence becomes a vector — a bounded projection
-    of a possibly-infinite thing cannot be that thing).
-  - RECORDS project to their field map, tagged with the type name sci
-    itself reports through `sci.impl.types/-get-type` (probed:
-    `user.Foo`). Sci records are `clojure.lang.IRecord` and map-like
-    (`reference-code/sci/src/sci/impl/records.cljc:146-200`), so this
-    is a projection, not an interpretation.
-  - EVERYTHING ELSE becomes an explicit marker naming what it was: a
-    sci var (`sci.lang.Var`), a sci fn (`sci.impl.fns`), a sci deftype
-    instance (`sci.impl.deftype.SciType`, named through the same
-    `-get-type`), a host object, an array, a reference type.
-  - REFERENCE TYPES ARE NEVER DEREFERENCED. `clojure.lang.IDeref`
-    covers atoms, delays, promises, futures, volatiles and vars, and
-    forcing one is either a cycle or an uninterruptible park: a pending
-    promise blocks the compute thread past the time limit and no
-    interrupt can take it back (probed).
-  - CYCLES ARE THEREFORE UNREPRESENTABLE, by construction rather than
-    by detection. Persistent immutable collections cannot close a loop;
-    every construct that can — reference types, arrays, mutable
-    deftypes — projects opaquely without being entered. This matters
-    because it is a live crash today: `pr-str` of a self-referential
-    atom, and of an ordinary map holding an atom holding that map,
-    raises `StackOverflowError` — an Error, which a `catch Exception`
-    does not even see (probed).
-  - DEPTH, WIDTH, STRING LENGTH, and TOTAL NODES are capped, and the
-    caps are CONFIG FACTS the caller reads from the database and passes
-    in — never literals here, never `(or x 512)`. The node budget is
-    the real bound: depth and width alone still admit an astronomical
-    product.
-
-  Because the projection is bounded, deref-free and cycle-free, its
-  `pr-str` is finite by construction and reads back as EDN. The old
-  unbounded `pr-str` is not made safe; it is made unreachable.
-
-  ONE PROJECTION, NOT TWO VALUES. `::value` is the projected value and
-  `:seon.cluster.eval/result-edn` is that same value printed. The raw
-  object graph does not escape admission at all — nothing unrealized,
-  unbounded, or host-opaque crosses this line, which is L3 stated
-  positively.
-
-  ERRORS, AND THE ONE DIAL (owner ruling 2026-07-27, reversing the
-  drafted marker-only choice): a node the total codec CANNOT project is
-  a core degradation, not ordinary agent input, so R41 decides it. On
-  `:panic` — development — admission throws hard and loud, because a
-  value our codec cannot describe is a hole in the codec and must be
-  found immediately. On `:record` — production — it degrades: the
-  marker, plus a best-effort description when one can be taken safely
-  (never a deref, never anything sequential, always truncated). The
-  dial is a REQUIRED request key: a caller that has not decided has not
-  thought about it. Agent-visible refusal shapes stay flat
-  `:seon.error` values either way. Admission does NOT
-  catch the interrupt — sci's interrupt is deliberately uncatchable by
-  evaluated code (`reference-code/sci/src/sci/interrupt.cljc:32-41`),
-  and host code that swallowed it would be forging the one guarantee the
-  time limit rests on. It propagates to `evaluate`, which records the
-  `:time` outcome. The question `is this that interrupt?` has ONE
-  owner — `seon.sci.eval/interrupted?` — and this namespace asks it
-  rather than keeping a copy (seal revision, 2026-07-27).
-
-  Crash walk. Admission is PURE given the value and the caps: it opens
-  nothing, writes nothing durable, and holds no lock.
-  - killed before admission: the evaluation's receipt has no terminal;
-    N2's resume marks the run `:interrupted` and the agent adapts (the
-    2026-07-27 night ruling — no auto-retry, nothing re-executes);
-  - killed DURING admission: identical durable state. A partial
-    projection is a value on a dead thread, not a fact;
-  - killed after admission, before the terminal receipt commits: the
-    same again — the projection was never durable;
-  - after the terminal receipt commits: ordinary committed state.
-  There is no admission-specific recovery, and that is the design."
+  The returned value and its `:seon.cluster.eval/result-edn` string are
+  projections of the same bounded data. Admission preserves supplied
+  evaluation diagnostics and reports whether anything was capped. SCI
+  interrupts propagate. Other projection failures panic or degrade to
+  markers according to `:seon.config/on-core-error`. Admission opens no
+  resources and writes no durable state."
   (:require [clojure.test.check.generators :as gen]
             ;; sci.lang and sci.impl.types are loaded for their deftypes:
             ;; the class literals below do not exist until their defining

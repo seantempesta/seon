@@ -1,77 +1,20 @@
 (ns seon.cluster
-  "The entry: one JVM process hosting cluster instances, REPL-first.
+  "Process entry for starting, inspecting, and stopping named clusters.
 
-  CONTRACT LAYER (orchestrator-authored, 2026-07-27 — the B0 rung). The
-  schemas and function contracts are SEALED: the implementation lane
-  fills the stub bodies until test/seon/cluster/boot_test.clj is green
-  and may not loosen a schema or a test. Friction is reported, never
-  resolved by weakening.
+  `start!` resolves the closed bootstrap configuration, opens and
+  advertises an io-prepl, then builds the remaining instance from the
+  process-root store and executors, a source-digest ancestor, the
+  cluster's database branch and configuration, recovered run facts,
+  the root agent, agent and render flows, and the web server. The
+  io-prepl and the partially built instance remain available when a
+  later layer fails.
 
-  The boot tower (plan README, rulings 2026-07-27): each layer reads
-  only the one below it and publishes its own readiness —
-
-  0. PROCESS. `start!` consumes one complete bootstrap configuration —
-     the closed, deliberately tiny key set the process needs before any
-     store exists. Everything else lives in the database (B2). The REPL
-     (io-prepl) opens FIRST, before anything else, and the instance
-     advertises its coordinate; the ten-second ruling is this layer's
-     bound.
-  1. STORE. start! opens the ONE process-root store (B1's open-store!,
-     first instance only — later instances of this process reuse it),
-     ensures the bootstrap ancestor (seon.cluster.ancestor/ensure!),
-     forks/finds the cluster's branch
-     (seon.cluster.registry/ensure-cluster!) and opens its connection
-     (store/open-branch!).
-  2. FACTS. Config applies (seon.config/apply! — converged = zero
-     writes) against the cluster branch; runtime reads the database
-     from here on, and the root agent is seeded (one datom, no process,
-     no tokens) so escalation has somewhere real to go.
-  3. FLOW. The run loop is INSTALLED AND ARMED: its graph runs, the
-     error fan-out consumes flow's error channel into durable error
-     facts, the wake listener is registered with the fan-out's own
-     fault channel, and the wake is primed once. Armed is not busy —
-     a wake says only `look`, so a cluster with no triggers makes no
-     model call, while a REBOOTED one picks up the work its
-     predecessor left by the same mechanism.
-
-  FAILED BOOT SEMANTICS (owner ruling 2026-07-27): the REPL is never
-  hostage to anything downstream. When a later layer fails, start!
-  THROWS — loud, the error dial decides panic vs record — but the prepl
-  socket and its advertisement STAY UP for live diagnosis, and the
-  degraded instance stays in the registry so stop! cleans it normally.
-  Which layers stand is readable from the instance value itself: the
-  tower fields are absent exactly where boot stopped — absence over
-  status booleans.
-  2. FACTS and 3. FLOW (B2/N3): the flow graph definition is data
-     derived from database facts at a basis; graph transforms are
-     referenced as VARS so re-evaluating a defn updates a running proc
-     with no restart, and topology changes rebuild the graph (measured
-     ~0.3 ms) — nothing in a flow channel is durable
-     (research/flow-dynamic-update-2026-07-27.md).
-
-  Multi-instance from day 0: the process identity is
-  (cluster-name, pid, start-instant); every path derives from
-  (root, cluster-name) by convention; each instance advertises its own
-  REPL coordinate under its cluster directory; a JVM may host several
-  instances and NOTHING here is an ambient one-cluster singleton — no
-  process-global connection, cache, or session keyed by \"the\"
-  cluster.
-
-  The root of the process owns exactly two shared executors — one
-  bounded `:compute` (default parallelism = available processors, a
-  computed hardware fact, never a literal) and one `:io` — created once
-  per JVM and shared by every cluster's flow graph
-  (research/flow-per-cluster-2026-07-27.md).
-
-  Crash walk: a kill at any instant leaves at most an orphan
-  advertisement file plus whatever the tower's own crash rows already
-  describe — the ancestor build (rename-at-end, scratch owned by
-  (pid, start-instant)), the fork roster, and config reconciliation
-  (one atomic transaction) each own their row; the OS releases the
-  store's flock with the process. The advertisement carries
-  (pid, start-instant) so a reader detects staleness against the live
-  process table rather than trusting the file. `stop!` is idempotent;
-  a killed process's next boot simply re-advertises."
+  A JVM may host several named cluster instances. They share the
+  process-root store and executor pair; branch connections, flows,
+  routing state, advertisements, and web servers remain per cluster.
+  `readiness` derives its report from the instance and its database.
+  `stop!` idempotently unwinds only the addressed instance and releases
+  the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
             [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]

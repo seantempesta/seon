@@ -1,74 +1,18 @@
 (ns seon.cluster.ancestor
-  "The ancestor: one branch every cluster is born from, built once.
+  "Builds and reuses source-identified ancestor database branches.
 
-  CONTRACT LAYER (drafted + SEALED 2026-07-27 — the B2 rung, grounded
-  in research/b2-plan-2026-07-27.md §0, §5.2-§5.3 and §9; implemented
-  green a35c95d0a). The implementation lane fills
-  the stubs until test/seon/cluster/ancestor_test.clj is green and may
-  not loosen a schema or a test. Friction is reported, never resolved
-  by weakening.
+  `digest` hashes the regular Clojure and EDN files beneath declared
+  roots, and `ancestor-branch` derives the corresponding branch name.
+  `ensure!` returns immediately when that branch is already in the
+  roster. Otherwise it resolves the requested population function,
+  populates a process-owned scratch branch, records the ancestor facts,
+  publishes the completed ancestor through `seon.cluster.registry`,
+  and retires the scratch branch.
 
-  The model:
-
-  - ONE deliberate build indexes all code into the ancestor; a fresh
-    cluster is a near-instant BRANCH of it, never a re-index (owner
-    ruling 2026-07-27, plan README). The ancestor is a branch and not a
-    directory, so its bytes are stored exactly once for every
-    descendant — structural sharing on any backend.
-  - ANCESTOR IDENTITY IS A DIGEST OVER THE DECLARED ROOTS, not over a
-    build artifact and not over a cluster name (b2-plan §5.2 retires
-    both halves of State A's `(application-digest, cluster-name)` key).
-    `digest` is a pure function of file bytes: it is true in dev with no
-    artifact chain, and the branch name carries it, so the roster alone
-    answers \"which ancestors exist\".
-  - THE ROSTER IS THE WHOLE CACHE. `ensure!` reads it; when
-    `:ancestor-<digest>` is present the call is over — no connect, no
-    comparison, no rebuild.
-  - THE POPULATION IS INJECTED, AS DATA. `:seon.ancestor/populate` is a
-    QUALIFIED SYMBOL, resolved with `requiring-resolve` and invoked with
-    a live connection to the scratch branch; it transacts whatever the
-    caller declares the ancestor to contain — schema facts today
-    (`seon.schema.edn/load!` plus activation), program-graph facts when
-    N5's indexer exists. A symbol keeps the request an ordinary
-    printable value (no opaque function type on a contract boundary),
-    so the fork mechanics do not wait on the producer and a suite can
-    build a two-row ancestor by naming its own var.
-  - PUBLISH BY RENAME-AT-END. The build runs on a scratch
-    `:building-<pid>-<start-millis>-<uuid>` branch and only then
-    branches `:ancestor-<digest>` from the finished scratch head and
-    retires the scratch. `:ancestor-<digest>` therefore only ever
-    appears COMPLETE — every crash row below depends on that
-    discipline, and a partial ancestor under the real name would be
-    undetectable.
-  - The scratch name carries its owner's (pid, start-instant) because a
-    live build and an abandoned one are the same durable state
-    otherwise. A dead owner's scratch is reclaimed; a live owner's
-    scratch refuses `::build-in-progress`.
-  - EVERY branch operation goes through `seon.cluster.registry`, the one
-    branch-lifecycle owner (b2-plan §0.6 condition 1). This namespace
-    never calls `datahike.api/branch!` or `delete-branch!`.
-  - Refusals are loud ex-info
-    `{:seon.error/kind ::refused ::rule <which>}`, matching B0/B1
-    (`src/seon/cluster/store.clj:161-167`).
-
-  Crash walk (kill -9 at any point):
-
-  - mid build, BEFORE the scratch branch reaches the roster: a head
-    blob nothing points at. Invisible; GC sweeps it; `ensure!`
-    rebuilds;
-  - mid build, AFTER `:building-<…>` is in the roster: a partial
-    ancestor under a scratch name. The next `ensure!` finds its owning
-    process dead, retires it, and rebuilds. The `:ancestor-<digest>`
-    name never appeared;
-  - between the publishing `branch!`'s head write and its `:branches`
-    update (`versioning.cljc:255-257`): an orphan head blob, not in the
-    roster → GC sweeps it and `ensure!` re-runs;
-  - after `:ancestor-<digest>` lands in the roster: a complete
-    ancestor. Nothing to do — `ensure!` returns `::built? false` and
-    does zero work;
-  - while a scratch build is live in ANOTHER process: `ensure!` refuses
-    `::build-in-progress` rather than racing a second build to the same
-    name."
+  Abandoned scratch branches are reclaimed when their recorded process
+  is dead. A scratch branch owned by a live process refuses a competing
+  build. Population failures retire the current process's scratch and
+  leave the ancestor name unpublished."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
