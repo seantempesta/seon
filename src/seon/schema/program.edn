@@ -30,7 +30,14 @@
         :seon.render/html seon.render.handlers.schema/render-html}
   [:seon.schema/key :seon.schema/key]
   [:seon.schema/form :seon.schema/form]
-  [:seon.schema/ns {:optional true} :seon.schema/ns]]
+  [:seon.schema/ns {:optional true} :seon.schema/ns]
+  [:seon.schema/created-at {:optional true} :seon.schema/created-at]
+  [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
+
+ :seon.db.id/generator
+ [:enum
+  :seon.db.id.generator/human-readable
+  :seon.db.id.generator/compact]
 
  :seon.ns/name [:symbol {:seon.db/identity true}]
  :seon.ns/source [:string {:min 1}]
@@ -61,6 +68,14 @@
   [:seon.ns.require/refer-all?
    {:optional true}
    :seon.ns.require/refer-all?]
-  [:seon.ns.require/as-alias?
+ [:seon.ns.require/as-alias?
    {:optional true}
-   :seon.ns.require/as-alias?]]}
+   :seon.ns.require/as-alias?]]
+
+ :seon.fn/roots [:vector [:string {:min 1}]]
+ :seon.fn/index-request
+ [:map {:closed true}
+  [:seon.store/branch-connection
+   {:optional true}
+   :seon.store/branch-connection]
+  [:seon.fn/roots :seon.fn/roots]]}

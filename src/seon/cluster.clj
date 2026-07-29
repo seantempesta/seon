@@ -34,6 +34,7 @@
             [clojure.string :as str]
             [seon.config :as config]
             [seon.flow :as flow]
+            [seon.fn :as seon.fn]
             [seon.problems :as problems]
             [seon.render.block :as block]
             [seon.render.root :as root]
@@ -361,6 +362,8 @@
                     [:seon.db.process/id boot-process-identity]}})))
   nil)
 
+(def ^:private ancestor-roots ["src" "test"])
+
 (defn populate-ancestor!
   "The default ancestor content: this code's own schema population.
   Named by symbol in `ancestor/ensure!`'s request, so the producer is
@@ -376,7 +379,9 @@
                      :seon.store/branch-connection]]]
     :nil]}
   [{connection :seon.store/branch-connection}]
-  (accrete-schema-population! connection))
+  (accrete-schema-population! connection)
+  (seon.fn/index! {:seon.store/branch-connection connection
+                   :seon.fn/roots ancestor-roots}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The tower above the REPL
@@ -386,8 +391,6 @@
 ;;; population above is derived from these sources; at N5 the indexer
 ;;; reads the same tree, so one digest keeps answering "what was I born
 ;;; from?" without a second mechanism.
-(def ^:private ancestor-roots ["src"])
-
 (defn- ancestor-branch!
   "The ancestor branch this cluster forks from.
   A supplied `:seon.boot/ancestor-branch` is used AS GIVEN — the caller
