@@ -102,8 +102,8 @@ itself is complete and independent of this.
 
 ## Resolution 2026-07-29
 
-Superseded as a compound issue after identifying the actual artifact. Durable
-verification lives in
+Archived by `4a4d2c44f` as a compound issue after identifying the actual
+artifact. Durable verification lives in
 `docs/prds/sci-execution-runtime/research/jetbrains-mono-license-verification-2026-07-29.md`.
 
 The binary with SHA-256

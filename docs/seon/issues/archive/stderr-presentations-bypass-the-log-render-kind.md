@@ -55,9 +55,10 @@ units and the export owner supplying an ordinary warning unit.
 
 ## Resolution 2026-07-29
 
-Superseded as a boundary-classification error. `:seon.render/log` remains the
-one reusable human projection of a renderable notice. The direct stderr sites
-cited here are process-control annunciators rather than competing projections:
+Archived by `4a4d2c44f` as a boundary-classification error.
+`:seon.render/log` remains the one reusable human projection of a renderable
+notice. The direct stderr sites cited here are process-control annunciators
+rather than competing projections:
 
 - `commit-fault!` reports that the durability path itself failed and cannot
   depend recursively on that path;

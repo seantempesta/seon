@@ -125,9 +125,9 @@ owner and acceptance criteria remain current.
 
 ## Resolution 2026-07-29
 
-Superseded as a standalone hygiene fix and transferred to the program's
-old-system deletion boundary. Re-verification proved the root-only `bb.edn`
-edit is still unsafe:
+Archived by `4a4d2c44f` as a superseded standalone hygiene fix and transferred
+to the program's old-system deletion boundary. Re-verification proved the
+root-only `bb.edn` edit is still unsafe:
 
 - plain `bb` loads quarry-only `seon.time`, while plain Clojure rejects it;
 - `bin/seon --help` already fails because the mixed path resolves fresh
