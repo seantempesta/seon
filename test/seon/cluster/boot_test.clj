@@ -23,6 +23,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.flow :as seon.flow]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
             [seon.schema :as schema])
@@ -265,6 +266,70 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest a-failed-stop-remains-addressable-and-retryable
+  (let [root (fresh-root)
+        cluster-name "retry-stop"
+        original-release-store! store/release-store!]
+    (try
+      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root root})
+            advertisement (:seon.boot/advertisement instance)
+            registered-instances
+            (var-get (ns-resolve 'seon.cluster 'running-instances))
+            failure
+            (with-redefs
+              [store/release-store!
+               (fn [_store]
+                 (throw (ex-info "injected root-store release failure"
+                                 {::injected true})))]
+              (try
+                (cluster/stop! instance)
+                nil
+                (catch Throwable failure
+                  failure)))]
+        (try
+          (testing "a root-store release failure is loud"
+            (is (instance? Throwable failure))
+            (is (true? (::injected (ex-data failure)))))
+          (testing "the failed generation remains exactly addressable"
+            (is (identical? instance
+                            (get @registered-instances cluster-name)))
+            (is (= advertisement
+                   (cluster/read-advertisement root cluster-name)))
+            (is (= "\"addressable\""
+                   (prepl-eval (:seon.boot/prepl-host advertisement)
+                               (:seon.boot/prepl-port advertisement)
+                               "\"addressable\""))))
+          (testing "the failed generation excludes a replacement"
+            (when (get @registered-instances cluster-name)
+              (is (thrown? Exception
+                           (cluster/start!
+                            {:seon.boot/cluster-name cluster-name
+                             :seon.boot/root root})))))
+          (testing "a later stop retries the remaining release"
+            (is (nil? (cluster/stop! instance)))
+            (is (nil? (cluster/read-advertisement root cluster-name)))
+            (is (nil? (get @registered-instances cluster-name))))
+          (testing "the released name and flock admit a replacement"
+            (when (nil? (cluster/read-advertisement root cluster-name))
+              (let [replacement
+                    (cluster/start! {:seon.boot/cluster-name cluster-name
+                                     :seon.boot/root root})]
+                (cluster/stop! replacement))))
+          (finally
+            ;; Keep a red test from leaking a live socket or flock into the
+            ;; rest of the suite. Both releases are no-ops after a green retry.
+            (cluster/stop! instance)
+            (original-release-store! (:seon.store/store instance))
+            (when-not (.isClosed
+                       ^java.net.ServerSocket
+                       (:seon.boot/prepl-server instance))
+              (.close
+               ^java.net.ServerSocket
+               (:seon.boot/prepl-server instance))))))
+      (finally
+        (delete-recursively! root)))))
+
 (deftest orderly-stop-awaits-the-active-loop-pass
   (let [root (fresh-root)
         pass-entered (CountDownLatch. 1)
@@ -379,12 +444,60 @@
         (schema/restore-state! schema-state)
         (delete-recursively! root)))))
 
+(deftest selected-config-repairs-locked-state-before-consumers-arm
+  (let [root (fresh-root)
+        cluster-name "config-unlock"
+        observed (atom [])
+        install-work-launcher! seon.flow/install-work-launcher!
+        arm-agents! (var-get (ns-resolve 'seon.cluster 'arm-agents!))]
+    (try
+      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)]
+        (d/transact
+         connection
+         {:tx-data
+          [{:seon.config/cluster cluster-name
+            :seon.config.flow.compute/queue-depth 1}]})
+        (cluster/stop! instance))
+      (with-redefs-fn
+        {#'seon.flow/install-work-launcher!
+         (fn [request]
+           (swap! observed conj
+                  [:launcher
+                   (:seon.config.flow.compute/queue-depth
+                    (::seon.flow/configuration request))])
+           (install-work-launcher! request))
+         (ns-resolve 'seon.cluster 'arm-agents!)
+         (fn [instance connection name]
+           (swap! observed conj
+                  [:agents
+                   (:seon.config.flow.compute/queue-depth
+                    (config/effective @connection name))])
+           (arm-agents! instance connection name))}
+        #(let [instance
+               (cluster/start!
+                {:seon.boot/cluster-name cluster-name
+                 :seon.boot/root root
+                 :seon.config/manifest
+                 {:seon.config.flow.compute/queue-depth 37}})]
+           (try
+             (is (= [[:launcher 37] [:agents 37]] @observed)
+                 "selected config settles before launcher install and graph arm")
+             (finally
+               (cluster/stop! instance)))))
+      (finally
+        (delete-recursively! root)))))
+
 (deftest the-tower-stands-in-one-start
   (let [root (fresh-root)]
     (try
       (let [started-at (System/nanoTime)
             instance (cluster/start! {:seon.boot/cluster-name "tower"
-                                      :seon.boot/root root})
+                                      :seon.boot/root root
+                                      :seon.config/manifest
+                                      {:seon.config.flow.compute/queue-depth
+                                       11}})
             elapsed-ms (/ (- (System/nanoTime) started-at) 1e6)]
         (try
           (testing "every tower field is present — nothing degraded"
@@ -399,13 +512,27 @@
                     near-instantly off the shared store"
             (let [forked-at (System/nanoTime)
                   sibling (cluster/start! {:seon.boot/cluster-name "twr2"
-                                           :seon.boot/root root})
+                                           :seon.boot/root root
+                                           :seon.config/manifest
+                                           {:seon.config.flow.compute/queue-depth
+                                            22}})
                   fork-ms (/ (- (System/nanoTime) forked-at) 1e6)]
               (try
                 (is (some? (:seon.boot/cluster-connection sibling)))
                 (is (identical? (:seon.store/store instance)
                                 (:seon.store/store sibling))
                     "siblings share the ONE process-root store")
+                (is (= 11
+                       (:seon.config.flow.compute/queue-depth
+                        (config/effective
+                         @(:seon.boot/cluster-connection instance)
+                         "tower"))))
+                (is (= 22
+                       (:seon.config.flow.compute/queue-depth
+                        (config/effective
+                         @(:seon.boot/cluster-connection sibling)
+                         "twr2")))
+                    "two clusters in one JVM retain distinct applied configs")
                 (is (< fork-ms 2000)
                     (str "sibling fork took " fork-ms " ms"))
                 (finally

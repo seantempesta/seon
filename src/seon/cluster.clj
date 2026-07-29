@@ -262,10 +262,10 @@
         (if (pos? remaining)
           (swap! root-store-holder assoc-in [store-dir ::holders] remaining)
           (do
-            ; drop the entry FIRST: a failing release must not leave a
-            ; released store advertised as held
-            (swap! root-store-holder dissoc store-dir)
-            (store/release-store! (:seon.store/store held)))))))
+            ; release FIRST: a failure leaves this exact flock-held store
+            ; addressable here for the stop retry
+            (store/release-store! (:seon.store/store held))
+            (swap! root-store-holder dissoc store-dir))))))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -849,7 +849,7 @@
   Each layer is assoc'd as it stands, and the whole value is republished
   to the registry at every step, so the instance a failure carries is
   exactly what stands: absence marks where boot stopped."
-  [instance publish!]
+  [instance publish! config-request]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
         store (acquire-root-store! (:seon.boot/store-dir config))
@@ -877,9 +877,10 @@
                   (assoc instance
                          :seon.boot/config-result
                          (config/apply!
-                          {:seon.config/connection connection
-                           :seon.config/manifest (config/defaults)
-                           :seon.boot/cluster-name cluster-name})))
+                          (merge
+                           {:seon.config/connection connection
+                            :seon.boot/cluster-name cluster-name}
+                           config-request))))
         ;; AFTER the dials are facts, because the root agent is who the
         ;; escalation dial names, and BEFORE the loop is armed, because
         ;; an armed loop may need to address it on its first pass
@@ -941,10 +942,15 @@
   stops it through that carried value like any other. Two instances in one JVM share the root store and executors,
   nothing else. Refuses a second start! for a cluster this JVM already
   has running."
-  {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/instance]}
-  [overrides]
+  {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
+  [request]
   (let [began (System/nanoTime)
-        config (resolve-bootstrap overrides)
+        config-request
+        (select-keys request
+                     [:seon.config/manifest :seon.config/environment])
+        config
+        (resolve-bootstrap
+         (apply dissoc request (keys config-request)))
         cluster-name (:seon.boot/cluster-name config)
         paths (cluster-paths (:seon.boot/root config) cluster-name)
         name (server-name cluster-name)]
@@ -1003,7 +1009,7 @@
         ;; the elapsed measure belongs to boot, not to whoever prints
         ;; the banner: a caller timing `start!` from outside measures
         ;; its own require time too
-        (let [stood (stack-tower! instance publish!)]
+        (let [stood (stack-tower! instance publish! config-request)]
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000))))
         (catch Throwable failure
@@ -1133,9 +1139,10 @@
   releases the store and with it the lifetime flock, a sibling's hold
   keeps it open — then closes ITS prepl server socket and deletes ITS
   advertisement. The database resources go FIRST so a failure to release
-  one still leaves the REPL up to diagnose it. A DEGRADED instance stops
-  the same way: absence marks what was never built, so each layer is
-  released only if it stands. A delayed stop! of an old instance value
+  one restores this exact instance to the registry with its REPL up for
+  diagnosis and a later stop retry. A DEGRADED instance stops the same
+  way: absence marks what was never built, so each layer is released
+  only if it stands. A delayed stop! of an old instance value
   must not touch a replacement started under the same cluster name (the
   replacement's socket, advertisement, and registry entry all survive).
   Idempotent — stopping a stopped instance is a no-op returning nil.
@@ -1166,12 +1173,21 @@
                      (edn/read-string (slurp advertisement-file))
                      (catch Throwable _ nil)))
             (.delete advertisement-file)))
-        (finally
+        (swap! running-instances
+               (fn [instances]
+                 (if (identical? marker (get instances cluster-name))
+                   (dissoc instances cluster-name)
+                   instances)))
+        (catch Throwable failure
+          ;; A resource that failed to release remains the addressed
+          ;; generation. Restoring the exact instance makes stop retryable
+          ;; while its live REPL and registry fence exclude a replacement.
           (swap! running-instances
                  (fn [instances]
                    (if (identical? marker (get instances cluster-name))
-                     (dissoc instances cluster-name)
-                     instances)))))))
+                     (assoc instances cluster-name instance)
+                     instances)))
+          (throw failure)))))
   nil)
 
 (defn- matching-live-process?
