@@ -812,6 +812,24 @@
           (is (= 200 (.statusCode response)))
           (is (str/includes? (.body response) "seon-data-drill")))))))
 
+(deftest the-data-drill-resolves-an-entity-root
+  (with-server two-blocks
+    (fn [connection server _context]
+      (d/transact connection
+                  [{:seon.cluster.agent/id "alice"}])
+      (let [response
+            (fetch server
+                   "/data?entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
+            body (.body response)
+            default-body (.body (fetch server "/data"))]
+        (is (= 200 (.statusCode response)))
+        (is (str/includes? body "seon-data-drill"))
+        (is (and (str/includes? body ":seon.cluster.agent/id")
+                 (str/includes? body ">alice</dd>"))
+            "the drill root is the pulled entity, not the schema vector")
+        (is (str/includes? default-body ":seon.ai.attempt/at")
+            "without entity the schema vector remains the drill root")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Slice 1 — one POST, the existing route and render chain
 ;;; ---------------------------------------------------------------------------

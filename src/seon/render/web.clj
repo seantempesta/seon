@@ -45,6 +45,7 @@
   `on-open`, and the next commit re-offers the wake."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
@@ -676,6 +677,16 @@
   (some-> (re-matches pattern uri) second
           (URLDecoder/decode "UTF-8")))
 
+(defn- query-entity
+  [encoded]
+  (try
+    (let [value (some-> encoded edn/read-string)]
+      (when (and (vector? value)
+                 (= 2 (count value))
+                 (qualified-keyword? (first value)))
+        value))
+    (catch Throwable _ nil)))
+
 (defn handler
   "The one Ring dispatcher, including the exact inbound POST route.
 
@@ -747,20 +758,26 @@
                                    :seon.render.web/render-channel])))
 
         (and (= :get method) (= "/data" uri))
-        ;; the drill over the CLUSTER's own facts. Its cursor is
-        ;; ordinary query data, so a drilled position is a link
-        ;; somebody can send rather than a session somebody holds.
+        ;; The entity lookup ref selects the drill root; the cursor
+        ;; navigates within that ordinary value. With no entity the
+        ;; canonical database attributes remain the front page.
         (let [query (into {} (map (fn [pair]
                                     (let [[k v] (str/split pair #"=" 2)]
                                       [k (some-> v (java.net.URLDecoder/decode
                                                     "UTF-8"))])))
-                          (str/split (or (:query-string request) "") #"&"))]
+                          (str/split (or (:query-string request) "") #"&"))
+              entity? (contains? query "entity")
+              entity (query-entity (get query "entity"))
+              value (if entity?
+                      (when entity
+                        (d/pull @connection '[*] entity))
+                      (schema/canonical-database-attributes))]
           {:status 200
            :headers {"content-type" "text/html; charset=utf-8"}
            :body (shell {:seon.cluster.agent/id id
                          :seon.render/page
                          [(data/drill-html
-                           {:seon.render/value (schema/canonical-database-attributes)
+                           {:seon.render/value value
                             :seon.sci.admit/caps caps
                             :seon.render.data/cursor
                             (data/parse-cursor (get query "path")
