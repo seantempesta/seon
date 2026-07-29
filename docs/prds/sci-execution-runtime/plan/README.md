@@ -618,6 +618,16 @@ may reintroduce a shadow build into the dev feedback path.
   (census/fingerprint/explain), render family = floor. MESSAGE DELIVERY
   IS A RENDER APPLICATION: the envelope is facts; the delivered body
   renders per boundary kind (ai to agents, html to browsers).
+  **Ruling 2026-07-29 (owner — ONE PARSER, ONE SET OF PRIMITIVES):**
+  the eval parse is NOT a reply parser — one GENERAL parser turns any
+  code-bearing text into runnable forms anywhere in the system, and
+  the :io/:compute workload detection happens IN THE SAME AREA (the
+  parse pass lifts classification facts; forms go to the right
+  scheduled lanes from there). Find and condense every duplicated
+  parse/serve path into a core primitive set that works everywhere —
+  audit dispatched (parse-serve-duplication-2026-07-29.md), the
+  condensation plan follows the armed pipeline (plan → falsify → seal
+  → pre-authorized implementation).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
