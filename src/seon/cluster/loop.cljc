@@ -155,7 +155,8 @@
            :seon.cluster.run.form/ordinal
            :seon.cluster.eval/result-edn :seon.cluster.eval/error
            :seon.cluster.eval/interrupted-at
-           :seon.cluster.eval/output :seon.error/kind
+           :seon.cluster.eval/output :seon.cluster.eval/ns
+           :seon.sci.eval/program-row :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
@@ -167,6 +168,8 @@
                   interrupted-at (assoc :seon.cluster.eval/interrupted-at
                                         interrupted-at)
                   kind (assoc :seon.error/kind kind)
+                  ns (assoc :seon.cluster.eval/ns ns)
+                  program-row (assoc :seon.sci.eval/program-row program-row)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
                   output (assoc :seon.cluster.eval/output output))]
@@ -389,17 +392,27 @@
     (when-not (:seon.error/kind outcome)
       (some-> commit first (dissoc :db/id)))))
 
-(defn- form-source
-  "The source of one form of a run, by ordinal."
+(defn- form-data
+  "The source and parse-time namespace of one form of a run, by ordinal."
   [db run-id ordinal]
-  (d/q '[:find ?source .
-         :in $ ?run-id ?ordinal
-         :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?form :seon.cluster.run.form/run ?run]
-         [?form :seon.cluster.run.form/ordinal ?ordinal]
-         [?form :seon.cluster.run.form/source ?source]]
-       db run-id ordinal))
+  (when-let [form-eid
+             (d/q '[:find ?form .
+                    :in $ ?run-id ?ordinal
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?form :seon.cluster.run.form/run ?run]
+                    [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                  db run-id ordinal)]
+    (let [form (d/pull db
+                       [:seon.cluster.run.form/source
+                        {:seon.cluster.run.form/ns [:seon.ns/name]}]
+                       form-eid)]
+      (cond-> {:seon.cluster.run.form/source
+               (:seon.cluster.run.form/source form)}
+        (:seon.cluster.run.form/ns form)
+        (assoc :seon.cluster.run.form/ns
+               [:seon.ns/name
+                (get-in form [:seon.cluster.run.form/ns :seon.ns/name])])))))
 
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
@@ -563,7 +576,9 @@
               ;; answered stops mattering the moment one did. The frozen
               ;; plan FACT is the stream terminal; no lossy channel value
               ;; carries "done".
-              (let [sources (reply/sources (:seon.ai/text completion))]
+              (let [sources
+                    (reply/sources (:seon.ai/text completion)
+                                   (sci.eval/agent-namespace agent-id))]
                 (if (:seon.error/kind sources)
                   (fail! sources)
                   (let [outcome (store/transact!
@@ -756,7 +771,11 @@
             ;; turn sends extends, and it cannot change while the run is
             ;; held
             trigger (message/trigger @connection run-id)
-            ctx (sci/fork (sci.eval/base))]
+            ctx (sci/fork (sci.eval/base))
+            ;; First use of this run-local ctx materializes current program
+            ;; facts. Boot and cluster creation never index or replay.
+            _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx
+                                  :seon.db/db @connection})]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0]
           (if skipped?
@@ -777,12 +796,14 @@
                           {:seon.cluster.agent/id agent-id
                            :seon.cluster.run/id run-id})
               (report :error ran)
-              (let [source (form-source @connection run-id ordinal)
+              (let [form (form-data @connection run-id ordinal)
                     evaluation
                     (submit-evaluation!!
                      evaluate
                      receipt-id
-                     {:seon.cluster.run.form/source source
+                     (merge
+                      form
+                      {
                       :seon.sci.admit/caps
                       (:seon.sci.admit/caps cluster)
                       :seon.sci.eval/ctx ctx
@@ -790,7 +811,7 @@
                       :seon.sci.eval/time-limit-ms
                       (:seon.config.eval/time-limit-ms cluster)
                       :seon.config/on-core-error
-                      (:seon.config/on-core-error cluster)})
+                      (:seon.config/on-core-error cluster)}))
                     problem
                     (problems/form-problem
                      @connection
@@ -880,6 +901,12 @@
                       (:seon.cluster.eval/output evaluation)
                       (assoc :seon.cluster.eval/output
                              (:seon.cluster.eval/output evaluation))
+                      (:seon.cluster.eval/ns evaluation)
+                      (assoc :seon.cluster.eval/ns
+                             (:seon.cluster.eval/ns evaluation))
+                      (:seon.sci.eval/program-row evaluation)
+                      (assoc :seon.sci.eval/program-row
+                             (:seon.sci.eval/program-row evaluation))
                       settled
                       (assoc :my.run/value settled))
                     outcome
@@ -901,6 +928,13 @@
                        (assoc :tx-meta
                               {:seon.db/trigger
                                [:seon.cluster.message/id trigger]})))
+                    _ (when (and (:seon.sci.eval/program-row evaluation)
+                                 (not (:seon.error/kind outcome)))
+                        (sci.eval/install-program-row!
+                         {:seon.sci.eval/ctx ctx
+                          :seon.db/db (:db-after outcome)
+                          :seon.sci.eval/program-row
+                          (:seon.sci.eval/program-row evaluation)}))
                     ran (inc ran)
                     ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
                     ;; §5.2): asking the GLOBAL derivation here was the

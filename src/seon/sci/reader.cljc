@@ -36,7 +36,9 @@
   (throw
    (ex-info "Reader evaluation is not accepted: #="
             {::refusal true
-             ::tag (symbol "#=")})))
+             ;; `#=` cannot round-trip as an EDN symbol. Reader errors
+             ;; cross the same ordinary-data boundary as eval results.
+             ::tag "#="})))
 
 (defn- line-starts
   [text]

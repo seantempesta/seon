@@ -8,10 +8,20 @@
  ; sci's own word for an interpreter context; forked per evaluation so
  ; one eval's defs cannot reach another's.
  :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
+ :seon.sci.eval/program-row :map
+ :seon.sci.eval/install-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :any]
+  [:seon.sci.eval/program-row :seon.sci.eval/program-row]]
+ :seon.sci.eval/acquire-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :any]]
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; What one evaluation leaves behind: the terminal facts the receipt
  ; stores (result-edn always; error when it failed; interrupted-at when
  ; the time limit fired), the admitted value the loop reads a
@@ -19,4 +29,4 @@
  ; Nothing here is optional-by-nil — an absent key means the evaluation
  ; had no such thing, and PRESENCE IS THE STATE: there is no status
  ; label restating which keys exist (owner ruling 2026-07-28).
- :seon.sci.eval/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]}
+ :seon.sci.eval/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]}

@@ -390,7 +390,14 @@
   [db request]
   (let [{::keys [id plan-digest sources]} request
         run (held-run db `plan-call request)
-        run-eid (:db/id run)]
+        run-eid (:db/id run)
+        agent-namespace
+        (d/q '[:find ?namespace-name .
+               :in $ ?agent
+               :where
+               [?agent :seon.cluster.agent/namespace ?namespace]
+               [?namespace :seon.ns/name ?namespace-name]]
+             db (:db/id (::agent run)))]
     (when (some? (::plan-digest run))
       (refuse! `plan-call ::plan-frozen request))
     (let [;; THE PARSE-TIME NAMESPACE IS PROJECTED, NEVER DERIVED HERE.
@@ -401,7 +408,9 @@
           ;; form the reader could not attribute simply has no ref, and
           ;; the routing owner falls back to the run's author.
           namespaces (into []
-                           (comp (keep :seon.ns/name)
+                           (comp (map #(or (:seon.ns/name %)
+                                          agent-namespace))
+                                 (keep identity)
                                  (distinct)
                                  (map (fn [namespace-name]
                                         {:db/id (str "namespace:"
@@ -412,7 +421,8 @@
                       (map-indexed
                        (fn [ordinal form]
                          (let [form-id (pr-str [id ordinal])
-                               namespace-name (:seon.ns/name form)]
+                               namespace-name (or (:seon.ns/name form)
+                                                  agent-namespace)]
                            (cond-> {:db/id form-id
                                     :seon.cluster.run.form/id form-id
                                     :seon.cluster.run.form/run run-eid
@@ -513,10 +523,69 @@
            :seon.cluster.eval/interrupted-at]
           [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
-           :seon.cluster.eval/output]]]
+           :seon.cluster.eval/output]
+          [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
+          [:seon.sci.eval/program-row {:optional true}
+           :seon.sci.eval/program-row]]]
     [:vector :some]]}
   [request]
   [[:db.fn/call #'receipt-settle-call request]])
+
+(def ^:private program-attributes
+  {:seon.fn/sym
+   #{:seon.fn/ns :seon.fn/source :seon.fn/arglists :seon.fn/doc
+     :seon.fn/private? :seon.fn/spec :seon.fn/workload}
+   :seon.schema/key
+   #{:seon.schema/ns :seon.schema/form}
+   :seon.test/sym
+   #{:seon.test/ns :seon.test/source}})
+
+(defn- program-row-tx
+  "Validate and exact-upsert one reader-produced durable declaration."
+  [db request row]
+  (if-let [deleted-sym (:seon.fn/delete row)]
+    (let [function (d/pull db
+                           [:db/id {:seon.fn/ns [:db/id]}]
+                           [:seon.fn/sym deleted-sym])
+          namespace-eid (get-in function [:seon.fn/ns :db/id])
+          owner (when namespace-eid
+                  (d/q '[:find ?agent .
+                         :in $ ?namespace
+                         :where
+                         [?agent :seon.cluster.agent/namespace ?namespace]]
+                       db namespace-eid))]
+      (when (and function (nil? owner))
+        (refuse! `receipt-settle-call ::program-delete-not-owned request))
+      (if function [[:db/retractEntity (:db/id function)]] []))
+    (let [identity (some #(when (contains? row %) %) (keys program-attributes))
+        owned (get program-attributes identity)
+        namespace-ref (or (:seon.fn/ns row)
+                          (:seon.schema/ns row)
+                          (:seon.test/ns row))
+        existing (when identity (d/pull db '[*] [identity (get row identity)]))
+        required? (case identity
+                    :seon.fn/sym
+                    (and (:seon.fn/source row) (:seon.fn/spec row))
+                    :seon.schema/key
+                    (and (:seon.schema/form row)
+                         (schema/malli-form?
+                          (edn/read-string (:seon.schema/form row))))
+                    :seon.test/sym
+                    (some? (:seon.test/source row))
+                    false)]
+    (when-not (and identity required?)
+      (refuse! `receipt-settle-call ::program-row-not-admitted request))
+    (when-not (:db/id (d/pull db [:db/id] namespace-ref))
+      (refuse! `receipt-settle-call ::program-namespace-missing request))
+    (into
+     (if existing
+       (mapv (fn [attribute]
+               [:db/retract (:db/id existing) attribute])
+             (remove #(contains? row %) owned))
+       [])
+      [(assoc row :db/id
+              (or (:db/id existing)
+                  (str (name identity) ":" (get row identity))))]))))
 
 (defn receipt-settle-call
   "Settle one running receipt, inside the transaction.
@@ -538,7 +607,10 @@
            :seon.cluster.eval/interrupted-at]
           [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
-           :seon.cluster.eval/output]]]
+           :seon.cluster.eval/output]
+          [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
+          [:seon.sci.eval/program-row {:optional true}
+           :seon.sci.eval/program-row]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id]
@@ -560,7 +632,10 @@
 
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
-    (into []
+    (into
+     (if-let [row (:seon.sci.eval/program-row request)]
+       (program-row-tx db request row)
+       [])
           (keep (fn [attribute]
                   (when-some [value (get request attribute)]
                     [:db/add (:db/id receipt) attribute value])))
@@ -568,7 +643,8 @@
            :seon.cluster.eval/error
            :seon.cluster.eval/interrupted-at
            :seon.error/kind
-           :seon.cluster.eval/output])))
+           :seon.cluster.eval/output
+           :seon.cluster.eval/ns])))
 
 (defn recover-tx
   "Transaction data recovering one run from dead-process facts."

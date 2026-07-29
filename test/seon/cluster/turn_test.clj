@@ -345,6 +345,222 @@
                               [_ :seon.cluster.run/closed-at ?c]]
                             @connection)))))))))
 
+(deftest mixed-plan-publishes-only-the-contracted-function
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (d/transact connection
+                    [{:seon.ns/name 'my.agents.agent-a}
+                     {:seon.cluster.agent/id "agent-a"
+                      :seon.cluster.agent/namespace
+                      [:seon.ns/name 'my.agents.agent-a]}])
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} durable "
+               "[x] (inc x))\n"
+               "(def x 42)\n"
+               "(durable x)")})]
+          (drive! cluster 10)
+          (testing "all forms leave inert receipt history"
+            (is (= 3
+                   (count
+                    (d/q '[:find ?receipt
+                           :where
+                           [?receipt :seon.cluster.eval/result-edn _]]
+                         @connection)))))
+          (testing "installation derives from db-after before the next form"
+            (is (= "43"
+                   (d/q '[:find ?result .
+                          :where
+                          [?receipt :seon.cluster.eval/ordinal 2]
+                          [?receipt :seon.cluster.eval/result-edn ?result]]
+                        @connection))))
+          (testing "only the contracted defn enters the program graph"
+            (is (= #{"my.agents.agent-a/durable"}
+                   (set
+                    (d/q '[:find [?sym ...]
+                           :where
+                           [_ :seon.fn/sym ?sym]]
+                         @connection))))
+            (is (empty?
+                 (d/q '[:find ?entity
+                        :where
+                        [?entity :seon.fn/sym "my.agents.agent-a/x"]]
+                      @connection)))))))))
+
+(deftest ns-unmap-retracts-the-owned-function-after-the-terminal-commit
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (d/transact connection
+                    [{:seon.ns/name 'my.agents.agent-a}
+                     {:seon.cluster.agent/id "agent-a"
+                      :seon.cluster.agent/namespace
+                      [:seon.ns/name 'my.agents.agent-a]}])
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} obsolete "
+               "[x] (inc x))\n"
+               "(ns-unmap 'my.agents.agent-a 'obsolete)")})]
+          (drive! cluster 10)
+          (is (= 2
+                 (count
+                  (d/q '[:find ?receipt
+                         :where
+                         [?receipt :seon.cluster.eval/result-edn _]]
+                       @connection)))
+              "the declaration and deletion both leave receipts")
+          (is (nil?
+               (d/pull @connection
+                       [:seon.fn/sym]
+                       [:seon.fn/sym "my.agents.agent-a/obsolete"]))
+              "the explicit delete retracts the durable identity"))))))
+
+(deftest evaluation-follows-the-readers-parse-time-namespace
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(in-ns 'my.gen.alpha)\n"
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} f "
+               "[x] (inc x))\n"
+               "(f 1)")})]
+          (drive! cluster 10)
+          (is (= "2"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 2]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection))
+              "in-ns governs the later definition and call")
+          (is (= "my.gen.alpha/f"
+                 (d/q '[:find ?sym .
+                        :where
+                        [_ :seon.fn/sym ?sym]]
+                      @connection)))
+          (is (empty?
+               (d/q '[:find ?form
+                      :where
+                      [?form :seon.cluster.run.form/run ?run]
+                      [?form :seon.cluster.run.form/ordinal ?ordinal]
+                      [?form :seon.cluster.run.form/ns ?parsed-ns]
+                      [?receipt :seon.cluster.eval/run ?run]
+                      [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                      [?receipt :seon.cluster.eval/ns ?evaluated-ns]
+                      [(not= ?parsed-ns ?evaluated-ns)]]
+                    @connection))
+              "parse/eval divergence is a direct fact query, never silent"))))))
+
+(deftest contracted-redefinition-exactly-replaces-the-program-row
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(defn ^{:malli/schema [:=> [:cat :int] :int] "
+               ":seon.workload :compute} f \"old\" [x] (inc x))\n"
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} f "
+               "[x] (+ x 2))\n"
+               "(f 1)")})]
+          (drive! cluster 10)
+          (is (= "3"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 2]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection)))
+          (let [row (d/pull @connection
+                            '[*]
+                            [:seon.fn/sym "my.agents.agent-a/f"])]
+            (is (= "(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] (+ x 2))"
+                   (:seon.fn/source row)))
+            (is (not (contains? row :seon.fn/doc)))
+            (is (not (contains? row :seon.fn/workload)))))))))
+
+(deftest a-refused-contract-commits-a-receipt-and-no-program-row
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              "(defn ^{:malli/schema [:=> [:cat :missing/schema] :int]} bad [x] x)"})]
+          (drive! cluster 10)
+          (is (some?
+               (d/q '[:find ?error .
+                      :where
+                      [?receipt :seon.cluster.eval/error ?error]]
+                    @connection))
+              "the failed form reaches a terminal receipt")
+          (is (nil?
+               (d/pull @connection
+                       [:seon.fn/sym]
+                       [:seon.fn/sym "my.agents.agent-a/bad"]))
+              "the failed declaration commits no program fact"))))))
+
+(deftest a-new-agent-ctx-acquires-and-calls-the-committed-definition
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            replies (atom
+                     [(str
+                       "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                       "persisted [x] (inc x))\n"
+                       "(my.run/complete \"published\")")
+                      (str
+                       "(my.run/complete "
+                       "(str (my.agents.agent-a/persisted 41)))")])]
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         (let [reply (first @replies)]
+                           (swap! replies subvec 1)
+                           reply)})]
+          (drive! cluster 10)
+          (d/transact
+           connection
+           [{:seon.ns/name 'my.agents.agent-b}
+            (assoc (agent-row "agent-b")
+                   :seon.cluster.agent/namespace
+                   [:seon.ns/name 'my.agents.agent-b])
+            {:seon.cluster.message/id "m-agent-b"
+             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+             :seon.cluster.message/content "call the published function"
+             :seon.cluster.message/at now}])
+          (drive! cluster 10)
+          (is (some #(str/includes? % "42")
+                    (d/q '[:find [?result ...]
+                           :where
+                           [_ :seon.cluster.eval/result-edn ?result]]
+                         @connection))
+              "the second run's fresh ctx materialized current program facts"))))))
+
 (deftest a-settled-orphan-stops-wedging-the-agent
   ;; The crash drill's headline: a process died holding a claimed,
   ;; unplanned run. Boot recovery released the dead CUSTODY, but until

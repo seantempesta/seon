@@ -119,8 +119,11 @@
   (`:seon.sci.reader/ns`, REPL semantics, absent rather than inherited
   after a malformed declaration) arrives with the span instead of being
   re-derived here by a second rule."
-  [source]
-  (let [events (reader/read {:seon.sci.reader/text source})]
+  [source namespace-name]
+  (let [events (reader/read
+                (cond-> {:seon.sci.reader/text source}
+                  namespace-name
+                  (assoc :seon.sci.reader/ns namespace-name)))]
     (if (map? events)
       events
       (mapv (fn [event]
@@ -315,25 +318,30 @@
   - `::refused-tag` — `#=` or an unknown reader tag, named;
   - `::no-forms` — the reply was empty or whitespace only. Prose is a
     successful comment source, not a refusal."
-  {:malli/schema [:=> [:cat :seon.cluster.reply/text]
-                  [:or :seon.cluster.reply/sources :seon.error/value]]}
-  [text]
-  (loop [source (unfenced text)
-         recovered-lines #{}]
-    (let [events (parsed-events source)]
-      ; the reader refuses #= and unknown tags by itself — there is no
-      ; blocklist here, and there must never be one
-      (if (map? events)
-        (let [message (:seon.error/message events)]
-          (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
-            (refused ::refused-tag message {::text text})
-            (if-let [{recovered-source :source line :line}
-                     (comment-prose-failure source events recovered-lines)]
-              (recur recovered-source (conj recovered-lines line))
-              (refused ::unreadable message {::text text}))))
-        (let [forms (plan-sources source events)]
-          (if (seq forms)
-            (vec forms)
-            (refused ::no-forms
-                     "The reply carried no Clojure forms or prose notes."
-                     {::text text})))))))
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.cluster.reply/text]
+     [:or :seon.cluster.reply/sources :seon.error/value]]
+    [:=> [:cat :seon.cluster.reply/text :seon.ns/name]
+     [:or :seon.cluster.reply/sources :seon.error/value]]]}
+  ([text] (sources text nil))
+  ([text namespace-name]
+   (loop [source (unfenced text)
+          recovered-lines #{}]
+     (let [events (parsed-events source namespace-name)]
+       ; the reader refuses #= and unknown tags by itself — there is no
+       ; blocklist here, and there must never be one
+       (if (map? events)
+         (let [message (:seon.error/message events)]
+           (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
+             (refused ::refused-tag message {::text text})
+             (if-let [{recovered-source :source line :line}
+                      (comment-prose-failure source events recovered-lines)]
+               (recur recovered-source (conj recovered-lines line))
+               (refused ::unreadable message {::text text}))))
+         (let [forms (plan-sources source events)]
+           (if (seq forms)
+             (vec forms)
+             (refused ::no-forms
+                      "The reply carried no Clojure forms or prose notes."
+                      {::text text}))))))))

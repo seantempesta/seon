@@ -29,6 +29,7 @@
  :seon.cluster.eval/output [:string {:min 1}]
  :seon.cluster.eval/id [:string {:min 1 :seon.db/identity true}]
  :seon.cluster.eval/ordinal [:int {:min 0}]
+ :seon.cluster.eval/ns :seon.db/ref
  :seon.cluster.eval/result-edn :string
  :seon.cluster.eval/run :seon.db/ref
  ; When this eval was cut instead of settling: the time limit fired, or
@@ -88,6 +89,7 @@
   [:seon.cluster.eval/run :seon.cluster.eval/run]
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
   [:seon.cluster.eval/at :seon.cluster.eval/at]
+  [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
   [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
   [:seon.cluster.eval/interrupted-at {:optional true}

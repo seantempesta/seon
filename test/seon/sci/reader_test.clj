@@ -159,7 +159,7 @@
                      {(symbol "#=") identity}})]
         (is (= :seon.sci.reader/refused-tag
                (:seon.error/kind result)))
-        (is (= (symbol "#=")
+        (is (= "#="
                (get-in result
                        [:seon.error/data :seon.sci.reader/tag])))))))
 

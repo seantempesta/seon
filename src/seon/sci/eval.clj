@@ -95,14 +95,17 @@
   `interrupted-at` — and rows 6 and 7 of the crash walk stay
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [clojure.edn :as edn]
+            [clojure.test.check.generators :as gen]
+            [datahike.api :as d]
             [my.message]
             [my.run]
             [sci.core :as sci]
             [sci.interrupt :as sci.interrupt]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit])
+            [seon.sci.admit :as admit]
+            [seon.sci.reader :as reader])
   (:import [java.lang.management ManagementFactory]
            [java.util.concurrent ScheduledThreadPoolExecutor TimeUnit]))
 
@@ -295,6 +298,170 @@
                       (ex-data throwable)
                       (assoc :seon.sci.eval/data (ex-data throwable)))})
 
+(defn- quoted-symbol
+  [value]
+  (when (and (seq? value) (= 'quote (first value)) (= 2 (count value))
+             (symbol? (second value)))
+    (second value)))
+
+(defn- deletion-row
+  [event]
+  (let [form (:seon.sci.reader/form event)]
+    (when (and (seq? form)
+               (= 'ns-unmap (first form))
+               (= 3 (count form)))
+      (when-let [namespace-name (quoted-symbol (second form))]
+        (when-let [function-name (quoted-symbol (nth form 2))]
+          {:seon.fn/delete (str (symbol (str namespace-name)
+                                             (str function-name)))
+           :seon.fn/source (:seon.sci.reader/source event)
+           :seon.fn/ns [:seon.ns/name namespace-name]})))))
+
+(defn- program-row
+  "Return the one reader declaration eligible for durable publication.
+  A function without its complete contract is deliberately absent."
+  [event]
+  (or
+   (deletion-row event)
+   (cond
+    (and (:seon.fn/sym event) (:seon.fn/spec event))
+    (if (schema/malli-form? (edn/read-string (:seon.fn/spec event)))
+      (select-keys event [:seon.fn/sym :seon.fn/ns :seon.fn/source
+                          :seon.fn/arglists :seon.fn/doc :seon.fn/private?
+                          :seon.fn/spec :seon.fn/workload])
+      (throw (ex-info "Function contract is not a registered Malli form."
+                      {:seon.error/kind ::contract-refused
+                       :seon.fn/sym (:seon.fn/sym event)})))
+
+    (:seon.schema/key event)
+    (if (schema/malli-form? (edn/read-string (:seon.schema/form event)))
+      (select-keys event [:seon.schema/key :seon.schema/ns :seon.schema/form])
+      (throw (ex-info "Schema registration is not a registered Malli form."
+                      {:seon.error/kind ::schema-refused
+                       :seon.schema/key (:seon.schema/key event)})))
+
+    (:seon.test/sym event)
+    (select-keys event [:seon.test/sym :seon.test/ns :seon.test/source])
+
+     :else nil)))
+
+(defn- one-event
+  [source namespace-name]
+  (let [events (reader/read {:seon.sci.reader/text source
+                             :seon.sci.reader/ns namespace-name})]
+    (cond
+      (map? events)
+      (throw (ex-info (:seon.error/message events) events))
+
+      (= 1 (count events))
+      (first events)
+
+      :else
+      (throw (ex-info "Evaluation requires exactly one reader event."
+                      {:seon.error/kind ::reader-event-count
+                       :seon.sci.reader/event-count (count events)})))))
+
+(declare activate-program-schemas!)
+
+(defn install-program-row!
+  "Install one declaration only after resolving its exact committed row from
+  the terminal transaction's db-after. Receipts are never consulted."
+  {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :boolean]}
+  [{ctx :seon.sci.eval/ctx
+    db :seon.db/db
+    row :seon.sci.eval/program-row}]
+  (let [[identity value]
+        (some (fn [attribute]
+                (when-some [value (get row attribute)]
+                  [attribute value]))
+              [:seon.fn/sym :seon.schema/key :seon.test/sym
+               :seon.fn/delete])
+        committed (when-not (= identity :seon.fn/delete)
+                    (d/pull db '[*] [identity value]))]
+    (when-not (= (:seon.fn/source row) (:seon.fn/source committed))
+      (when (= identity :seon.fn/sym)
+        (throw (ex-info "Committed function source does not match install request."
+                        {:seon.error/kind ::install-source-mismatch
+                         :seon.fn/sym value}))))
+    (case identity
+      :seon.fn/sym
+      (let [namespace-name (second (:seon.fn/ns row))
+            event (one-event (:seon.fn/source committed) namespace-name)]
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event)))
+        true)
+
+      ;; Schema activation and test discovery derive from their committed
+      ;; rows. They are deliberately not executed as arbitrary eval effects.
+      :seon.schema/key (activate-program-schemas! db)
+      :seon.test/sym true
+      :seon.fn/delete
+      (let [namespace-name (second (:seon.fn/ns row))
+            event (one-event (:seon.fn/source row) namespace-name)]
+        (when (d/pull db [:db/id] [:seon.fn/sym value])
+          (throw (ex-info "Deleted function is still present after commit."
+                          {:seon.error/kind ::install-delete-mismatch
+                           :seon.fn/sym value})))
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event)))
+        true)
+      false)))
+
+(defn- activate-program-schemas!
+  [db]
+  (let [schema-rows
+        (d/q '[:find ?key ?form ?tx
+               :where
+               [?schema :seon.schema/key ?key ?tx]
+               [?schema :seon.schema/form ?form]]
+             db)]
+    (when (seq schema-rows)
+      (schema/activate-projection!
+       (schema/projection-from-rows
+        {:seon.schema/database-value db
+         :seon.schema/schema-rows schema-rows
+         :seon.schema/function-contract-rows
+         (d/q '[:find ?sym ?spec ?tx
+                :where
+                [?function :seon.fn/sym ?sym]
+                [?function :seon.fn/spec ?spec ?tx]]
+              db)
+         :seon.schema/function-source-rows
+         (d/q '[:find ?sym ?source ?tx
+                :where
+                [?function :seon.fn/sym ?sym]
+                [?function :seon.fn/source ?source ?tx]]
+              db)
+         :seon.schema/artifact-exports #{}
+         :seon.schema/pure-predicate-symbols #{}})))
+    (boolean (seq schema-rows))))
+
+(defn acquire!
+  "Install the current committed program into a ctx at one database value.
+  This reads program rows only; receipts and eval results are outside the
+  query by construction."
+  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :int]}
+  [{ctx :seon.sci.eval/ctx db :seon.db/db}]
+  (activate-program-schemas! db)
+  (let [rows
+        (d/q '[:find ?sym ?source ?namespace-name
+               :where
+               [?function :seon.fn/sym ?sym]
+               [?function :seon.fn/source ?source]
+               [?function :seon.fn/spec _]
+               [?function :seon.fn/ns ?namespace]
+               [?namespace :seon.ns/name ?namespace-name]]
+             db)]
+    (doseq [[sym source namespace-name] (sort-by first rows)]
+      (install-program-row!
+       {:seon.sci.eval/ctx ctx
+        :seon.db/db db
+        :seon.sci.eval/program-row
+        {:seon.fn/sym sym
+         :seon.fn/source source
+         :seon.fn/ns [:seon.ns/name namespace-name]}}))
+    (count rows)))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs on the CALLER's thread, which must be a `:compute` platform
@@ -307,8 +474,7 @@
   2. install it on the SUPPLIED ctx (the caller's per-run fork, so the
      fold shares defs) or on a fresh fork of the base when none was
      given;
-  3. PARSE INSIDE the armed ctx, so `#=` and unknown tags are refused
-     by sci's own reader and never reach host evaluation;
+  3. consume THE ONE reader event; source is never reparsed;
   4. evaluate;
   5. ADMIT the value — realized and bounded — while still armed;
   6. disarm in `finally`.
@@ -325,6 +491,7 @@
   [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
+    namespace-ref :seon.cluster.run.form/ns
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
   (let [{:keys [interrupt-fn] stop! ::stop! record ::record}
@@ -335,17 +502,23 @@
         evaluation-ctx (assoc (or ctx (sci/fork (base)))
                               :interrupt-fn interrupt-fn)
         printed (java.io.StringWriter.)
-        ;; the agent's own namespace, established for the eval so a def
-        ;; lands where the prompt promised it would
-        namespace-object (sci/create-ns (if agent-id
-                                          (agent-namespace agent-id)
-                                          'user))]
+        namespace-name (or (second namespace-ref)
+                           (when agent-id (agent-namespace agent-id))
+                           'user)
+        namespace-object (sci/create-ns namespace-name)]
     (try
-      (let [form (sci/parse-string evaluation-ctx source)
-              value (sci/binding [sci/ns namespace-object
+      (let [event (one-event source namespace-name)
+            row (program-row event)
+            form (:seon.sci.reader/form event)
+            ;; Durable declarations are installed only after the row commits.
+            value (if row
+                    (or (:seon.fn/sym row)
+                        (:seon.schema/key row)
+                        (:seon.test/sym row))
+                    (sci/binding [sci/ns namespace-object
                                   sci/out printed
                                   sci/err printed]
-                      (sci/eval-form evaluation-ctx form))
+                      (sci/eval-form evaluation-ctx form)))
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
@@ -361,8 +534,10 @@
           (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn admitted)
+                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
                    :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+            row (assoc :seon.sci.eval/program-row row)
             (seq (str printed))
             (assoc :seon.cluster.eval/output
                    (bounded-output printed caps))))
@@ -379,6 +554,7 @@
             (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                      :seon.cluster.eval/result-edn
                      (:seon.cluster.eval/result-edn admitted)
+                     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                      :seon.cluster.eval/error (:seon.error/message value)
                      :seon.sci.admit/capped?
                      (:seon.sci.admit/capped? admitted)
