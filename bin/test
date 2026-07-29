@@ -14,12 +14,40 @@ cd "$(dirname "$0")/.."
 
 source bin/_java-home-resolver
 
+usage() {
+  cat <<'USAGE'
+Usage: bin/test [--result-cluster NAME] [--result-root PATH] [namespaces...]
+
+With no namespaces, runs every *_test.clj[c] under test/.
+USAGE
+}
+
+if [ ! -L seon-skills ] || [ ! -L .claude/skills ]; then
+  echo "bin/test: skill paths must be links to the one .agents/skills tree" >&2
+  echo "bin/test: restore the tracked links; edit skills only under .agents/skills" >&2
+  exit 1
+fi
+
+skills_root=$(cd .agents/skills && pwd -P)
+runtime_skills_root=$(cd seon-skills && pwd -P)
+claude_skills_root=$(cd .claude/skills && pwd -P)
+if [ "$skills_root" != "$runtime_skills_root" ] ||
+   [ "$skills_root" != "$claude_skills_root" ]; then
+  echo "bin/test: skill paths resolve to different directories" >&2
+  echo "bin/test: .agents/skills, seon-skills, and .claude/skills must share one tree" >&2
+  exit 1
+fi
+
 result_cluster=${SEON_TEST_RESULT_CLUSTER:-}
 result_root=${SEON_TEST_RESULT_ROOT:-data/clusters}
 namespaces=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --help|-h)
+      usage
+      exit 0
+      ;;
     --result-cluster)
       if [ $# -lt 2 ]; then
         echo "bin/test: --result-cluster requires a name" >&2
@@ -40,6 +68,11 @@ while [ $# -gt 0 ]; do
       shift
       namespaces+=("$@")
       break
+      ;;
+    --*)
+      echo "bin/test: unknown option: $1" >&2
+      usage >&2
+      exit 64
       ;;
     *)
       namespaces+=("$1")
@@ -85,5 +118,29 @@ done
 
 exec clojure -M:test -e \
   "$requires
-   (let [result (apply clojure.test/run-tests [$symbols])]
-     (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1)))"
+   (let [selected-namespaces (set [$symbols])
+         failures (atom #{})
+         default-report clojure.test/report
+         summary
+         (binding
+          [clojure.test/report
+           (fn [event]
+             (when (contains? #{:fail :error} (:type event))
+               (when-let [test-var
+                          (or (:var event)
+                              (first clojure.test/*testing-vars*))]
+                 (let [{:keys [name ns]} (meta test-var)]
+                   (when (and name
+                              ns
+                              (contains? selected-namespaces (ns-name ns)))
+                     (swap! failures
+                            conj
+                            (symbol (str (ns-name ns)) (str name)))))))
+             (default-report event))]
+          (apply clojure.test/run-tests [$symbols]))]
+     (when (seq @failures)
+       (println \"\\nFailing tests:\")
+       (doseq [test-symbol (sort @failures)]
+         (println \" -\" test-symbol)))
+     (System/exit
+      (if (zero? (+ (:fail summary) (:error summary))) 0 1)))"

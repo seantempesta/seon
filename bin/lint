@@ -73,6 +73,34 @@ if [[ ${#PATHS[@]} -eq 0 ]]; then
     PATHS=($DEFAULT_PATHS)
 fi
 
+mode_count=0
+[[ "$KONDO_ONLY" == "true" ]] && ((mode_count+=1))
+[[ "$SPLINT_ONLY" == "true" ]] && ((mode_count+=1))
+[[ "$METRICS_ONLY" == "true" ]] && ((mode_count+=1))
+if [[ $mode_count -gt 1 ]]; then
+    echo "bin/lint: choose only one of --kondo, --splint, or --metrics" >&2
+    exit 64
+fi
+if [[ "$FIX_MODE" == "true" ]] && [[ "$KONDO_ONLY" == "true" ]]; then
+    echo "bin/lint: --fix applies to Splint and cannot be combined with --kondo" >&2
+    exit 64
+fi
+for path in "${PATHS[@]}"; do
+    if [[ ! -e "$path" ]]; then
+        echo "bin/lint: path does not exist: $path" >&2
+        exit 66
+    fi
+done
+if [[ "$SPLINT_ONLY" != "true" ]] && [[ "$METRICS_ONLY" != "true" ]] &&
+   ! command -v clj-kondo >/dev/null 2>&1; then
+    echo "bin/lint: clj-kondo is not on PATH" >&2
+    exit 69
+fi
+if [[ "$KONDO_ONLY" != "true" ]] && ! command -v bb >/dev/null 2>&1; then
+    echo "bin/lint: bb is not on PATH; install Babashka to run Splint" >&2
+    exit 69
+fi
+
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'

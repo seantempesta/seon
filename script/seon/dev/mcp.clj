@@ -229,7 +229,7 @@
 
 (defn- start-remedy
   [cluster]
-  (str "Start the cluster with: bin/repl " cluster "."))
+  (str "Start the cluster with: bin/seon start " cluster "."))
 
 (defn- endpoint-error
   [row]

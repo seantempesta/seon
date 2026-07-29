@@ -457,21 +457,62 @@ case "$command" in
     ;;
   watch)
     [ $# -ge 1 ] || usage
-    exec tail -n 40 -f "$dir/$1-stdout.log"
+    name=$1
+    valid_name "$name" || {
+      echo "bin/codex-agent: invalid lane name '$name'" >&2
+      exit 64
+    }
+    log=$dir/$name-stdout.log
+    [ -f "$log" ] || {
+      echo "bin/codex-agent: no transcript for lane '$name' at $log" >&2
+      exit 1
+    }
+    exec tail -n 40 -f "$log"
     ;;
   summary)
     [ $# -ge 1 ] || usage
-    exec cat "$dir/$1-summary.txt"
+    name=$1
+    valid_name "$name" || {
+      echo "bin/codex-agent: invalid lane name '$name'" >&2
+      exit 64
+    }
+    summary=$dir/$name-summary.txt
+    [ -f "$summary" ] || {
+      echo "bin/codex-agent: no summary for lane '$name' at $summary" >&2
+      exit 1
+    }
+    exec cat "$summary"
     ;;
   status)
     echo "running codex lanes:"
-    ps -axo pid=,etime=,command= |
-      awk '/codex exec/ && !/vendor/ && !/zsh|sh -c|awk/ {
-        printf "  %s  %s  %.100s\n", $1, $2, substr($0, index($0,$3))
-      }' || true
+    found_running=0
+    for lane_state in "$lanes_dir"/*; do
+      [ -d "$lane_state" ] || continue
+      lane_name=${lane_state##*/}
+      lane_pid=
+      for pid_file in wrapper.pid codex.pid; do
+        [ -f "$lane_state/$pid_file" ] || continue
+        candidate_pid=$(sed -n '1p' "$lane_state/$pid_file")
+        if pid_is_live "$candidate_pid"; then
+          lane_pid=$candidate_pid
+          break
+        fi
+      done
+      [ -n "$lane_pid" ] || continue
+      elapsed=$(ps -p "$lane_pid" -o etime= | tr -d ' ')
+      lane_command=$(sed -n '1p' "$lane_state/command" 2>/dev/null || true)
+      printf "  %-28s pid=%-7s elapsed=%-10s %s\n" \
+        "$lane_name" "$lane_pid" "$elapsed" "$lane_command"
+      found_running=1
+    done
+    [ "$found_running" -eq 1 ] || echo "  none"
     echo "summaries landed in the last hour:"
     find "$dir" -name '*-summary.txt' -mmin -60 2>/dev/null |
-      while IFS= read -r f; do echo "  $f"; done
+      while IFS= read -r f; do
+        if ! grep -q '^lane-summary: in-progress$' "$f"; then
+          echo "  $f"
+        fi
+      done
     ;;
   *) usage ;;
 esac
