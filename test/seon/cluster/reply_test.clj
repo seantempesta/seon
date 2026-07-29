@@ -32,6 +32,9 @@
 (defn- error? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
+(defn- no-forms? [value]
+  (= :seon.cluster.reply/no-forms (:seon.error/kind value)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The round trip
 ;;; ---------------------------------------------------------------------------
@@ -88,6 +91,38 @@
            (reply/sources "(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Code or text — the whole reply, never token salad
+;;; ---------------------------------------------------------------------------
+
+(deftest a-reply-is-entirely-code-or-entirely-text
+  (testing "pure code keeps its exact ordered top-level sources"
+    (let [text (str "(def widgets (map inc (range 3)))\n"
+                    "widgets\n"
+                    "(my.run/complete \"counted 6\")")]
+      (is (= ["(def widgets (map inc (range 3)))"
+              "widgets"
+              "(my.run/complete \"counted 6\")"]
+             (reply/sources text)))))
+
+  (testing "pure prose stays exact reply text and yields no forms"
+    (let [text "I explained what I had done. The result was fifty-five."
+          result (reply/sources text)]
+      (is (no-forms? result))
+      (is (= text (get-in result
+                          [:seon.error/data :seon.cluster.reply/text])))))
+
+  (testing "the live word-salad reply freezes none of its 23 tokens"
+    (let [text (str "I defined a function to sum integers from 1 to n, "
+                    "called it with 10 to get 55, and reported the action.\n"
+                    "(my.run/complete \"reported\")")
+          result (reply/sources text)]
+      (is (no-forms? result))
+      (is (not (vector? result))
+          "neither `get` nor the trailing list becomes a plan form")
+      (is (= text (get-in result
+                          [:seon.error/data :seon.cluster.reply/text]))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws
 ;;; ---------------------------------------------------------------------------
 
@@ -109,7 +144,7 @@
   (testing "prose with no forms is its own outcome, not a parse failure"
     (let [refused (reply/sources "I think we should consider the options.")]
       (is (error? refused))
-      (is (= :seon.cluster.reply/no-forms (:seon.error/kind refused)))))
+      (is (no-forms? refused))))
   (testing "an empty reply is the same outcome"
     (is (= :seon.cluster.reply/no-forms
            (:seon.error/kind (reply/sources "   \n\n  "))))))
