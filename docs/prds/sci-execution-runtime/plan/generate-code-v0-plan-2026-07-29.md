@@ -6,645 +6,650 @@ tags: [prd, agent, architecture, runtime]
 
 # generate-code v0 — the whole loop on the local model (2026-07-29)
 
-> **REVISION 2026-07-29 (rev 2, after falsification).** Rev 1 (`aa8f2c24f`)
-> was **REJECTED FOR SEAL** by
-> [../research/generate-code-v0-falsification-2026-07-29.md](../research/generate-code-v0-falsification-2026-07-29.md)
-> (`042f57726`): 10 SEAL-BLOCKING, 2 REVISION, 6 NOTE, with 44 tests / 168
-> assertions of verification behind them. **I verified the load-bearing
-> findings against source myself and accept every one of them.** Three of rev
-> 1's mechanisms are dead and are redesigned here, not patched: parse-time
-> namespace attribution (S2), delegation-by-ordinary-send with `about` (S4,
-> S5), and delivery-as-termination (S6). Two of rev 1's claims were simply
-> false about the tree: the planner had no trigger for its repair turn (S1),
-> and a namespace-less planner contradicts the one formal creation path (S3).
-> Every changed section carries a **[rev 2]** marker; §13 gives a
-> per-finding disposition; §12 names the preconditions that are now separate
-> units with owners. **This document is not sealed** — §14 states what
-> remains before it can be.
+> **REVISION 2026-07-29 (rev 3, owner rulings batch 4).** Two owner rulings
+> (plan README, `4193c3f91`) resolve rev 2's two blockers, and both go
+> *against* rev 2's design:
+>
+> 1. **The fold is OWNER-ROUTED, not stop-at-first-red.** Rev 2's E2 (halt at
+>    the first failure) is **SUPERSEDED**. The fold continues per-form; every
+>    red form is a **routed problem** to its namespace owner carrying the
+>    planner's context; only an owner's explicit can't-fix bubbles to the
+>    planner as failure. **Completion = all forms settled**, and false
+>    completion dies because unsettled routed problems keep the plan open —
+>    not because evaluation halts. §2.3 and the new §2.4 are rewritten to this.
+> 2. **Namespace attribution is PARSE-TIME, REPL semantics** (D8 resolved).
+>    `(ns a)(defn x)(ns b)(defn y)` associates x with a and y with b, via the
+>    ONE reader's per-event namespace-in-effect. **Rev 2's withdrawal of
+>    `:seon.cluster.run.form/ns` is reversed** — with the reader, not this
+>    plan, as its owner. E1's evaluated-namespace receipt fact survives as the
+>    **evaluation-truth complement**; parse/eval disagreement is a detectable
+>    anomaly, not a design choice.
+>
+> Rev 2 (`6ed8fc3ea`) answered the falsification
+> ([../research/generate-code-v0-falsification-2026-07-29.md](../research/generate-code-v0-falsification-2026-07-29.md),
+> 10 seal-blocking / 2 revision / 6 note); all of its other dispositions
+> stand. Changed sections carry **[rev 3]**; §13 keeps the full per-finding
+> disposition with rev-3 amendments marked.
 
 **The law of this wave (owner, verbatim): "DO NOT PORT THINGS EXACTLY"** —
-the quarry supplies inventory and lessons, this plan derives everything
-fresh from the ruled architecture. And: *"I want us to improve what the
-system can do through learning from the past."* Every element of the old
-design below is either RECONCEIVED (§8 says how) or RETIRED (§8 says why).
-Nothing is transcribed.
+the quarry supplies inventory and lessons, this plan derives everything fresh
+from the ruled architecture. And: *"I want us to improve what the system can
+do through learning from the past."*
 
-`plan/README.md` remains the only ordering; this is a contract-shaped plan
-for one product capability, not a second ledger.
+`plan/README.md` remains the only ordering.
 
 Evidence authority:
 
+- **plan README rulings batch 4** (`4193c3f91`) — the two rulings above.
+- [parse-primitives-plan-2026-07-29.md](parse-primitives-plan-2026-07-29.md)
+  — **the owner of namespace attribution.** Its read event carries
+  `:seon.sci.reader/ns` ("ns IN EFFECT for this form"), tracked as the read
+  proceeds, changing at each `(ns …)`/`(in-ns 'x)`, and — critically —
+  yielding **absence** rather than inheritance after a malformed declaration.
+  That plan is mid-revision under the same rulings; the two documents are
+  coordinated in §2.2 and unit X1.
 - [../research/generate-code-v0-falsification-2026-07-29.md](../research/generate-code-v0-falsification-2026-07-29.md)
-  — **the review this revision answers.** Its six NOTE rows are the current
-  landed/absent boundary and are treated as the tree's state of record.
+  — the review rev 2 answered; its six NOTE rows remain the state of record.
 - [../research/generate-code-quarry-2026-07-29.md](../research/generate-code-quarry-2026-07-29.md)
-  — the archaeology: the 771-line `seon.ai/generate-code!` orchestrator, the
-  coordinator-free Flow prototype, what live-proved, what never graduated,
-  and the one lesson that survives everything: **evaluate the ambitious
-  whole-program pass once, preserve every accepted fact, and bisect only red
-  residue to owners through queryable provenance.**
-- [../research/renderable-corpus-plan-2026-07-28.md](../research/renderable-corpus-plan-2026-07-28.md)
-  §7 — delegation preconditions P1–P4 and the §7.4 falsifier.
-- [f1-agent-graph-contracts-2026-07-28.md](f1-agent-graph-contracts-2026-07-28.md)
-  — every agent is its own flow; the episode dial; the turn proc.
-- [../research/local-provider-2026-07-28.md](../research/local-provider-2026-07-28.md)
-  — the local Qwen row: 42.6 tok/s, `:seon.config.ai/no-auth true` landed.
+  — the archaeology, and the lesson that survives everything: **attempt the
+  whole program once, preserve every accepted fact, bisect only red residue
+  to owners through queryable provenance.**
+- [f1-agent-graph-contracts-2026-07-28.md](f1-agent-graph-contracts-2026-07-28.md),
+  [../research/local-provider-2026-07-28.md](../research/local-provider-2026-07-28.md).
 
-**The tree's state, as verified by the review and re-verified here.** P2 (test
-results) and P3 (namespace assignment) are landed. P1 is absent. The form
-entity has exactly `/id`, `/run`, `/ordinal`, `/source` — `/ns` was never a
-precondition, only rev 1's proposal. `:seon.cluster.message/about` is declared
-in `schema/error.edn` and written **only** by the error recorder; the ordinary
-message entity does not carry it. And three findings I confirmed by reading
-source, because they kill mechanisms:
-
-- **`sci/eval.clj:319-342` rebinds `sci/ns` to `my.agents.<id>` for every
-  form.** A shared ctx preserves *definitions*, not the dynamic namespace
-  binding. `(ns my.gen.alpha)` in form 0 does not put form 1 in that
-  namespace. **Multi-namespace execution is not real today** (S2).
-- **`:seon.cluster.agent/creation-request` requires `:seon.ns/name`**
-  (`schema/agent.edn:8-14`); root itself is created that way. A
-  namespace-less agent needs a second creation path (S3).
-- **`docs/seon/issues/a-failed-form-does-not-stop-the-fold.md` is OPEN**,
-  with live evidence of a run completing on an `Unbound` marker and
-  delivering it to another agent as a confident answer (S7).
-
-Two landed mechanisms the review's own reading surfaces, which rev 2 builds
-on and rev 1 missed:
-
-- **`seon.cluster.message/reply` auto-replies to the triggering agent on
-  completion** (`message.cljc:134-183`), deriving the recipient from the
-  trigger. A completed run wakes its caller with no protocol to remember.
-- **`caused-by` walks transaction metadata** (`message.cljc:100-119`):
-  message → its creating tx → that tx's `:seon.db/trigger` → the causing
-  message, total against cycles by a `seen` set. **The causal chain is a
-  landed, durable relation** — which is what rev 1 lacked when it retired
-  the attempt entity with nothing in its place.
+**The tree's state.** P2 (test results) and P3 (namespace assignment) landed;
+P1 absent. The form entity has `/id`, `/run`, `/ordinal`, `/source`.
+`:seon.cluster.message/about` is declared in `schema/error.edn` and written
+only by the error recorder. Verified by reading source, because they shape the
+design: the evaluator rebinds `sci/ns` per form (`sci/eval.clj:319-342`);
+`creation-request` requires `:seon.ns/name` (`schema/agent.edn:8-14`);
+`seon.cluster.message/reply` auto-replies to the triggering agent on
+completion (`message.cljc:134-183`); `caused-by` walks tx-meta and is total
+(`message.cljc:100-119`).
 
 ---
 
-## 0. The v0 in five sentences **[rev 2 — rewritten]**
+## 0. The v0 in five sentences **[rev 3 — rewritten]**
 
-A human messages **root** one goal; root messages the **planner**, an
-ordinary agent with its own namespace, and the planner's turn is the
-whole-program attempt. The attempt evaluates through the existing fold, and
-**attribution comes from the evaluator** — the namespace a form actually ran
-in, recorded on its receipt — never from a second parser's syntactic guess,
-which is why multi-namespace execution has to become real before the loop can
-exist at all (precondition **E1**). When the planner's run closes, the landed
-auto-reply wakes **root**, whose context carries the attributed-problems
-block; **root delegates**, because root is the caller and needs no new trigger
-contract, and a problems-driven wake would break the loop's L8 disjointness.
-Delegation is an assignment with a **commit-time identity** — at most one live
-assignment per (problem, owner) by upsert, not by a render-time read — and it
-**never removes a problem from the problems value**: an unrepaired problem
-stays visible as outstanding forever, so a silent owner cannot make work
-disappear. **Done is empty red at the acceptance basis, derived by anyone**;
-no agent's prose is ever acceptance, and the loop stops because red is gone,
-not because messages were sent.
+A human messages **root** one goal; root messages the **planner**, an ordinary
+agent with its own namespace, and the planner's turn is the whole-program
+attempt, whose forms are associated with the namespace each was written under
+by the **one reader's parse-time namespace-in-effect** — REPL semantics, the
+reader's contract, not this plan's invention. The fold **continues per-form**:
+every form that fails becomes a **routed problem** addressed to that
+namespace's owner agent, carrying the planner's context, while successes
+simply land. An owner repairs in its own namespace and its work lands as
+ordinary facts the planner later sees as results; **only an explicit can't-fix
+bubbles back as failure**. **A plan is complete when every form is settled** —
+succeeded, owner-fixed, or owner-declared-can't — so an unsettled routed
+problem keeps the attempt open, which is what kills false completion: not a
+halt, not prose, and not delivery evidence. Everything else follows from
+landed mechanisms: the auto-reply wakes the caller, `caused-by` scopes the
+goal, and the derived settlement is a query anyone can run.
 
 ---
 
-## 1. The surface — a message, not a function **[rev 2 — S3 fixed]**
-
-**Judged against the three agent-facing shapes law** (values the driver
-interprets / capability requests through the one door / durable facts the
-driver commits):
+## 1. The surface — a message, not a function
 
 | candidate | verdict |
 |---|---|
-| a `my.generate-code` value the loop interprets | **REJECTED.** The loop would have to launch an agent, install a scheduler and deliver a terminal result — runtime semantics performed from inside an eval. That is precisely the old-engine residue the conversion law names: a lifecycle call wearing a value's clothes. |
-| a capability through `seon.effect` | **REJECTED for v0.** The door does not exist yet, and building its first arm to carry "run a whole strong-model pass" would rebuild `^:async generate-code!` with a new spelling. |
-| **orchestration by message between ordinary agents** | **ADOPTED.** A whole-program attempt IS an agent taking a turn. `my.message/send` already commits, wakes and carries content; F1 gives each agent its own flow; and the landed auto-reply closes the loop back to the caller. |
+| a `my.generate-code` value the loop interprets | **REJECTED.** The loop would have to launch an agent, install a scheduler and deliver a terminal result — a lifecycle call wearing a value's clothes. |
+| a capability through `seon.effect` | **REJECTED for v0.** The door does not exist; building its first arm for this would rebuild `^:async generate-code!`. |
+| **orchestration by message between ordinary agents** | **ADOPTED.** |
 
 **The surface is `(my.message/send "planner" "<the goal>")` from root, or a
-human's message to root.** Zero new agent-facing constructs.
+human's message to root.** Zero new agent-facing constructs for the *surface*
+(§12 names the one new agent-facing value the fold semantics require).
 
-### 1.1 The cast, and why the planner owns a namespace **[rev 2 — S3]**
+### 1.1 The cast
 
 Rev 1 made the planner namespace-less and claimed self-delegation was
-therefore *structurally* unrepresentable. **That was false about the tree**:
-the one formal creation path requires a namespace name, root itself uses it,
-and an ownerless planner would need a second creation path — precisely the
-"one mechanism" violation this program refuses.
+structurally impossible; S3 falsified that — the one formal creation path
+requires a namespace, and root itself uses it.
 
 | agent | namespace | role |
 |---|---|---|
-| `root` | `my.agents.root` (landed) | the caller; receives the goal; receives the planner's reply; **delegates** |
-| `planner` | `my.gen.planner` | attempts the whole program |
+| `root` | `my.agents.root` (landed) | caller; receives the goal and the planner's reply; **delegates** |
+| `planner` | `my.gen.planner` | attempts the whole program; **owns any red form no namespace owner claims** |
 | `alpha`, `beta` | `my.gen.alpha`, `my.gen.beta` | own the target namespaces; repair |
 
-Self-delegation is now an **explicit refusal, not a structural claim**: an
-attributed problem whose owner is the delegating agent is held as
-unattributable residue and rendered loudly. Stating it as a rule is honest;
-rev 1's structural claim was not.
+**Every red form has an owner.** When a form's namespace has no assigned
+agent, the **author** — the planner — owns it. This retires rev 2's separate
+"unattributable residue" bucket: residue is not a leftover category, it is
+ownership falling back to the author, which is both honest and total.
 
-**Context is a render, and the planner's view is single-rooted.** Rev 1 wanted
-several namespace roots extracted from free-form goal text; the landed pilot
-walks from one agent (`render/agent.clj:118-134`) and the prompt invokes
-installed blocks for that one agent. Rev 2 does not invent a multi-root
-extractor: the planner sees **its own namespace at distance**, and the goal
-text names the target namespaces in prose. Multi-root views are a render
-question for N5, not a dependency of this loop.
+The planner's context is **its own namespace at distance** (the landed
+single-root pilot); the goal names target namespaces in prose. No multi-root
+view extractor is invented here.
 
 ---
 
-## 2. The attempt **[rev 2 — attribution moved to the evaluator]**
+## 2. The attempt **[rev 3 — attribution and fold both re-ruled]**
 
-### 2.1 The dead mechanism, and why
+### 2.1 History: two dead designs, one restored
 
-Rev 1 proposed `:seon.cluster.run.form/ns`, lifted at parse from the preceding
-`(ns …)`/`(in-ns …)` form. **S2 kills it, and the probes are decisive**: the
-evaluator rebinds `sci/ns` per form, so a `def` after `(in-ns 'my.gen.alpha)`
-lands in `my.agents.planner`. A parse-time ref would have committed a **false
-attribution** — a stored fact contradicting the runtime — and rev 1's own
-suite property (a namespace must appear in the form's own source prefix)
-contradicted rev 1's own inheritance rule. Both are retired.
+- **Rev 1** lifted the namespace at parse by its own inheritance rule. **S2
+  killed it** — the evaluator rebinds `sci/ns` per form, so the fact would
+  have contradicted the runtime, and rev 1's own suite property contradicted
+  its own inheritance rule.
+- **Rev 2** concluded attribution must therefore come *only* from the
+  evaluator.
+- **Ruling 2 resolves it properly**: attribution is parse-time **REPL
+  semantics**, owned by the ONE reader — and the evaluator's truth is kept as
+  a complement, so the two are *compared* rather than one guessing.
 
-The deeper error: **a stored attribution cannot manufacture an execution
-semantics that does not exist.** Reseal question 2 is the real question, and
-it must be answered before anything else in this plan is buildable.
+The distinction that makes ruling 2 right and rev 1 wrong: rev 1 invented a
+private inheritance rule inside this capability; ruling 2 puts the
+namespace-in-effect in **the one reader every code-bearing text goes through**,
+where a malformed declaration yields absence rather than inheritance
+(`parse-primitives-plan-2026-07-29.md:117-140`). Same fact, correct owner.
 
-### 2.2 Precondition E1 — multi-namespace execution, and attribution from its owner
+### 2.2 Attribution — parse-time, with evaluation as its complement **[rev 3]**
 
-**v0 requires that one run can really author several namespaces**, because
-otherwise the whole-program attempt is a single-namespace attempt and there is
-nothing to bisect. That is a change to the **evaluator contract**, and it is
-its own unit (§12, E1), not something this plan absorbs:
+| layer | fact | owner |
+|---|---|---|
+| parse | `:seon.sci.reader/ns` on each read event — the namespace in effect, REPL semantics | the parse-primitives plan's reader |
+| freeze | `:seon.cluster.run.form/ns` — ref to the upserted `:seon.ns`, projected from the read event | plan freeze (`seon.cluster.run`) |
+| eval | the namespace the form **actually** ran in, on its receipt | E1 (§12), the evaluator |
 
-- the run's namespace becomes **stateful across its forms** — the evaluator
-  threads the namespace it ended in, exactly as it already threads the ctx
-  that preserves definitions;
-- each receipt records **the namespace the form actually evaluated in**, so
-  attribution is an *evaluation* fact from the *same owner* that produced the
-  behavior (reseal Q2's requirement, verbatim);
-- the one-parser ruling is untouched: the parse still lifts *workload*
-  classification; it does not guess namespaces.
+**Coordination.** The parse-primitives plan already cites this one for
+`:seon.cluster.run.form/ns` and states the fencing property as a reader
+property. Rev 2 withdrew the attribute; **rev 3 restores it**, and the two
+plans now agree: the reader produces the namespace, plan freeze projects it,
+this plan consumes it. It is a `select-keys` projection, not a translation
+layer. Neither document may re-derive the other's half (X1).
 
-**If the owner declines E1**, the fallback is v0-B: the planner authors no
-code, only a decomposition, and each owner authors its own namespace in its
-own run — where the home namespace is correct by construction. That is a
-smaller v0 and it forfeits the quarry's central lesson (attempt once, preserve
-accepted work, bisect residue). §11 D8 puts the choice to the owner.
+**Disagreement is an anomaly, not a design choice.** Today's evaluator rebinds
+to `my.agents.<id>` per form, so a parse-attributed `my.gen.alpha` form will
+report `my.agents.planner` at eval — a *guaranteed* disagreement until E1
+lands. That is precisely why E1 survives as the complement: **the anomaly is
+detectable, and v0's drive must report it rather than assume it away.** Until
+E1 lands, attribution is the parse fact and the drive states plainly that
+execution did not honour it.
 
-### 2.3 Precondition E2 — the fold must stop at the first red form
+### 2.3 The fold — owner-routed, continuing **[rev 3 — supersedes rev 2's E2]**
 
-Rev 1 called continuation after a failed form "free" and used a later
-completion as acceptance evidence. **S7 is right and rev 1's judgment was
-wrong**: the open issue's live evidence is a run that completed on
-`Unbound: #'my.agents.bob/primes-below-100` and delivered it to another agent
-as an answer. A loop that can do that cannot host a capability whose entire
-output is "which parts are accepted".
+Rev 2 made "the fold stops at the first red form" a blocking precondition.
+**Ruling 1 supersedes it.** The fold continues per-form, and the correction to
+the old behavior is not a halt but a **destination**: a red form is neither
+silently continued past (the open issue's defect) nor globally aborted (rev
+2's over-correction). It is **routed**.
 
-**This plan therefore DEPENDS on that issue being ruled and fixed first**
-(§12, E2). Sibling preservation does not require evaluating forms authored
-against a state that failed to materialize: accepted earlier receipts stay
-terminal while the fold stops at the first red form.
+```text
+form fails → the form's namespace (parse-time) → that namespace's owner agent
+          → an assignment carrying the planner's context and the exact refs
+          → the owner repairs in its own namespace, or declares can't-fix
+```
 
-**A consequence rev 2 states rather than hides:** with stop-at-first-red, one
-attempt yields *one* red form, not N. The loop runs more rounds, each with
-smaller fan-out. That is a cost — and it is also what makes §9's episode
-arithmetic survivable at v0 scale.
+Successes and owner-fixed parts **simply land**; the planner later sees results
+as diffs. This preserves the quarry's central lesson exactly — accepted facts
+are never re-generated — while removing the quarry's dispatcher entirely.
+
+**The open issue resolves by these semantics, and rev 3 states the one
+residual honestly.** `a-failed-form-does-not-stop-the-fold` is closed by
+routing rather than stopping: form 0's failure becomes a routed problem
+instead of a silent continue. But its *evidence case* — form 1 computing on a
+missing definition and completing with `Unbound: #'…/primes-below-100` — is
+not closed by routing alone, because form 1 still evaluates.
+
+**Rev 3's answer, inside the ruled semantics:** a result that carries an
+**unbound-var reference is itself red**, and routes like any other red form.
+This is a computed rule at the one admission gate, not a marker layer: the
+admit codec already renders a Var as `:seon.sci.admit/reference`, so a value
+referencing an unbound var is detectable exactly where every value is already
+bounded. That closes the issue's evidence case without halting anything.
+**It needs confirmation from the admit owner** that the marker is visible at
+that seam (§12, E2′).
+
+**A red form is not always the owner's fault — the cold-resume interaction
+[rev 3].** Another lane filed a blocker while this revision was being written:
+`cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established`. The fold
+threads one sci ctx within a pass, but `:resume` after a process death forks a
+fresh ctx and re-evaluates only the target ordinal, so every def, require and
+alias the prefix installed is gone — **and so is the reading context the
+namespace-in-effect tracking depends on**.
+
+Under this plan's routing model that failure would be **misattributed**: a
+form that failed because the process died between ordinals would be addressed
+to a namespace owner as though its code were wrong. Routing must therefore
+**exclude resume-artifact failures** — a red form whose run shows an
+interruption before its ordinal is not the owner's problem — or that blocker
+must land first. Recorded as X2 (§12); this plan does not attempt to fix
+someone else's owner.
+
+### 2.4 The settled-form state model **[rev 3 — new, the ruling's core]**
+
+Every form of a frozen plan is in exactly one state, and **every state is
+derived from presence of facts** — no stored status attribute
+(presence-not-kinds, 2026-07-28).
+
+| state | derived from | settled? |
+|---|---|---|
+| **unevaluated** | no receipt for this ordinal | no |
+| **running** | receipt present, no terminal facts | no |
+| **succeeded** | terminal receipt with `result-edn`, no `error`, no unbound-var reference in the result | **yes** |
+| **routed** | red receipt **and** a live assignment to the form's owner | no — *this is what keeps the plan open* |
+| **unrouted red** | red receipt with no assignment yet | no |
+| **owner-fixed** | the routed problem no longer derives at the current basis | **yes** |
+| **owner-declared-can't** | the owner's explicit can't-fix value (E5) | **yes** |
+
+**Plan settlement** = every form settled. **A derived value — not stored, and
+not a run state.**
+
+Two consequences stated precisely, because they are where this model could be
+misread:
+
+1. **Plan settlement is independent of run closure.** The planner's run closes
+   normally (`wait` or `complete`) and the agent parks — F1's model, custody,
+   and the episode dial are untouched; holding a run open across an owner
+   round-trip would break all three. What stays open is **the plan's
+   settlement**, a derivation over the plan's forms. **A closed run does not
+   settle its plan.** This is how "unsettled routed problems keep the plan
+   OPEN" is realized without a long-held run.
+2. **False completion dies by contradiction, not by halting.** A planner that
+   completes while forms are unsettled is contradicted by the derived
+   settlement, which root's context renders beside the reply. Combined with
+   §10, the wrong answer has nowhere to hide — and unlike rev 1's version, the
+   *facts* say so rather than a convention.
+
+**What "owner-fixed" is, objectively.** Not the owner's claim: the routed
+problem stops deriving at the current basis — the same "a problem stops being
+a problem when the facts stop saying so" rule `seon.problems` is already built
+on. Completion stays evidence-derived, as the quarry's hardest lesson demands.
+
+**What "owner-declared-can't" is.** The one place a claim is irreducible:
+nothing observable distinguishes "I cannot fix this" from "I have not fixed
+this yet". It needs an explicit **value** — never prose the driver parses —
+and it collides with the sealed two-disposition surface, where "adding a third
+disposition is a design change, not a convenience". **Rev 3 does not invent
+it**: §12 E5 names the unit and §11 D10 puts the collision to the owner.
 
 ---
 
-## 3. Bisection, delegation, and the three things rev 1 got wrong **[rev 2 — rewritten]**
+## 3. Scope, trigger, assignment **[rev 3 — S6 strengthened by the ruling]**
 
-### 3.1 Attempt scope — the landed relation rev 1 lacked (S8)
+### 3.1 Attempt scope (S8)
 
-Rev 1 retired the attempt entity with nothing in its place, so "the attempt's
-problems are empty" was not a query anyone could run. **`caused-by` is that
-relation** (`message.cljc:100-119`): every run's opening transaction names its
-trigger as `:seon.db/trigger` tx-meta, and the walk is total.
+**`caused-by` is the relation**: a problem is in scope for a goal when the run
+that produced it has a trigger chain reaching the goal message. Landed, total,
+no attempt entity.
 
-**A problem is in scope for a goal when the run that produced it has a trigger
-chain reaching the goal message.** No new fact, no attempt entity.
+Two stated limits: **test results are not chain-reachable** (they come from
+`bin/test` runs outside the population) and are scoped by target namespace
+instead; and **one live goal per planner** at v0 (D9).
 
-**Two honest limits, stated because S8 is right that scope must be specified,
-not assumed:**
+### 3.2 The repair-turn trigger (S1)
 
-- **test results are not chain-reachable.** They come from `bin/test` runs,
-  outside the agent population. v0 scopes them by **target namespace** — the
-  namespaces the goal names — and that is a weaker relation which two
-  concurrent goals over the same namespace would confuse. v0 forbids that
-  configuration rather than pretending to resolve it;
-- **one standing planner serving two live goals** is out of scope for v0 for
-  the same reason. §11 D9.
+Rev 1 claimed F1's self-rewake produced the planner's next turn;
+`next-agent-work` has four situations and none reads `seon.problems`, so the
+graph parks.
 
-### 3.2 The trigger for the repair turn (S1)
+**The landed auto-reply is the trigger.** The planner's run closes →
+`seon.cluster.message/reply` derives a reply to **root** → an unanswered
+message → root's `:open` situation. No new trigger contract, no protocol the
+model must remember.
 
-Rev 1 claimed F1's self-rewake would produce the planner's next turn. **False:**
-`next-agent-work` has four situations, none of which reads `seon.problems`, so
-after the last receipt and close the graph parks. Nothing happened next.
+**No problems-driven wake is proposed**: the loop wakes on exactly one thing
+it does not itself commit (L8 disjointness), and a wake derived from
+`seon.problems` would violate it.
 
-**Rev 2 uses the landed auto-reply instead, and moves the delegating role to
-root.** When the planner's run closes, `seon.cluster.message/reply` derives a
-reply to the agent that triggered it — **root** — and that reply is an
-ordinary unanswered message, which is exactly the `:open` situation. **Root
-wakes. No new trigger contract, no new fact, no protocol the model must
-remember.**
+### 3.3 Assignment needs a commit-time identity (S4, S5)
 
-Why root rather than a problems-driven wake: the loop wakes on exactly one
-thing it does not itself commit (L8 disjointness). A wake derived from
-`seon.problems` would be the loop waking on facts the loop commits — the
-disjointness violation the run model exists to avoid. **Rev 2 does not propose
-one.**
+`my.message/send` returns a closed two-field map and the committed row carries
+no `about`; a render-time exclusion is a read, not a fence, and one frozen plan
+can hold two sends for the same problem whose ids differ by
+`(run, ordinal, index)`.
 
-Why root rather than a planner self-message: a self-message works and is
-ruled-legitimate, but it depends on the model emitting it every time, and the
-landed reply is derived rather than remembered — the exact argument
-`message.cljc:145-158` already makes about why completion replies are derived.
+**E3 (§12)** supplies: an optional **string identity** on `send` naming what
+the message is about (agents hold names, never entity ids — the driver
+resolves it exactly as it resolves recipients); and a **derived
+`(about, recipient)` identity** on the assignment, so a duplicate lands on the
+same entity by upsert. **The fence is in the transaction**, and the suite
+drives it under latched concurrency.
 
-### 3.3 Delegation needs a real assignment (S4, S5)
+### 3.4 No silent loss — now structural **[rev 3]**
 
-**S4 is correct: ordinary sends cannot carry `about`.** `my.message/send`
-returns a closed two-field map; the delivery request has no `about`; the
-committed row writes id/to/from/content/at. Rev 1's Act 3 was unbuildable, and
-its "everything landed except `:attributed`, `/ns` and the drive" was false.
+Rev 1 let delivery exclude a problem forever, so a silent owner erased work
+(S6). Rev 2 fixed the visibility half: delegation never removes a problem from
+the problems value.
 
-**S5 is correct that a render-time exclusion is not an idempotency fence.** A
-read proves what the read returned, not what a competing terminal transaction
-can commit — and one frozen plan can contain two send forms for the same
-problem, whose ids differ by `(run, ordinal, index)`, so both commit.
-
-Rev 2's answer is **one accretion with a commit-time identity** (§12, E3):
-
-- `my.message/send` gains an optional third argument naming **what the
-  message is about**, as a **string identity** — never an entity id, because
-  agent code holds names, exactly as it holds recipient names and lets the
-  driver resolve them. The producing facts already have string identities:
-  `:seon.cluster.eval/id`, `:seon.test.result/id`, `:seon.error/id`;
-- the driver resolves it to the entity and writes `about` on the row, the
-  same resolution it already performs for the recipient;
-- **at-most-once is a schema fact, not a query**: the assignment carries a
-  **derived identity** over `(about-entity, recipient)`. Datahike identity
-  gives upsert semantics, so a second assignment for the same pair — from a
-  duplicate send form, a re-derivation, or a second delegating agent — lands
-  on the same entity instead of creating a second one. **The fence is at
-  commit, in the transaction, where S5 requires it.**
-
-The suite must therefore drive the **production transition under concurrency
-with latches**, not a sequential model (S5's closing sentence, adopted
-verbatim in §6).
-
-### 3.4 Delegation is not termination (S6)
-
-**S6 is the most important finding in the review**, because rev 1's design
-turned a silent owner into permanent invisible loss: delivery excluded the
-problem forever, and the stopping rule called that done.
-
-**Rev 2 separates the two things rev 1 conflated:**
+**Ruling 1 makes the guarantee structural rather than presentational.** An
+unsettled routed problem keeps the **plan** unsettled. A silent owner does not
+merely leave a visible row — it leaves the whole attempt incomplete, by
+derivation, forever.
 
 | question | answer |
 |---|---|
-| may this problem be **messaged again**? | No, if a live assignment exists for (problem, owner) — the commit-time identity |
-| is this problem **still a problem**? | Yes, until its own facts stop saying so |
+| may this be **messaged again**? | no, while a live assignment exists — the commit-time identity |
+| is this **still a problem**? | yes, until its own facts stop saying so |
+| is the **plan complete**? | no, while any form is unsettled |
 
-**Delegation never removes a problem from the problems value.** It adds an
-owner and a delivered marker, changing how the row *renders*, never whether it
-exists. An owner that waits forever, fails, is paused, or refuses leaves an
-**outstanding** row visible to root and to any human, permanently.
-
-**The stopping rule is therefore: no red facts in scope at the acceptance
-basis.** Not "everything has been delegated". Rev 1's rule is retired.
-
-Termination no longer comes from exclusion. It comes from the red set
-shrinking — and if it does not shrink, the loop does not silently succeed, it
-**visibly stalls**, which is the outcome a human can act on.
+**Termination comes from the red set shrinking.** If it does not shrink, the
+loop does not silently succeed — it **visibly stalls**, with an unsettled plan
+naming exactly which forms and which owners.
 
 ---
 
 ## 4. What v0 explicitly DEFERS
 
-| deferred | why, and what unblocks it |
+| deferred | unblocked by |
 |---|---|
-| **Corpus composition** — accepted code is durable *source*, not callable definitions across runs. | **N5.** The honest v0/v1 line. |
-| **Warm namespace repair** — the quarry's headline promise, never proven. | N5 plus dependent tracking. |
-| **P1 — function/schema/call-path attribution.** v0 attributes at namespace granularity. | P1's normalize-time refs + `:seon.fn/calls`. |
-| **Dependency-ordered admission.** Authored order is the order. | Not scheduled. |
-| **Accrete-first admission and spec-first economics.** One local model in both roles. | After the shape is proven. |
-| **`seon.effect`** and capabilities inside generated programs. v0 programs are pure. | The door's own rung. |
-| **Two live goals on one planner; test results scoped by chain.** | §3.1's stated limits; needs a scoping relation for non-agent-produced facts. |
-| **Fan-out beyond the episode headroom** (§9). | Trigger coalescing, E4 — a candidate unit, not v0. |
+| **Corpus composition** — accepted code is durable source, not callable definitions across runs | **N5** (the v0/v1 line) |
+| **Warm namespace repair** | N5 + dependent tracking |
+| **P1** — function/schema/call-path attribution; v0 is namespace-granular | P1 + `:seon.fn/calls` |
+| **Dependency-ordered admission** — authored order is the order | not scheduled |
+| **Accrete-first admission, spec-first economics** — one local model in both roles | after the shape is proven |
+| **`seon.effect`** and capabilities inside generated programs | the door's rung |
+| **Two live goals per planner; chain-scoped test results** | §3.1's limits |
+| **Fan-out beyond the episode headroom** | E4 (trigger coalescing) |
 
 ---
 
-## 5. The live proof on local Qwen **[rev 2 — R1 adopted]**
+## 5. The live proof on local Qwen **[rev 3 — follows the routing model]**
 
-Cluster `generate-code-v0`, disposable path, landed local row.
-
-**Cast:** root (landed namespace), `planner` (`my.gen.planner`), `alpha`
-(`my.gen.alpha`), `beta` (`my.gen.beta`) — **all created through the one
-formal path**, all armed as F1 graphs.
+Cluster `generate-code-v0`, disposable path, landed local row. Cast: root,
+`planner`, `alpha`, `beta` — all created through the one formal path, all
+armed as F1 graphs.
 
 **Act 1 — the attempt.** Root messages the planner a two-namespace goal.
-Observe: one run, one plan, per-form receipts, **each receipt carrying the
-namespace it actually evaluated in** (E1), and the fold **stopping at the
-first red form** (E2).
+Observe: one run, one plan, per-form receipts, **each form carrying its
+parse-time namespace**, and — until E1 — the **reported disagreement** between
+parse attribution and the evaluator's actual namespace (§2.2).
 
-**Act 2 — failure, through the production paths (R1 adopted).** Rev 1 planned
-to transact a `:seon.test.result` directly; **S/R1 is right that this proves
-only the consumer.** Rev 2 instead:
+**Act 2 — failure through production paths (R1).** A real failing discovered
+`deftest` via `bin/test --result-cluster generate-code-v0` (so
+`clojure.test/report` → `runner/run!` → `record-tx` all execute), and model
+failure injected **at the provider-response boundary** so splitter, freeze,
+evaluator and receipt path all see throwing source. Natural Qwen residue is
+reported separately as evidence about the model, never about the design.
 
-- **test failure**: a real failing discovered `deftest`, run through
-  `bin/test --result-cluster generate-code-v0`, so `clojure.test/report` →
-  `runner/run!` → `record-tx` all execute;
-- **model failure**: injected **at the provider-response boundary**, so the
-  ordinary splitter, freeze, evaluator and receipt path see throwing source.
+**Act 3 — routing.** The fold **continues**; red forms become routed problems.
+Observe: assignments with commit-time identity, each owner's derived prompt
+already containing its own namespace's source, and the **plan derived as
+unsettled** with exactly the red forms named.
 
-Natural residue from Qwen is reported separately as evidence about the model,
-never as evidence about the design.
+**Act 4 — the three endings, all run.**
 
-**Act 3 — reply, delegation, assignment.** The planner closes; the landed
-reply wakes root; root's block shows attributed problems; root delegates with
-`about`-carrying sends (E3). Observe two assignments, each with the derived
-identity, and **each owner's derived prompt already containing its own
-namespace's source**.
-
-**Act 4 — repair, and the two honest endings.** Owners fix; the derived red
-set empties; root's block goes empty. **And the adversarial ending is run
-too**: one owner deliberately never completes, and the proof requires that its
-problem **remains visible as outstanding** and is never silently dropped
-(S6's history, run as a test rather than argued away).
+1. **owner fixes** → the problem stops deriving → the form settles → the plan
+   settles;
+2. **owner declares can't-fix** (E5) → the form settles as declared → the plan
+   settles **with a named failure**, which the planner sees;
+3. **owner never replies** → the form stays routed → **the plan stays
+   unsettled forever**, visibly, and nothing anywhere marks the goal done.
+   This is S6's adversarial history, run as a required proof.
 
 **Proof obligations:**
 
-| # | obligation | how it is observed |
+| # | obligation | observed by |
 |---|---|---|
-| 1 | accepted forms are never re-evaluated | one receipt per `(run, ordinal)` across the drive |
+| 1 | accepted forms are never re-evaluated | one receipt per `(run, ordinal)` |
 | 2 | the derivation transacts nothing | datom census; `:max-tx` unchanged |
-| 3 | attribution equals the evaluator's actual namespace | receipt's namespace vs. where the `def` resolved (S2's probe, inverted into a check) |
-| 4 | at-most-once assignment **under concurrency** | two delegating transactions raced with latches → one assignment entity |
-| 5 | a silent owner does not lose work | the non-replying owner's problem still outstanding at the end |
-| 6 | a failed form cannot produce a completed run or a delivered reply | E2's regression, driven live |
-| 7 | episode headroom respected | root's episode count vs. the dial, with the arithmetic of §9 |
-| 8 | one model, honestly reported | tokens, wall time, and what Qwen actually got wrong |
+| 3 | parse attribution matches the reader's contract, and eval disagreement is **reported** | per-form parse ns vs. receipt ns |
+| 4 | at-most-once assignment **under concurrency** | two delegating transactions raced with latches → one entity |
+| 5 | a silent owner leaves the plan unsettled | ending 3 |
+| 6 | a failed form cannot make a plan settle | the settlement derivation over ending 3 |
+| 7 | an unbound-var result is red and routes | the open issue's exact case, replayed |
+| 8 | episode headroom respected | root's episode count vs. §9's arithmetic |
+| 9 | one model, honestly reported | tokens, wall time, what Qwen got wrong |
 
-Evidence lands in `../research/generate-code-v0-drive-2026-07-29.md`; the
-drive is committed code.
-
----
-
-## 6. The sealed suite **[rev 2 — rewritten from required outcomes, R2 adopted]**
-
-R2 is adopted in full: rev 1's properties could pass while work was lost.
-The suite is rewritten **from the required outcomes**, not from the
-mechanisms:
-
-1. **every unresolved problem remains visible as outstanding** — generated red
-   sets with generated delegation histories, including owners that never
-   settle; no history makes a red fact invisible.
-2. **at most one live assignment per (problem, owner) under concurrent
-   commits** — the production transition, driven with latches, including two
-   send forms for the same pair in one frozen plan.
-3. **owner completion / refusal / supersession changes the derived state** —
-   the state transitions that *do* retire an assignment, proven to be the only
-   ones that do.
-4. **a failed form cannot yield a completed run or a delivered reply** (E2's
-   invariant, the open issue's own falsifier).
-5. **attribution equals the evaluator's actual namespace** — not a parser's
-   syntactic guess; the property is written against the evaluator's output, so
-   it cannot contradict its own design the way rev 1's did.
-6. **scope totality** — every problem is in scope for at most one goal, or is
-   out of scope; `caused-by`'s cycle-totality is exercised.
-7. **self-delegation refusal** and unowned-namespace residue.
-
-Every proof is claimed by `bin/test`. A live-only proof counts as NOT COVERED.
+Evidence: `../research/generate-code-v0-drive-2026-07-29.md`; the drive is
+committed code.
 
 ---
 
-## 7. Where the primitives are exercised — the honest map **[rev 2 — corrected]**
+## 6. The sealed suite **[rev 3 — settlement properties replace the halt property]**
 
-Rev 1's version of this table asserted "everything landed except three
-things", which S4 correctly called false. The corrected map:
+Written from **required outcomes** (R2 adopted), not from mechanisms:
+
+1. **plan settlement totality** — every form is in exactly one of the seven
+   states; settled ⇔ succeeded | owner-fixed | owner-declared-can't. Generated
+   receipt/assignment histories, including partial and adversarial ones.
+2. **an unsettled form keeps the plan unsettled** — no history of messages,
+   replies, or run closures settles a plan with a routed problem outstanding.
+   This replaces rev 2's stop-at-first-red test.
+3. **at most one live assignment per (problem, owner) under concurrent
+   commits** — the production transition with latches, including two sends for
+   the same pair in one frozen plan.
+4. **owner fix / can't-fix / supersession change the derived state**, and
+   nothing else does.
+5. **an unbound-var result is red** — the open issue's invariant as a
+   value-level property at the admission gate.
+6. **attribution follows the reader's namespace-in-effect**, including
+   **absence after a malformed declaration** (never inheritance), and the
+   parse/eval comparison surfaces disagreement rather than hiding it.
+7. **scope totality** — a problem is in scope for at most one goal;
+   `caused-by`'s cycle-totality exercised.
+8. **author fallback** — a red form whose namespace has no owner is owned by
+   the author, never dropped.
+
+Every proof is claimed by `bin/test`; a live-only proof counts as NOT COVERED.
+
+---
+
+## 7. Primitive map — honest readiness **[rev 3]**
 
 | primitive | state | v0's use |
 |---|---|---|
-| `my.message/send` | **needs E3** | the surface and the delegation |
-| `seon.cluster.message/reply` | landed | the repair-turn trigger (S1's answer) |
-| `caused-by` chain | landed | goal scoping (S8's answer) |
-| F1 per-agent graphs, custody-as-presence | landed | four agents, no dispatcher |
-| the fold + receipts | **needs E2** | the attempt, and preservation |
-| the evaluator | **needs E1** | multi-namespace execution and attribution |
+| `my.message/send` | **needs E3** | the surface and the assignment |
+| `seon.cluster.message/reply` | landed | the repair-turn trigger |
+| `caused-by` chain | landed | goal scoping |
+| F1 graphs, custody-as-presence | landed | four agents, no dispatcher |
+| the fold + receipts | landed; **needs E2′** (routing + the unbound rule) | the attempt |
+| the ONE reader's `:seon.sci.reader/ns` | **parse-primitives plan, in flight** | attribution |
+| the evaluator's namespace | **E1, non-blocking complement** | anomaly detection |
+| the can't-fix value | **needs E5** | settlement's third arm |
 | P2 test facts, P3 assignment | landed | red facts and the ownership join |
-| the render walk + distance | landed | root's block and each owner's local view |
-| `seon.problems` | landed, gains a family | the derivation |
-| the local no-auth provider row | landed | the model |
-
-**Three of the ten rows are preconditions.** That is the honest reading of
-this plan's readiness, and it is why §14 does not claim seal.
+| render walk + distance, `seon.problems` | landed (gains a family) | root's block; the derivation |
 
 ---
 
-## 8. Every old-design element: reconceived or retired
-
-*(Unchanged from rev 1 except the marked rows.)*
+## 8. Old-design elements: reconceived or retired
 
 | old element | verdict |
 |---|---|
-| public `^:async generate-code!` wrapper | **RETIRED.** An effectful lifecycle call from inside an eval. Replaced by a message. |
-| `:my.plan/goal` request map + injected caller id | **RETIRED.** The goal is message content; the caller is the message's sender fact. |
-| launching a `:planning` agent per goal | **RETIRED.** One standing planner; per-goal disposables recreate the task-agent shape F1 rejects. |
-| root observer + `:execution` scheduler + recovery registry | **RETIRED.** Owners wake on messages; recovery is the ordinary derivation. |
-| CAS claim of each unit | **RETIRED as a unit mechanism**; one open run per agent is the fence. **[rev 2]** The at-most-once property it was reaching for returns as E3's commit-time assignment identity — S5 was right that rev 1 had *no* fence at all. |
-| `parse-program` / `project-program` | **RETIRED entirely. [rev 2]** Rev 1 kept its namespace-fencing idea as a parse-time fact; S2 killed that. Attribution is an evaluation fact (E1). |
+| `^:async generate-code!` wrapper | **RETIRED** — a lifecycle call from inside an eval. |
+| `:my.plan/goal` request map + caller id | **RETIRED** — goal is message content; caller is the sender fact. |
+| per-goal `:planning` agent | **RETIRED** — one standing planner. |
+| root observer + scheduler + recovery registry | **RETIRED** — owners wake on messages; recovery is the ordinary derivation. |
+| CAS claim per unit | **RETIRED as a unit mechanism**; the at-most-once property returns as E3's commit-time identity (S5). |
+| `parse-program` / `project-program` (1,517 lines) | **RECONCEIVED to a reader property. [rev 3]** Namespace fencing survives as the ONE reader's namespace-in-effect with absence-not-inheritance — not rev 1's private rule (S2), and not rev 2's eval-only attribution (ruling 2). |
 | generated dependency ordering | **RETIRED for v0.** |
-| `my.plan/publish-generated-program!` + `:my.plan/needs` | **RETIRED.** The problems query derives the same answer from existing receipts. |
-| evidence-derived positive completion | **RECONCEIVED, and rev 2 restores what rev 1 weakened.** Completion is absence of red in scope at the acceptance basis. Rev 1 also called fold continuation "free" and leaned on a later completion as evidence — S7 showed that is exactly how the old system's false greens happened. E2 closes it. |
-| repair assignment as a pointer | **RECONCEIVED.** The owner's context IS its namespace view at distance; the message carries vision + refs. |
-| namespace resident birth-on-demand | **RECONCEIVED** as landed P3. Unowned namespace ⇒ root residue; auto-birth is D4. |
-| compact terminal `:done` message | **RECONCEIVED** as the landed auto-reply. **[rev 2]** Rev 1 said "a reader trusts the derived value, not prose"; S10 showed the runtime still records and delivers a stale completion. §10 rules the semantics and files the general class. |
-| no-reply retry path | **RETIRED.** No auto-retry, ever. |
-| planner scratch namespace as self-recipient | **RETIRED by an explicit refusal rule. [rev 2]** Rev 1's structural claim depended on a namespace-less planner, which S3 falsified. |
-| `:seon.ai.attempt/*` batch identity | **RETIRED**, and **[rev 2]** replaced by the `caused-by` chain rather than by nothing (S8). |
-| exact node budgets, whole-database equality fences | **RETIRED.** |
-| the fake Flow prototype's coordination laws | **RECONCEIVED** as §6 items 1–3 against real facts and real concurrency. |
+| `publish-generated-program!` + `:my.plan/needs` | **RETIRED** — the settlement derivation answers it from existing receipts. |
+| evidence-derived positive completion | **RECONCEIVED, and rev 3 restores its full strength.** Completion is **plan settlement**: every form succeeded, owner-fixed, or declared. Rev 1 called fold continuation "free" (S7); rev 2 over-corrected to halting; ruling 1 routes instead, which keeps sibling progress *and* kills false completion. |
+| the quarry's per-unit stored completion | **RETIRED** — settlement is derived, never stored. |
+| repair assignment as a pointer | **RECONCEIVED** — the owner's context IS its namespace view; the assignment carries vision + exact refs. |
+| namespace resident birth-on-demand | **RECONCEIVED** as landed P3; unowned ⇒ **author ownership** (§1.1), not a residue bucket. |
+| compact terminal `:done` message | **RECONCEIVED** as the landed auto-reply, with §10's semantics. |
+| no-reply retry | **RETIRED** — no auto-retry, ever. |
+| planner scratch ns as self-recipient | **RETIRED** by an explicit refusal rule (rev 1's structural claim died with S3). |
+| `:seon.ai.attempt/*` batch identity | **RETIRED**, replaced by the `caused-by` chain (S8). |
+| node budgets, whole-database equality fences | **RETIRED.** |
+| the fake Flow prototype's coordination laws | **RECONCEIVED** as §6.1–6.4 against real facts and real concurrency. |
 
 ---
 
-## 9. Episode economics — ruled, not waved at **[rev 2 — new, S9]**
+## 9. Episode economics **[S9 — rev 2, with a rev 3 note]**
 
-S9's arithmetic is correct and I re-verified it: `episode-runs`
-(`work.cljc:153-189`) counts inclusively from the run answering the last
-**outside** trigger, and a trigger is outside only when it carries **neither
-`from` nor `about`**. So every owner reply is an *inside* trigger, and:
+`episode-runs` counts inclusively from the run answering the last **outside**
+trigger, and a trigger is outside only when it carries **neither `from` nor
+`about`** — so every owner reply is an inside trigger:
 
 ```text
-planner/root runs in one episode = 1 outside-triggered run + N reply runs
+runs in one episode = 1 outside-triggered run + N reply runs
 ```
 
-At the default 100, N = 100 delegates needs 101. Rev 1's D7 ("if the cap fires
-that's a bug report") ignored deterministic arithmetic. **Retracted.**
+At the default 100, N = 100 delegates needs 101. Rev 1's D7 ("a firing cap is
+just a bug report") is **retracted**.
 
-**The v0 ruling: fan-out per delegating run is bounded by derived headroom.**
+**Ruling: fan-out per delegating run is bounded by derived headroom.**
 
 ```text
 max-delegates = max-episode-runs − episode-runs(db, delegator) − 1
 ```
 
-The delegator renders **at most that many** assignments per run; the remainder
-stay outstanding (§3.4 guarantees they stay *visible*) and are delegated on a
-later run. This is a derived bound from a landed dial, not a new constant, and
-it degrades honestly: over-fan-out becomes *slower*, never *lost*.
+The remainder stay outstanding — and under ruling 1 they also keep the plan
+unsettled, so over-fan-out is **slower, never lost**. The general fix (one run
+answering every unanswered trigger at its basis) is **E4**, not v0's problem.
 
-**A second consequence of E2 helps:** stop-at-first-red means one attempt
-yields one red form, so v0's realistic fan-out is 1–2 and the bound never
-binds. The proof still asserts obligation 7 rather than assuming it.
-
-**The general answer is a separate unit, not v0's problem.** Each reply
-opening its own run is not merely a cap issue — it is N paid model calls that
-all re-derive the same basis. The right fix is **trigger coalescing**: one run
-answers *every* unanswered trigger at its basis, because a run derives from a
-basis, not from a queue. That is E4 (§12) — a real change to run opening and
-the `:seon.db/trigger` tx-meta shape, with its own owner. v0 does not need it
-and must not smuggle it in.
+**Rev 3 note:** the routing model *raises* fan-out relative to rev 2, because
+the fold no longer halts at the first red form — a bad attempt can produce
+several red forms at once. The derived bound therefore matters more here than
+it did in rev 2, and obligation 8 asserts it rather than assuming it.
 
 ---
 
-## 10. Completion semantics **[rev 2 — new, S10]**
+## 10. Completion semantics **[rev 3 — settlement supplies the objective check]**
 
-S10 is correct: the loop accepts `my.run/complete` from the frozen form and
-closes in the same receipt transaction without re-deriving anything, so a
-completion frozen at basis B can close at B+2 after an owner's failure
-committed at B+1.
+S10: the loop accepts `my.run/complete` from a frozen form and closes without
+re-deriving at the terminal transaction's basis, so a completion authored at
+basis B can close at B+2 after a contradicting fact at B+1.
 
-**Rev 2 rules the semantics rather than pretending the query protects us:**
+**Ruled for v0:**
 
 1. **An agent's completion is not an acceptance claim.** It means "I have
-   nothing further to say this turn". The goal's doneness is the derived value
-   of §3.4, which any reader can run and which no agent can assert.
-2. **Root's context always shows the outstanding block.** A reply saying
-   "done" beside a block showing two outstanding problems is not a lie the
-   system told; it is one agent's prose next to the facts. The drive asserts
-   this composition explicitly.
-3. **The general class is filed, not absorbed.** "A frozen disposition can
-   close against newer facts" is true of *every* agent, not just this
-   capability. It belongs to the run-closing owner as an issue with S10's
-   interleaving as evidence — §12 lists it. If the owner rules that the
-   terminal transition must refuse stale completions, this plan inherits the
-   fix for free.
+   nothing further to say this turn". **The goal's doneness is plan
+   settlement** (§2.4) — derived, runnable by anyone, assertable by no agent.
+2. **Root's context always renders settlement beside the reply.** A "done"
+   reply next to an unsettled plan is one agent's prose next to the facts; the
+   drive asserts the composition.
+3. **The general class is filed, not absorbed** — a frozen disposition closing
+   against newer facts is true of every agent
+   (`docs/seon/issues/a-frozen-disposition-can-close-against-newer-facts.md`,
+   filed by rev 2). If its owner rules that the terminal transition must
+   refuse stale completions, this plan inherits the fix.
 
-What rev 2 will **not** do is claim, as rev 1 did, that "a reader trusts the
-derived value" makes the recorded false completion harmless.
+Rev 3 strengthens rev 2 here: rev 2 could only offer "trust the query"; ruling
+1 makes the query **structurally decisive**, because an unsettled plan is not
+complete no matter what any agent said.
 
 ---
 
-## 11. Owner decisions, and the name table **[rev 2 — D7 retracted, D8/D9 new]**
+## 11. Owner decisions **[rev 3 — D8 resolved, D10 new]**
 
-**D1 — does `generate-code` survive as a name?** *Yes as the name of the
-loop, no as the name of any code.* No namespace, function, or attribute in
-this plan carries it.
+**D1 — `generate-code` as a name?** *Yes for the loop, no for any code.*
 
-**D2 — is the planner namespace-less?** **RETRACTED (S3).** The planner owns
-`my.gen.planner` through the one formal creation path; self-delegation is an
-explicit refusal rule.
+**D2 — namespace-less planner?** **RETRACTED (S3).** The planner owns
+`my.gen.planner`; self-delegation is an explicit refusal rule.
 
-**D3 — attribution granularity at v0 = namespace (P1 deferred).** *Confirm* —
-but note it now depends on E1 rather than on a parse fact.
+**D3 — namespace-granular attribution at v0 (P1 deferred).** *Confirm.*
 
-**D4 — unowned namespace: root residue, or birth an agent?** *Root residue.*
+**D4 — unowned namespace?** **REVISED [rev 3]:** owned by the **author**
+(§1.1), which is total and removes the residue bucket.
 
 **D5 — one local model in both roles.** *Confirm for v0.*
 
-**D6 — staged failure acceptable?** *Yes, through the production paths only*
-(R1): a real failing `deftest` via `--result-cluster`, and model failure
-injected at the provider-response boundary.
+**D6 — staged failure through production paths only** (R1). *Confirm.*
 
-**D7 — episode cap.** **RETRACTED (S9).** Replaced by §9's derived headroom
-bound; the general fix is E4.
+**D7 — episode cap.** **RETRACTED (S9)** for §9's derived bound.
 
-**D8 — E1, or the smaller v0-B? [new]** Does one planner run really author
-several namespaces (E1, evaluator change), or does v0 drop to a decomposition
-planner whose owners each author their own namespace? *Recommendation: E1* —
-v0-B forfeits the quarry's central lesson and makes the capability little more
-than "message two agents". But E1 is an evaluator contract change and the
-owner should choose knowingly.
+**D8 — E1 or the smaller v0-B?** **RESOLVED by ruling 2 [rev 3]:** attribution
+is parse-time REPL semantics via the ONE reader; E1 survives as the
+evaluation-truth complement and is **no longer blocking**. v0-B is withdrawn.
 
-**D9 — one live goal per planner at v0. [new]** §3.1's scoping limit.
-*Recommendation: accept the restriction* and record it, rather than invent a
-scoping relation for test results that the facts do not support.
+**D9 — one live goal per planner at v0.** *Recommendation: accept and record.*
 
-### Name table — for veto
+**D10 — how does an owner say "I can't fix this"? [new]** The settled-form
+model needs its third arm, and it collides with the sealed two-disposition
+surface. Options, recommendation first:
+
+1. **A third disposition** (`my.run` gains one member). Honest, minimal, and
+   symmetric with `complete`/`wait` — but it breaks a seal the owner set
+   deliberately ("adding a third disposition is a design change").
+2. **A resolution value on the assignment** — a distinct agent-facing value
+   meaning "this assignment is declined", leaving `my.run` sealed. Costs a
+   fourth agent-facing value family.
+3. **Derive it from silence plus a bound** — **rejected**: a timeout standing
+   in for a declaration is exactly the tuned constant the standing ruling
+   bans, and it resurrects the silent-loss class S6 named.
+
+*Recommendation: option 1*, because the fact being expressed genuinely is a
+run disposition. Either way it is **E5**, its own unit.
+
+### Name table
 
 | name | what it is | grounded in |
 |---|---|---|
-| receipt's evaluated namespace (E1) | the namespace a form actually ran in | `sci/eval.clj`'s own `sci/ns` binding; named by what the evaluator did |
-| `:attributed` (a `seon.problems` family key) | problems grouped by owner, retaining exact refs | the six existing family keys |
-| the assignment identity (E3) | derived `(about, recipient)` identity giving upsert-based at-most-once | receipts' and messages' existing derived-identity idiom |
-| **"residue"** | *retired as a coinage* — say **unattributable problems** | R34 |
-| **"attempt"** | prose for one planner run; scoped by `caused-by` | no entity |
-| ~~`:seon.cluster.run.form/ns`~~ | **withdrawn (S2)** | — |
+| `:seon.sci.reader/ns` | namespace in effect per read event | the parse-primitives plan (its owner) |
+| `:seon.cluster.run.form/ns` | the projected ref at plan freeze | **restored [rev 3]**; sits beside `/id`, `/run`, `/ordinal`, `/source` |
+| evaluated namespace on the receipt | evaluation truth, the complement | `sci/eval.clj`'s own `sci/ns` binding |
+| **settled** / **routed** / **owner-fixed** / **owner-declared-can't** | the form states of §2.4 | the owner's own words in ruling 1 |
+| the assignment identity | derived `(about, recipient)`, upsert-based | the existing derived-identity idiom |
+| **"residue"** | *retired* — say **author-owned red form** | R34; §1.1 |
+| ~~"stop-at-first-red"~~ | **superseded by ruling 1** | — |
 
 ---
 
-## 12. Preconditions — separate units, each with an owner **[rev 2 — new]**
+## 12. Preconditions — separate units with owners **[rev 3 — E2 replaced, E5 new]**
 
-Per the coordinator's instruction, these are **not absorbed into this plan**.
-Each is its own unit; this plan is blocked on E1–E3 and merely benefits from
-E4 and the S10 issue.
-
-| id | unit | owner | why v0 needs it |
+| id | unit | owner | status |
 |---|---|---|---|
-| **E1** | **Run-stateful namespace + evaluated-namespace on the receipt.** The evaluator threads the namespace across a run's forms as it already threads the ctx; each receipt records where its form ran. | `seon.sci.eval` + `schema/run.edn` | Without it multi-namespace execution is fiction and there is nothing to bisect (S2, reseal Q2). **BLOCKING.** |
-| **E2** | **The fold stops at the first red form.** Closes the open issue `a-failed-form-does-not-stop-the-fold`. | `seon.cluster.loop` + the issue | A loop that can complete on `Unbound` cannot host a capability whose output is "which parts are accepted" (S7, reseal Q6). **BLOCKING.** |
-| **E3** | **`about`-carrying sends with a commit-time assignment identity.** Optional string identity on `my.message/send`, resolved by the driver; derived `(about, recipient)` identity giving at-most-once by upsert. | `my.message` + `seon.cluster.message` + `schema/message.edn` | Delegation is unbuildable without it, and a render-time read is not a fence (S4, S5, reseal Q4). **BLOCKING.** |
-| **E4** | **Trigger coalescing** — one run answers every unanswered trigger at its basis. | `seon.cluster.work` | Not v0-blocking; the general answer to N replies costing N paid calls (S9, reseal Q7). |
-| **I1** | **Issue: a frozen disposition can close against newer facts.** S10's interleaving as evidence. | the run-closing owner | Not v0-blocking under §10's ruling; v0 inherits any fix. |
+| **E2′** | **owner-routed fold [replaces E2]**: a red form emits a routed problem to its namespace owner (author fallback); plus the **unbound-var result is red** rule at the admission gate. Closes `a-failed-form-does-not-stop-the-fold` by routing, per ruling 1. | `seon.cluster.loop` + `seon.sci.admit` (the unbound rule) | **BLOCKING** |
+| **E3** | `about`-carrying sends + commit-time `(about, recipient)` assignment identity | `my.message` + `seon.cluster.message` + `schema/message.edn` | **BLOCKING** (S4, S5) |
+| **E5** | **the can't-fix value [new]** — settlement's third arm; see D10 | `my.run` (or a new value family), owner-ruled | **BLOCKING** — without it, a plan containing an unfixable form can never settle |
+| **E1** | evaluated-namespace on the receipt | `seon.sci.eval` + `schema/run.edn` | **no longer blocking [rev 3]** — the complement that makes parse/eval disagreement detectable. Until it lands, v0 reports the disagreement rather than detecting it per-form. |
+| **E4** | trigger coalescing — one run answers every unanswered trigger at its basis | `seon.cluster.work` | not blocking (S9) |
+| **I1** | issue: a frozen disposition can close against newer facts | the run-closing owner | not blocking under §10 |
+| **X1** | **coordination**: the parse-primitives plan keeps `:seon.sci.reader/ns`; this plan keeps the freeze projection; neither re-derives the other's half | both plans | in flight, same rulings |
+| **X2** | **dependency [rev 3]**: `cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established` (blocker, filed by another lane). Either it lands, or E2′'s routing excludes resume-artifact failures — otherwise a process death is misattributed to a namespace owner (§2.3) | that issue's owner | **blocks correct attribution**, not the loop's shape |
 
 ---
 
-## 13. Per-finding disposition **[rev 2 — new]**
+## 13. Per-finding disposition **[rev 3 amendments marked]**
 
 | # | finding | disposition |
 |---|---|---|
-| **S1** | no fact wakes the planner for the repair turn | **ACCEPTED — mechanism replaced.** The landed auto-reply wakes **root**, which delegates (§3.2). No problems-driven wake is proposed; that would break L8 disjointness. |
-| **S2** | parse-time vs evaluation-time namespace | **ACCEPTED — mechanism killed.** `/ns` withdrawn. Attribution becomes an evaluation fact from the evaluator (E1, §2.2). Rev 1's contradictory suite property is deleted. |
-| **S3** | namespace-less planner contradicts creation | **ACCEPTED — design changed.** The planner owns `my.gen.planner` via the one formal path; self-delegation is an explicit refusal, not a structural claim (§1.1). |
-| **S4** | ordinary sends cannot carry `about` | **ACCEPTED — precondition created.** E3, with the string-identity resolution consistent with recipient names (§3.3). Rev 1's "everything landed" claim is retracted (§7). |
-| **S5** | render-time exclusion is not an idempotency fence | **ACCEPTED — fence moved to commit.** Derived `(about, recipient)` identity, upsert semantics, proven under latched concurrency (§3.3, §6.2). |
-| **S6** | non-replying owner ⇒ silent loss | **ACCEPTED — stopping rule replaced.** Delegation never removes a problem; done is empty red, never "all delegated"; the adversarial history is a required proof (§3.4, §5 Act 4, §6.1). |
-| **S7** | the fold continues and can complete with a lie | **ACCEPTED — named as blocking precondition E2.** Rev 1's "free" judgment retracted; the consequence for fan-out is stated (§2.3). |
-| **S8** | "the run is the attempt" does not scope later runs | **ACCEPTED — landed relation supplied.** `caused-by` chain scoping, with the two limits (test results, one-goal-per-planner) stated rather than assumed (§3.1, D9). |
-| **S9** | the cap starves 100 delegates | **ACCEPTED — D7 retracted, bound derived.** Fan-out ≤ derived headroom; the general fix is E4 (§9). |
-| **S10** | evidence-derived done is not enforced at the terminal transition | **ACCEPTED — semantics ruled, class filed.** Completion is not an acceptance claim; root's block always shows outstanding; the general defect is issue I1 (§10). |
-| **R1** | injected test failure bypasses the P2 path | **ACCEPTED.** Real failing `deftest` through `bin/test --result-cluster`; model failure injected at the provider-response boundary (§5 Act 2). |
-| **R2** | properties can pass while work is lost | **ACCEPTED — suite rewritten from required outcomes** (§6), including the non-settling owner, same-plan duplicates, and concurrent terminal transactions. |
-| **N1–N6** | current-tree verification | **ADOPTED as the state of record** and reflected in §7's corrected map. |
+| **S1** | no fact wakes the planner for the repair turn | **ACCEPTED** — the landed auto-reply wakes root, which delegates. No problems-driven wake (L8). |
+| **S2** | parse-time vs evaluation-time namespace | **ACCEPTED, remedy amended [rev 3].** Rev 1's private inheritance rule stays dead. Rev 2's eval-only attribution is **superseded by ruling 2**: attribution is parse-time REPL semantics owned by the ONE reader, with the evaluator's namespace as the complement and disagreement as a detectable anomaly. `:seon.cluster.run.form/ns` is **restored**. |
+| **S3** | namespace-less planner contradicts creation | **ACCEPTED** — the planner owns a namespace; self-delegation is an explicit refusal. |
+| **S4** | ordinary sends cannot carry `about` | **ACCEPTED** — precondition E3. |
+| **S5** | render-time exclusion is not a fence | **ACCEPTED** — commit-time identity, latched-concurrency proof. |
+| **S6** | non-replying owner ⇒ silent loss | **ACCEPTED, strengthened [rev 3].** Rev 2 kept the problem visible; ruling 1 makes an unsettled routed problem keep the **plan** unsettled, so a silent owner cannot produce a completed goal at all. Required proof (§5, ending 3). |
+| **S7** | the fold continues and can complete with a lie | **ACCEPTED; rev 2's remedy SUPERSEDED [rev 3].** Not stop-at-first-red: the fold continues and every red form routes, so completion dies by unsettled work rather than by halting. The issue's evidence case is closed by the unbound-var-result rule (§2.3, E2′). |
+| **S8** | no attempt scoping | **ACCEPTED** — `caused-by` chain, with two stated limits. |
+| **S9** | the cap starves 100 delegates | **ACCEPTED** — D7 retracted; derived headroom bound, and rev 3 notes routing raises fan-out (§9). |
+| **S10** | done not enforced at the terminal transition | **ACCEPTED** — completion is not acceptance; **plan settlement** is the objective check [rev 3]; the general class is issue I1. |
+| **R1** | injected test failure bypasses the P2 path | **ACCEPTED** — production paths only. |
+| **R2** | properties can pass while work is lost | **ACCEPTED** — suite rewritten from required outcomes; rev 3 replaces the halt property with the settlement properties (§6.1–6.2). |
+| **N1–N6** | current-tree verification | **ADOPTED** as the state of record. |
 
-**Nothing in the review is refuted.** Two of its readings are *extended*
-rather than contradicted: `seon.cluster.message/reply` supplies S1's missing
-trigger, and `caused-by` supplies S8's missing scope — both landed, both
-missed by rev 1.
+**Nothing in the review is refuted.** Two of its readings were extended by rev
+2 (`reply` supplies S1's trigger; `caused-by` supplies S8's scope), and two of
+rev 2's own remedies are now superseded by owner ruling rather than by
+falsification (attribution owner; fold semantics).
 
 ---
 
-## 14. Seal assessment **[rev 2 — new]**
+## 14. Seal assessment **[rev 3]**
 
-**This document is not seal-ready, and rev 2 does not claim it is.** It
-answers all seven reseal questions, but three of its answers are
-*preconditions owned elsewhere*:
+**Both of rev 2's blockers are resolved by the rulings; one new blocker
+appears from the ruling itself (E5).**
 
 | reseal question | answered | by |
 |---|---|---|
-| 1. what triggers the first repair turn? | yes, with landed mechanism | §3.2 |
-| 2. does one run execute several namespaces? | **only if E1 lands** | §2.2, D8 |
-| 3. what scopes one goal across runs? | yes, with landed mechanism | §3.1 |
-| 4. what owns at-most-once, and what distinguishes delivered/outstanding/repaired? | **design given, needs E3** | §3.3, §3.4 |
-| 5. what prevents a stale disposition closing? | ruled for v0; class filed | §10, I1 |
-| 6. what fold ruling closes the false-completion issue? | **owner ruling needed** | E2 |
+| 1. what triggers the first repair turn? | yes, landed | §3.2 |
+| 2. does one run execute several namespaces? | **resolved differently [rev 3]** — attribution is parse-time REPL semantics; execution truth is the complement, and disagreement is reported | §2.2, D8 |
+| 3. what scopes one goal across runs? | yes, landed | §3.1 |
+| 4. at-most-once, and delivered/outstanding/repaired? | **design given, needs E3 + E5** | §3.3, §2.4 |
+| 5. what prevents a stale disposition closing? | **plan settlement**; class filed | §10 |
+| 6. what fold ruling closes the false-completion issue? | **RULED** — owner-routed fold | §2.3 |
 | 7. what fan-out bound composes with the cap? | yes, derived | §9 |
 
-**Seal requires, in order:** the owner's D8 choice (E1 or v0-B); the E2 fold
-ruling; and E3's contract authored by its owner. When those three land, this
-plan's remaining content is implementable and the §7.4 falsifier can be run
-honestly. Until then, as the review says, a drive would demonstrate a
-hand-held two-owner scenario — which rev 2 no longer claims is the product.
+**Seal requires three contracts authored by their owners: E2′** (routing plus
+the unbound-var rule — needs the admit owner's confirmation that the marker is
+visible at that seam), **E3** (about-carrying sends and the assignment
+identity), and **E5** (the can't-fix value, gated on D10). E1 is no longer
+blocking; D8 is closed.
+
+**One element is deliberately left open rather than guessed:** D10, because it
+touches a surface the owner sealed on purpose. Everything else is landed,
+derived from landed facts, or owned by a named unit.
 
 ---
 
 ## 15. Sequencing
 
-**Blocked on E1, E2, E3** (§12). Not blocked on P1, N5, or the effect door,
-and must not acquire those dependencies during implementation. It occupies a
-parallel product slot, never the F-series spine. Its first honest v1 begins
-when N5's corpus round trip makes accepted code callable.
+**Blocked on E2′, E3, E5.** Not blocked on P1, N5, E1, or the effect door, and
+must not acquire those dependencies during implementation. Coordinated with
+the parse-primitives plan through X1. It occupies a parallel product slot,
+never the F-series spine; its first honest v1 begins when N5's corpus round
+trip makes accepted code callable.

@@ -54,20 +54,45 @@ but the gap is worth recording where the surface is decided.
 `src/seon/cluster/loop.cljc`, the `:resume` fold; the disposition semantics in
 `src/my/run.cljc` are an input to the decision.
 
-## Acceptance
+## Acceptance — RULED 2026-07-29 (owner, plan README rulings batch 4)
 
-A decision, then its mechanism. The candidates, in the order they seem honest:
+The decision is made, and it is **none of the three candidates below**: the
+fold **continues per-form**, and a red form becomes a **routed problem**
+addressed to its namespace's owner agent, carrying the planner's context. Only
+an owner's explicit can't-fix bubbles back as failure. **Completion = all
+forms settled** (succeeded | owner-fixed | owner-declared-can't), so a plan
+with an unsettled routed problem simply is not complete. The lie dies because
+unsettled work keeps the plan open — not because evaluation halts.
 
-1. **Stop the fold at the first failed form** and leave the run open, so the
-   agent's next turn sees the error in its prompt and adapts. This matches
-   "nothing wedges, the agent adapts" and costs the remaining forms, which were
-   authored against a state that no longer exists.
-2. **Keep folding but refuse the completion**: a run whose plan contains a
-   failed receipt may not close with `:completed`. Narrower, and it stops the
-   lie specifically rather than the wasted work.
-3. Keep today's behaviour and make the prompt carry the failure — which does
-   not help, because the completing form runs before any prompt is derived.
+The candidates considered and superseded:
 
-Whichever is chosen, the regression asserts the CLASS: a plan whose first form
-fails must not produce a completion containing an `Unbound` marker, and — since
-completion now replies to the asking agent — must not deliver one either.
+1. ~~Stop the fold at the first failed form~~ — superseded: it costs sibling
+   progress, which the routing model keeps.
+2. ~~Keep folding but refuse the completion~~ — close, but "refuse" is a
+   negative check; settlement is the positive derivation that replaces it.
+3. ~~Keep today's behaviour and let the prompt carry the failure~~ — rejected
+   for the reason stated above (the completing form runs first).
+
+**The evidence case needs one more rule than routing supplies.** Routing alone
+does not stop form 1 from computing on form 0's missing definition and
+completing with `Unbound: #'…/primes-below-100`. The proposed closure is a
+computed rule at the one admission gate: **a result carrying an unbound-var
+reference is itself red**, and routes like any other red form. The admit codec
+already renders a Var as `:seon.sci.admit/reference`, so the marker is
+detectable exactly where every value is already bounded — this needs
+confirmation from the `seon.sci.admit` owner that the marker is visible at
+that seam.
+
+The regression asserts the CLASS, unchanged: a plan whose first form fails
+must not produce a completion containing an `Unbound` marker, and — since
+completion replies to the asking agent — must not deliver one either. Added
+by the ruling: **such a plan must not derive as settled.**
+
+## Related
+
+- `docs/prds/sci-execution-runtime/plan/generate-code-v0-plan-2026-07-29.md`
+  §2.3–2.4 — the settled-form state model this ruling produces, and unit E2′
+  (the routing implementation plus the unbound-var rule), which is the
+  first consumer that cannot ship until this issue closes.
+- `docs/seon/issues/a-frozen-disposition-can-close-against-newer-facts.md` —
+  same failure family, different cause.
