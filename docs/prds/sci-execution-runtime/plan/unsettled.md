@@ -265,8 +265,51 @@ stale JVM (the reader fix was in the tree, the running JVM predated it), then
 measuring the lane's uncommitted working tree and concluding "there was never
 an attribution bug" when there was. `git log -S` settled it. Anything confident
 about this area deserves verification; an adversarial review
-(`indexer-adversarial-review`) is running against the whole unit for exactly
-that reason.
+(`indexer-adversarial-review`) ran against the whole unit for exactly that
+reason, and its verdict is below.
+
+### The adversarial review's verdict (`3317d95dc`) — read this before trusting the block above
+
+**The inventory is right; two of the safety claims are false.** Report:
+`research/indexer-review-2026-07-29.md`. Independently confirmed: 1,242 rows
+across 105 namespaces, 808 complete private rows, gate 568/2,780/0, and the
+build/eval boundary still distinct (eval-time admission still requires a
+contract). Independently FALSIFIED, and **re-reproduced by the orchestrator on
+HEAD before dispatching the fix**:
+
+- **"No hand lists" is false.** The deleted allowlist was replaced by
+  hand-maintained NAME MATCHING — `(name operator)` compared against literal
+  strings, discarding qualification. So `(foo/defn ghost [] 1)` emits a
+  PHANTOM function row, `(foo/ns audit.b)` a phantom namespace,
+  `(foo/deftest ghost)` a phantom test, and `(other/in-ns 'audit.b)`
+  attributes every following declaration to a namespace nothing moved to.
+- **"Everything accounted for" is false, in both directions.** A real
+  declaration inside a top-level `do` vanishes with no row AND no refusal,
+  even though Clojure's compiler treats a top-level `do`'s children as
+  top-level forms. And `namespace-changing-mention?` walks QUOTED data, so a
+  file containing `'(in-ns 'x)` clears attribution and `seon.fn` then refuses
+  the ENTIRE FILE — inert data making real source unindexable, the sharpest of
+  the four.
+- **The coverage invariant is not independent.** It shares the production
+  reader's event stream and collapses declarations into SETS, so it agrees
+  with both defects by construction. The claim in the paragraph above that it
+  "cannot agree by sharing a bug" is wrong.
+
+One root cause, one fix, dispatched as `reader-operator-identity`: every
+recognizer resolves the operator's identity through the ns form's own
+aliases/refers (`resolved-operation` already exists in that file and is
+already used for `seon.schema/register!` — the other recognizers simply never
+called it); the walk stops at inert `quote`; top-level `do` splices; and the
+coverage proof takes its census from an independent reader with per-occurrence
+multiplicity. Naming `clojure.core/defn` is not the banned pattern — the ban is
+on lists of operations believed SAFE, which fail open; recognizing the one var
+that defines functions fails closed.
+
+**The lesson worth keeping past this fix:** the same evening produced a
+hand-maintained allowlist, its replacement by hand-maintained name matching,
+and a coverage test that could not see either. Every one of those passed a
+gate. Reader-level recognition must resolve identity, and a coverage proof that
+shares its subject's machinery is decoration.
 
 **TWO NEW BLOCKERS, filed rather than papered over:**
 - `eval-time-schema-and-test-rows-have-no-recurring-proof.md` — writing the
