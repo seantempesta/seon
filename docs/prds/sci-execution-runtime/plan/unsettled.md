@@ -43,6 +43,27 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**WORKING EDGE (2026-07-29 ~03:00).** Gate 467/1953/0. LANDED since
+midnight: F4 all five drives PASS (6 parallel/83ms, 100 parked at
+2vt+50KiB, SIGKILL zero-replay, cap byte-equal, two clusters); the
+independent audit CLOSED (both blockers fixed — stream clear deleted
+per owner ruling, oversight throw); the MESSAGE BAR live (e7c02a483 —
+POST /agent/{id}/message, identity probe 64/64, live Ollama round
+trip); agent birth seeds the namespace view (df160158f); the sealed
+READER (90338c62a — 42-file self-seeding suite); E3 about-refs
+(4a9b9161d), E5 decline (200a447c0), E2-prime routing + seven-state
+settlement + X2 (c7eecfb4f, 8e57347d2) — GENERATE-CODE SEAL MET, v0
+IMPLEMENTATION DISPATCHED (Opus; live proof = staged two-namespace
+goal + delegation round trip on Ollama, scratch cluster). UI slices 1+3
+sealed; slice 2 (transcript) next after the owner types. IN FLIGHT:
+config-chain-fixes (the three-layer no-auth trace: bridge := form,
+manifest cross-check test, .env sourcing, dial literals — acceptance =
+helper REPLIES on the owner'''s page), load-testing (Ollama parallel,
+thinking-tokens policy: keep/bound/measure), v0 impl. RULINGS 2026-07-29
+batches 3-4 + D10 + Ollama-is-the-project-server + audit cadence all in
+README. Owner'''s cluster: default on 7994, agent helper created
+(my.agents.helper), bar serving, awaiting the config fix for replies.
+
 **AUTONOMOUS CHARTER (owner, night close): iterate, don'''t be
 dogmatic.** No final solutions expected — keep the cycle moving
 (falsify → revise → seal → implement → live-prove → ledger), surface
