@@ -27,6 +27,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.context :as context]
+            [seon.flow :as seon.flow]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
@@ -820,9 +821,22 @@
   (cluster/process-identity {:seon.boot/pid 2805
                              :seon.boot/start-instant now}))
 
+(defn- with-work-launcher
+  [body]
+  (seon.flow/install-work-launcher!
+   {::seon.flow/configuration
+    {:seon.config.flow.compute/queue-depth 2
+     :seon.config.flow.compute/concurrency 1}})
+  (try
+    (body)
+    (finally
+      (seon.flow/stop-installed-work-launcher!))))
+
 (deftest capture-before-provider-test
   (support/with-database
     (fn [connection]
+      (with-work-launcher
+       (fn []
       (d/transact connection
                   [{:seon.cluster.agent/id "agent-a"
                     :seon.cluster.agent/blocks
@@ -933,7 +947,7 @@
                   prompt's basis (property 6)"
           (is (= 1 (count (d/q '[:find ?attempt :where
                                  [?attempt :seon.ai.attempt/ordinal _]]
-                               @connection)))))))))
+                               @connection)))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 12. Exact database identity — seed 2026072801

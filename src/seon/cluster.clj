@@ -893,7 +893,10 @@
         ;; roots is the wrong seam besides. The dev loop turns it on
         ;; (`bin/repl`, and the drive scripts), which is where a human
         ;; is watching. See `seon.instrument`.
-        ]
+        _ (flow/install-work-launcher!
+           {::flow/configuration
+            (select-keys (config/effective @connection cluster-name)
+                         flow/flow-workload-attributes)})]
     (let [instance (publish!
                     (merge instance
                            (arm-agents! instance connection cluster-name)))
@@ -1147,6 +1150,8 @@
         ;; the armed layers first: nothing new may be derived while the
         ;; database resources are being released
         (disarm-agents! instance)
+        (when (= 1 (count @running-instances))
+          (flow/stop-installed-work-launcher!))
         (when-let [connection (:seon.boot/cluster-connection instance)]
           (d/release connection))
         (when (:seon.store/store instance)

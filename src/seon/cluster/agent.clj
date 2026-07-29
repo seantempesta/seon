@@ -32,10 +32,11 @@
     pre-provider capture, terminal transactions all unchanged), then
     self-rewake into this agent's OWN mailbox when more remains.
 
-  Evals are NOT a proc here: they hop to the one bounded `:compute`
-  door (`seon.flow/submit!!` under the one `:interrupt-fn`), exactly as
-  the loop always did. `:mixed` appears nowhere — `var-process` refuses
-  it at construction.
+  Evals are NOT a proc here: the turn's resume branch submits every form
+  through the process-root `seon.flow/submit!!` owner. That owner admits
+  at most configured C eval lifetimes with Q more queued, runs admitted
+  tasks on virtual threads, and returns the evaluator's flat value.
+  `:mixed` appears nowhere — `var-process` refuses it at construction.
 
   THE GRAPH IS DERIVED STATE — never stored, always re-derivable from
   (agent-id + the handle's dials). Arm = stamp → start → resume → join
@@ -166,8 +167,9 @@
   Settle this agent's orphan (the wedge fence, per-agent), pin one
   database value, derive `next-agent-work`, run the situation through
   `seon.cluster.loop/turn` — the surviving owner of open/call/resume/
-  close, the pass-local custody law, and the pre-provider capture —
-  then `offer!` one wake into this agent's OWN mailbox when
+  close, the pass-local custody law, the pre-provider capture, and the
+  resume branch's mandatory `seon.flow/submit!!` eval hop — then
+  `offer!` one wake into this agent's OWN mailbox when
   `more-agent-work?`. Coalescing on sliding-1 keeps the rewake
   non-recursive. Failures inside the pass stay VALUES (the existing
   `refused!`/`error-tx` owners); a Throwable that escapes anyway is a

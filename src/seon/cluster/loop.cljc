@@ -46,6 +46,7 @@
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.error :as error]
+            [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.sci.eval :as sci.eval]
@@ -192,6 +193,38 @@
 ;;; ---------------------------------------------------------------------------
 
 (declare turn settle-interruption!)
+
+(defn- submission-time-limit-evaluation
+  [time-limit-ms submission-wait-ms]
+  (let [message
+        (str "Evaluation submission did not settle within "
+             time-limit-ms "ms.")
+        value
+        {:seon.error/kind :seon.flow/time-limit
+         :seon.error/message message
+         :seon.error/data
+         {:seon.flow/submission-wait-ms submission-wait-ms}}]
+    {:seon.sci.admit/value value
+     :seon.cluster.eval/result-edn (pr-str value)
+     :seon.cluster.eval/error message
+     :seon.cluster.eval/interrupted-at (Date.)}))
+
+(defn- submit-evaluation!!
+  [evaluate submission-id request]
+  (let [submission
+        (seon.flow/submit!!
+         {::seon.flow/submission-id submission-id
+          ::seon.flow/workload :compute
+          ::seon.flow/time-limit-ms (:seon.sci.eval/time-limit-ms request)
+          ::seon.flow/work-fn
+          (fn [{::seon.flow/keys [started!]}]
+            (started!)
+            (evaluate request))})]
+    (if (= ::seon.flow/completed (::seon.flow/outcome submission))
+      (::seon.flow/value submission)
+      (submission-time-limit-evaluation
+       (:seon.sci.eval/time-limit-ms request)
+       (::seon.flow/submission-wait-ms submission)))))
 
 (defn- digest
   "The plan digest: SHA-256 over the ordered sources, so the same reply
@@ -744,16 +777,19 @@
                            :seon.cluster.run/id run-id})
               (report :error ran)
               (let [source (form-source @connection run-id ordinal)
-                    evaluation (evaluate
-                                {:seon.cluster.run.form/source source
-                                 :seon.sci.admit/caps
-                                 (:seon.sci.admit/caps cluster)
-                                 :seon.sci.eval/ctx ctx
-                                 :seon.cluster.agent/id agent-id
-                                 :seon.sci.eval/time-limit-ms
-                                 (:seon.config.eval/time-limit-ms cluster)
-                                 :seon.config/on-core-error
-                                 (:seon.config/on-core-error cluster)})
+                    evaluation
+                    (submit-evaluation!!
+                     evaluate
+                     receipt-id
+                     {:seon.cluster.run.form/source source
+                      :seon.sci.admit/caps
+                      (:seon.sci.admit/caps cluster)
+                      :seon.sci.eval/ctx ctx
+                      :seon.cluster.agent/id agent-id
+                      :seon.sci.eval/time-limit-ms
+                      (:seon.config.eval/time-limit-ms cluster)
+                      :seon.config/on-core-error
+                      (:seon.config/on-core-error cluster)})
                     problem
                     (problems/form-problem
                      @connection

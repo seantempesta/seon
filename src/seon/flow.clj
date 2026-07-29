@@ -132,6 +132,10 @@
   [parallelism]
   (Executors/newFixedThreadPool (int parallelism)))
 
+(defn- virtual-task-executor
+  []
+  (Executors/newVirtualThreadPerTaskExecutor))
+
 (defn- capacity-facts
   [parallelism active-work]
   (let [active @active-work
@@ -194,73 +198,83 @@
 
 (defn- execute-work!
   [pid compute-executor error report completion active-work
-   {::keys [submission-id work-fn result started] :as work}]
-  (swap! active-work
-         assoc submission-id
-         {::workload :compute
-          ::wedged? false
-          ::platform-thread? false})
-  (try
-    (.execute
-     ^Executor compute-executor
-     ^Runnable
-     (fn []
-       (swap! active-work
-              update submission-id
-              assoc
-              ::platform-thread?
-              (not (.isVirtual (Thread/currentThread))))
-       (let [started? (atom false)
-             started!
-             (fn []
-               (when (compare-and-set! started? false true)
-                 (deliver started (System/nanoTime))))]
-         (try
-           (let [value (work-fn {::started! started!})]
-             (started!)
-             (deliver result {::value value})
-             (async/offer!
-              report
-              {::pid pid
-               ::event ::work-complete
-               ::submission-id submission-id
-               ::value value}))
-           (catch Throwable throwable
-             (started!)
-             (deliver result {::throwable throwable})
-             (async/>!!
-              error
-              #::flow{:pid pid
-                      :status :running
-                      :cid ::compute-submission
-                      :msg (dissoc work ::work-fn ::result ::started)
-                      :op ::work
-                      :ex throwable}))
-           (finally
-             (swap! active-work dissoc submission-id)
-             (when-not
-              (async/offer!
-               completion
-               {::submission-id submission-id
-                ::workload :compute})
-               (async/offer!
-                error
-                #::flow{:pid pid
-                        :status :running
-                        :cid ::compute-submission
-                        :op ::completion-overflow
-                        :ex
-                        (ex-info
-                         "The launcher completion channel overflowed."
-                         {::submission-id submission-id})})))))))
-    (catch Throwable throwable
-      (swap! active-work dissoc submission-id)
-      (deliver started (System/nanoTime))
-      (deliver result {::throwable throwable})
-      (async/offer!
-       completion
-       {::submission-id submission-id
-        ::workload :compute}))))
+   {::keys [submission-id work-fn result status] :as work}]
+  (if-not (compare-and-set! status ::queued ::running)
+    (async/offer!
+     completion
+     {::submission-id submission-id
+      ::workload :compute})
+    (do
+      (swap! active-work
+             assoc submission-id
+             {::workload :compute
+              ::wedged? false
+              ::platform-thread? false})
+      (try
+        (.execute
+         ^Executor compute-executor
+         ^Runnable
+         (fn []
+           (swap! active-work
+                  update submission-id
+                  assoc
+                  ::platform-thread?
+                  (not (.isVirtual (Thread/currentThread))))
+           (let [started-at (volatile! nil)
+                 started!
+                 (fn []
+                   (when (nil? @started-at)
+                     (vreset! started-at (System/nanoTime))))]
+             (try
+               (let [value (work-fn {::started! started!})]
+                 (started!)
+                 (deliver result {::started-at @started-at
+                                  ::value value})
+                 (async/offer!
+                  report
+                  {::pid pid
+                   ::event ::work-complete
+                   ::submission-id submission-id
+                   ::value value}))
+               (catch Throwable throwable
+                 (started!)
+                 (deliver result {::started-at @started-at
+                                  ::throwable throwable})
+                 (async/>!!
+                  error
+                  #::flow{:pid pid
+                          :status :running
+                          :cid ::compute-submission
+                          :msg (dissoc work ::work-fn ::result ::status)
+                          :op ::work
+                          :ex throwable}))
+               (finally
+                 (reset! status ::completed)
+                 (swap! active-work dissoc submission-id)
+                 (when-not
+                  (async/offer!
+                   completion
+                   {::submission-id submission-id
+                    ::workload :compute})
+                   (async/offer!
+                    error
+                    #::flow{:pid pid
+                            :status :running
+                            :cid ::compute-submission
+                            :op ::completion-overflow
+                            :ex
+                            (ex-info
+                             "The launcher completion channel overflowed."
+                             {::submission-id submission-id})})))))))
+        (catch Throwable throwable
+          (reset! status ::completed)
+          (swap! active-work dissoc submission-id)
+          (deliver result {::started-at (System/nanoTime)
+                           ::throwable throwable})
+          (async/offer!
+           completion
+           {::submission-id submission-id
+            ::workload :compute}))))))
 
 (defn- work-launcher-description
   []
@@ -269,7 +283,7 @@
    :workload :io})
 
 (defn- work-launcher-proc
-  [{::keys [parallelism active-work]}]
+  [{::keys [parallelism active-work task-executor]}]
   (reify
     core.protocols/Datafiable
     (datafy [_]
@@ -285,7 +299,8 @@
             error (::flow/error outs)
             report (::flow/report outs)
             completion (async/chan parallelism)
-            compute-executor (flow.spi/get-exec resolver :compute)]
+            compute-executor
+            (or task-executor (flow.spi/get-exec resolver :compute))]
         (.execute
          ^Executor (flow.spi/get-exec resolver :io)
          ^Runnable
@@ -364,13 +379,15 @@
     selected))
 
 (defn- work-launcher-graph-definition
-  [{::keys [parallelism active-work queue-depth compute-executor]}]
+  [{::keys [parallelism active-work queue-depth compute-executor
+            io-executor task-executor]}]
   {:procs
    {::work-launcher
     {:proc
      (work-launcher-proc
       {::parallelism parallelism
-       ::active-work active-work})
+       ::active-work active-work
+       ::task-executor task-executor})
      :chan-opts
      {::compute-submission {:buf-or-n queue-depth}}}
     ::capacity-observer
@@ -379,7 +396,8 @@
       {::parallelism parallelism
        ::active-work active-work})}}
    :conns []
-   :compute-exec compute-executor})
+   :compute-exec compute-executor
+   :io-exec io-executor})
 
 (defn start-work-launcher!
   "Start the one bounded work launcher from acquired config facts."
@@ -390,20 +408,24 @@
         parallelism
         (:seon.config.flow.compute/concurrency configuration)
         active-work (atom {})
-        compute-executor (bounded-platform-executor parallelism)
+        root-executors
+        ((requiring-resolve 'seon.cluster/root-executors))
+        task-executor (virtual-task-executor)
         graph
         (flow/create-flow
          (work-launcher-graph-definition
-          {::parallelism parallelism
+           {::parallelism parallelism
            ::active-work active-work
            ::queue-depth queue-depth
-           ::compute-executor compute-executor}))
+           ::compute-executor (:compute root-executors)
+           ::io-executor (:io root-executors)
+           ::task-executor task-executor}))
         started (flow/start graph)]
     (flow/resume graph)
     {::graph graph
      ::started started
      ::active-work active-work
-     ::compute-executor compute-executor
+     ::compute-executor task-executor
      ::configuration configuration}))
 
 (defn stop-work-launcher!
@@ -452,7 +474,7 @@
   [{::keys [submission-id workload work-fn time-limit-ms]}]
   (let [{::keys [graph active-work]} (current-work-launcher)
         result (promise)
-        started (promise)
+        status (atom ::queued)
         submitted-at (System/nanoTime)
         injection
         (flow/inject
@@ -462,19 +484,24 @@
            ::workload workload
            ::work-fn work-fn
            ::result result
-           ::started started}])]
+           ::status status}])]
     (.get ^Future injection)
-    (let [started-at @started
+    (let [settled (deref result time-limit-ms ::time-limit)
+          settled-at (System/nanoTime)
           submission-wait-ms
-          (quot (- (long started-at) submitted-at) 1000000)
-          settled (deref result time-limit-ms ::time-limit)]
+          (quot (- (long (if (= ::time-limit settled)
+                           settled-at
+                           (::started-at settled)))
+                   submitted-at)
+                1000000)]
       (if (= ::time-limit settled)
         (do
-          (swap! active-work
-                 (fn [active]
-                   (if (contains? active submission-id)
-                     (assoc-in active [submission-id ::wedged?] true)
-                     active)))
+          (when-not (compare-and-set! status ::queued ::cancelled)
+            (swap! active-work
+                   (fn [active]
+                     (if (contains? active submission-id)
+                       (assoc-in active [submission-id ::wedged?] true)
+                       active))))
           {::outcome ::time-limit
            ::submission-wait-ms submission-wait-ms})
         (if-let [throwable (::throwable settled)]

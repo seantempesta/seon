@@ -20,7 +20,7 @@
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
-            [seon.flow]
+            [seon.flow :as seon.flow]
             [seon.render.web :as web]
             [seon.cluster :as cluster]
             [seon.cluster.loop :as cluster.loop]
@@ -111,6 +111,10 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
+      (seon.flow/install-work-launcher!
+       {::seon.flow/configuration
+        {:seon.config.flow.compute/queue-depth 10
+         :seon.config.flow.compute/concurrency 2}})
       (d/transact connection
                   (schema.datahike/malli->datahike-schema
                    (schema/canonical-database-attributes)))
@@ -170,6 +174,7 @@
               :seon.config.eval.result/max-string 4096
               :seon.config.eval.result/max-nodes 256}})
       (finally
+        (seon.flow/stop-installed-work-launcher!)
         (d/release connection)
         (d/delete-database configuration)))))
 

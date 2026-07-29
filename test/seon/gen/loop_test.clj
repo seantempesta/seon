@@ -33,6 +33,7 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
+            [seon.flow :as seon.flow]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -65,36 +66,43 @@
   [body]
   (test-support/with-database
    (fn [connection]
-     (d/transact connection
-                 (conj cast-rows
-                       {:seon.config/cluster "generate-code-v0"
-                        :seon.config.run/max-episode-runs 100}))
-     (body {:seon.store/branch-connection connection
-            :seon.cluster.run/process process
-            :seon.cluster.wake/channel
-            (async/chan (async/sliding-buffer 1))
-            :seon.ai/primary
-            {:seon.ai/endpoint "http://127.0.0.1:1/v1"
-             :seon.ai/model "probe"
-             :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
-             :seon.ai/timeout-ms 200}
-            :seon.ai.retry/strategy
-            {:seon.ai.retry/base-delay-ms 1
-             :seon.ai.retry/multiplier 2.0
-             :seon.ai.retry/jitter-fraction 0.0
-             :seon.ai.retry/maximum-delay-ms 1
-             :seon.ai.retry/maximum-retries 0
-             :seon.ai.retry/maximum-total-delay-ms 0}
-            :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-            :seon.config.eval/time-limit-ms 2000
-            :seon.config/on-core-error :panic
-            :seon.config.error/recurrence-limit 3
-            :seon.config.message/max-chain 4
-            :seon.sci.admit/caps
-            {:seon.config.eval.result/max-depth 6
-             :seon.config.eval.result/max-collection 8
-             :seon.config.eval.result/max-string 4096
-             :seon.config.eval.result/max-nodes 256}}))))
+     (seon.flow/install-work-launcher!
+      {::seon.flow/configuration
+       {:seon.config.flow.compute/queue-depth 10
+        :seon.config.flow.compute/concurrency 2}})
+     (try
+       (d/transact connection
+                   (conj cast-rows
+                         {:seon.config/cluster "generate-code-v0"
+                          :seon.config.run/max-episode-runs 100}))
+       (body {:seon.store/branch-connection connection
+              :seon.cluster.run/process process
+              :seon.cluster.wake/channel
+              (async/chan (async/sliding-buffer 1))
+              :seon.ai/primary
+              {:seon.ai/endpoint "http://127.0.0.1:1/v1"
+               :seon.ai/model "probe"
+               :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
+               :seon.ai/timeout-ms 200}
+              :seon.ai.retry/strategy
+              {:seon.ai.retry/base-delay-ms 1
+               :seon.ai.retry/multiplier 2.0
+               :seon.ai.retry/jitter-fraction 0.0
+               :seon.ai.retry/maximum-delay-ms 1
+               :seon.ai.retry/maximum-retries 0
+               :seon.ai.retry/maximum-total-delay-ms 0}
+              :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+              :seon.config.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic
+              :seon.config.error/recurrence-limit 3
+              :seon.config.message/max-chain 4
+              :seon.sci.admit/caps
+              {:seon.config.eval.result/max-depth 6
+               :seon.config.eval.result/max-collection 8
+               :seon.config.eval.result/max-string 4096
+               :seon.config.eval.result/max-nodes 256}})
+       (finally
+         (seon.flow/stop-installed-work-launcher!))))))
 
 (defn- agent-ids
   [db]

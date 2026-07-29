@@ -24,6 +24,7 @@
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
@@ -80,11 +81,16 @@
     (d/create-database configuration)
     (let [connection (d/connect configuration)]
       (try
+        (seon.flow/install-work-launcher!
+         {::seon.flow/configuration
+          {:seon.config.flow.compute/queue-depth 10
+           :seon.config.flow.compute/concurrency 3}})
         (d/transact connection
                     (schema.datahike/malli->datahike-schema
                      (schema/canonical-database-attributes)))
         (body connection)
         (finally
+          (seon.flow/stop-installed-work-launcher!)
           (d/release connection)
           (d/delete-database configuration))))))
 
