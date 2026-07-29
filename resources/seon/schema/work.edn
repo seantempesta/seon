@@ -2,8 +2,9 @@
  ; situations below are total and mutually exclusive over any database
  ; value; `nil` is idle, and nothing else is representable.
  :seon.cluster.work/situation [:enum :resume :call :open :close]
- ; :resume — an open run this process holds, with a plan: fold on at the
- ;           first ordinal lacking a terminal receipt
+ ; :resume — an open run THIS process already holds, with a plan: fold
+ ;           on at the first ordinal lacking a terminal receipt. An
+ ;           unheld plan never resumes; recovery closes interrupted work.
  ; :call   — an open run this process holds, no plan: derive the prompt,
  ;           call the model, freeze the plan (the ONE paid call, never
  ;           retried)

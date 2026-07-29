@@ -528,12 +528,11 @@
 
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
-  A run whose process died before its plan existed lost a paid model
-  call that NOTHING re-calls, so there is no work to resume — only an
-  agent held busy by a run nobody owns. Settling is claim-then-close
-  through the ordinary transitions: a survivor cannot close a run it
-  does not hold (`close-call` refuses `::not-the-holder`), so it takes
-  custody by the takeover path first and closes as the holder.
+  Planned or unplanned, an unheld run is not work: there is no cold
+  resume. Settling is claim-then-close through the ordinary
+  transitions: a survivor cannot close a run it does not hold
+  (`close-call` refuses `::not-the-holder`), so it takes custody by the
+  takeover path first and closes as the holder.
 
   Boot recovery released the dead custody; this releases the AGENT.
   The two are deliberately separate: recovery states who no longer
@@ -853,30 +852,11 @@
       ;; State A defect. One fork per run is what makes a plan read like
       ;; a REPL session: form 2 sees what form 1 defined.
       ;;
-      ;; A kill mid-fold loses the ctx, so a resumed fold starts fresh
-      ;; and later forms may no longer resolve earlier defs. That is the
-      ;; crash model working as designed — nothing re-executes, and the
-      ;; agent's next prompt carries the interrupted warning — not a
-      ;; case to paper over with a persisted context.
+      ;; Boot recovery closes interrupted runs before any agent graph is
+      ;; armed, so this branch is only the ordinary live fold over one
+      ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
       :resume
-      ;; CUSTODY PRECEDES WORK (custody revision, Revision 1): the pass
-      ;; claims the unheld run — CAS-on-absence inside the transaction —
-      ;; BEFORE folding, so the disposition's terminal transaction finds
-      ;; the holder present and the unheld-resume livelock is
-      ;; unrepresentable rather than caught. A lost claim is a QUIET
-      ;; skip: another pass owns the run, and that is not an error fact.
-      (let [held (d/pull @connection [:seon.cluster.run/process]
-                         [:seon.cluster.run/id run-id])
-            claimed (when-not (= process (:seon.cluster.run/process held))
-                      (store/transact!
-                       connection
-                       (run/claim-tx {:seon.cluster.run/id run-id
-                                      :seon.cluster.run/process process
-                                      :seon.cluster.run/live-processes
-                                      #{process}
-                                      :seon.cluster.run/now now})))
-            skipped? (some? (:seon.error/kind claimed))
-            evaluate (requiring-resolve
+      (let [evaluate (requiring-resolve
                       (:seon.cluster.loop/evaluate cluster))
             ;; the message this run is answering, read ONCE per turn: it
             ;; is the head of the conversation chain every message this
@@ -890,20 +870,18 @@
                                   :seon.db/db @connection})]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0]
-          (if skipped?
-            (report :released ran)
-            (let [receipt-id (pr-str [run-id ordinal])
-                  problem-id (work/problem-id run-id ordinal)
-                  started
-                  (store/transact!
-                   connection
-                   (conj
-                    (run/receipt-start-tx
-                     {:seon.cluster.run/id run-id
-                      :seon.cluster.eval/ordinal ordinal
-                      :seon.cluster.eval/at now})
-                    [:db/add [:seon.cluster.eval/id receipt-id]
-                     :seon.problems/id problem-id]))]
+          (let [receipt-id (pr-str [run-id ordinal])
+                problem-id (work/problem-id run-id ordinal)
+                started
+                (store/transact!
+                 connection
+                 (conj
+                  (run/receipt-start-tx
+                   {:seon.cluster.run/id run-id
+                    :seon.cluster.eval/ordinal ordinal
+                    :seon.cluster.eval/at now})
+                  [:db/add [:seon.cluster.eval/id receipt-id]
+                   :seon.problems/id problem-id]))]
             (if (refused! cluster started now
                           {:seon.cluster.agent/id agent-id
                            :seon.cluster.run/id run-id})
@@ -1074,7 +1052,7 @@
                   ;; the run closed
                   settled (report :closed ran)
                   next-ordinal (recur next-ordinal ran)
-                  :else (report :released ran))))))))
+                  :else (report :released ran)))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the
       ;; agent stops being busy.

@@ -314,17 +314,19 @@
 (defn- recover-terminal-refusal!
   [cluster receipt]
   (let [connection (:seon.store/branch-connection cluster)
-        recovered-process "terminal-refusal-recovery"
-        recovered-cluster
-        (assoc cluster :seon.cluster.run/process recovered-process)]
+        recovered-process "terminal-refusal-recovery"]
     (d/transact
      connection
      (run/recover-tx
       {:seon.cluster.run/id (:seon.cluster.run/id receipt)
        :seon.cluster.run/live-processes #{recovered-process}
        :seon.cluster.run/now (Date.)}))
-    (cluster.loop/settle-interruption!
-     recovered-cluster (:seon.cluster.run/id receipt) (Date.))))
+    (some?
+     (:seon.cluster.run/closed-at
+      (d/pull @connection
+              '[:seon.cluster.run/closed-at]
+              [:seon.cluster.run/id
+               (:seon.cluster.run/id receipt)])))))
 
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
   ;; the injection seam, proven: the same qualified symbol the cluster
@@ -1644,84 +1646,9 @@
               "and the refusal is a durable error fact with its own kind"))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Custody precedes work — the two audit interleavings as regressions
-;;; (custody-revision-contracts-2026-07-28; probes P1 and P2)
+;;; Custody precedes work — the surviving live-holder interleaving
+;;; (custody-revision-contracts-2026-07-28; probe P2)
 ;;; ---------------------------------------------------------------------------
-
-(deftest a-recovered-unheld-planned-run-completes-without-error-facts
-  ;; P1, the unheld-resume disposition livelock, unrepresentable: a
-  ;; process died mid-fold, boot recovery released its custody, and the
-  ;; next pass derives `:resume` for the unheld planned run. The pass
-  ;; CLAIMS FIRST, so the disposition's terminal transaction commits,
-  ;; the run closes, and no error-fact storm exists. Before the custody
-  ;; revision this exact state hot-livelocked forever
-  ;; (`::not-the-holder` aborting the settle, then `::receipt-exists`
-  ;; on every rewake — research/zombie-constructibility-2026-07-28 §3).
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
-            dead "99999-1"]
-        ;; the dead process's history, built from the real transitions:
-        ;; open+claim on the trigger, a two-form plan whose SECOND form
-        ;; carries the disposition, form 0 settled — then it died
-        (d/transact connection
-                    {:tx-data (into (run/open-tx
-                                     {:seon.cluster.run/id "run-p1"
-                                      :seon.cluster.run/agent
-                                      [:seon.cluster.agent/id "agent-a"]
-                                      :seon.cluster.run/opened-at now})
-                                    (run/claim-tx
-                                     {:seon.cluster.run/id "run-p1"
-                                      :seon.cluster.run/process dead
-                                      :seon.cluster.run/live-processes #{dead}
-                                      :seon.cluster.run/now now}))
-                     :tx-meta {:seon.db/trigger
-                               [:seon.cluster.message/id "m-1"]}})
-        (d/transact connection
-                    (run/plan-tx {:seon.cluster.run/id "run-p1"
-                                  :seon.cluster.run/process dead
-                                  :seon.cluster.run/plan-digest
-                                  (apply str (repeat 64 "b"))
-                                  :seon.cluster.run/sources
-                                  [{:seon.cluster.run.form/source "(+ 1 2)"}
-                                   {:seon.cluster.run.form/source
-                                    "(my.run/complete \"3\")"}]}))
-        (d/transact connection
-                    (run/receipt-start-tx {:seon.cluster.run/id "run-p1"
-                                           :seon.cluster.eval/ordinal 0
-                                           :seon.cluster.eval/at now}))
-        (d/transact connection
-                    (run/receipt-settle-tx {:seon.cluster.run/id "run-p1"
-                                            :seon.cluster.eval/ordinal 0
-                                            :seon.cluster.eval/result-edn "3"}))
-        ;; boot recovery on the surviving process releases dead custody
-        (d/transact connection
-                    (run/recover-tx {:seon.cluster.run/id "run-p1"
-                                     :seon.cluster.run/live-processes
-                                     #{process}
-                                     :seon.cluster.run/now (Date.)}))
-        (is (= :resume (:seon.cluster.work/situation
-                        (work/next-agent-work @connection (request connection))))
-            "the recovered planned run is ordinary :resume work")
-        (binding [*evaluation* {:seon.cluster.eval/result-edn
-                                (pr-str (my.run/complete "3"))
-                                :seon.sci.admit/value (my.run/complete "3")}]
-          (drive! cluster 6))
-        (testing "the disposition committed and the run closed"
-          (is (some? (d/q '[:find ?c . :in $ ?id :where
-                            [?r :seon.cluster.run/id ?id]
-                            [?r :seon.cluster.run/closed-at ?c]]
-                          @connection "run-p1")))
-          (is (nil? (work/next-agent-work @connection (request connection)))
-              "and nothing re-derives — no livelock"))
-        (testing "no error facts — the old path committed one per pass"
-          (is (empty? (d/q '[:find ?e :where [?e :seon.error/id _]]
-                           @connection))))
-        (testing "form 1 was attempted exactly once, under (run, ordinal)
-                  identity"
-          (is (= 1 (count (d/q '[:find ?e :where
-                                 [?e :seon.cluster.eval/ordinal 1]]
-                               @connection)))))))))
 
 (deftest a-held-runs-paid-call-is-never-duplicated
   ;; P2, the lapsed-lease re-pay cycle, re-expressed as CUSTODY

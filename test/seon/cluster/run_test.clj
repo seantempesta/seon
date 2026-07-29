@@ -580,9 +580,13 @@
                       ;; running receipts are its own business
                       (contains? live holder) acc
                       :else
-                      (cond-> (stamp-running-receipts acc run-id)
-                        (some? holder)
-                        (update-in [:runs run-id] dissoc :process)))))
+                      (let [agent-id (:agent entry)]
+                        (-> (stamp-running-receipts acc run-id)
+                            (update-in [:runs run-id]
+                                       #(-> %
+                                            (assoc :closed true)
+                                            (dissoc :process)))
+                            (update :pointers dissoc agent-id))))))
                 model
                 (:runs model)))))
 
@@ -845,10 +849,12 @@
                     (= terminals-before (pull-terminals connection run-id))
                     (if dead?
                       ;; a dead holder's running receipts are stamped
-                      ;; and its custody released
+                      ;; and the interrupted run is ended atomically
                       (and (every? run/terminal?
                                    (pull-receipts connection run-id))
-                           (nil? (::run/process entity)))
+                           (nil? (::run/process entity))
+                           (some? (::run/closed-at entity))
+                           (nil? (agent-pointer connection agent-id)))
                       ;; a live holder's run needs NOTHING: custody
                       ;; kept, running receipts still running
                       (and (= receipts-before
@@ -896,7 +902,11 @@
             "the settled receipt is byte-untouched — no contradiction
              fact can exist"))
       (is (nil? (::run/process (run-entity connection "order-b")))
-          "and the dead custody is released"))))
+          "and the dead custody is released")
+      (is (some? (::run/closed-at (run-entity connection "order-b")))
+          "the interrupted run is ended")
+      (is (nil? (agent-pointer connection "orderer"))
+          "and the agent pointer is retracted"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema admissibility — the model refuses what it must

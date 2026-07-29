@@ -209,16 +209,6 @@
               (open-run! connection {:triggered? true}))
     ::expect nil}
 
-   {::label "planned run whose custody died: resume is still correct —
-             committed work continues, and that is not a retry"
-    ::build (fn [connection]
-              (add-trigger! connection)
-              (open-run! connection {:planned? true :triggered? true}))
-    ::expect {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
-              :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 0}}
-
    {::label "another process holds it: not ours to touch"
     ::build (fn [connection]
               (add-trigger! connection)
@@ -366,16 +356,17 @@
         (is (= run-id (:seon.cluster.run/id (work/interruption db agent-id)))
             "it IS an interruption the turn proc must settle")))))
 
-(deftest a-planned-orphan-run-is-work-not-an-interruption
+(deftest a-planned-orphan-run-is-interruption-not-work
   (with-database
     (fn [connection]
       (add-trigger! connection)
       (open-run! connection {:planned? true :triggered? true})
       (let [db (d/db connection)]
-        (is (nil? (work/interruption db agent-id))
-            "a planned run continues; it is not wreckage")
-        (is (= :resume (:seon.cluster.work/situation
-                        (work/next-agent-work db request))))))))
+        (is (nil? (work/next-agent-work db request))
+            "an unheld plan never cold resumes")
+        (is (= run-id (:seon.cluster.run/id
+                       (work/interruption db agent-id)))
+            "it is wreckage to bury, not work to continue")))))
 
 (deftest answeredness-is-transaction-metadata
   (with-database

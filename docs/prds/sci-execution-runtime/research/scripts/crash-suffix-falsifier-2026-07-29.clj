@@ -8,8 +8,10 @@
 ;;   px xp-a  '(plant-crash/plant! "xp-a")'      ; then kill -9, reboot
 ;;   px xp-a  '(plant-crash/verdict "xp-a")'
 (ns plant-crash
-  (:require [datahike.api :as d]
-            [seon.cluster :as cluster])
+  (:require [clojure.core.async.flow :as flow]
+            [datahike.api :as d]
+            [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent])
   (:import [java.util Date]))
 
 (defn instance [name] (get @@#'seon.cluster/running-instances name))
@@ -26,6 +28,17 @@
   [name]
   (let [conn (connection name)
         now (Date.)]
+    ;; The boot prime makes root live immediately. Pause the one armer,
+    ;; then park root before planting so the database listener cannot
+    ;; re-arm it and the real evaluator cannot consume the artificial
+    ;; plan during the operator's plant → kill round trip. Reboot
+    ;; creates a fresh armer and arms root only after boot recovery has
+    ;; settled the dead custody.
+    (flow/pause-proc (:seon.flow/graph (instance name))
+                     :seon.cluster.agent/armer)
+    (agent/disarm! {:seon.cluster.agent/id "root"
+                    :seon.cluster.agent/routing
+                    (:seon.cluster.agent/routing (instance name))})
     ;; the trigger FIRST and alone: tx-meta resolves a lookup ref against
     ;; db-before, so a message created in the same transaction it is
     ;; referenced from is not there yet (one live probe, one clear refusal)

@@ -40,10 +40,11 @@
     from core code — agents never reach this layer.
   - Crashes are rare and NOTHING re-executes: boot recovery asserts
     `:seon.cluster.eval/interrupted-at` on dangling receipts (those
-    carrying no terminal fact) and releases custody held by dead
-    processes, leaving every settled receipt untouched. A form has AT
-    MOST ONE settlement, ever. The interrupted state surfaces as ONE
-    derived warning, never per-eval markers.
+    carrying no terminal fact), closes every open prior-process run,
+    releases its custody, and retracts the agent pointer. Every settled
+    receipt stays untouched. A form has AT MOST ONE settlement, ever.
+    The interrupted state surfaces as ONE derived warning, never
+    per-eval markers.
 
   Crash walk: every transition here is ONE atomic transaction (a single
   `[:db.fn/call ...]`), so a kill at any instant leaves it either fully
@@ -733,17 +734,38 @@
   [[:db.fn/call #'recover-call request]])
 
 (defn recover-call
-  "Boot recovery for one run, inside the transaction.
+  "Settle and close one interrupted run during boot recovery.
   When the run's holder is NOT a live process — dead, or absent
   entirely — every running receipt (one carrying NO terminal fact) gets
-  `:seon.cluster.eval/interrupted-at` asserted at `::now`, and dead
-  custody is released. EVERY settled receipt is left byte-untouched:
+  `:seon.cluster.eval/interrupted-at` asserted at `::now`, dead custody
+  is released, the run is CLOSED at `::now`, and the owning agent's
+  run pointer is retracted. EVERY settled receipt is left byte-untouched:
   the receipt read and the stamp share this one transaction, so a
   stale-basis recovery stamping a settled receipt is unrepresentable
   (custody revision, Revision 4). A run held by a live process, a
   closed run, and a missing run all need nothing — recovery is
   idempotent and never refuses. NOTHING here re-opens, re-plans, or
-  re-executes."
+  re-executes.
+
+  THE CLOSE IS THE WHOLE POINT (owner ruling 25(b), 2026-07-29). An
+  interrupted run used to be left OPEN with its unsettled ordinals, so
+  the next pass derived `:resume` and executed a plan suffix that had
+  never started before the crash — with a fresh sci ctx that had lost
+  every def, require and alias the prefix established, and with nothing
+  stopping a capability-shaped form from making a post-crash external
+  call. Both were live-reproduced
+  (`research/repl-workflows-2026-07-29.md` §7). Closing here makes the
+  whole class unrepresentable rather than handled: there is no cold
+  resume to restore a context for, because there is no resume. This is
+  the crash model's \"the agent adapts\" clause made literal — the
+  interruption is in the agent's next context and the agent decides.
+
+  IT NEVER REFUSES, and that includes wreckage. `close-call` refuses
+  `::agent-pointer-broken` because a live close with a mismatched
+  pointer is a caller bug; at recovery it is just what a dead process
+  left behind, and a boot that threw on it would wedge the cluster it
+  was trying to rescue. So the pointer is retracted exactly when it
+  points at this run, and the run closes either way."
   {:malli/schema [:=> [:cat :any
                        [:map {:closed true}
                         [::id ::id]
@@ -758,9 +780,20 @@
             (not (open? run))
             (contains? live-processes holder))
       []
-      (into (interrupt-stamps db (:db/id run) now)
-            (when (some? holder)
-              (retract-custody run))))))
+      (let [agent-eid (:db/id (::agent run))
+            pointer (when agent-eid
+                      (:seon.cluster.agent/run
+                       (d/pull db [:seon.cluster.agent/run] agent-eid)))]
+        (cond-> (into (interrupt-stamps db (:db/id run) now)
+                      (when (some? holder)
+                        (retract-custody run)))
+          true
+          (conj [:db/add (:db/id run) ::closed-at now])
+          ;; exactly when it points HERE — see the docstring: recovery
+          ;; settles wreckage, it does not refuse it
+          (= (:db/id run) (:db/id pointer))
+          (conj [:db/retract agent-eid :seon.cluster.agent/run
+                 (:db/id run)]))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The family default renders — what a run, a form and a receipt LOOK
@@ -799,6 +832,37 @@
          :where [?receipt :seon.cluster.eval/run ?run]]
        db run-eid))
 
+(defn- receipt-value
+  [receipt]
+  (some-> (:seon.cluster.eval/result-edn receipt)
+          (#(try (edn/read-string %)
+                 (catch #?(:clj Throwable :cljs :default) _
+                   nil)))))
+
+(defn- unfinished-warning
+  "The first form recovery closed before it started, and the missing count."
+  [forms receipts]
+  (let [terminal-ordinals
+        (into #{}
+              (comp (filter terminal?)
+                    (map :seon.cluster.eval/ordinal))
+              receipts)
+        last-value (some->> receipts
+                            (sort-by :seon.cluster.eval/ordinal)
+                            last
+                            receipt-value)
+        missing
+        (sort
+         (remove terminal-ordinals
+                 (map :seon.cluster.run.form/ordinal forms)))]
+    ;; A completed/wait disposition deliberately closes the run and
+    ;; leaves any later authored forms unstarted. That is not recovery.
+    (when-let [ordinal (when-not (contains? #{:completed :wait}
+                                            (:my.run/disposition last-value))
+                         (first missing))]
+      {:seon.cluster.eval/ordinal ordinal
+       ::missing-results (count missing)})))
+
 (defn render-ai
   "`:seon.render/ai` — one run, as the agent's own history of it.
 
@@ -821,8 +885,14 @@
     (when id
       (let [opened (get unit ::opened-at)
             receipts (when db (run-receipts db (:db/id unit)))
-            cut (when db
-                  (interrupted-warning (run-forms db (:db/id unit)) receipts))
+            forms (when db (run-forms db (:db/id unit)))
+            cut (when db (interrupted-warning forms receipts))
+            never-started
+            (when (and db
+                       (::closed-at unit)
+                       (::plan-digest unit)
+                       (nil? cut))
+              (unfinished-warning forms receipts))
             ;; THE PAUSE NOTE IS A CONDITION OF THE RUN, which is why it
             ;; is read here and not only on the receipt: a run is one hop
             ;; from its agent and a receipt is two, so an agent asking
@@ -833,10 +903,7 @@
             note (some->> receipts
                           (sort-by :seon.cluster.eval/ordinal)
                           last
-                          :seon.cluster.eval/result-edn
-                          (#(try (edn/read-string %)
-                                 (catch #?(:clj Throwable :cljs :default) _
-                                   nil)))
+                          receipt-value
                           (#(when (and (map? %)
                                        (= :wait (:my.run/disposition %)))
                               (:my.run/note %))))
@@ -847,6 +914,13 @@
                        " — that form's effect may have happened, "
                        (::missing-results cut)
                        " result(s) are missing, and nothing was retried.")
+
+              never-started
+              (str "It was interrupted before form "
+                   (:seon.cluster.eval/ordinal never-started)
+                   " started — "
+                   (::missing-results never-started)
+                   " form(s) never ran, and nothing was retried.")
 
               (::error unit)
               (str "It did not run: " (::error unit)

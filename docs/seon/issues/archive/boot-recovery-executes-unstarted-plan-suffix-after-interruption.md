@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent-runtime, run-loop]
 ---
@@ -121,3 +121,35 @@ ownership, and reversing a deliberate documented contract is an owner ruling.
   describes context loss under the currently supported suffix-resume model.
 - `docs/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md` —
   seam re-audit attempt 6 carries the full live proof.
+
+## Resolution
+
+Ruling 25 ended the suffix-resume model. `run/recover-call` now stamps every
+running receipt interrupted, retracts dead custody and the agent's current-run
+pointer, and closes the run in the same transaction. `work/next-agent-work`
+does not claim an unheld plan, so no later ordinal can reach evaluation.
+
+The recurring graph test plants a three-form plan with one completed receipt,
+one running receipt, and an unstarted capability-shaped suffix. Recovery closes
+the run, the capability form receives no receipt and never reaches the
+evaluator, an unanswered pre-crash message opens a new episode, and that
+episode's derived prompt includes the interruption evidence.
+
+The repaired live falsifier pauses the armer and parks root before planting, so
+the evaluator cannot race the operator's plant-to-kill round trip. On isolated
+root `tmp/r25-live3-20260729`, process 6750 remained for a full second with
+only running receipt 0 and no message to `peer`; after `kill -9` and reboot:
+
+```clojure
+{:recovered 1
+ :verdict
+ {:receipts ({:seon.cluster.eval/ordinal 0
+              :seon.cluster.eval/interrupted-at
+              #inst "2026-07-29T20:38:21.285-00:00"})
+  :run {:seon.cluster.run/closed-at
+        #inst "2026-07-29T20:38:21.285-00:00"}
+  :agent-still-points? false
+  :messages-to-peer []}}
+```
+
+No suffix receipt or capability effect appeared.

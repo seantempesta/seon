@@ -353,6 +353,41 @@
         (open-run! connection)
         (is (string? (text-of connection)))))))
 
+(deftest a-completed-disposition-does-not-mislabel-an-unstarted-suffix
+  (with-database
+    (fn [connection]
+      (d/transact
+       connection
+       [{:seon.cluster.run/id "run-completed-early"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (Date. 1000)
+         :seon.cluster.run/closed-at (Date. 2000)
+         :seon.cluster.run/plan-digest (apply str (repeat 64 "d"))}
+        {:seon.cluster.run.form/id "run-completed-early-0"
+         :seon.cluster.run.form/run
+         [:seon.cluster.run/id "run-completed-early"]
+         :seon.cluster.run.form/ordinal 0
+         :seon.cluster.run.form/source "(my.run/complete \"done\")"}
+        {:seon.cluster.run.form/id "run-completed-early-1"
+         :seon.cluster.run.form/run
+         [:seon.cluster.run/id "run-completed-early"]
+         :seon.cluster.run.form/ordinal 1
+         :seon.cluster.run.form/source "(+ 1 1)"}
+        {:seon.cluster.eval/id "run-completed-early-0"
+         :seon.cluster.eval/run
+         [:seon.cluster.run/id "run-completed-early"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (Date. 1500)
+         :seon.cluster.eval/result-edn
+         (pr-str {:my.run/disposition :completed
+                  :my.run/result "done"})}])
+      (open-run! connection)
+      (let [text (text-of connection)]
+        (is (str/includes? text "It completed."))
+        (is (not (str/includes? text "interrupted"))
+            "a terminal disposition intentionally leaves its suffix
+             unstarted; it is not crash evidence")))))
+
 (deftest the-execution-grammar-is-always-present
   (with-database
     (fn [connection]

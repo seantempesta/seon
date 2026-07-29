@@ -418,11 +418,12 @@
 (defn- recover-runs!
   "Settle every run held by a dead process, before anything resumes.
   BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
-  released immediately, and its dangling receipts — those carrying no
-  terminal fact — get `interrupted-at` asserted (presence is the state;
-  there is no status). No clock is consulted at all: this process just
-  started, so on this branch every other holder is provably gone (one
-  connection per branch, one process per store).
+  closed immediately, its custody and agent pointer are retracted, and
+  its dangling receipts — those carrying no terminal fact — get
+  `interrupted-at` asserted (presence is the state; there is no status).
+  No clock is consulted at all: this process just started, so on this
+  branch every other holder is provably gone (one connection per
+  branch, one process per store).
 
   Nothing here re-opens, re-plans, or re-executes. `recover-tx` is pure
   over the values it is handed and returns [] for a run needing
@@ -661,9 +662,10 @@
   arms one graph per agent (R6: arm-all-at-boot); each arm ends with
   its own mailbox prime, whose first pass derives that agent's work
   from FACTS. A fresh cluster has no triggers, so boot makes zero
-  model calls; a REBOOTED one picks up the work its predecessor left
-  by the same mechanism — recovery has already settled dead custody,
-  and the first pass settles what recovery released.
+  model calls. A rebooted cluster never resumes interrupted work:
+  recovery has already closed it. The first pass can start a new
+  episode only for an unanswered durable message, including one that
+  arrived before the crash.
 
   ORDER IS THE CONTRACT. The cluster graph starts first because the
   fan-out taps ITS channels; the routing listener comes after the

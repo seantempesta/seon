@@ -173,10 +173,11 @@ before SCI dispatch and one terminal receipt afterward. Terminal settlement and
 the interpreted disposition commit together under the run pointer-and-custody
 fence, so no process can publish half a form outcome.
 
-The plan and receipts are the only execution cursor. A terminal receipt is
-never re-executed. A running receipt left by a dead process becomes
-interrupted, and an absent receipt means no durable result is claimed.
-Recovery never fabricates success or infers a result from process memory.
+The plan and receipts are the only execution cursor while one process holds the
+run. A terminal receipt is never re-executed. A running receipt left by a dead
+process becomes interrupted, the run closes, and forms with absent receipts
+never start. Recovery never fabricates success, resumes a suffix, or infers a
+result from process memory.
 
 Provider calls have their own attempt facts. Each row records the chosen
 descriptor, role, non-secret request projection, transport-phase evidence,

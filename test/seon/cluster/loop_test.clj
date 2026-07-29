@@ -295,19 +295,16 @@
 ;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
 ;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
 ;;; derives the same expected situation per row under the AGENT-SCOPED
-;;; request, and the interrupted ordinal is never re-derived for
-;;; execution (the clause below). The rows were always per-agent facts;
-;;; the global pass just asked the question badly. ONE regression per
-;;; class, so this is the re-seal of the existing walk rather than a
-;;; second copy of it.
+;;; request. Boot-recovery rows are absent here because recovery now
+;;; closes interrupted runs before this derivation can see them. The
+;;; rows were always per-agent facts; the global pass just asked the
+;;; question badly.
 
 (deftest kill-positions-per-agent-test
   (doseq [[row state expected]
           [["1 — trigger only" nil :open]
            ["2-4 — claimed, no plan, custody died" {} nil]
            ["5 — planned, no receipts" {:held? true :planned? true} :resume]
-           ["6-7 — running receipt recovered to :interrupted"
-            {:held? true :planned? true :receipts [[0 :interrupted]]} :resume]
            ["8 — one terminal receipt"
             {:held? true :planned? true :receipts [[0 :done]]} :resume]
            ["9 — every receipt terminal, run open"
@@ -320,18 +317,5 @@
       (fn [connection]
         (when state (commit-run! connection state))
         (let [derived (work/next-agent-work (d/db connection) request)]
-          (testing (str "crash walk row " row)
+          (testing (str "work derivation row " row)
             (is (= expected (:seon.cluster.work/situation derived)))))))))
-
-(deftest an-interrupted-form-is-never-re-executed
-  ;; rows 6 and 7 are indistinguishable from the facts, and that is
-  ;; correct: the effect MAY have happened, so the fold moves PAST the
-  ;; interrupted ordinal rather than retrying it
-  (with-database
-    (fn [connection]
-      (commit-run! connection {:held? true :planned? true
-                        :receipts [[0 :interrupted]]})
-      (let [derived (work/next-agent-work (d/db connection) request)]
-        (is (= :resume (:seon.cluster.work/situation derived)))
-        (is (= 1 (:seon.cluster.run.form/ordinal derived))
-            "past the interrupted form, never back onto it")))))

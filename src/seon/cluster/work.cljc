@@ -3,19 +3,16 @@
 
   This contract layer is fully implemented and live-proven.
 
-  THIS IS THE RESUME MODEL, and it is a pure derivation rather than a
-  recovery procedure. There is no dirty flag, no scan-requested atom, no
-  retry counter: the facts hold the work, and `next-agent-work` reads
-  them.
-  Recovery is therefore not a code path — it is the same derivation
-  running against a database that happens to carry a dead process's
-  wreckage.
+  This is a pure work derivation, never a recovery procedure. There is
+  no dirty flag, scan-requested atom, or retry counter: the facts hold
+  the work, and `next-agent-work` reads them. Boot recovery runs before
+  this derivation and closes every interrupted prior-process run.
 
   FOUR SITUATIONS, TOTAL AND MUTUALLY EXCLUSIVE, `nil` for idle:
 
   - `:resume` — an open run this process holds, WITH a plan digest.
-    Fold on at the first ordinal lacking a terminal receipt. Committed
-    work continues; nothing re-executes;
+    Fold from the first ordinal lacking a terminal receipt. This is the
+    ordinary live fold, never a cold continuation after recovery;
   - `:call` — an open run this process holds, WITHOUT a plan digest.
     Derive the prompt, make the ONE paid model call, freeze the plan;
   - `:open` — an unanswered trigger and an agent with no open run.
@@ -31,35 +28,25 @@
     2026-07-27);
   - `nil` — idle.
 
-  NO AUTO-RETRY, EVER (owner ruling, 2026-07-27 night). This is the
-  clause that supersedes n3-plan §9.1's Option A recovery half: a run
-  whose custody was released by recovery and which has NO plan digest
-  lost its paid model call, and the turn DOES NOT call again. The
-  interrupted run is settled and the agent adapts on its next trigger.
-  A lost call is lost; the agent is told, not the call repeated.
-
-  Consequently `:call` is reachable only for a run THIS process holds
-  and opened in this pass. A run that is open, unclaimed and unplanned
-  is not work — it is wreckage to settle, which is why
+  NO AUTO-RETRY OR COLD RESUME, EVER (owner ruling 25, 2026-07-29).
+  Boot recovery closes the interrupted run, releases custody, and
+  retracts the agent pointer in one transaction. `:call` and `:resume`
+  are therefore reachable only for runs THIS process holds. An open
+  unclaimed run is not work — it is wreckage to settle, which is why
   `interruption` exists and why `next-agent-work` does not return it.
 
   Crash walk (the kill positions of n3-plan §9.3, as this namespace
   answers them):
   - kill after the trigger commits, before any wake: the trigger is
     unanswered, so the boot pass derives `:open`. A normal first turn;
-  - kill after claim, before/during/after the model call: N2's
-    `recover-tx` releases dead custody; the run is open, unclaimed,
-    unplanned. `next-agent-work` does NOT return it — `interruption`
-    does, and the turn proc settles it with no reply. ONE paid call is
-    lost and
-    the agent is told;
-  - kill after plan freeze, before form 0: `:resume` at ordinal 0;
-  - kill mid-fold: `:resume` at the first ordinal lacking a terminal
-    receipt. Rows 6 and 7 are indistinguishable from the facts — the
-    effect MAY have happened — and the derived warning says exactly
-    that;
-  - kill after the last terminal receipt, before close: `:close`, and
-    the completion lands one wake later;
+  - kill after opening a run, during the model call, after plan freeze,
+    or mid-fold: `recover-tx` marks any running receipt interrupted,
+    closes the run, releases custody, and retracts the pointer. No
+    unstarted suffix executes. A later unanswered message derives
+    `:open` for a new episode, whose context includes the run's derived
+    interruption evidence;
+  - kill after the last terminal receipt, before close: recovery closes
+    the already-finished run;
   - kill during recovery itself: `recover-tx` is idempotent and every
     terminal receipt is byte-untouched, so the derivation is unchanged."
   (:require [clojure.edn :as edn]
@@ -518,14 +505,10 @@
          :seon.cluster.run/id (:seon.cluster.run/id run)
          :seon.cluster.agent/id agent-id})
 
-      ;; an open run nobody holds: a planned one is committed work we
-      ;; may pick up, an unplanned one lost its paid call and is
-      ;; `interruption`'s business, never ours
-      (and run (nil? (:seon.cluster.run/process run)))
-      (when (:seon.cluster.run/plan-digest run)
-        (fold-or-close db run agent-id))
-
-      ;; another process holds it: not ours to touch
+      ;; An unheld run is interruption wreckage, never work. Boot
+      ;; recovery normally closes it before any graph is armed; keeping
+      ;; this derivation total prevents a fabricated or in-process
+      ;; orphan from becoming a cold resume.
       (some? run) nil
 
       :else
@@ -548,13 +531,13 @@
   (some? (next-agent-work db request)))
 
 (defn interruption
-  "The open, unclaimed, unplanned run of `agent-id` on `db`, or nil.
-  A run whose process died before the plan was frozen: its paid call is
-  lost and NOTHING re-calls it. The turn settles it with no reply so the
-  agent stops being busy, and the agent's next prompt carries the
-  warning. Returned separately from `next-agent-work` because it is not
-  work — the difference between `continue this` and `bury this` must be
-  visible in the value, not in a flag.
+  "The open, unclaimed run of `agent-id` on `db`, or nil.
+  Planned or unplanned, an unheld run is not work and never cold
+  resumes. Boot recovery normally closes prior-process runs before any
+  graph is armed; this derivation keeps the same rule total for
+  in-process wreckage. Returned separately from `next-agent-work`
+  because it is not work — the difference between `continue this` and
+  `bury this` must be visible in the value, not in a flag.
 
   AGENT-SCOPED AND ALWAYS WAS: each turn proc settles its OWN orphan
   before deriving, and the armer's arm-prime pass covers an agent with
@@ -565,8 +548,7 @@
   [db agent-id]
   (let [run (agent-run db agent-id)]
     (when (and run
-               (nil? (:seon.cluster.run/process run))
-               (nil? (:seon.cluster.run/plan-digest run)))
+               (nil? (:seon.cluster.run/process run)))
       {:seon.cluster.run/id (:seon.cluster.run/id run)})))
 
 (defn unanswered-triggers

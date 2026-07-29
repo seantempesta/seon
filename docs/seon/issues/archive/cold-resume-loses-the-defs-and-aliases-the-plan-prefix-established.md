@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent-runtime, run-loop, sci]
 ---
@@ -121,3 +121,11 @@ and deletes two sealed test oracles.
 durable form rows retain source rather than the evaluated prefix environment.
 The reading-context half and this no-reexecution constraint must be settled
 together by the parser-merge wave.
+
+## Superseded by ruling 25
+
+Recovery never resumes an interrupted plan. It closes the run and leaves every
+unstarted suffix form unexecuted. The only surviving `:resume` situation is a
+continuation while the same live process still holds the run and its fold
+context; the cold-resume path and its sealed test oracles were deleted. There
+is therefore no prefix context to reconstruct after a crash.

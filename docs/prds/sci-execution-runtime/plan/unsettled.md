@@ -125,22 +125,16 @@ claim — **both now fixed and landed**:
    the class the green gate had never exercised.
 
 Full gate **552 tests / 2,360 assertions / 0 failures**, tree clean.
-**Attempt 6 (`1a804e342`) — STILL NOT GRADUATED, two new blockers**, both
-at the newest seams (the expected yield). Everything else passed:
+**Attempt 6 (`1a804e342`) — STILL NOT GRADUATED.** Its recovery blocker is
+now resolved under ruling 25: boot recovery marks the running receipt
+interrupted, closes the run, removes custody and the agent pointer, and never
+executes the unstarted suffix. The cold-resume blocker is superseded because
+there is no recovery resume path. Everything else in attempt 6 passed:
 refusal variants, episode-cap behavior, wake accounting, the
 transaction-outcome fence, the three-writer census, gate 552/2360/0.
 
-1. `boot-recovery-executes-unstarted-plan-suffix-after-interruption` —
-   recovery marks the running receipt `interrupted-at` correctly and
-   then RESUMES THE OPEN PLAN AT THE NEXT ORDINAL, executing work that
-   never started before the crash. Contradicts ruling 23 and the crash
-   model, and is a live safety hole (a later form may carry a
-   capability request → a post-crash external call). **This may
-   DISSOLVE the cold-resume issue rather than require its fix**: if the
-   suffix must never execute, there is no cold resume to restore
-   context for. The Opus lane owning loop/run/eval was redirected to
-   decide that from evidence.
-2. `instrumentation-preempts-terminal-settlement-core-fault` — armed
+The remaining blocker found by attempt 6 is
+`instrumentation-preempts-terminal-settlement-core-fault`: armed
    instrumentation raises `:seon.instrument/contract-violated` before
    the named settlement core fault, so the honest fault is masked by
    its own guardrail.

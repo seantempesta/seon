@@ -676,12 +676,11 @@
                       (d/q (quote [:find [?at ...] :where
                                    [_ :seon.cluster.eval/interrupted-at ?at]])
                            @connection)))))
-          (testing "and the run is still OPEN with its plan intact —
-                    recovery settles custody, it does not re-plan or
-                    re-execute anything"
-            (is (nil? (d/q (quote [:find ?c . :where
-                                   [_ :seon.cluster.run/closed-at ?c]])
-                           @connection)))
+          (testing "and the run is CLOSED with its plan intact —
+                    recovery ends custody and no plan form can execute"
+            (is (some? (d/q (quote [:find ?c . :where
+                                    [_ :seon.cluster.run/closed-at ?c]])
+                            @connection)))
             (is (some? (d/q (quote [:find ?d . :where
                                     [_ :seon.cluster.run/plan-digest ?d]])
                             @connection))))

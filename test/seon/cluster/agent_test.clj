@@ -655,14 +655,23 @@
     (fn [connection]
       (let [dead "99999-1"
             routing (armory)
-            ledger (atom [])]
-        (d/transact connection [{:seon.cluster.agent/id "midfold"}
+            ledger (atom [])
+            evaluation-sources (atom [])
+            evaluate fake-evaluate]
+        (d/transact connection [{:seon.cluster.agent/id "midfold"
+                                 :seon.cluster.agent/blocks
+                                 [{:seon.render.block/name :namespace
+                                   :seon.render.block/band :dynamic
+                                   :seon.render.block/priority 80
+                                   :seon.render/ai
+                                   'seon.render.agent/namespace-ai}]}
                                 {:seon.cluster.agent/id "waiting"}
                                 {:seon.config/cluster "restamp-2026072816"
                                  :seon.config.run/max-episode-runs 100}])
         ;; the dead process's history: open+claim on an outside
-        ;; trigger, a two-form plan, form 0 settled, form 1 STARTED and
-        ;; never settled — killed mid-fold
+        ;; trigger, a three-form plan, form 0 settled, form 1 STARTED
+        ;; and never settled, and a capability-shaped form 2 that had
+        ;; never started — killed mid-fold
         (outside-trigger! connection "midfold" "m-dead" "count things")
         (d/transact connection
                     {:tx-data (into (run/open-tx
@@ -686,7 +695,9 @@
                                   :seon.cluster.run/sources
                                   [{:seon.cluster.run.form/source "(+ 1 2)"}
                                    {:seon.cluster.run.form/source
-                                    "(my.run/complete \"3\")"}]}))
+                                    "(+ 3 4)"}
+                                   {:seon.cluster.run.form/source
+                                    "(my.message/send \"waiting\" \"must not run\")"}]}))
         (d/transact connection
                     (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
                                            :seon.cluster.eval/ordinal 0
@@ -700,12 +711,21 @@
                     (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
                                            :seon.cluster.eval/ordinal 1
                                            :seon.cluster.eval/at now}))
-        ;; a second agent's trigger the dead process never reached
+        ;; Messages committed before the crash and never answered remain
+        ;; triggers. One belongs to the interrupted agent itself, proving
+        ;; recovery ends only the old WORK rather than dropping mail.
+        (outside-trigger! connection "midfold" "m-unanswered"
+                          "still needed after crash")
         (outside-trigger! connection "waiting" "m-waiting" "still here")
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
+                         ledger (fn [_] "(my.run/complete \"done\")"))
+                        fake-evaluate
+                        (fn [request]
+                          (swap! evaluation-sources conj
+                                 (:seon.cluster.run.form/source request))
+                          (evaluate request))]
             ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime
             (d/transact connection
                         (run/recover-tx
@@ -716,207 +736,102 @@
               (arm-one! connection routing agent-id))
             (is (await-until #(quiescent? @connection
                                           ["midfold" "waiting"])))
-            (let [db @connection]
-              (testing "the dead custody's running receipt carries
-              interrupted-at, and custody was retracted"
-                (is (some? (d/q '[:find ?at . :where
+            (let [db @connection
+                  answers (answers-by-trigger db)
+                  run-receipts
+                  (d/q '[:find [?receipt ...]
+                         :where
+                         [?run :seon.cluster.run/id "run-dead"]
+                         [?receipt :seon.cluster.eval/run ?run]]
+                       db)]
+              (testing "recovery ends the interrupted run atomically"
+                (is (some? (d/q '[:find ?at .
+                                  :where
+                                  [?run :seon.cluster.run/id "run-dead"]
+                                  [?receipt :seon.cluster.eval/run ?run]
                                   [?receipt :seon.cluster.eval/ordinal 1]
                                   [?receipt
-                                   :seon.cluster.eval/interrupted-at
-                                   ?at]]
+                                   :seon.cluster.eval/interrupted-at ?at]]
                                 db)))
-                (is (nil? (d/q '[:find ?p . :in $ ?id :where
-                                 [?run :seon.cluster.run/id ?id]
-                                 [?run :seon.cluster.run/process ?p]]
-                               db "run-dead"))))
-              (testing "zero re-executed forms: every receipt is unique
-              by (run, ordinal) and the interrupted form was never
-              re-settled"
+                (is (nil? (d/q '[:find ?process .
+                                 :where
+                                 [?run :seon.cluster.run/id "run-dead"]
+                                 [?run :seon.cluster.run/process ?process]]
+                               db)))
+                (is (some? (d/q '[:find ?at .
+                                  :where
+                                  [?run :seon.cluster.run/id "run-dead"]
+                                  [?run :seon.cluster.run/closed-at ?at]]
+                                db)))
+                (is (nil? (d/q '[:find ?run .
+                                 :where
+                                 [?agent :seon.cluster.agent/id "midfold"]
+                                 [?agent :seon.cluster.agent/run ?run]]
+                               db))))
+              (testing "the interrupted plan never continues"
                 (is (every? (fn [[_ _ n]] (= 1 n))
                             (d/q '[:find ?run ?ordinal (count ?receipt)
                                    :where
                                    [?receipt :seon.cluster.eval/run ?run]
-                                   [?receipt :seon.cluster.eval/ordinal
-                                    ?ordinal]]
+                                   [?receipt
+                                    :seon.cluster.eval/ordinal ?ordinal]]
                                  db)))
-                (is (nil? (d/q '[:find ?edn . :where
-                                 [?receipt :seon.cluster.eval/ordinal 1]
-                                 [?receipt :seon.cluster.eval/run ?run]
+                (is (nil? (d/q '[:find ?result .
+                                 :where
                                  [?run :seon.cluster.run/id "run-dead"]
-                                 [?receipt :seon.cluster.eval/result-edn
-                                  ?edn]]
-                               db))))
-              (testing "zero provider re-dispatches: the dead run's plan
-              was frozen, so the only call is the waiting agent's"
-                (is (= 1 (count @ledger)))
-                (is (= 1 (get (answers-by-trigger db) "m-waiting"))))
-              (testing "the one derived interrupted warning is present"
-                (let [forms (mapv (fn [ordinal]
-                                    {:seon.cluster.run.form/ordinal
-                                     ordinal})
-                                  (d/q '[:find [?o ...] :where
-                                         [?form
-                                          :seon.cluster.run.form/run ?run]
-                                         [?run :seon.cluster.run/id
-                                          "run-dead"]
-                                         [?form
-                                          :seon.cluster.run.form/ordinal
-                                          ?o]]
-                                       db))
-                      receipts (mapv #(d/pull db '[*] %)
-                                     (d/q '[:find [?r ...] :where
-                                            [?r :seon.cluster.eval/run
-                                             ?run]
-                                            [?run :seon.cluster.run/id
-                                             "run-dead"]]
-                                          db))]
-                  (is (some? (run/interrupted-warning forms receipts)))))))
-          (finally
-            (disarm-all! routing)))))))
-
-(deftest arming-does-not-route-a-triggerless-historical-red
-  (with-connection
-    (fn [connection]
-      (let [routing (armory)]
-        (d/transact
-         connection
-         [{:seon.ns/name 'my.gen.helper}
-          {:seon.ns/name 'my.gen.alpha}
-          {:seon.cluster.agent/id "helper"
-           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.helper]}
-          {:seon.cluster.agent/id "alpha"
-           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}])
-        (d/transact
-         connection
-         [{:seon.cluster.run/id "historical-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "helper"]
-           :seon.cluster.run/opened-at now
-           :seon.cluster.run/plan-digest (apply str (repeat 64 "h"))}])
-        (d/transact
-         connection
-         [{:seon.cluster.agent/id "helper"
-           :seon.cluster.agent/run [:seon.cluster.run/id "historical-run"]}
-          {:seon.cluster.run.form/id "historical-form"
-           :seon.cluster.run.form/run
-           [:seon.cluster.run/id "historical-run"]
-           :seon.cluster.run.form/ordinal 0
-           :seon.cluster.run.form/source "(my.store/get :obsolete)"
-           :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}])
-        (try
-          (with-redefs
-           [fake-evaluate
-            (fn [_]
-              {:seon.sci.admit/value
-               {:seon.error/kind :seon.sci.eval/evaluation-failed
-                :seon.error/message "Unable to resolve my.store/get"
-                :seon.error/data {}}
-               :seon.cluster.eval/result-edn
-               (pr-str {:seon.error/kind
-                        :seon.sci.eval/evaluation-failed})
-               :seon.cluster.eval/error "Unable to resolve my.store/get"
-               :seon.sci.admit/capped? false
-               :seon.sci.admit/record
-               {:seon.eval/fn-entries 1
-                :seon.eval/duration-ms 1
-                :seon.eval/allocated-bytes 1
-                :seon.eval/outcome :error}})]
-            (arm-one! connection routing "helper")
-            (is (await-until #(quiescent? @connection ["helper"])))
-            (is (= ["Unable to resolve my.store/get"]
-                   (d/q '[:find [?error ...]
-                          :where
-                          [?receipt :seon.cluster.eval/run ?run]
-                          [?run :seon.cluster.run/id "historical-run"]
-                          [?receipt :seon.cluster.eval/error ?error]]
-                        @connection))
-                "the historical attempt still records its red receipt")
-            (is (empty?
-                 (d/q '[:find ?assignment
-                        :where
-                        [?assignment :seon.cluster.message/about _]]
-                      @connection))
-                "the arm prime routes no historical repair assignment"))
+                                 [?receipt :seon.cluster.eval/run ?run]
+                                 [?receipt :seon.cluster.eval/ordinal 1]
+                                 [?receipt
+                                  :seon.cluster.eval/result-edn ?result]]
+                               db)))
+                (is (nil? (d/q '[:find ?receipt .
+                                 :where
+                                 [?run :seon.cluster.run/id "run-dead"]
+                                 [?receipt :seon.cluster.eval/run ?run]
+                                 [?receipt :seon.cluster.eval/ordinal 2]]
+                               db))
+                    "the unstarted capability-shaped suffix has no receipt")
+                (is (not-any? #(str/includes? % "my.message/send")
+                              @evaluation-sources)
+                    "and it never reached the evaluator"))
+              (testing "unanswered pre-crash messages start new episodes"
+                (is (= 2 (count @ledger))
+                    "one fresh provider call for each unanswered message")
+                (is (= 1 (get answers "m-unanswered")))
+                (is (= 1 (get answers "m-waiting"))))
+              (testing "the next episode sees honest interruption evidence"
+                (let [interrupt-prompts
+                      (->> @ledger
+                           (map :seon.ai/prompt)
+                           (filter string?)
+                           (filter #(str/includes? % "interrupted"))
+                           vec)
+                      prompt (first interrupt-prompts)
+                      forms
+                      (mapv (fn [ordinal]
+                              {:seon.cluster.run.form/ordinal ordinal})
+                            (d/q '[:find [?ordinal ...]
+                                   :where
+                                   [?run :seon.cluster.run/id "run-dead"]
+                                   [?form
+                                    :seon.cluster.run.form/run ?run]
+                                   [?form
+                                    :seon.cluster.run.form/ordinal ?ordinal]]
+                                 db))
+                      receipts (mapv #(d/pull db '[*] %) run-receipts)]
+                  (is (= 1 (count interrupt-prompts))
+                      (str "only the interrupted agent sees recovery evidence: "
+                           (pr-str (mapv :seon.ai/prompt @ledger))))
+                  (is (and (string? prompt)
+                           (str/includes? prompt "result(s) are missing")))
+                  (is (some?
+                       (run/interrupted-warning forms receipts)))))))
           (finally
             (disarm-all! routing)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 7. unheld-resume-regression (audit P1) — seed 2026072817
 ;;; ---------------------------------------------------------------------------
-
-(deftest unheld-resume-regression
-  ;; seed 2026072817 — the recovered unheld planned run whose remaining
-  ;; form carries a disposition: the per-agent pass CLAIMS BEFORE
-  ;; FOLDING, the terminal transaction commits, the run closes; no
-  ;; identical-work fixed point, no error-fact storm.
-  (with-connection
-    (fn [connection]
-      (let [dead "88888-1"
-            routing (armory)
-            ledger (atom [])]
-        (d/transact connection [{:seon.cluster.agent/id "p1"}
-                                {:seon.config/cluster "p1-2026072817"
-                                 :seon.config.run/max-episode-runs 100}])
-        (outside-trigger! connection "p1" "m-p1" "do it")
-        (d/transact connection
-                    {:tx-data (into (run/open-tx
-                                     {:seon.cluster.run/id "run-p1"
-                                      :seon.cluster.run/agent
-                                      [:seon.cluster.agent/id "p1"]
-                                      :seon.cluster.run/opened-at now})
-                                    (run/claim-tx
-                                     {:seon.cluster.run/id "run-p1"
-                                      :seon.cluster.run/process dead
-                                      :seon.cluster.run/live-processes
-                                      #{dead}
-                                      :seon.cluster.run/now now}))
-                     :tx-meta {:seon.db/trigger
-                               [:seon.cluster.message/id "m-p1"]}})
-        (d/transact connection
-                    (run/plan-tx {:seon.cluster.run/id "run-p1"
-                                  :seon.cluster.run/process dead
-                                  :seon.cluster.run/plan-digest
-                                  (apply str (repeat 64 "e"))
-                                  :seon.cluster.run/sources
-                                  [{:seon.cluster.run.form/source "(+ 1 2)"}
-                                   {:seon.cluster.run.form/source
-                                    "(my.run/complete \"3\")"}]}))
-        (d/transact connection
-                    (run/receipt-start-tx {:seon.cluster.run/id "run-p1"
-                                           :seon.cluster.eval/ordinal 0
-                                           :seon.cluster.eval/at now}))
-        (d/transact connection
-                    (run/receipt-settle-tx {:seon.cluster.run/id "run-p1"
-                                            :seon.cluster.eval/ordinal 0
-                                            :seon.cluster.eval/result-edn
-                                            "3"}))
-        (d/transact connection
-                    (run/recover-tx {:seon.cluster.run/id "run-p1"
-                                     :seon.cluster.run/live-processes
-                                     #{process}
-                                     :seon.cluster.run/now (Date.)}))
-        (try
-          (with-redefs [ai/complete
-                        (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
-            (arm-one! connection routing "p1")
-            (is (await-until #(quiescent? @connection ["p1"])))
-            (let [db @connection]
-              (is (some? (d/q '[:find ?c . :in $ ?id :where
-                                [?run :seon.cluster.run/id ?id]
-                                [?run :seon.cluster.run/closed-at ?c]]
-                              db "run-p1"))
-                  "the disposition's terminal transaction committed")
-              (is (empty? (d/q '[:find ?e :where [?e :seon.error/id _]]
-                               db))
-                  "error-fact count bounded at 0 for this path")
-              (is (= 1 (count (d/q '[:find ?r :where
-                                     [?r :seon.cluster.eval/ordinal 1]]
-                                   db)))
-                  "form 1 was attempted exactly once")
-              (is (zero? (count @ledger))
-                  "the frozen plan never re-called the provider")))
-          (finally
-            (disarm-all! routing)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 8. custody-mismatch-regression (audit P2) — seed 2026072818
