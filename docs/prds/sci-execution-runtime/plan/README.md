@@ -835,6 +835,19 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (21) RENDERING MOVES INTO THE AGENT'S FLOW (owner direction, to be
+  falsified by the implementation wave): the agent graph grows a THIRD
+  proc — registered renders — beside mailbox and turn: it owns every
+  derived view of that agent's world (html blocks, canvas, transcript,
+  AND the agent's own ai context pieces — "we can cache all data this
+  way, not just html"), waking on fact interest, memoizing in proc
+  state, byte-digesting for churn ordering. PRODUCTION is per-agent;
+  DELIVERY stays per-cluster (tabs, mult, keyframe snapshot, parked
+  writer); sliding-1 per page between them. The cache is an
+  optimization of derivation, never a second truth — process-local,
+  losable, rebuilt from facts. Falsify before sealing: wake-router
+  render-interest delivery, proc cost at 100 parked agents,
+  cross-namespace production through corpus renderer functions.
   (20) THE RENDERING NORTH STAR (owner, closing the design session):
   implementation-neutral; the DESIGN must be simple to understand,
   easy to use and compose, and fast BY DESIGN. EACH NAMESPACE RENDERS
