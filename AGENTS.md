@@ -566,6 +566,8 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | `my.agents.<id>` | agent workspace, sandbox ns | each agent's scratch namespace; a real namespace has at most one assigned agent (`:seon.agent/namespace`, unique) |
 | `:seon.render/ai` + `:seon.render/html` | widget, view-model, dual render | the ONE render contract: two projections on one unit — `ai` derives into agent context, `html` rides the flow pipeline to canvas (focal, `:seon.render.canvas/content`) or a surface (context render); no third surface noun |
 | wire (external crossings only) | wire for anything in-process | "wire" is reserved for a crossing that LEAVES the process to an external service — the provider HTTP request, the browser SSE connection (owner ruling 2026-07-29). Internal transport is channels, flow, and database facts, and is never called a wire; this refactor deleted the internal wire protocols and nothing may reintroduce the word for them |
+| block | widget, component, panel | ONE render function's identified output: the function + its stable element id + its current bytes — the unit of rendering, morph targeting, equality suppression, and churn ranking (owner ruling 2026-07-29). A page is a scaffold plus blocks |
+| package, keyframe, delta | frame, bundle, snapshot-stream | the DELIVERY units (render-pipeline-design-2026-07-29.md): one revisioned package per change carries delta fragments (changed blocks) and/or the keyframe (every block, serialized once, multed to all tabs); a revision gap snaps to keyframe; new page loads serve from the latest keyframe with zero re-render |
 
 This table is maintained: when a boundary term is settled, add its row in the
 same change, and when the meaning spans an integration boundary, name the

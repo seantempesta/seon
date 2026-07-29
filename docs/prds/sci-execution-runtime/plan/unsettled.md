@@ -10,6 +10,50 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**WORKING EDGE (2026-07-29 afternoon — the owner-present design +
+restoration session; supersedes handoff v2 below).** Rulings 7–21 in
+README (read the 2026-07-29 midday/afternoon batches) are the day's
+charter. LANDED, all owner-ruled and gated: THE LIVING CODE GRAPH
+(0fc110286 + f9e587ec0 — reader→rows string identities, selective
+admission = contracted fns/schemas/tests ONLY, one parser, commit-first
+terminal transactions, lazy acquisition from facts never receipts,
+indexing only at ancestor population; GRADUATION PROVEN: agent defn →
+cluster restart → cross-agent call → 42; full gate 530/2181/0); the
+CONFIG UNFUCK (dial-authority derivation, one manifest compiler +
+explicit-absence semantics, bin/seon start --config + config apply via
+one apply!, apply-before-arm locked-state repair, 30-entry
+application-proof sweep, multi-cluster no-bleed; resources/ move = the
+in-flight final slice); the UNIVERSAL VALUE RENDERER ported
+(263de0563, router precedence per ruling 14, live proofs);
+schema-cycle refusal (009b079b8); the HTTP-KIT WRITE-STATE FORK
+(submodule 238a85c + 875353668 — parked SSE writer, boundedness
+falsifiers green; upstream PR pending OWNER GO); compute-door
+(evals through the bounded launcher on virtual threads); CRLF spans;
+integer coercion at transact; failed-stop addressability; S8 routing;
+helper re-armed live. RESEARCH IN: render-pipeline-design (composite
+package + keyframes, pull variant measured and REJECTED +24.8%/race;
+five-generation history table), query-invalidation (read-tracing
+FALSIFIED; datahike result-cache inheritance 22µs; old E/A/V
+registration located src-old/seon/db/writer.clj:2756-3205),
+workload-scheduling truth, submit-probe, parser-merge (NOT merged; 24
+bug classes; repair pass ruled), config-aero quarry, old-context
+assembly, transcript-aging, code-graph end-to-end, httpkit write path,
+tree-audit chunks 1–2, test-problems triage (8 waves), S0/S1 context
+shadow outputs (AWAIT OWNER READ). RUNNING: Opus falsifier
+(agent-flow renders, one registration mechanism for html+context —
+must reuse the old E/A/V machinery), config final slice.
+NEXT, in order: (1) config slice lands → FROZEN CHECKPOINT (quiet-tree
+full gate + armed-test wedge verdict + independent post-wave audit +
+joint debt review with the owner); (2) the falsifier verdict → the
+render/context implementation wave (contracts test-forward, owner
+review first); (3) S1 outputs read with the owner → S2 guinea pig
+(unfenced: graph data exists); (4) parser merge wave (S1–S6 + repair
+front door); (5) test-dissolution waves 1–4 (design review); UI stays
+TABLED until the context rendering system is proven. PENDING OWNER:
+upstream http-kit PR go; render-design doc read; S1 shadow read;
+generate-code design conversation (parked). Issue queue: 26 open
+(index.md current as of chunk 4; triage chunks 5+ pending).
+
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
 `:seon.cluster.agent/namespace` ref to `:seon.ns`; formal creation

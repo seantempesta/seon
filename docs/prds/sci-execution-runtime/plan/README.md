@@ -848,6 +848,22 @@ may reintroduce a shadow build into the dev feedback path.
   losable, rebuilt from facts. Falsify before sealing: wake-router
   render-interest delivery, proc cost at 100 parked agents,
   cross-namespace production through corpus renderer functions.
+  ACCRETIONS (owner, same session): (a) REUSE THE OLD REGISTRATION
+  MACHINERY — interest-registration was already built; the proven
+  shape is query-plan-derived attribute registration + exact E/A/V
+  matching + the reverse candidate index at
+  src-old/seon/db/writer.clj:2756-3205, src-old/seon/reactive.cljc:
+  120-349, src-old/seon/db.cljc:320-348 (located by
+  query-invalidation-2026-07-29.md). "I don't want to redo this shit
+  from scratch" — adapt, never invent a third mechanism.
+  (b) DEMAND-DRIVEN REGISTRATION AS BYPRODUCT: arming registers
+  nothing; the FIRST DEMAND (a turn needing context, a tab opening
+  the page) runs the walk, and deriving each piece leaves its
+  registration behind as a byproduct (identity, renderer,
+  schema-derived reactivity, digest, interest). One listen! per
+  cluster; per-piece interest is DATA in the proc's index, never
+  listener sprawl. Undisplay lapses registrations; crash loses only
+  the cache — the next demand re-walks.
   (20) THE RENDERING NORTH STAR (owner, closing the design session):
   implementation-neutral; the DESIGN must be simple to understand,
   easy to use and compose, and fast BY DESIGN. EACH NAMESPACE RENDERS
