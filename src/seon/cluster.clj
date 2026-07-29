@@ -576,7 +576,8 @@
                        (select-keys view
                                     [:seon.render.web/pages-mult
                                      :seon.render.web/registration
-                                     :seon.render.web/render-channel])))]
+                                     :seon.render.web/render-channel
+                                     :seon.cluster.run/process])))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
       (log/warn (str "seon " cluster-name " view: port " unavailable
                      " was taken, serving on "
@@ -744,7 +745,15 @@
         view {:seon.render.web/render-channel render-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
-              :seon.render.web/completion (async/promise-chan)}
+              :seon.render.web/completion (async/promise-chan)
+              ;; THE ONE THING THE DATABASE CANNOT ANSWER, carried to
+              ;; the page boundary rather than defaulted at it. On this
+              ;; branch the live set is a singleton by construction —
+              ;; one connection per branch, one process per store, the
+              ;; same invariant `recover-runs!` reasons from — so the
+              ;; holder a run names and the holder a rendered page
+              ;; judges are the same string.
+              :seon.cluster.run/process (:seon.cluster.run/process handle)}
         drops (atom 0)
         graph (flow.core/create-flow
                (cluster-graph-definition handle routing view))

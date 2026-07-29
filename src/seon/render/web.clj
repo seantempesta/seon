@@ -200,25 +200,30 @@
   `surface-html`. The render proc and the initial paint both call THIS,
   so the bytes the proc suppresses against and the bytes a tab diffs
   against are the same bytes by construction — colocation is what makes
-  the byte contract structural (F2 R2). `snapshot` is the agent's
-  transient `:seon.ai/partial` (or nil), threaded into every unit
-  through the one builder."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id
-                       :seon.sci.admit/caps
-                       ;; nil is a REAL value here, not an absent key:
-                       ;; an agent that is not streaming has no snapshot
-                       ;; and the unit must carry no `:seon.ai/partial`
-                       [:or :nil :seon.ai/partial]]
+  the byte contract structural (F2 R2).
+
+  THE LIVE SET RIDES IN, it is not defaulted here. `:seon.cluster.run/
+  live-processes` is the one input no database value can answer, and
+  the problems block refuses to guess it rather than inventing wedges
+  (`#{}`) or hiding them (\"assume alive\"). The web layer can answer
+  it because the web layer IS the running process: the service carries
+  this process's run-holder identity, and on one branch that is the
+  whole live set."
+  {:malli/schema [:=> [:cat :seon.render.web/paint-request]
                   [:map-of :seon.render/surface-id :string]]}
-  [db agent-id caps snapshot]
+  [{:keys [:seon.db/db :seon.cluster.agent/id] caps :seon.sci.admit/caps
+    :as request}]
   (into {}
         (map (fn [surface]
                [(:seon.render/surface-id surface)
                 (surface-html surface caps db)]))
-        (block/surfaces db (cond-> {:seon.cluster.agent/id agent-id
-                                    :seon.render/kind :seon.render/html
-                                    :seon.sci.admit/caps caps}
-                             snapshot (assoc :seon.ai/partial snapshot)))))
+        (block/surfaces db (merge {:seon.cluster.agent/id id
+                                   :seon.render/kind :seon.render/html
+                                   :seon.sci.admit/caps caps}
+                                  (select-keys
+                                   request
+                                   [:seon.cluster.run/live-processes
+                                    :seon.ai/partial])))))
 
 (defn changed
   "The patches whose bytes differ between `delivered` and `page`.
@@ -277,8 +282,16 @@
         pages (into {}
                     (map (fn [agent-id]
                            [agent-id
-                            (page-of db agent-id caps
-                                     (get-in state [::streams agent-id]))]))
+                            (page-of
+                             (cond-> {:seon.db/db db
+                                      :seon.cluster.agent/id agent-id
+                                      :seon.sci.admit/caps caps
+                                      :seon.cluster.run/live-processes
+                                      #{(:seon.cluster.run/process handle)}}
+                               (get-in state [::streams agent-id])
+                               (assoc :seon.ai/partial
+                                      (get-in state
+                                              [::streams agent-id]))))]))
                     watched)
         state (-> state
                   (update ::passes inc)
@@ -434,6 +447,7 @@
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
   [request {:keys [:seon.cluster.agent/id :seon.store/connection]
             caps :seon.sci.admit/caps
+            process :seon.cluster.run/process
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
             render-channel :seon.render.web/render-channel}]
@@ -452,7 +466,11 @@
          (Thread/ofVirtual)
          (fn []
            (try
-             (let [initial (page-of @connection id caps nil)]
+             (let [initial (page-of {:seon.db/db @connection
+                                     :seon.cluster.agent/id id
+                                     :seon.sci.admit/caps caps
+                                     :seon.cluster.run/live-processes
+                                     #{process}})]
                ;; the initial full paint: every block, at its own id
                (doseq [[_id html] (sort-by key initial)]
                  (datastar/patch-elements! generator html))
@@ -514,18 +532,26 @@
   {:malli/schema [:=> [:cat :seon.render.web/service] fn?]}
   [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps
+    process :seon.cluster.run/process
     :as service}]
   (fn [request]
     (let [uri (:uri request)
-          agent-of (fn [prefix] (subs uri (count prefix)))]
+          agent-of (fn [prefix] (subs uri (count prefix)))
+          ;; ONE page request builder for both html routes, so `/` and
+          ;; `/agent/{id}` cannot drift into two answers about who is
+          ;; alive. Root IS an agent: the only difference between these
+          ;; routes is which id they name.
+          page-request (fn [agent-id]
+                         {:seon.cluster.agent/id agent-id
+                          :seon.sci.admit/caps caps
+                          :seon.cluster.run/live-processes #{process}})]
       (cond
         (= "/" uri)
         {:status 200
          :headers {"content-type" "text/html; charset=utf-8"}
          :body (shell {:seon.cluster.agent/id id
                        :seon.render/page (block/page @connection
-                                                     {:seon.cluster.agent/id id
-                                                      :seon.sci.admit/caps caps})
+                                                     (page-request id))
                        :seon.render.web/feed-url (str "/feed/" id)})}
 
         (str/starts-with? uri "/agent/")
@@ -534,9 +560,7 @@
            :headers {"content-type" "text/html; charset=utf-8"}
            :body (shell {:seon.cluster.agent/id agent-id
                          :seon.render/page
-                         (block/page @connection
-                                     {:seon.cluster.agent/id agent-id
-                                      :seon.sci.admit/caps caps})
+                         (block/page @connection (page-request agent-id))
                          :seon.render.web/feed-url (str "/feed/" agent-id)})})
 
         (str/starts-with? uri "/feed/")
@@ -545,6 +569,7 @@
                      (select-keys service
                                   [:seon.store/connection
                                    :seon.sci.admit/caps
+                                   :seon.cluster.run/process
                                    :seon.render.web/pages-mult
                                    :seon.render.web/registration
                                    :seon.render.web/render-channel])))

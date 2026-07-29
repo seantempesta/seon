@@ -45,11 +45,19 @@
  ; database value, because a page derives at whatever basis is current
  ; when the request arrives and a feed derives again on every commit —
  ; a value captured at start would freeze the page at boot.
+ ; `:seon.cluster.run/process` is THIS process's run-holder identity,
+ ; and it is REQUIRED rather than optional on purpose. It is the one
+ ; input the database cannot answer — which processes are alive — and
+ ; the problems block refuses to guess it, correctly: an absent set
+ ; makes every held run look wedged and an assumed-alive default hides
+ ; a real wedge. A service that cannot say who is alive cannot render an
+ ; honest page, so the refusal belongs at construction, not per card.
  :seon.render.web/service
  [:map {:closed true}
   [:seon.store/connection :seon.store/connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/process :seon.cluster.run/process]
   [:seon.render.web/pages-mult :seon.render.web/pages-mult]
   [:seon.render.web/registration :seon.render.web/registration]
   [:seon.render.web/render-channel :seon.flow/channel]
@@ -60,6 +68,7 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.store/connection :seon.store/connection]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/process :seon.cluster.run/process]
   [:seon.render.web/pages-mult :seon.render.web/pages-mult]
   [:seon.render.web/registration :seon.render.web/registration]
   [:seon.render.web/render-channel :seon.flow/channel]]
@@ -69,6 +78,20 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/page :seon.render/page]
   [:seon.render.web/feed-url [:string {:min 1}]]]
+
+ ; What ONE agent's paint needs. A map rather than five positional
+ ; arguments because the two optional members carry meaning by
+ ; PRESENCE: an agent that is not streaming has no `:seon.ai/partial`
+ ; at all, and absent is not the same as empty. The database VALUE is
+ ; here, not the connection — a paint is derived at one basis and the
+ ; whole page must be that basis.
+ :seon.render.web/paint-request
+ [:map {:closed true}
+  [:seon.db/db :any]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]]
 
  ; One repaint: what to send, and what the connection has now seen.
  ; Keyed by surface id and holding the BYTES, because bytes are what the

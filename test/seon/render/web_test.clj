@@ -44,6 +44,12 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
+(def ^:private process
+  "This suite's run-holder identity. The web service REQUIRES one —
+  which processes are alive is the one input no database value answers,
+  and a page that guessed it would either invent wedges or hide them."
+  "web-test-1")
+
 (def ^:private agent-id "root")
 
 ;;; ---------------------------------------------------------------------------
@@ -107,6 +113,7 @@
                              (assoc view :seon.cluster.loop/cluster
                                     {:seon.store/branch-connection connection
                                      :seon.sci.admit/caps caps
+                                     :seon.cluster.run/process process
                                      ;; the cluster's one stream conn:
                                      ;; production always has it, and
                                      ;; the proc now refuses to be
@@ -135,6 +142,7 @@
                           {:seon.store/connection connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
+                           :seon.cluster.run/process process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
                            :seon.render.web/render-channel render-channel}))
@@ -463,7 +471,11 @@
               (is (some? page) "the slow tap yielded a value")
               (is (= 2 (count page))
                   "a COMPLETE page — every block present, not a patch")
-              (is (= page (web/page-of @connection agent-id caps nil))
+              (is (= page (web/page-of
+                           {:seon.db/db @connection
+                            :seon.cluster.agent/id agent-id
+                            :seon.sci.admit/caps caps
+                            :seon.cluster.run/live-processes #{process}}))
                   "and it is the NEWEST page: byte-equal to a fresh
                    derivation at the current basis, so no block was lost
                    to displacement")
@@ -681,6 +693,7 @@
                            {:seon.store/connection connection
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps caps
+                            :seon.cluster.run/process process
                             ;; its own disposable view half: this test
                             ;; is about the PORT, and the second view
                             ;; never opens a feed
