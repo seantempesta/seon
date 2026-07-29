@@ -7,7 +7,10 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.core :as datahike]
+            [seon.cluster.loop :as cluster.loop]
+            [seon.config :as config]
             [seon.flow :as sut]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net ServerSocket URI]
@@ -271,7 +274,7 @@
         (is (= wedge-ids (::sut/wedged-submissions observer-state)))
         (is (= (- parallelism wedge-count)
                (::sut/available-capacity observer-state)))
-        (is (true? (::sut/platform-threads? observer-state))))
+        (is (false? (::sut/platform-threads? observer-state))))
       (let [remaining
             (mapv
              (fn [submission-id]
@@ -297,6 +300,142 @@
            #(contains? wedge-ids (::sut/submission-id %))))
         (is (empty? @(::sut/active-work launcher)))
         (sut/stop-installed-work-launcher!)))))
+
+(deftest production-launcher-bounds-virtual-task-lifetimes
+  (let [parallelism 2
+        entered (CountDownLatch. parallelism)
+        release (CountDownLatch. 1)
+        active (atom 0)
+        maximum-active (atom 0)
+        virtual? (atom [])
+        _ (sut/install-work-launcher!
+           {::sut/configuration
+            {:seon.config.flow.compute/queue-depth 3
+             :seon.config.flow.compute/concurrency parallelism}})
+        submissions
+        (mapv
+         (fn [ordinal]
+           (future
+             (sut/submit!!
+              {::sut/submission-id (keyword (str "bounded-" ordinal))
+               ::sut/workload :compute
+               ::sut/time-limit-ms 5000
+               ::sut/work-fn
+               (fn [{::sut/keys [started!]}]
+                 (started!)
+                 (let [now-active (swap! active inc)]
+                   (swap! maximum-active max now-active)
+                   (swap! virtual? conj (.isVirtual (Thread/currentThread)))
+                   (.countDown entered)
+                   (try
+                     (test-support/await-event! release ::release-bounded-work)
+                     {:seon.flow-test/ordinal ordinal}
+                     (finally
+                       (swap! active dec)))))})))
+         (range 5))]
+    (try
+      (test-support/await-event! entered ::bounded-work-entered)
+      (is (= parallelism @active))
+      (is (= parallelism @maximum-active))
+      (.countDown release)
+      (let [results (mapv deref submissions)]
+        (is (= (set (range 5))
+               (into #{}
+                     (map #(get-in % [::sut/value
+                                     :seon.flow-test/ordinal]))
+                     results)))
+        (is (every? #(= ::sut/completed (::sut/outcome %)) results))
+        (is (= parallelism @maximum-active))
+        (is (every? true? @virtual?)))
+      (finally
+        (.countDown release)
+        (sut/stop-installed-work-launcher!)))))
+
+(deftest submission-time-limit-covers-the-pre-start-wait
+  (testing "paused before start"
+    (let [launcher
+          (sut/install-work-launcher!
+           {::sut/configuration
+            {:seon.config.flow.compute/queue-depth 2
+             :seon.config.flow.compute/concurrency 1}})
+          graph (::sut/graph launcher)]
+      (try
+        (flow/pause graph)
+        (let [result
+              (deref
+               (future
+                 (sut/submit!!
+                  {::sut/submission-id ::paused-before-start
+                   ::sut/workload :compute
+                   ::sut/time-limit-ms 30
+                   ::sut/work-fn (fn [_] ::unexpected-start)}))
+               (* 1000 test-support/event-backstop-seconds)
+               ::did-not-settle)]
+          (is (= ::sut/time-limit (::sut/outcome result))))
+        (finally
+          (flow/resume graph)
+          (sut/stop-installed-work-launcher!)))))
+  (testing "queued behind a fully occupied owner"
+    (let [entered (CountDownLatch. 1)
+          release (CountDownLatch. 1)
+          _ (sut/install-work-launcher!
+             {::sut/configuration
+              {:seon.config.flow.compute/queue-depth 2
+               :seon.config.flow.compute/concurrency 1}})
+          occupied
+          (future
+            (sut/submit!!
+             {::sut/submission-id ::occupied
+              ::sut/workload :compute
+              ::sut/time-limit-ms 30
+              ::sut/work-fn
+              (fn [{::sut/keys [started!]}]
+                (started!)
+                (.countDown entered)
+                (test-support/await-event! release ::release-occupied)
+                ::released)}))]
+      (try
+        (test-support/await-event! entered ::occupied-entered)
+        (is (= ::sut/time-limit (::sut/outcome @occupied)))
+        (let [result
+              (deref
+               (future
+                 (sut/submit!!
+                  {::sut/submission-id ::queued-behind-occupied
+                   ::sut/workload :compute
+                   ::sut/time-limit-ms 30
+                   ::sut/work-fn (fn [_] ::unexpected-start)}))
+               (* 1000 test-support/event-backstop-seconds)
+               ::did-not-settle)]
+          (is (= ::sut/time-limit (::sut/outcome result))))
+        (finally
+          (.countDown release)
+          (sut/stop-installed-work-launcher!))))))
+
+(deftest turn-evaluation-completion-is-a-flat-diagnostic-value
+  (sut/install-work-launcher!
+   {::sut/configuration
+    {:seon.config.flow.compute/queue-depth 1
+     :seon.config.flow.compute/concurrency 1}})
+  (try
+    (let [evaluation
+          (#'cluster.loop/submit-evaluation!!
+           sci.eval/evaluate
+           "turn-boundary-0"
+           {:seon.cluster.run.form/source
+            "(reduce + (map inc (range 500)))"
+            :seon.sci.admit/caps
+            (config/result-caps (config/defaults))
+            :seon.sci.eval/time-limit-ms 1000
+            :seon.config/on-core-error :panic})
+          record (:seon.sci.admit/record evaluation)]
+      (is (map? evaluation))
+      (is (= 125250 (:seon.sci.admit/value evaluation)))
+      (is (pos? (:seon.eval/fn-entries record)))
+      (is (int? (:seon.eval/duration-ms record)))
+      (is (= -1 (:seon.eval/allocated-bytes record))))
+    (finally
+      (sut/stop-installed-work-launcher!))))
 
 (deftest wedged-steps-degrade-capacity-exactly-and-name-themselves
   (let [parallelism 4
