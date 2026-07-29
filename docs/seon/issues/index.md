@@ -10,10 +10,13 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (5)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Instrumented `assert-compilable-schema!` refuses every agent turn](instrumented-assert-compilable-schema-refuses-every-agent-turn.md) | blocker | Core |
+| [`terminal-refused!` never checks its own settlement commit](terminal-refusal-never-checks-its-own-settlement-commit.md) | blocker | Core |
+| [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 

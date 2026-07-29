@@ -321,3 +321,310 @@ That green gate is useful calibration, but B1 demonstrates why it is not the
 graduation gate by itself: no recurring test currently exercises a refused
 terminal program transaction through the live agent flow and waits for
 quiescence.
+
+## Seam re-audit
+
+The second seam re-audit stopped before executing the refusal scenarios. It
+does not graduate the checkpoint.
+
+The required scratch cluster could not cross the fresh operator's pre-start
+instrumentation boundary:
+
+```text
+bin/seon start seam-reaudit-20260729
+✗ The cluster rejected the prepl operation.
+:malli.core/register-function-schema
+ns=seon.render.value name=sample
+:malli.core/invalid-schema
+schema=:seon.render/value
+```
+
+The failure occurs in `script/seon/fresh_operator.clj`'s generated add form.
+Its `refresh-instrument-form` calls `seon.instrument/apply!` against the
+already-running anchor before `seon.cluster/start!` is entered. Registering
+`seon.render.value/sample` then fails because the anchor JVM's live schema
+registry cannot resolve `:seon.render/value`. No
+`data/clusters/seam-reaudit-20260729/prepl.edn` advertisement was published, so
+there was no scratch-cluster REPL on which to run the current
+`store/transact!` encoder, channel-quiescence observations, refusal variants,
+or crash/recovery proof.
+
+The source tree was initially clean. During this attempt another lane began
+editing three archived issue files. Per the audit instruction, this lane did
+not restart the shared JVM, bypass the operator with a separately launched
+cluster process, resume or message another lane, or edit its files. The exact
+gate boundary remains: a scratch cluster must start through the maintained
+operator with the current schema population and instrumentation, after which
+the full refusal matrix must be rerun. No seam verdict is claimed.
+
+## Seam re-audit (attempt 3)
+
+The third seam re-audit stopped at the same required precondition. The
+checkpoint is **not graduated**.
+
+The audit ran from source HEAD `f30526c447e9`, which includes the claimed boot
+fix at `bf9d9425e`, and invoked:
+
+```text
+bin/seon start seam-reaudit3-20260729
+```
+
+The maintained operator sent the new pre-start form to the live anchor. The
+returned form visibly contained the intended ordering:
+`seon.schema.edn/load!` → `seon.instrument/apply!` →
+`seon.cluster/start!`. Instrumentation nevertheless refused before `start!`:
+
+```text
+✗ The cluster rejected the prepl operation.
+:malli.core/register-function-schema
+ns=seon.render.value name=sample
+:malli.core/invalid-schema
+schema=:seon.render/value
+```
+
+No `data/clusters/seam-reaudit3-20260729/prepl.edn` advertisement was
+published. Consequently there was no scratch-cluster REPL on which to
+construct the current encoder refusal, run the first-form or mid-plan
+variants, observe turns below or at the episode cap, inspect channel
+quiescence, or perform the crash/recovery proof. None of those scenarios is
+claimed.
+
+This is itself the instrumentation finding named by the audit instruction:
+the fresh-child proof and green suite do not establish that the maintained
+`bin/seon start` path can add a scratch cluster to the live instrumented
+anchor. Per the stop rule, this audit did not restart the shared JVM, bypass
+the operator, touch another lane's source or tests, or continue beyond the
+failed boundary. The archived
+`fresh-operator-instrumentation-cannot-resolve-render-value-schema` resolution
+is falsified on the required live-add path.
+
+## Seam re-audit (attempt 5)
+
+The fourth attempt left no notes; it did leave a healthy isolated operator
+root (`tmp/seam-reaudit4-operator-root`, cluster `seam-reaudit4-20260729`,
+prepl 57979, PID 76448). Attempt 5 reused it, executed the complete refusal
+matrix and the crash/recovery proof, and never touched the shared default root
+or the owner's JVM on port 7994.
+
+**The checkpoint is NOT GRADUATED.** The refusal seam itself is genuinely
+correct under every scenario the ruling names, but two defects stand in front
+of the graduation claim: one blocker that stops any agent from executing a
+form in a development cluster, and one that leaves the seam's central
+"un-refusable" claim unproven by construction.
+
+### The apparatus
+
+Live REPL through the isolated cluster's own prepl. Wakes were observed on the
+CHANNELS, not inferred from facts: `clojure.core.async.flow/ping` on each
+agent's graph reports `:seon.cluster.agent/deliveries` on the mailbox proc and
+`:seon.cluster.agent/passes` / `:seon.cluster.agent/turns` on the turn proc,
+plus every in/out port's `put-count`/`take-count` and buffer occupancy. An
+independent `d/listen` observer recorded every commit's datom attributes, from
+which `wake/route!`'s own rule was replayed to count agent wakes
+(`:seon.cluster.message/to`), armer wakes (`:seon.cluster.agent/id`) and render
+wakes (one per report). `seon.ai/complete` was replaced by a scripted stub, so
+no paid call was made; the fresh root has no `DEEPSEEK_API_KEY` at all.
+Probe scripts are committed under `tmp/seam-reaudit5/`.
+
+### Finding 1 (blocker, new) — armed instrumentation refuses every agent turn
+
+The first live drive never reached a receipt. `seon.cluster.loop/turn`'s
+`:resume` branch begins with `seon.sci.eval/acquire!`, which calls
+`activate-program-schemas!` → `seon.schema/activate-projection!`, which passes
+BOUND forms (core predicate symbols already replaced by function objects) to
+`seon.schema.internal/assert-compilable-schema!` — whose declared input schema
+is `:seon.schema/definition`, an EDN-readable Malli form. With
+`:seon.config/on-core-error :panic` the armed reporter throws:
+
+```clojure
+(seon.sci.eval/acquire! {:seon.sci.eval/ctx (sci.core/fork (seon.sci.eval/base))
+                         :seon.db/db @(conn)})
+;; throws: seon.schema.internal/assert-compilable-schema! violated its
+;; contract (invalid-input): [nil nil ["must be a parseable, EDN-readable
+;; Malli form"]]   :seon.error/kind :seon.instrument/contract-violated
+```
+
+Driven through a real trigger this produced two runs opened, two plans frozen,
+ZERO receipts, four `:seon.instrument/contract-violated` facts carrying
+`:seon.error/proc :seon.cluster.agent/turn`, and both runs left OPEN, HELD and
+PLANNED — a wedge no later pass can clear, because every later pass dies at the
+same call. 357 vars are instrumented and
+`#'seon.schema.internal/assert-compilable-schema!` is one of them.
+
+This is not an artifact of a long-lived JVM: after the crash test below, a
+fresh operator boot of the same root (new PID 77445) produced the same fact on
+its first turn. The recurring gate passes because no test exercises the
+acquisition path with instrumentation ARMED. Filed as
+`docs/seon/issues/instrumented-assert-compilable-schema-refuses-every-agent-turn.md`.
+
+Everything below was then run with the wrappers stripped
+(`seon.instrument/remove!`), which isolates that defect and lets the seam
+itself be judged.
+
+### Scenario 1 — refusal on the FIRST form, episode below the cap
+
+Agent `audit-c`, unowned program row `audit.victim1/target`, scripted reply
+`(ns-unmap (quote audit.victim1) (quote target))`.
+
+```clojure
+{:calls 1
+ :wakes {:agent-wakes 1 :armer-wakes 0 :render-wakes 7}
+ :quiesce {:quiet-after-ms 6007
+           :counts {:deliveries 4 :passes 4 :turns 3}}
+ :state {:runs [{:closed? true :held? false :planned? true}]
+         :agent-run nil
+         :receipts [{:seon.cluster.eval/ordinal 0
+                     :seon.error/kind :seon.cluster.run/refused
+                     :seon.cluster.eval/error
+                     "seon.cluster.run/receipt-settle-call was refused by
+                      :seon.cluster.run/program-delete-not-owned."}]
+         :errors [#:seon.error{:kind :seon.cluster.run/refused}]
+         :more-work? false :next-work nil}
+ :victim "(defn target [] :original)"}
+```
+
+EXACTLY one receipt, terminal, carrying the admitted flat error as both
+`result-edn` and `error`; EXACTLY one durable error fact; the run closed,
+unheld, and the agent pointer retracted; the program row byte-identical; ONE
+model call. The only agent wake in the window is the trigger commit itself —
+the refusal event produced zero agent wakes, the mailbox took no further
+delivery, and both work predicates went quiet.
+
+### Scenario 2 — refusal MID-PLAN
+
+Same shape, three forms: `(def midplan-marker 1)`, the poison `ns-unmap`, and
+`(def never-ran 2)`.
+
+```clojure
+:forms   ([0 "(def midplan-marker 1)"]
+          [1 "(ns-unmap (quote audit.victim2) (quote target))"]
+          [2 "(def never-ran 2)"])
+:receipts [{:ordinal 0 :result-edn "{:seon.sci.admit/reference \"sci.lang.Var\" …}"}
+           {:ordinal 1 :seon.error/kind :seon.cluster.run/refused …}]
+:errors  [#:seon.error{:kind :seon.cluster.run/refused}]
+:runs    [{:closed? true :held? false}]   :more-work? false
+```
+
+Form 0 settled ordinarily, form 1 terminalized as the refusal, form 2 NEVER
+started — no receipt for ordinal 2 exists. The fold stops at the refusal and
+the run closes in the same event.
+
+### Scenario 3 — below the cap, the next turn reads the refusal
+
+A peer follow-up to `audit-c` opened one new run. The rendered prompt carried
+the fact, not a retry:
+
+```text
+(:seon.error/agent) The receipt-settle of b16aab90-… was refused atomically by
+:seon.cluster.run/program-delete-not-owned. Nothing from this receipt-settle
+committed. Re-read the run before deciding whether a new transition is
+eligible. Evidence: error 5e4a5443-…, kind :seon.cluster.run/refused,
+signature 4d949eaf….
+```
+
+The second run completed; the agent's error-fact count stayed at ONE — later
+work never re-records the original event.
+
+### Scenario 4 — AT the episode cap
+
+`:seon.config.run/max-episode-runs` set to 1, fresh agent `audit-e`, same
+poison, then a peer follow-up.
+
+```clojure
+{:cap 1 :episode-runs 1
+ :calls-after-first 1 :calls-after-follow-up 1
+ :deferred ["C4-follow-up"]
+ :state {:runs [{:closed? true :held? false}]
+         :receipts [one terminal refusal receipt]
+         :errors [one] :more-work? false :next-work nil}}
+```
+
+The episode simply ends. The follow-up is a deferred trigger, not a run; the
+cap is the only retry budget; nothing dangles.
+
+### Scenario 5 — the "un-refusable claim", falsified
+
+`terminal-refused!`'s minimal commit was attacked directly against REAL running
+receipts. Four hostile outcomes settled correctly — a 200 KB message with a
+20 000-element data payload, an empty message, an absent message, and an
+ordinary transition refusal each produced a terminal receipt, a closed unheld
+run, and one durable error fact. That is real robustness and worth saying.
+
+The fifth falsified the claim. Replaying the function's exact construction
+while KEEPING the transaction result:
+
+```clojure
+(probe2! "audit-g" "string-kind"
+  {:seon.error/kind "not-a-keyword" :seon.error/message "hostile kind"})
+;; => {:minimal-commit #:seon.error{:kind :seon.db/rejected
+;;      :message "Bad entity value \"not-a-keyword\" at
+;;                [:db/add 2570 :seon.error/kind \"not-a-keyword\"] …"}
+;;     :terminal-refused!-returned true
+;;     :receipt-terminal? false :run-closed? false :run-held? true}
+```
+
+The minimal commit was REFUSED and `terminal-refused!` returned `true` anyway:
+it ends in a `when-let` on `kind` and discards `store/transact!`'s outcome, so
+the caller reports `:error` and moves on while the receipt is still running
+inside an open held run — the exact precondition of the hot loop `e7d9f14c3`
+claims to have eliminated, with no fact recording that it happened.
+
+The specific falsifier is not reachable from agent code today (every kind Seon
+produces is a keyword), so this is a latent defect rather than a live one. But
+"un-refusable" is currently an argument about today's inputs, not a fence: the
+code cannot tell whether its own settlement committed. Filed as
+`docs/seon/issues/terminal-refusal-never-checks-its-own-settlement-commit.md`.
+
+### Scenario 6 — abrupt crash and recovery
+
+A run was left in the exact mid-plan crash state — open, held, planned with two
+forms, receipt ordinal 0 RUNNING, `next-agent-work` = `:resume` ordinal 0 — and
+the JVM was killed with `kill -9 76448`. The same root was rebooted through its
+own operator.
+
+```clojure
+{:boot {:recovered-runs 1 :recovery-operations 1 :ready-ms 968
+        :process "77445-1785345496856"}
+ :crash-receipt-0 #:seon.cluster.eval{:interrupted-at #inst "2026-07-29T17:18:25.911Z"}
+ :crash-receipt-1 nil
+ :receipt-count 18        ; unchanged across the crash
+ :crash-marker-fn false}  ; the interrupted form's def never became a row
+```
+
+Recovery marked exactly the dangling receipt `interrupted-at`, asserted no
+result and no error on it, released dead custody, and touched nothing else.
+No receipt was created, no form re-executed, no paid call re-fired, and the
+interrupted `def` produced no program row. Receipts inside already-closed runs
+were left byte-untouched, as `recover-call` promises. Boot readiness was
+968 ms.
+
+### Item 4 — one settlement path
+
+Terminal facts on a receipt are written by exactly three transaction
+functions, all in `seon.cluster.run`, all fenced on PRESENCE/ABSENCE and all
+sharing one assertion builder or its recovery counterpart:
+
+- `receipt-settle-call` — refuses `::receipt-terminal` when any terminal fact
+  is already present, and `::no-terminal-fact` when the request carries none;
+- `receipt-refusal-call` — contributes NOTHING when the receipt is absent or
+  already terminal, so the recorder sharing its transaction still commits;
+- `recover-call` — stamps `interrupted-at` only on receipts carrying no
+  terminal fact, and only when the holder is not live.
+
+`receipt-terminal-assertions` is the one builder the first two share, and
+`terminal?` is the one predicate all three fence on. There is no second
+mechanism, no status label, and no fourth writer.
+
+### Verdict
+
+The seam is right. One refused terminal transaction yields exactly one
+terminal receipt, one durable error fact and one closed run, in one commit,
+with zero further wakes on the channels, zero re-execution, zero re-calls, and
+an unchanged program row — on the first form, mid-plan, below the cap and at
+the cap — and a crash mid-plan recovers by marking interruption and nothing
+else.
+
+Graduation is blocked on the two filed issues: a development cluster cannot
+run a single agent form with instrumentation armed (finding 1), and the
+settlement commit's own success is never checked (finding 5). Both are at the
+newest seams, which is the expected yield.
