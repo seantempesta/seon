@@ -4,8 +4,10 @@
    The schema registry is the one shape authority; this namespace is its
    database bridge — registered attribute forms in, ordinary Datahike
    schema maps out. Pure derivation: no connection, no session, no
-   transaction. The store owner transacts the returned declarations."
-  (:require [seon.schema :as schema]
+  transaction. The store owner transacts the returned declarations."
+  (:require #?(:clj [clojure.edn :as edn]
+               :cljs [cljs.reader :as edn])
+            [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
 (defn form-children
@@ -119,10 +121,8 @@
                        (not (contains? types ::unmappable)))
               (first types))
             ;; Mixed unions deliberately store their logical values as EDN
-            ;; strings.  The quarry's `seon.db.internal/edn-encoded-attr?`
-            ;; selected the matching `pr-str`/`read-string` codec.  The fresh
-            ;; transaction path does not own that codec half yet; see
-            ;; `mixed-union-datahike-declaration-lacks-fresh-edn-codec.md`.
+            ;; strings. `edn-encoded-attr?`, `encode-transaction`, and
+            ;; `decode-attribute-value` own the matching codec at this bridge.
             :db.type/string))
       (schema.form/nilable-value-schema? resolved)
       (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
@@ -193,5 +193,115 @@
 
 (defn malli->datahike-schema
   "Derive ordered Datahike attribute declarations."
+  {:malli/schema [:=> [:cat [:sequential :keyword]] [:vector :map]]}
   [attrs]
   (mapv malli->datahike-attr attrs))
+
+(defn edn-encoded-attr?
+  "True when a heterogeneous Malli union uses the EDN string fallback."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
+  [attr]
+  (boolean
+   (when (schema/registered? attr)
+     (let [form (resolve-malli-form (schema/schema-definition attr))
+           explicit
+           (:seon.db/value-type (schema.form/attr-form-properties form))
+           types
+           (when (= :or (form-head form))
+             (into #{}
+                   (map #(try
+                           (form->datahike-value-type %)
+                           (catch #?(:clj Throwable :cljs :default) _
+                             ::unmappable)))
+                   (form-children form)))]
+       (and types
+            (nil? explicit)
+            (or (> (count types) 1)
+                (contains? types ::unmappable)))))))
+
+(defn- refuse-slot!
+  [rule attr value]
+  (throw
+   (ex-info
+    (str "The EDN-backed attribute " attr " has an invalid logical value.")
+    {::rule rule
+     ::attr attr
+     ::value value
+     :seon.error/kind :user-input})))
+
+(defn- validate-logical-slot!
+  [attr value]
+  (when-not (schema/valid-candidate-value? attr value)
+    (refuse-slot! ::schema-invalid attr value))
+  value)
+
+(defn- encode-entity
+  [entity]
+  (reduce-kv
+   (fn [encoded attr value]
+     (assoc encoded attr
+            (cond
+              (edn-encoded-attr? attr)
+              (pr-str (validate-logical-slot! attr value))
+
+              (map? value)
+              (encode-entity value)
+
+              (and (vector? value) (some map? value))
+              (mapv #(if (map? %) (encode-entity %) %) value)
+
+              (and (set? value) (some map? value))
+              (into #{} (map #(if (map? %) (encode-entity %) %)) value)
+
+              (and (sequential? value) (some map? value))
+              (mapv #(if (map? %) (encode-entity %) %) value)
+
+              :else value)))
+   (empty entity)
+   entity))
+
+(defn- encode-transaction-data
+  [transaction-data]
+  (mapv
+   (fn [operation]
+     (cond
+       (map? operation)
+       (encode-entity operation)
+
+       (and (vector? operation)
+            (= :db/add (first operation))
+            (edn-encoded-attr? (nth operation 2 nil)))
+       (update operation 3
+               #(pr-str
+                 (validate-logical-slot! (nth operation 2) %)))
+
+       :else operation))
+   transaction-data))
+
+(defn encode-transaction
+  "Encode heterogeneous union slots once at the Datahike transaction seam."
+  {:malli/schema [:=> [:cat :seon.store/transaction]
+                  :seon.store/transaction]}
+  [transaction]
+  (if (map? transaction)
+    (update transaction :tx-data encode-transaction-data)
+    (encode-transaction-data transaction)))
+
+(defn decode-attribute-value
+  "Decode and validate one value read from an EDN-backed attribute."
+  {:malli/schema [:=> [:cat :keyword :seon.schema/value]
+                  :seon.schema/value]}
+  [attr value]
+  (if-not (edn-encoded-attr? attr)
+    value
+    (do
+      (when-not (string? value)
+        (refuse-slot! ::storage-not-string attr value))
+      (let [decoded
+            (try
+              (edn/read-string value)
+              (catch #?(:clj Throwable :cljs :default) _
+                (refuse-slot! ::malformed-edn attr value)))]
+        (when-not (= value (pr-str decoded))
+          (refuse-slot! ::noncanonical-edn attr value))
+        (validate-logical-slot! attr decoded)))))

@@ -24,6 +24,7 @@
             [clojure.test.check.generators :as gen]
             [seon.error :as error]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
            [java.nio.file OpenOption StandardOpenOption]))
@@ -444,7 +445,9 @@
                   [:or [:map] :seon.error/value]]}
   [connection tx-data]
   (try
-    (d/transact connection (jdk-integers->long tx-data))
+    (d/transact connection
+                (schema.datahike/encode-transaction
+                 (jdk-integers->long tx-data)))
     (catch Throwable throwable
       (let [data (error/refusal throwable)]
         (cond

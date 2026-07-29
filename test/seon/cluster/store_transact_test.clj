@@ -22,8 +22,10 @@
             [datahike.api :as d]
             [seon.cluster.store :as store]
             [seon.error :as error]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]))
+
+(schema/register! ::mixed-value [:or :string :int])
 
 ;;; ---------------------------------------------------------------------------
 ;;; C6 — the pure cause-chain walk
@@ -124,3 +126,56 @@
                        [[:db/add "nonsense" :nothing/here 1]]]]
         (is (map? (store/transact! connection tx-data))
             "every outcome is a value the run loop can branch on")))))
+
+(defn- with-mixed-connection
+  [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact
+       connection
+       [(schema.datahike/malli->datahike-attr ::mixed-value)])
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
+(deftest heterogeneous-unions-round-trip-through-the-one-codec
+  (doseq [logical ["forty-two" 42]]
+    (with-mixed-connection
+      (fn [connection]
+        (let [outcome (store/transact! connection [{::mixed-value logical}])
+              stored (d/q '[:find ?value .
+                            :where [_ ::mixed-value ?value]]
+                          @connection)]
+          (is (contains? outcome :db-after))
+          (is (= (pr-str logical) stored))
+          (is (= logical
+                 (schema.datahike/decode-attribute-value
+                  ::mixed-value stored))))))))
+
+(deftest invalid-logical-and-storage-values-refuse-loudly
+  (with-mixed-connection
+    (fn [connection]
+      (let [outcome (store/transact! connection [{::mixed-value true}])]
+        (is (= :user-input (:seon.error/kind outcome)))
+        (is (empty? (d/q '[:find ?value
+                           :where [_ ::mixed-value ?value]]
+                         @connection))))))
+  (doseq [stored ["[" "true"]]
+    (with-mixed-connection
+      (fn [connection]
+        (d/transact connection [{::mixed-value stored}])
+        (let [failure
+              (try
+                (schema.datahike/decode-attribute-value
+                 ::mixed-value stored)
+                nil
+                (catch clojure.lang.ExceptionInfo error
+                  (ex-data error)))]
+          (is (= :user-input (:seon.error/kind failure)))
+          (is (contains? #{::schema.datahike/malformed-edn
+                           ::schema.datahike/schema-invalid}
+                         (::schema.datahike/rule failure))))))))

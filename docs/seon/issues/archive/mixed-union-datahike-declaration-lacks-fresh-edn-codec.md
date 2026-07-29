@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, database, schema]
 severity: blocker
 ---
@@ -67,3 +67,24 @@ single declaration bridge.
 explicit missing-codec comment remain, but no live heterogeneous attribute
 consumer is evidenced; close it at the fresh transaction-normalization owner,
 not as an interrupt to the execution spine.
+
+## Resolution
+
+Re-verification confirmed the deliberate mixed-union fallback and the missing
+fresh codec. `seon.schema.datahike` now computes EDN-slot status from the
+registered union form, validates and encodes logical values at the one
+`store/transact!` seam, and canonically decodes plus revalidates application
+read values. No attribute roster or second declaration bridge was introduced.
+
+The recurring store transaction gate covers integer and string arms through a
+real in-memory Datahike connection, exact stored `pr-str` bytes, malformed EDN,
+schema-invalid decoded EDN, and a logical value outside the union. Resolved in
+the commit that archives this note.
+
+Proof:
+
+```text
+bin/test seon.schema.datahike-test seon.cluster.store-transact-test
+Ran 12 tests containing 37 assertions.
+0 failures, 0 errors.
+```
