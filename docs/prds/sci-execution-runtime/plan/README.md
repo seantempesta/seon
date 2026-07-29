@@ -638,6 +638,24 @@ may reintroduce a shadow build into the dev feedback path.
   stuff in there"). FACTS LINK: an agent row'''s facts link opens the
   /data drill rooted at THAT AGENT'''S ENTITY, drillable; the schema
   vocabulary stays on /data'''s front page.
+  **Rulings 2026-07-29 (owner, batch 4):** (1) FOLD/DELEGATION
+  SEMANTICS (supersedes stop-at-first-red): a failed form belongs to a
+  NAMESPACE — its owner agent is tasked FIRST, carrying the planner'''s
+  context; only an owner'''s explicit can'''t-fix makes it FAIL to the
+  planner. Successes and owner-fixed parts simply land; the planner
+  sees results (diffs). The fold continues per-form; every red form is
+  a routed problem, never a silent continue and never a global abort;
+  completion = all forms settled (succeeded | owner-fixed |
+  owner-declared-can'''t). (2) NAMESPACE ATTRIBUTION IS PARSE-TIME,
+  REPL SEMANTICS (D8): the parser associates forms with the namespace
+  in effect exactly like a REPL paste of (ns a)(defn x)(ns b)(defn y)
+  — the old parser did this; the ONE reader'''s per-event
+  namespace-in-effect IS this mechanism. E1'''s receipt fact records
+  evaluation truth as the complement; disagreement between the two is
+  a detectable anomaly, not a design choice. (3) UI slice 3 SEALED as
+  redesigned: closed authored-hiccup grammar ordered before the sole
+  action-emitting rewrite; REFUSAL not sanitizing (owner-flagged
+  divergence accepted — stripping is symptom-side containment).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
