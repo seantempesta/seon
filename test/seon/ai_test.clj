@@ -76,6 +76,30 @@
               (dissoc target :seon.config.ai/no-auth)))
         "omitting a credential does not silently mean no-auth")))
 
+(deftest a-no-auth-config-row-assembles-and-sends-without-authorization
+  (let [requests (atom [])
+        targets (ai/targets
+                 (-> @dials
+                     (dissoc :seon.config.ai/api-key-variable)
+                     (assoc :seon.config.ai/no-auth true)))
+        target (:seon.ai/primary targets)
+        outcome
+        (with-redefs-fn
+          {#'seon.ai/send-request
+           (fn [request-data]
+             (swap! requests conj request-data)
+             {:seon.ai/text "local reply"})}
+          #(ai/complete (assoc target :seon.ai/prompt "hello")))]
+    (is (= true (:seon.config.ai/no-auth target))
+        "assembly carries the descriptor's declared authentication state")
+    (is (not (contains? target :seon.ai/api-key-variable))
+        "the assembled target keeps exactly one authentication declaration")
+    (is (schema/valid-candidate-value? :seon.ai/target target))
+    (is (= {:seon.ai/text "local reply"} outcome))
+    (is (= {"content-type" "application/json"}
+           (:seon.ai.http/headers (first @requests)))
+        "the F4 recorder seam observes no Authorization header")))
+
 (deftest one-dial-configures-a-backup-and-the-rest-inherit
   ;; the shape that makes a PARTIAL backup unrepresentable: `model`
   ;; decides, everything else is an override

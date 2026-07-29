@@ -109,11 +109,15 @@
   is exactly what `:seon.ai/backup?` reads downstream."
   {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai/targets]}
   [dials]
-  (let [primary {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
-                 :seon.ai/model (:seon.config.ai/model dials)
-                 :seon.ai/api-key-variable
-                 (:seon.config.ai/api-key-variable dials)
-                 :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}]
+  (let [primary
+        (merge
+         {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
+          :seon.ai/model (:seon.config.ai/model dials)
+          :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
+         (if (:seon.config.ai/no-auth dials)
+           {:seon.config.ai/no-auth true}
+           {:seon.ai/api-key-variable
+            (:seon.config.ai/api-key-variable dials)}))]
     (cond-> {:seon.ai/primary primary}
       (:seon.config.ai.backup/model dials)
       (assoc :seon.ai/backup
@@ -123,8 +127,10 @@
                (assoc :seon.ai/endpoint
                       (:seon.config.ai.backup/endpoint dials))
                (:seon.config.ai.backup/api-key-variable dials)
-               (assoc :seon.ai/api-key-variable
-                      (:seon.config.ai.backup/api-key-variable dials))
+               (->
+                (dissoc :seon.config.ai/no-auth)
+                (assoc :seon.ai/api-key-variable
+                       (:seon.config.ai.backup/api-key-variable dials)))
                (:seon.config.ai.backup/timeout-ms dials)
                (assoc :seon.ai/timeout-ms
                       (:seon.config.ai.backup/timeout-ms dials)))))))
