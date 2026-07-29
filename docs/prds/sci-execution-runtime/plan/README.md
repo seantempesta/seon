@@ -656,6 +656,12 @@ may reintroduce a shadow build into the dev feedback path.
   redesigned: closed authored-hiccup grammar ordered before the sole
   action-emitting rewrite; REFUSAL not sanitizing (owner-flagged
   divergence accepted — stripping is symptom-side containment).
+  **Ruling 2026-07-29 (owner, D10): can'''t-fix is a STRUCTURED REPLY,
+  no new disposition.** The two-disposition seal stands: an owner
+  agent that cannot fix a routed problem simply COMPLETES, and its
+  reply is a registered schema'''d value (which problem + why); the
+  planner'''s settlement derivation reads the reply'''s shape. One new
+  value schema, zero new lifecycle.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
