@@ -117,6 +117,16 @@ JVM restart, zero-overlay config + single-registration dial + explicit
 absence, the fork's bound holding (239,188 bytes vs the 524,288
 bound), full gate 531/2183/0 independently green. The checkpoint
 graduates when the hot-loop fix lands + re-audit of that seam passes.
+**GRADUATION ORDER (2026-07-29 evening):** hot-loop fix LANDED to
+ruling 23 (e7d9f14c3 — one refusal = one atomic terminal receipt +
+error fact + run close, zero re-fires; gate 538/2242/0); the seam
+re-audit correctly REFUSED to certify while the contracts batch holds
+uncommitted store.clj transact-encoder edits under the refusal path —
+it relaunches when that batch lands, then the checkpoint closes.
+Facade quarry resumed with the combined ruling-24 brief (full surface,
+port-best-for-datahike-internals, dual-use pass-bound capture,
+two-level dedupe); orchestrator authors the contract spec on its
+return.
 **EVERYTHING SCHEDULED (owner order, 2026-07-29 evening).** Ruling 23
 (nothing re-fires; the episode turn cap is the only retry budget)
 corrected the hot-loop fix mid-flight. NINE lanes running:
