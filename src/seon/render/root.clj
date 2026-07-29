@@ -33,18 +33,62 @@
 ;;; The renders
 ;;; ---------------------------------------------------------------------------
 
+(defn heading
+  "One section's channel header: a label, a rule, and its count.
+
+  THE RULE IS THE PAGE'S ONE STRUCTURAL DEVICE, and it earns its place
+  by carrying information rather than decorating: the count on the right
+  is the section's real cardinality, so \"how many agents\" is answered
+  before the eye reaches the list, and a section that has nothing to
+  count omits the number rather than printing a zero it had to invent.
+  The rule itself is a CSS pseudo-element — markup says label and count,
+  which is all a reader of this code needs to know.
+
+  A shared function rather than a copied vector, because three sections
+  differing by a string is one section rendered three times."
+  {:malli/schema [:function
+                  [:=> [:cat :string] :seon.render/hiccup]
+                  [:=> [:cat :string [:int {:min 0}]] :seon.render/hiccup]]}
+  ([label] [:h2 {:class "seon-root-heading"}
+            [:span {:class "seon-root-heading-label"} label]])
+  ([label counted]
+   [:h2 {:class "seon-root-heading"}
+    [:span {:class "seon-root-heading-label"} label]
+    [:span {:class "seon-root-heading-count"} (str counted)]]))
+
+(defn- stat
+  "One masthead readout: a dim label and a tabular value, in that order.
+  Label first because the label is what you scan for; the value is what
+  you read once you have found it."
+  [label value]
+  [:span {:class "seon-root-stat"}
+   [:span {:class "seon-root-stat-label"} label]
+   [:span {:class "seon-root-stat-value"} (str value)]])
+
 (defn header-html
-  "Cluster identity and a live count. The quiet strip at the top."
+  "Cluster identity and a live count. The quiet strip at the top.
+
+  IT NAMES ITS CLUSTER, which is not decoration: several clusters run in
+  one JVM and each answers on its own derived port, so a tab that only
+  said `seon` left the one question a second tab raises — which cluster
+  am I looking at? — answerable only by reading the URL. The name is an
+  ordinary config fact, read at the same basis as everything else."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [db (:seon.db/db unit)
+        cluster (d/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
+                     db)
         agents (count (d/q '[:find ?a :where [?a :seon.cluster.agent/id _]] db))
         runs (count (d/q '[:find ?r :where [?r :seon.cluster.run/id _]] db))]
     [:header {:id (block/surface-id :header) :class "seon-root-header"}
      [:span {:class "seon-root-mark"} "◆"]
      [:span {:class "seon-root-name"} "seon"]
-     [:span {:class "seon-root-stat"} (str agents " agents")]
-     [:span {:class "seon-root-stat"} (str runs " runs")]]))
+     ;; absent rather than empty: a cluster whose name is not yet a fact
+     ;; prints no separator and no blank, it just says less
+     (when cluster [:span {:class "seon-root-cluster"} cluster])
+     [:span {:class "seon-root-stats"}
+      (stat "agents" agents)
+      (stat "runs" runs)]]))
 
 (defn agents-html
   "Every agent in the cluster, each linking to its page and its facts.
@@ -63,9 +107,9 @@
                           (d/q '[:find ?id :where [?a :seon.cluster.agent/id ?id]]
                                db)))]
     [:section {:id (block/surface-id :agents) :class "seon-root-agents"}
-     [:h2 {:class "seon-root-heading"} "agents"]
+     (heading "agents" (count agents))
      (if (empty? agents)
-       [:p {:class "seon-root-empty"} "no agents yet"]
+       [:p {:class "seon-root-empty"} "No agents yet. Create one to begin."]
        [:ul {:class "seon-root-list"}
         (for [id agents]
           [:li {:class "seon-root-agent"}
@@ -100,9 +144,9 @@
                       ;; committed in sequence, and it is stable
                       (sort-by first))]
     [:section {:id (block/surface-id :messages) :class "seon-root-messages"}
-     [:h2 {:class "seon-root-heading"} "messages"]
+     (heading "messages" (count messages))
      (if (empty? messages)
-       [:p {:class "seon-root-empty"} "nothing said yet"]
+       [:p {:class "seon-root-empty"} "No messages yet. Send one to an agent."]
        [:ul {:class "seon-root-list"}
         (for [[_ content to-id] messages]
           [:li {:class "seon-root-message"}
@@ -121,7 +165,13 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [snapshot (:seon.ai/partial unit)]
-    [:div {:id (block/surface-id :tokens) :class "seon-stream-tokens"}
+    ;; `seon-stream-strip` is carried by BOTH streaming blocks so the
+    ;; counter and the reply read as one instrument strip at the foot of
+    ;; the page. They remain two independent morph targets — the shared
+    ;; class is presentation, never a container, because a container
+    ;; would make one morph carry the other's bytes.
+    [:div {:id (block/surface-id :tokens)
+           :class "seon-stream-strip seon-stream-tokens"}
      [:span {:class "seon-stream-label"} "tokens"]
      [:span {:class "seon-stream-count"}
       (str (or (:seon.ai/tokens snapshot) 0))]]))
@@ -139,7 +189,8 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [text (:seon.ai/text (:seon.ai/partial unit))]
-    [:div {:id (block/surface-id :reply) :class "seon-stream-reply"}
+    [:div {:id (block/surface-id :reply)
+           :class "seon-stream-strip seon-stream-reply"}
      (if text
        [:span {:class "seon-stream-text"} text]
        [:span {:class "seon-stream-idle"} "idle"])
@@ -156,7 +207,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   [:section {:id (block/surface-id :problems) :class "seon-root-problems"}
-   [:h2 {:class "seon-root-heading"} "problems"]
+   (heading "problems")
    (problems/block unit)])
 
 ;;; ---------------------------------------------------------------------------

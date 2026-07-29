@@ -149,12 +149,16 @@
       [:title (str "seon · " id)]
       [:link {:rel "stylesheet" :href "/css/output.css"}]
       [:script {:type "module" :src "/js/datastar.js"}]]
-     [:body {:class "min-h-screen bg-base-950 text-text-50 font-mono p-4"}
+     ;; SEMANTIC CLASSES, not utility strings, for the same reason the
+     ;; render surfaces already use them (the note above `.seon-problems`
+     ;; in `input.css`): the document frame is one thing, it is styled in
+     ;; one place, and restyling the page does not mean editing Clojure.
+     [:body {:class "seon-body"}
       ;; `seq`, not the vector: a page is a VECTOR OF ELEMENTS, and a
       ;; vector whose head is a vector is not hiccup — the grammar
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
-      [:main {:class "flex flex-col gap-3"} (seq page)]
+      [:main {:class "seon-main"} (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
       ;; looks alive while receiving nothing.

@@ -735,3 +735,317 @@ details.tool-call-details[open] .tool-preview {
 @media (prefers-reduced-motion: reduce) {
   .seon-stream-cursor { animation: none; opacity: 0.6; }
 }
+
+/* ============================================================
+   THE ROOT VIEW — the cluster looking at itself.
+
+   These classes existed in the markup with NO rules behind them,
+   which is why the live page read as a stack of browser defaults:
+   `seon-root-header`, `-heading`, `-list`, `-agent`, `-message`
+   and `-empty` were all emitted and none were styled. The page
+   was not under-designed, it was un-styled.
+
+   The design language is the one this repository already has —
+   Phosphor Terminal, warm blacks and cream, amber reserved for
+   what is LIVE — expressed as density rather than chrome. Three
+   rules carry it:
+
+   - THE PAGE IS AN INSTRUMENT COLUMN, not a full-bleed dashboard.
+     A measured column keeps a line of prose readable on a wide
+     monitor and puts every section on one scan axis.
+   - THE SECTION RULE IS THE ONE STRUCTURAL DEVICE. A dim uppercase
+     label, a hairline to the right edge, and the section's real
+     count. It carries information (cardinality), so it is
+     structure rather than decoration, and it repeats so the page
+     reads as one instrument with several channels.
+   - AMBER MEANS LIVE. The mark, a streaming counter, a hovered
+     link. Nothing static is amber, so anything amber is worth
+     looking at.
+   ============================================================ */
+
+.seon-body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-base-950);
+  color: var(--color-text-100);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The instrument column. `78ch` is a measure, not a magic number:
+   monospace prose stops being scannable past roughly 80 characters,
+   and the fleet table is the widest thing here at ~76. */
+.seon-main {
+  max-width: 78ch;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+/* --- the masthead ------------------------------------------------- */
+
+.seon-root-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--color-base-800);
+}
+/* the one always-on amber: this cluster is answering */
+.seon-root-mark {
+  color: var(--color-signal);
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.seon-root-name {
+  color: var(--color-text-50);
+  font-weight: 600;
+  font-size: 0.9rem;
+  letter-spacing: 0.01em;
+}
+/* the cluster's own name, subordinate to the product name and
+   separated by a dim divider rather than punctuation in the markup */
+.seon-root-cluster {
+  color: var(--color-text-400);
+  font-size: 0.8rem;
+}
+.seon-root-cluster::before {
+  content: "/";
+  color: var(--color-text-600);
+  margin-right: 0.45rem;
+}
+.seon-root-stats {
+  display: flex;
+  gap: 1.1rem;
+  margin-left: auto;
+}
+.seon-root-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.seon-root-stat-label {
+  color: var(--color-text-500);
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.seon-root-stat-value {
+  color: var(--color-text-50);
+  font-size: 0.8rem;
+  /* tabular so a count that changes never shifts the masthead */
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- the section rule --------------------------------------------- */
+
+.seon-root-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-text-400);
+}
+.seon-root-heading::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--color-base-800);
+}
+/* `order` puts the count AFTER the pseudo-element rule, so the
+   markup stays label-then-count and the rule needs no element */
+.seon-root-heading-count {
+  order: 3;
+  color: var(--color-text-600);
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.seon-root-problems,
+.seon-root-agents,
+.seon-root-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* --- lists: agents and messages ------------------------------------ */
+
+.seon-root-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.seon-root-agent,
+.seon-root-message {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--color-base-900);
+}
+.seon-root-agent:hover,
+.seon-root-message:hover {
+  background: var(--color-base-900);
+}
+.seon-root-link {
+  color: var(--color-text-50);
+  text-decoration: none;
+}
+/* the row's own caret, dim until the row is under the cursor —
+   an affordance that costs no markup and no layout */
+.seon-root-link::before {
+  content: "▸";
+  color: var(--color-text-600);
+  margin-right: 0.5rem;
+}
+.seon-root-agent:hover .seon-root-link { color: var(--color-signal); }
+.seon-root-agent:hover .seon-root-link::before { color: var(--color-signal); }
+
+/* the secondary action: present, legible, and never competing with
+   the agent's own name */
+.seon-root-drill {
+  margin-left: auto;
+  color: var(--color-text-500);
+  text-decoration: none;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.seon-root-drill:hover {
+  color: var(--color-signal);
+  text-decoration: underline;
+}
+
+.seon-root-to {
+  flex: 0 0 auto;
+  color: var(--color-signal);
+  font-size: 0.68rem;
+}
+.seon-root-said {
+  min-width: 0;
+  color: var(--color-text-200);
+  overflow-wrap: anywhere;
+}
+
+/* An empty section is an invitation, not a shrug: it says what is
+   absent and what would fill it. Dim and unemphatic — nothing is
+   wrong here. */
+.seon-root-empty {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  color: var(--color-text-500);
+  font-size: 0.7rem;
+}
+
+/* --- the fleet panel ----------------------------------------------- */
+
+/* The one section that is a real PANEL, because it is the only one
+   holding a grid of live numbers. Addressed by its surface id: the
+   fleet block's markup is `seon.oversight`'s to own, and presentation
+   reaching across that boundary belongs here rather than in a class
+   this file would have to ask for. */
+#surface-fleet-oversight {
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  padding: 0.55rem 0.7rem 0.65rem;
+  /* the grid-cell card's `height: 100%` must not stretch this one */
+  height: auto;
+}
+/* its heading matches every other section's, so the page has one
+   heading language and not two */
+#surface-fleet-oversight > h2 {
+  margin: 0 0 0.45rem;
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-text-400);
+}
+#surface-fleet-oversight table {
+  margin: 0;
+  font-size: 0.72rem;
+}
+#surface-fleet-oversight th {
+  font-size: 0.55rem;
+  letter-spacing: 0.12em;
+  color: var(--color-text-500);
+  padding: 0 0.55rem 0.3rem 0;
+  border-bottom: 1px solid var(--color-base-800);
+}
+#surface-fleet-oversight td {
+  padding: 0.28rem 0.55rem 0.28rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-base-800) 55%, transparent);
+}
+/* the agent's own id is the row's subject; the rest is its reading */
+#surface-fleet-oversight td:first-child { color: var(--color-text-50); }
+#surface-fleet-oversight tbody tr:last-child td { border-bottom: 0; }
+/* striping earns nothing on a handful of rows and costs contrast */
+#surface-fleet-oversight tbody tr:nth-child(even) { background: transparent; }
+#surface-fleet-oversight tbody tr:hover { background: var(--color-base-850); }
+
+/* the plumbing line is a footnote to the table, not a definition list
+   anybody reads as prose */
+#surface-fleet-oversight dl {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.55rem 0 0;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--color-base-800);
+}
+#surface-fleet-oversight dt {
+  margin: 0;
+  font-size: 0.55rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-500);
+}
+#surface-fleet-oversight dd {
+  margin: 0;
+  font-size: 0.66rem;
+  color: var(--color-text-400);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- the stream strip ---------------------------------------------- */
+
+/* The two streaming blocks read as one strip at the foot of the page:
+   the counter, then whatever the model is currently saying. They stay
+   two independent morph targets — this is presentation only. */
+.seon-stream-strip {
+  padding: 0.4rem 0.5rem;
+}
+.seon-stream-tokens.seon-stream-strip {
+  border-top: 1px solid var(--color-base-800);
+  padding-top: 0.7rem;
+}
+.seon-stream-reply.seon-stream-strip {
+  min-height: 1.5rem;
+  padding-top: 0;
+}
+
+/* --- problems, in the page's rhythm --------------------------------- */
+
+/* The healthy state is a whole section saying nothing is wrong, so it
+   should be calm and small — the loud version is the error card, and
+   the difference between them must be visible from across the room. */
+.seon-problems-healthy {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  color: var(--color-text-400);
+  font-size: 0.7rem;
+}
+.seon-problems-healthy-mark { font-size: 0.6rem; }
