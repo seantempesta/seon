@@ -33,7 +33,8 @@ before acting on it.
   starts normally and receives no boot-time program transaction. Ancestor
   identity now includes `resources/` schema EDN. Focused evidence:
   `seon.fn-test` 3/17/0, `seon.cluster.boot-test` 22/107/0,
-  `seon.dev.fresh-operator-test` 10/54/0.
+  `seon.dev.fresh-operator-test` 10/54/0. Full `bin/test`:
+  566 tests, 2,445 assertions, 0 failures, 0 errors.
 - **THE LIVING CODE GRAPH** (`0fc110286`, `f9e587ec0`) — reader→rows with
   string identities; SELECTIVE ADMISSION (contracted fns/schemas/tests
   only; scratch defs/expressions get receipts, never rows); one parser
