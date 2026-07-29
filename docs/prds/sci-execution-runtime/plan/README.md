@@ -859,6 +859,39 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
+  (28) A CLUSTER MUST BE PRIMED WITH THE CODE GRAPH; A STALE ONE IS
+  DENIED AT START (owner ruling 2026-07-29 evening: "the cluster needs
+  to be primed with the code graph… detect and deny start and indicate
+  the right procedure"). MEASURED on the owner's live cluster after
+  restart: its recorded `:seon.ancestor/digest` is
+  `cf34c5ed…` while the current source digest is `7e915030…` — and its
+  corpus is PARTIAL, 69 `:seon.ns` rows with ZERO `:seon.fn` rows,
+  which is worse than empty because it looks populated. The cause is
+  correct-by-design and incomplete: the ancestor is content-addressed
+  by a digest over the source roots and `populate-ancestor!` indexes at
+  fork time, so a cluster forked before the indexer landed keeps its
+  old corpus forever — reboot reuses the branch and never re-indexes,
+  and cluster sovereignty (rightly) forbids silent migration.
+  WHAT IS MISSING is any way to prime an existing cluster. Today the
+  only "init" is forking a NEW name, and the fresh operator has no
+  reset either. So:
+  (a) DETECT AND DENY: `start` compares the cluster's recorded ancestor
+  digest against the current source digest and REFUSES a mismatch,
+  naming the right procedure rather than booting a cluster whose code
+  graph does not describe this source tree. Same for a partial corpus
+  (namespaces without functions).
+  (b) THE PROCEDURE — `bin/seon index [CLUSTER]`: re-derive the current
+  source corpus INTO that cluster's branch through the one indexer
+  (`seon.fn/index!`), an explicit operator action, never automatic and
+  never on the boot path (ruling 17 holds). This is accretion of facts
+  DERIVED from source, so it preserves every other fact — the owner's
+  366 messages, 229 runs, agent-authored rows — which is exactly why it
+  is not a migration and does not violate sovereignty.
+  (c) `bin/seon reset [CLUSTER]` remains the destructive path for when
+  a clean world is wanted; deny-at-start must offer both and say which
+  one preserves history.
+  (d) Ruling 25's idle-start is confirmed UNBUILT by the same restart:
+  both agents came up armed.
   (27) THE OPERATOR RECONCILES, LIKE CONFIG DOES (orchestrator design
   finding 2026-07-29 evening, from four consecutive operator stumbles
   the owner licensed as learning material). Every one of those four
