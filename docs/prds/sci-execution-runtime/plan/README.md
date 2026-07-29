@@ -835,6 +835,20 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (18) HTTP-KIT FORK APPROVED + PULL-BASED DELIVERY EXPLORATION
+  (owner): the minimal ADDITIVE fork lands (per-channel pending bytes
+  + atomic drain-or-close completion; httpkit-write-path-2026-07-29.md
+  is the spec) and is shaped as an upstream PR against #180/#474 so
+  the fork may retire; the deeper per-send-completion integration
+  waits for render-pipeline measurements. ALSO EXPLORE PULL-BASED:
+  the frontend knows when to PULL a full copy vs stream updating
+  diffs — server side reuses the existing machinery (listen! +
+  attribute interest + compute/diff/hash) to produce values into
+  channels with per-edge buffer semantics (dropping/queued/mult)
+  optimized for http-kit delivery. Design must be REACTIVE and smart;
+  MINE THE HISTORICAL RECORD first — this system has been built ~5
+  times (owner); learn from every generation before designing the
+  sixth.
   (17) CODE-AS-FACTS IS GO, HIGH PRIORITY (owner): the end-to-end
   mining landed (code-graph-end-to-end-2026-07-29.md) — implement the
   indexing + ongoing saving of ALL functions, schemas, and tests NOW.
