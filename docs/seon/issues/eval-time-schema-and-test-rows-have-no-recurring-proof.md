@@ -24,7 +24,11 @@ test. `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
 contract. The resulting drift is live: runtime schemas persist unevaluated
 syntax, tests are committed but never materialized or acquired, `ns-unmap`
 deletes only function identities, and one database's schema projection replaces
-process-global state used by every cluster. The evidence and historical
+process-global state used by every cluster. Runtime schema rows also omit the
+Datahike schema transaction data required to make their attributes usable;
+source reconciliation exempts every schema row from stale removal; and the
+reader mistakes any operator named `deftest` for `clojure.test/deftest`. The
+evidence and historical
 precedents are recorded in
 `docs/prds/sci-execution-runtime/research/registration-archaeology-2026-07-29.md`.
 
@@ -122,9 +126,12 @@ The recurring proof matrix then establishes:
 
 - build/runtime canonical row parity over their shared admitted domain;
 - evaluated, canonical schema values rather than reader syntax, with failed
-  registration leaving neither a row nor staged state;
+  registration leaving neither a row nor staged state, and with the same
+  terminal transaction installing the derived Datahike attribute declaration;
 - exact function/schema/test redefinition and stale source reconciliation;
 - `ns-unmap` removing both function and test identities;
+- exact resolved test operation identity, so an unrelated `foo/deftest` never
+  becomes a `:seon.test` row;
 - installation from the successful terminal transaction report's exact
   `db-after`, never from receipts or a pre-commit runtime mutation;
 - current function, schema, and test materialization after cluster reopen; and

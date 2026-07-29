@@ -115,6 +115,27 @@ runs explicitly loaded JVM namespaces and never discovers program-graph test
 rows. Registration and result recording are different mechanisms; the latter
 must not manufacture evidence that the former works.
 
+The reader also classifies any operator whose unqualified name is `deftest`
+as a test (`src/seon/sci/reader.cljc:246-254`), without proving that the symbol
+resolves to `clojure.test/deftest`. This repeats the analyzer-flag failure in a
+new form: literal form-head classification must still use resolved operator
+identity, not a coincidental name.
+
+### A runtime schema row is not yet a usable database attribute
+
+The terminal transaction exact-upserts `:seon.schema/key` and
+`:seon.schema/form`, but it does not derive and install the corresponding
+Datahike schema declaration. A row can therefore claim a runtime attribute is
+registered while a fact using it is still refused by the database. The
+candidate projection and `seon.schema.datahike/malli->datahike-schema` output
+must be validated and committed in the same terminal transaction as the row;
+post-commit global Malli activation cannot repair the database schema.
+
+Source reconciliation has the inverse defect: `seon.fn/current-rows` excludes
+schema rows from stale removal, so deleting a source registration can leave its
+old row indefinitely. Canonical resource rows and agent-authored rows must be
+preserved by provenance, not by exempting the entire identity family.
+
 ### Three current owners can disagree
 
 `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
@@ -132,8 +153,11 @@ One class-covering matrix must establish:
   function, schema, and test domain;
 - explicit build-all-functions/runtime-contracted-functions policy;
 - evaluated schema form publication, including a computed form and refusal
-  without candidate mutation;
+  without candidate mutation, plus immediate database acceptance of a fact
+  using the committed attribute;
 - exact redefinition and typed deletion of functions and tests;
+- resolved `clojure.test/deftest` identity, including refusal to misclassify a
+  different `foo/deftest`;
 - exact source-owned reconciliation for every declaration family, including
   stale removal and a converged zero-datom pass;
 - installation only after successful terminal commit and only from that
