@@ -1477,3 +1477,13 @@ Recorded because the failure mode is systematic, not incidental:
 
 **So: re-grep a row's evidence before acting on it.** Every claim in this file
 was verified on 2026-07-26 and may already be stale.
+
+**GRADUATION ATTEMPT 2 (evening): blocked at boot, not the seam** — the
+re-audit found bin/seon start failing pre-boot: the
+instrumentation-refresh-before-start! fix (79d02f6fd) runs before
+seon.schema.edn/load! populates the registry, so contracts referencing
+registered schemas (first casualty :seon.render/value) cannot compile.
+Orchestrator-verified ordering defect between two correct fixes;
+instrumentation-order-fix lane dispatched (schema load precedes
+refresh; both regressions must survive + a fresh-process boot
+regression). Re-audit attempt 3 relaunches on its landing.
