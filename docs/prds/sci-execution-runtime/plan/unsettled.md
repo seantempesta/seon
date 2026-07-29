@@ -43,6 +43,29 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**COMPACTION HANDOFF (2026-07-29 morning — read FIRST).** The owner is
+PRESENT and was given a how-the-system-works explanation to verify
+(the successor should NOT redo it — ask for the verdict): three
+uncertainty flags await his answer: (1) should the GENERIC cluster
+route historical reds at all, or only planner-scoped attempts (the
+noise-fixes lane is implementing S8 caused-by scoping — confirm
+direction); (2) the owner-fixed derivation ruling (recommendation:
+derive problems from the OBSERVABLE CONDITION — var still unbound,
+test still failing — so a real repair settles; declination remains the
+only settle where no condition is computable); (3) root's birth
+context (stays block-suppressed vs the namespace-view seed). ALSO
+PENDING HIS EYES: the /goal Stop hook evaluates retroactively and
+cannot be satisfied by any action — he may clear it. STATE: gate
+481/2042/0+, tree green, default cluster live on 7994 with Ollama via
+facts (max-tokens 32768 — consider tightening per the load table:
+thinking = 99.24% of tokens, throughput 4 turns/min at 10 agents —
+the budget is THE lever), helper DISARMED pending noise-fixes (broken
+namespace lens + unscoped historical routing), message bar + transcript
+live on the page. THE FRAMED QUEUE below is the ordered work, each
+unit pre-thought. Lanes: noise-fixes running (chunked mode — resume
+with small slices; never stack resumes; big sessions do not resume,
+relaunch fresh). One model server at a time (Ollama), fleets share it.
+
 **THE FRAMED QUEUE (2026-07-29 morning — every pending unit with its
 pre-dispatch thought, written BEFORE dispatch per the /goal
 discipline).** Format: unit — what we'd learn if unnecessary | the
