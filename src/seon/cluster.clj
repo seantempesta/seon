@@ -1081,8 +1081,9 @@
   process-root store (first instance; siblings reuse the held store) →
   ancestor/ensure! (population from :seon.boot/ancestor-branch when
   supplied, else the default schema population) → registry/
-  ensure-cluster! → store/open-branch! → require the recorded source
-  digest and complete program graph → accrete the current schema
+  ensure-cluster! → store/open-branch! → require one recorded source
+  digest and a coherent program graph (a complete older corpus is
+  sovereign and allowed) → accrete the current schema
   population → config/apply! with the shipped defaults → return the complete
   instance. A later-layer failure THROWS
   with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance

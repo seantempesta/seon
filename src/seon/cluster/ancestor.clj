@@ -62,8 +62,8 @@
 (defn digest
   "The ancestor digest of the declared source roots.
   SHA-256 over the sorted sequence of `[path, sha256(bytes)]` for every
-  `.clj`, `.cljc`, and `.edn` file under each root — the schema EDN is
-  inside `src/`, so one rule covers both halves of b2-plan §5.2. Pure,
+  `.clj`, `.cljc`, and `.edn` file under each root. Callers include
+  `resources/` because its schema EDN contributes ancestor facts. Pure,
   order-free (the roots are sorted, and each root's files are sorted by
   their path relative to it), and spelling-free (each root is
   canonicalized once, so `x` and `./x` are one root).

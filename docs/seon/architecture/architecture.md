@@ -540,10 +540,19 @@ code through ordinary context projections. See [[agent-runtime]].
 Source indexing is explicit and never part of startup. Ancestor population
 indexes the source-owned base before a cluster forks; an operator-invoked
 `index` exact-reconciles that same source-owned slice into an existing cluster
-while preserving every other fact and agent-authored declaration. Startup
-checks the cluster's recorded source digest and rejects an empty, partial, or
-stale program graph with both remedies named: `index` preserves history,
-whereas `reset` destroys it and reforks from the current ancestor.
+while preserving every other fact and agent-authored declaration. Bare
+`bin/seon index` is the deliberate exception to the operator's ordinary
+no-name-means-default rule: it creates or reuses the content-addressed
+ancestor for current source, leaves every existing cluster untouched, and
+makes that ancestor the baseline future clusters fork. Several baselines
+coexist in the roster by digest.
+
+Startup verifies coherence, never age. One recorded digest plus populated
+namespace and function rows is a coherent sovereign world even when its
+digest predates the current baseline; startup reports that age and proceeds
+without indexing. An empty, digest-ambiguous, or partial graph is denied with
+both explicit remedies: `index CLUSTER` preserves history, whereas `reset`
+destroys it and reforks from the current ancestor.
 
 ## The domains
 

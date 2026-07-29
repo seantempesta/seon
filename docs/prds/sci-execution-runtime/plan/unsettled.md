@@ -20,6 +20,20 @@ before acting on it.
 
 ## Landed and gated today
 
+- **ROLLING BASELINE + CLUSTER PRIMING** (`41b9ba6a9`, `9ca8b0652`) —
+  `bin/seon index` with no cluster refreshes the content-addressed ancestor
+  baseline and explicitly does not select `default`; `index CLUSTER`
+  exact-reconciles source-owned program rows through `seon.fn/index!`,
+  preserves messages/runs/agents/agent-authored declarations, advances the
+  digest with its synchronization meaning, and writes no transaction when
+  converged. `reset [CLUSTER]` retains the process-store fence while stopping
+  the exact instance, then destroys and reforks only that branch through
+  `registry/reset-cluster!`. Startup denies incoherence (including the
+  measured namespace-without-function state), but a complete older corpus
+  starts normally and receives no boot-time program transaction. Ancestor
+  identity now includes `resources/` schema EDN. Focused evidence:
+  `seon.fn-test` 3/17/0, `seon.cluster.boot-test` 22/107/0,
+  `seon.dev.fresh-operator-test` 10/54/0.
 - **THE LIVING CODE GRAPH** (`0fc110286`, `f9e587ec0`) — reader→rows with
   string identities; SELECTIVE ADMISSION (contracted fns/schemas/tests
   only; scratch defs/expressions get receipts, never rows); one parser
@@ -201,14 +215,13 @@ to AGENTS.md (recursive deletion never follows symlinks; the boundary derives
 from the fixture's own root, never the process CWD; a symlinked sentinel must
 survive the cleanup regression).
 
-CLUSTER-PRIMING IS HALF-LANDED. Its detect-and-deny half COMMITTED before the
-incident (`de8560cd9`, "Refuse stale cluster program graphs"). Its `bin/seon
-index` / `cluster/reset!` half was in the destroyed `src/` files; the matching
-TEST edits survived and now reference vars that no longer exist, so they are
-parked in `git stash@{0}` ("priming lane half-work") rather than deleted.
-RESUMING THAT WORK: read the stash for what it intended, but rebuild the
-implementation from ruling 28 (which is complete and unambiguous) rather than
-trusting half-work — and fix the fixture FIRST.
+CLUSTER-PRIMING RESUMED AND LANDED. The detect-and-deny half survived before
+the incident (`de8560cd9`); the fixture was repaired first (`80d38dbf0`), and
+the missing baseline/prime/reset half then landed as `41b9ba6a9` +
+`9ca8b0652`. The surviving test/operator edits were reviewed as intent rather
+than preserved: their bare-index→default behavior was discarded because
+ruling 28 makes bare index mean baseline, and their duplicate cleanup was
+replaced by `seon.test-support/delete-recursively!`.
 
 ## Where the tree is (2026-07-29 night)
 
@@ -226,18 +239,16 @@ lane turned the ruling into a live gate. `browser-automation` deleted (built-in
 browser instructions already cover it). All remaining skills independently
 verified high-trust, with four unverifiable claims DELETED rather than hedged.
 
-LANDED WHILE THE OWNER WATCHED: ruling 28's detect-and-deny is real
-(`de8560cd9`, "Refuse stale cluster program graphs" — 716 lines across
-`seon.fn`, `cluster.clj`, `ancestor.clj` plus boot/fn/admission tests), and the
-operator-reconciliation lane archived the two operator failures it fixed
-(`110080420`). `bin/codex-agent status` now reports named lanes with elapsed
-times instead of raw pids.
+LANDED WHILE THE OWNER WATCHED: ruling 28's initial detect-and-deny half
+(`de8560cd9`) plus its resumed rolling-baseline/prime/reset half
+(`41b9ba6a9`, `9ca8b0652`) are real. The latter corrects the initial gate to
+deny incoherence rather than age. The operator-reconciliation lane archived
+the two operator failures it fixed (`110080420`). `bin/codex-agent status`
+now reports named lanes with elapsed times instead of raw pids.
 
-STILL RUNNING (3): cluster-priming (`bin/seon index`, the priming procedure +
-coherence detection), operator-reconciliation (ruling 27 — one derivation of
-cluster truth; ~709 lines into `fresh_operator.clj`), tool-sharpening (the
-`bin/test` failure-name output, the obsolete skills generator's deletion, and
-the wider tooling sweep). Each owes a green gate at its own exit.
+CLUSTER-PRIMING IS COMPLETE. Operator reconciliation is the landed
+`26a5ef07f` derivation that every new index/reset command uses; no pre-landing
+parallel truth path survived.
 
 GRADUATION ATTEMPT 7 still waits for a quiet tree. Both attempt-6 blockers are
 fixed; auditing a moving tree measures other lanes' half-finished work, which
@@ -1353,7 +1364,7 @@ rule); malli schema-matching (filter registered-schemas by
 valid-candidate-value? — multiple matches always possible since open
 shapes subsume) is a DIAGNOSTIC surface for inspector/steering, never
 routing. Remaining order after step 1: (1) seon.error normalizer + totality property
-+ ai/log projections + fault.edn→error family rename; (2)
+and ai/log projections + fault.edn→error family rename; (2)
 seon.error/commit! + boot wiring as a cluster.clj revision (D4);
 (3) seon.problems; (4) seon.instrument (near-mechanical from the
 measurements); (5) seon.ai failover rows + disposition reducer +

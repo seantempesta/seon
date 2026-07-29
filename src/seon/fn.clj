@@ -9,7 +9,7 @@
 (schema.edn/load! {})
 
 (def source-roots
-  "The complete first-party source corpus admitted to the ancestor."
+  "The Clojure source roots admitted to the program graph."
   ["src" "test"])
 
 (defn- source-file?

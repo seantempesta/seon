@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, testing, tooling]
 ---
@@ -69,3 +69,17 @@ narrow and absolute.
   this is the sharp edge that change exposed.
 - [[root-store-holder-does-not-canonicalize-store-dir]] — the same family:
   path identity treated casually.
+
+## Resolution
+
+Resolved by `80d38dbf0`. `seon.test-support/delete-recursively!` now compares
+normalized lexical paths, walks directories with `NOFOLLOW_LINKS`, rechecks
+every entry against project-local `tmp/`, and treats links as leaves. Its
+regression plants an external sentinel reachable only through a symlink and
+proves cleanup removes the link while the sentinel survives.
+
+The resumed priming work also deleted the two local recursive-cleanup
+implementations in `boot_test.clj` and `fresh_operator_test.clj`; both now call
+that one shared owner (`41b9ba6a9`, `9ca8b0652`). Focused evidence:
+`seon.test-support-test`, `seon.cluster.boot-test`, and
+`seon.dev.fresh-operator-test` green.

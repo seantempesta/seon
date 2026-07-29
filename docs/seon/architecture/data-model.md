@@ -896,15 +896,26 @@ decomposition in Datahike.
 **Index source declarations explicitly; tee authored declarations.** The source
 snapshot exact-reconciles source-owned namespaces, contracted functions,
 schemas, and tests during ancestor population or an operator-invoked cluster
-prime. Startup never indexes: it compares the recorded source digest with the
-current digest and refuses a stale, empty, or partial program graph. Priming
-preserves messages, runs, agents, and agent-authored rows; reset is the
-destructive refork. Agent-authored namespace, function, schema, and test forms
-enter through the eval analyzer tee. The whole live program graph is therefore
-queryable without a second test registry. Agent context renders only `my.*`
-members in full source while source-owned members stay
-indexed-but-summarized. The render policy is owned by [[ui]]; the declaration
-facts are owned here.
+prime. Bare `bin/seon index` creates or reuses the current
+content-addressed ancestor and does not select the default cluster; future
+clusters fork it while existing branches and older ancestors remain intact.
+The ancestor digest covers `src/`, `test/`, and the schema EDN under
+`resources/`.
+
+Startup never indexes. It requires exactly one recorded digest and populated
+namespace and function rows, refusing empty, ambiguous, or partial program
+graphs. A complete graph from an older digest is a legitimate sovereign
+world: startup reports its age and continues without modifying program
+definition transactions. Priming preserves messages, runs, agents, and
+agent-authored rows; reset is the destructive refork. After priming, the
+cluster's `:seon.ancestor/digest` means the source digest whose source-owned
+program facts were last synchronized while independent facts were preserved,
+not necessarily the ancestor branch from which the cluster was born.
+Agent-authored namespace, function, schema, and test forms enter through the
+eval analyzer tee. The whole live program graph is therefore queryable
+without a second test registry. Agent context renders only `my.*` members in
+full source while source-owned members stay indexed-but-summarized. The render
+policy is owned by [[ui]]; the declaration facts are owned here.
 
 ### 4.12 completed restore — `:seon.db.restore/*`
 
