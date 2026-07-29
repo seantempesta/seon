@@ -843,7 +843,22 @@ may reintroduce a shadow build into the dev feedback path.
   proven at least by REPL prototype (entity's LAZY incremental reads
   are the decisive hard case; datoms' index-scan evidence must be
   honest or fail-open). Implementation may land in slices;
-  learning may not be deferred.
+  learning may not be deferred. GO (owner, same session): port the
+  BEST of the seven mined generations — the one that fits our system
+  and works best with DATAHIKE INTERNALS (our fork; internal calls
+  sanctioned). The orchestrator authors the contract spec from the
+  full-surface quarry answer, owner-reviewed before implementation.
+  DUAL USE + DEDUPE (owner, same session): the facade serves ONE-OFF
+  queries (plain call, no registration — a REPL probe, an ad-hoc turn
+  read) AND registration into each agent's registration system — the
+  SAME functions; whether evidence registers is a property of the
+  CALLING PASS (the render proc's pass binds the capture context;
+  absent = one-off), never a per-call agent choice. Dedupe at two
+  levels: computation dedupe is Datahike's query/result cache (same
+  query+basis serves every agent, measured 22µs); interest dedupe is
+  the shared reverse candidate index (identical queries collapse to
+  identical attribute entries; only the tiny per-agent reference rows
+  multiply) with plan→attribute derivation memoized by query form.
   (23) NOTHING RE-FIRES — the turn cap is the only retry budget
   (owner, correcting the hot-loop fix framing): "an agent fucks up,
   they only get another turn to fix it if they haven't hit the max
