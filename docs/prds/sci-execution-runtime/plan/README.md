@@ -780,6 +780,32 @@ may reintroduce a shadow build into the dev feedback path.
   before designing; thinking budgets are likely new and per-model.
   Unlimited local testing on the Ollama qwen server is sanctioned
   (documented in research/local-provider-2026-07-28.md).
+  (7) THE FORGIVING PARSER (owner, verbatim-close): be as forgiving as
+  possible. The old system detected prose without comment markers,
+  fixed missing parens/closing brackets, the simple shit. The goal is
+  NEVER to chastise agents into perfect syntax: fix what we are SURE
+  is the intended code and REWRITE it so the agent never sees the
+  failure — it sees the correction (prose line → `;;` prose line
+  above the defn), reinforcing proper behavior going forward. Pipeline
+  shape: an explicit repair pass BEFORE reading (its output re-enters
+  the one reader — repair is a pure pre-plan transform, never an
+  implicit fallback inside the reader), then sci evaluation; on eval
+  problems, attempt repair and retry where safe. SCI safety stays but
+  is not the fix-everything layer. The old repair's acceptance rule
+  survives: a repair counts only when the source changed AND the
+  result re-reads; only confident fixes apply. The 24-row bug-class
+  history in research/parser-merge-2026-07-29.md is the regression
+  corpus for the merge.
+  (8) CODE-GRAPH PRECEDENT IS BINDING (owner, verbatim-close): the
+  self-indexing living code graph — base committed at cluster init,
+  every eval updating it, resume from newer code than the boot
+  package, efficient replay — WAS ALL BUILT BEFORE. Do not rebuild
+  from scratch; the end-to-end mining (code-graph-mining lane) gates
+  any contract authoring for the code-as-facts rung.
+  (9) SCOPE FENCE (owner): NO multi-runtime/leaf-tier work now —
+  everything stays plain Clojure with sci interpreting untrusted
+  code. Scheduling designs must not depend on a capability door that
+  does not exist yet.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
