@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent-runtime, database, prompt]
 ---
@@ -61,3 +61,7 @@ refusal and records it as a flat error value
 STAYS OPEN for the query-layer root cause — any `d/q` whose `:in`
 value can be nil still degrades from "match this" to "match any"; the
 choke-point fix (a query helper refusing nil inputs) is unowned.
+
+Resolved by `7bb7ccbfe`: current `prompt` derives the trigger from the held
+run and refuses `::no-trigger` before rendering; no current nil-id query caller
+remains to support the note’s generic helper claim.

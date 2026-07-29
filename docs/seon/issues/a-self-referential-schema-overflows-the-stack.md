@@ -82,3 +82,10 @@ in an unrelated caller.
 
 Found 2026-07-27 while drafting the N4 render contracts. The probe script is
 `tmp/n4_hiccup_schema_probe.clj`.
+
+## Triage 2026-07-29
+
+**REAL-BUT-QUEUED — schema admission.** `bind-predicates` still performs an
+unguarded postwalk over the recursive form, but the only demonstrated consumer
+was the now-draft render grammar. Keep the generic admission trap queued; do
+not fence the render walk with it.

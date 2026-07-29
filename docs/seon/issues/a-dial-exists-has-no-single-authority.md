@@ -40,13 +40,13 @@ repair.
 
 ## Triage 2026-07-29
 
-**PRESSING — relaunching config-authority fix lane.** Current source still
-requires a dial to be registered separately for schema admission, database
-installation, and shipped defaults; the owner is the config/schema
-reconciliation rung.
+**REAL-BUT-QUEUED — config-aero mining.** Current source still requires a dial
+to be registered separately for schema admission, database installation, and
+shipped defaults. The quarry report ranks this maintenance defect behind the
+missing selection/apply workflow.
 
-Config patching is FROZEN pending the `config-aero-quarry` mining lane’s
-return. This classification cross-references that mining; it is not a fix plan.
+Config patching remains FROZEN. This classification cross-references the
+returned `config-aero-quarry` mining report; it is not a fix plan.
 
 ## Analysis 2026-07-29 — chunk 1
 

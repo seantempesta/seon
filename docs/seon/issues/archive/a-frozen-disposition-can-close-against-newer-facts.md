@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, agent-runtime, run-loop]
 ---
@@ -76,3 +76,7 @@ completion that no consumer reads as acceptance.
 - `docs/prds/sci-execution-runtime/plan/generate-code-v0-plan-2026-07-29.md`
   §10 — rules the semantics for that capability's v0 and defers this class
   here rather than absorbing it.
+
+Superseded by the 2026-07-29 late-morning modes ruling: goal completion is an
+observable test-based condition, not acceptance inferred from the agent’s
+frozen completion prose.

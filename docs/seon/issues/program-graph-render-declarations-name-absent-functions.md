@@ -44,6 +44,7 @@ The N5 program-graph projection builders, composed with the one
 
 ## Triage 2026-07-29
 
-**PRESSING — current N5/program-graph render blocker.** `src/seon/schema.cljc`
-still publishes all six `seon.render.handlers.{fn,schema,ns}` symbols, no such
-namespace exists, and the router still returns `:seon.render/unresolvable`.
+**DRAFT-SURFACE — render walk.** `src/seon/schema.cljc` still publishes all six
+`seon.render.handlers.{fn,schema,ns}` symbols and no such namespace exists, but
+the afternoon ruling declares the whole render walk draft: preserve this as
+design input, without a fix plan or new test fence.

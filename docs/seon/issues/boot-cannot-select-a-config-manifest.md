@@ -52,3 +52,10 @@ a path resolved through the existing `config/read-manifest`, so the defaults
 remain the base and the manifest declares only its subset — and a drive can
 point a scratch cluster at a local provider with no `with-redefs` anywhere.
 Bootstrap config stays tiny: the selection is a path, never dials.
+
+## Triage 2026-07-29
+
+**PRESSING — config-aero mining’s primary regression.** Fresh boot still
+applies only `config/default.edn`; the quarry report confirms that selected
+startup plus explicit apply/repair is the missing owner workflow. Config
+patching remains frozen; this is a cross-reference, not a fix plan.

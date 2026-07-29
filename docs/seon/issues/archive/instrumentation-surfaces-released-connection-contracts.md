@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, database, boot, error]
 ---
@@ -85,3 +85,7 @@ race), with `seon.cluster.store` as the contract owner.
   lands: today it is documented as a kill row in
   `seon.cluster/disarm-loop!`, and that is honest but not yet proven by
   a test.
+
+Resolved by the orderly-stop sequence `852ef9759`, `af200d5d6`, and
+`2e372027d`: current disarm joins the active agent and both cluster-graph procs
+before releasing the branch connection.

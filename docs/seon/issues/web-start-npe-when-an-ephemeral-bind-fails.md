@@ -41,3 +41,10 @@ map this function receives but not its binding logic.
 - an ephemeral bind that fails throws an ex-info naming the attempted port and
   carrying the BindException as its cause, never an NPE;
 - the taken-port fallback behaviour and its two-number report are unchanged.
+
+## Triage 2026-07-29
+
+**DRAFT-SURFACE — render walk.** The nil destructuring remains in current
+`seon.render.web/start!`, but the afternoon ruling forbids hardening or
+test-fencing the draft render family; carry this failure mode into the eventual
+web-render design.

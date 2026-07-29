@@ -29,3 +29,10 @@ commits.
 A transaction containing a JVM `Integer` under a `:db.type/long`
 attribute commits; the per-site `(long …)` coercions are removed; the
 class is unrepresentable and this issue + the memory scar both close.
+
+## Triage 2026-07-29
+
+**REAL-BUT-QUEUED — database transaction normalization.** Current write paths
+still rely on per-site `long` coercion, but the known live HTTP-status site is
+fixed and no active corruption is present. The natural owner is the eventual
+single tx-data normalization boundary.

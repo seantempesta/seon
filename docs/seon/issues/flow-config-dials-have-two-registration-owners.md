@@ -57,3 +57,10 @@ kept in a process/classpath that cannot load the fresh owner twice.
   quarry configuration at `src-old/seon/config/resolve.cljc:343-365`; the
   explicit old-system alias at `deps.edn:75-84` is the remaining collision
   surface and dies with that machinery.
+
+## Triage 2026-07-29
+
+**REAL-BUT-QUEUED — config-aero quarry cleanup.** The collision remains only
+when an explicit quarry alias loads both generations. The mining report names
+the two visible config generations; patching is frozen and this dies with the
+quarry rather than receiving an independent fix plan.

@@ -36,3 +36,9 @@ Replace the sampling race with an event-driven readiness boundary proving the
 initial render work has settled before `before` is captured. The focused test
 and a subsequent full `bin/test` checkpoint must then pass without timing
 constants or relaxed pass-count assertions.
+
+## Triage 2026-07-29
+
+**DRAFT-SURFACE — render walk.** The sampling race remains evidence about the
+draft, but the afternoon ruling explicitly forbids adding a readiness fence or
+hardening this render test before the walk’s real design exists.
