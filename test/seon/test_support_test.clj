@@ -95,3 +95,35 @@
     (prop/for-all [value gen/int]
       (= value value))
     :seed 20260728)))
+
+(deftest recursive-cleanup-never-follows-a-symlink-out-of-tmp
+  ;; The 2026-07-29 data-loss incident: a scratch root under tmp/ linked the
+  ;; source tree for its classpath, and cleanup walked the link and deleted 55
+  ;; tracked paths. A sandbox check on the ROOT is worthless if the walk can
+  ;; leave the sandbox, so the sentinel below must survive its own link's
+  ;; deletion.
+  (let [scratch (java.nio.file.Files/createTempDirectory
+                 (.toPath (clojure.java.io/file "tmp"))
+                 "cleanup-symlink-proof"
+                 (make-array java.nio.file.attribute.FileAttribute 0))
+        outside (java.nio.file.Files/createTempDirectory
+                 (.toPath (clojure.java.io/file "tmp"))
+                 "cleanup-sentinel"
+                 (make-array java.nio.file.attribute.FileAttribute 0))
+        sentinel (.resolve outside "must-survive.txt")
+        link (.resolve scratch "linked-elsewhere")
+        nofollow (into-array java.nio.file.LinkOption
+                             [java.nio.file.LinkOption/NOFOLLOW_LINKS])]
+    (try
+      (spit (.toFile sentinel) "do not delete me")
+      (java.nio.file.Files/createSymbolicLink
+       link outside (make-array java.nio.file.attribute.FileAttribute 0))
+      (test-support/delete-recursively! (str scratch))
+      (is (not (java.nio.file.Files/exists (.toPath (.toFile scratch)) nofollow))
+          "the scratch directory itself is gone")
+      (is (java.nio.file.Files/exists sentinel nofollow)
+          "a file reached only through a symlink SURVIVES cleanup")
+      (is (java.nio.file.Files/exists outside nofollow)
+          "the link's target directory survives; only the link was removed")
+      (finally
+        (test-support/delete-recursively! (str outside))))))
