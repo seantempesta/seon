@@ -870,6 +870,22 @@ may reintroduce a shadow build into the dev feedback path.
   SCI installation is LAZY (on first use; boot installs nothing);
   call edges are BEST-EFFORT STATIC now, unknowns explicit and
   fail-closed.
+  CORPUS ADMISSION IS SELECTIVE (owner, same session): "I don't want
+  to save arbitrary evals and I don't want atoms and temporary defs
+  littering the codebase. Agents need to store data in the database
+  and write functions, schemas and tests that work on that data."
+  Only DURABLE DECLARATIONS become corpus rows — functions (defn with
+  the required :malli/schema — the contract requirement IS the
+  durability gate, a computed rule not a new flag), schema
+  registrations, and tests. Arbitrary evals, scratch defs, and atoms
+  are ctx-local, dying with the process. Evals ARE saved as RECEIPTS —
+  historical understanding (forensics, transcripts, diagnostics) — but
+  receipts are inert history: never read to modify the system or to
+  determine system state (owner clarification, same session). Agent
+  DATA is database facts through registered schemas, never vars.
+  Reboot reconstruction therefore projects a clean codebase of
+  contracted functions/schemas/tests by construction, and consults no
+  receipt.
   (16) FRESHNESS OUTRANKS CACHE (owner): "I'm okay with seon being a
   weird system where we accept a larger amount of context churn in
   exchange for always up to date information." Every turn derives ALL
