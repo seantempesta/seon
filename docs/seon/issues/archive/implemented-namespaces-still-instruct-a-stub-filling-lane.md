@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 tags: [issue, docs]
 ---
@@ -47,3 +47,20 @@ scaffold prose outside an explicitly active contract package.
 
 Configuration settled in `ce398cd59`, so its identical stale instruction is
 now part of the finding. The prior in-flight exclusion is superseded.
+
+## Superseded 2026-07-29
+
+This hygiene lane replaced the stale construction prose in
+`seon.cluster`, `seon.cluster.store`, `seon.cluster.ancestor`,
+`seon.schema.edn`, and `seon.sci.admit` with descriptions of their
+implemented behavior.
+
+Two live owners retain the remaining docstring corrections:
+
+- the config lane owns `src/seon/config.cljc`; and
+- the compute-door-fix lane owns `src/seon/cluster/agent.clj`, whose claim
+  that evals use `seon.flow/submit!!` does not match the current call path.
+
+Those files were deliberately not edited here. The broad six-file issue is
+superseded by these explicit owner handoffs rather than kept open across
+overlapping source ownership.

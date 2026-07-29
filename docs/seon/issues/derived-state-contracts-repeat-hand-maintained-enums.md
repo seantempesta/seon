@@ -37,3 +37,11 @@ Context contributions reference the one render-band schema. Form settlement
 computes `state` and `settled?` from one shared derivation rather than a
 second literal state set. A new band/state requires one edit and the existing
 generative contracts cover the result.
+
+## Scope note 2026-07-29
+
+The bounded docstring/comment hygiene lane did not alter these owners.
+Replacing the context enum with the render-band schema reference and deriving
+`settled?` from `form-settlement` both require code-form edits; the lane
+explicitly prohibited code-form changes. This issue remains open for that
+behavior-preserving source change.
