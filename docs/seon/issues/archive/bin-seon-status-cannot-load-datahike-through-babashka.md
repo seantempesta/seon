@@ -110,3 +110,19 @@ After the routing commit, a non-document `rg` finds no live caller of
 remain. The retained hook and changed-test seams, plus removal of the ambient
 `src-old` Babashka path, are tracked together in
 [[../finish-deleting-the-old-operator-classpath-from-retained-tooling]].
+
+## Ruling 27 addendum
+
+Commit `26a5ef07f` preserves this issue's one-entry-point resolution and
+replaces the advertisement-only status projection described above. `bin/seon
+status` now reads one derived cluster-truth value built from advertisements,
+the reachable JVM registry, live Datahike branch connections, and process
+identity. It reconciles stale or missing advertisements before printing every
+cluster in the current operator root. Orphan JVM reporting is root-scoped, so
+an isolated operator no longer calls the owner's project-root JVM an orphan.
+
+Focused proof remained 6 tests and 29 assertions with zero failures. The
+isolated live drive reported both clusters in a shared JVM, reported a
+registered unadvertised cluster as addressable, removed a stale advertisement,
+and finished at 0/0 after its sole remaining cluster was stopped. The owner's
+project-root status remained `default` pid 8515 on web port 7994.
