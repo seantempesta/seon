@@ -93,3 +93,6 @@ Recurring proof:
   duration remain recorded and allocated bytes are `-1`; and
 - the complete turn, agent, boot, context, generative-loop, flow, and
   flow-configuration focused suites pass with zero failures or errors.
+
+Final integrated proof: `bin/test` ran 510 tests containing 2,080 assertions
+with zero failures and zero errors.

@@ -56,3 +56,6 @@ opens.
 and a submission queued behind a fully occupied owner settle within the
 declared limit, without sleeps or an unbounded startup dereference. The
 complete focused flow suite passes with zero failures or errors.
+
+Final integrated proof: `bin/test` ran 510 tests containing 2,080 assertions
+with zero failures and zero errors.

@@ -56,3 +56,6 @@ state instead of running it.
 evaluation with latches, times out the queued caller as a flat
 `::seon.flow/time-limit` outcome, then releases the owner. The complete
 focused flow suite passes with zero failures or errors.
+
+Final integrated proof: `bin/test` ran 510 tests containing 2,080 assertions
+with zero failures and zero errors.
