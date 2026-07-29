@@ -853,6 +853,14 @@ may reintroduce a shadow build into the dev feedback path.
   commits as a detectable anomaly, never silent). Build indexer
   populates the ancestor at cluster init; acquisition installs current
   rows at boot. Graduation: live defn → restart → cross-agent call.
+  STARTUP CONSTRAINT (owner, same session): indexing NEVER rides the
+  boot path — no huge startup time. Indexing is an EXPLICIT step (the
+  deliberate build populating the ancestor) and/or ONGOING while we
+  develop (our own file edits flow through the same reader-events →
+  program-rows living-update path agents use — one mechanism for human
+  and agent code changes). The result: a pre-indexed cluster sits
+  READY and forks near-instantly for experiments; the ten-second start
+  bound holds unconditionally; a cluster create never re-indexes.
   (16) FRESHNESS OUTRANKS CACHE (owner): "I'm okay with seon being a
   weird system where we accept a larger amount of context churn in
   exchange for always up to date information." Every turn derives ALL
