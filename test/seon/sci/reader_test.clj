@@ -396,5 +396,8 @@
              "accepted-source readers migrate. Current sites: "
              (pr-str sites)))
     (is (contains? sites "src/seon/sci/eval.clj"))
-    (is (contains? sites "src/seon/cluster/reply.cljc"))
-    (is (contains? sites "bin/seon-hook"))))
+    (is (contains? sites "bin/seon-hook"))
+    ;; MIGRATED 2026-07-29 (generate-code v0): the reply splitter reads
+    ;; through this reader now, which is where its forms get the
+    ;; parse-time namespace-in-effect they freeze with.
+    (is (not (contains? sites "src/seon/cluster/reply.cljc")))))

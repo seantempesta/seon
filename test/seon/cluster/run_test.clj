@@ -186,7 +186,9 @@
                 (run/plan-tx {::run/id "lesson"
                               ::run/process "p1"
                               ::run/plan-digest "digest-a"
-                              ::run/sources ["(+ 1 1)" "(+ 2 2)"]}))))
+                              ::run/sources
+                              [{:seon.cluster.run.form/source "(+ 1 1)"}
+                               {:seon.cluster.run.form/source "(+ 2 2)"}]}))))
         (is (= ["(+ 1 1)" "(+ 2 2)"]
                (->> (d/q '[:find ?ordinal ?source
                            :in $ ?run-id
@@ -230,7 +232,8 @@
             #(run/plan-tx {::run/id "held"
                            ::run/process "p2"
                            ::run/plan-digest "held-digest"
-                           ::run/sources ["(+ 1 1)"]})]]]
+                           ::run/sources
+                           [{:seon.cluster.run.form/source "(+ 1 1)"}]})]]]
     (with-model-database
       (fn [connection]
         (d/transact connection [{:seon.cluster.agent/id "held-agent"}])
@@ -559,7 +562,8 @@
               {::run/id run-id
                ::run/process process
                ::run/plan-digest digest
-               ::run/sources ["(+ 1 1)"]})))
+               ::run/sources
+                [{:seon.cluster.run.form/source "(+ 1 1)"}]})))
     :receipt-start (let [[run-id ordinal] args]
                      (transact-or-refusal
                       connection

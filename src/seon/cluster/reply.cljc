@@ -31,15 +31,19 @@
   comment-only plan source: SCI reads that as nil, so the prose is
   recorded but no prose token is resolved or invoked.
 
-  SOURCES, NOT FORMS. The return is a vector of strings. The evaluator
-  parses each one inside its own armed context, so the reply is read
+  SOURCES, NOT FORMS. The return is a vector of plan forms, each one a
+  SOURCE STRING plus the namespace it was written under. The evaluator
+  parses each source inside its own armed context, so the reply is read
   once for splitting and once for evaluation — never handed across as
   parsed data that a second reader would have to trust.
 
-  THE PARSING CONTEXT IS A THROWAWAY `(sci/init {})`. Parsing is not
-  evaluation: it needs neither the binding table nor the interrupt-fn,
-  and giving it either would be handing model text a context that can
-  do something.
+  ONE READER, AND IT IS NOT THIS NAMESPACE'S. Reading belongs to
+  `seon.sci.reader`; this namespace only decides which read events are
+  code and which are prose. That is why the parse-time
+  namespace-in-effect (`:seon.sci.reader/ns`) arrives with the span
+  instead of being re-derived by a second inheritance rule of our own —
+  the rule that a previous revision of the generate-code plan invented
+  and that contradicted the runtime.
 
   Errors are flat values, never throws: a reply the loop cannot split
   closes the run with a steering message the agent sees next wake.
@@ -48,8 +52,8 @@
   committed; the plan is not durable until N2's `plan-tx` commits it,
   and re-deriving it from the same text is deterministic."
   (:require [clojure.string :as str]
-            [sci.core :as sci]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.reader :as reader]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/reply.edn
@@ -109,28 +113,26 @@
    :seon.error/data data})
 
 (defn- parsed-events
-  "SCI forms with exact source spans in `source`."
+  "Read events for `source` from THE ONE reader, or its flat error value.
+  This namespace no longer reads model text itself: `seon.sci.reader`
+  owns reading, so the namespace-in-effect each form was written under
+  (`:seon.sci.reader/ns`, REPL semantics, absent rather than inherited
+  after a malformed declaration) arrives with the span instead of being
+  re-derived here by a second rule."
   [source]
-  (let [ctx (sci/init {})
-        reader (sci/source-reader source)]
-    (loop [search-from 0
-           events []]
-      (let [[form form-source] (sci/parse-next+string ctx reader
-                                                      {:eof ::eof})]
-        (if (= ::eof form)
-          events
-          (let [start (.indexOf source form-source search-from)]
-            (when (neg? start)
-              (throw (ex-info "SCI source span was not present in its input."
-                              {::text source
-                               ::form-source form-source})))
-            (let [end (+ start (count form-source))]
-              (recur end
-                     (conj events
-                           {::form form
-                            ::source form-source
-                            ::start start
-                            ::end end})))))))))
+  (let [events (reader/read {:seon.sci.reader/text source})]
+    (if (map? events)
+      events
+      (mapv (fn [event]
+              (let [start (:seon.sci.reader/source-start event)
+                    form-source (:seon.sci.reader/source event)]
+                (cond-> {::form (:seon.sci.reader/form event)
+                         ::source form-source
+                         ::start start
+                         ::end (+ start (count form-source))}
+                  (:seon.sci.reader/ns event)
+                  (assoc ::ns (:seon.sci.reader/ns event)))))
+            events))))
 
 (defn- standalone-symbol?
   "True when an event is a bare symbol occupying its whole source line."
@@ -204,7 +206,11 @@
        (str/join "\n")))
 
 (defn- plan-sources
-  "Attach prose spans to the next form and retain trailing prose."
+  "Attach prose spans to the next form and retain trailing prose.
+  Each plan form carries the reader's namespace-in-effect when the
+  reader attributed one; a form the reader could not attribute simply
+  has no `:seon.ns/name`, and absence is what routes its red receipt to
+  the run's author rather than to a guessed owner."
   [source events]
   (let [code-indexes (code-event-indexes source events)
         code-events (keep-indexed (fn [index event]
@@ -213,16 +219,20 @@
                                   events)]
     (loop [cursor 0
            remaining (seq code-events)
-           sources []]
-      (if-let [{::keys [start end] form-source ::source} (first remaining)]
+           forms []]
+      (if-let [{::keys [start end ns] form-source ::source} (first remaining)]
         (let [prose (comment-source (subs source cursor start))
               plan-source (str (when-not (str/blank? prose)
                                  (str prose "\n"))
                                form-source)]
-          (recur end (next remaining) (conj sources plan-source)))
+          (recur end (next remaining)
+                 (conj forms
+                       (cond-> {:seon.cluster.run.form/source plan-source}
+                         ns (assoc :seon.ns/name ns)))))
         (let [prose (comment-source (subs source cursor))]
-          (cond-> sources
-            (not (str/blank? prose)) (conj prose)))))))
+          (cond-> forms
+            (not (str/blank? prose))
+            (conj {:seon.cluster.run.form/source prose})))))))
 
 (def ^:private prose-read-failure
   #"^Invalid (?:number|symbol|keyword|token)")
@@ -237,33 +247,42 @@
   [line]
   (some (fn [offset]
           (let [suffix (subs line offset)]
-            (try
-              (let [events (parsed-events suffix)]
-                (when (and (seq events)
-                           (some (comp coll? ::form) events)
-                           (every? (fn [event]
-                                     (or (coll? (::form event))
-                                         (standalone-symbol? suffix event)))
-                                   events))
-                  suffix))
-              (catch #?(:clj Throwable :cljs :default) _ nil))))
+            (let [events (parsed-events suffix)]
+              (when (and (vector? events)
+                         (seq events)
+                         (some (comp coll? ::form) events)
+                         (every? (fn [event]
+                                   (or (coll? (::form event))
+                                       (standalone-symbol? suffix event)))
+                                 events))
+                suffix))))
         (keep-indexed (fn [index character]
                         (when (#{\( \[ \{} character) index))
                       line)))
 
+(defn- top-level-failure?
+  "True when everything before the failing line reads completely.
+  A token that fails INSIDE an unclosed form is malformed code, never
+  prose, and the ONE reader answers that question by reading the prefix
+  — no delimiter bookkeeping of our own, and nothing that depends on
+  which keys a reader exception happens to carry."
+  [lines line-number]
+  (vector?
+   (reader/read {:seon.sci.reader/text
+                 (str/join "\n" (subvec lines 0 (dec line-number)))})))
+
 (defn- comment-prose-failure
   "Comment one reader-failing prose line, preserving a valid code suffix."
   [source failure recovered-lines]
-  (let [message (or (ex-message failure) (str failure))
-        failure-data (ex-data failure)
-        line-number (or (:line failure-data) (:row failure-data))
+  (let [message (:seon.error/message failure)
+        line-number (:seon.sci.reader/line (:seon.error/data failure))
         lines (vec (str/split source #"\n" -1))
-        line (when line-number (nth lines (dec line-number) nil))]
+        line (when (and line-number (pos? line-number))
+               (get lines (dec line-number)))]
     (when (and line
                (not (contains? recovered-lines line-number))
                (re-find prose-read-failure message)
-               (nil? (:opened-delimiter failure-data))
-               (nil? (:opened-delimiter-loc failure-data))
+               (top-level-failure? lines line-number)
                (not (code-line? line)))
       (let [suffix (readable-code-suffix line)
             prefix (when suffix
@@ -280,10 +299,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn sources
-  "The ordered form sources in one model reply, or a flat error value.
-  Strips code fences, then reads with SCI's own reader
-  (`sci/source-reader` + `sci/parse-next+string`) against a throwaway
-  `(sci/init {})`, returning each form's EXACT source text in order.
+  "The ordered plan forms in one model reply, or a flat error value.
+  Strips code fences, then reads through THE ONE reader
+  (`seon.sci.reader/read`), returning each form's EXACT source text in
+  order — each carrying `:seon.ns/name`, the namespace that form was
+  written under, whenever the reader attributed one. Attribution is the
+  reader's REPL semantics, not a rule of this namespace: absence after
+  a malformed declaration stays absence, and plan freeze projects
+  whatever arrives here.
 
   Flat `:seon.error` values, never throws:
   - `::unreadable` — unbalanced or malformed input, carrying the
@@ -296,24 +319,20 @@
   [text]
   (loop [source (unfenced text)
          recovered-lines #{}]
-    (let [attempt (try
-                    {:sources (plan-sources source (parsed-events source))}
-                    (catch #?(:clj Throwable :cljs :default) failure
-                      {:failure failure}))]
-      (if-let [failure (:failure attempt)]
-        ; sci's reader refuses #= and unknown tags by itself — there is
-        ; no blocklist here, and there must never be one
-        (let [message (or (ex-message failure) (str failure))]
-          (if (or (str/includes? message "EvalReader")
-                  (str/includes? message "reader function for tag"))
+    (let [events (parsed-events source)]
+      ; the reader refuses #= and unknown tags by itself — there is no
+      ; blocklist here, and there must never be one
+      (if (map? events)
+        (let [message (:seon.error/message events)]
+          (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
             (refused ::refused-tag message {::text text})
             (if-let [{recovered-source :source line :line}
-                     (comment-prose-failure source failure recovered-lines)]
+                     (comment-prose-failure source events recovered-lines)]
               (recur recovered-source (conj recovered-lines line))
               (refused ::unreadable message {::text text}))))
-        (let [sources (:sources attempt)]
-          (if (seq sources)
-            (vec sources)
+        (let [forms (plan-sources source events)]
+          (if (seq forms)
+            (vec forms)
             (refused ::no-forms
                      "The reply carried no Clojure forms or prose notes."
                      {::text text})))))))

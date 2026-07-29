@@ -368,7 +368,7 @@
                              [::id ::id]
                              [::process ::process]
                              [::plan-digest ::plan-digest]
-                             [::sources [:vector [:string {:min 1}]]]]]
+                             [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'plan-call request]])
@@ -385,7 +385,7 @@
                         [::id ::id]
                         [::process ::process]
                         [::plan-digest ::plan-digest]
-                        [::sources [:vector [:string {:min 1}]]]]]
+                        [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [db request]
   (let [{::keys [id plan-digest sources]} request
@@ -393,19 +393,40 @@
         run-eid (:db/id run)]
     (when (some? (::plan-digest run))
       (refuse! `plan-call ::plan-frozen request))
-    (let [forms (into []
+    (let [;; THE PARSE-TIME NAMESPACE IS PROJECTED, NEVER DERIVED HERE.
+          ;; The splitter carries the reader's namespace-in-effect; this
+          ;; freeze upserts that `:seon.ns` by its identity attribute and
+          ;; points the form at it, so "who owns this form" is one join
+          ;; away from the same entity an agent's assignment names. A
+          ;; form the reader could not attribute simply has no ref, and
+          ;; the routing owner falls back to the run's author.
+          namespaces (into []
+                           (comp (keep :seon.ns/name)
+                                 (distinct)
+                                 (map (fn [namespace-name]
+                                        {:db/id (str "namespace:"
+                                                     namespace-name)
+                                         :seon.ns/name namespace-name})))
+                           sources)
+          forms (into []
                       (map-indexed
-                       (fn [ordinal source]
-                         (let [form-id (pr-str [id ordinal])]
-                           {:db/id form-id
-                            :seon.cluster.run.form/id form-id
-                            :seon.cluster.run.form/run run-eid
-                            :seon.cluster.run.form/ordinal ordinal
-                            :seon.cluster.run.form/source source})))
+                       (fn [ordinal form]
+                         (let [form-id (pr-str [id ordinal])
+                               namespace-name (:seon.ns/name form)]
+                           (cond-> {:db/id form-id
+                                    :seon.cluster.run.form/id form-id
+                                    :seon.cluster.run.form/run run-eid
+                                    :seon.cluster.run.form/ordinal ordinal
+                                    :seon.cluster.run.form/source
+                                    (:seon.cluster.run.form/source form)}
+                             namespace-name
+                             (assoc :seon.cluster.run.form/ns
+                                    (str "namespace:" namespace-name))))))
                       sources)]
       (into [[:db/add run-eid ::plan-digest plan-digest]]
             cat
-            [forms
+            [namespaces
+             forms
              (map (fn [form]
                     [:db/add run-eid ::forms (:db/id form)])
                   forms)]))))

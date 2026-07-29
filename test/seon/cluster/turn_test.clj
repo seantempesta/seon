@@ -1127,7 +1127,9 @@
                                   :seon.cluster.run/plan-digest
                                   (apply str (repeat 64 "b"))
                                   :seon.cluster.run/sources
-                                  ["(+ 1 2)" "(my.run/complete \"3\")"]}))
+                                  [{:seon.cluster.run.form/source "(+ 1 2)"}
+                                   {:seon.cluster.run.form/source
+                                    "(my.run/complete \"3\")"}]}))
         (d/transact connection
                     (run/receipt-start-tx {:seon.cluster.run/id "run-p1"
                                            :seon.cluster.eval/ordinal 0

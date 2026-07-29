@@ -3,5 +3,13 @@
  ; agent wrote (comments and all), and the evaluator parses inside its
  ; own armed context — parsing twice on two readers is how a `#=` scar
  ; comes back.
- :seon.cluster.reply/sources [:vector [:string {:min 1}]]
+ ; One plan form: the exact source the agent wrote, plus the namespace
+ ; that form was written under when THE ONE READER attributed one.
+ ; Absence is a real answer (a malformed declaration yields absence
+ ; rather than inheritance), and it routes a red form to its author.
+ :seon.cluster.reply/form
+ [:map {:closed true}
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.ns/name {:optional true} :seon.ns/name]]
+ :seon.cluster.reply/sources [:vector :seon.cluster.reply/form]
  :seon.cluster.reply/text :string}
