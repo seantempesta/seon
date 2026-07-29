@@ -70,7 +70,7 @@
                  ;; nothing is armed: this is not an eval, and
                  ;; admission's bounds are the whole guard here
                  :seon.sci.admit/interrupt-fn (fn [])
-                 :seon.config/on-core-error :log})))
+                 :seon.config/on-core-error :record})))
 
 (defn- contribution
   "One block's validated AI contribution record, or nil for omission.

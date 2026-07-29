@@ -962,7 +962,7 @@
                         ;; nothing is armed: this is not an eval, and
                         ;; admission's bounds are the whole guard here
                         :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.config/on-core-error :log})]
+                        :seon.config/on-core-error :record})]
       [:div {:class "seon-data-panel"}
        (letfn [(panel [node]
                  (cond
@@ -1034,7 +1034,7 @@
           (admit/admit {:seon.sci.admit/value value
                         :seon.sci.admit/caps caps
                         :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.config/on-core-error :log})]
+                        :seon.config/on-core-error :record})]
       (str (pr-str value)
            ;; the honest signal, kept: a reader must never have to guess
            ;; whether an elision marker was the value's own data
