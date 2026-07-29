@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent-runtime, provider, database]
 ---
@@ -46,14 +46,19 @@ Raw reproduction evidence is under
 The ordinary HTTP response boundary in `seon.ai` and the provider-attempt
 transaction in `seon.cluster.loop`.
 
-## Acceptance
+## Resolution
 
-- A real non-2xx JDK response commits one attempt and one referenced error
-  fact with the status value intact.
-- The conversion happens once at the HTTP boundary; transaction consumers do
-  not each coerce it.
-- One recurring test uses the JDK HTTP client against a real loopback server,
-  because a hand-built Clojure numeric literal is already a `Long` and cannot
-  reproduce this class.
-- The run closes with the ordinary provider-error value rather than a
-  secondary transaction refusal or an error loop.
+Resolved by `ff9dde36e`. `seon.ai/send-request` converts the JDK
+`HttpResponse.statusCode()` value with `long` exactly once as it crosses the
+HTTP boundary. The provider-error value and every downstream transaction
+therefore carry the `java.lang.Long` required by Datahike's
+`:db.type/long`.
+
+## Proof
+
+The recurring `a-real-jdk-provider-status-commits-with-its-attempt` test runs
+the JDK client against a real loopback 502 response, asserts the normalized
+status is a `Long`, then invokes the production attempt recorder against a
+canonical in-memory database. The attempt and its referenced error fact commit
+together with status 502 intact. The complete `bin/test` gate passed 480 tests
+and 2,039 assertions with zero failures or errors on 2026-07-29.

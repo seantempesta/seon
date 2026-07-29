@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent-runtime, provider, database]
 ---
@@ -51,14 +51,23 @@ attribute.
 provider-family capability expressed as data, not an Ollama-specific adapter
 arm.
 
-## Acceptance
+## Resolution
 
-- A database-owned provider descriptor can declare a positive maximum output
-  and the compatible request transmits it as `max_tokens`.
-- Finish reason `length` with no visible assistant content returns a specific
-  flat error value rather than the generic empty-stream error.
-- A supported thinking control is optional and data-driven; absence preserves
-  provider/model defaults.
-- A real loopback compatible-server test captures the exact request document
-  and proves the maximum survives descriptor resolution.
-- The Ollama project row can carry `max_tokens=8192` without a load-only proxy.
+Resolved by `335764cd2` plus the clean-process population repair
+`ca7a5e458`. The positive `:seon.config.ai/max-tokens` dial is admitted by
+the closed manifest, installed on the config entity, required by the effective
+configuration, projected through `seon.ai/targets`, required by descriptor and
+request schemas, and emitted as the compatible wire field `max_tokens`.
+
+The shipped value is 8,192, with the real Qwen calibration as its provenance.
+The owner narrowed this blocker to bounding thinking through the one request
+chain; reasoning-level selection and a separate `length` classification were
+not part of the closure and no second provider mechanism was added.
+
+## Proof
+
+`seon.ai-test` asserts the shipped descriptor carries 8,192 and
+`request-body` emits `"max_tokens" 8192`. `seon.config-test` proves the dial is
+admitted, installable, defaulted, and valid in a clean process. The complete
+`bin/test` gate passed 480 tests and 2,039 assertions with zero failures or
+errors on 2026-07-29.

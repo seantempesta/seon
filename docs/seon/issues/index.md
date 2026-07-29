@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (15)
+## Blocker (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -20,8 +20,6 @@ See `README.md` for the convention.
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
 | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | blocker | general |
-| [Fresh model requests cannot express an output budget](fresh-model-requests-cannot-express-an-output-budget.md) | blocker | Core |
-| [HTTP status `Integer` refuses a provider-error attempt](http-status-integer-refuses-provider-error-attempt.md) | blocker | Core |
 | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | blocker | Core |
 | [Keep evaluation failures inside total admission](sci-eval-failure-bypasses-total-admission.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
@@ -30,10 +28,11 @@ See `README.md` for the convention.
 | [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (18)
+## Friction (19)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | friction | general |
 | [A failed ephemeral bind NPEs instead of saying what happened](web-start-npe-when-an-ephemeral-bind-fails.md) | friction | UI |
 | [A frozen disposition can close a run against facts newer than the basis it was written at](a-frozen-disposition-can-close-against-newer-facts.md) | friction | general |
 | [A nil query input matches anything, so prompt cannot refuse a nil trigger](a-nil-query-input-matches-anything-so-prompt-cannot-refuse.md) | friction | Core |
