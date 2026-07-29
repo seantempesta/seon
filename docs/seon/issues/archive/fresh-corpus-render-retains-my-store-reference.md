@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, rendering, program-graph]
 ---
@@ -25,3 +25,7 @@ A scratch cluster initialized from current source renders no `my.store`
 namespace or function references. Existing clusters either reset to current
 initialization pages or omit rows whose namespace no longer exists in the
 current program graph.
+
+Superseded by the 2026-07-27 reset-only cluster ruling: current `src/` has no
+`my.store` program row, and clusters reset to current initialization pages
+instead of migrating stale program-graph facts.

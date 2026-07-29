@@ -37,3 +37,10 @@ database entity map, shipped defaults, descriptor/request schemas,
 provider assembly, wire projection, and the honest-population expected
 set. The derivation remains deliberately out of scope for that blocker
 repair.
+
+## Triage 2026-07-29
+
+**PRESSING — relaunching config-authority fix lane.** Current source still
+requires a dial to be registered separately for schema admission, database
+installation, and shipped defaults; the owner is the config/schema
+reconciliation rung.

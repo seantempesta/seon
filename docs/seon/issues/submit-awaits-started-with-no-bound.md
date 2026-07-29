@@ -34,3 +34,10 @@ A submission queued behind fully-wedged workers ends as a flat
 `:seon.error` value (or a `::time-limit` outcome) within a bound, with
 a regression in `test/seon/flow_test.clj`; no ordinary backpressure
 wait is converted into a spurious timeout.
+
+## Triage 2026-07-29
+
+**PRESSING — fold into [[agent-turns-bypass-the-bounded-compute-door]].** This
+note and [[flow-submit-waits-forever-before-time-limit]] name the same startup
+wait in `submit!!`; preserve both evidence trails during the one fix wave, then
+close them together.

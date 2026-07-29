@@ -34,3 +34,9 @@ declared time limit settles it without a sleep or an unbounded wait.
 - **OPEN-CURRENT.** `src/seon/flow.clj:387-407` still performs the unbounded
   `@started` dereference before the timed result dereference, so the declared
   time limit does not cover executor-queue delay.
+
+## Triage 2026-07-29
+
+**PRESSING — fold into [[agent-turns-bypass-the-bounded-compute-door]].** This
+is the same bounded-compute fix wave: production agent eval cannot safely adopt
+`submit!!` while submission can wait forever before its declared time limit.

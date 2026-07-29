@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, agent, tests]
 ---
@@ -62,3 +62,6 @@ convergence rule).
 - A regression creates an agent through the production path and asserts its
   prompt carries the identity, execution, peers and namespace contributions —
   replacing the pilot test's hand-seeding as the proof of record.
+
+Resolved by `df160158f`: `seon.cluster.agent/creation-tx` now installs the
+ordinary-agent block set in the same transaction that creates the agent.

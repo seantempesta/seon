@@ -63,3 +63,11 @@ than configured compute capacity and proves:
 The dead launcher path is deleted or becomes the production owner, its
 duplicate issue notes are reconciled, and the agent namespace docstring
 describes the observed call path.
+
+## Triage 2026-07-29
+
+**PRESSING — confirmed spine blocker.** The bounded-compute fix wave also owns
+[[flow-submit-waits-forever-before-time-limit]] and
+[[submit-awaits-started-with-no-bound]]: both are startup-boundary failures in
+the currently unused launcher that must be corrected as it becomes the
+production agent-eval path.

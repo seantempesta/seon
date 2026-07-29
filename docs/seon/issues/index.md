@@ -6,11 +6,31 @@ tags: [orchestrator, issue, index]
 
 # Open Issues — Index
 
-GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
+Owner-requested triage is in progress in sub-five-minute committed slices.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
-See `README.md` for the convention.
+See `README.md` for the convention. The severity projection below remains the
+complete open inventory while each row receives current-tree verification.
 
-## Blocker (13)
+## Verified triage — slice 1
+
+| Rank | Classification | Issue | Why now | Owner / rung |
+|------|----------------|-------|---------|--------------|
+| 1 | PRESSING | [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | Confirmed spine blocker: production turns still evaluate SCI inline on an `:io` proc. | Agent-flow bounded-compute fix wave |
+| 2 | PRESSING | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | `submit!!` still waits on `@started` before its timed result wait; this must fold into rank 1. | Same bounded-compute fix wave |
+| 3 | PRESSING | [`seon.flow/submit!!` awaits `started` with no bound](submit-awaits-started-with-no-bound.md) | Duplicate evidence for rank 2's startup wait; preserve until the shared fix closes both. | Same bounded-compute fix wave |
+| 4 | PRESSING | ["A dial exists" has no single authority](a-dial-exists-has-no-single-authority.md) | Config admission, database installation, and defaults still require separate registration edits; a fix lane is relaunching. | Config/schema reconciliation rung |
+
+Thirty-five open notes remain to be verified against current source. Their
+severity grouping below is inventory, not a completed triage classification.
+
+## Closed by current-tree verification — slice 1
+
+| Classification | Issue | What dissolved it |
+|----------------|-------|-------------------|
+| DISSOLVED | [An ordinary agent's block set has no production caller](archive/an-ordinary-agents-block-set-has-no-production-caller.md) | `df160158f` made `creation-tx` install the block set with the agent. |
+| DISSOLVED | [Fresh-corpus render retains a removed my.store reference](archive/fresh-corpus-render-retains-my-store-reference.md) | The reset-only cluster ruling discards stale program rows; current source has no `my.store` row. |
+
+## Blocker (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -26,9 +46,10 @@ See `README.md` for the convention.
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
+| [Route agent evals through the bounded compute owner](agent-turns-bypass-the-bounded-compute-door.md) | blocker | agent |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (21)
+## Friction (20)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -40,7 +61,6 @@ See `README.md` for the convention.
 | [A slow-tab proof can count a late initial derivation](a-slow-tab-proof-can-count-a-late-initial-derivation.md) | friction | general |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [An agent can be assigned its own red form, and the loop delivers it](an-agent-can-be-assigned-its-own-red-form.md) | friction | general |
-| [An ordinary agent's block set has no production caller](an-ordinary-agents-block-set-has-no-production-caller.md) | friction | agent |
 | [Boot cannot select a config manifest, so a cluster cannot choose its provider](boot-cannot-select-a-config-manifest.md) | friction | general |
 | [Contracts that require a LIVE connection are called with a released one](instrumentation-surfaces-released-connection-contracts.md) | friction | Core |
 | [Flow monitor test preselects an unreserved port](flow-monitor-test-preselects-an-unreserved-port.md) | friction | Core |
@@ -54,7 +74,7 @@ See `README.md` for the convention.
 | [`seon.flow/submit!!` awaits `started` with no bound](submit-awaits-started-with-no-bound.md) | friction | Core |
 | [stop! may leave the prepl server name registered](stop-may-leave-the-prepl-server-name-registered.md) | friction | general |
 
-## Cleanup (4)
+## Cleanup (5)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -62,3 +82,4 @@ See `README.md` for the convention.
 | [Give (pid, start-instant) liveness one owner](process-liveness-check-has-no-single-owner.md) | cleanup | general |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Remove the stale program-graph owner rename](architecture-program-graph-owner-rename-is-stale.md) | cleanup | Core |
+| [Replace contract-scaffold prose with current namespace contracts](implemented-namespaces-still-instruct-a-stub-filling-lane.md) | cleanup | general |
