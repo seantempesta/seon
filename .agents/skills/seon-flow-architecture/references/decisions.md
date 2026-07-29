@@ -115,7 +115,7 @@ presence in the armed map. There is no `:type`, `:kind`, active-set row, or
 status flag.
 
 Current derivation is explicit in the routing map and armer at
-`src/seon/cluster/agent.clj:276-326,426-475`. The data-model ruling is maintained in
+`src/seon/cluster/agent.clj:276-326,441-490`. The data-model ruling is maintained in
 `docs/seon/architecture/data-model.md`.
 
 Plan ruling: presence-not-kinds decision 2 at

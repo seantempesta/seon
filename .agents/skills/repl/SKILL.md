@@ -1,6 +1,6 @@
 ---
 name: repl
-description: "How fresh Seon splits a model/agent reply into ordered plan-form sources. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, source fidelity, or namespace attribution through seon.cluster.reply and seon.sci.reader. Do not load it merely for a generic JVM REPL problem: io-prepl/MCP eval_clj and raw clojure -M:dev use ordinary Clojure read/eval semantics, which this skill distinguishes but does not replace."
+description: "Distinguish and probe Seon's agent-reply reader, a live cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
 ---
 
 # REPL — distinguish the three surfaces
@@ -11,7 +11,7 @@ Three surfaces share Clojure syntax but not a reader contract:
   source strings. This is what this skill is mostly about. Fresh Seon uses
   `seon.cluster.reply/sources` over `seon.sci.reader/read`; the retired
   `src-old/seon/repl/parse.cljc` repair system is not on this path
-  (`src/seon/cluster/reply.cljc:1-48,307-354`).
+  (`src/seon/cluster/reply.cljc:1-48,306-348`).
 - **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
   JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
   structured envelope; a bare value evaluates normally, and the agent-reply
@@ -36,17 +36,18 @@ tracks the namespace in effect while reading
 
 - Structured top-level lists, vectors, maps, and sets are plan forms.
 - A bare symbol is a plan form only when it occupies its own source line and
-  the reply also contains structured code.
+  the reply also contains structured code. This includes a trailing standalone
+  symbol that a human might have intended as prose.
 - Other text becomes single-`;` source comments attached to the next form;
   trailing or pure prose becomes a comment-only source.
 - Markdown fence lines are stripped before reading because backticks otherwise
   read as plausible symbols.
 
 Those classifications and the exact-source return contract are current at
-`src/seon/cluster/reply.cljc:20-48,143-240,307-354`. There is no delimiter
+`src/seon/cluster/reply.cljc:20-48,143-240,306-348`. There is no delimiter
 auto-repair in this path. Unbalanced or malformed code returns
 `:seon.cluster.reply/unreadable`; an empty reply returns
-`:seon.cluster.reply/no-forms` (`src/seon/cluster/reply.cljc:307-354`).
+`:seon.cluster.reply/no-forms` (`src/seon/cluster/reply.cljc:306-348`).
 
 Practical rule: write code as ordinary balanced Clojure. Use single-`;`
 comments for prose you intentionally want preserved beside a form, and do not
@@ -103,7 +104,7 @@ not change an already-running JVM.
 
 | Symptom | Surface and next move |
 |---|---|
-| Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` on the exact text. |
+| Reply became prose or the wrong plan forms | Agent reply: call `(seon.cluster.reply/sources exact-text 'user)` with an explicit namespace symbol. |
 | `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |
 | A private function is unresolved | JVM probe: invoke `#'fully.qualified.ns/var`. |

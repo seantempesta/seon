@@ -47,9 +47,9 @@ condition of transaction delivery.
 
 ### Never park
 
-The recorded probe installed a listener that slept for 800 ms. The triggering
-transaction took 804 ms. Listener work therefore remains on the transaction's
-critical path.
+Datahike invokes listeners before delivering the transaction report
+(`reference-code/datahike/src/datahike/writer.cljc:384-386`). Listener work
+therefore remains on the transaction's critical path.
 
 Use non-blocking `offer!` into already-buffered flow inputs. Do not use
 blocking channel operations, database queries, rendering, logging transports,

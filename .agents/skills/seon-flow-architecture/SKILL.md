@@ -92,13 +92,17 @@ When a scratch cluster fails partway up the tower, read
 - inspect the carried `:seon.boot/instance`; absent keys identify the last
   published layer (`src/seon/cluster.clj:845-924,926-1023`);
 - inspect the advertisement and prove both the named cluster and any detached
-  operator JVM are gone with `bin/seon status`; `bin/seon` and
-  `bin/seon-fresh` now enter the same fresh operator
-  (`bin/seon:4-7`; `bin/seon-fresh:5-8`);
+  operator JVM are gone with `bin/seon status`; `bin/seon-fresh status` is the
+  compatibility alias and reaches the same fresh operator
+  (`bin/seon:4-7`; `bin/seon-fresh:5-6`);
 - remember that `bin/seon start <name>` adds to an already-running JVM when
   one is advertised, so its Var roots may predate the source edit
-  (`script/seon/fresh_operator.clj:495-522`); use a lane-owned operator root
-  with no advertisements to force a fresh JVM from current source; and
+  (`script/seon/fresh_operator.clj:495-522`). A lane-owned operator root keeps
+  files separate but is **not currently an isolation guarantee**: JVM
+  discovery can select a process from another root
+  (`docs/seon/issues/operator-start-discovers-jvms-from-other-roots.md`).
+  Confirm the selected pid and store path; stop at the boundary if either is
+  foreign; and
 - if boot is blocked by shared-tree churn but the subject is a pure
   transformation, fall back to a separate `clojure -M:dev` JVM with immutable
   in-memory inputs and make no live-tower claim.
@@ -110,10 +114,12 @@ Use `seon.flow/var-process` (`src/seon/flow.clj:83-115`). Two things matter:
 **Reference the step-fn as a var (`#'f`), never a value.** This is what
 makes live update work: re-evaluating a `defn` against the running system
 changes proc behavior immediately, zero restart. Topology changes (procs,
-conns, buffers) instead rebuild the graph — stop → `create-flow` → start,
-measured 0.343 ms median for a three-proc
-create/start/resume/ping-ready/stop round trip in the documented JDK 26 probe
-— which is safe only when every channel's contents are losable by construction
+conns, buffers) instead rebuild the graph — stop → `create-flow` → start. A
+three-proc create/start/resume/ping-ready/stop API round trip measured 0.343 ms
+median after five warm-ups over 50 samples on OpenJDK 26.0.1 with 18 available
+processors. Ping proved all three procs responsive; `stop` returning was not
+an exit-join proof. Rebuild is safe only when every channel's contents are
+losable by construction
 (`docs/prds/sci-execution-runtime/research/flow-dynamic-update-2026-07-27.md`).
 
 **Declare the workload explicitly.** `var-process` **refuses a missing or
@@ -176,9 +182,11 @@ belongs in the database.
 ## Agent graphs
 
 Every agent is its own flow graph, created with the agent from one
-blueprint, parked between episodes (two `:io` procs; the measured baseline is
-~8.5 KB and one virtual thread per parked proc) and kicked off by the messages
-it receives (`src/seon/cluster/agent.clj:246-270`):
+blueprint, parked between episodes (two `:io` procs), and kicked off by the
+messages it receives (`src/seon/cluster/agent.clj:246-270`). The ~8.5 KB and
+one-virtual-thread baseline was the steady 1,000 one-proc graph case on an
+18-core Mac, JDK 26, `-Xmx512m`; it is not a production-agent heap
+measurement:
 
 - **`::mailbox`** (`:io`) — total and instant: forwards a payload-free
   wake; it cannot recurse because the pass derives from facts.
@@ -193,9 +201,11 @@ episode's remaining turns.
 
 **[TARGET] `::renders`** — a third proc owning every derived view of the
 agent's world (html blocks *and* its own AI context pieces), memoized in
-proc state with byte digests. Falsification passed
-(`agent-flow-render-falsification-2026-07-29.md`: +8.9 KB/agent, zero new
-platform threads, 12 registrations in one measured pass), but it also exposed
+proc state with byte digests. A 100-agent in-memory comparison on JDK 26 with
+`-Xmx512m -XX:+UseG1GC`, two discarded warm-ups, three forced GCs, and a
+400 ms park measured +7.3 to +9.2 KB/agent and zero new platform threads; its
+one measured pass used 12 registrations
+(`agent-flow-render-falsification-2026-07-29.md`). It also exposed
 unresolved interest-narrowness and unbounded-memory seams. The proc and its
 contract are not authored: the current graph definition contains only
 `::mailbox` and `::turn` (`src/seon/cluster/agent.clj:246-270`). Production
@@ -205,12 +215,11 @@ delivery stays per-cluster.
 
 **Wakes are event-driven, never polled.** One `listen!` per cluster routes
 committed transactions to agent and render inputs
-(`src/seon/cluster/wake.cljc:156-217`). Message/agent creation routing is
+(`src/seon/cluster/wake.cljc:146-228`). Message/agent creation routing is
 datom-selective; the current render input receives every transaction report.
 Two rules that cost real debugging to learn (documented at
 `src/seon/cluster/wake.cljc:6-63`): the listener **must never throw or park**
-(Datahike invokes it before transaction delivery; an 800 ms listener made the
-transaction take 804 ms), and re-asserting an identical value produces no
+(Datahike invokes it before transaction delivery), and re-asserting an identical value produces no
 datom and therefore no routed wake.
 
 **Faults ride flow's error channel** into `fault-committer-proc`
@@ -226,9 +235,10 @@ the recorder (`src/seon/cluster.clj:708-747`).
 current JVM renderer emits complete page snapshots, mults them, and computes
 per-tab changed blocks (`src/seon/render/web.clj:229-285,530-608`).
 **[TARGET]** Revisioned packages/keyframes would serialize shared bytes once.
-The falsifier measured 0.872–1.171 ms p95 for once+mult at 50 tabs versus
-31.783–42.479 ms p50 for per-tab serialization, and 1.2–1.5 ms p95 for a
-250-event Chrome block morph
+Two runs on OpenJDK 26.0.1/18 processors and headless Chrome 150.0.7871.187
+with Datastar 1.0.0-RC.7 measured 0.872–1.171 ms p95 for once+mult at 50 tabs
+versus 31.783–42.479 ms p50 for per-tab serialization, and 1.2–1.5 ms p95 for
+a 250-event Chrome block morph; the browser measurement excludes transport
 (`render-pipeline-design-2026-07-29.md`). Our
 http-kit fork adds per-channel pending-byte state and a drain-or-close
 completion so the `:io` writer **parks** on real backpressure — stock

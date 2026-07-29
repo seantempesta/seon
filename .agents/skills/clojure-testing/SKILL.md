@@ -26,10 +26,11 @@ bin/test                        # every *_test.clj / *_test.cljc under test/
 bin/test seon.cluster.run-test  # exactly these namespaces
 ```
 
-Source classpath, in-memory Datahike, no artifact and no operator — seconds per
-cycle, and the exit code is the verdict. Use the selection while iterating and
-the full run at the natural unit boundary. There is no separate build step to
-wait on and no live process to contend with.
+Source classpath, no artifact and no operator: the exit code is the verdict.
+Use one explicit multi-namespace selection while iterating and the full run at
+the natural unit boundary. `bin/test` discovers files, converts paths to
+namespaces, requires the selected namespaces, and calls one `run-tests`
+invocation in one JVM (`bin/test:1-89`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A
@@ -68,29 +69,23 @@ Run the root test to prove Seon pins the behavior it depends on; run the fork
 focus to prove the implementation in its owning project. One does not replace
 the other.
 
-Two honesty facts about the gate itself:
+One honesty fact about the gate itself:
 
 - **A namespace with zero `deftest`s reports green.** `run-tests` returns
   `0 fail 0 error` and the exit code is 0. Green is not evidence that anything
   ran — check the test count.
-- **Expected refusals print full Datahike stack traces.** A refusal aborts the
-  transaction by throwing, and `datahike.writer` logs the whole
-  `:datahike/write-error` payload: `bin/test seon.cluster.run-test` emits ~15,700
-  lines for six tests. A stack trace in the log is not a failure; the
-  `Ran N tests` line and the exit code are the verdict.
 
-Cost, measured 2026-07-27: the JVM starts in 0.24 s but `(require
-'datahike.api)` costs ~6.9 s, and that cost is paid **per JVM, not per suite**
-(five suites: 69 s separately, 35.6 s together). So run a selection as ONE
-`bin/test ns-a ns-b` invocation, never one process per namespace. A test that
-spawns a child JVM re-pays the full ~7 s.
+Run a selection as one `bin/test ns-a ns-b` invocation. The runner accepts all
+explicit namespace arguments before starting its single JVM (`bin/test:40-89`);
+separate invocations are separate JVMs.
 
 ## Fresh in-memory Datahike per test
 
 Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-ancestor!` to install
 the current `resources/seon/schema/*.edn` population and program rows, and
-releases in a `finally`. There is no ambient connection.
+releases and deletes it in a `finally`. There is no ambient connection
+(`test/seon/test_support.clj:151-183`).
 
 ```clojure
 (ns seon.cluster.run-test
@@ -292,10 +287,10 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
 
 Live falsifiers — real sockets, real files, real child JVMs, real SIGKILL —
 belong IN the suite, discovered by the runner: a proof that ran once in a lane
-counts as not covered. They are expensive (~7 s per child JVM), so write one
-per interaction class, never one per scenario. Wait on an observed event (a
-ready file, a latch); a clock is only the backstop for a foreign process, and
-its firing is a bug report (`test/seon/cluster/store_test.clj:196-207`).
+counts as not covered. Write one per interaction class, never one per scenario.
+Wait on an observed event (a ready file, a latch); a clock is only the backstop
+for a foreign process, and its firing is a bug report
+(`test/seon/cluster/store_test.clj:196-207`).
 
 Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`

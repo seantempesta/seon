@@ -26,8 +26,10 @@ add a `.cljs`.
 **Don't guess a library's behavior from training memory — read the vendored
 source in `reference-code/` and test in the REPL first.** Every dep that
 matters (datahike, malli, core.async + flow, sci) is checked out under
-`reference-code/`, grep-able, the same version we run; `clojure -M:test -e "…"`
-gives you a JVM with in-memory Datahike in seconds. The default
+`reference-code/`, grep-able, the same version we run. Use `clojure -M:dev` for
+a load-only JVM probe; create an explicit `:memory` database or use
+`seon.test-support/with-database` when database behavior is the subject
+(`test/seon/test_support.clj:151-183`). The default
 failure mode is writing confident Clojure in a place/mutable mindset while
 *guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
 wrong. Ground the concept→file first, then write. A 30-second REPL experiment
@@ -44,24 +46,24 @@ transacting an uninstalled attribute throws.
 maps under `resources/seon/schema/`, loaded by `seon.schema.edn/load!` as one
 validated population. Shipped Clojure does not author those schemas with
 load-time `schema/register!`. Runtime agent registrations still pass through
-the same admission gate.
+the same admission gate (`src/seon/schema/edn.clj:195-240,317-348`).
 
 **One config authority:** declare a config attribute once in that EDN
 population. `seon.schema.edn/derive-config-forms` derives the manifest,
 effective, and database-entity composites from the leaf registrations.
 `config/default.edn` supplies one complete shipped decision map; never maintain
-a second dial roster.
+a second dial roster (`src/seon/schema/edn.clj:87-111`;
+`src/seon/config.cljc:137-229`).
 
 **Selective corpus admission:** only durable declarations become program-graph
 rows — contracted functions (`defn` with `:malli/schema`), schema registrations,
 and tests. Arbitrary evals, scratch defs, and atoms are process-local. Receipts
 retain history but never reconstruct code. `src/seon/fn.clj` is the computed
-selection.
+selection (`src/seon/fn.clj:11-70`).
 
 ## The reflexes, and what to write instead
 
-Each pair is WRONG instinct → idiomatic Seon. The skill is the trigger; the
-grounding doc has the file:line for every claim.
+Each pair is WRONG instinct → idiomatic Seon.
 
 ### Entity = attributes + connections. There are NO kinds.
 
@@ -105,7 +107,8 @@ The `:malli/schema` is the contract of record: tests check it, generators
 derive from it, review reads it, and `seon.instrument/apply!` instruments every
 loaded public var carrying one in development. The selection is computed —
 public + contracted — with no namespace allow list. Re-run `apply!` after
-re-evaluating a defn because hot reload replaces the wrapper. `:pre`/`:post`
+re-evaluating a defn because hot reload replaces the wrapper
+(`src/seon/instrument.clj:180-215`). `:pre`/`:post`
 gets none of this — not
 discoverable, not generatively testable, not a database fact. Two sanctioned
 argument shapes: map-in/map-out
@@ -159,10 +162,12 @@ may still throw into the core fault path.
 The system is self-healing because nothing is stored that needs clearing — when
 the underlying problem is fixed the query returns empty and the surface vanishes.
 No acknowledgement state, no stored "last error", no separate notification
-system. Caching is a *perf* escape hatch (memoize an expensive derivation), not a
-reason to bifurcate into "stored fast path + derived slow path" — `:memory` reads
-are sub-millisecond; measure before caching. Cross-agent coordination falls out
-for free: a section that doesn't filter by agent-id sees the whole cluster.
+system. Caching is a *perf* escape hatch for a measured expensive derivation,
+not a reason to bifurcate into "stored fast path + derived slow path". Do not
+`memoize` on a Datahike database value: its equality implementation compares
+the EAVT index (`reference-code/datahike/src/datahike/db.cljc:703-715`).
+Cross-agent coordination falls out naturally: a section that does not filter
+by agent-id sees the whole cluster.
 
 The same reflex in temporal form: **storing who/when-wrote-this on a domain
 entity** (`created-by`, `created-at`, `source-turn`) — the transaction entity
@@ -279,14 +284,14 @@ only what function code actually calls:
 
 `seon.schema.edn/load!` reads the classpath directory. File boundaries are
 editorial only: duplicate keys refuse, every reference must resolve, and
-predicate schemas require registered predicates plus honest generators.
+predicate schemas require registered predicates plus honest generators
+(`src/seon/schema/edn.clj:195-240,317-348`).
 
 ### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 
 When you "write a test", put it in a `<ns>-test` namespace under `test/`,
 mirroring the source path, using `clojure.test/deftest` + `is` — NOT a pile of
-inline `(assert …)` calls (one drive produced 494 inline asserts for one "write
-a test" request). A deftest is discoverable by `bin/test`, re-runnable, and
+inline `(assert …)` calls. A deftest is discoverable by `bin/test`, re-runnable, and
 reports pass/fail as data. A test the gate cannot discover is NOT coverage:
 
 ```clojure

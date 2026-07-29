@@ -131,8 +131,10 @@ Java channel/write-state implementation under `reference-code/http-kit/`.
 
 ## Measured frame budgets
 
-The July 29 render falsifier measured the following on its recorded host and
-Chrome build:
+The July 29 render falsifier ran the JVM and browser extensions twice on
+OpenJDK 26.0.1 with 18 available processors and headless Chrome
+150.0.7871.187 using Datastar 1.0.0-RC.7. Browser morph timing excluded
+transport and ended at the `MutationObserver` microtask. It measured:
 
 | probe | p95 |
 |---|---:|

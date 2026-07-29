@@ -63,10 +63,15 @@ For the shared default root, use:
 bin/seon status
 ```
 
-`bin/seon` and `bin/seon-fresh` now both enter `seon.fresh-operator`; the
-former broken `seon.dev.cli` status path was removed in `c073093e2`
-(`bin/seon:4-7`; `bin/seon-fresh:5-8`). `bin/seon-fresh status` is therefore
-an equivalent explicit entry, not the only working one.
+`bin/seon` enters `seon.fresh-operator`; `bin/seon-fresh` is a compatibility
+alias to it (`bin/seon:4-7`; `bin/seon-fresh:5-6`). Both status commands were
+executed after the operator repair and produced the same rows.
+
+An alternate operator root does not currently guarantee JVM isolation.
+`start` discovery can select a live JVM from a different root, and a partial
+start can then be unaddressable. Verify the selected pid and store path before
+using the result; stop rather than touching a foreign process or cluster
+(`docs/seon/issues/operator-start-discovers-jvms-from-other-roots.md`).
 
 The fresh status path reads every `prepl.edn`, checks `(pid, start-instant)`
 liveness, and separately reports detached operator JVMs with no live

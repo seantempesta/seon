@@ -39,15 +39,18 @@ Read `references/fork-maintenance.md` before editing the fork. It maps:
 Those mechanics are grounded in the current fork at `19f5cdd9` and its Seon
 pin `4dc963e2e`; do not derive them from upstream memory.
 
-## The runtime: co-located, synchronous, one writer per store
+## The runtime: co-located, synchronous, one connection per branch
 
 Everything runs in the **cluster JVM**, which embeds Datahike. There is no wire
 on the database path.
 
-- **One live write connection per store.** That invariant is structural: two
-  JVMs writing one store both won the same epoch CAS and 40 of 40 returned
-  commits vanished. One process may host many stores; a store may not have two
-  writers.
+- **One process holds one physical store lock and may open many branches.**
+  Each cluster is a distinct branch in that store
+  (`src/seon/cluster/registry.clj:1-38`;
+  `src/seon/cluster/store.clj:279-385`). A self-writer connection identity is
+  `[store-id branch]`, and Seon refuses a second open connection to the same
+  branch (`reference-code/datahike/src/datahike/store.cljc:50-61`;
+  `src/seon/cluster/store.clj:336-385`).
 - **Reads are synchronous and local.** `d/q` / `d/pull` / `d/entity` resolve
   against an immutable database value — a pointer, not a fetch. Compose reads
   in straight-line code.

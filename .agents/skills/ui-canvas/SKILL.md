@@ -1,6 +1,6 @@
 ---
 name: ui-canvas
-description: "Assess or design Seon's agent-controlled canvas after confirming its current status. Load this whenever a task asks for my.canvas, dashboards, tables, charts, buttons, inputs, toggles, or forms: the old effectful API is deleted and the fresh canvas/action surface is tabled, so this skill prevents inventing a usable API and points to the required target design."
+description: "Assess or design Seon's agent-controlled canvas after confirming its current status. Load for my.canvas or for an agent-authored dashboard, table, chart, button, input, toggle, or form that would require a generalized canvas/control API. Do not load for the existing JVM web UI's message form, routes, HTML, or Datastar mechanics; datastar-web-ui owns those. The old effectful canvas API is deleted and the fresh canvas/action surface is tabled."
 ---
 
 # Agent canvas — tabled target

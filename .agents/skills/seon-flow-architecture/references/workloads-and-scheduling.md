@@ -112,29 +112,25 @@ not yet recover CPU capacity from parked capability I/O.
 The source-grounded probe used:
 
 - compute parallelism `C = 18`;
-- mixed workload count `M = 72`;
-- total tasks `L = 100`; and
+- `M = 72` tasks;
+- each task blocked for `L = 100 ms`; and
 - JDK 26.0.1 on the recorded host.
 
-Its elapsed results were:
-
-| strategy | elapsed |
-|---|---:|
-| fixed platform executor | 417.151 ms |
-| virtual executor, lifetime gate | 425.937 ms |
-| virtual executor, CPU-segment gate | 102.672 ms |
-| unbounded virtual executor | 105.822 ms |
-
-Read the harness, repetitions, and interpretation in
+The fixed platform pool and virtual threads holding a lifetime semaphore both
+ran in four waves; releasing the CPU permit for the blocking segment matched
+the one-wave unbounded virtual-thread case. Read the probe output and
+interpretation in
 `docs/prds/sci-execution-runtime/research/workload-scheduling-truth-2026-07-29.md`.
 The result does not say “virtual threads make work faster.” It shows that a
 lifetime-wide logical gate preserves the same bottleneck as fixed workers when
 most admitted work is parked. Releasing the CPU permit at an explicit blocking
 boundary recovered the expected overlap in that probe.
 
-The flow-mechanics probe separately measured about 8.5 KB and one virtual
-thread per parked proc, 8.3 MB for 1,000 one-proc graphs, and 21.6 ms to start
-those graphs. Use the exact conditions and caveats in
+The flow-mechanics probe ran each section in a fresh JVM on an 18-core Mac,
+JDK 26, `-Xmx512m`; its idle section used one-proc graphs sharing the default
+executors. It measured about 8.5 KB and one virtual thread per parked proc,
+8.3 MB for 1,000 graphs, and 21.6 ms to start those graphs. Use the full
+method and caveats in
 `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`; do not
 turn those host measurements into universal constants.
 

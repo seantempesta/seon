@@ -80,7 +80,7 @@ Keep this distinction:
 - a “status” field duplicating that relationship would become stale.
 
 Read the routing map and armer's `agents`/`armed` set derivation at
-`src/seon/cluster/agent.clj:276-326,426-475`.
+`src/seon/cluster/agent.clj:276-326,441-490`.
 
 ## Episode caps and retry semantics
 
@@ -103,7 +103,10 @@ Do not add:
 
 ## Measured graph cost
 
-The July 28 flow probe measured:
+The July 28 flow probe ran each section in a fresh JVM on an 18-core Mac with
+JDK 26 and `-Xmx512m`. Its idle case used one-proc graphs sharing the default
+executors; its lifecycle case ran 1,000 create/start/resume/stop cycles of a
+three-proc, two-connection graph. It measured:
 
 - about 8.5 KB and one virtual thread per parked proc;
 - about 8.3 MB for 1,000 measured one-proc graphs;
@@ -112,6 +115,8 @@ The July 28 flow probe measured:
 
 Read the exact host, JDK, heap method, warm-up, and samples in
 `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
+The lifecycle timing ends when the stop API returns; it is not an exit-join
+measurement.
 The current two-proc blueprint therefore suggests roughly two parked virtual
 threads and 17 KB of proc baseline per agent, but that multiplication is an
 inference from the per-proc measurement, not a separately measured production
@@ -124,7 +129,10 @@ views in one memoized proc state. It is **not built**: current
 `graph-definition` has only mailbox and turn
 (`src/seon/cluster/agent.clj:246-270`).
 
-The July 29 falsifier built a disposable experimental proc with:
+The July 29 falsifier compared 100 parked agents in an in-memory database on
+JDK 26 with `-Xmx512m -XX:+UseG1GC`; it discarded two warm-ups, forced three
+GCs with a 120 ms settle before heap reads, and parked 400 ms. It built a
+disposable experimental proc with:
 
 - 12 registrations in one pass: eight AI and four HTML;
 - +8.9 KB measured heap per agent;

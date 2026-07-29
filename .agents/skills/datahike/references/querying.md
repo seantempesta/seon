@@ -46,15 +46,17 @@ example: use `:with` whenever duplicate projected values must remain distinct.
 
 ## Order and Limit
 
-Datahike's query language has no `:order-by` / `:limit` inside `:find`. Sort and
-slice in Clojure after the query:
+Seon's maintained Datahike accepts a query map with `:query`, `:args`,
+`:order-by`, `:offset`, and `:limit`
+(`reference-code/datahike/src/datahike/query.cljc:98-121,3475-3505`):
 
 ```clojure
-(->> (d/q '[:find ?name ?score
-            :where [?e ::name ?name] [?e ::score ?score]]
-          db)
-     (sort-by second >)
-     (take 10))
+(d/q {:query '[:find ?name ?score
+               :in $
+               :where [?e ::name ?name] [?e ::score ?score]]
+      :args [db]
+      :order-by '[?score :desc]
+      :limit 10})
 ```
 
 For large result sets, narrow the `:where` clauses first (start from a known
@@ -126,8 +128,10 @@ must declare which vars unify with the outer query.
 
 A PLAIN ref with no sub-pattern pulls back as `{:db/id N}` — name it with a
 sub-pattern (`{::parent [::name]}`) to pull its fields. A COMPONENT ref expands
-to a nested map under `[*]`. Reverse-ref navigation (`::parent` →
-`{:my.ns/_parent [...]}`) is free — see the `data-modeling` skill.
+to a nested map under `[*]`. Pull also supports reverse-ref navigation
+(`::parent` → `{:my.ns/_parent [...]}`)
+(`reference-code/datahike/src/datahike/pull_api.cljc:276-319`;
+`reference-code/datahike/test/datahike/test/pull_api_test.cljc:250-277`).
 
 ## Inspecting the index (debugging only)
 
@@ -149,14 +153,18 @@ implementation need. Do not recreate the retired `seon.db` pod facade.
 ## Performance tips
 
 - **Batch inserts** in one `d/transact` call, not one entity per call.
-- **Most selective clause first** — pin the entity by a known eid or a unique
-  attr value so datahike picks a small AEVT/AVET slice, not a full-index scan.
+- **Give the planner selective facts** — constrain entities with known eids or
+  unique attribute values. The maintained planner, not caller clause order,
+  orders operations and chooses index scans
+  (`reference-code/datahike/src/datahike/query/plan.cljc:1524-1663`).
 - **Scalar form (`.`)** when expecting one result — skips the set wrapper.
 - **Prefer pull** over N follow-up queries when fetching related entities.
 - **Thread one database value** through a unit of work instead of repeatedly
   dereferencing a connection. It is a correctness and performance win.
-- **Don't `memoize` on a db value** — `=` on a DB walks the whole EAVT index,
-  faulting every node from durable storage on a cache HIT (`datahike-primer.md` §5).
-  Measure before caching; `:memory`/local reads are sub-ms on small datom counts.
-- **Skip history unless you need retractions** — current-db queries carry no
-  history overhead; only reach for `d/history` when you want retracted datoms.
+- **Don't `memoize` on a db value** — `=` on a DB compares the EAVT index and
+  can fault index nodes from durable storage on a cache hit
+  (`reference-code/datahike/src/datahike/db.cljc:703-715`;
+  `docs/prds/archive/agent-fsm/research/datahike-primer.md` §5).
+  Measure before caching.
+- **Use `d/history` only when historical additions and retractions are the
+  query subject.**

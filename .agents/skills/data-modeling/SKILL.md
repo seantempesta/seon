@@ -35,8 +35,10 @@ asserting them. Design moves, not tables:
 - **FIND a set** → query by attribute presence (`[?e :my.kb.source/id]`).
 - **IDENTIFY one** → a `{:seon.db/identity true}` attribute (also drives upsert).
 - **RELATE / REMOVE** → refs (`:seon.db/component` cascades the delete).
-- **SCOPE** → the transaction's `:seon.db/user` and `:seon.db/process` refs,
-  not a kind field.
+- **SCOPE provenance** → the transaction's `:seon.db/user` and
+  `:seon.db/process` refs.
+- **SCOPE ownership** → a real domain ref such as
+  `:seon.cluster.run/agent`, not a kind field.
 
 If you write "for each kind" or a `:kind` enum, stop and reframe.
 
@@ -81,7 +83,8 @@ What the bridge installs for each (verify live with
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
 and same-type `:or`; a `[:maybe X]` on a stored attribute and any unmappable
 shape THROW — extend the bridge
-(`src/seon/schema/datahike.cljc`), never hand-write a `:db.type/*`. The other
+(`src/seon/schema/datahike.cljc:36-48,149-205`), never hand-write a
+`:db.type/*`. The other
 properties it reads are `{:seon.db/unique true}` (`:db.unique/value`),
 `{:seon.db/index true}`, and `{:seon.db/no-history? true}`. Full table +
 query/transact mechanics: the **`datahike`** skill.
@@ -127,7 +130,8 @@ derives the closed `:seon.config/manifest`, `:seon.config/effective`, and
 `:seon.config/entity` schemas. Never add the same dial to hand-maintained
 composite maps or a separate roster. `config/default.edn` is the complete
 shipped decision document and `seon.config/compile-manifest` applies defaults,
-overlay, and explicit environment data once.
+overlay, and explicit environment data once
+(`src/seon/schema/edn.clj:87-111`; `src/seon/config.cljc:137-229`).
 
 ## Provenance is NOT a domain attribute — the tx already records it
 
@@ -160,8 +164,8 @@ shapes); mark optional fields `{:optional true}`:
 The `{:seon.db/entity true}` marker is opt-in and load-bearing: the projection
 derives the identity attribute and emits a queryable `:seon.schema` row, so the
 renderer can enumerate instances by walking that id-attr's index (NO per-row
-`:kind` stamp). Request/response/view maps OMIT the marker — they're contracts,
-not catalogued kinds.
+`:kind` stamp) (`src/seon/schema.cljc:1149-1209`). Request/response/view maps
+OMIT the marker — they're contracts, not catalogued kinds.
 
 ## Function specs — DEFAULT to map-in / map-out
 

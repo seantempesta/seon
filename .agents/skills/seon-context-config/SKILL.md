@@ -68,8 +68,13 @@ bin/seon config apply CLUSTER path/to/overlay.edn
 ```
 
 The current operator grammar is
-`script/seon/fresh_operator.clj:705-730`; `bin/seon:4-8` routes `start` and
+`script/seon/fresh_operator.clj:705-730`; `bin/seon:4-7` routes `start` and
 `config` to it.
+
+`start` discovery is not currently scoped to the operator root. Before
+accepting a start result, confirm that its pid and store path belong to the
+intended root; otherwise stop at the boundary
+(`docs/seon/issues/operator-start-discovers-jvms-from-other-roots.md`).
 
 `seon.config/apply!` exact-reconciles the desired row
 (`src/seon/config.cljc:237-252`). Runtime code reads the effective ordinary
