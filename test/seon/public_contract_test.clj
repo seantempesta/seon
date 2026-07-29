@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.tools.reader :as reader]
             [clojure.tools.reader.reader-types :as reader-types]
+            [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
             [seon.sci.admit :as admit]
@@ -90,3 +91,21 @@
            [sci.eval/ctx? sci.eval/ctx-generator]]]
     (is (true? (predicate (gen/generate generator)))
         (str predicate " rejected the value from its own generator"))))
+
+(deftest mutable-runtime-generators-do-not-reuse-released-samples
+  (let [connection (gen/generate store/connection-generator)]
+    (d/release connection)
+    (let [next-connection (gen/generate store/connection-generator)]
+      (try
+        (is (store/connection? next-connection))
+        (finally
+          (d/release next-connection)))))
+  (let [lock (gen/generate store/file-lock-generator)]
+    (.release ^java.nio.channels.FileLock lock)
+    (.close (.channel ^java.nio.channels.FileLock lock))
+    (let [next-lock (gen/generate store/file-lock-generator)]
+      (try
+        (is (store/file-lock? next-lock))
+        (finally
+          (.release ^java.nio.channels.FileLock next-lock)
+          (.close (.channel ^java.nio.channels.FileLock next-lock)))))))

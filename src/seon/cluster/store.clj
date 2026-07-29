@@ -81,30 +81,44 @@
 (schema/register-core-predicate! 'seon.cluster.store/database-value?
                                  database-value?)
 
-(defonce ^:private generator-resources
-  (delay
-    (let [configuration {:store {:backend :memory :id (random-uuid)}
-                         :schema-flexibility :write}
-          _ (d/create-database configuration)
-          connection (d/connect configuration)
-          lock-file (io/file "tmp/schema-generator/file-lock")
-          _ (.mkdirs (.getParentFile lock-file))
-          channel (FileChannel/open
-                   (.toPath lock-file)
-                   (into-array
-                    OpenOption
-                    [StandardOpenOption/CREATE StandardOpenOption/WRITE]))
-          lock (.tryLock channel)]
-      {:connection connection :channel channel :lock lock})))
+(defn- fresh-connection
+  []
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}]
+    (d/create-database configuration)
+    (d/connect configuration)))
+
+(defn- fresh-file-lock
+  []
+  (let [lock-file
+        (io/file "tmp/schema-generator" (str (random-uuid) ".lock"))
+        _ (.mkdirs (.getParentFile lock-file))
+        channel
+        (FileChannel/open
+         (.toPath lock-file)
+         (into-array
+          OpenOption
+          [StandardOpenOption/CREATE StandardOpenOption/WRITE]))
+        lock (.tryLock channel)]
+    (or lock
+        (throw
+         (ex-info
+          "The file-lock generator could not acquire its fresh lock."
+          {:seon.error/kind :core-bug
+           ::lock-file (.getPath lock-file)})))))
 
 (def connection-generator
-  (gen/fmap (fn [_] (:connection @generator-resources)) (gen/return nil)))
+  ;; Generated lifecycles may release their connection, so every sample owns
+  ;; a new one rather than mutating a singleton used by later samples.
+  (gen/fmap (fn [_] (fresh-connection)) (gen/return nil)))
 (def file-lock-generator
-  (gen/fmap (fn [_] (:lock @generator-resources)) (gen/return nil)))
+  ;; Each generated store lifecycle owns and releases its lock. Reusing one
+  ;; singleton made later samples invalid after the first generated stop!.
+  (gen/fmap (fn [_] (fresh-file-lock)) (gen/return nil)))
 (def database-value-generator
   (gen/fmap
    (fn [variant]
-     (let [database @(:connection @generator-resources)]
+     (let [database @(fresh-connection)]
        (case variant
          :current database
          :as-of (d/as-of database (:max-tx database))

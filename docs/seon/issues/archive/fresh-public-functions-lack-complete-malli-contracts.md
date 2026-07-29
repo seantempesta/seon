@@ -75,11 +75,21 @@ The recurring check reads every fresh `.clj` and `.cljc` form with
 has no source roster or exception list. The instrumentation proof confirms the
 six launcher vars are collected by the existing computed public-var rule.
 
+The first full gate exposed one additional constructibility defect: the
+connection and file-lock generators reused mutable singleton samples, so an
+earlier generated lifecycle could release the object a later contract received.
+Those generators now construct fresh owned runtime objects per sample, and the
+regression explicitly releases one sample before demanding another valid one.
+
 Proof:
 
 ```text
 bin/test seon.public-contract-test seon.instrument-test seon.flow-test \
   seon.schema-test seon.schema.datahike-test
 Ran 35 tests containing 184 assertions.
+0 failures, 0 errors.
+
+bin/test seon.public-contract-test seon.instrument-test
+Ran 11 tests containing 40 assertions.
 0 failures, 0 errors.
 ```
