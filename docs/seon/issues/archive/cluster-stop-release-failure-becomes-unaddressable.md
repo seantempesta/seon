@@ -56,3 +56,8 @@ can finish teardown without weakening the instance-generation fence.
 **PRESSING — live lifecycle correctness.** Current `cluster/stop!` still
 removes the stop marker in `finally` after `d/release` or root-store release
 can throw, leaving the still-live generation unavailable for retry.
+
+Resolved 2026-07-29: integrated at f219d96da — stop! restores the exact
+instance on teardown failure (retryable, replacement excluded); release
+precedes holder removal. Proof: boot-test failure-injection suite,
+combined gate 16/78/0.
