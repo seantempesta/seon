@@ -3,11 +3,17 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
+            [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
-            [seon.instrument :as instrument])
+            [seon.instrument :as instrument]
+            [seon.test-support :as test-support])
   (:import [java.net ServerSocket]
+           [java.nio.file Files]
            [java.util Date]
            [java.util.concurrent TimeUnit]))
 
@@ -21,20 +27,19 @@
     (.mkdirs root)
     root))
 
+(defn- runnable-root!
+  [root]
+  (doseq [path ["config" "deps.edn" "reference-code" "resources"
+                "src" "test"]]
+    (Files/createSymbolicLink
+     (.toPath (io/file root path))
+     (.toPath (io/file project-root path))
+     (make-array java.nio.file.attribute.FileAttribute 0)))
+  root)
+
 (defn- delete-recursively!
   [root]
-  (let [temporary-root (.getCanonicalFile (io/file project-root "tmp"))
-        target (.getCanonicalFile (io/file root))]
-    (when-not (.startsWith (.toPath target) (.toPath temporary-root))
-      (throw (ex-info "The test cleanup target is outside project-local tmp/."
-                      {:seon.dev.fresh-operator-test/path
-                       (.getPath target)})))
-    (when (.exists target)
-      (doseq [child (reverse (file-seq target))]
-        (when-not (.delete ^java.io.File child)
-          (throw (ex-info "The test could not delete its fixture path."
-                          {:seon.dev.fresh-operator-test/path
-                           (.getPath ^java.io.File child)})))))))
+  (test-support/delete-recursively! root))
 
 (defn- start-disposable-process!
   []
@@ -124,6 +129,45 @@
     (when-not (and completed? (zero? (.exitValue process)))
       (throw
        (ex-info "The fresh operator parser probe failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    (edn/read-string output)))
+
+(defn- operator-private-outcome
+  [function-name & arguments]
+  (let [code
+        (pr-str
+         `(do
+            (require 'seon.fresh-operator)
+            (prn
+             (try
+               {:seon.dev.fresh-operator-test/value
+                (apply
+                 (var-get
+                  (ns-resolve 'seon.fresh-operator '~function-name))
+                 ~(vec arguments))}
+               (catch Throwable failure#
+                 {:seon.dev.fresh-operator-test/message
+                  (ex-message failure#)
+                  :seon.dev.fresh-operator-test/data
+                  (ex-data failure#)})))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" (str (io/file project-root "script"))
+            "-e" code])
+           (.directory project-root)
+           (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The fresh operator outcome probe failed."
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
@@ -294,6 +338,165 @@
           :seon.fresh-operator/force? true}
          (operator-private-value
           'parse-stop-arguments ["--force" "beta"]))))
+
+(deftest destructive-reset-selection-requires-one-unambiguous-cluster
+  (let [row
+        (fn [name]
+          {:seon.fresh-operator/name name
+           :seon.fresh-operator/operator-root? true})]
+    (is (= "only"
+           (operator-private-value
+            'select-destructive-name [(row "only")] nil "reset")))
+    (let [outcome
+          (operator-private-outcome
+           'select-destructive-name
+           [(row "alpha") (row "beta")]
+           nil
+           "reset")]
+      (is (str/includes?
+           (:seon.dev.fresh-operator-test/message outcome)
+           "Refusing ambiguous `reset` because it destroys cluster data"))
+      (is (= ["alpha" "beta"]
+             (get-in outcome
+                     [:seon.dev.fresh-operator-test/data
+                      :seon.fresh-operator/candidates]))))))
+
+(deftest bare-index-refreshes-the-baseline-and-never-selects-default
+  (let [root (runnable-root! (fresh-root))
+        store-dir (str (io/file root "data" "clusters" "store"))]
+    (try
+      (let [result (run-operator root "index")]
+        (is (::completed? result) (::output result))
+        (is (= 0 (::exit result)) (::output result))
+        (is (str/includes? (::output result) "● baseline source index")
+            (::output result)))
+      (let [opened (store/open-store! {:seon.store/dir store-dir})]
+        (try
+          (let [current-digest
+                (ancestor/digest
+                 {:seon.ancestor/roots cluster/ancestor-roots})
+                roster (registry/roster opened)]
+            (is (contains? roster (ancestor/ancestor-branch current-digest)))
+            (is (not (contains? roster :cluster-default))
+                "bare index is the ruling-28 exception to default selection"))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest index-command-primes-one-live-cluster-through-the-one-indexer
+  (let [root (fresh-root)
+        cluster-root (str (io/file root "data" "clusters"))
+        name "index-command"
+        instance
+        (cluster/start! {:seon.boot/cluster-name name
+                         :seon.boot/root cluster-root})
+        connection (:seon.boot/cluster-connection instance)
+        stale-digest (apply str (repeat 64 "e"))]
+    (try
+      (let [ancestor
+            (d/q '[:find ?ancestor .
+                   :where [?ancestor :seon.ancestor/digest]]
+                 @connection)
+            functions
+            (d/q '[:find [?function ...]
+                   :where [?function :seon.fn/sym]]
+                 @connection)]
+        (d/transact
+         connection
+         (into
+          [[:db.fn/retractAttribute ancestor :seon.ancestor/digest]
+           {:db/id ancestor :seon.ancestor/digest stale-digest}]
+          (map (fn [function] [:db.fn/retractEntity function]))
+          functions)))
+      (let [result (run-operator root "index" name)]
+        (is (::completed? result) (::output result))
+        (is (= 0 (::exit result)) (::output result))
+        (is (str/includes? (::output result)
+                           (str "● " name " source index"))
+            (::output result))
+        (is (pos?
+             (or
+              (d/q '[:find (count ?function) .
+                     :where [?function :seon.fn/sym]]
+                   @connection)
+              0)))
+        (is (not= stale-digest
+                  (d/q '[:find ?digest .
+                         :where [_ :seon.ancestor/digest ?digest]]
+                       @connection))))
+      (let [basis (:max-tx @connection)
+            converged (run-operator root "index" name)]
+        (is (::completed? converged) (::output converged))
+        (is (= 0 (::exit converged)) (::output converged))
+        (is (str/includes? (::output converged)
+                           "converged? true")
+            (::output converged))
+        (is (= basis (:max-tx @connection))
+            "a converged operator prime writes no transaction"))
+      (finally
+        (cluster/stop! instance)
+        (delete-recursively! root)))))
+
+(deftest reset-command-destroys-history-and-reforks-a-current-cluster
+  (let [root (runnable-root! (fresh-root))
+        name "reset-command"]
+    (try
+      (let [started (run-operator root "start" name)]
+        (is (::completed? started) (::output started))
+        (is (= 0 (::exit started)) (::output started)))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters" name "prepl.edn")))]
+        (prepl-eval
+         advertisement
+         (pr-str
+          `(do
+             (require 'datahike.api)
+             (let [instances#
+                   @@(ns-resolve 'seon.cluster
+                                 (symbol "running-instances"))
+                   connection#
+                   (:seon.boot/cluster-connection
+                    (get instances# ~name))]
+               (datahike.api/transact
+                connection#
+                [{:seon.cluster.message/id
+                  "operator-reset-destroys"}]))))))
+      (let [reset-result (run-operator root "reset" name)]
+        (is (::completed? reset-result) (::output reset-result))
+        (is (= 0 (::exit reset-result)) (::output reset-result))
+        (is (str/includes?
+             (::output reset-result)
+             (str "● " name " reset destroyed its old branch"))
+            (::output reset-result)))
+      (let [restarted (run-operator root "start" name)]
+        (is (::completed? restarted) (::output restarted))
+        (is (= 0 (::exit restarted)) (::output restarted)))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters" name "prepl.edn")))
+            history
+            (prepl-eval
+             advertisement
+             (pr-str
+              `(let [instances#
+                     @@(ns-resolve 'seon.cluster
+                                   (symbol "running-instances"))
+                     connection#
+                     (:seon.boot/cluster-connection
+                      (get instances# ~name))]
+                 (datahike.api/q
+                  '[:find ?message .
+                    :where
+                    [?message :seon.cluster.message/id
+                     "operator-reset-destroys"]]
+                  @connection#))))]
+        (is (= "nil" history)
+            "the replacement branch contains none of the destroyed history"))
+      (finally
+        (run-operator root "stop" name)
+        (delete-recursively! root)))))
 
 (deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
   (let [form (operator-private-value 'add-form "scratch" {})
