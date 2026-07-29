@@ -662,6 +662,11 @@ may reintroduce a shadow build into the dev feedback path.
   reply is a registered schema'''d value (which problem + why); the
   planner'''s settlement derivation reads the reply'''s shape. One new
   value schema, zero new lifecycle.
+  **Ruling 2026-07-29 (owner): the project LOCAL model server is
+  OLLAMA** — 127.0.0.1:11434, qwen3.5:35b-a3b-coding-nvfp4, no-auth
+  descriptor row, OLLAMA_NUM_PARALLEL for parallel processing. The
+  src-needle mlx server is EXPERIMENTAL only, never the project
+  server. (Hosted default remains DeepSeek.)
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
