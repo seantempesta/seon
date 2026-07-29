@@ -11,8 +11,8 @@ It is not the deleted CLJS pod, and it does not use a fixed port.
 Discover the URL from the cluster advertisement:
 
 ```text
-bin/seon-fresh status
-bin/seon-fresh open NAME
+bin/seon status
+bin/seon open NAME
 ```
 
 Boot writes the actual bound URL and port into the advertisement at
@@ -79,7 +79,7 @@ errors. If liveness is ambiguous, verify `/feed/{id}` with a server-side HTTP
 client and inspect the selected cluster log with:
 
 ```text
-bin/seon-fresh logs NAME
+bin/seon logs NAME
 ```
 
 The maintained http-kit fork exposes pending bytes plus drained/closed

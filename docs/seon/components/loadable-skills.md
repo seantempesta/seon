@@ -94,10 +94,7 @@ loader, a second block collection, or an atom-backed registry.
 
 ## Key files
 
-- `src/my/skills.cljs` — scanner, database rows, list/load/unload functions
-- `src/seon/config.cljs` — selected corpus directory
-- `src/seon/client.cljs` — boot desired-state reconciliation
-- `src/seon/agent/ctx.cljs` — shared context file rendering
-- `config/system.edn` — shipped corpus selection and initial context tree
-- `script/seon/dev/skills.clj` — deterministic adapter generation and drift gate
-- `test/my/skills_test.cljs` — current behavioral coverage
+- `.agents/skills/` — the one checked-in skill corpus
+- `seon-skills` — runtime-facing link to that corpus
+- `.claude/skills` — Claude-facing link to that corpus
+- `bin/test` — live structural gate that refuses replaced or divergent links

@@ -759,7 +759,8 @@ memory, every anomaly becomes an issue + fix lane, drives repeat
 after each wave slice; (b) BROWSER/UI VERIFICATION lanes — root
 view + /agent/{id} + /data rendering, a real transact must morph
 the page (SSE datastar over gzip verified server-side per the
-browser-automation skill; browser bridge may 503 on long SSE),
+`datastar-web-ui` skill; use the built-in browser control for layout,
+focus, and console state, while a server-side client holds long SSE),
 responsiveness after db changes, console errors; (c) cleanup lanes
 from the accepted audits (fragile-tests F-rows, census, wiki-driven
 smells) whenever a slot is otherwise idle.

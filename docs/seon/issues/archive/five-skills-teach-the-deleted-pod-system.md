@@ -127,3 +127,6 @@ distinguish verified current behavior from ruled target behavior.
 - Historical pod, `cljs.js`, `src-old/`, `config/system.edn`, and port 7890
   appear only in explicit quarry/prohibition statements, never as current
   instructions.
+- The tool-sharpening follow-up replaced the Datastar skill's compatibility
+  `bin/seon-fresh` examples with the one public `bin/seon` operator after
+  `c073093e2` collapsed both launchers onto the fresh operator.
