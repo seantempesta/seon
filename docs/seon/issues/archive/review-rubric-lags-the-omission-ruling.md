@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, review]
 ---
@@ -46,3 +46,29 @@ REPL-falsified: datahike.api/transact accepts BOTH the arg-map and raw
 vector forms — probe returned {:map-form true, :vec-form true}
 (tmp/reviews/20260729T140011.539Z.md). The rubric needs Datahike's own
 transact arities, not Datomic-client folklore.
+
+## Resolution
+
+Resolved by `4d248e8f6`. The Gemini prompt in `bin/seon-hook` now places two
+source-grounded rulings ahead of the assembled skill and convention text:
+
+- "`[:maybe]` is allowed in in-memory function RETURN contracts (stored
+  attributes stay nil-free — the bridge forces absence there)." The prompt
+  explicitly forbids flagging an in-memory return merely for `[:maybe]` while
+  retaining the ban on stored nil and `[:maybe]` stored attributes.
+- `datahike.api/transact` accepts both the argument-map form containing
+  `:tx-data` and the raw vector or sequence form. The prompt explicitly
+  rejects the false claim that the argument map is entity transaction data.
+
+## Proof
+
+- `reference-code/datahike/src/datahike/api/impl.cljc:30-48` is the dependency
+  implementation for both accepted transaction forms. A focused JVM probe
+  returned `{:map-form true, :vec-form true}`.
+- A focused re-review of `src/seon/cluster/loop.cljc` with the corrected rubric
+  classified its two in-memory `[:maybe]` return contracts as compliant. A
+  re-review of `loop.cljc` now produces no `[:maybe]` flag.
+- A focused re-review of `test/seon/test_support.clj` classified its
+  `{:tx-data [...]}` call as compliant and produced no transact-arity flag.
+- `printf '{}' | bin/seon-hook` returned `{"continue":true}`, proving the
+  edited hook remains executable.

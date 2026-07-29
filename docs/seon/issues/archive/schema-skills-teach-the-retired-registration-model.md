@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, docs, schema, database]
 ---
@@ -51,3 +51,38 @@ actual activation/instrumentation path, direct fresh Datahike mechanics, and
 the stored-vs-in-memory omission distinction. Their examples point to current
 fresh source and contain no nonexistent facade or retired instrumentation
 claim.
+
+## Resolution
+
+Resolved by `818128ff2`. The datahike, data-modeling, and
+data-oriented-clojure skills now teach the current schema system. The
+clojure-testing skill and the datahike querying reference were corrected in
+the same change because they are loaded by the review hook or linked from the
+primary skills and repeated the retired mechanics.
+
+The corrected guidance is grounded in the current owners:
+
+- `src/seon/schema/edn.clj:220-240` loads the first-party schema EDN under
+  `resources/seon/schema/`, and `src/seon/schema/edn.clj:87-110` derives all
+  config composite schemas from the one set of config dial registrations.
+- `src/seon/instrument.clj:180-220` is the live collection and
+  instrumentation operation.
+- `src/seon/fn.clj:21-39` admits contracted functions, schema registrations,
+  and tests while omitting other function events; namespace rows remain the
+  structural source container.
+- `reference-code/datahike/src/datahike/api/impl.cljc:30-48` accepts both a
+  transaction argument map containing `:tx-data` and a raw vector or
+  sequence.
+
+The skills state the omission ruling verbatim: "`[:maybe]` is allowed in
+in-memory function RETURN contracts (stored attributes stay nil-free — the
+bridge forces absence there)." They retain presence-not-kinds as the entity
+model and no longer teach a fresh `seon.db` facade, direct schema
+registration, or absent instrumentation.
+
+## Proof
+
+`quick_validate.py` passed for all four updated skill directories. A focused
+JVM probe against a fresh in-memory test database returned
+`{:map-form true, :vec-form true}` after calling `datahike.api/transact` once
+with `{:tx-data []}` and once with `[]`.
