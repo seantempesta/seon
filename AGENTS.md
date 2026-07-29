@@ -948,6 +948,17 @@ Concretely, when the ground moves under you:
   the work committed so far stands. Re-read the tree, resume from what is
   actually there, and never assume your uncommitted state survived.
 
+**Recursive deletion NEVER follows symlinks.** A fixture cleaning its own
+scratch directory followed repository symlinks on 2026-07-29 and deleted 55
+tracked paths — all of `src/` and thirteen vendored submodule trees — while a
+suite was running. Any recursive delete walks without `FOLLOW_LINKS` (or
+`lstat`s each entry) and refuses a path that resolves outside its own root,
+derived from that root rather than from the process working directory. Plant a
+symlinked sentinel in the cleanup regression and assert it survives. The lane
+that did this behaved correctly afterwards — it detected the damage, captured
+an exact inventory, and refused to self-recover without authorization, which
+is why it cost ten minutes instead of a day.
+
 The rule behind all of it: derive current state from the system rather than
 remembering it, keep your own work committed in small coherent slices so churn
 can only ever cost you minutes, and treat every restart as the free resilience
