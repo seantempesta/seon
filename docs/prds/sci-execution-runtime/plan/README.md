@@ -859,6 +859,33 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
+  (29) ONE REAL SKILLS DIRECTORY, LINKED — NOT THREE COPIES WITH A
+  CHECKER (owner-prompted, 2026-07-29 evening: "okay so we copy them?
+  what's the problem?"). The copying was never the problem; the
+  problem is that NOTHING CATCHES AN EDIT TO THE WRONG COPY. Today
+  every skills lane edited `.agents/skills` (a generated adapter),
+  leaving canonical `seon-skills/` and `.claude/skills/` with pod-era
+  content — so Seon's own runtime agents and every Claude-side lane
+  still read the stale corpus, and the only drift detector
+  (`script/seon/dev/skills.clj`, called from the dying old operator)
+  never ran. Measured: datahike 482 vs 421, repl 111 vs 107,
+  clojure-testing 320 vs 280.
+  THE FIX IS THE ONE THIS REPO ALREADY USES: `CLAUDE.md -> AGENTS.md`
+  is exactly this shape — two harnesses want the same bytes at two
+  paths, so one is a LINK and drift is impossible rather than
+  detected. Make `.agents/skills` and `.claude/skills` links to ONE
+  real directory. No generation step, no drift checker, no
+  "which copy is canonical" question for any future agent, and no
+  silent rot. Prefer a filesystem answer to a process answer whenever
+  the constraint is only "the file must appear at two paths".
+  COROLLARY: with one real directory, RUNTIME-vs-DEVELOPMENT stops
+  being a matter of where a file lives and becomes METADATA on the
+  skill — which is what it always was conceptually, and why the `repl`
+  skill drifted into confusion about whether it addressed an agent
+  inside Seon or a developer outside it. Also (owner): do not write
+  skills for capabilities the agent already has natively — the browser
+  skill duplicated built-in browser instructions and was noise at
+  best; it is DELETED.
   (28) A CLUSTER MUST BE PRIMED WITH THE CODE GRAPH; A STALE ONE IS
   DENIED AT START (owner ruling 2026-07-29 evening: "the cluster needs
   to be primed with the code graph… detect and deny start and indicate
