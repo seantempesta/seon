@@ -835,6 +835,15 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (24) THE FACADE PROVES THE FULL READ SURFACE (owner, correcting the
+  quarry's deferral): "if we are building the mechanism to support
+  everything, we need to learn if it will support all the main API
+  points." The seon.db facade DESIGN must cover query, pull,
+  pull-many, entity, AND datoms — each with its evidence-capture story
+  proven at least by REPL prototype (entity's LAZY incremental reads
+  are the decisive hard case; datoms' index-scan evidence must be
+  honest or fail-open). Implementation may land in slices;
+  learning may not be deferred.
   (23) NOTHING RE-FIRES — the turn cap is the only retry budget
   (owner, correcting the hot-loop fix framing): "an agent fucks up,
   they only get another turn to fix it if they haven't hit the max
