@@ -565,6 +565,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | tuple (`:db/tupleType`) | small limited vector, ordered many | Datahike's single-value ordered construct — one datom, whole-value replace; homogeneous cap 8 (fork lift queued); cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`) |
 | `my.agents.<id>` | agent workspace, sandbox ns | each agent's scratch namespace; a real namespace has at most one assigned agent (`:seon.agent/namespace`, unique) |
 | `:seon.render/ai` + `:seon.render/html` | widget, view-model, dual render | the ONE render contract: two projections on one unit — `ai` derives into agent context, `html` rides the flow pipeline to canvas (focal, `:seon.render.canvas/content`) or a surface (context render); no third surface noun |
+| wire (external crossings only) | wire for anything in-process | "wire" is reserved for a crossing that LEAVES the process to an external service — the provider HTTP request, the browser SSE connection (owner ruling 2026-07-29). Internal transport is channels, flow, and database facts, and is never called a wire; this refactor deleted the internal wire protocols and nothing may reintroduce the word for them |
 
 This table is maintained: when a boundary term is settled, add its row in the
 same change, and when the meaning spans an integration boundary, name the

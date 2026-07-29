@@ -715,6 +715,42 @@ may reintroduce a shadow build into the dev feedback path.
   forms to one form at a time like a user debugging."
   (6) The dial-authority dissolution is SCHEDULED (analyze + fix
   properly, not queued-someday).
+  **Rulings 2026-07-29 midday (owner, conversational — the construction
+  loop, config locality, vocabulary):**
+  (1) LLM CONFIG IS LOCAL, never global: every model-execution config
+  (model, endpoint, max-tokens, thinking budget) must be overridable at
+  the agent or the situation — "we support completely different configs
+  simultaneously." Current state verified: `seon.ai/complete` is pure
+  data-in (target map argument, zero process-global state), but
+  SELECTION is cluster-wide — the loop always reads the cluster's one
+  primary. The per-agent/per-call override seam is a real unit, designed
+  WITH agent modes (charter item 1) and per-call thinking (charter
+  item 5), never as a second config system: descriptor rows stay the
+  defaults, the call site's map wins.
+  (2) "WIRE" is reserved for crossings that LEAVE the process to an
+  external service (provider HTTP, browser SSE). Internal transport is
+  channels/flow/database facts and is never called a wire — the
+  refactor deleted internal wire protocols; the word may not
+  reintroduce them (vocabulary row added to AGENTS.md).
+  (3) THE CONSTRUCTION LOOP, test-forward (supersedes nothing,
+  sharpens the ladder): (a) quarry lanes mine src-old/git/docs for
+  what was tried, what worked, what didn't, and HOW the fresh system
+  differs, returning recommendations; (b) the orchestrator reviews the
+  designs — no parallel systems, platform used correctly, robustness —
+  and authors generative/property tests FIRST as the sealed goal;
+  (c) sol/Opus lanes iterate in the REPL toward those tests, writing
+  code and refining understanding simultaneously. "I'm leaning more
+  test forward these days."
+  (4) FRAGILE-TEST TRIPWIRE (standing): many tests matching exact
+  words in context, or a pile of edge-case point tests, is a DESIGN
+  verdict — stop and tell the owner; propose the redesign that
+  dissolves the majority of the tests into something simpler. Never
+  keep writing them.
+  (5) Prefer `get`/nil-punning over `contains?` at read sites — a
+  default argument or returned nil says what presence-checking says,
+  without keeping a nil-vs-absent distinction alive (applies the
+  omission ruling; the walk-forwarding `contains?` fix is queued for
+  this simplification).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
