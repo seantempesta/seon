@@ -875,13 +875,28 @@ may reintroduce a shadow build into the dev feedback path.
   WHAT IS MISSING is any way to prime an existing cluster. Today the
   only "init" is forking a NEW name, and the fresh operator has no
   reset either. So:
-  (a) DETECT AND DENY: `start` compares the cluster's recorded ancestor
-  digest against the current source digest and REFUSES a mismatch,
-  naming the right procedure rather than booting a cluster whose code
-  graph does not describe this source tree. Same for a partial corpus
-  (namespaces without functions).
-  (b) THE PROCEDURE — `bin/seon index [CLUSTER]`: re-derive the current
-  source corpus INTO that cluster's branch through the one indexer
+  (a) DETECT AND DENY — BUT ONLY INCOHERENCE, NOT AGE (owner
+  refinement, same session): "we should be branching off the init, and
+  we can update the base fork anytime with newly indexed base code.
+  Then old sessions who were already started are independent, and the
+  new sessions get the fast fork of the new baseline." So a cluster
+  carrying a COMPLETE corpus from an OLDER baseline is a legitimate
+  sovereign world and starts normally — an older digest is not an
+  error, it is independence, and denying it would break the sovereignty
+  ruling. What `start` must refuse is an INCOHERENT corpus: the state
+  the owner's cluster is actually in (namespace rows present, function
+  rows absent), or any partial population that would make corpus
+  queries silently wrong. Age is reported, incoherence is denied.
+  BASELINES ROLL: re-indexing produces a NEW content-addressed ancestor
+  and leaves existing ones alone; several coexist, keyed by source
+  digest, with the roster as the whole cache; new clusters fork the
+  newest (~17 ms).
+  (b) THE PROCEDURE — `bin/seon index` has TWO targets. With NO cluster
+  it refreshes the BASELINE: index current source into a new ancestor
+  so every future fork is born current (existing clusters untouched —
+  that is the whole point). With a CLUSTER named it primes THAT
+  cluster: re-derive the current source corpus INTO its branch through
+  the one indexer
   (`seon.fn/index!`), an explicit operator action, never automatic and
   never on the boot path (ruling 17 holds). This is accretion of facts
   DERIVED from source, so it preserves every other fact — the owner's
