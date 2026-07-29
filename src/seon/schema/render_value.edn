@@ -1,0 +1,54 @@
+{; The proven presentation bounds from the quarry's structural renderer.
+ ; These are renderer-local per-call options, not new cluster configuration
+ ; facts. Each registration owns its shipped presentation default, and
+ ; `:seon.render.value/options` is the complete set from which the
+ ; implementation derives those defaults. Admission's existing config facts
+ ; remain hard safety maxima; adding these as `seon.config.*` dials would
+ ; create a second defaults authority outside config/default.edn.
+ :seon.render.value/max-depth
+ [:int {:min 1 :seon.render.value/default 3}]
+
+ :seon.render.value/max-collection
+ [:int {:min 1 :seon.render.value/default 8}]
+
+ :seon.render.value/max-map-visits
+ [:int {:min 1 :seon.render.value/default 32}]
+
+ :seon.render.value/max-string
+ [:int {:min 1 :seon.render.value/default 80}]
+
+ :seon.render.value/shape-sample
+ [:int {:min 1 :seon.render.value/default 8}]
+
+ :seon.render.value/width
+ [:int {:min 20 :seon.render.value/default 72}]
+
+ :seon.render.value/options
+ [:map {:closed true}
+  [:seon.render.value/max-depth {:optional true}
+   :seon.render.value/max-depth]
+  [:seon.render.value/max-collection {:optional true}
+   :seon.render.value/max-collection]
+  [:seon.render.value/max-map-visits {:optional true}
+   :seon.render.value/max-map-visits]
+  [:seon.render.value/max-string {:optional true}
+   :seon.render.value/max-string]
+  [:seon.render.value/shape-sample {:optional true}
+   :seon.render.value/shape-sample]
+  [:seon.render.value/width {:optional true}
+   :seon.render.value/width]]
+
+ ; Genuine polymorphic boundary: the universal renderer accepts any value and
+ ; returns a bounded structural tree whose recursive grammar is owned by the
+ ; implementation and tested as a total codec.
+ :seon.render/value :any
+ :seon.render.value/tree :any
+ :seon.render.value/summary :string
+ :seon.render.value/truncated? :boolean
+ :seon.render.value/projection
+ [:map {:closed true}
+  [:seon.render.value/tree :seon.render.value/tree]
+  [:seon.render.value/summary :seon.render.value/summary]
+  [:seon.render.value/truncated? :seon.render.value/truncated?]
+  [:seon.render.value/width {:optional true} :seon.render.value/width]
+  [:seon.render.value/schemas {:optional true} [:vector :map]]]}

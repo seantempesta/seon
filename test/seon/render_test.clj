@@ -79,7 +79,12 @@
     (is (= #{:seon.render/ai :seon.render/log :seon.render/sms}
            (render/kinds (assoc (unit) :seon.render/sms `echo-kind)))))
   (testing "the router's own request keys can never be mistaken for kinds"
-    (is (= #{} (render/kinds (request {::marker "u"} :seon.render/ai))))))
+    (is (= #{} (render/kinds (request {::marker "u"} :seon.render/ai)))))
+  (testing "a wrapped raw value and its unit declarations are both visible"
+    (is (= #{:seon.render/ai :seon.render/log}
+           (render/kinds
+            {:seon.render/value {:seon.render/ai `echo-kind}
+             :seon.render/log `other-projection})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Resolution is late, var-backed, and loads the owner
@@ -127,13 +132,14 @@
 ;;; Totality: this router runs on the error path and may not fault into it
 ;;; ---------------------------------------------------------------------------
 
-(deftest an-undeclared-kind-is-a-value-naming-what-is-declared
-  (let [refused (render/render (request (unit) :seon.render/html))]
-    (is (seon.schema/valid-candidate-value? :seon.error/value refused))
-    (is (= :seon.render/kind-not-declared (:seon.error/kind refused)))
+(deftest an-undeclared-kind-reaches-the-universal-structural-floor
+  (let [rendered (render/render (request (unit) :seon.render/html))]
+    (is (= :seon.render/html (:seon.render/kind rendered)))
+    (is (vector? (:seon.render/output rendered)))
+    (is (= :div (first (:seon.render/output rendered))))
     (is (= #{:seon.render/ai :seon.render/log}
-           (:seon.render/kinds (:seon.error/data refused)))
-        "the caller is told what it does have")))
+           (render/kinds (unit)))
+        "the universal floor is capability, not a repeated declaration")))
 
 (deftest a-literal-declaration-is-its-own-output
   ;; The accretion this test's predecessor pinned the refusal for, in

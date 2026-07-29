@@ -1215,19 +1215,22 @@
                         id-attr (:seon.entity/id-attr props)]
                     (when (seq required-attrs)
                       [k (cond->
-                           {:seon.schema/key k
-                            :seon.schema/required-attrs required-attrs
-                            :seon.schema/entity?
-                            (boolean (:seon.db/entity props))}
+                           (merge
+                            {:seon.schema/key k
+                             :seon.schema/required-attrs required-attrs
+                             :seon.schema/entity?
+                             (boolean (:seon.db/entity props))}
+                            (into {}
+                                  (filter
+                                   (fn [[property declaration]]
+                                     (and
+                                      (qualified-keyword? property)
+                                      (= "seon.render"
+                                         (namespace property))
+                                      (qualified-symbol? declaration))))
+                                  props))
                            id-attr
-                           (assoc :seon.entity/id-attr id-attr)
-
-                           (:seon.render/ai props)
-                           (assoc :seon.render/ai (:seon.render/ai props))
-
-                           (:seon.render/html props)
-                           (assoc :seon.render/html
-                                  (:seon.render/html props)))]))))
+                           (assoc :seon.entity/id-attr id-attr))]))))
               forms)
         required-by-key
         (into (sorted-map)

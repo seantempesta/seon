@@ -14,6 +14,9 @@
  ; because a second naming is a second place to drift.
  :seon.render/kind :qualified-keyword
  :seon.render/kinds [:set :seon.render/kind]
+ ; The viewer namespace whose `render-<kind>` defn may override a matching
+ ; schema's default. Explicit request data, never ambient `*ns*`.
+ :seon.render/namespace :symbol
  ; The declaration. USUALLY a fully qualified symbol naming the
  ; projection fn, resolved LATE on every render so a re-`defn` takes
  ; effect with no re-registration — the proven `:seon.ancestor/populate`
@@ -62,7 +65,10 @@
  :seon.render/unit [:map-of :qualified-keyword :any]
  :seon.render/output :any
 
- :seon.render/request [:map {:closed true} [:seon.render/unit :seon.render/unit] [:seon.render/kind :seon.render/kind]]
+ :seon.render/request
+ [:map {:closed true}
+  [:seon.render/unit :seon.render/unit]
+  [:seon.render/kind :seon.render/kind]]
  ; The output is WRAPPED, and that is deliberate: an unwrapped return
  ; would be indistinguishable from a flat `:seon.error/value` for any
  ; projection whose own output is a map. With the wrap, "did this

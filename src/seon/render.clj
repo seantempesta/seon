@@ -1,13 +1,19 @@
 (ns seon.render
-  "THE ONE PROJECTION ROUTER. A map declares what it can become; this
-  resolves and applies it.
+  "THE ONE PROJECTION ROUTER. Any value reaches one bounded projection.
 
-  THE WHOLE MECHANISM, in one sentence: a UNIT is any map carrying, per
-  OUTPUT KIND, the fully qualified symbol of the function that projects
-  the unit into that kind, and `render` resolves the symbol and applies
-  it to the unit. That is the entire contract — there is no
-  registration table, no dispatch map, no per-kind namespace and no
-  protocol.
+  Resolution is one ordered chain, most specific first:
+
+  1. a declaration on the value itself;
+  2. the requesting namespace's `render-<kind>` defn;
+  3. the most-specific matching schema's attached declaration;
+  4. `seon.render.value`'s structural floor.
+
+  A unit may wrap arbitrary data under `:seon.render/value`; declarations
+  on that raw value outrank declarations on the wrapper. A requesting
+  namespace is an explicit `:seon.render/namespace` symbol, never ambient
+  `*ns*`, so the same database value renders reproducibly. Namespace and
+  schema projection symbols remain late-resolved vars. There is no
+  registration table, dispatch map, protocol, or consumer-side branch.
 
   WHY THIS EXISTS AS ITS OWN TINY NAMESPACE. The render contract
   (`docs/seon/architecture/ui.md`, \"The block and its two renders\")
@@ -42,8 +48,8 @@
   class, with the unit's declared symbol, so the broken projection is
   named rather than the caller.
 
-  THE KIND SET IS COMPUTED, never listed. `kinds` derives what a unit
-  can become from the unit itself — every key in the `seon.render`
+  THE EXPLICIT KIND SET IS COMPUTED, never listed. `kinds` derives what a
+  value explicitly declares — every key in the `seon.render`
   namespace whose value is a qualified symbol — so adding a kind to a
   producer makes it discoverable everywhere with no edit here. This is
   the no-hand-maintained-lists rule applied to the one place a registry
@@ -54,11 +60,17 @@
   `declaration?` admits those two narrow runtime shapes, and `render`
   returns a non-symbol declaration as its own output.
 
+  The structural floor is chosen by the requested boundary: HTML receives
+  hiccup; every textual/open kind receives the AI text projection. The
+  floor is deliberately not reported by `kinds`: it is universal capability,
+  not a declaration stored redundantly on every value.
+
   Crash walk: pure resolution plus one call. Nothing here opens,
   commits, or holds anything, so a kill during a render loses a value
   that was never durable. Whether the PROJECTION is pure is the
   projection's own contract; the ones this repository ships are."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/render.edn
@@ -98,13 +110,65 @@
   projections is an ordinary value, not an error."
   {:malli/schema [:=> [:cat :seon.render/unit] [:set :seon.render/kind]]}
   [unit]
-  (into #{}
-        (keep (fn [[key value]]
-                (when (and (qualified-keyword? key)
-                           (= "seon.render" (namespace key))
-                           (declaration? value))
-                  key)))
-        unit))
+  (let [value (get unit :seon.render/value unit)]
+    (into #{}
+          (keep (fn [[key declaration]]
+                  (when (and (qualified-keyword? key)
+                             (= "seon.render" (namespace key))
+                             (declaration? declaration))
+                    key)))
+          (concat
+           (when (map? value) value)
+           (when (and (map? unit) (not (identical? unit value))) unit)))))
+
+(defn- value-declaration
+  [unit kind]
+  (let [value (get unit :seon.render/value unit)]
+    (or (when (map? value)
+          (let [declaration (get value kind)]
+            (when (declaration? declaration)
+              declaration)))
+        (let [declaration (get unit kind)]
+          (when (declaration? declaration)
+            declaration)))))
+
+(defn- namespace-declaration
+  [unit kind]
+  (when-let [namespace-name (:seon.render/namespace unit)]
+    (let [candidate
+          (symbol (str namespace-name)
+                  (str "render-" (name kind)))]
+      (when
+       (try
+         (some? (requiring-resolve candidate))
+         (catch Throwable _ false))
+        candidate))))
+
+(defn- schema-declaration
+  [unit kind]
+  (let [value (get unit :seon.render/value unit)]
+    (when (map? value)
+      (try
+        (some
+         (fn [row]
+           (let [declaration (get row kind)]
+             (when (declaration? declaration)
+               declaration)))
+         (schema/matching-shapes value))
+        (catch Throwable _ nil)))))
+
+(defn- floor-declaration
+  [kind]
+  (if (= :seon.render/html kind)
+    'seon.render.value/render-html
+    'seon.render.value/render-ai))
+
+(defn- projection-declaration
+  [unit kind]
+  (or (value-declaration unit kind)
+      (namespace-declaration unit kind)
+      (schema-declaration unit kind)
+      (floor-declaration kind)))
 
 (defn render
   "Project `:seon.render/unit` into `:seon.render/kind`.
@@ -115,8 +179,6 @@
 
   Flat `:seon.error` values, never throws — this router runs on the
   error path and may not fault into it:
-  - `::kind-not-declared` — the unit declares no such kind, naming the
-    kinds it does declare so the caller can see what it has;
   - `::unresolvable` — the declared symbol does not resolve, naming the
     symbol. This is the same failure `:seon.ancestor/populate` refuses
     on, and it is a bug in the producer, not in the caller;
@@ -126,14 +188,8 @@
   {:malli/schema [:=> [:cat :seon.render/request]
                   [:or :seon.render/rendered :seon.error/value]]}
   [{:seon.render/keys [unit kind]}]
-  (let [declaration (get unit kind)]
+  (let [declaration (projection-declaration unit kind)]
     (cond
-      (not (declaration? declaration))
-      {:seon.error/kind ::kind-not-declared
-       :seon.error/message (str "This unit declares no " kind " projection.")
-       :seon.error/data {:seon.render/kind kind
-                         :seon.render/kinds (kinds unit)}}
-
       ;; A LITERAL IS ITS OWN OUTPUT. No resolution, nothing to invoke,
       ;; and therefore nothing that can throw — a fixed string or a
       ;; fixed hiccup vector is the answer, and a block that just says a
