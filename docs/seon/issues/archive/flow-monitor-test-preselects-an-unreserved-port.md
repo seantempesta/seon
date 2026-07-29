@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, flow]
 ---
@@ -32,3 +32,23 @@ API cannot publish an operating-system-selected port.
 The test starts the monitor without a close-then-bind window, discovers the
 actual bound port from the running server, and repeatedly passes while other
 processes concurrently allocate ephemeral ports.
+
+## Resolution
+
+Resolved by dependency commit `fbff8424696c7080ee7dc27b55cde1659ec18d8f`
+(`Publish the bound monitor port`) and Seon commit `62ce76559` (`Bind flow
+monitor tests directly on port zero`).
+
+Flow Monitor now asks http-kit for the bound port after `run-server`, publishes
+it as `:port` in the returned state atom, and prints that actual port. Both
+Seon monitor fixtures now pass `:port 0` directly and build their HTTP and
+WebSocket URLs from `(:port @monitor-state)`; the close-then-bind helper and
+`ServerSocket` import are gone.
+
+Focused proof on 2026-07-29:
+
+```text
+bin/test seon.flow-test
+Ran 19 tests containing 117 assertions.
+0 failures, 0 errors.
+```
