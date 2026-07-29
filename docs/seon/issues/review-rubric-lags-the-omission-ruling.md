@@ -37,3 +37,12 @@ attributes), and a re-review of loop.cljc produces no `[:maybe]` false flag.
 - `CountedDroppingBuffer` wraps an unsynchronized LinkedList read from other
   threads via `count`/`datafy`.
 - Six public flow fns lack `:malli/schema`.
+
+## Second false positive (2026-07-29 afternoon)
+
+The review flagged `(d/transact connection {:tx-data [...]})` in
+test_support.clj as a correctness bug ("expects a vector... not a map").
+REPL-falsified: datahike.api/transact accepts BOTH the arg-map and raw
+vector forms — probe returned {:map-form true, :vec-form true}
+(tmp/reviews/20260729T140011.539Z.md). The rubric needs Datahike's own
+transact arities, not Datomic-client folklore.
