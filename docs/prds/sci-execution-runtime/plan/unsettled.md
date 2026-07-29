@@ -192,6 +192,67 @@ executor; current rendering is complete snapshots plus per-tab deltas
 The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
 which is why the independent pass exists.
 
+## THE CODE GRAPH IS REAL NOW (2026-07-29 night, `7340e2635`)
+
+**121 fn rows → 1,242.** Namespaces with functions 21 → 105. Private helpers
+0 → **808**. Per-file `defn`/`defn-` counts now EQUAL per-namespace row counts
+with zero mismatches. Gate **568/2780/0**. Two silent defects were behind it:
+
+1. **A hand-maintained allowlist killed namespace attribution.**
+   `seon.sci.reader`'s `namespace-stable-operations` cleared parse-time
+   attribution after ANY top-level form outside the list — permanently, until
+   the next explicit `ns`/`in-ns`. So the FIRST ordinary call in a file erased
+   every declaration below it: `(set! *warn-on-reflection* true)` cost
+   `seon.flow` all 47 functions, `(schema.edn/load! {})` cost
+   `cluster/agent.clj` 14, `register-core-predicate!` cost `cluster.clj`
+   everything below line 65. Replaced by a property DERIVED from the form (a
+   form mentioning `ns`/`in-ns` below its own head clears attribution); no
+   list, no skip-set, no per-file case. This was `parser-merge`'s predicted S4
+   conflict — the report foresaw the design problem but not that it was
+   already destroying the corpus.
+2. **A contract gated the graph itself.** `seon.fn/durable-row` required
+   `:seon.fn/spec`, so private helpers were never rows even where attribution
+   held — breaking `:seon.fn/calls` reachability through private helpers, which
+   workload derivation and test selection depend on. Build-time now admits
+   every declared function with `private?` and spec-presence as ordinary
+   attributes. **The eval-time rule is UNCHANGED** — an agent-authored durable
+   declaration still requires its contract (selective admission); a scratch
+   defn still gets a receipt and no row.
+
+The silence is fixed at the gate: a file whose declaration cannot be placed is
+now REFUSED loudly with `:seon.fn/namespace-unproven` naming file, line,
+source and reason. Recurring proofs added: the per-file coverage invariant
+(counting `defn` names from the FORMS, not from the reader's own lifted facts,
+so it cannot agree by sharing a bug) and the loud-refusal regression.
+
+**A CAUTIONARY NOTE FOR WHOEVER READS THIS.** The orchestrator produced TWO
+confident wrong diagnoses on this exact code in one evening — first measuring a
+stale JVM (the reader fix was in the tree, the running JVM predated it), then
+measuring the lane's uncommitted working tree and concluding "there was never
+an attribution bug" when there was. `git log -S` settled it. Anything confident
+about this area deserves verification; an adversarial review
+(`indexer-adversarial-review`) is running against the whole unit for exactly
+that reason.
+
+**TWO NEW BLOCKERS, filed rather than papered over:**
+- `eval-time-schema-and-test-rows-have-no-recurring-proof.md` — writing the
+  test exposed why it is missing: `activate-program-schemas!` rebuilds the
+  whole projection from one database's rows and calls a PROCESS-GLOBAL
+  activation, so a fixture holding one agent-authored schema collapses the
+  registry and kills four unrelated tests in the same JVM. That contradicts
+  "clusters share no mutable state." The function half IS covered
+  (publish/refuse/upsert/delete/attribution).
+- `priming-indexes-with-the-live-jvms-loaded-code.md` — `bin/seon index` reads
+  source FILES from disk but interprets them with the reader the target JVM
+  loaded at boot, then records `:seon.ancestor/digest` from the disk files, so
+  the recorded digest LIES about which code produced the corpus (this is what
+  bit the orchestrator). Recommended fix: the JVM records the digest of the
+  source its indexing namespaces actually loaded from and `index!` REFUSES on
+  mismatch, naming both — readiness published rather than a reload the caller
+  must remember. A `:reload`-inside-index one-liner is explicitly rejected
+  (it re-runs schema activation against a running system), and per-cluster
+  indexing cannot move to a subprocess because the live JVM holds the flock.
+
 ## THE OWNER'S CLUSTER IS PRIMED (2026-07-29 night, owner watching)
 
 `bin/seon index default` ran against the live cluster on 7994. Before → after:
