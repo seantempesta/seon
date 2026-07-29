@@ -47,6 +47,53 @@
        ::m/walk-refs #(not (contains? canonical-keys %))})
     @!references))
 
+(defn- reference-cycle
+  "First deterministic cycle in `graph` reachable from `roots`, or nil."
+  [graph roots]
+  (letfn [(visit [node path positions visited]
+            (if-some [cycle-start (get positions node)]
+              [(conj (subvec path cycle-start) node) visited]
+              (if (contains? visited node)
+                [nil visited]
+                (let [path (conj path node)
+                      positions (assoc positions node (dec (count path)))]
+                  (loop [references (sort-by str (get graph node #{}))
+                         visited visited]
+                    (if-let [reference (first references)]
+                      (let [[cycle visited]
+                            (visit reference path positions visited)]
+                        (if cycle
+                          [cycle visited]
+                          (recur (next references) visited)))
+                      [nil (conj visited node)]))))))]
+    (loop [roots (sort-by str roots)
+           visited #{}]
+      (when-let [root (first roots)]
+        (let [[cycle visited] (visit root [] {} visited)]
+          (if cycle
+            cycle
+            (recur (next roots) visited)))))))
+
+(defn- assert-acyclic-references!
+  "Refuse cycles in a canonical schema-reference graph."
+  [forms roots reference-graph]
+  (when-let [cycle-path (reference-cycle reference-graph roots)]
+    (let [identity (first cycle-path)]
+      (throw
+       (ex-info
+        (str "Schema population refused " identity
+             ": canonical schema reference cycle "
+             (pr-str cycle-path)
+             ". Recursive canonical registrations are not supported. "
+             "Use a Malli local `:schema` registry for a recursive value "
+             "shape, or a named predicate schema when the grammar belongs "
+             "to its enforcing function.")
+        {:seon.schema/error :seon.schema/cyclic-reference
+         :seon.schema/identity identity
+         :seon.schema/definition (get forms identity)
+         :seon.schema/cycle-path cycle-path
+         :seon.error/kind :user-input})))))
+
 (defn- predicate-symbols-in [value]
   (cond
     (and (vector? value) (= :fn (first value)))
@@ -116,6 +163,37 @@
 
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(bind-predicates % predicate-functions)))
+
+(defn- canonical-reference-graph
+  "Direct canonical references without eagerly expanding canonical forms."
+  [forms predicate-functions]
+  (let [canonical-keys (set (keys forms))
+        reference-registry
+        (mr/composite-registry
+         (m/default-schemas)
+         (mr/fast-registry
+          (into {}
+                (map (fn [schema-key]
+                       [schema-key [:ref schema-key]]))
+                canonical-keys)))
+        options {:registry reference-registry}]
+    (into
+     (sorted-map)
+     (map
+      (fn [[schema-key definition]]
+        [schema-key
+         (try
+           (direct-references*
+            (m/schema
+             (bind-predicates definition predicate-functions)
+             options)
+            canonical-keys)
+           (catch #?(:clj Exception :cljs :default) _
+             ;; The ordinary compilation gate owns malformed and unresolved
+             ;; forms. This preflight owns only the reference graph needed to
+             ;; make recursive expansion unrepresentable.
+             #{}))]))
+     forms)))
 
 (declare canonical-data-string)
 
@@ -698,6 +776,14 @@
                         bindings)))
                   predicate-functions
                   predicate-symbols))
+        schema-dependencies
+        (or schema-dependencies
+            (canonical-reference-graph forms predicate-functions))
+        _ (when-not prepared?
+            (assert-acyclic-references!
+             forms
+             (if (keyword? identity) [identity] (keys forms))
+             schema-dependencies))
         compiled-forms (or compiled-forms
                            (bound-forms forms predicate-functions))
         compiled-definition
@@ -1003,6 +1089,10 @@
                        bindings)))
                  predicate-functions
                  predicate-symbols)
+         schema-dependencies
+         (canonical-reference-graph forms predicate-functions)
+         _ (assert-acyclic-references!
+            forms (keys forms) schema-dependencies)
          compiled-forms (bound-forms forms predicate-functions)
          compiled-contracts
          (bound-forms function-contracts predicate-functions)
@@ -1028,13 +1118,6 @@
                (map (fn [[sym contract]]
                       [sym (m/function-schema contract options)]))
                compiled-contracts)
-         schema-dependencies
-         (into (sorted-map)
-               (map (fn [[k _form]]
-                      [k (direct-references*
-                          (get compiled-schemas k)
-                          canonical-keys)]))
-               forms)
          !reference-advisories (atom {})
          reference-advisories
          (fn [reference role admission]

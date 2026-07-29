@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, render]
 ---
@@ -89,3 +89,25 @@ Found 2026-07-27 while drafting the N4 render contracts. The probe script is
 unguarded postwalk over the recursive form, but the only demonstrated consumer
 was the now-draft render grammar. Keep the generic admission trap queued; do
 not fence the render walk with it.
+
+## Resolution
+
+Resolved by the path-limited cycle-refusal fix that archives this note.
+`seon.schema` now derives the direct canonical reference graph before eager
+compilation and refuses its first deterministic cycle at the admission seam
+with `:seon.schema/cyclic-reference`, the submitted identity, and the complete
+`:seon.schema/cycle-path`. Direct self-reference, explicit `:ref`, and mutual
+recursion therefore fail where submitted; Malli-local `:schema` registry
+recursion remains supported.
+
+Proof on 2026-07-29:
+
+- the focused schema gate passed within the combined renderer/schema run;
+- direct and explicit self-cycles reported
+  `[:seon.schema-test/self :seon.schema-test/self]`;
+- the mutual cycle reported
+  `[:seon.schema-test/left :seon.schema-test/right
+  :seon.schema-test/left]`; and
+- the combined renderer/schema gate ran 153 tests / 501 assertions, with only
+  two unrelated pre-existing failures in
+  `seon.render.web-test/stalled-sse-consumer-has-a-constant-socket-write-bound`.
