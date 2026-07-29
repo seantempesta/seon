@@ -51,8 +51,18 @@ review first); (3) S1 outputs read with the owner → S2 guinea pig
 front door); (5) test-dissolution waves 1–4 (design review); UI stays
 TABLED until the context rendering system is proven. PENDING OWNER:
 upstream http-kit PR go; render-design doc read; S1 shadow read;
-generate-code design conversation (parked). Issue queue: 26 open
-(index.md current as of chunk 4; triage chunks 5+ pending).
+generate-code design conversation (parked).
+**CHECKPOINT ENTERED (2026-07-29 late afternoon).** Config wave CLOSED
+(nine commits, both issues archived, resources/ move done, exit gate
+531/2183/0). The armed-test wedge did NOT reproduce on the quiet tree —
+exonerated as mid-edit contention. In flight: the independent
+orchestrator gate rerun; checkpoint-audit-0729 (the standing post-wave
+adversarial sweep — re-verifies the code-graph terminal seam, selective
+admission edges, zero-overlay boot from resources/, the fork's
+boundedness, and sweeps today's diffs for the known failure modes);
+the Opus agent-flow render falsifier (REPL-only). Issue queue: 28 open
+after the wave's archives — the debt review with the owner runs on the
+audit's return.
 
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
