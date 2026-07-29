@@ -6,10 +6,10 @@ tags: [research, database]
 
 # `seon.db` facade quarry and fresh read design
 
-This report binds ruling 22a to source evidence. Renders call `seon.db`, never
-`datahike.api` directly. The facade described here is a return to a repeatedly
-implemented Seon mechanism, cut down for the fresh in-process CLJ runtime; it
-is not a new database abstraction.
+This report binds rulings 22a and 24 to source evidence. Renders call
+`seon.db`, never `datahike.api` directly. The facade described here is a
+return to a repeatedly implemented Seon mechanism, cut down for the fresh
+in-process CLJ runtime; it is not a new database abstraction.
 
 The owner direction is literal:
 
@@ -25,21 +25,21 @@ pass basis-consistent and cluster-local.
 
 ## Verdict
 
-The first fresh `seon.db` slice should contain:
+The owner-reviewed contract must prove the complete read surface before any
+implementation slice begins:
 
 - `query`, named as Seon named it in every mature generation;
 - `pull`;
+- `pull-many`;
+- `entity`, returning eager ordinary data rather than Datahike's lazy entity;
+- bounded `datoms`, including an honest AVET range interest;
 - `with-db`, the system-side binding of one immutable database value;
 - `with-read-evidence`, the system-side capture around a render pass; and
-- the private query-input alignment and evidence-recording functions required
-  by those four public functions.
+- the private alignment, evidence, bounded realization, and range-matching
+  functions those reads require.
 
-It should not initially contain `entity`, `pull-many`, or `datoms`: no
-executable call in `src/seon/render/` uses them. `entity` is exactly
-`(pull '[*] eid)` and adds no mechanism. `pull-many` becomes justified when a
-real consumer needs input-aligned bulk pull. Raw `datoms` has no
-`*-with-evidence` API and is potentially unbounded; a later bounded index owner
-must make its dependency behavior explicit before it enters the facade.
+Implementation may still land in dependency-ordered slices. Learning and the
+public contract may not defer any of these five reads.
 
 Both reads have the mined positional pairs:
 
@@ -49,11 +49,22 @@ Both reads have the mined positional pairs:
 
 (db/pull selector eid)                     ; bound latest db is inserted
 (db/pull db selector eid)                  ; explicit immutable db
+
+(db/pull-many selector eids)               ; bound latest db is inserted
+(db/pull-many db selector eids)            ; explicit immutable db
+
+(db/entity eid)                            ; eager '[*] projection
+(db/entity db eid)                         ; explicit immutable db
+
+(db/datoms options)                        ; bounded index page/range
+(db/datoms db options)                     ; explicit immutable db
 ```
 
-`query` calls `d/q-with-evidence`, and `pull` calls
-`d/pull-with-evidence`, on every invocation. Evidence capture is not an
-optional sibling API that renderers can forget to use.
+`query`, `pull`, and `pull-many` call the maintained fork's executing evidence
+APIs on every invocation. `entity` composes from `pull '[*]`.
+`datoms` uses the maintained bounded index operations and emits its own
+conservative automatic range evidence. Evidence capture is not an optional
+sibling API that renderers can forget to use.
 
 ## Scope and method
 
@@ -72,15 +83,19 @@ The quarry read:
 - the relevant resolved/superseded issue archive and the fixing commits; and
 - every current `datahike.api` require and executable use under `src/`.
 
-This is analysis and design only. No fresh source or test was edited.
+This is analysis and REPL design only. No fresh `src/` or `test/` file was
+edited.
 
 ## Dependency ledger
 
 | dependency or Seon mechanism | selected revision | source read |
 |---|---|---|
-| Datahike | `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/api/specification.cljc:440-622`, `query.cljc:115-170,2880-2960`, `pull_api.cljc:420-465` |
+| Datahike | `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/api/specification.cljc:440-771`, `query.cljc:115-170,2480-2520,2880-2960`, `pull_api.cljc:420-465` |
 | Datahike query evidence | same revision | `q-with-evidence`, `query-dependency-plan`, `dependency-plan-attributes` |
 | Datahike pull evidence | same revision | `pull-dependency-plan`, `pull-with-evidence`, `pull-many-with-evidence` |
+| Datahike lazy entity | same revision | `impl/entity.cljc:17-39,53-184,205-218` |
+| Datahike indexes | same revision | `api/types.cljc:174-207`, `db.cljc:281-305`, `test/index_test.cljc:192-237` |
+| fresh value projection | current tree | `src/seon/render/value.cljc:165-209` |
 | old facade | tree `src-old/` | all of `src-old/seon/db.cljc` |
 | old capture context | tree `src-old/` | `db/leaf.cljc`, `fiber.cljs:20-72`, `session.cljs:41-67,570-607`, `host.clj:900-982` |
 | old wake routing | tree `src-old/` | `db/writer.clj:2756-3205` |
@@ -368,7 +383,9 @@ same live branch and reduced each plan through:
 `:all` absorbed sets. The reverse index narrowed candidate interests by
 changed attribute, then exact datom matching confirmed delivery. The fresh
 falsifier keeps that two-stage routing, same-signature installation no-op,
-and fail-open `:all`.
+and fail-open `:all`. Plan-to-attribute projection is memoized by normalized
+query form, so two registered passes executing the same query do not repeat
+the pure dependency-plan reduction.
 
 Fresh deliberately changes two historical policies:
 
@@ -405,8 +422,14 @@ The vector is stable first-observation order with exact duplicate entries
 removed. It is invocation-local process state, not durable data and not
 derived state stored in the database.
 
-Every `query` and `pull` records automatically when a capture is active. A
-read outside capture still works; it simply has no interest consumer.
+Every `query`, `pull`, `pull-many`, `entity`, and `datoms` call checks one
+dynamic, invocation-local capture context. When the render proc binds that
+context, reads append evidence and the proc may install the reduced interest
+under its `[agent-id registration-name]` reference. With no binding, the
+exact same functions are plain one-off calls: they return their values,
+allocate no collector, and register nothing. The facade neither accepts an
+agent/registration argument nor knows the interest registry. Registration is
+a property of the calling pass, never a per-call mode selected by an agent.
 
 If alignment or database execution fails, the facade records `:all` before
 returning its read error. If the enclosing projection/render fails, the render
@@ -442,7 +465,7 @@ repairing transaction can be filtered out forever unless failure widens.
 | `instrumented-query-lost-one-argument-accessor.md` / `daf8f41c3` | overlapping fixed and variadic Malli implementations lost `(query form)` | one variadic query implementation and one honest logical contract |
 | `query-contract-required-a-source-the-function-did-not.md` / `4af318a6b` | schema required at least one input while omission allowed none | query inputs use `:*`, then semantic alignment decides validity |
 | `pull-contract-omitted-explicit-database-arity.md` / `31b4a8230` | implementation accepted the three-argument form but schema did not | schemas enumerate both pull arities |
-| `public-pull-map-used-transport-field-names.md` / `921d185a3` | public request keys drifted into protocol vocabulary | no map request in the first slice; positional only |
+| `public-pull-map-used-transport-field-names.md` / `921d185a3` | public request keys drifted into protocol vocabulary | no protocol-shaped read request maps; the closed datoms index options are dependency input, not transport |
 | `invalid-database-request-was-core-fault.md` / `1c6718875` | malformed/unawaited input was classified as a core fault | validation errors return a caller-correctable flat error value |
 | `database-failures-lost-seon-error-kind.md` | protocol projection dropped the failure's kind | use the one fresh closed `:seon.error/value` unchanged |
 | `datahike-read-dependencies-miss-valid-query-and-pull-inputs.md` | incomplete dependency analysis missed valid missing/reverse/nested cases | call maintained Datahike `*-with-evidence`; never implement a Seon analyzer |
@@ -519,7 +542,8 @@ Before execution it uses the mined count-and-source-position algorithm:
    exactly;
 3. if supplied count is one less and there is exactly one database source,
    insert the bound database at that source's declared argument position;
-4. otherwise return `:seon.db/invalid-query-inputs`;
+4. otherwise return the closed read-failure envelope with
+   `:seon.error/kind :seon.db/invalid-read`;
 5. call `(apply d/q-with-evidence query-form aligned-inputs)`; and
 6. record the returned plan once for every database source position.
 
@@ -545,8 +569,104 @@ The first uses the bound database. The second uses the explicit value. Both
 call `d/pull-with-evidence`, record source position zero, and return an eager
 map or nil inside the closed read result.
 
-`'[*]` is a valid selector and produces a conservative plan. There is no
-separate `entity` implementation in slice one.
+### Pull-many
+
+`pull-many` has the same positional pair:
+
+```clojure
+([selector eids] ...)
+([database selector eids] ...)
+```
+
+Both call `d/pull-many-with-evidence` once, not `mapv` over facade `pull`.
+Datahike returns one input-aligned vector and one shared parsed dependency
+plan. The facade records one primary-source entry. Missing entities remain
+`nil` in position; no filtering or reordering occurs.
+
+### Entity
+
+`entity` supports the old positional pair but deliberately ports Generation
+G's semantics, not Datahike's return object:
+
+```clojure
+([eid] ...)
+([database eid] ...)
+```
+
+It is exactly eager `pull '[*]`, including `d/pull-with-evidence` and its
+conservative `:all` attribute plan. The facade then passes the ordinary map
+through the calling pass's existing bounded value-admission discipline. It
+also passes the cluster's configured result-weight limit into Datahike's pull
+options, so an oversize projection becomes the closed read failure instead of
+being constructed without bound. A one-off call uses the same cluster-bound
+default. The limit is a configuration fact, not a new per-entity magic number.
+
+This conclusion follows from the prototype in Chunk 7:
+
+- a wrapper can record keyed lookup precisely, including absent attributes
+  and later navigation through a ref;
+- `seq`, `count`, printing, equality helpers, and other map operations cause
+  Datahike's `touch`, whose open attribute set must widen to `:all`;
+- every returned ref needs another wrapper, so the wrapper becomes a second
+  lazy entity implementation; and
+- fresh `seon.render.value/opaque?` correctly classifies Datahike's raw entity
+  as a runtime handle.
+
+Refusing the public `entity` function would fail ruling 24. Returning the raw
+entity would leak lazy database access across the evidence/basis and ordinary
+value boundaries. Eager bounded projection is the only option that supports
+the API while preserving those boundaries. Callers needing precise wake
+interest use explicit `pull`; `entity` is intentionally conservative.
+
+### Datoms
+
+Raw `d/datoms` is lazy and its datom objects are opaque to the fresh value
+renderer. Fresh `datoms` therefore has two positional arities around one
+closed bounded options value:
+
+```clojure
+([options] ...)
+([database options] ...)
+```
+
+The options schema admits:
+
+- Datahike's eager `SIndexPageArgs`, retaining its `index`, `components`,
+  `direction`, `limit`, cursor, and result-weight vocabulary; or
+- a bounded accretion of `SIndexRangeArgs` requiring `attrid`, inclusive
+  `start`, inclusive `end`, and `limit`.
+
+The return is an eager vector of closed ordinary datom maps using the mined
+Generation G writer projection:
+
+```clojure
+{:seon.db/e entity-id
+ :seon.db/a attribute
+ :seon.db/v value
+ :seon.db/tx transaction-id
+ :seon.db/added? boolean}
+```
+
+The facade may call the maintained fork's internal index functions directly;
+the owner explicitly sanctioned that dependency boundary. It never exposes a
+lazy sequence. Its dependency exception boundary encloses bounded realization
+and datom-map projection, so a delayed index failure still becomes the closed
+read failure.
+
+Evidence is automatic:
+
+- an AVET bounded range emits its concrete attribute plus an inclusive value
+  interval pattern;
+- a page whose prefix exposes a concrete attribute emits at least that
+  attribute dependency;
+- an EAVT entity-only prefix, an open index scan, or a shape whose attribute
+  cannot be proven widens to `:all`; and
+- no renderer authors these patterns.
+
+The exact range matcher must test both the transaction report's new value and
+the old value found by a point lookup in `db-before`. The maintained report
+does not include the displaced cardinality-one value. Looking only at
+`:tx-data` misses an entity leaving the range and is unsound.
 
 ### Result and error shape
 
@@ -555,7 +675,7 @@ an error:
 
 ```clojure
 {:seon.db/success? true
- :seon.db/value query-or-pull-value}
+ :seon.db/value ordinary-read-value}
 
 {:seon.db/success? false
  :seon.error/value flat-registered-error}
@@ -564,7 +684,7 @@ an error:
 The facade catches dependency exceptions. It classifies from structured
 `ex-data`, never message text:
 
-- malformed query/pull/inputs/ref becomes caller-correctable
+- malformed query/pull/pull-many/entity/datoms inputs become caller-correctable
   `:seon.db/invalid-read`;
 - absence of an ambient database becomes `:seon.db/missing-database`;
 - a Datahike refusal retaining its own useful kind/data remains that
@@ -614,6 +734,51 @@ instrumentation:
 [:fn {:error/message "a Datahike entity id or lookup ref"}
  seon.db/entity-ref?]
 
+:seon.db/entity-refs
+[:vector :seon.db/entity-ref]
+
+:seon.db/index-component
+[:fn {:error/message "an ordinary Datahike index component"}
+ seon.db/index-component?]
+
+:seon.db/index-components
+[:vector {:max 4} :seon.db/index-component]
+
+:seon.db/index-cursor
+[:tuple :seon.db/index-component :seon.db/index-component
+ :seon.db/index-component :int :boolean]
+
+:seon.db/index-page-options
+[:map {:closed true}
+ [:seon.db/index [:enum :eavt :aevt :avet]]
+ [:seon.db/components :seon.db/index-components]
+ [:seon.db/direction [:enum :forward :reverse]]
+ [:seon.db/limit [:int {:min 1}]]
+ [:seon.db/cursor {:optional true} :seon.db/index-cursor]
+ [:seon.db/max-result-weight {:optional true} [:int {:min 1}]]]
+
+:seon.db/index-range-options
+[:map {:closed true}
+ [:seon.db/attr :keyword]
+ [:seon.db/start :seon.db/index-component]
+ [:seon.db/end :seon.db/index-component]
+ [:seon.db/limit [:int {:min 1}]]
+ [:seon.db/max-result-weight {:optional true} [:int {:min 1}]]]
+
+:seon.db/datoms-options
+[:or :seon.db/index-page-options :seon.db/index-range-options]
+
+:seon.db/datom
+[:map {:closed true}
+ [:seon.db/e :seon.db/index-component]
+ [:seon.db/a :keyword]
+ [:seon.db/v :seon.db/index-component]
+ [:seon.db/tx [:int {:min 1}]]
+ [:seon.db/added? :boolean]]
+
+:seon.db/datoms
+[:vector :seon.db/datom]
+
 :seon.db/success? :boolean
 
 :seon.db/read-success
@@ -629,11 +794,63 @@ instrumentation:
 :seon.db/read-result
 [:or :seon.db/read-success :seon.db/read-failure]
 
-:seon.db/read-evidence-entry
+:seon.db/pull-value
+[:fn {:error/message "nil or one fully realized ordinary pull map"}
+ seon.db/pull-value?]
+
+:seon.db/pull-many-value
+[:vector :seon.db/pull-value]
+
+:seon.db/pull-success
+[:map {:closed true}
+ [:seon.db/success? [:= true]]
+ [:seon.db/value :seon.db/pull-value]]
+
+:seon.db/pull-many-success
+[:map {:closed true}
+ [:seon.db/success? [:= true]]
+ [:seon.db/value :seon.db/pull-many-value]]
+
+:seon.db/datoms-success
+[:map {:closed true}
+ [:seon.db/success? [:= true]]
+ [:seon.db/value :seon.db/datoms]]
+
+:seon.db/pull-result
+[:or :seon.db/pull-success :seon.db/read-failure]
+
+:seon.db/pull-many-result
+[:or :seon.db/pull-many-success :seon.db/read-failure]
+
+:seon.db/datoms-result
+[:or :seon.db/datoms-success :seon.db/read-failure]
+
+:seon.db/plan-evidence-entry
 [:map {:closed true}
  [:seon.db/db :seon.db/database]
  [:seon.db/source-argument-position [:int {:min 0}]]
  [:datahike.read/dependency-plan :datahike/SReadDependencyPlan]]
+
+:seon.db/value-range
+[:map {:closed true}
+ [:seon.db/start :seon.db/index-component]
+ [:seon.db/end :seon.db/index-component]
+ [:seon.db/start-inclusive? [:= true]]
+ [:seon.db/end-inclusive? [:= true]]]
+
+:seon.db/datom-pattern
+[:map {:closed true}
+ [:seon.db/a :keyword]
+ [:seon.db/value-range {:optional true} :seon.db/value-range]]
+
+:seon.db/index-evidence-entry
+[:map {:closed true}
+ [:seon.db/db :seon.db/database]
+ [:seon.db/dependencies [:or [:= :all] [:set :keyword]]]
+ [:seon.db/patterns [:vector :seon.db/datom-pattern]]]
+
+:seon.db/read-evidence-entry
+[:or :seon.db/plan-evidence-entry :seon.db/index-evidence-entry]
 
 :seon.db/read-evidence
 [:vector :seon.db/read-evidence-entry]
@@ -650,8 +867,8 @@ The former accepts only fully realized ordinary values plus nil. The latter
 validates the value against the caller-owned render-pass result schema rather
 than replacing that schema with a second database-owned copy. `thunk?`
 requires a function whose declared arglists admit zero arguments. Query forms,
-selectors, entity refs, database values, plans, source positions, and errors
-all have their actual named schemas.
+selectors, entity refs, index components, database values, plans, source
+positions, and errors all have their actual named schemas.
 
 The public function contracts are:
 
@@ -673,15 +890,37 @@ query
 pull
 [:function
  [:=> [:cat :seon.db/pull-selector :seon.db/entity-ref]
-  :seon.db/read-result]
+  :seon.db/pull-result]
  [:=> [:cat :seon.db/database :seon.db/pull-selector
        :seon.db/entity-ref]
-  :seon.db/read-result]]
+  :seon.db/pull-result]]
+
+pull-many
+[:function
+ [:=> [:cat :seon.db/pull-selector :seon.db/entity-refs]
+  :seon.db/pull-many-result]
+ [:=> [:cat :seon.db/database :seon.db/pull-selector
+       :seon.db/entity-refs]
+  :seon.db/pull-many-result]]
+
+entity
+[:function
+ [:=> [:cat :seon.db/entity-ref] :seon.db/pull-result]
+ [:=> [:cat :seon.db/database :seon.db/entity-ref]
+  :seon.db/pull-result]]
+
+datoms
+[:function
+ [:=> [:cat :seon.db/datoms-options] :seon.db/datoms-result]
+ [:=> [:cat :seon.db/database :seon.db/datoms-options]
+  :seon.db/datoms-result]]
 ```
 
 `query` has one variadic implementation and one contract, so the zero-input
-ambient form is admitted by `:*`. `pull` has two non-overlapping fixed
-arities, both declared.
+ambient form is admitted by `:*`. Every other read has two non-overlapping
+fixed arities, both declared. The facade translates its fully namespaced
+index option keys to Datahike's bare dependency argument keys only at the
+dependency call.
 
 ### Evidence and errors interact atomically
 
@@ -712,10 +951,11 @@ values.
 | `query-with-evidence` public sibling | drop | built-in capture prevents an untracked read path |
 | normalized-read replay | drop | executing Datahike already returns a sound plan |
 | returned `(e,a)` tracing | drop | misses absent attributes and empty results |
-| lazy `d/entity` | drop | tier-local object, implicit follow-up reads, and duplicate of full pull |
-| `entity` convenience | defer | no fresh render caller; add only as `(pull '[*] eid)` if justified |
-| `pull-many` | defer | no fresh render caller |
-| `datoms`/seek/rseek/index-page | defer | no evidence API for raw datoms; unbounded/lazy scans violate the first slice |
+| raw lazy `d/entity` object | drop | wrapper prototype still widens on `seq` and becomes a second lazy entity implementation |
+| eager `entity` facade | retain | Generation G's full pull supports the main API without leaking a tier-local object |
+| `pull-many` | retain | maintained `pull-many-with-evidence` gives aligned results and one shared plan |
+| raw lazy `d/datoms`/seek/rseek | drop | opaque datom objects and deferred reads can escape the pass basis |
+| bounded `datoms` facade | retain | eager index pages/ranges have explicit caps and automatic precise-or-`:all` evidence |
 | installed-schema/read admission | drop | not needed for render invalidation; `:all` is not an authorization set |
 | transactions/listeners/branches/restore/KNN | drop from this facade slice | owned by other fresh mechanisms or not needed by renders |
 | schema bridge and codecs | drop | database schema registration and external projection are separate owners |
@@ -733,6 +973,14 @@ rg -n 'datahike\.api|\bd/' src/
 There are 27 fresh source files requiring `datahike.api`. The migration is
 grouped by owning wave so the render read seam can land without turning
 `seon.db` into a store/lifecycle facade.
+
+Ruling 24 does not change a present call-site owner: a second census found no
+executable `d/entity`, `d/pull-many`, `d/datoms`, `d/index-range`,
+`d/index-page`, `d/seek-datoms`, or `d/rseek-datoms` call under `src/`.
+Those functions are full-contract learning and forward API support.
+`src/seon/render/value.cljc:170-204` recognizes entity and datom objects only
+to classify them as opaque; it is a design dependency, not a facade migration
+call site.
 
 ### Owner lane R — render reads, first facade consumer
 
@@ -774,7 +1022,7 @@ the render seam proves the contract:
 
 `src/seon/oversight.clj:44` also calls
 `d/committed-value-identity`. It belongs in this owner lane but not in the
-first `query`/`pull` slice; add a thin facade projection only when the
+initial five-read implementation wave; add a thin facade projection when the
 consumer migration reaches it. `src/seon/error.clj:850` is only a `d/pull`
 docstring reference, not a call.
 These consumers require an explicit result-union migration; a blind namespace
@@ -856,17 +1104,20 @@ rather than literally repeats the last public facade.
 After approval:
 
 1. register the database/read/evidence schemas;
-2. implement synchronous `with-db`, `with-read-evidence`, `query`, and `pull`
-   with built-in evidence;
+2. implement synchronous `with-db`, `with-read-evidence`, `query`, `pull`,
+   `pull-many`, eager `entity`, and bounded `datoms` with built-in evidence;
 3. prove explicit and omitted forms, nonzero query source position,
    multi-source refusal, error-shaped success data, absent pull attributes,
+   pull-many alignment, entity ref walking, bounded index ranges,
    empty/static capture, and failure widening;
 4. migrate the six render files atomically with the result-union handling;
 5. connect the capture to the falsifier's interest reduction and reverse
-   index;
+   index, including `db-before` checks for range exits;
 6. prove one render pass observes one basis and a repairing transaction wakes
    a previously failed render; and
-7. only then schedule the remaining application-read lanes.
+7. prove two agents share Datahike's result cache and attribute bucket while
+   retaining distinct registration references; then schedule the remaining
+   application-read lanes.
 
 The shortest acceptance falsifiers are:
 
@@ -880,6 +1131,14 @@ The shortest acceptance falsifiers are:
   both reads used the database value bound at pass entry;
 - run a query whose sole database source is not argument position zero and
   prove insertion and evidence position agree;
+- walk an entity through a ref, prove eager ordinary data and conservative
+  interest, and prove no Datahike Entity escapes;
+- update an AVET value from inside to outside a registered range and prove the
+  `db-before` lookup wakes it while an unrelated attribute does not;
+- run `pull-many` with a missing middle ref and prove alignment plus one plan;
+- run the same query and basis in two agent passes and observe first
+  `miss-owner`, second `hit`, one memoized plan derivation, one attribute
+  bucket with two references, and both registrations waking;
 - fail after a narrow capture, prove installed interest is `:all`, repair via
   a disjoint transaction, and prove the later success narrows; and
 - inspect the fresh `src/seon/render/` tree and prove it contains no
@@ -915,21 +1174,266 @@ The commits below are the compact trail for the behaviors this design mines:
 | `f6d843ee7` | portable core and tier leaves |
 | `f25e34594` | old tree archived; fresh tree becomes project |
 
-## Final design boundary
+## Chunk 7 — ruling 24 full-surface REPL falsifiers
 
-The facade returns as a four-function synchronous CLJ read seam, not as the
-old database subsystem:
+The executable probe used the maintained Datahike revision from the dependency
+ledger, a fresh canonical in-memory Seon database, and the already recorded
+old reverse-index prototype in `tmp/agent-render-falsify/interest.clj`.
+Synthetic `:probe/*` attributes isolated the mechanisms from product data.
+Every result below came from one ordinary CLJ process; no fresh `src/` code
+was defined or edited.
+
+### Entity: lazy incremental reads are observable but do not survive the boundary
+
+Datahike's `Entity` holds an immutable database value, eid, touched flag, and
+cache (`impl/entity.cljc:17-20,53`). A keyed lookup searches exactly
+`[eid attribute]`, including an absent attribute
+(`impl/entity.cljc:165-184`). A ref returns another lazy Entity
+(`impl/entity.cljc:22-29`). Reverse lookup searches the forward ref
+(`impl/entity.cljc:31-39`). In contrast, `seq` and `count` call `touch`, which
+scans every current EAVT datom for the entity
+(`impl/entity.cljc:132-151,205-212`).
+
+The wrapper falsifier implemented `ILookup` by recording the requested
+attribute before delegating, recursively wrapped returned entity refs, and
+implemented `Seqable`/`Counted` by widening the collector:
+
+```clojure
+(valAt [_ attribute]
+  (swap! reads #(if (= :all %) :all (conj % attribute)))
+  (traced-value (get entity attribute) reads))
+
+(seq [_]
+  (reset! reads :all)
+  (seq entity))
+```
+
+One renderer-like walk read message content, followed `:probe/from` to the
+agent's id, and tested one absent attribute. The exact output was:
+
+```clojure
+{:walk {:content "hello"
+        :agent-id "agent-a"
+        :missing ::missing}
+ :keyed-evidence
+ #{:probe/content :probe/from :probe/id :probe/missing}
+ :after-seq-evidence :all
+ :raw-opaque? true}
+```
+
+Installing the keyed set in the old reverse candidate index and changing
+`:probe/content` returned `[["agent-a" :entity-render]]`; changing
+`:probe/noise` returned `[]`. The interest machinery can therefore consume
+incremental wrapper evidence. That does not make the wrapper the right public
+value:
+
+| option | prototype result | ruling |
+|---|---|---|
+| wrapper around raw Entity | exact for `get`, forward-ref navigation, and absent keys; reverse keys also require canonicalization to their forward attribute; `seq`/`count` widen | reject: every lazy ref needs wrapping, map operations are an open escape set, and this recreates Datahike Entity |
+| eager bounded `'[*]` projection | ordinary map; Datahike plan attributes are `:all` | choose for `entity`: sound, basis-closed, value-renderable, conservative |
+| refuse entity and require pull | most precise, simplest mechanism | reject as the public answer: ruling 24 requires the main API; retain explicit `pull` as the precision path |
+
+The fresh value renderer independently returned `true` from
+`opaque?` for the raw Entity (`src/seon/render/value.cljc:170-204`).
+The executing eager alternative returned:
+
+```clojure
+{:value {:db/id 2330
+         :probe/content "hello"
+         :probe/from {:db/id 2328}
+         :probe/id "message"}
+ :attributes :all}
+```
+
+Thus `entity` is supported, but raw lazy entity is deliberately not.
+
+### Datoms: a precise range needs `db-before`
+
+The maintained AVET implementation slices from resolved start through resolved
+end (`db.cljc:281-298`). Its tests prove both endpoints inclusive
+(`test/index_test.cljc:222-231`). The probe:
+
+```clojure
+(d/index-range db {:attrid :probe/rank :start 20 :end 39})
+```
+
+returned 20 datoms, first value 20 and last value 39.
+
+The initial range matcher checked only values present in the transaction
+report. It returned zero wakes when 20 entities moved from values 20–39 to
+120–139: the report names the asserted replacement, not the displaced old
+cardinality-one value. The sound matcher was:
+
+```clojure
+(some
+ (fn [datom]
+   (when (= attribute (datom-attribute report datom))
+     (let [old-values
+           (map :v
+                (d/datoms
+                 (:db-before report)
+                 {:index :eavt
+                  :components [(:e datom) (:a datom)]}))]
+       (or (in-range? (:v datom) start end)
+           (some #(in-range? % start end) old-values)))))
+ (:tx-data report))
+```
+
+This is one EAVT point read in `db-before` per candidate `(e,a)` in the
+transaction report, memoizable within that report. It catches insertion into,
+mutation within, mutation out of, and retraction from the inclusive range.
+
+The precision experiment used 60 actual transaction reports: 20 rank changes
+leaving the registered range, 20 rank changes outside it, and 20 unrelated
+noise changes.
+
+| evidence policy | wakes | true wakes | false wakes | precision |
+|---|---:|---:|---:|---:|
+| fail-open `:all` | 60 | 20 | 40 | 33.3% |
+| attribute `:probe/rank` only | 40 | 20 | 20 | 50.0% |
+| attribute plus inclusive range and `db-before` | 20 | 20 | 0 | 100.0% |
+
+Range evidence is therefore worthwhile and honest when the attribute and
+bounds are concrete. The facade must fail open to `:all` for an entity-only
+EAVT prefix or any scan shape the shared attribute index cannot route
+soundly. Attribute-only evidence remains a valid conservative middle case.
+
+### Pull-many: one read, one plan, aligned values
+
+The composition prototype was one dependency call:
+
+```clojure
+(d/pull-many-with-evidence
+ db
+ '[:probe/id :probe/content]
+ [[:probe/id "message"]
+  [:probe/id "missing"]
+  [:probe/id "agent-a"]])
+```
+
+It returned:
+
+```clojure
+{:result [{:probe/id "message" :probe/content "hello"}
+          nil
+          {:probe/id "agent-a"}]
+ :attributes #{:probe/id :probe/content}}
+```
+
+The vector exactly equaled the three individual pull results, including the
+middle `nil`; each individual plan projected to the same attribute set.
+`pull-many` therefore composes trivially from pull capture semantics while
+using the fork's more efficient single operation and one shared plan.
+
+### Dual use and two-agent dedupe
+
+The prototype's only call-mode seam was:
+
+```clojure
+(def ^:dynamic *capture-context* nil)
+
+(defn capture! [entry]
+  (when *capture-context*
+    (swap! *capture-context* conj entry)))
+
+(defn facade-query [query database & inputs]
+  (let [response (apply d/q-with-evidence query database inputs)]
+    (capture! (evidence-entry query response))
+    (:datahike.query/result response)))
+```
+
+Calling it outside a binding returned 40 and mutated no capture. Binding a
+collector in each of two simulated agent passes returned the same value and
+one evidence entry per pass. There was no registration or agent argument in
+the read.
+
+After `clear-query-cache!`, two passes used the same query, ordinary inputs,
+and immutable database value:
+
+```clojure
+{:agent-cache-outcomes
+ [:datahike.cache.outcome/miss-owner
+  :datahike.cache.outcome/hit]
+ :plan-derivations 1
+ :memo-entries 1
+ :attribute-buckets
+ {:probe/rank
+  (["agent-a" :rank-render]
+   ["agent-b" :rank-render])}
+ :interest-count 2
+ :relevant-wakes
+ (["agent-a" :rank-render]
+  ["agent-b" :rank-render])
+ :irrelevant-wakes []}
+```
+
+Datahike owns computation dedupe. Its cache key includes admitted connection
+generation and commit ID plus the normalized query computation
+(`query.cljc:2428-2440,2658-2685,3070-3110,4636-4688`). A 301-call warm sample
+on the same query and basis measured 22.792 µs p50; a repeated warmed process
+measured 16.542 µs. The independent query-invalidation probe measured
+21.666–25.459 µs p50. This is the owner's 22 µs class, not a Seon result
+cache to build.
+
+Seon owns only interest dedupe. The memo is bucketed by normalized query form
+and guarded by returned dependency plan plus source position, so dynamic
+rules or a changed plan cannot reuse an unsound projection. Identical calls
+derive plan attributes once. The reverse index stores one attribute key and
+the two tiny `[agent-id registration-name]` references; it does not duplicate
+the query, result, plan, or attribute bucket per agent.
+
+## Port recommendation — Generation G
+
+Port **Generation G**, commit `f6d843ee7`, as the fresh facade generation.
+It is the only generation that already combines the mature positional forms,
+parsed query-source alignment, executing-read dependency plans, eager
+entity/pull values, pull-many, ordinary database values, synchronous CLJ
+metadata, and one portable interception point. Generation C proves the
+original dual-call ergonomics but predates sound plans. Generations D and E
+reconstruct reads or route them through condemned machinery. Generation F
+introduces the right plans; G is its complete facade accretion.
+
+“Port G” means the following exact quarry, not the old subsystem:
+
+| exact old source | ported result |
+|---|---|
+| `src-old/seon/db.cljc:506-553` | parsed query input/source alignment and plan-to-attribute projection |
+| `src-old/seon/db.cljc:595-704` | query, pull, pull-many, and eager entity public semantics |
+| `src-old/seon/db.cljc:782-814` | bounded eager index-page result shape, generalized into bounded `datoms` |
+| `src-old/seon/db/fiber.cljs:30-48` | capture-if-bound, plain-call-if-absent, distinct invocation-local evidence; translated synchronously to CLJ |
+| `src-old/seon/db/writer.clj:1044-1130` | direct `pull-with-evidence`/`pull-many-with-evidence` calls and ordinary datom projection |
+| `src-old/seon/db/writer.clj:2756-3205` | plan reduction, shared reverse attribute index, exact matching, and candidate routing |
+
+The fresh port calls maintained Datahike internals directly. It does **not**
+port `leaf.cljc`, the JVM host evidence no-op, AsyncLocalStorage, sessions,
+protocol, UDS transport, database descriptors, pools, request ids, timeouts,
+writer jobs, or branch-scope restoration. The CLJS async variant is quarry
+evidence for the capture lifetime only; no async residue enters fresh CLJ.
+
+Ruling 24 adds two owner-reviewed accretions to G without selecting a second
+generation:
+
+- the public `datoms` name wraps G's bounded index-page discipline plus an
+  inclusive AVET range and the proven `db-before` matcher; and
+- CLJ implements the capture behavior G only had in its CLJS fiber, because
+  G's JVM host no-op is the one known defect in the otherwise selected
+  generation.
+
+The resulting boundary is:
 
 ```text
 cluster connection
-    → one immutable latest database value at render-pass entry
-        → seon.db/query or seon.db/pull
-            → Datahike value + dependency plan
-                → closed read result + invocation-local evidence
-                    → old two-stage interest routing
+    → one immutable latest database value at pass entry
+        → seon.db query / pull / pull-many / entity / datoms
+            → ordinary value + executing-read or index evidence
+                → closed read result
+                    → optional pass-bound capture
+                        → memoized attributes/ranges
+                            → one shared reverse bucket
+                                → per-agent registration references
 ```
 
-That is simpler than every old generation while retaining the parts those
-generations repeatedly proved: positional dual forms, automatic latest
-insertion, one interception point, exact executing-read evidence, and ordinary
-error values.
+This ports the facade that worked best with the maintained fork while deleting
+the system around it. Datahike dedupes computation; the mined reverse index
+dedupes candidate interests; the facade remains one synchronous CLJ read
+surface for both one-off and registered calls.
