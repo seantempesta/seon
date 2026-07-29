@@ -32,6 +32,7 @@
             [clojure.test.check.properties :as prop]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [org.httpkit.server :as http]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.flow :as flow]
@@ -40,12 +41,10 @@
             [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
-  (:import [java.lang.reflect Field]
-           [java.net Socket URI]
+  (:import [java.net Socket URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]
-           [java.nio ByteBuffer]
-           [java.nio.channels Selector]))
+           [java.util.concurrent CompletableFuture]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
@@ -287,41 +286,6 @@
     (.write (.getOutputStream socket) request)
     (.flush (.getOutputStream socket))
     socket))
-
-(defn- declared-field
-  ^Field [class field-name]
-  (doto (.getDeclaredField class field-name)
-    (.setAccessible true)))
-
-(def ^:private server-atta-class
-  (Class/forName "org.httpkit.server.ServerAtta"))
-
-(def ^:private selector-field
-  (declared-field org.httpkit.server.HttpServer "selector"))
-
-(def ^:private writes-field
-  (declared-field server-atta-class "toWrites"))
-
-(defn- pending-write-state
-  "The selected http-kit server's actual queued socket buffers and bytes."
-  [server]
-  (let [http-server (:seon.render.web/server server)
-        ^Selector selector (.get selector-field http-server)]
-    (reduce
-     (fn [{:keys [buffers bytes]} key]
-       (let [attachment (.attachment key)]
-         (if (instance? server-atta-class attachment)
-           (let [writes (.get writes-field attachment)]
-             {:buffers (+ buffers (count writes))
-              :bytes (+ bytes
-                        (transduce
-                         (map (fn [^ByteBuffer buffer] (.remaining buffer)))
-                         +
-                         0
-                         writes))})
-           {:buffers buffers :bytes bytes})))
-     {:buffers 0 :bytes 0}
-     (.keys selector))))
 
 (defn- patches
   [text]
@@ -616,41 +580,51 @@
   ;; changes one complete 256 KiB outer morph, so the test reaches the
   ;; selected Datastar adapter and http-kit's real nonblocking socket path.
   ;;
-  ;; ORACLE: observable socket backpressure closes this tab and therefore
-  ;; deregisters its tap. At no point may http-kit's private pending-write
-  ;; queue become a second unbounded mailbox. The reflective observation is
-  ;; deliberately test-only: production must consume a supported completion
-  ;; or writable signal, not couple Seon to ServerAtta.
-  (with-server [(block-map :stalled 0 `stalled-html)]
-    (fn [connection server context]
-      (let [socket (open-stalled-feed server (str "/feed/" agent-id))]
-        (try
-          (await-ping! context
-                       #(= 1 (:seon.render.web/watched-agents %))
-                       [:stalled-reader-registered])
-          (let [samples
-                (mapv
-                 (fn [n]
-                   (let [before (derivations context)]
-                     (d/transact connection
-                                 [{:seon.cluster.agent/id
-                                   (str "stalled-" n)}])
-                     (await-ping! context
-                                  #(> (:seon.render.web/passes %) before)
-                                  [:stalled-reader-rendered n])
-                     (assoc (pending-write-state server) :morphs (inc n))))
-                 (range 20))
-                final-state (peek samples)
-                write-bound (* 2 stalled-payload-bytes)]
-            (is (nil? (get @(:registration context) agent-id))
-                (str "the stalled socket must close and deregister its tap; "
-                     "samples=" samples))
-            (is (<= (:bytes final-state) write-bound)
-                (str "pending socket bytes must stay within a constant "
-                     "two-morph backstop; bound=" write-bound
-                     ", samples=" samples)))
-          (finally
-            (.close socket)))))))
+  ;; ORACLE: the supported per-channel accessor never exceeds one event
+  ;; remainder plus framing, and the writer parks instead of closing a healthy
+  ;; connection. The render proc continues deriving while its sliding-1 tap
+  ;; retains only the newest complete page.
+  (let [observed-channel (CompletableFuture.)
+        write-state http/write-state]
+    (with-redefs [http/write-state
+                  (fn [channel]
+                    (.complete observed-channel channel)
+                    (write-state channel))]
+      (with-server [(block-map :stalled 0 `stalled-html)]
+        (fn [connection server context]
+          (let [socket (open-stalled-feed server (str "/feed/" agent-id))]
+            (try
+              (await-ping! context
+                           #(= 1 (:seon.render.web/watched-agents %))
+                           [:stalled-reader-registered])
+              (let [channel
+                    (support/await-event! observed-channel
+                                          [:stalled-writer-observed])
+                    samples
+                    (mapv
+                     (fn [n]
+                       (let [before (derivations context)]
+                         (d/transact connection
+                                     [{:seon.cluster.agent/id
+                                       (str "stalled-" n)}])
+                         (await-ping! context
+                                      #(> (:seon.render.web/passes %) before)
+                                      [:stalled-reader-rendered n])
+                         (assoc (write-state channel) :morphs (inc n))))
+                     (range 20))
+                    max-pending
+                    (apply max
+                           (map :http-kit.write/pending-bytes samples))
+                    write-bound (* 2 stalled-payload-bytes)]
+                (is (= 1 (get @(:registration context) agent-id))
+                    (str "the stalled writer must park without closing its "
+                         "healthy socket; samples=" samples))
+                (is (<= max-pending write-bound)
+                    (str "pending socket bytes must stay within a constant "
+                         "two-morph backstop; bound=" write-bound
+                         ", samples=" samples)))
+              (finally
+                (.close socket)))))))))
 
 ;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
 

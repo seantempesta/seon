@@ -62,7 +62,7 @@
             [starfederation.datastar.clojure.api :as datastar])
   (:import [java.net URI URLDecoder URLEncoder]
            [java.util Date]
-           [java.util.concurrent Executors]))
+           [java.util.concurrent CompletableFuture Executors]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/web.edn
@@ -490,22 +490,27 @@
                (dissoc watched agent-id))))))
 
 (defn- write-patches!
-  "Write one batch while the socket accepts complete writes.
+  "Write one batch, parking after an event enters http-kit's queue.
 
-  Datastar propagates http-kit's `send!` result. `false` is the one
-  backpressure/closure signal this seam consumes: stop the batch and
-  close the generator, which synchronously reaches `on-close` and
-  releases the tab's tap. A displaced patch costs nothing — reconnect
-  repaints current facts.
+  `send!` retains its established meaning: `false` says the channel was
+  already closed, so that inherited seam still closes the generator.
+  After every accepted Datastar event, read http-kit's atomic write
+  state. When bytes are pending, park this connection-owned virtual
+  thread on that exact drain-or-close completion before the next event.
 
-  The selected http-kit currently returns `true` after queueing a
-  partial write; the real-socket regression requires its measured fork
-  to make this result mean fully written rather than merely accepted."
-  [generator patches]
+  While parked, the per-tab `(sliding-buffer 1)` retains only the newest
+  complete page. Queue drain is permission for another write, never
+  remote-delivery acknowledgement."
+  [channel generator patches]
   (reduce
    (fn [_accepted? [_id html]]
      (if (datastar/patch-elements! generator html)
-       true
+       (let [{pending-bytes :http-kit.write/pending-bytes
+              drained :http-kit.write/drained}
+             (http/write-state channel)]
+         (when (pos? pending-bytes)
+           (.join ^CompletableFuture drained))
+         true)
        (do
          (datastar/close-sse! generator)
          (reduced false))))
@@ -524,10 +529,11 @@
   snapshot, select this agent's entry, diff against this connection's
   own last-delivered map, and patch only the changed blocks.
 
-  Backpressure walk: the tap's sliding-1 keeps the newest page pending
-  before the socket and the proc never parks. A write the socket cannot
-  complete closes this tab; reconnect repaints the newest database truth
-  rather than retaining another queue after the tap.
+  Backpressure walk: after at most one Datastar event enters http-kit's
+  pending queue, this connection's `:io` writer parks on its exact
+  drain-or-close completion. The tap's sliding-1 keeps only the newest
+  complete page while the render proc continues; after drain the writer
+  takes that newest page instead of submitting every displaced value.
 
   `on-close` untaps and deregisters. The connection owns exactly one
   virtual thread and one map; nothing outlives the socket."
@@ -538,7 +544,8 @@
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
             render-channel :seon.render.web/render-channel}]
-  (let [tap (async/chan (async/sliding-buffer 1))
+  (let [channel (:async-channel request)
+        tap (async/chan (async/sliding-buffer 1))
         painting (volatile! true)]
     (datastar.http-kit/->sse-response
      request
@@ -559,7 +566,7 @@
                                      :seon.cluster.run/live-processes
                                      #{process}})]
                ;; the initial full paint: every block, at its own id
-               (when (write-patches! generator (sort-by key initial))
+               (when (write-patches! channel generator (sort-by key initial))
                  (async/offer! render-channel ::wake)
                  (loop [delivered initial]
                    (when @painting
@@ -570,7 +577,7 @@
                            ;; default patch mode is `outer` — a complete
                            ;; morph of one element; the id rides in the
                            ;; element itself
-                           (when (write-patches! generator patches)
+                           (when (write-patches! channel generator patches)
                              (recur page)))
                          ;; a snapshot that predates this tab's interest
                          ;; carries no entry for its agent; the wake this

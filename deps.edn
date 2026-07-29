@@ -52,7 +52,10 @@
         ;; (N4 — the web layer is system code; the block morph rides SSE).
         dev.data-star.clojure/sdk
         {:local/root "reference-code/datastar-clojure/libraries/sdk"}
-        ;; http-kit itself rides the adapter's own coordinate (2.9.0-beta2)
+        ;; Fork: atomic pending-byte/drain state for bounded SSE writes.
+        ;; Retire this override when the http-kit #180/#474 fix merges upstream.
+        http-kit/http-kit
+        {:local/root "reference-code/http-kit"}
         dev.data-star.clojure/http-kit
         {:local/root
          "reference-code/datastar-clojure/libraries/sdk-http-kit"}
