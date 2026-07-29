@@ -6,8 +6,116 @@ tags: [research, agent, runtime, architecture]
 
 # Local OpenAI-compatible provider — 2026-07-28
 
-The exact owner-named model is running locally and completed one real Seon
-turn. No model download and no Seon source change were required.
+## Project local provider update — 2026-07-29
+
+The project local provider is now the Ollama target descriptor row below. This
+supersedes the provider selection in the historical MLX experiment later in
+this note; that experiment remains useful evidence, but MLX is not the project
+server and was not restarted or benchmarked by the load lane.
+
+**Owner ruling: run one model server at a time.** Every Seon fleet shares this
+one endpoint; a fleet does not launch its own Ollama or MLX server.
+
+```clojure
+{:seon.ai/endpoint
+ "http://127.0.0.1:11434/v1/chat/completions"
+ :seon.ai/model "qwen3.5:35b-a3b-coding-nvfp4"
+ :seon.ai/max-tokens 8192
+ :seon.config.ai/no-auth true
+ :seon.ai/timeout-ms 300000}
+```
+
+The mixed namespaces are the target schema's actual vocabulary:
+endpoint/model/budget/timeout are `:seon.ai/*`, while explicit no-auth remains
+`:seon.config.ai/no-auth`. The input configuration uses
+`:seon.config.ai/*`; `seon.ai/targets` performs that projection.
+
+Ollama is `0.32.1`; the installed model digest is
+`6e73b30f8f1cfa06b979c842ba222ae21dad1e55e7c6748a7d8acad46fb340c4`.
+Pin both the eight execution slots and a sane context per slot before
+restarting the one shared server:
+
+```bash
+launchctl setenv OLLAMA_NUM_PARALLEL 8
+launchctl setenv OLLAMA_CONTEXT_LENGTH 32768
+```
+
+Then restart the Ollama menu application or the single `ollama serve` process.
+Verify the inherited launch environment with:
+
+```bash
+test "$(launchctl getenv OLLAMA_NUM_PARALLEL)" = 8
+test "$(launchctl getenv OLLAMA_CONTEXT_LENGTH)" = 32768
+```
+
+Ollama processes requests in parallel when memory permits and queues them in
+order otherwise; `OLLAMA_MAX_QUEUE` bounds that waiting room
+([Ollama concurrency FAQ](https://docs.ollama.com/faq)).
+
+The one-command health and identity check is:
+
+```bash
+curl -fsS http://127.0.0.1:11434/api/version &&
+  ollama list | grep qwen3.5:35b-a3b-coding-nvfp4
+```
+
+### Context and memory
+
+The sustained drive accidentally exercised Ollama's VRAM-derived default:
+`OLLAMA_CONTEXT_LENGTH=0` selected `num_ctx=262144` for each of eight slots.
+That is capacity for 2,097,152 context tokens across the server even though
+Seon's agent prompts are small. Pinning 32,768 per slot reduces that aggregate
+capacity to 262,144 tokens; 16–32k per slot is ample for this workload.
+
+Owner clarification: the approximately 28.7 GB figure is only the KV
+reservation. Batch-processing a 200k-plus-token context across eight streams
+also incurs model execution and activation costs; it is not “covered” by that
+reservation. Do not use the 262k × 8 default as a memory forecast or as the
+project setup.
+
+### Thinking policy and output budget
+
+Thinking stays on: local tokens are free, but excess must be observable and a
+completion budget must leave room for visible content. Ollama separates
+thinking from visible content in its native chat API and in compatible
+streams. Its official model contract gives Qwen thinking a Boolean control;
+`low`/`medium`/`high` levels are specifically documented for GPT-OSS, not
+Qwen ([Ollama thinking](https://docs.ollama.com/capabilities/thinking)).
+The compatible endpoint accepts `reasoning_effort`, but an empirical
+`reasoning_effort=low` Qwen call still consumed its complete 4,096-token
+budget without visible content. It is therefore not an honest Qwen thinking
+budget.
+
+`max_tokens=4,096` was unsafe on the real small-code task shape: both default
+thinking and `reasoning_effort=low` reached `finish_reason: length` with zero
+visible content. At `max_tokens=8,192`, three consecutive real Seon task
+shapes all reached `stop` and emitted the correct terminal form. Their
+provider-total completion counts were 68, 1,369, and 1,338; inferred thinking
+tokens were 60, 1,361, and 1,330, while each visible form used eight streamed
+token chunks. Thus the small calibration had thinking p50 `1,330`, p95
+`1,361`, and a 99.1% thinking share. The two 4,096-token no-content cases are
+runaway reasoning and are retained as negative evidence, not averaged away.
+
+The sustained verdict is: keep thinking on and keep the 8,192-token bound, but
+do not mistake the bound for guaranteed visible output. In the source-stable
+10-agent drive, 50/51 requests stopped with the correct form; one consumed all
+8,192 tokens in reasoning and emitted no assistant text. Inferred thinking
+tokens were p50 865 and p95 3,204, with a 99.24% share of all completion
+tokens. The bound turned the runaway into one durable error value instead of
+an unbounded request.
+
+The descriptor/request chain now owns this setting. `seon.ai/targets` projects
+`:seon.config.ai/max-tokens` to `:seon.ai/max-tokens`, the closed descriptor
+and request schemas require it, and `seon.ai/request-body` emits
+`"max_tokens"`. The load proxy enforced the same value for this drive and
+recorded it on every request; it did not select a second production policy.
+Reasoning-level selection remains unbuilt because Ollama's compatible
+`reasoning_effort` value did not honestly bound Qwen thinking.
+
+The exact owner-named model completed the source-stable sustained drive. The
+load-owned server was stopped after evidence collection; start the one shared
+server with the setup above when a fleet needs it. No model download was
+required.
 
 ## Result
 

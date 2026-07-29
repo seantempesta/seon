@@ -1,17 +1,43 @@
 ---
 type: research
 status: active
-tags: [research, agent, runtime, performance]
+tags: [research, agent, runtime]
 ---
 
 # Ollama-parallel sustained load — 2026-07-29
 
 ## Deliverable
 
-The one deliverable is a source-stable 10-agent, 10-minute sustained table for
-the project Ollama provider. The table will report turns/minute, p50/p95 whole
-turn latency, and p50/p95 inferred thinking tokens. Chunk 1 selected and
-calibrated the harness; the sustained row remains the next bounded chunk.
+The source-stable 10-agent, 10-minute sustained drive completed against the
+project Ollama provider. The 600-second offer window drained its final
+in-flight turns over 760.450 observed seconds.
+
+## The table
+
+| agents | offered window | completed / correct turns | aggregate turns/min | turn latency p50 / p95 | thinking tokens p50 / p95 |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 600 s | 51 / 50 | 4.02 | 137.564 s / 209.018 s | 865 / 3,204 |
+
+Aggregate throughput uses the complete observed phase, including the
+160.450-second terminal drain, rather than dividing by only the offer window.
+Turn latency is trigger-to-terminal wall time from the Seon driver. Thinking
+tokens are the recording proxy's conservative inference: Ollama total
+completion tokens minus visible streamed token chunks.
+
+The row is not a clean-pass claim. Fifty requests ended with `stop` and the
+correct terminal form; one request exhausted all 8,192 completion tokens in
+reasoning, ended with `length`, emitted no assistant text, and committed the
+run error `"The provider streamed no assistant text."` Provider transport
+errors were zero. The proxy observed at most 10 outstanding request intervals;
+Ollama had eight execution slots, so this includes queued requests rather than
+claiming ten model streams executed simultaneously.
+
+The provider produced 57,301 completion tokens at 75.65 tokens/second over its
+wall interval. Inferred thinking was 99.24% of those tokens and consumed 75.08
+tokens/second. Aggregate throughput barely moved from the 2-agent calibration's
+3.84 turns/minute to 4.02 at ten agents while median whole-turn latency rose
+from 23.771 to 137.564 seconds. Local model generation and queueing are the
+measured wall.
 
 ## Dependency ledger
 
@@ -98,22 +124,39 @@ An initial `nohup` attempt was reaped with the lane's tool-owned process group
 before it created a database or provider timing log. The `launchd` jobs above
 are the first actual sustained-drive launch.
 
-## Next chunk
+## Terminal evidence
 
-Resume after approximately `2026-07-29T06:13:42-04:00`. Verify that the drive
-job has exited and inspect:
+The driver completed at `2026-07-29T06:15:22-04:00`. `run.edn` records
+identical before/after `src/` digests:
+`d58ae2c423f1d89d1d1001e5bdf6c79b5c11bc52ae9770e3c9cc077f1a87127b`.
+The database carried zero error facts before the phase and one after it: the
+bounded no-visible-text failure above. Both sampled SSE feeds completed without
+errors.
 
-```bash
-launchctl print \
-  gui/$(id -u)/seon.loadtest.ollama-p8-10a-600s-20260729
-tail -80 \
-  tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/drive.out
-```
+The final evidence is:
 
-Accept the row only when `run.edn` says `:load-testing/source-stable? true`,
-all provider finish reasons are `stop`, and provider errors are zero. Replace
-the pending deliverable statement above with the 10-agent row, recording the
-raw evidence root and any honest failures. Then add the descriptor row,
-`OLLAMA_NUM_PARALLEL=8`, thinking verdict, and health-check curl to the top of
-[local-provider-2026-07-28.md](local-provider-2026-07-28.md), preserving any
-already-present uncommitted provider setup work.
+- `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/run.edn`
+- `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/p00-a10.edn`
+- `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/provider-timing-first-run.jsonl`
+- `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/provider-summary-first-run.json`
+- `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/drive.out`
+
+Ollama dominated the row: provider request-to-done p50/p95 was
+136.026/208.190 seconds, while SCI evaluation p50/p95 was
+0.490/0.931 milliseconds. The measured wall is parallel model generation and
+queueing, not SCI evaluation.
+
+The submitted launchd job restarted `run.sh` after its successful first exit.
+That second drive began against the same scratch coordinates and appended a
+second proxy session to `provider-timing.jsonl`; it was stopped before
+terminalization. The accepted recording is therefore the first 256 JSONL rows,
+ending at the first `proxy-stopped` event, preserved as
+`provider-timing-first-run.jsonl`. Re-summarizing that bounded recording is
+byte-identical to the original terminal `provider-summary.json` (SHA-256
+`19191e512dec8877443937d5b0188f1d949c6f67a69dd855fa350a32cbeb0e70`).
+The recurrence is tracked in [[detached-load-launch-restarts-after-success]].
+
+Final cleanup removed both load-owned launchd labels. No run-id-specific
+process, proxy listener on 18114, scratch web listener on 61565 or 62589, or
+open scratch database lock remained. The default listener on port 7994 was
+observed only and was not changed.
