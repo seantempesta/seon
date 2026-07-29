@@ -78,4 +78,5 @@ the production self-rewake predicate false, no error-delivery wake, and no
 second provider call. A genuinely new peer trigger sees
 `program-delete-not-owned` in the next prompt below the episode cap; at the cap
 the trigger is deferred and the episode ends. The focused cluster gate passes
-45 tests and 260 assertions.
+45 tests and 260 assertions. The complete `bin/test` checkpoint passes 538
+tests and 2,242 assertions with zero failures and zero errors.
