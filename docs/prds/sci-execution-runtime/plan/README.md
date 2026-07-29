@@ -815,6 +815,26 @@ may reintroduce a shadow build into the dev feedback path.
   "default"), multi-cluster correct; SMART DEFAULTS for every config
   entry — zero-overlay boot is a fully working system. Independent
   validation lanes on every returned chunk.
+  (13) CONTEXT DESIGN SESSION (owner, conversational — iterating, not
+  sealed): (a) ALL agent context derives from ONE database copy taken
+  at loop start. (b) Blocks stay FOR NOW as scaffold; the old
+  namespace block becomes THE WALK — render everything in the agent's
+  namespace so the result is helpful: functions/schemas render as
+  VALID CLOJURE code statements (like reading the raw file),
+  overridable per namespace; requires followed at distance 2, each
+  possibly with its own namespace rendering; agents author their own
+  personalizations easily. Functionally-same-at-first is fine.
+  (c) THE DREAM (sanctioned if buildable): skip the block system
+  entirely — everything derived from DEFAULT RENDER FUNCTIONS
+  ATTACHED TO SCHEMAS AS METADATA, and even the TRANSCRIPT built from
+  walking the agent's entity. (d) Mode rides the trigger message as
+  ordinary data rendered by the same system. (e) Mid-goal incoming
+  messages INTEGRATE INTO THE TRANSCRIPT — no queueing, no interrupt
+  machinery; messages carry no reply obligation and may help the
+  current goal (root's thrashing warning, the human's course
+  correction). (f) FROZEN CHECKPOINT after the current fix wave
+  lands: full gate + independent verification + audit calibration +
+  joint debt review BEFORE new construction.
   (12) UI TABLED (owner): the proper UI cannot be built until the
   context rendering system is understood — table UI restoration; FOCUS
   everything on reaching that understanding. The path: (a) code-graph
