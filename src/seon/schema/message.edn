@@ -47,17 +47,21 @@
   ; where the error recorder first established the same relation.
   [:seon.cluster.message/about
    {:optional true}
-   :seon.cluster.message/about]]
+   :seon.cluster.message/about]
+  ; A declination rides the ordinary message row. The reason's presence
+  ; is the reply shape settlement joins; content mirrors it so the
+  ; existing render path gives readers the explanation without parsing.
+  [:my.message/reason {:optional true} :my.message/reason]]
 
  ; --------------------------------------------------------------------
- ; THE AGENT-FACING VALUE — `my.message/send` returns this and nothing
- ; happens. It is the FIRST of the three agent-facing shapes (pure code
- ; returning a value the driver interprets), exactly like `my.run`'s two
- ; dispositions, and it is deliberately NOT the second shape: a message
- ; is a durable FACT the driver commits, not a capability request that
- ; needs a guarded door. Building `seon.effect` for one verb whose whole
- ; effect is a transaction the loop already makes would be a door around
- ; the inside of the house.
+ ; THE AGENT-FACING VALUES — `my.message/send` and `/decline` return
+ ; these and nothing happens. They are the FIRST of the three
+ ; agent-facing shapes (pure code returning a value the driver
+ ; interprets), exactly like `my.run`'s two dispositions, and they are
+ ; deliberately NOT the second shape: a message is a durable FACT the
+ ; driver commits, not a capability request that needs a guarded door.
+ ; Building `seon.effect` for verbs whose whole effect is a transaction
+ ; the loop already makes would be a door around the inside of the house.
  ;
  ; The recipient is an AGENT ID string, not a ref: agent code holds
  ; names, never entity ids, and resolving the name is the driver's job
@@ -66,6 +70,7 @@
  :my.message/to [:string {:min 1}]
  :my.message/content [:string {:min 1}]
  :my.message/about [:string {:min 1}]
+ :my.message/reason [:string {:min 1}]
  :my.message/message
  [:map {:closed true}
   [:my.message/to :my.message/to]
@@ -75,13 +80,24 @@
   ; assignment's unique `(about, recipient)` message id.
   [:my.message/about {:optional true} :my.message/about]]
 
- ; What a FORM may evaluate to and the loop will deliver: one message,
- ; or several. The vector arm is not a convenience — a form's value is
- ; the only channel, so `[(send "a" …) (send "b" …)]` is the ONLY way
- ; to fan out in one form, and without it an agent would have to spend
- ; a form per recipient.
+ ; A can't-fix is a STRUCTURED REPLY, not a run disposition. `about`
+ ; is mandatory because an unjoinable declination cannot settle the
+ ; routed form; `reason` is reader-facing and is never parsed.
+ :my.message/declination
+ [:map {:closed true}
+  [:my.message/to :my.message/to]
+  [:my.message/about :my.message/about]
+  [:my.message/reason :my.message/reason]]
+
+ ; What a FORM may evaluate to and the loop will deliver: one message
+ ; or declination, or several of either. The vector arm is not a
+ ; convenience — a form's value is the only channel, so a mixed vector
+ ; is the ONLY way to answer and message several recipients in one form.
  :my.message/value
- [:or :my.message/message [:vector {:min 1} :my.message/message]]
+ [:or :my.message/message
+  :my.message/declination
+  [:vector {:min 1}
+   [:or :my.message/message :my.message/declination]]]
 
  ; --------------------------------------------------------------------
  ; THE DRIVER SIDE — what `seon.cluster.message/delivery` is asked and

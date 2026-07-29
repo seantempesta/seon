@@ -25,13 +25,13 @@
   whole design — and the quarry shows what the effectful shape costs
   when you take it: `src-old/seon/agent/message.cljc` is 590 lines of
   `^:async message!`, ALS-derived sender identity, per-call authority
-  queries and a stored hop counter, all of it inside the eval. This is
-  eleven lines of pure function.
+  queries and a stored hop counter, all of it inside the eval. These
+  constructors remain pure functions.
 
-  ONE FUNCTION, AND FAN-OUT IS THE VECTOR. `(send \"bob\" \"…\")` is one
-  message; `[(send \"bob\" \"…\") (send \"carol\" \"…\")]` is two, because a
-  form's VALUE is the only channel and a vector is what Clojure already
-  says for several. There is no `send-many`.
+  TWO CONSTRUCTORS, AND FAN-OUT IS THE VECTOR. `(send \"bob\" \"…\")` is
+  one message; `(decline \"planner\" \"problem-1\" \"…\")` is one structured
+  answer; a vector is what Clojure already says for several. There is no
+  `send-many` or `decline-many`.
 
   COMPOSITION: a form may send, and a LATER form may complete. They are
   different forms with different values, so the question \"can a turn
@@ -40,11 +40,11 @@
   and that is the shape being honest rather than a limitation: one
   value means one instruction.
 
-  ERRORS ARE VALUES HERE TOO. A blank recipient or blank content
-  returns the ONE registered flat error value rather than throwing.
-  Whether the recipient EXISTS is not asked here — that is a fact about
-  the database, this function is pure, and the driver answers it where
-  the answer lives.
+  ERRORS ARE VALUES HERE TOO. A blank recipient, content, problem
+  identity or reason returns the ONE registered flat error value rather
+  than throwing. Whether the recipient or problem EXISTS is not asked
+  here — those are facts about the database, these functions are pure,
+  and the driver answers where the facts live.
 
   The error value carries its `:seon.error/kind`, because
   `:seon.error/value` REQUIRES one and a declared output schema that
@@ -54,7 +54,8 @@
   (`docs/seon/issues/`), not copied.
 
   Crash walk: no durable state. A kill loses a map on a dead thread;
-  nothing was sent, because nothing is ever sent from in here."
+  nothing was sent or declined, because nothing is delivered from in
+  here."
   (:refer-clojure :exclude [send])
   (:require [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
@@ -66,7 +67,7 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The one function
+;;; The value constructors
 ;;; ---------------------------------------------------------------------------
 
 (defn- send-value
@@ -120,3 +121,39 @@
    (send-value to content false nil))
   ([to content about]
    (send-value to content true about)))
+
+(defn decline
+  "Decline the assignment about `about`, giving `to` the reason.
+  Nothing is delivered and no red fact is retired by calling this.
+  Return the value as a form result, alone or in a vector with messages;
+  the run loop commits the structured reply through the ordinary
+  delivery path. `about` is mandatory because settlement joins this
+  reply to that identified problem; `reason` is for readers and is
+  never parsed.
+
+  A blank or non-string argument returns the ONE registered flat error
+  value — an agent mistake answers, never throws."
+  {:malli/schema
+   [:=> [:cat :my.message/to :my.message/about :my.message/reason]
+    [:or :my.message/declination :seon.error/value]]}
+  [to about reason]
+  (cond
+    (or (not (string? to)) (str/blank? to))
+    {:seon.error/kind ::no-recipient
+     :seon.error/message
+     "decline needs the id of the assigning agent, as a string."}
+
+    (or (not (string? about)) (str/blank? about))
+    {:seon.error/kind ::no-about
+     :seon.error/message
+     "decline's about argument must be a non-blank identity string."}
+
+    (or (not (string? reason)) (str/blank? reason))
+    {:seon.error/kind ::no-reason
+     :seon.error/message
+     "decline needs a reader-facing reason, as a string."}
+
+    :else
+    {:my.message/to to
+     :my.message/about about
+     :my.message/reason reason}))

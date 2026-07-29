@@ -2,11 +2,12 @@
   "The agent-facing message value: one function, and it is pure.
 
   Short by construction, exactly like the disposition suite: the whole
-  contract is that the shape validates, that it is the ONLY function,
-  that a bad argument comes back as a value an agent can read rather
-  than a throw it cannot, and — the one thing this suite adds over
-  `my.run`'s — that the error value is a REAL `:seon.error/value`, so
-  the declared output schema is one the function actually keeps."
+  contract is that both shapes validate, that they are the ONLY
+  functions, that a bad argument comes back as a value an agent can
+  read rather than a throw it cannot, and — the one thing this suite
+  adds over `my.run`'s — that the error value is a REAL
+  `:seon.error/value`, so the declared output schemas are ones the
+  functions actually keep."
   (:require [clojure.test :refer [deftest is testing]]
             [my.message :as message]
             [my.run :as run]
@@ -34,6 +35,20 @@
          :my.message/value [(message/send "bob" "hello")
                             (message/send "carol" "hello")]))))
 
+(deftest a-declination-is-an-ordinary-value
+  (let [value (message/decline "planner" "failure-17"
+                               "The dependency contract is missing.")]
+    (is (= {:my.message/to "planner"
+            :my.message/about "failure-17"
+            :my.message/reason "The dependency contract is missing."}
+           value))
+    (is (seon.schema/valid-candidate-value? :my.message/declination value))
+    (is (seon.schema/valid-candidate-value? :my.message/value value))
+    (is (seon.schema/valid-candidate-value?
+         :my.message/value
+         [(message/send "bob" "repair this" "failure-17") value])
+        "one form may return messages and declinations together")))
+
 (deftest a-bad-argument-is-an-error-value-never-a-throw
   (doseq [bad [nil "" "   " "\n\t" 123 :bob {:a 1} ["bob"]]]
     (testing (str "recipient " (pr-str bad))
@@ -48,6 +63,23 @@
     (testing (str "about " (pr-str bad))
       (is (string? (:seon.error/message
                     (message/send "bob" "content" bad))))))
+  (doseq [[label invoke expected-kind]
+          [["recipient"
+            #(message/decline % "failure-17" "Cannot repair.")
+            :my.message/no-recipient]
+           ["about"
+            #(message/decline "planner" % "Cannot repair.")
+            :my.message/no-about]
+           ["reason"
+            #(message/decline "planner" "failure-17" %)
+            :my.message/no-reason]]
+          bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
+    (testing (str "declination " label " " (pr-str bad))
+      (let [value (invoke bad)]
+        (is (= expected-kind (:seon.error/kind value)))
+        (is (= #{:seon.error/kind :seon.error/message}
+               (set (keys value))))
+        (is (seon.schema/valid-candidate-value? :seon.error/value value)))))
 
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared
@@ -59,12 +91,15 @@
   ;; exactly as designed, and was deleted with the issue's archival).
   (doseq [value [(message/send "" "content") (message/send "bob" "")
                  (message/send "bob" "content" "")
+                 (message/decline "" "failure-17" "Cannot repair.")
+                 (message/decline "planner" "" "Cannot repair.")
+                 (message/decline "planner" "failure-17" "")
                  (run/complete "")]]
     (is (seon.schema/valid-candidate-value? :seon.error/value value)
         "the error path keeps the output schema too")))
 
-(deftest the-surface-is-exactly-one-function
-  ;; countable, like the disposition ruling: fan-out is the vector, so
-  ;; there is no send-many, and delivery is the driver's, so there is
-  ;; no send!
-  (is (= #{'send} (set (keys (ns-publics 'my.message))))))
+(deftest the-surface-is-exactly-two-functions
+  ;; Countable, like the disposition ruling: fan-out is the vector, so
+  ;; there is no send-many or decline-many, and delivery is the
+  ;; driver's, so neither function has a `!`.
+  (is (= #{'decline 'send} (set (keys (ns-publics 'my.message))))))

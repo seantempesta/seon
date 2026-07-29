@@ -50,10 +50,10 @@
   that interrupted a run does) already says so.
 
   Crash walk: nothing here holds state. Ordinary message ids are DERIVED
-  from (run, ordinal, index) exactly as receipt ids are. An assignment
-  message carrying `about` instead derives its identity from the resolved
-  (about entity, recipient), so concurrent terminal transactions upsert
-  one assignment at Datahike's serial commit point."
+  from (run, ordinal, index) exactly as receipt ids are. A message or
+  declination carrying `about` instead derives its identity from the
+  resolved (about entity, recipient), so concurrent terminal
+  transactions upsert one answer at Datahike's serial commit point."
   (:require [datahike.api :as d]
             [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
@@ -302,7 +302,7 @@
       :seon.cluster.message/at at}]))
 
 (defn delivery
-  "What one admitted message value asks to send, resolved against `db`.
+  "What one admitted message-family value sends, resolved against `db`.
   Returns the tx-data rows to commit and the flat error values for
   every candidate that could not be delivered — both, because a value
   asking to send three messages where one names a stranger delivers the
@@ -365,7 +365,8 @@
       :else
       (reduce
        (fn [delivered [index candidate]]
-         (let [to (:my.message/to candidate)]
+         (let [to (:my.message/to candidate)
+               reason (:my.message/reason candidate)]
            (if-not (agent-exists? db to)
              ;; a lookup ref to an agent this cluster does not have
              ;; fails the WHOLE transaction — receipt, disposition and
@@ -403,11 +404,13 @@
                     :seon.cluster.message/from
                     [:seon.cluster.agent/id sender]
                     :seon.cluster.message/content
-                    (:my.message/content candidate)
+                    (or (:my.message/content candidate) reason)
                     :seon.cluster.message/at at}
                     about
                     (assoc :seon.cluster.message/about
-                           (:seon.cluster.message/about about)))))))))
+                           (:seon.cluster.message/about about))
+                    reason
+                    (assoc :my.message/reason reason))))))))
        {:seon.cluster.message/rows []
         :seon.error/values []}
        (map-indexed vector candidates)))))
