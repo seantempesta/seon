@@ -400,6 +400,46 @@
                           db (work/problem-id run-id 2))))
                "the assignment is one hop from the human-shaped goal")))))))
 
+(deftest a-result-built-on-a-failed-form-is-red-and-routes
+  ;; The open issue's exact evidence case
+  ;; (`a-failed-form-does-not-stop-the-fold`), replayed as the plan's
+  ;; obligation 7: form 0 fails, form 1 computes on the definition that
+  ;; never happened, and the fold continues. The question is whether the
+  ;; value form 1 produces is RED — because if it is not, a run can
+  ;; still complete with a confident lie.
+  (with-gen-cluster
+   (fn [cluster]
+     (let [connection (:seon.store/branch-connection cluster)]
+       (d/transact connection
+                   [{:seon.cluster.message/id "goal-1"
+                     :seon.cluster.message/to
+                     [:seon.cluster.agent/id "planner"]
+                     :seon.cluster.message/from
+                     [:seon.cluster.agent/id "root"]
+                     :seon.cluster.message/content "Count the primes."
+                     :seon.cluster.message/at now}])
+       (with-redefs [ai/complete
+                     (fn [{prompt :seon.ai/prompt}]
+                       {:seon.ai/text
+                        (if (str/includes? prompt "You are agent planner")
+                          (str "(ns my.gen.alpha)\n"
+                               ;; fails: Math/sqrt is not in the base ctx
+                               "(def primes (Math/sqrt 4))\n"
+                               ;; evaluates fine, and its VALUE references
+                               ;; the var form 0 never bound
+                               "primes\n")
+                          "(my.run/wait \"nothing\")")})]
+         (drive! cluster 6))
+       (let [db @connection
+             run-id (planner-run db)
+             state (states db run-id)]
+         (is (= :routed (get state 1))
+             "the unbound-var result is red at the one admission gate and
+              routes like any other red form — no string matching, and no
+              run completing on a value that references nothing")
+         (is (false? (:seon.cluster.work/settled?
+                      (work/plan-settlement db run-id)))))))))
+
 (deftest a-silent-owner-leaves-the-plan-unsettled-forever
   ;; S6's adversarial history, as a required proof: the owner that never
   ;; answers cannot produce a completed goal, and the facts — not a
