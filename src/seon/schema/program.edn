@@ -1,0 +1,66 @@
+{; The current program graph. A function, namespace, or test is found by
+ ; identity-attribute presence and connected through refs; there is no kind
+ ; stamp and no stored projection of callability.
+ :seon.fn/sym [:string {:min 1 :seon.db/identity true}]
+ :seon.fn/ns :seon.db/ref
+ :seon.fn/source [:string {:min 1}]
+ :seon.fn/arglists :string
+ :seon.fn/doc :string
+ :seon.fn/private? :boolean
+ :seon.fn/spec :string
+ ; Explicit only on capability leaves. All other workload classification is
+ ; derived by reachability over the program graph.
+ :seon.fn/workload [:enum :io :compute]
+ :seon.fn/fn
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.handlers.fn/render-ai
+        :seon.render/html seon.render.handlers.fn/render-html}
+  [:seon.fn/sym :seon.fn/sym]
+  [:seon.fn/ns :seon.fn/ns]
+  [:seon.fn/source :seon.fn/source]
+  [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+  [:seon.fn/doc {:optional true} :seon.fn/doc]
+  [:seon.fn/private? {:optional true} :seon.fn/private?]
+  [:seon.fn/spec {:optional true} :seon.fn/spec]
+ [:seon.fn/workload {:optional true} :seon.fn/workload]]
+
+ :seon.schema/schema
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.handlers.schema/render-ai
+        :seon.render/html seon.render.handlers.schema/render-html}
+  [:seon.schema/key :seon.schema/key]
+  [:seon.schema/form :seon.schema/form]
+  [:seon.schema/ns {:optional true} :seon.schema/ns]]
+
+ :seon.ns/name [:symbol {:seon.db/identity true}]
+ :seon.ns/source [:string {:min 1}]
+ :seon.ns/doc :string
+ :seon.ns/require-edges
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/ns
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.handlers.ns/render-ai
+        :seon.render/html seon.render.handlers.ns/render-html}
+  [:seon.ns/name :seon.ns/name]
+  [:seon.ns/source :seon.ns/source]
+  [:seon.ns/doc {:optional true} :seon.ns/doc]
+  [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]]
+
+ ; Component rows have no independent identity or life. The containing
+ ; namespace owns the complete set and replacement retracts the old children.
+ :seon.ns.require/target :symbol
+ :seon.ns.require/alias :symbol
+ :seon.ns.require/refers [:set :symbol]
+ :seon.ns.require/refer-all? :boolean
+ :seon.ns.require/as-alias? :boolean
+ :seon.ns.require/edge
+ [:map {:seon.db/entity true}
+  [:seon.ns.require/target :seon.ns.require/target]
+  [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
+  [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
+  [:seon.ns.require/refer-all?
+   {:optional true}
+   :seon.ns.require/refer-all?]
+  [:seon.ns.require/as-alias?
+   {:optional true}
+   :seon.ns.require/as-alias?]]}
