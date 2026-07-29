@@ -43,6 +43,22 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**4AM STATE (for the morning resume).** Background codex wrappers are
+being SIGTERM'''d (exit 143; machine load ~6-7) — three resumes died
+but THE WORK SURVIVED: test-smell-audit report COMMITTED (top finding:
+three design changes dissolve 65 awkward tests — exposing the
+production handle construction to fixtures, event consumption over
+pollers, the entity-walk property); generate-code v0 PROOF NOTE
+committed; v0 lane (Agent-tool, alive) has landed four commits incl.
+settlement-beside-the-reply. UNCOMMITTED lane work in tree (resume
+owners, do not clobber): slice-2 css/input.css + context_pilot_test
+(transcript, mid-suite), local-provider doc edit (load lane). MORNING:
+resume ui-slice2-transcript, test-smell has its report (implementation
+units next), load-testing (harness error triage + Ollama drives), seal
+review v0 on its notification, THEN bounce default + apply the Ollama
+override + the owner types to helper. Do not stack multiple resumes on
+one lane; never chain resumes with &&.
+
 **OVERNIGHT CHARTER (owner, winding down 2026-07-29): press on
 autonomously, nothing crazy.** Keep going through ISSUES; keep AUDITING
 TESTS for what we are not understanding — the simplifications that
