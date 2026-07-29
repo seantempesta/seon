@@ -768,6 +768,71 @@
           (finally
             (disarm-all! routing)))))))
 
+(deftest arming-does-not-route-a-triggerless-historical-red
+  (with-connection
+    (fn [connection]
+      (let [routing (armory)]
+        (d/transact
+         connection
+         [{:seon.ns/name 'my.gen.helper}
+          {:seon.ns/name 'my.gen.alpha}
+          {:seon.cluster.agent/id "helper"
+           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.helper]}
+          {:seon.cluster.agent/id "alpha"
+           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}])
+        (d/transact
+         connection
+         [{:seon.cluster.run/id "historical-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id "helper"]
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/plan-digest (apply str (repeat 64 "h"))}])
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id "helper"
+           :seon.cluster.agent/run [:seon.cluster.run/id "historical-run"]}
+          {:seon.cluster.run.form/id "historical-form"
+           :seon.cluster.run.form/run
+           [:seon.cluster.run/id "historical-run"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(my.store/get :obsolete)"
+           :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}])
+        (try
+          (with-redefs
+           [fake-evaluate
+            (fn [_]
+              {:seon.sci.admit/value
+               {:seon.error/kind :seon.sci.eval/evaluation-failed
+                :seon.error/message "Unable to resolve my.store/get"
+                :seon.error/data {}}
+               :seon.cluster.eval/result-edn
+               (pr-str {:seon.error/kind
+                        :seon.sci.eval/evaluation-failed})
+               :seon.cluster.eval/error "Unable to resolve my.store/get"
+               :seon.sci.admit/capped? false
+               :seon.sci.admit/record
+               {:seon.eval/fn-entries 1
+                :seon.eval/duration-ms 1
+                :seon.eval/allocated-bytes 1
+                :seon.eval/outcome :error}})]
+            (arm-one! connection routing "helper")
+            (is (await-until #(quiescent? @connection ["helper"])))
+            (is (= ["Unable to resolve my.store/get"]
+                   (d/q '[:find [?error ...]
+                          :where
+                          [?receipt :seon.cluster.eval/run ?run]
+                          [?run :seon.cluster.run/id "historical-run"]
+                          [?receipt :seon.cluster.eval/error ?error]]
+                        @connection))
+                "the historical attempt still records its red receipt")
+            (is (empty?
+                 (d/q '[:find ?assignment
+                        :where
+                        [?assignment :seon.cluster.message/about _]]
+                      @connection))
+                "the arm prime routes no historical repair assignment"))
+          (finally
+            (disarm-all! routing)))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; 7. unheld-resume-regression (audit P1) — seed 2026072817
 ;;; ---------------------------------------------------------------------------

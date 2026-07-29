@@ -25,10 +25,29 @@
         :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]}
        {:seon.cluster.agent/id "alpha"
         :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-       {:seon.cluster.run/id run-id
-        :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
-        :seon.cluster.run/opened-at now
-        :seon.cluster.run/plan-digest "settlement-digest"}])
+       {:seon.cluster.agent/id "root"}
+       {:seon.cluster.message/id "goal"
+        :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+        :seon.cluster.message/content "Generate the program."
+        :seon.cluster.message/at now}])
+     (d/transact
+      connection
+      {:tx-data
+       [{:seon.cluster.message/id "planner-goal"
+         :seon.cluster.message/to [:seon.cluster.agent/id "planner"]
+         :seon.cluster.message/from [:seon.cluster.agent/id "root"]
+         :seon.cluster.message/content "Generate the program."
+         :seon.cluster.message/at now}]
+       :tx-meta {:seon.db/trigger [:seon.cluster.message/id "goal"]}})
+     (d/transact
+      connection
+      {:tx-data
+       [{:seon.cluster.run/id run-id
+         :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
+         :seon.cluster.run/opened-at now
+         :seon.cluster.run/plan-digest "settlement-digest"}]
+       :tx-meta
+       {:seon.db/trigger [:seon.cluster.message/id "planner-goal"]}})
      (body connection))))
 
 (defn- form-row
@@ -119,6 +138,33 @@
            "pre-reader absence and an unowned namespace both fall back to author")
        (is (schema/valid-candidate-value?
             :seon.problems/form-problem attributed))))))
+
+(deftest historical-reds-are-outside-the-live-attempt-chain
+  (with-routing-database
+   (fn [connection]
+     (d/transact
+      connection
+      [{:seon.cluster.run/id "historical-run"
+        :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
+        :seon.cluster.run/opened-at now
+        :seon.cluster.run/plan-digest "historical-digest"}
+       {:seon.cluster.run.form/id "historical-form"
+        :seon.cluster.run.form/run [:seon.cluster.run/id "historical-run"]
+        :seon.cluster.run.form/ordinal 0
+        :seon.cluster.run.form/source "(my.store/get :obsolete)"
+        :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}])
+     (is (nil?
+          (problems/form-problem
+           @connection
+           {:seon.cluster.run/id "historical-run"
+            :seon.cluster.run.form/ordinal 0
+            :seon.sci.eval/evaluation (evaluation-error "Unable to resolve")})))
+     (is (empty?
+          (d/q '[:find ?assignment
+                 :where
+                 [?assignment :seon.cluster.message/about _]]
+               @connection))
+         "a newly assigned owner has no historical problem to deliver"))))
 
 (deftest every-form-has-exactly-one-of-the-seven-derived-states
   (with-routing-database

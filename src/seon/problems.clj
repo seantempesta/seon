@@ -151,8 +151,8 @@
 
 (defn form-problem
   "A routable red evaluation attributed to its namespace owner, or nil.
-  X2 is the one exclusion clause: process-history failures at or after an
-  interrupted ordinal stay red but are never blamed on an owner."
+  S8 scopes routing to a goal's caused-by chain; X2 additionally excludes
+  process-history failures at or after an interrupted ordinal."
   {:malli/schema [:=> [:cat :any :seon.problems/form-problem-request]
                   [:maybe :seon.problems/form-problem]]}
   [db {:keys [:seon.cluster.run/id :seon.cluster.run.form/ordinal
@@ -170,9 +170,10 @@
         interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
         unbound? (work/unbound-value? admitted)
         red? (or ordinary-error interrupted? unbound?)
+        scoped? (work/planner-scoped-attempt? db id)
         artifact? (and red?
                        (work/resume-artifact? db id ordinal interrupted?))]
-    (when (and red? (not artifact?))
+    (when (and scoped? red? (not artifact?))
       (let [owner-id (work/form-owner db form)
             author-id
             (d/q '[:find ?author-id .

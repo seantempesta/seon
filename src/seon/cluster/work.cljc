@@ -64,6 +64,7 @@
     terminal receipt is byte-untouched, so the derivation is unchanged."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
+            [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.schema.edn :as schema.edn]))
 
@@ -149,6 +150,16 @@
                   :seon.problems/id]}
   [run-id ordinal]
   (str "problem-" (pr-str [run-id ordinal])))
+
+(defn planner-scoped-attempt?
+  "True when `run-id` belongs to a goal's caused-by message chain.
+
+  A planner attempt's opening transaction points at one member of the chain:
+  either the depth-zero goal message itself or a later caused-by message.
+  A triggerless historical run has no membership edge and fails closed."
+  {:malli/schema [:=> [:cat :any :seon.cluster.run/id] :boolean]}
+  [db run-id]
+  (some? (message/trigger db run-id)))
 
 (defn- receipt-value
   [receipt]

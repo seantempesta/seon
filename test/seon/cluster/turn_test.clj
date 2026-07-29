@@ -475,15 +475,25 @@
           {:seon.ns/name 'my.gen.alpha}
           {:seon.cluster.agent/id "agent-b"
            :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-          {:seon.cluster.run/id route-run
-           :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-           :seon.cluster.run/opened-at now
-           :seon.cluster.run/process process
-           :seon.cluster.run/plan-digest "route-digest"}])
+          {:seon.cluster.agent/id "agent-a"
+           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]}
+          {:seon.cluster.message/id "route-goal"
+           :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
+           :seon.cluster.message/content "Generate the program."
+           :seon.cluster.message/at now}])
+        (d/transact
+         connection
+         {:tx-data
+          [{:seon.cluster.run/id route-run
+            :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+            :seon.cluster.run/opened-at now
+            :seon.cluster.run/process process
+            :seon.cluster.run/plan-digest "route-digest"}]
+          :tx-meta
+          {:seon.db/trigger [:seon.cluster.message/id "route-goal"]}})
         (d/transact
          connection
          [{:seon.cluster.agent/id "agent-a"
-           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]
            :seon.cluster.agent/run [:seon.cluster.run/id route-run]}
           {:seon.cluster.run.form/id "route-form-0"
            :seon.cluster.run.form/run [:seon.cluster.run/id route-run]
