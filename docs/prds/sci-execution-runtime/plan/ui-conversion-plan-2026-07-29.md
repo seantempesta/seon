@@ -22,6 +22,17 @@ This document sequences only its own slices. `plan/README.md` remains
 the one ordering authority for the program; where a ruling and this plan
 disagree, the ruling wins.
 
+**Seal (orchestrator, 2026-07-29): SLICE 1 SEALED with two falsification
+corrections — the single POST route is hand-rolled in web.clj's existing
+routing (reitit deferred; D4 answered: not for one route), and the
+identity burst probe runs first exactly as planned. Slices 4-7 and the
+retirement table are accepted. SLICE 3 IS BLOCKED pending revision: the
+falsifier proved agent-authored hiccup can emit raw form/Datastar action
+attributes that bypass the callback gate and POST directly — the render
+pipeline must make ungated actions unrepresentable (sanitize/refuse at
+the one place agent hiccup is admitted), not merely gate the blessed
+path. Slice 2 may proceed after slice 1's live proof.**
+
 ## The law
 
 > "We can convert it to this ping renderer but I don't want to lose the
