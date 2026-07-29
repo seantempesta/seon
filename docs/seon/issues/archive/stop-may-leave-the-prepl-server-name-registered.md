@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, boot]
 severity: friction
 ---
@@ -24,3 +24,24 @@ the batch's acceptance proof.
   stop-server (the registered name is the resource; the socket is its
   consequence).
 - A regression in the boot suite covering same-JVM same-name restart.
+
+## Resolution
+
+Resolved by `218eb293e`. Re-verification found the direct
+`ServerSocket.close` still present in `seon.cluster/stop!`; Clojure
+1.12.5's `clojure.core.server/stop-server` synchronously removes the
+registered name before closing the socket, while the server thread's
+eventual cleanup is not an immediate ownership boundary.
+
+`stop!` now releases the prepl by its registered server name. The
+`same-jvm-same-name-restart-releases-the-registered-prepl` regression
+asserts that the registry is empty immediately after stop, then starts
+the same name again and proves the replacement prepl answers.
+
+Proof:
+
+```text
+bin/test seon.cluster.boot-test seon.cluster.ancestor-test
+Ran 26 tests containing 111 assertions.
+0 failures, 0 errors.
+```

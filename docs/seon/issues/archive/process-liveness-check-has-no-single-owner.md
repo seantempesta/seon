@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, runtime, concurrency]
 ---
@@ -55,3 +55,24 @@ identity, and answer whether a given identity is live.
   `src/seon/cluster.clj:244-252,530-545`, while ancestor independently repeats
   both halves at `src/seon/cluster/ancestor.clj:182-213`; the completed B2
   implementation made the predicted duplicate real.
+
+## Resolution
+
+Resolved by `218eb293e`. The claim remained current: boot and ancestor
+each called `ProcessHandle` and compared start instants independently.
+
+`seon.cluster.process` now owns the registered
+`:seon.cluster.process/identity` shape, `current-identity`, and `live?`.
+Boot advertisement production and validation call it; ancestor scratch
+production and reclaim call it. The regression proves the current
+identity is live and that the same live pid paired with a different
+start instant reads as dead. The ancestor suite also constructs its
+live scratch identity through the shared producer.
+
+Proof:
+
+```text
+bin/test seon.cluster.boot-test seon.cluster.ancestor-test
+Ran 26 tests containing 111 assertions.
+0 failures, 0 errors.
+```
