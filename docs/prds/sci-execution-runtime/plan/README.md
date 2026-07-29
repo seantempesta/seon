@@ -835,6 +835,25 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (22) THE §7 RULINGS + THE READ SEAM (owner, at the checkpoint):
+  (a) RENDERS CALL seon.db, NEVER datahike.api directly — "so we can
+  intercept and do whatever we want." The facade RETURNS, mined not
+  reinvented: "we've done it like 3 times" — dig up the old
+  definitions (the CLJS one is async; the pattern to keep is DUAL
+  POSITIONAL ARITIES where the conn/db argument may be omitted and
+  the LATEST DB AUTO-INSERTS). DO NOT REDO FROM SCRATCH.
+  (b) DISCOVERY PHASE AT AGENT BOOT: during agent boot-up a discovery
+  pass walks the agent's world, discovers all its renders, and
+  REGISTERS them; registration stays active AS LONG AS THE FUNCTIONS
+  EXIST (softens demand-driven-only: discovery at boot, maintenance
+  by existence; exact shape open — "I'm open to how that looks").
+  (c) BUILD THE OTHER PARTS NOW — the third proc lands before the
+  read seam (§7.1 accepted). (d) MEMORY BOUND: cache everything is
+  fine IF each output is stored AT MOST ONCE (dedupe by digest).
+  (e) SKILL UPDATES ARE PRIORITIZED — agents consume the skills;
+  stale skills (schema-registration model, review rubric) are
+  high-priority fixes. (f) Schedule ALL known problems — the open
+  queue dispatches as batched fix lanes.
   (21) RENDERING MOVES INTO THE AGENT'S FLOW (owner direction, to be
   falsified by the implementation wave): the agent graph grows a THIRD
   proc — registered renders — beside mailbox and turn: it owns every
