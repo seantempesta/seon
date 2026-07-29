@@ -835,6 +835,14 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (15) CHURN ORDERING CLARIFIED (owner): agent context is dynamically
+  rendered, NEVER stored. The churn key is "has this piece changed
+  since the last turn," measured by BYTE-IDENTICAL comparison of the
+  rendered piece; with ~100 pieces and 90% unchanged, order descends
+  by stability — most-changed nearest the bottom. Not everything
+  renders every turn: smart overrides and collapse of deep renderings
+  are required (CS techniques under design discussion — fisheye DOI,
+  banded ordering with hysteresis, subtree digests, drill handles).
   (14) THE UNIVERSAL DATA RENDERER + FINAL PRECEDENCE (owner): ANY
   piece of data — not just entities — renders through a default
   renderer. The old system's structural value renderer
