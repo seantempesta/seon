@@ -177,6 +177,39 @@ executor; current rendering is complete snapshots plus per-tab deltas
 The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
 which is why the independent pass exists.
 
+## RECOVERED FROM A DATA-LOSS INCIDENT (2026-07-29 night) — read before resuming cluster-priming
+
+A cluster-reset TEST FIXTURE followed repository symlinks out of its scratch
+area and deleted **55 tracked paths**: all 45 files of `src/` plus 13 vendored
+`reference-code/` submodule working trees, while a suite was running. The
+symlinks it walked were the ones introduced hours earlier when the three skill
+directories collapsed into one real directory plus two links (ruling 29) — a
+change that killed one bug class handed a fixture a path out of its sandbox.
+
+NOTHING WAS PERMANENTLY LOST. Recovery: `git checkout --` restricted to exactly
+the 55 deleted paths (nothing was staged, so no in-flight work was overwritten),
+then `git submodule update --init` for the 13 emptied submodules, then
+`clojure -X:deps prep` to rebuild Datahike's prepared artifacts. The Datahike
+FORK commit `19f5cdd9` survived in the submodule's own object store.
+
+THE LANE BEHAVED CORRECTLY and that is why this cost ten minutes: it detected
+its own damage, captured an exact inventory
+(`tmp/accidental-deletions-20260729.txt`), refused to self-recover without
+authorization, and reported the blocking boundary. Issue filed:
+`a-test-fixture-deleted-tracked-files-through-symlinks.md`, with the law added
+to AGENTS.md (recursive deletion never follows symlinks; the boundary derives
+from the fixture's own root, never the process CWD; a symlinked sentinel must
+survive the cleanup regression).
+
+CLUSTER-PRIMING IS HALF-LANDED. Its detect-and-deny half COMMITTED before the
+incident (`de8560cd9`, "Refuse stale cluster program graphs"). Its `bin/seon
+index` / `cluster/reset!` half was in the destroyed `src/` files; the matching
+TEST edits survived and now reference vars that no longer exist, so they are
+parked in `git stash@{0}` ("priming lane half-work") rather than deleted.
+RESUMING THAT WORK: read the stash for what it intended, but rebuild the
+implementation from ruling 28 (which is complete and unambiguous) rather than
+trusting half-work — and fix the fixture FIRST.
+
 ## Where the tree is (2026-07-29 night)
 
 ORIENTATION CONSOLIDATED: `docs/TRANSFER_PROMPT.md` is now the one standing
