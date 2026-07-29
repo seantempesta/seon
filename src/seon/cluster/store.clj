@@ -50,6 +50,7 @@
   - a live holder is NEVER displaced: the flock refusal is immediate
     and loud, no waiting, no takeover."
   (:require [clojure.java.io :as io]
+            [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
@@ -412,10 +413,23 @@
             :where [_ :seon.config/on-core-error ?mode]]
           @connection)))
 
+(defn- jdk-integers->long
+  "Change exactly `java.lang.Integer` values to `java.lang.Long`."
+  [tx-data]
+  (walk/postwalk
+   (fn [value]
+     (if (instance? Integer value)
+       (long value)
+       value))
+   tx-data))
+
 (defn transact!
   "Commit tx-data. Returns a value on success AND on refusal; never throws.
   Nothing throws into the run loop, so this is the one door every write
-  goes through. Four outcomes, four shapes:
+  goes through. Before Datahike sees the transaction, this boundary walks
+  its data and changes exactly `java.lang.Integer` values to Long; other
+  numeric classes stay untouched and Datahike continues to refuse them.
+  Four outcomes, four shapes:
 
   - committed → the transaction report;
   - OUR transition refused → the transition's own map, verbatim, under
@@ -446,7 +460,7 @@
                   [:or [:map] :seon.error/value]]}
   [connection tx-data]
   (try
-    (d/transact connection tx-data)
+    (d/transact connection (jdk-integers->long tx-data))
     (catch Throwable throwable
       (let [data (error/refusal throwable)]
         (cond

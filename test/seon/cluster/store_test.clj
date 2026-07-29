@@ -40,7 +40,10 @@
   [{:db/ident :seon.store.test/marker
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}])
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.store.test/measurement
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}])
 
 (defn- markers [store]
   (set (d/q '[:find [?marker ...]
@@ -102,6 +105,50 @@
             (is (= #{"survives"} (markers reopened)))
             (finally
               (store/release-store! reopened)))))
+      (finally
+        (delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest transact-normalizes-only-jdk-integers
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            connection (:seon.store/connection opened)]
+        (try
+          (d/transact connection probe-schema)
+          (testing "Integer values commit from entity maps and datom vectors"
+            (let [outcome
+                  (store/transact!
+                   connection
+                   [{:seon.store.test/marker "entity-map"
+                     :seon.store.test/measurement (Integer/valueOf 7)}
+                    [:db/add "datom-vector"
+                     :seon.store.test/marker "datom-vector"]
+                    [:db/add "datom-vector"
+                     :seon.store.test/measurement (Integer/valueOf 8)]])
+                  stored
+                  (into {}
+                        (d/q '[:find ?marker ?measurement
+                               :where
+                               [?entity :seon.store.test/marker ?marker]
+                               [?entity :seon.store.test/measurement
+                                ?measurement]]
+                             @connection))]
+              (is (contains? outcome :db-after))
+              (is (= {"entity-map" 7
+                      "datom-vector" 8}
+                     stored))
+              (is (every? #(identical? Long (class %)) (vals stored)))))
+          (testing "Double remains invalid for a long attribute"
+            (let [outcome
+                  (store/transact!
+                   connection
+                   [{:seon.store.test/marker "double"
+                     :seon.store.test/measurement (Double/valueOf 9.0)}])]
+              (is (= :seon.db/rejected (:seon.error/kind outcome)))
+              (is (not (contains? (markers opened) "double"))
+                  "the refused transaction commits nothing")))
+          (finally
+            (store/release-store! opened))))
       (finally
         (delete-recursively! (str (io/file dir) "/.."))))))
 

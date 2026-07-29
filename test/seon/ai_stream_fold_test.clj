@@ -233,8 +233,8 @@
             failure (ai/complete (assoc target :seon.ai/prompt "hello"))
             status (:seon.ai/http-status (:seon.error/data failure))]
         (is (= :seon.ai/provider-error (:seon.error/kind failure)))
-        (is (instance? Long status)
-            "the JDK Integer is normalized at the HTTP boundary")
+        (is (instance? Integer status)
+            "the JDK value remains an Integer until the transaction boundary")
         (support/with-database
           (fn [connection]
             (d/transact connection
