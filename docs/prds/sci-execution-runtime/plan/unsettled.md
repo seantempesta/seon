@@ -63,6 +63,30 @@ boundedness, and sweeps today's diffs for the known failure modes);
 the Opus agent-flow render falsifier (REPL-only). Issue queue: 28 open
 after the wave's archives — the debt review with the owner runs on the
 audit's return.
+**FALSIFIER RETURNED (f8c260dd7): the third proc SURVIVES — all four
+targets pass** (agent-flow-render-falsification-2026-07-29.md +
+committed prototype scripts). Measured: interest routing adapted from
+the OLD machinery (reverse candidate index, plan→attribute reduction,
+:all fail-open; ::by-scope and the settle-delay scheduler dropped —
+flow's sliding-1 already is that) addressed 1 of 1,001 interests at
+0.49µs/report and registered ABSENCE dependence (the case that killed
+returned-(e,a) tracing); 100 parked three-proc agents = +8.9KB heap
+each, ZERO new platform threads, +19µs arm; ONE mechanism proven — 12
+registrations (8 ai + 4 html) in one memory/digest pass, one commit
+re-deriving an ai context piece and two html blocks together,
+churn-ordered assembly served from proc state; cross-namespace
+production through a plain defn, B needs no proc. HONEST BREAKS
+(design inputs, not failures): the fresh tree has NO READ SEAM (render
+owners call datahike.api directly) so narrow waking is blocked and
+today's unconditional wake is CORRECT; (d/pull '[*]) plans to :all —
+focus/namespace renderers can never narrow as written;
+RE-REGISTRATION-EVERY-PASS IS LOAD-BEARING (captured plans lag one
+render on data-dependent branches — install-once-at-arm would be
+wrong); real memory = held outputs (~85KB/transcript) not the proc;
+the turn→render-memory read path is UNPROVEN and breaks first. FIVE
+OPEN DECISIONS in the report §7 — chiefly: land the proc before the
+read seam (recommended), and where render memory lives for turn
+reads. Await the owner's §7 rulings at the debt review.
 
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
