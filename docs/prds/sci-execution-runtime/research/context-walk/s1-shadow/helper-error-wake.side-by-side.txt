@@ -1,0 +1,50 @@
+=== BLOCK CONTEXT — exact captured bytes ===
+You are agent helper. Your namespace is my.agents.helper — defns you write land there.
+
+Reply with Clojure forms to run, in order. Finish with (my.run/complete "your reply") when you are done, or (my.run/wait "why") to pause this run — pause when you are waiting on another agent, and put everything you will need to finish into the note, because your next run starts fresh and that note is what it reads.
+
+Other agents in this cluster, by id: root. To ask one for something, return (my.message/send "root" "what you want to say") from a form — that delivers it and wakes them. Use the bare id exactly as listed above; it is not a namespace. Their answer comes back to you later as a new request, so pause with my.run/wait after asking. Return a vector of sends to message several.
+
+Your namespace, as it stands right now:
+Agent helper is running now.
+  (:seon.cluster.agent/namespace) {:db/id 766, :seon.ns/name my.agents.helper}
+  (:seon.cluster.agent/run) Run 057a830b-e5db-4c33-868f-4c71f98027c1, opened #inst "2026-07-29T12:43:46.770-00:00". It is running now, held by 15938-1785329012242.
+  (:seon.cluster.message/from) Agent helper said to root: Investigate context-walk-problem-root and report whether this namespace can repair it.
+  (:seon.cluster.message/to) From outside this cluster to helper: Chat baseline for helper: report the namespace and the current request.
+  (:seon.cluster.message/to) Agent root said to helper: Investigate context-walk-problem-helper and report whether this namespace can repair it.
+  (:seon.cluster.message/to) From outside this cluster to helper: Injected context-walk fault for helper (:seon.error/unclassified). It interrupted run . Inspect error context-walk-error-helper; nothing was retried. Signature: 5ddfb218779e9c0749c4d08fc3d49445c440bd69f4ab5cd8fe04cc286d737f6a.
+  (:seon.cluster.run/agent) Run 2757fff5-dd1f-403d-8dee-8ba2a115cfeb, opened #inst "2026-07-29T12:43:44.948-00:00". It paused, leaving this note: context-walk capture complete
+  (:seon.cluster.run/agent) Run 0563822a-b83d-49b7-8291-85f37822e044, opened #inst "2026-07-29T12:43:45.795-00:00". It paused, leaving this note: context-walk capture complete
+  (:seon.error/agent) Injected context-walk fault for helper (:seon.error/unclassified). Inspect error context-walk-error-helper; nothing was retried. Signature: 5ddfb218779e9c0749c4d08fc3d49445c440bd69f4ab5cd8fe04cc286d737f6a.
+
+Work you asked for, and whether its plan is SETTLED — every form succeeded, repaired, or explicitly declined:
+  bc2ef603-ab36-4204-8a44-9ebe5b4c06ff — NOT settled: form 0 is unevaluated, owned by root.
+
+Problems routed to you, by identity: "context-walk-problem-helper". Repair one in your own namespace and say what you did. If you cannot — the code is not yours to change, or nothing in your namespace could satisfy it — return (my.message/decline "root" "context-walk-problem-helper" "why you cannot"), naming the agent that assigned it and the problem identity exactly as listed above. Declining settles the problem as answered; saying nothing leaves it open forever.
+
+You have been asked:
+
+Injected context-walk fault for helper (:seon.error/unclassified). It interrupted run . Inspect error context-walk-error-helper; nothing was retried. Signature: 5ddfb218779e9c0749c4d08fc3d49445c440bd69f4ab5cd8fe04cc286d737f6a.
+
+=== WALK CONTEXT — shadow only ===
+;;; static execution scaffold
+Reply with Clojure forms to run, in order. Finish with (my.run/complete "your reply") when you are done, or (my.run/wait "why") to pause this run — pause when you are waiting on another agent, and put everything you will need to finish into the note, because your next run starts fresh and that note is what it reads.
+
+;;; agent entity
+{:seon.cluster.agent/id "helper"
+  :seon.cluster.agent/namespace my.agents.helper}
+
+;;; namespace walk — requires followed to distance 2
+;;; namespace my.agents.helper — distance 2
+
+(ns my.agents.helper)
+
+;;; trigger rendered by shape
+{:context-walk/trigger-shape :error-wake
+  :context-walk/mode :goal-seeking
+  :seon.cluster.message/id "context-walk-error-helper-your-run"
+  :seon.cluster.message/to "helper"
+  :seon.cluster.message/content "Injected context-walk fault for helper (:seon.error/unclassified). It interrupted run . Inspect error context-walk-error-helper; nothing was retried. Signature: 5ddfb218779e9c0749c4d08fc3d49445c440bd69f4ab5cd8fe04cc286d737f6a."
+  :seon.cluster.message/about {:seon.error/id "context-walk-error-helper"
+    :seon.error/kind :seon.error/unclassified
+    :seon.error/message "Injected context-walk fault for helper"}}

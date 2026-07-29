@@ -1,0 +1,90 @@
+[#:context-walk.s0-s1{:block-estimated-tokens 331,
+                      :trigger-shape :chat,
+                      :run-id "2757fff5-dd1f-403d-8dee-8ba2a115cfeb",
+                      :capture-id "2757fff5-dd1f-403d-8dee-8ba2a115cfeb-context-536870924",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870924,
+                      :case :helper-chat,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/helper-chat.side-by-side.txt",
+                      :walk-bytes 865,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/helper-chat.prompt.txt",
+                      :agent-id "helper",
+                      :block-bytes 1333,
+                      :walk-estimated-tokens 214}
+ #:context-walk.s0-s1{:block-estimated-tokens 41,
+                      :trigger-shape :chat,
+                      :run-id "2dcee8b6-b591-4bc7-8f93-ea9c3c4009e8",
+                      :capture-id "2dcee8b6-b591-4bc7-8f93-ea9c3c4009e8-context-536870928",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870928,
+                      :case :root-chat,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/root-chat.side-by-side.txt",
+                      :walk-bytes 851,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/root-chat.prompt.txt",
+                      :agent-id "root",
+                      :block-bytes 164,
+                      :walk-estimated-tokens 211}
+ #:context-walk.s0-s1{:block-estimated-tokens 533,
+                      :trigger-shape :routed-problem,
+                      :run-id "0563822a-b83d-49b7-8291-85f37822e044",
+                      :capture-id "0563822a-b83d-49b7-8291-85f37822e044-context-536870937",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870937,
+                      :case :helper-routed-problem,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/helper-routed-problem.side-by-side.txt",
+                      :walk-bytes 1018,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/helper-routed-problem.prompt.txt",
+                      :agent-id "helper",
+                      :block-bytes 2145,
+                      :walk-estimated-tokens 253}
+ #:context-walk.s0-s1{:block-estimated-tokens 41,
+                      :trigger-shape :routed-problem,
+                      :run-id "bc2ef603-ab36-4204-8a44-9ebe5b4c06ff",
+                      :capture-id "bc2ef603-ab36-4204-8a44-9ebe5b4c06ff-context-536870946",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870946,
+                      :case :root-routed-problem,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/root-routed-problem.side-by-side.txt",
+                      :walk-bytes 1004,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/root-routed-problem.prompt.txt",
+                      :agent-id "root",
+                      :block-bytes 164,
+                      :walk-estimated-tokens 249}
+ #:context-walk.s0-s1{:block-estimated-tokens 829,
+                      :trigger-shape :error-wake,
+                      :run-id "057a830b-e5db-4c33-868f-4c71f98027c1",
+                      :capture-id "057a830b-e5db-4c33-868f-4c71f98027c1-context-536870952",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870952,
+                      :case :helper-error-wake,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/helper-error-wake.side-by-side.txt",
+                      :walk-bytes 1230,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/helper-error-wake.prompt.txt",
+                      :agent-id "helper",
+                      :block-bytes 3332,
+                      :walk-estimated-tokens 306}
+ #:context-walk.s0-s1{:block-estimated-tokens 41,
+                      :trigger-shape :error-wake,
+                      :run-id "7f455cd0-7793-4633-924d-f586d04ebac7",
+                      :capture-id "7f455cd0-7793-4633-924d-f586d04ebac7-context-536870958",
+                      :value-renderer :seon.render.value/render-ai,
+                      :basis-t 536870958,
+                      :case :root-error-wake,
+                      :walk-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s1-shadow/root-error-wake.side-by-side.txt",
+                      :walk-bytes 1239,
+                      :block-file
+                      "docs/prds/sci-execution-runtime/research/context-walk/s0-baseline/root-error-wake.prompt.txt",
+                      :agent-id "root",
+                      :block-bytes 164,
+                      :walk-estimated-tokens 308}]

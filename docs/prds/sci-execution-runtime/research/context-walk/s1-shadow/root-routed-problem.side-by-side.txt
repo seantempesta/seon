@@ -1,0 +1,24 @@
+=== BLOCK CONTEXT — exact captured bytes ===
+helper: mid-turn on run 0563822a-b83d-49b7-8291-85f37822e044, 2nd run this episode; root: mid-turn on run bc2ef603-ab36-4204-8a44-9ebe5b4c06ff, 2nd run this episode
+
+=== WALK CONTEXT — shadow only ===
+;;; static execution scaffold
+Reply with Clojure forms to run, in order. Finish with (my.run/complete "your reply") when you are done, or (my.run/wait "why") to pause this run — pause when you are waiting on another agent, and put everything you will need to finish into the note, because your next run starts fresh and that note is what it reads.
+
+;;; agent entity
+{:seon.cluster.agent/id "root"
+  :seon.cluster.agent/namespace my.agents.root}
+
+;;; namespace walk — requires followed to distance 2
+;;; namespace my.agents.root — distance 2
+
+(ns my.agents.root)
+
+;;; trigger rendered by shape
+{:context-walk/trigger-shape :routed-problem
+  :context-walk/mode :goal-seeking
+  :seon.cluster.message/id "context-walk-routed-root"
+  :seon.cluster.message/to "root"
+  :seon.cluster.message/content "Investigate context-walk-problem-root and report whether this namespace can repair it."
+  :seon.cluster.message/from "helper"
+  :seon.cluster.message/about {:seon.problems/id "context-walk-problem-root"}}

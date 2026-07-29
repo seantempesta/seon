@@ -1,0 +1,25 @@
+=== BLOCK CONTEXT — exact captured bytes ===
+helper: mid-turn on run 057a830b-e5db-4c33-868f-4c71f98027c1, 3rd run this episode; root: mid-turn on run 7f455cd0-7793-4633-924d-f586d04ebac7, 3rd run this episode
+
+=== WALK CONTEXT — shadow only ===
+;;; static execution scaffold
+Reply with Clojure forms to run, in order. Finish with (my.run/complete "your reply") when you are done, or (my.run/wait "why") to pause this run — pause when you are waiting on another agent, and put everything you will need to finish into the note, because your next run starts fresh and that note is what it reads.
+
+;;; agent entity
+{:seon.cluster.agent/id "root"
+  :seon.cluster.agent/namespace my.agents.root}
+
+;;; namespace walk — requires followed to distance 2
+;;; namespace my.agents.root — distance 2
+
+(ns my.agents.root)
+
+;;; trigger rendered by shape
+{:context-walk/trigger-shape :error-wake
+  :context-walk/mode :goal-seeking
+  :seon.cluster.message/id "context-walk-error-root-no-attributable-agent"
+  :seon.cluster.message/to "root"
+  :seon.cluster.message/content "Injected context-walk fault for root (:seon.error/unclassified). No agent or run could be attributed. Inspect error context-walk-error-root; nothing was retried. Signature: 5ddfb218779e9c0749c4d08fc3d49445c440bd69f4ab5cd8fe04cc286d737f6a."
+  :seon.cluster.message/about {:seon.error/id "context-walk-error-root"
+    :seon.error/kind :seon.error/unclassified
+    :seon.error/message "Injected context-walk fault for root"}}
