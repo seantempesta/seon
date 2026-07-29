@@ -10,6 +10,20 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**PLANNING WAVE ARMED (owner, 2026-07-29 early): map ALL quarry
+research onto the new rendering concept — DO NOT PORT THINGS EXACTLY.**
+When each quarry lane returns, launch its planning agent (Opus)
+immediately: (1) old-ui-quarry → the UI conversion plan — every old
+component reconceived as blocks/renderers/boundaries under the
+distance model, design language (Phosphor tokens) preserved as CSS +
+idioms, mechanisms redesigned; the message-entry bar is priority one
+if fresh has none. (2) generate-code-quarry → the v0 plan on the local
+model, grounded in the old design'''s lessons + the delegation
+preconditions landing tonight. Both plans then falsified before
+sealing (the proven cycle). The quarry documents inventory and
+lessons; the plans derive from the RULED architecture — reconceive or
+retire-with-reason, never copy.
+
 **AUTONOMOUS CHARTER (owner, night close): iterate, don'''t be
 dogmatic.** No final solutions expected — keep the cycle moving
 (falsify → revise → seal → implement → live-prove → ledger), surface
