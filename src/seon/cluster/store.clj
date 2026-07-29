@@ -1,54 +1,18 @@
 (ns seon.cluster.store
-  "The store: one Datahike store per cluster, opened under the lifetime
-  flock.
+  "Owns Datahike stores, branch connections, and transaction admission.
 
-  CONTRACT LAYER (orchestrator-authored, 2026-07-27 — the B1 rung,
-  grounded in research/datahike-multistore-2026-07-27.md; every rule
-  below carries file:line evidence there). The schemas and function
-  contracts are SEALED: the implementation lane fills the stub bodies
-  until test/seon/cluster/store_test.clj is green and may not loosen a
-  schema or a test. Friction is reported, never resolved by weakening.
+  `open-store!` canonicalizes a store directory and acquires its
+  non-blocking exclusive flock before checking or creating the
+  database. It recreates an incomplete genesis, verifies the main
+  branch is readable, and returns the connected store with the flock
+  held until `release-store!`. A live holder is refused rather than
+  displaced.
 
-  The model:
-
-  - One store component per canonical physical store; a JVM may host N
-    concurrently; nothing obtains \"the\" store from an ambient
-    singleton — callers hold the store value `open-store!` returns.
-  - Exactly ONE live write connection per physical store, and clusters
-    never share a store (O2/L6: two JVMs writing one store silently
-    destroyed 40/40 commits). Datahike's own serialization stops at the
-    connection boundary — its process registry and Konserve's lock
-    atoms do NOT span two JVMs — so the fence is OURS: one non-blocking
-    exclusive flock on the store's lock file, acquired BEFORE existence
-    check, creation, or connect, held until final release. The lock
-    file lives BESIDE the store directory (never inside Konserve's key
-    namespace, which enumerates its files).
-  - Datahike runs itself: the `:self` writer is a serial loop per
-    connection with its own transaction/commit queues. This namespace
-    never builds a writer, never queues across stores — it opens,
-    verifies, and releases.
-  - Readiness is a COMPLETELY opened connection over a COMPLETELY
-    initialized store. The first-create kill window is real: `:db` can
-    exist while `:branches` is missing. `open-store!` detects that
-    state and repairs by RECREATE — provably mid-genesis means nothing
-    durable existed, and clusters always reset to current code and
-    pages, never migrate.
-  - Errors refuse loudly as ex-info {:seon.error/kind
-    :seon.cluster.store/refused, ::rule <which>}: a foreign flock, a
-    store that fails initialization verification after repair, an
-    already-open store in this process.
-
-  Crash walk (kill -9 at any point):
-  - before the flock: nothing exists, next boot proceeds;
-  - after flock, before create: an empty/partial store dir with no
-    `:db` — recreate;
-  - mid-create (`:db` present, `:branches` missing) — detected,
-    recreate;
-  - after create/connect: a complete store; the OS released the dead
-    process's flock, reopen proceeds cleanly and committed datoms are
-    all present (the child-process falsifier proves exactly this);
-  - a live holder is NEVER displaced: the flock refusal is immediate
-    and loud, no waiting, no takeover."
+  `open-branch!` opens one existing roster branch and refuses a second
+  connection to that branch in the process. Datahike's `:self` writer
+  owns transaction serialization. `transact!` returns transaction
+  reports or classified error values, with the configured core-error
+  mode deciding whether an unclassified failure also panics."
   (:require [clojure.java.io :as io]
             [clojure.walk :as walk]
             [datahike.api :as d]
