@@ -90,10 +90,10 @@
            (or (row-identity desired) (row-identity current))]
     (into
      []
-     (filter #(not= (get current %) (get desired %)))
-     (disj (set (:seon.program/owned-attributes
-                 (shape identity-attribute)))
-           identity-attribute))
+     (comp
+      (remove #{identity-attribute})
+      (filter #(not= (get current %) (get desired %))))
+     (:seon.program/owned-attributes (shape identity-attribute)))
     []))
 
 (defn deletion-row
