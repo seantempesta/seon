@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, render]
 ---
@@ -78,3 +78,22 @@ Following the `facts` link for any agent on the root page renders that agent's
 own facts in the drill, at a shareable cursor, with the windowed paging the
 drill already provides — proven live against a cluster with more than one
 agent, not only in a fixture.
+
+## Resolution — 2026-07-29
+
+Commit `514eca9eb` makes the `/data` route resolve a supplied entity lookup ref
+with `d/pull '[*]` and use that pulled map as the drill root. With no `entity`
+parameter it still uses `schema/canonical-database-attributes`.
+
+The real-socket regression
+`seon.render.web-test/the-data-drill-resolves-an-entity-root` transacts Alice,
+follows her encoded entity URL, asserts her identity facts on the HTML wire,
+and asserts that plain `/data` still starts at the schema vector. The focused
+suite passed 30 tests and 115 assertions.
+
+Live proof used the disposable `ui-data-entity-live` cluster with two agents.
+The root page contained Alice's exact `facts` href; following it rendered
+`:seon.cluster.agent/id` with `alice`, and plain `/data` rendered the canonical
+schema vocabulary. All four evidence predicates are true in
+`tmp/ui-data-entity-live/evidence.edn`; the captured pages are beside it. The
+scratch cluster stopped after capture.
