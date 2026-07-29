@@ -27,7 +27,7 @@ See `README.md` for the convention.
 | [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (18)
+## Friction (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -37,7 +37,6 @@ See `README.md` for the convention.
 | [A self-referential registered schema overflows the stack instead of refusing](a-self-referential-schema-overflows-the-stack.md) | friction | Core |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [An ordinary agent's block set has no production caller](an-ordinary-agents-block-set-has-no-production-caller.md) | friction | agent |
-| [Boot arms agents twice, and primes before the listener](boot-arms-agents-twice-and-primes-before-the-listener.md) | friction | agent |
 | [Contracts that require a LIVE connection are called with a released one](instrumentation-surfaces-released-connection-contracts.md) | friction | Core |
 | [Five namespaces claim they await implementation](five-namespaces-claim-they-await-implementation.md) | friction | general |
 | [Flow monitor test preselects an unreserved port](flow-monitor-test-preselects-an-unreserved-port.md) | friction | Core |

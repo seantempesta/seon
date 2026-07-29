@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, cluster, flow, agent, boot]
 ---
@@ -68,3 +68,12 @@ that has already fired by then.
   deliberately different and equally safe order.
 - A regression commits a message for an existing agent during the arming window
   and asserts the agent answers it without any later unrelated wake.
+
+## Resolution
+
+Resolved in the commit that archives this note. `arm-agents!` now registers
+`wake/route!` before synchronously invoking `cluster.agent/armer-step`'s one
+derive-and-arm path; the duplicate agent query and asynchronous boot prime are
+gone. The live-boot regression waits for the root mailbox's arm prime, commits
+a message before `arm!` returns, and observes the model call plus the run's
+exact `:seon.db/trigger` without issuing another wake.

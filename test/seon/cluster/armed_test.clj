@@ -28,11 +28,12 @@
             [datahike.api :as d]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
-            [seon.cluster.agent]
+            [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
             [seon.schema]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch]))
+  (:import [java.util Date]
+           [java.util.concurrent CountDownLatch]))
 
 (set! *warn-on-reflection* true)
 
@@ -178,6 +179,55 @@
                   "a wake with no facts to act on is not work"))
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))
+
+(deftest a-message-committed-during-boot-arming-is-conserved
+  (let [name "arming-window"
+        root (str "tmp/armed-test/" name)
+        primed (CountDownLatch. 1)
+        called (CountDownLatch. 1)
+        next-agent-work work/next-agent-work
+        arm! agent/arm!]
+    (doseq [file (reverse (file-seq (io/file root)))]
+      (.delete ^java.io.File file))
+    (with-redefs
+      [work/next-agent-work
+       (fn [& arguments]
+         (let [result (apply next-agent-work arguments)]
+           (.countDown primed)
+           result))
+       agent/arm!
+       (fn [request]
+         (let [entry (arm! request)]
+           ;; This is the historical loss window: the arm prime has
+           ;; completed, then a message commits before arm! returns.
+           ;; Boot must already have registered the routing listener.
+           (test-support/await-event! primed "boot arm prime")
+           (d/transact
+            (:seon.store/branch-connection
+             (:seon.cluster.loop/cluster request))
+            [{:seon.cluster.message/id "boot-window-message"
+              :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+              :seon.cluster.message/content "answer during boot"
+              :seon.cluster.message/at (Date.)}])
+           entry))
+       ai/complete
+       (fn [_request]
+         (.countDown called)
+         {:seon.ai/text "(my.run/complete \"answered\")"})]
+      (let [instance (cluster/start! {:seon.boot/cluster-name name
+                                      :seon.boot/root root})]
+        (try
+          (test-support/await-event! called "boot-window model call")
+          (is (= "boot-window-message"
+                 (d/q '[:find ?message-id .
+                        :where
+                        [?run :seon.cluster.run/id _ ?tx]
+                        [?tx :seon.db/trigger ?message]
+                        [?message :seon.cluster.message/id ?message-id]]
+                      @(:seon.boot/cluster-connection instance)))
+              "the committed message opened a run without a later wake")
+          (finally
+            (cluster/stop! instance)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE VISIBILITY PROPERTY — an escaped Throwable becomes facts

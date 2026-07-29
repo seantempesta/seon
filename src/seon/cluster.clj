@@ -806,17 +806,6 @@
     ;; can tap its agent graph's errors into the ONE committer inbox
     (swap! routing assoc :seon.cluster.agent/fault-channel
            (:seon.flow/fault-channel fanout))
-    ;; ARM ALL AT BOOT (R6), synchronously: boot's own arming step
-    ;; derives the agent set from facts and arms one graph per agent,
-    ;; so a returned instance IS armed — readiness is published, never
-    ;; awaited. The armer proc covers everything committed after this
-    ;; read: its prime below re-derives (agents − armed) from facts.
-    (doseq [agent-id (sort (d/q '[:find [?id ...]
-                                  :where [_ :seon.cluster.agent/id ?id]]
-                                @connection))]
-      (cluster.agent/arm! {:seon.cluster.loop/cluster handle
-                           :seon.cluster.agent/id agent-id
-                           :seon.cluster.agent/routing routing}))
     ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster, and its
     ;; own faults ride the same path as every other fault
     (wake/route! {:seon.cluster.wake/connection connection
@@ -827,9 +816,17 @@
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.cluster.agent/route})
-    ;; the boot prime: the armer's first pass arms every agent in
-    ;; facts, and each arm primes its own mailbox once
-    (async/offer! armer-channel :seon.cluster.agent/boot)
+    ;; ARM ALL AT BOOT (R6), synchronously, through the armer's ONE
+    ;; derivation. The listener is already registered, so every arm's
+    ;; mailbox prime and every commit concurrent with it are conserved.
+    ;; Direct invocation publishes readiness: a returned instance is
+    ;; armed, while the running proc owns every later wake.
+    (cluster.agent/armer-step
+     (cluster.agent/armer-step
+      {:seon.cluster.loop/cluster handle
+       :seon.cluster.agent/routing routing})
+     ::cluster.agent/arm
+     ::cluster.agent/boot)
     {:seon.cluster.loop/cluster handle
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
