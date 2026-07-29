@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling]
 ---
@@ -28,3 +28,28 @@ anchor is joined — an `--own-jvm` hint or a heuristic for non-default
 names would isolate blast radius by construction). One regression: a
 staged eval-failure stop on a shared JVM with a live sibling refuses
 rather than killing both.
+
+## Resolution
+
+Resolved by `8ab798cb9`. Re-verification found `sigterm!` still
+destroyed the advertised `ProcessHandle` after any prepl failure,
+despite already deriving every live advertisement on that pid.
+
+The fresh operator now distinguishes the target from its sibling
+cluster names. A non-forced fallback refuses before signaling, names
+the siblings, and prints the explicit `stop --force <name>`
+escalation. The existing one-cluster fallback remains unconditional;
+`--force` retains the deliberate shared-process kill.
+
+The regression stages a real prepl exception against a disposable
+process with two live advertisements. The operator exits with a
+refusal, names the sibling and force command, and the process remains
+alive.
+
+Proof:
+
+```text
+bin/test seon.dev.fresh-operator-test
+Ran 4 tests containing 22 assertions.
+0 failures, 0 errors.
+```

@@ -21,7 +21,7 @@ See `README.md` for the convention.
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
 | [Terminalize a receipt when its terminal transaction is refused](refused-terminal-transaction-leaves-a-running-receipt-hot-loop.md) | blocker | agent |
 
-## Friction (17)
+## Friction (16)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -38,7 +38,6 @@ See `README.md` for the convention.
 | [Re-ground schema skills in the fresh EDN and instrumentation system](schema-skills-teach-the-retired-registration-model.md) | friction | Core |
 | [Refresh instrumentation before the fresh operator calls start](fresh-operator-start-enters-stale-instrumentation-before-refresh.md) | friction | general |
 | [Route ordinary stderr presentations through log renders](stderr-presentations-bypass-the-log-render-kind.md) | friction | general |
-| [Stop fallback kills innocent shared-JVM clusters](stop-fallback-kills-innocent-shared-jvm-clusters.md) | friction | general |
 | [The design language's font is redistributed without its license, and only at one weight](the-bundled-font-has-no-license-and-only-one-weight.md) | friction | UI |
 | [The review hook's rubric lags the omission ruling](review-rubric-lags-the-omission-ruling.md) | friction | general |
 | [Three smaller defects in the vendored Datahike, found beside the card-many scan bug](datahike-planner-and-caches-carry-three-smaller-defects.md) | friction | Core |
