@@ -20,6 +20,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.schema]))
@@ -267,9 +268,9 @@
 (deftest a-live-builders-scratch-refuses-the-second-build
   (with-store
     (fn [opened]
-      (let [handle (java.lang.ProcessHandle/current)
-            start-millis (.toEpochMilli (.get (.startInstant (.info handle))))
-            live (scratch-branch (.pid handle) start-millis)]
+      (let [{:seon.boot/keys [pid start-instant]}
+            (cluster.process/current-identity)
+            live (scratch-branch pid (inst-ms start-instant))]
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
                            :seon.store/branch live})

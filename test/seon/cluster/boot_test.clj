@@ -20,6 +20,7 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -61,6 +62,10 @@
           (if (= :ret (:tag message))
             (:val message)
             (recur)))))))
+
+(defn- registered-prepl-servers
+  []
+  (var-get (ns-resolve 'clojure.core.server 'servers)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap resolution — generative over the whole override domain
@@ -242,6 +247,15 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest process-identity-refuses-a-recycled-pid-once-for-every-caller
+  (let [identity (cluster.process/current-identity)]
+    (is (cluster.process/live? identity))
+    (is (false?
+         (cluster.process/live?
+          (update identity :seon.boot/start-instant
+                  #(java.util.Date. (dec (inst-ms %))))))
+        "the pid still exists, but a different generation is dead")))
+
 (deftest a-delayed-stop-never-kills-a-replacement
   ;; stops are instance-addressed: a stale stop! of an OLD instance
   ;; value must leave a same-named replacement fully alive
@@ -261,6 +275,34 @@
                 "the replacement's REPL survived the stale stop")
             (is (some? (cluster/read-advertisement root "swap"))
                 "the replacement's advertisement survived")
+            (finally
+              (cluster/stop! replacement)))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest same-jvm-same-name-restart-releases-the-registered-prepl
+  (let [root (fresh-root)
+        cluster-name "registered-restart"
+        server-name (str "seon.cluster/" cluster-name)]
+    (try
+      (let [first-instance
+            (cluster/start! {:seon.boot/cluster-name cluster-name
+                             :seon.boot/root root})]
+        (cluster/stop! first-instance)
+        (is (not (contains? (registered-prepl-servers) server-name))
+            "stop! releases the clojure.core.server name synchronously")
+        (let [replacement
+              (cluster/start! {:seon.boot/cluster-name cluster-name
+                               :seon.boot/root root})]
+          (try
+            (is (contains? (registered-prepl-servers) server-name))
+            (is (= "\"replacement\""
+                   (prepl-eval
+                    (get-in replacement
+                            [:seon.boot/advertisement :seon.boot/prepl-host])
+                    (get-in replacement
+                            [:seon.boot/advertisement :seon.boot/prepl-port])
+                    "\"replacement\"")))
             (finally
               (cluster/stop! replacement)))))
       (finally

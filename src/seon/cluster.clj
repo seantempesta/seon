@@ -20,6 +20,7 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
             [seon.cluster.run :as run]
@@ -207,16 +208,6 @@
            (if (= starting (get instances cluster-name))
              (dissoc instances cluster-name)
              instances))))
-
-(defn- current-process-identity
-  []
-  (let [handle (java.lang.ProcessHandle/current)
-        optional (.startInstant (.info handle))]
-    (when-not (.isPresent optional)
-      (refused! "The process start instant is unavailable."
-                {:seon.boot/pid (.pid handle)}))
-    {:seon.boot/pid (.pid handle)
-     :seon.boot/start-instant (java.util.Date/from (.get optional))}))
 
 (defn- create-directories!
   [config paths]
@@ -978,7 +969,7 @@
                    {:seon.boot/cluster-name cluster-name
                     :seon.boot/prepl-host (:seon.boot/prepl-host config)
                     :seon.boot/prepl-port (.getLocalPort prepl-server)}
-                   (current-process-identity))
+                   (cluster.process/current-identity))
                   instance
                   {:seon.boot/config config
                    :seon.boot/advertisement advertisement
@@ -1167,7 +1158,13 @@
           (d/release connection))
         (when (:seon.store/store instance)
           (release-root-store! (:seon.boot/store-dir config)))
-        (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
+        (when-not
+         (clojure.core.server/stop-server (server-name cluster-name))
+          (when-not
+           (.isClosed ^java.net.ServerSocket (:seon.boot/prepl-server instance))
+            (refused!
+             "The cluster's registered prepl server is unavailable."
+             {:seon.boot/cluster-name cluster-name})))
         (let [advertisement-file
               (io/file
                (:seon.boot/advertisement-file
@@ -1194,23 +1191,6 @@
           (throw failure)))))
   nil)
 
-(defn- matching-live-process?
-  [advertisement]
-  (try
-    (let [optional
-          (java.lang.ProcessHandle/of
-           (long (:seon.boot/pid advertisement)))]
-      (when (.isPresent optional)
-        (let [handle (.get optional)
-              start (.startInstant (.info handle))]
-          (and (.isAlive handle)
-               (.isPresent start)
-               (= (.getTime
-                   ^java.util.Date (:seon.boot/start-instant advertisement))
-                  (.toEpochMilli ^java.time.Instant (.get start)))))))
-    (catch Throwable _
-      false)))
-
 (defn read-advertisement
   "Read and validate one cluster's advertisement, or nil.
   Returns the advertisement map only when the file exists, parses,
@@ -1230,7 +1210,9 @@
              (schema/valid-candidate-value?
               :seon.boot/advertisement advertisement)
              (= cluster-name (:seon.boot/cluster-name advertisement))
-             (matching-live-process? advertisement))
+             (cluster.process/live?
+              (select-keys advertisement
+                           [:seon.boot/pid :seon.boot/start-instant])))
         advertisement))
     (catch Throwable _
       nil)))

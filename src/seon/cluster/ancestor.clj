@@ -16,6 +16,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.schema :as schema]
@@ -119,35 +120,21 @@
 (defn- scratch-branch
   "A scratch name carrying this process's (pid, start-instant)."
   []
-  (let [handle (java.lang.ProcessHandle/current)
-        start (.startInstant (.info handle))]
-    (when-not (.isPresent start)
-      (refuse! ::process-start-unavailable
-               "this process has no start instant to own a build with"
-               {::pid (.pid handle)}))
-    (keyword (str "building-" (.pid handle) "-"
-                  (.toEpochMilli ^java.time.Instant (.get start)) "-"
+  (let [{:seon.boot/keys [pid start-instant]}
+        (cluster.process/current-identity)]
+    (keyword (str "building-" pid "-"
+                  (inst-ms start-instant) "-"
                   (random-uuid)))))
 
 (defn- owner-alive?
   "True when the (pid, start-instant) a scratch name carries is live.
   The start instant is what makes a recycled pid read as dead; the
-  platform truncates to milliseconds on both sides
-  (`src/seon/cluster.clj:344-359` answers the same question about an
-  advertisement — see the issue note asking for one owner)."
+  shared process owner compares the platform value at millisecond
+  precision for both advertisements and scratch branches."
   [pid start-millis]
-  (try
-    (let [optional (java.lang.ProcessHandle/of (long pid))]
-      (boolean
-       (when (.isPresent optional)
-         (let [handle (.get optional)
-               start (.startInstant (.info handle))]
-           (and (.isAlive handle)
-                (.isPresent start)
-                (= (long start-millis)
-                   (.toEpochMilli ^java.time.Instant (.get start))))))))
-    (catch Throwable _
-      false)))
+  (cluster.process/live?
+   {:seon.boot/pid (long pid)
+    :seon.boot/start-instant (java.util.Date. (long start-millis))}))
 
 (defn- reclaim-scratch-branches!
   "Retire every abandoned scratch branch; refuse if one is still live."
