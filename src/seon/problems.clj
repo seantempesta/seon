@@ -22,7 +22,7 @@
   `:type` discriminator because the key a family arrives under IS the
   family.
 
-  FOUR FAMILIES, and each one is a fact nobody has to maintain:
+  SIX FAMILIES, and each one is a fact nobody has to maintain:
 
   - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
     signature. Grouping is the point: a hundred errors of one signature
@@ -40,6 +40,8 @@
     own mistake is NOT a core fault and never becomes an error fact,
     but a plan that keeps erroring is something a human wants to see.
     The distinction survives into the value instead of being flattened.
+  - UNOWNED NAMESPACES — a source-bearing program namespace with no
+    agent namespace ref. Assignment makes the row disappear immediately.
 
   WHAT IS DELIBERATELY NOT HERE: a stale-trigger family. \"Unanswered\"
   is derivable and already owned (`work/unanswered-triggers`); STALE is
@@ -167,6 +169,19 @@
                     :seon.problems/deferred-count (count deferred)}))))
        vec))
 
+(defn- unowned-namespaces
+  "Source-bearing program namespaces with no assigned agent."
+  [db]
+  (->> (d/q '[:find [?name ...]
+              :where
+              [?namespace :seon.ns/name ?name]
+              [?namespace :seon.ns/source _]
+              (not [_ :seon.cluster.agent/namespace ?namespace])]
+            db)
+       sort
+       (mapv (fn [namespace-name]
+               {:seon.ns/name namespace-name}))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
@@ -197,12 +212,15 @@
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
+        unowned (unowned-namespaces db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq wedged) (assoc :seon.problems/wedged-runs wedged)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
-                (seq deferred) (assoc :seon.problems/deferred-agents deferred))]
+                (seq deferred) (assoc :seon.problems/deferred-agents deferred)
+                (seq unowned)
+                (assoc :seon.problems/unowned-namespaces unowned))]
     (cond-> found
       (seq found) (assoc :seon.render/log `log-report)
       (seq found) (assoc :seon.render/html `html-report)
@@ -290,7 +308,11 @@
     (for [entry (:seon.problems/deferred-agents found)]
       (row "agent" (:seon.cluster.agent/id entry)
            "episode runs" (:seon.cluster.work/episode-runs entry)
-           "deferred" (:seon.problems/deferred-count entry))))])
+           "deferred" (:seon.problems/deferred-count entry))))
+   (family-section
+    "unowned namespaces"
+    (for [entry (:seon.problems/unowned-namespaces found)]
+      (row "namespace" (:seon.ns/name entry))))])
 
 (defn block
   "The problems BLOCK's html render: derive, then project.
@@ -394,5 +416,8 @@
                (:seon.cluster.agent/id entry)
                " episode-runs=" (:seon.cluster.work/episode-runs entry)
                " deferred=" (:seon.problems/deferred-count entry)
-               " (agent-sent triggers wait for an outside trigger)")))
+               " (agent-sent triggers wait for an outside trigger)"))
+        (for [entry (:seon.problems/unowned-namespaces found)]
+          (str "seon.problems unowned-namespace namespace="
+               (:seon.ns/name entry))))
        (str/join "\n")))

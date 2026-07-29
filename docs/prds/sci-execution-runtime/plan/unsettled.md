@@ -10,6 +10,15 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+**DELEGATION PRECONDITION P3 LANDED (2026-07-29 early).** Agent
+namespace assignment is the unique-value
+`:seon.cluster.agent/namespace` ref to `:seon.ns`; formal creation
+commits the namespace and agent together, `seon.cluster.agent/owner-of`
+is the pure namespace-symbol → agent-id query, ordinary cardinality-one
+transact reassigns it, and `seon.problems` derives sourced namespaces
+with no owner. Focused proof: 28 tests / 109 assertions / zero failures.
+P2 test-result ingestion is the next boundary in the same bounded lane.
+
 **PLANNING WAVE ARMED (owner, 2026-07-29 early): map ALL quarry
 research onto the new rendering concept — DO NOT PORT THINGS EXACTLY.**
 When each quarry lane returns, launch its planning agent (Opus)

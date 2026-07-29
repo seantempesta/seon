@@ -75,6 +75,37 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
+;;; Namespace assignment
+;;; ---------------------------------------------------------------------------
+
+(defn creation-tx
+  "Create one agent already assigned to its namespace.
+
+  Pure transaction data: the namespace identity and agent identity land in
+  the same commit, so the formal creation path has no ownerless basis."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
+                  :seon.cluster.agent/creation-tx]}
+  [{agent-id :seon.cluster.agent/id namespace-name :seon.ns/name}]
+  (let [namespace-tempid (str "namespace:" namespace-name)]
+    [{:db/id namespace-tempid
+      :seon.ns/name namespace-name}
+     {:seon.cluster.agent/id agent-id
+      :seon.cluster.agent/namespace namespace-tempid}]))
+
+(defn owner-of
+  "The agent id assigned to `namespace-name`, or nil."
+  {:malli/schema [:=> [:cat :any :seon.ns/name]
+                  [:maybe :seon.cluster.agent/id]]}
+  [db namespace-name]
+  (d/q '[:find ?agent-id .
+         :in $ ?namespace-name
+         :where
+         [?namespace :seon.ns/name ?namespace-name]
+         [?agent :seon.cluster.agent/namespace ?namespace]
+         [?agent :seon.cluster.agent/id ?agent-id]]
+       db namespace-name))
+
+;;; ---------------------------------------------------------------------------
 ;;; The two proc steps
 ;;; ---------------------------------------------------------------------------
 

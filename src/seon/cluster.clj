@@ -535,7 +535,10 @@
   block install is an idempotent upsert by name, so a reboot rewrites
   the same set and any block an agent added itself survives."
   [connection]
-  (d/transact connection [{:seon.cluster.agent/id root-agent-id}])
+  (d/transact connection
+              (cluster.agent/creation-tx
+               {:seon.cluster.agent/id root-agent-id
+                :seon.ns/name 'my.agents.root}))
   (let [seed (root/seed-tx @connection root-agent-id)]
     (when (seq seed)
       (d/transact connection seed))))

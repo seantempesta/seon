@@ -42,6 +42,11 @@
  ; no flag, no refusal message row anywhere.
  :seon.problems/deferred-agent [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
 
+ ; A program namespace carrying source but no reverse namespace assignment.
+ ; Presence is the problem; it vanishes when an agent gains the ref.
+ :seon.problems/unowned-namespace
+ [:map {:closed true} [:seon.ns/name :seon.ns/name]]
+
  ; The request. `live-processes` is the same set `run/recover-tx` takes,
  ; by the same name, because it is the same question: which holders are
  ; real right now. Absent set = nothing is known to be live, which
@@ -52,4 +57,4 @@
  ; builder carry (§9 of the context-blocks contract package).
  :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
 
- :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]}
+ :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]}

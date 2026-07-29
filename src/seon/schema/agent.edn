@@ -1,4 +1,22 @@
-{; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
+{; An agent's current namespace is a connection to the canonical
+ ; `:seon.ns` entity. Cardinality one means an agent has at most one;
+ ; unique-value means a namespace has at most one agent. Reassignment
+ ; is an ordinary cardinality-one transact, never a second identity.
+ :seon.cluster.agent/namespace
+ [:and {:seon.db/unique true} :seon.db/ref]
+
+ ; The one formal creation shape. It creates the namespace row and the
+ ; agent row in one transaction so a newly created agent is never
+ ; ownerless at any committed basis.
+ :seon.cluster.agent/creation-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.ns/name :seon.ns/name]]
+
+ ; Pure transaction data is heterogeneous Datahike input by definition.
+ :seon.cluster.agent/creation-tx [:vector :map]
+
+ ; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
  ; Two agents differ only in the agent-id their procs carry and the
  ; mailbox channel routed to them — there is no per-agent variation.
  :seon.cluster.agent/blueprint-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]

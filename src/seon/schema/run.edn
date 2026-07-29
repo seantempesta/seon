@@ -17,6 +17,9 @@
         :seon.render/ai seon.render.agent/agent-ai
         :seon.render/html seon.render.agent/agent-html}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.agent/namespace
+   {:optional true}
+   :seon.cluster.agent/namespace]
   [:seon.cluster.agent/run {:optional true} :seon.cluster.agent/run]]
  :seon.cluster.eval/at :inst
  :seon.cluster.eval/error :string
