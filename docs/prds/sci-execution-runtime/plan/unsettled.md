@@ -20,7 +20,13 @@ idioms, mechanisms redesigned; the message-entry bar is priority one
 if fresh has none. (2) generate-code-quarry → the v0 plan on the local
 model, grounded in the old design'''s lessons + the delegation
 preconditions landing tonight. Both plans then falsified before
-sealing (the proven cycle). The quarry documents inventory and
+sealing (the proven cycle). IMPLEMENTATION IS PRE-AUTHORIZED (owner,
+same message): once the orchestrator has reviewed a falsified plan and
+sealed its contracts, launch the implementation lanes without waiting —
+"I want us to improve what the system can do through learning from the
+past." The full loop runs autonomously: quarry → plan → falsify → seal
+review → implement → live-prove → ledger; the owner sees results and
+retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
