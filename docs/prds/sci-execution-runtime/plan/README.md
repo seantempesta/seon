@@ -673,6 +673,48 @@ may reintroduce a shadow build into the dev feedback path.
   background-wrapper SIGTERM wave) happened with mlx (19GB) + Ollama
   (28.7GB incl. 8-slot KV) both loaded. The project server is Ollama;
   fleet experiments SHARE the one server, never spawn siblings.
+  **Rulings 2026-07-29 late morning (owner, the verification reply —
+  NEXT SESSION'S CHARTER; quote-heavy on purpose):**
+  (1) AGENT MODES, not message hacks: the from-less-outside mechanism
+  is "fragile. We need a way for agents to clearly do different things
+  without hacking messages." Two modes: CHAT (talking to a human) and
+  GOAL-SEEKING — "a program-like call where the agent has limited
+  turns to achieve a goal and return the schema from that function
+  call" OR test-based: "the goal is something more test based... the
+  test is the namespace they are in with all tests passing and the
+  broken form is present in the namespace"; the agent may delete the
+  form, update the namespace to what should have happened, write new
+  functions/schemas/tests, then mark complete. THIS ANSWERS
+  OWNER-FIXED: goal-done = the namespace's tests pass — the observable
+  condition IS the test suite. To explore next session; check whether
+  messages can set up the planning system — my.plan was NEVER ported
+  (quarry only); the v0 planner works via plain messages.
+  (2) CONTEXT IS MOSTLY TRANSCRIPT: "the blocks were too rigid... I
+  was hand coding each agent'''s context which just wasn'''t going to
+  scale." Blocks SURVIVE for static scaffold only (system message,
+  REPL instructions, AGENTS.md loading). The agent'''s context is
+  mostly its transcript — DIG UP the previous transcript work ("it
+  changed the amount of detail stored over time and aged old items
+  out"). Next session'''s focus.
+  (3) CONTEXT ORDERING FOR CACHING: routed problems carry ARBITRARY
+  CONTEXT (the planner'''s original markdown problem description,
+  instructions) + the owner'''s dynamic context; "context can be
+  rendered in parallel and then sorted by change timestamp so we can
+  have more context caching — the parts that change more flow to the
+  end" (transcript last). Designing this for generate-code designs it
+  for all agents.
+  (4) ROOT: same context system as everything, plus root-specific
+  context (full system view); root GETS ERRORS — "not each error is a
+  separate wake up processed sequentially, but all errors that are
+  queued up wake the agent" ONCE; root stops the alarms, diagnoses,
+  rights it in its session.
+  (5) THINKING PER USE: budgets are per-call, not only per-descriptor
+  — the planner thinks hard before one-shotting multi-namespace code;
+  repair agents minimal; plan-then-execute lighter or none; "if no
+  thinking and local compute are fast we can even switch from batched
+  forms to one form at a time like a user debugging."
+  (6) The dial-authority dissolution is SCHEDULED (analyze + fix
+  properly, not queued-someday).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
