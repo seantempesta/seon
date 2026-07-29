@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: high
+severity: friction
 tags: [issue, agent, runtime]
 ---
 

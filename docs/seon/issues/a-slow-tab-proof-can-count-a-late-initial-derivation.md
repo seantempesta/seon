@@ -1,7 +1,8 @@
 ---
 type: issue
 status: open
-tags: [testing, render, concurrency]
+severity: friction
+tags: [issue, testing, render, concurrency]
 ---
 
 # A slow-tab proof can count a late initial derivation

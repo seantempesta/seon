@@ -32,6 +32,16 @@ delivery motions beside the router. This plan seals the one reader, places
 classification beside it, judges what must NOT be condensed, and orders the
 cuts. It does not authorize the delivery wave beyond naming its boundary.
 
+**Seal (orchestrator, 2026-07-29): D8 RULED YES — the starting reading
+context freezes on the run at plan freeze (the mechanism the owner's
+REPL-semantics ruling requires; recovery re-reads from it, re-executing
+nothing). D9 RULED JOINT — E1 + D2 land as ONE evaluator revision
+(owner batch 4: one mechanism, two complementary facts; v0-B was
+implicitly rejected by the same ruling). S1 SEALED and dispatching now;
+S2+S3 sequential in one lane once the generate-code rev agrees in
+writing on the freeze/receipt facts, per this plan's own coordination
+duty.**
+
 ## 0. Dependency ledger
 
 | Dependency or mechanism | Selected revision | Contract used here |

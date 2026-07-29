@@ -27,7 +27,7 @@ See `README.md` for the convention.
 | [Root blocks carry two key vocabularies, so the page 500s](root-blocks-carry-two-key-vocabularies-and-500-the-page.md) | blocker | general |
 | [`bin/seon up` exits 0 after a readiness timeout](operator-up-exits-zero-on-readiness-timeout.md) | blocker | general |
 
-## Friction (17)
+## Friction (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -36,6 +36,7 @@ See `README.md` for the convention.
 | [A frozen disposition can close a run against facts newer than the basis it was written at](a-frozen-disposition-can-close-against-newer-facts.md) | friction | general |
 | [A nil query input matches anything, so prompt cannot refuse a nil trigger](a-nil-query-input-matches-anything-so-prompt-cannot-refuse.md) | friction | Core |
 | [A self-referential registered schema overflows the stack instead of refusing](a-self-referential-schema-overflows-the-stack.md) | friction | Core |
+| [A slow-tab proof can count a late initial derivation](a-slow-tab-proof-can-count-a-late-initial-derivation.md) | friction | general |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [An ordinary agent's block set has no production caller](an-ordinary-agents-block-set-has-no-production-caller.md) | friction | agent |
 | [Contracts that require a LIVE connection are called with a released one](instrumentation-surfaces-released-connection-contracts.md) | friction | Core |
