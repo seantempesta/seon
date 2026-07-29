@@ -664,3 +664,12 @@ The shortest live proof depends on the selected Ollama descriptor:
 Then inspect the attempt datoms and recorded provider request. Pair that proof
 with pure tests for Anthropic projection; spending on a hosted provider is
 unnecessary to prove resolution.
+
+## Orchestrator review note (2026-07-29)
+
+Gemini review flagged the proposed `:seon.ai.provider/descriptor` as an
+`[:or]` of two entity-tagged maps — `register!` derives `:seon.entity/id-attr`
+from the TOP-LEVEL form only, so the nested `{:seon.db/entity true}` tags are
+invisible. At design review, reshape to ONE top-level entity map with the two
+authentication keys optional (the established partial-unrepresentable idiom,
+see ai.cljc targets), never a union of entity maps.
