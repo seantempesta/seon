@@ -78,4 +78,5 @@
   [:seon.store/branch-connection
    {:optional true}
    :seon.store/branch-connection]
+  [:seon.db/process {:optional true} :seon.db/ref]
   [:seon.fn/roots :seon.fn/roots]]}

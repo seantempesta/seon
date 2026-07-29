@@ -68,12 +68,17 @@
 (defn index!
   "Index the declared roots into an already schema-populated ancestor."
   {:malli/schema [:=> [:cat :seon.fn/index-request] :nil]}
-  [{connection :seon.store/branch-connection :as request}]
+  [{connection :seon.store/branch-connection
+    process :seon.db/process
+    :as request}]
   (let [program-rows (rows request)
         namespace-rows (filterv :seon.ns/name program-rows)
-        declaration-rows (remove :seon.ns/name program-rows)]
+        declaration-rows (remove :seon.ns/name program-rows)
+        transaction (fn [rows]
+                      (cond-> {:tx-data (vec rows)}
+                        process (assoc :tx-meta {:seon.db/process process})))]
     (when (seq namespace-rows)
-      (d/transact connection {:tx-data namespace-rows}))
+      (d/transact connection (transaction namespace-rows)))
     (when (seq declaration-rows)
-      (d/transact connection {:tx-data (vec declaration-rows)}))
+      (d/transact connection (transaction declaration-rows)))
     nil))

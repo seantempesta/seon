@@ -240,7 +240,8 @@
   (->> (d/q '[:find [?name ...]
               :where
               [?namespace :seon.ns/name ?name]
-              [?namespace :seon.ns/source _]
+              [?namespace :seon.ns/source _ ?tx]
+              (not [?tx :seon.db/process _])
               (not [_ :seon.cluster.agent/namespace ?namespace])]
             db)
        sort

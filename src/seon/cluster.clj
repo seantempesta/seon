@@ -381,6 +381,8 @@
   [{connection :seon.store/branch-connection}]
   (accrete-schema-population! connection)
   (seon.fn/index! {:seon.store/branch-connection connection
+                   :seon.db/process
+                   [:seon.db.process/id boot-process-identity]
                    :seon.fn/roots ancestor-roots}))
 
 ;;; ---------------------------------------------------------------------------
