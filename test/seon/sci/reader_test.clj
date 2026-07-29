@@ -424,13 +424,11 @@
               nil))))
        (into (sorted-map))))
 
-(deftest standing-no-second-reader-surface-is-pending-until-s5
+(deftest evaluator-no-longer-owns-a-second-reader-surface
   (let [sites (second-reader-sites)]
     (is (seq sites)
-        (str "PENDING S5: flip this assertion to empty after the remaining "
-             "accepted-source readers migrate. Current sites: "
-             (pr-str sites)))
-    (is (contains? sites "src/seon/sci/eval.clj"))
+        "non-evaluator tooling still owns its specialized readers")
+    (is (not (contains? sites "src/seon/sci/eval.clj")))
     (is (contains? sites "bin/seon-hook"))
     ;; MIGRATED 2026-07-29 (generate-code v0): the reply splitter reads
     ;; through this reader now, which is where its forms get the

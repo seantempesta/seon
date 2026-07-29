@@ -433,26 +433,37 @@
                 [?function :seon.fn/source ?source ?tx]]
               db)
          :seon.schema/artifact-exports #{}
-         :seon.schema/pure-predicate-symbols #{}})))
+         :seon.schema/pure-predicate-symbols #{}}
+        (or (schema/current-projection) {}))))
     (boolean (seq schema-rows))))
 
 (defn acquire!
-  "Install the current committed program into a ctx at one database value.
-  This reads program rows only; receipts and eval results are outside the
-  query by construction."
+  "Install current agent-authored functions into a ctx at one database value.
+  Ancestor-authored rows describe the compiled/base program and participate
+  in schema projection; they are not replayed as interpreted source. This
+  reads program rows only—receipts and eval results are outside the query by
+  construction."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :int]}
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
   (activate-program-schemas! db)
   (let [rows
-        (d/q '[:find ?sym ?source ?namespace-name
-               :where
-               [?function :seon.fn/sym ?sym]
-               [?function :seon.fn/source ?source]
-               [?function :seon.fn/spec _]
-               [?function :seon.fn/ns ?namespace]
-               [?namespace :seon.ns/name ?namespace-name]]
-             db)]
-    (doseq [[sym source namespace-name] (sort-by first rows)]
+        (into
+         []
+         (filter
+          (fn [[_ _ _ source-tx]]
+            (= :agent
+               (:seon.schema.admission/source
+                (schema/admission-from-asserting-transaction
+                 db source-tx)))))
+         (d/q '[:find ?sym ?source ?namespace-name ?source-tx
+                :where
+                [?function :seon.fn/sym ?sym]
+                [?function :seon.fn/source ?source ?source-tx]
+                [?function :seon.fn/spec _]
+                [?function :seon.fn/ns ?namespace]
+                [?namespace :seon.ns/name ?namespace-name]]
+              db))]
+    (doseq [[sym source namespace-name _] (sort-by first rows)]
       (install-program-row!
        {:seon.sci.eval/ctx ctx
         :seon.db/db db

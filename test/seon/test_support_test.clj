@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.config :as config]
+            [seon.fn :as seon.fn]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
@@ -17,9 +18,12 @@
             installed
             (into #{} (filter keyword?) (keys (:schema database)))
             expected-schema-keys
-            (into #{}
-                  (map :seon.schema/key)
-                  (schema/canonical-schema-rows (java.util.Date.)))
+            (into
+             (into #{}
+                   (map :seon.schema/key)
+                   (schema/canonical-schema-rows (java.util.Date.)))
+             (keep :seon.schema/key)
+             (seon.fn/rows {:seon.fn/roots seon.fn/source-roots}))
             actual-schema-keys
             (d/q
              '[:find [?key ...]

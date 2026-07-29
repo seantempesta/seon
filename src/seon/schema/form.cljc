@@ -45,7 +45,8 @@
 
 (defn database-attributes
   "Compute persisted database attributes from one immutable schema-form map."
-  {:malli/schema [:=> [:cat 'map?] [:vector :qualified-keyword]]}
+  {:malli/schema
+   [:=> [:cat [:fn clojure.core/map?]] [:vector :qualified-keyword]]}
   [forms]
   (->> forms
        (reduce-kv

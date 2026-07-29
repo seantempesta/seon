@@ -362,8 +362,6 @@
                     [:seon.db.process/id boot-process-identity]}})))
   nil)
 
-(def ^:private ancestor-roots ["src" "test"])
-
 (defn populate-ancestor!
   "The default ancestor content: this code's own schema population.
   Named by symbol in `ancestor/ensure!`'s request, so the producer is
@@ -383,7 +381,7 @@
   (seon.fn/index! {:seon.store/branch-connection connection
                    :seon.db/process
                    [:seon.db.process/id boot-process-identity]
-                   :seon.fn/roots ancestor-roots}))
+                   :seon.fn/roots seon.fn/source-roots}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The tower above the REPL
@@ -405,7 +403,7 @@
        (ancestor/ensure!
         {:seon.store/store store
          :seon.ancestor/digest (ancestor/digest
-                                {:seon.ancestor/roots ancestor-roots})
+                                {:seon.ancestor/roots seon.fn/source-roots})
          :seon.ancestor/populate `populate-ancestor!}))))
 
 ;;; ---------------------------------------------------------------------------

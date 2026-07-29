@@ -165,6 +165,16 @@
      (try
        (cluster/populate-ancestor!
         {:seon.store/branch-connection connection})
+       ;; `populate-ancestor!` is the contents step used by production
+       ;; `ancestor/ensure!`; production seals that completed population in
+       ;; the following transaction. Keep this canonical fixture on the same
+       ;; side of that provenance boundary so indexed core contracts are not
+       ;; misclassified as agent-authored rows.
+       (d/transact
+        connection
+        {:tx-data
+         [{:seon.ancestor/digest
+           (apply str (repeat 64 "0"))}]})
        (when (seq extra-schema)
          (d/transact connection {:tx-data extra-schema}))
        (body connection)

@@ -269,32 +269,27 @@
 
          (testing "the attempt froze one plan whose forms carry the
                    namespace each was WRITTEN under"
-           (is (= {0 'user
+           (is (= {0 'my.agents.planner
                    1 'my.gen.alpha
                    2 'my.gen.alpha
+                   3 'my.gen.planner
                    4 'my.gen.beta
-                   5 'my.gen.beta}
+                   5 'my.gen.beta
+                   6 'my.gen.planner}
                   (form-namespaces db run-id))
-               "REPL semantics across two declarations in ONE reply. The
-                gaps are the reader's contract, not an omission: form 3
-                follows an arbitrary invocation, so attribution is
-                ABSENT rather than inherited, and form 6 follows another
-                one. Absence routes to the author.")
+               "REPL semantics across two declarations in ONE reply.
+                The agent namespace is the default where no namespace
+                declaration governs, including fail-closed attribution
+                after an arbitrary top-level invocation.")
            (is (= 7 (count (d/q '[:find ?f
                                   :in $ ?run-id
                                   :where
                                   [?run :seon.cluster.run/id ?run-id]
                                   [?f :seon.cluster.run.form/run ?run]]
                                 db run-id)))
-               "seven forms froze; five carry a namespace"))
+               "seven forms froze and every form has evaluation truth"))
 
-         (testing "execution did NOT honour that attribution, and the
-                   disagreement is visible rather than assumed away"
-           ;; E1 is the complement that would make this per-form
-           ;; detectable; until it lands the drive REPORTS it. The
-           ;; evaluator rebinds sci/ns per form to the agent's own
-           ;; namespace, so a form written under my.gen.alpha defines
-           ;; into my.agents.planner.
+         (testing "execution honours parse-time attribution"
            (is (str/includes?
                 (d/q '[:find ?edn .
                        :in $ ?run-id
@@ -304,9 +299,9 @@
                        [?r :seon.cluster.eval/ordinal 1]
                        [?r :seon.cluster.eval/result-edn ?edn]]
                      db run-id)
-                "my.agents.planner/widget-total")
-               "parse says my.gen.alpha, evaluation says
-                my.agents.planner — one anomaly, two honest facts"))
+                "my.gen.alpha/widget-total")
+               "the definition is installed in the namespace the reader
+                attributed to its form"))
 
          (testing "the fold CONTINUES past a red form — nothing halts"
            (is (= 7 (count (d/q '[:find ?r

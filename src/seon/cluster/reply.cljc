@@ -119,24 +119,25 @@
   (`:seon.sci.reader/ns`, REPL semantics, absent rather than inherited
   after a malformed declaration) arrives with the span instead of being
   re-derived here by a second rule."
-  [source namespace-name]
-  (let [events (reader/read
-                (cond-> {:seon.sci.reader/text source}
-                  namespace-name
-                  (assoc :seon.sci.reader/ns namespace-name)))]
-    (if (map? events)
-      events
-      (mapv (fn [event]
-              (let [start (:seon.sci.reader/source-start event)
-                    end (:seon.sci.reader/source-end event)
-                    form-source (:seon.sci.reader/source event)]
-                (cond-> {::form (:seon.sci.reader/form event)
-                         ::source form-source
-                         ::start start
-                         ::end end}
-                  (:seon.sci.reader/ns event)
-                  (assoc ::ns (:seon.sci.reader/ns event)))))
-            events))))
+  ([source] (parsed-events source nil))
+  ([source namespace-name]
+   (let [events (reader/read
+                 (cond-> {:seon.sci.reader/text source}
+                   namespace-name
+                   (assoc :seon.sci.reader/ns namespace-name)))]
+     (if (map? events)
+       events
+       (mapv (fn [event]
+               (let [start (:seon.sci.reader/source-start event)
+                     end (:seon.sci.reader/source-end event)
+                     form-source (:seon.sci.reader/source event)]
+                 (cond-> {::form (:seon.sci.reader/form event)
+                          ::source form-source
+                          ::start start
+                          ::end end}
+                   (:seon.sci.reader/ns event)
+                   (assoc ::ns (:seon.sci.reader/ns event)))))
+             events)))))
 
 (defn- standalone-symbol?
   "True when an event is a bare symbol occupying its whole source line."

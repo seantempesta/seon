@@ -472,7 +472,9 @@
 
    The qualified symbol remains the durable schema form and admission
    authority; this reloadable function cache only supplies Malli's SCI tier."
-  {:malli/schema [:=> [:cat :qualified-symbol 'ifn?] :qualified-symbol]}
+  {:malli/schema
+   [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?]]
+    :qualified-symbol]}
   [predicate f]
   (swap! !schema-state assoc-in
          [:seon.schema.state/predicate-functions predicate]
@@ -1757,7 +1759,7 @@
   {:malli/schema
    [:=>
     [:catn [:seon.schema/registration-delta :map]
-           [:seon.schema/body 'ifn?]]
+           [:seon.schema/body [:fn clojure.core/ifn?]]]
     :any]}
   [delta f]
   (binding [*candidate-forms-overlay*

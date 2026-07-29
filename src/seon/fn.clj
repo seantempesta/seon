@@ -8,6 +8,10 @@
 
 (schema.edn/load! {})
 
+(def source-roots
+  "The complete first-party source corpus admitted to the ancestor."
+  ["src" "test"])
+
 (defn- source-file?
   [file]
   (and (.isFile ^java.io.File file)
