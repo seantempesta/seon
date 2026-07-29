@@ -18,9 +18,11 @@
   THE TERMINAL TRANSACTION IS ONE COMMIT carrying the receipt AND the
   interpreted disposition. Splitting them reintroduces a torn window
   the quarry already closed (`driver.clj:289-297`). A rejected terminal
-  transaction is followed by a terminal ERROR receipt carrying no agent
-  value — under `store/transact!` that is a branch on a returned value,
-  not a catch, which is strictly better.
+  transaction is followed by a separate minimal terminal commit carrying
+  the admitted flat ERROR value, its durable error fact, and the run
+  close, but no program row or agent disposition. Under
+  `store/transact!` that is a branch on a returned value, not a catch,
+  which is strictly better.
 
   NOTHING RETRIES A PAID CALL, and recovery is not a code path: a turn
   only ever acts on what `next-agent-work` derived from facts, and a
@@ -283,10 +285,13 @@
   would fail the very transaction that records the failure.
 
   The recording's own outcome is deliberately ignored. This is the
-  recursion fence: if the database refuses the error fact too, the
-  answer is not to record THAT — `store/transact!` never throws, the
-  loop keeps its pass, and the visible symptom stays the original
-  refusal rather than an infinite regress of them."
+  recursion fence for a refusal that owns no running receipt: if the
+  database refuses the error fact too, the answer is not to record
+  THAT — `store/transact!` never throws, the loop keeps its pass, and
+  the visible symptom stays the original refusal rather than an
+  infinite regress of them. A refused terminal receipt uses
+  `terminal-refused!` below instead, because recording alone cannot
+  settle work derivation."
   [cluster outcome now attribution]
   (boolean
    (when-let [kind (:seon.error/kind outcome)]
@@ -295,6 +300,49 @@
        (store/transact!
         connection
         (error-tx cluster db outcome now attribution)))
+     kind)))
+
+(defn- terminal-refused!
+  "Settle and record a refused terminal transaction, and say it refused.
+
+  The original transaction remains commit-first: its program row,
+  disposition, receipt, and context installation all stay absent when
+  the database refuses any one of them. This second transaction carries
+  only the SAME presence-fenced receipt settlement, the run close, and
+  the normalized durable error record. `error/commit-tx` admits the
+  refusal in record mode; `error/value` projects the flat value stored
+  on the receipt. There is no program row or disposition left for this
+  minimal transaction to refuse.
+
+  The receipt terminal fact, run close, and error fact commit together.
+  The event therefore derives no later pass: no re-execution, no
+  redelivery, and no separate close wake."
+  [cluster outcome now attribution receipt]
+  (boolean
+   (when-let [kind (:seon.error/kind outcome)]
+     (let [connection (:seon.store/branch-connection cluster)
+           db @connection
+           ;; The receipt is the run provenance for this eval result.
+           ;; Keeping a second run ref on the recorder fact would store
+           ;; the same connection twice; agent attribution is the one
+           ;; connection the next prompt needs to reach the fact.
+           recording (error-tx cluster db outcome now
+                               (dissoc attribution :seon.cluster.run/id))
+           failure (error/value (first recording))
+           terminal
+           (run/receipt-refusal-tx
+            {:seon.cluster.run/id (:seon.cluster.run/id receipt)
+             :seon.cluster.eval/ordinal
+             (:seon.cluster.run.form/ordinal receipt)
+             :seon.cluster.run/closed-at now
+             :seon.cluster.eval/result-edn (pr-str failure)
+             :seon.cluster.eval/error (:seon.error/message failure)
+             :seon.error/kind (:seon.error/kind failure)})]
+       ;; The recorder never panics or recursively records its own
+       ;; outcome. The construction above has removed the only refused
+       ;; payload (program row/disposition), so this terminal commit is
+       ;; the end of this event rather than another retry rail.
+       (store/transact! connection (into terminal recording)))
      kind)))
 
 (defn- attempt-id
@@ -950,9 +998,11 @@
                          :seon.cluster.run/process process
                          :seon.cluster.work/now now})))]
                 (cond
-                  (refused! cluster outcome now
-                            {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id})
+                  (terminal-refused!
+                   cluster outcome now
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster.run/id run-id}
+                   receipt)
                   (report :error ran)
 
                   ;; both dispositions CLOSE the run in the terminal

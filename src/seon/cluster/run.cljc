@@ -221,7 +221,8 @@
 ;; the var, so redefining a transition against the running system updates
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call
-         open-call receipt-start-call receipt-settle-call recover-call)
+         open-call receipt-start-call receipt-settle-call
+         receipt-refusal-call recover-call)
 
 (defn open-call
   "Open one run for an agent, inside the transaction.
@@ -531,6 +532,25 @@
   [request]
   [[:db.fn/call #'receipt-settle-call request]])
 
+(defn receipt-refusal-tx
+  "Transaction data terminalizing a receipt after its settlement refused.
+  The admitted flat error has no program row or disposition that can
+  repeat the original refusal. This transition also closes the receipt's
+  run, so the event derives no follow-up close pass."
+  {:malli/schema
+   [:=> [:cat
+         [:map {:closed true}
+          [::id ::id]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [::closed-at ::closed-at]
+          [:seon.cluster.eval/result-edn
+           :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/error :seon.cluster.eval/error]
+          [:seon.error/kind :seon.error/kind]]]
+    [:vector :some]]}
+  [request]
+  [[:db.fn/call #'receipt-refusal-call request]])
+
 (def ^:private program-attributes
   {:seon.fn/sym
    #{:seon.fn/ns :seon.fn/source :seon.fn/arglists :seon.fn/doc
@@ -587,6 +607,24 @@
               (or (:db/id existing)
                   (str (name identity) ":" (get row identity))))]))))
 
+(def ^:private receipt-terminal-attributes
+  [:seon.cluster.eval/result-edn
+   :seon.cluster.eval/error
+   :seon.cluster.eval/interrupted-at
+   :seon.error/kind
+   :seon.cluster.eval/output
+   :seon.cluster.eval/ns])
+
+(defn- receipt-terminal-assertions
+  "Terminal assertions present in `request`, targeting `receipt`."
+  [receipt request]
+  (into
+   []
+   (keep (fn [attribute]
+           (when-some [value (get request attribute)]
+             [:db/add (:db/id receipt) attribute value])))
+   receipt-terminal-attributes))
+
 (defn receipt-settle-call
   "Settle one running receipt, inside the transaction.
   The settle-once fence is PRESENCE: a receipt already carrying any
@@ -636,15 +674,48 @@
      (if-let [row (:seon.sci.eval/program-row request)]
        (program-row-tx db request row)
        [])
-          (keep (fn [attribute]
-                  (when-some [value (get request attribute)]
-                    [:db/add (:db/id receipt) attribute value])))
+     (receipt-terminal-assertions receipt request))))
+
+(defn receipt-refusal-call
+  "Terminalize a running receipt after its terminal transaction refused.
+  Never refuses: a missing or already-terminal receipt contributes no
+  transaction data, so the durable error recorder sharing this
+  transaction still commits. A running receipt gets the same terminal
+  assertions as ordinary settlement and its run closes in this same
+  transaction. Presence prevents overwrite, and closing here leaves no
+  derived `:close` work whose wake could be mistaken for a retry."
+  {:malli/schema
+   [:=> [:cat :any
+         [:map {:closed true}
+          [::id ::id]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [::closed-at ::closed-at]
           [:seon.cluster.eval/result-edn
-           :seon.cluster.eval/error
-           :seon.cluster.eval/interrupted-at
-           :seon.error/kind
-           :seon.cluster.eval/output
-           :seon.cluster.eval/ns])))
+           :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/error :seon.cluster.eval/error]
+          [:seon.error/kind :seon.error/kind]]]
+    [:vector :some]]}
+  [db {::keys [id]
+       :seon.cluster.eval/keys [ordinal]
+       :as request}]
+  (let [receipt (current-receipt db id ordinal)
+        run-eid (get-in receipt [:seon.cluster.eval/run :db/id])
+        run (when run-eid (d/pull db '[*] run-eid))
+        agent-eid (get-in run [::agent :db/id])
+        pointer-eid (get-in (when agent-eid
+                              (d/pull db [:seon.cluster.agent/run] agent-eid))
+                            [:seon.cluster.agent/run :db/id])]
+    (if (or (nil? receipt) (terminal? receipt))
+      []
+      (into
+       (receipt-terminal-assertions receipt request)
+       (concat
+        (when (and run (open? run))
+          (cond-> [[:db/add run-eid ::closed-at (::closed-at request)]]
+            (::process run)
+            (conj [:db/retract run-eid ::process (::process run)])))
+        (when (= run-eid pointer-eid)
+          [[:db/retract agent-eid :seon.cluster.agent/run run-eid]]))))))
 
 (defn recover-tx
   "Transaction data recovering one run from dead-process facts."

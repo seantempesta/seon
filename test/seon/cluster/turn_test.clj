@@ -247,6 +247,23 @@
                          :seon.cluster.work/next work}
                         (:seon.cluster.work/now request)))))))))
 
+(defn- drive-agent!
+  "Run one agent's passes until that agent is idle, or `limit` is reached."
+  [cluster agent-id limit]
+  (let [connection (:seon.store/branch-connection cluster)]
+    (loop [passes 0
+           reports []]
+      (let [request (request connection agent-id)
+            work (work/next-agent-work @connection request)]
+        (if (or (nil? work) (>= passes limit))
+          reports
+          (recur (inc passes)
+                 (conj reports
+                       (cluster.loop/turn
+                        {:seon.cluster.loop/cluster cluster
+                         :seon.cluster.work/next work}
+                        (:seon.cluster.work/now request)))))))))
+
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
   ;; the injection seam, proven: the same qualified symbol the cluster
   ;; handle carries now points at seon.sci.eval, so this drives a real
@@ -425,6 +442,130 @@
                        [:seon.fn/sym]
                        [:seon.fn/sym "my.agents.agent-a/obsolete"]))
               "the explicit delete retracts the durable identity"))))))
+
+(deftest refused-terminal-program-transactions-settle-and-do-not-refire
+  ;; Checkpoint-audit blocker B1, through the real SCI boundary. ONE
+  ;; refused event is the regression: it settles and closes atomically,
+  ;; records once, and generates neither another pass nor another trigger.
+  (doseq [[label cap next-turn?]
+          [["below the episode cap" 2 true]
+           ["at the episode cap" 1 false]]]
+    (testing label
+      (with-cluster
+        (fn [cluster]
+          (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                               'seon.sci.eval/evaluate)
+                connection (:seon.store/branch-connection cluster)
+                calls (atom [])
+                original-install! sci.eval/install-program-row!
+                installations (atom [])]
+            (d/transact
+             connection
+             [(agent-row "peer")
+              {:seon.config/cluster "turn-test"
+               :seon.config.run/max-episode-runs cap}
+              {:seon.ns/name 'seon.config}
+              {:seon.fn/sym "seon.config/defaults"
+               :seon.fn/ns [:seon.ns/name 'seon.config]
+               :seon.fn/source "(defn defaults [] {})"
+               :seon.fn/spec "[:=> [:cat] :map]"}])
+            (with-redefs
+              [ai/complete
+               (fn [request]
+                 (swap! calls conj request)
+                 {:seon.ai/text
+                  (if (= 1 (count @calls))
+                    "(ns-unmap (quote seon.config) (quote defaults))"
+                    "(my.run/complete \"recovered\")")})
+               sci.eval/install-program-row!
+               (fn [request]
+                 (swap! installations conj request)
+                 (original-install! request))]
+              (let [reports (drive-agent! cluster "agent-a" 10)
+                    db @connection
+                    receipts
+                    (d/q '[:find [(pull ?receipt [*]) ...]
+                           :where
+                           [?receipt :seon.cluster.eval/id _]]
+                         db)
+                    error-facts
+                    (d/q '[:find [?error ...]
+                           :where
+                           [?error :seon.error/id _]]
+                         db)]
+                (is (= [:open :call :resume]
+                       (mapv :seon.cluster.work/situation reports))
+                    "the refusal closes in its terminal pass")
+                (is (= 1 (count receipts)))
+                (is (run/terminal? (first receipts)))
+                (is (= :seon.cluster.run/refused
+                       (:seon.error/kind (first receipts))))
+                (is (= :seon.cluster.run/refused
+                       (:seon.error/kind
+                        (edn/read-string
+                         (:seon.cluster.eval/result-edn
+                          (first receipts))))))
+                (is (= 1 (count error-facts))
+                    "one refusal records exactly one durable error")
+                (is (empty? (drive-agent! cluster "agent-a" 10))
+                    "the event derives zero further passes")
+                (is (false?
+                     (work/more-agent-work?
+                      @connection (request connection "agent-a")))
+                    "the production self-rewake predicate is false")
+                (is (= 1 (count @calls))
+                    "the event never re-calls the model")
+                (is (empty?
+                     (d/q '[:find ?message
+                            :where
+                            [?message :seon.cluster.message/about ?error]
+                            [?error :seon.error/id _]]
+                          @connection))
+                    "a returned error value creates no delivery wake")
+                (is (not-any?
+                     (comp :seon.fn/delete :seon.sci.eval/program-row)
+                     @installations)
+                    "the refused deletion never installs")
+                (is (= "(defn defaults [] {})"
+                       (:seon.fn/source
+                        (d/pull db
+                                [:seon.fn/source]
+                                [:seon.fn/sym "seon.config/defaults"])))
+                    "commit-first leaves the program row unchanged")
+                (d/transact
+                 connection
+                 [{:seon.cluster.message/id "peer-follow-up"
+                   :seon.cluster.message/to
+                   [:seon.cluster.agent/id "agent-a"]
+                   :seon.cluster.message/from
+                   [:seon.cluster.agent/id "peer"]
+                   :seon.cluster.message/content "Try again after reading the error."
+                   :seon.cluster.message/at now}])
+                (let [next-reports (drive-agent! cluster "agent-a" 10)]
+                  (if next-turn?
+                    (do
+                      (is (= [:open :call :resume]
+                             (mapv :seon.cluster.work/situation next-reports)))
+                      (is (= 2 (count @calls)))
+                      (is (str/includes?
+                           (:seon.ai/prompt (second @calls))
+                           "program-delete-not-owned")
+                          "the next turn's context sees the refusal fact"))
+                    (do
+                      (is (empty? next-reports)
+                          "the capped episode simply ends")
+                      (is (= 1 (count @calls))
+                          "the cap is the only retry budget")
+                      (is (= ["peer-follow-up"]
+                             (mapv :seon.cluster.message/id
+                                   (work/deferred-triggers
+                                    @connection "agent-a"))))))
+                (is (= 1
+                       (count
+                        (d/q '[:find ?error
+                               :where [?error :seon.error/id _]]
+                             @connection)))
+                    "later work never re-records the original event"))))))))))
 
 (deftest evaluation-follows-the-readers-parse-time-namespace
   (with-cluster

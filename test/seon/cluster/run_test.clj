@@ -62,7 +62,8 @@
    :seon.cluster.eval/at
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
-   :seon.cluster.eval/error])
+   :seon.cluster.eval/error
+   :seon.error/kind])
 
 (defn- with-model-database [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -351,6 +352,68 @@
                 "and `(run, ordinal)` identity makes re-execution
                  unrepresentable: an ordinal that ever had a receipt
                  refuses forever, across any custody change")))))))
+
+(deftest receipt-refusal-settlement-is-idempotent-and-never-refuses
+  (with-model-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.agent/id "refusal-agent"}])
+      (d/transact
+       connection
+       (run/open-tx {::run/id "refusal-run"
+                     ::run/agent
+                     [:seon.cluster.agent/id "refusal-agent"]
+                     ::run/opened-at t0}))
+      (let [terminal {::run/id "refusal-run"
+                      :seon.cluster.eval/ordinal 0
+                      ::run/closed-at t1
+                      :seon.cluster.eval/result-edn
+                      "{:seon.error/kind :seon.db/rejected}"
+                      :seon.cluster.eval/error "The terminal commit refused."
+                      :seon.error/kind :seon.db/rejected}]
+        (is (= ::committed
+               (transact-or-refusal
+                connection
+                (run/receipt-refusal-tx
+                 (assoc terminal :seon.cluster.eval/ordinal 99))))
+            "a missing receipt is a no-op, not a recorder refusal")
+        (d/transact
+         connection
+         (into
+          (run/claim-tx {::run/id "refusal-run"
+                         ::run/process "refusal-process"
+                         ::run/live-processes #{"refusal-process"}
+                         ::run/now t0})
+          (run/receipt-start-tx {::run/id "refusal-run"
+                                 :seon.cluster.eval/ordinal 0
+                                 :seon.cluster.eval/at t0})))
+        (is (= ::committed
+               (transact-or-refusal
+                connection
+                (run/receipt-refusal-tx terminal)))
+            "a running receipt accepts the minimal terminal error")
+        (let [settled (d/pull @connection
+                              '[*]
+                              [:seon.cluster.eval/id
+                               (pr-str ["refusal-run" 0])])]
+          (is (run/terminal? settled))
+          (is (= :seon.db/rejected (:seon.error/kind settled)))
+          (is (= t1 (::run/closed-at
+                     (run-entity connection "refusal-run"))))
+          (is (nil? (agent-pointer connection "refusal-agent"))
+              "the same transaction closes the run, leaving no close pass")
+          (is (= ::committed
+                 (transact-or-refusal
+                  connection
+                  (run/receipt-refusal-tx
+                   (assoc terminal
+                          :seon.cluster.eval/error "changed"))))
+              "an already-terminal receipt is a no-op, not a refusal")
+          (is (= settled
+                 (d/pull @connection
+                         '[*]
+                         [:seon.cluster.eval/id
+                          (pr-str ["refusal-run" 0])]))
+              "presence preserves the first terminal outcome exactly"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The state machine — generated command sequences against a pure model
