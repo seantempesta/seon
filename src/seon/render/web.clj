@@ -489,6 +489,29 @@
                (assoc watched agent-id remaining)
                (dissoc watched agent-id))))))
 
+(defn- write-patches!
+  "Write one batch while the socket accepts complete writes.
+
+  Datastar propagates http-kit's `send!` result. `false` is the one
+  backpressure/closure signal this seam consumes: stop the batch and
+  close the generator, which synchronously reaches `on-close` and
+  releases the tab's tap. A displaced patch costs nothing — reconnect
+  repaints current facts.
+
+  The selected http-kit currently returns `true` after queueing a
+  partial write; the real-socket regression requires its measured fork
+  to make this result mean fully written rather than merely accepted."
+  [generator patches]
+  (reduce
+   (fn [_accepted? [_id html]]
+     (if (datastar/patch-elements! generator html)
+       true
+       (do
+         (datastar/close-sse! generator)
+         (reduced false))))
+   true
+   patches))
+
 (defn feed
   "The SSE response for one tab: a tap and a virtual thread — never a
   graph, never a listener.
@@ -501,9 +524,10 @@
   snapshot, select this agent's entry, diff against this connection's
   own last-delivered map, and patch only the changed blocks.
 
-  Backpressure walk: this tab's socket backpressure is absorbed by this
-  loop alone — the tap's sliding-1 keeps the newest page pending and
-  the proc never parks (inventory §3.2, measured mechanics §5).
+  Backpressure walk: the tap's sliding-1 keeps the newest page pending
+  before the socket and the proc never parks. A write the socket cannot
+  complete closes this tab; reconnect repaints the newest database truth
+  rather than retaining another queue after the tap.
 
   `on-close` untaps and deregisters. The connection owns exactly one
   virtual thread and one map; nothing outlives the socket."
@@ -535,26 +559,29 @@
                                      :seon.cluster.run/live-processes
                                      #{process}})]
                ;; the initial full paint: every block, at its own id
-               (doseq [[_id html] (sort-by key initial)]
-                 (datastar/patch-elements! generator html))
-               (async/offer! render-channel ::wake)
-               (loop [delivered initial]
-                 (when @painting
-                   (when-let [pages (async/<!! tap)]
-                     (if-let [page (get pages id)]
-                       (let [{:seon.render.web/keys [patches]}
-                             (changed delivered page)]
-                         (doseq [[_id html] patches]
+               (when (write-patches! generator (sort-by key initial))
+                 (async/offer! render-channel ::wake)
+                 (loop [delivered initial]
+                   (when @painting
+                     (when-let [pages (async/<!! tap)]
+                       (if-let [page (get pages id)]
+                         (let [{:seon.render.web/keys [patches]}
+                               (changed delivered page)]
                            ;; default patch mode is `outer` — a complete
                            ;; morph of one element; the id rides in the
                            ;; element itself
-                           (datastar/patch-elements! generator html))
-                         (recur page))
-                       ;; a snapshot that predates this tab's interest
-                       ;; carries no entry for its agent; the wake this
-                       ;; tab offered brings the next one
-                       (recur delivered))))))
-             (catch Throwable _ nil)))))
+                           (when (write-patches! generator patches)
+                             (recur page)))
+                         ;; a snapshot that predates this tab's interest
+                         ;; carries no entry for its agent; the wake this
+                         ;; tab offered brings the next one
+                         (recur delivered)))))))
+             (catch Throwable _ nil)
+             (finally
+               ;; A writer exception or channel shutdown must not leave
+               ;; the socket and its tap alive. Idempotent after a real
+               ;; client close or the false-write path above.
+               (datastar/close-sse! generator))))))
 
       datastar.http-kit/on-close
       (fn [_generator _status]
