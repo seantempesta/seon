@@ -859,6 +859,32 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
+  (27) THE OPERATOR RECONCILES, LIKE CONFIG DOES (orchestrator design
+  finding 2026-07-29 evening, from four consecutive operator stumbles
+  the owner licensed as learning material). Every one of those four
+  failures was the SAME defect wearing a different face: cluster truth
+  is scattered across THREE mutable places with no single derivation
+  and no verb that reconciles them —
+  (i) the advertisement file, (ii) each JVM's process-local
+  `running-instances`, (iii) the store's branch locks/connections.
+  The failures: `stop` with no name SIGTERM'd a shared JVM;
+  a stale advertisement blocked `start` with no verb to clear it;
+  a partial start left a registry entry with no advertisement so
+  NEITHER `start` NOR `stop` could address the cluster (recovery
+  needed a hand-written prepl form); and `start` selected a JVM
+  belonging to a FOREIGN operator root. Each is an inconsistency
+  between two of the three sources.
+  THE ANSWER ALREADY EXISTS IN THIS CODEBASE: the config wave built
+  exactly this shape — `seon.config/apply!` computes desired vs
+  actual, repairs drift, and writes nothing when converged. The
+  operator gets the same treatment: ONE derivation of cluster truth
+  from all three sources (per name: advertised? / registered in which
+  JVM at which root? / branch open where? / process alive by
+  (pid, start-instant)?), every verb acting on that derived value, and
+  each verb repairing the inconsistencies it can rather than refusing.
+  A stale advertisement is not an error to report, it is drift to
+  repair. This is one mechanism instead of four patches, and it makes
+  the whole class unrepresentable rather than individually handled.
   (26) THE OPERATOR IS MULTICLUSTER WITH SMART DEFAULTS (owner, 
   2026-07-29): "make sure it's multicluster and has good defaults so
   you don't have to do obvious things, and we have a good default
