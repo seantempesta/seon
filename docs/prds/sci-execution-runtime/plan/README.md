@@ -806,6 +806,15 @@ may reintroduce a shadow build into the dev feedback path.
   everything stays plain Clojure with sci interpreting untrusted
   code. Scheduling designs must not depend on a capability door that
   does not exist yet.
+  (11) CONFIG UNFUCK APPROVED (owner): implement the config-aero-quarry
+  reconciled design — one manifest compiler, shared apply!,
+  apply-before-arm unlock, dial-authority derivation folded in,
+  resources/ move, plain EDN first. Constraints: do NOT fixate on
+  "dials" — cover EVERY configured thing and prove each is APPLIED to
+  the running system; cluster name OPTIONAL everywhere (absent =
+  "default"), multi-cluster correct; SMART DEFAULTS for every config
+  entry — zero-overlay boot is a fully working system. Independent
+  validation lanes on every returned chunk.
   (10) PRIORITY ORDER (owner, planning session): RESTORE PREVIOUS
   SYSTEM FUNCTIONALITY FIRST, by mining — "stop redoing the same
   mistakes." Correctness attention: turn loop + settlement, boot +
