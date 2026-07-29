@@ -47,3 +47,25 @@ Database-taking public functions reference the named database-value schema;
 pure transaction producers reference the named transaction-data schema; the
 predicate covers current/as-of/since/history Datahike values; and remaining
 `:any` sites each document a genuinely open boundary.
+
+## Protected dependency 2026-07-29
+
+Re-verification found that the source locations and schema resource paths in
+the original evidence were stale, but the root cause remained current. This
+batch added `:seon.db/database-value`,
+`:seon.store/transaction-operation`, and
+`:seon.store/transaction-data`, and converted every unprotected database and
+transaction producer it found.
+
+Nine database-taking contracts remain in `src/seon/cluster/run.cljc`. That file
+is currently owned by the refusal-hotloop fix lane, so this batch did not edit
+it and does not claim the issue resolved. The issue can close after that owner
+replaces those nine first-argument `:any` slots with
+`:seon.db/database-value` and reruns the contract and full gates.
+
+Focused proof for the unprotected conversion: `bin/test
+seon.schema.edn-test seon.schema.datahike-test
+seon.cluster.store-transact-test seon.cluster.message-test
+seon.cluster.work-test seon.reconcile-test seon.context-test
+seon.render.block-test` ran 87 tests and 294 assertions with zero failures or
+errors.

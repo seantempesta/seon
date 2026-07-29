@@ -70,7 +70,7 @@
  ; second one to drift from it.
  :seon.render.walk/request
  [:map {:closed true}
-  [:seon.db/db :any]
+  [:seon.db/db :seon.db/database-value]
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/kind :seon.render/kind]
   [:seon.render/floor :seon.render/floor]

@@ -8,7 +8,26 @@
  ; critical path while `transact!`'s contract said `[:vector :any]`,
  ; and Datahike's own spec admitted the map by accident — every map
  ; entry is a `coll?`. Declared, the mismatch is unrepresentable.
- :seon.store/transaction [:or [:vector :any] [:map {:closed true} [:tx-data [:vector :any]] [:tx-meta {:optional true} :map]]]
+ ; Datahike database values are opaque runtime objects, but not anonymous:
+ ; its maintained `datahike.db.utils/db?` predicate covers current, as-of,
+ ; since, and history values. The generator constructs all four variants.
+ :seon.db/database-value
+ [:fn {:gen/gen seon.cluster.store/database-value-generator}
+  seon.cluster.store/database-value?]
+ ; Transaction operations are dependency-owned open data: entity maps or
+ ; Datahike operation vectors. Their values are genuinely polymorphic at this
+ ; boundary, so the one named `:seon.schema/value` exception is referenced
+ ; instead of repeating anonymous `:any` slots throughout public contracts.
+ :seon.store/transaction-operation
+ [:or :map [:vector :seon.schema/value]]
+ :seon.store/transaction-data
+ [:vector :seon.store/transaction-operation]
+ :seon.store/transaction
+ [:or
+  :seon.store/transaction-data
+  [:map {:closed true}
+   [:tx-data :seon.store/transaction-data]
+   [:tx-meta {:optional true} :map]]]
  :seon.store/branch :keyword
  :seon.store/branch-connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]
  ; A connection OBJECT, live or released. The distinction is not

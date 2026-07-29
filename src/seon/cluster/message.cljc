@@ -75,7 +75,7 @@
   in one transaction, so the run's identity datom and the trigger ref
   share a transaction entity. Nothing is stored on the run for this —
   that is the night ruling, and this is the read it implies."
-  {:malli/schema [:=> [:cat :any :seon.cluster.run/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.run/id]
                   [:maybe :seon.cluster.message/id]]}
   [db run-id]
   (d/q '[:find ?message-id .
@@ -110,7 +110,9 @@
   itself): it is what makes this function TOTAL against a database that
   a fixture, an import or a bug could hand it, in the one place whose
   job is to stop something running forever."
-  {:malli/schema [:=> [:cat :any :seon.cluster.message/id] [:int {:min 0}]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.message/id]
+                  [:int {:min 0}]]}
   [db message-id]
   (loop [id message-id
          depth 0
@@ -121,7 +123,8 @@
 
 (defn sender
   "The agent that sent `message-id`, or nil when it came from outside."
-  {:malli/schema [:=> [:cat :any :seon.cluster.message/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.message/id]
                   [:maybe :seon.cluster.agent/id]]}
   [db message-id]
   (d/q '[:find ?agent-id .
@@ -168,7 +171,8 @@
   a delegation ends when the delegator completes, so the chain bound
   goes back to being the backstop it should be rather than the thing
   that stops ordinary conversations."
-  {:malli/schema [:=> [:cat :any :seon.cluster.message/reply-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.message/reply-request]
                   [:maybe :my.message/message]]}
   [db {:keys [:seon.cluster.message/trigger :my.run/result
               :seon.cluster.agent/id]}]
@@ -266,7 +270,7 @@
   Absence of `:seon.cluster.message/from` is the origin contract: this
   message came from outside the agent population. Provenance belongs on
   the transaction and is therefore absent here too."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.message/inbound-request]
                   :seon.cluster.message/inbound]}
   [db {:keys [:seon.cluster.agent/id
@@ -313,7 +317,8 @@
   computed ONCE and the guard is all-or-nothing for the form. That is
   the honest reading of the rule — the bound is on the conversation,
   not on the individual sentence."
-  {:malli/schema [:=> [:cat :any :seon.cluster.message/delivery-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.message/delivery-request]
                   :seon.cluster.message/delivery]}
   [db {:keys [:my.message/value :seon.cluster.agent/id
               :seon.cluster.run/id :seon.cluster.run.form/ordinal

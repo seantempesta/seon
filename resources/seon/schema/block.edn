@@ -205,7 +205,7 @@
  ; the unit builder's input — one shape for prompt, page, debug, capture
  :seon.render/unit-request
  [:map {:closed true}
-  [:seon.db/db :any]
+  [:seon.db/db :seon.db/database-value]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.render/distance {:optional true} :seon.render/distance]
@@ -230,7 +230,7 @@
   [:seon.render/surfaces :seon.render/surfaces]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.db/db {:optional true} :any]]
+  [:seon.db/db {:optional true} :seon.db/database-value]]
 
  ; What a page needs. Caps are REQUIRED, and they are the SAME four
  ; dials `seon.sci.admit` already takes — expansion is a walk over a

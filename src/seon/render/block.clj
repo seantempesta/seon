@@ -154,8 +154,9 @@
   in the emitting renderer's own output."
   {:malli/schema
    [:function
-    [:=> [:cat :any] :seon.render/hiccup]
-    [:=> [:cat :any :seon.render/projection] :seon.render/hiccup]]}
+    [:=> [:cat :seon.render.walk/lookup] :seon.render/hiccup]
+    [:=> [:cat :seon.render.walk/lookup :seon.render/projection]
+     :seon.render/hiccup]]}
   ([lookup]
    [:div {:data-ref (pr-str lookup)} ""])
   ([lookup projection]
@@ -217,7 +218,8 @@
   An agent with no blocks derives `[]`. That is a legitimate agent, not
   an error and not a cue to substitute defaults: an absent block tree
   means no blocks."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:vector :seon.render.block/block]]}
   [db agent-id]
   (->> (d/q '[:find ?block
@@ -251,7 +253,8 @@
   CONSTRUCTION — `[]`, not a stub that pretends. Derived candidates are
   VALUES, never stored descriptors: a membership census transacts
   nothing."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:vector :seon.render.block/block]]}
   [_db _agent-id]
   [])
@@ -272,7 +275,8 @@
   a merge. Order is (band ordinal, priority, name); absent band sorts
   `:dynamic`. Pre-N5 the derived side is empty by construction and this
   equals `blocks`."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:vector :seon.render.block/block]]}
   [db agent-id]
   (let [installed (blocks db agent-id)
@@ -452,7 +456,8 @@
   open tab read one value at one database value — the property the
   32-tab falsifier measures and the reason there is ONE registration per
   block rather than one per projection."
-  {:malli/schema [:=> [:cat :any :seon.render/surfaces-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.render/surfaces-request]
                   :seon.render/surfaces]}
   [db {:keys [:seon.cluster.agent/id :seon.render/kind] :as request}]
   (let [candidates (membership db id)]
@@ -499,7 +504,9 @@
   Returns a flat error value when `lookup` resolves to nothing, because
   a dangling ref is a fact about the database and not a reason to stop
   rendering a page."
-  {:malli/schema [:=> [:cat :any :any] [:or :seon.render/unit :seon.error/value]]}
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.render.walk/lookup]
+    [:or :seon.render/unit :seon.error/value]]}
   [db lookup]
   (let [pulled (try (d/pull db '[*] lookup) (catch Throwable _ nil))]
     (if (or (nil? pulled) (nil? (:db/id pulled)))
@@ -792,7 +799,9 @@
   morph target. The page is assembled once for the initial paint and
   never again: after that the pipeline patches the ONE block that
   changed."
-  {:malli/schema [:=> [:cat :any :seon.render/page-request] :seon.render/page]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.render/page-request]
+                  :seon.render/page]}
   [db {:keys [:seon.cluster.agent/id] caps :seon.sci.admit/caps :as request}]
   (let [agent-id id
         ;; ONE distance for the whole page: the top-level renderers are
@@ -1067,9 +1076,10 @@
 
   Empty `blocks` yields empty tx-data. Nothing to say is no transaction,
   the same rule `seon.reconcile` proved: converged means zero writes."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id
                        [:vector :seon.render.block/block]]
-                  [:vector :any]]}
+                  :seon.store/transaction-data]}
   [db agent-id blocks]
   (if (empty? blocks)
     []

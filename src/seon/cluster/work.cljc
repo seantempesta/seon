@@ -157,7 +157,9 @@
   A planner attempt's opening transaction points at one member of the chain:
   either the depth-zero goal message itself or a later caused-by message.
   A triggerless historical run has no membership edge and fails closed."
-  {:malli/schema [:=> [:cat :any :seon.cluster.run/id] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/id]
+                  :boolean]}
   [db run-id]
   (some? (message/trigger db run-id)))
 
@@ -182,7 +184,8 @@
   "True when this ordinal's failure belongs to interrupted process history.
   A directly interrupted receipt and every later ordinal after an interrupted
   prefix are excluded from owner routing; neither says owner code is wrong."
-  {:malli/schema [:=> [:cat :any :seon.cluster.run/id
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/id
                        :seon.cluster.run.form/ordinal :boolean]
                   :boolean]}
   [db run-id ordinal interrupted?]
@@ -200,7 +203,8 @@
 
 (defn form-owner
   "The parse-time namespace owner, or the run author as the total fallback."
-  {:malli/schema [:=> [:cat :any :map] :seon.cluster.agent/id]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :map]
+                  :seon.cluster.agent/id]}
   [db form]
   (let [form-eid (:db/id form)
         namespace-owner
@@ -294,7 +298,8 @@
 
 (defn form-settlement
   "One frozen form's exactly-one derived state at this database value."
-  {:malli/schema [:=> [:cat :any :seon.cluster.run.form/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run.form/id]
                   :seon.cluster.work/form-settlement]}
   [db form-id]
   (let [form (d/pull db '[*] [:seon.cluster.run.form/id form-id])
@@ -332,7 +337,8 @@
 
 (defn plan-settlement
   "Every form state and whether all forms of `run-id` are settled."
-  {:malli/schema [:=> [:cat :any :seon.cluster.run/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/id]
                   :seon.cluster.work/plan-settlement]}
   [db run-id]
   (let [form-ids
@@ -392,7 +398,8 @@
   exactly the agent-spawned agents it most concerns (review-caught,
   2026-07-28). The delivered conservation-audit derivation (§6),
   measured ~34 µs on a 64-run history."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   :seon.cluster.work/episode-runs]}
   [db agent-id]
   (let [outside-tx
@@ -459,7 +466,8 @@
   anything: the refusal wrote nothing, so this derivation is the whole
   \"deferred\" state — the next outside trigger's run resets the count
   and this derives to empty."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
@@ -496,7 +504,8 @@
   gate lives in the `:open` arm's trigger selection, so a deferred
   trigger simply derives no work — no consumer ever sees a decision to
   refuse."
-  {:malli/schema [:=> [:cat :any :seon.cluster.work/agent-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.work/agent-request]
                   [:maybe :seon.cluster.work/next]]}
   [db {:keys [:seon.cluster.agent/id :seon.cluster.run/process]}]
   (let [agent-id id
@@ -534,7 +543,8 @@
   `(some? (next-agent-work db request))`, stated as its own contract
   because the rewake must never drift from the derivation it rewakes
   for."
-  {:malli/schema [:=> [:cat :any :seon.cluster.work/agent-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.work/agent-request]
                   :boolean]}
   [db request]
   (some? (next-agent-work db request)))
@@ -551,7 +561,8 @@
   AGENT-SCOPED AND ALWAYS WAS: each turn proc settles its OWN orphan
   before deriving, and the armer's arm-prime pass covers an agent with
   no graph yet. The global plural died with the central pass (F2)."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:maybe [:map [:seon.cluster.run/id :seon.cluster.run/id]]]]}
   [db agent-id]
   (let [run (agent-run db agent-id)]
@@ -571,7 +582,8 @@
   message with no run pointing at it is unanswered by construction —
   which is also why deleting a run would make its trigger live again,
   and why nothing deletes runs."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]

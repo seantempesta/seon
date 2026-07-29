@@ -293,7 +293,8 @@
   snapshot when the request carried one. Idempotent by derived
   identity: re-deriving the same prompt at the same basis upserts,
   never double-writes."
-  {:malli/schema [:=> [:cat :seon.context/capture-request] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.context/capture-request]
+                  :seon.store/transaction-data]}
   [request]
   (let [{run-id :seon.cluster.run/id
          rendered :seon.cluster.prompt/rendered-context

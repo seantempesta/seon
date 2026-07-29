@@ -266,7 +266,9 @@
   accumulating them, and an agent's own edits to any OTHER block survive
   untouched. Returns empty tx-data when nothing would change, which is
   the converged-means-zero-writes rule the reconciler already proved."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  :seon.store/transaction-data]}
   [db agent-id]
   (let [installed (into {}
                         (map (juxt :seon.render.block/name identity))

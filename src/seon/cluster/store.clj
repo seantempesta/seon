@@ -17,6 +17,7 @@
             [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connections :as connections]
+            [datahike.db.utils :as db.utils]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
@@ -56,9 +57,16 @@
 
 (defn file-lock?
   "True for a held java.nio.channels.FileLock."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (and (instance? java.nio.channels.FileLock value)
        (.isValid ^java.nio.channels.FileLock value)))
+
+(defn database-value?
+  "True for any Datahike database value."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (db.utils/db? value))
 
 (schema/register-core-predicate! 'seon.cluster.store/connection-object?
                                  connection-object?)
@@ -67,6 +75,8 @@
                                  connection?)
 (schema/register-core-predicate! 'seon.cluster.store/file-lock?
                                  file-lock?)
+(schema/register-core-predicate! 'seon.cluster.store/database-value?
+                                 database-value?)
 
 (defonce ^:private generator-resources
   (delay
@@ -88,6 +98,16 @@
   (gen/fmap (fn [_] (:connection @generator-resources)) (gen/return nil)))
 (def file-lock-generator
   (gen/fmap (fn [_] (:lock @generator-resources)) (gen/return nil)))
+(def database-value-generator
+  (gen/fmap
+   (fn [variant]
+     (let [database @(:connection @generator-resources)]
+       (case variant
+         :current database
+         :as-of (d/as-of database (:max-tx database))
+         :since (d/since database 0)
+         :history (d/history database))))
+   (gen/elements [:current :as-of :since :history])))
 
 (schema.edn/load! {})
 

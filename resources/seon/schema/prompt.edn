@@ -30,4 +30,4 @@
  [:map {:closed true}
   [:seon.cluster.prompt/text :seon.cluster.prompt/text]
   [:seon.context/contributions :seon.context/contributions]
-  [:seon.db/db :any]]}
+  [:seon.db/db :seon.db/database-value]]}

@@ -310,7 +310,8 @@
   `::identity-outside-scope` (a desired identity already owned by an
   entity whose provenance is neither the managing process nor an
   adopted identity)."
-  {:malli/schema [:=> [:cat :any ::request] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value ::request]
+                  :seon.store/transaction-data]}
   [db request]
   (let [{::keys [desired process adopt-identities]} request
         adopt-identities (or adopt-identities #{})
@@ -409,7 +410,7 @@
   returning {::converged? false ::operations n}. Refusals are `plan`'s,
   surfaced before any transaction when the pre-check already sees them
   and atomically from inside the writer otherwise."
-  {:malli/schema [:=> [:cat :any ::request] ::result]}
+  {:malli/schema [:=> [:cat :seon.store/branch-connection ::request] ::result]}
   [connection request]
   (let [tx-data (plan @connection request)
         operations (count tx-data)]
@@ -430,6 +431,7 @@
   "The in-writer recomputation — the N2 transition idiom.
   Invoked as [:db.fn/call #'reconcile-call request]: one pure function
   of the mid-transaction database value returning the final tx-data."
-  {:malli/schema [:=> [:cat :any ::request] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value ::request]
+                  :seon.store/transaction-data]}
   [db request]
   (plan db request))

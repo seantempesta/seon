@@ -764,8 +764,9 @@
   throwable-only rule above, the number of runs an error can cause is
   bounded by the number of DISTINCT signatures, not by the number of
   errors."
-  {:malli/schema [:=> [:cat :any :seon.error/commit-tx-request]
-                  [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.error/commit-tx-request]
+                  :seon.store/transaction-data]}
   [db {:seon.error/keys [source id at process basis-t]
        :seon.sci.admit/keys [caps]
        run-id :seon.cluster.run/id

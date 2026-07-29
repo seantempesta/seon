@@ -503,7 +503,9 @@
   IDEMPOTENT — upsert by name, so a reboot rewrites the same blocks and
   any block the agent added itself survives untouched. Empty when
   nothing would change, the converged-means-zero-writes rule."
-  {:malli/schema [:=> [:cat :any :seon.cluster.agent/id] [:vector :any]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  :seon.store/transaction-data]}
   [db agent-id]
   (let [installed (into {}
                         (map (juxt :seon.render.block/name identity))

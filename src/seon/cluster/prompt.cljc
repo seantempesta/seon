@@ -146,7 +146,8 @@
 
   Returns {text, contributions, db}. The text is EXACTLY the reduction
   of the contribution texts joined by \"\\n\\n\"."
-  {:malli/schema [:=> [:cat :any :seon.cluster.prompt/request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.prompt/request]
                   :seon.cluster.prompt/rendered-context]}
   [db request]
   (let [run-id (:seon.cluster.run/id request)

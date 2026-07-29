@@ -153,7 +153,8 @@
   "A routable red evaluation attributed to its namespace owner, or nil.
   S8 scopes routing to a goal's caused-by chain; X2 additionally excludes
   process-history failures at or after an interrupted ordinal."
-  {:malli/schema [:=> [:cat :any :seon.problems/form-problem-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.problems/form-problem-request]
                   [:maybe :seon.problems/form-problem]]}
   [db {:keys [:seon.cluster.run/id :seon.cluster.run.form/ordinal
               :seon.sci.eval/evaluation]}]
@@ -270,7 +271,8 @@
   signatures come worst-recurring first, and every other family sorts
   by its own identity so two derivations of one database value are the
   same value."
-  {:malli/schema [:=> [:cat :any :seon.problems/request]
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.problems/request]
                   :seon.problems/problems]}
   [db {:keys [:seon.cluster.run/live-processes]}]
   (let [signatures (error-signatures db)

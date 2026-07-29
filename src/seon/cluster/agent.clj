@@ -104,7 +104,7 @@
 
 (defn owner-of
   "The agent id assigned to `namespace-name`, or nil."
-  {:malli/schema [:=> [:cat :any :seon.ns/name]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
                   [:maybe :seon.cluster.agent/id]]}
   [db namespace-name]
   (d/q '[:find ?agent-id .
