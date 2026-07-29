@@ -371,7 +371,7 @@
   Failure is a sibling of success rather than a key beside it, because
   `:seon.error/value` is a closed shape registered once.
 
-  ISOLATION IS STRUCTURAL. Three failures are all values here, and none
+  ISOLATION IS STRUCTURAL. Four failures are all values here, and none
   of them can reach a neighbour:
   - the block declares no such kind — `seon.render/render` says so, and
     an ai-only block asked for html is not an error at the CALLER (see
@@ -379,6 +379,9 @@
   - the projection does not resolve, or throws — the landed router
     already returns a value naming the projection, and this passes it
     through unchanged rather than re-wrapping it;
+  - a nested render boundary returns a flat error value — the outer
+    router preserves it as output, and this boundary restores it to the
+    surface's error sibling without changing its kind or evidence;
   - the projection returns something that is not the kind's grammar —
     for `:seon.render/html` that means `hiccup?` refuses, and this is
     the one check the router cannot make, because a kind's grammar
@@ -405,6 +408,15 @@
       ;; owner and two
       (:seon.error/kind rendered)
       (assoc base :seon.error/value rendered)
+
+      ;; A projection may itself be a render boundary. The router wraps
+      ;; every successful return so an ordinary output map is
+      ;; unambiguous; a returned value that satisfies the one closed
+      ;; error shape is nevertheless still an error at the block
+      ;; boundary, not html for the grammar check to reclassify.
+      (schema/valid-candidate-value? :seon.error/value
+                                     (:seon.render/output rendered))
+      (assoc base :seon.error/value (:seon.render/output rendered))
 
       ;; the ONE check the router cannot make: a kind's grammar belongs
       ;; to the kind's consumer, and html's consumer is a browser. Nil

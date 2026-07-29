@@ -6,6 +6,7 @@
             [seon.cluster :as cluster]
             [seon.oversight :as oversight]
             [seon.render :as render]
+            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
   (:import [java.net URI]
@@ -115,3 +116,35 @@
         (is (nil? (oversight/unit source)))
         (is (nil? (oversight/block-ai source)))
         (is (nil? (oversight/block-html source)))))))
+
+(deftest a-broken-fleet-projection-reports-on-the-root-page
+  (with-cluster
+    "broken-projection"
+    (fn [instance]
+      (with-redefs [oversight/unit
+                    (fn [source]
+                      (assoc source
+                             :seon.render/ai 'no.such.fleet/ai
+                             :seon.render/html 'no.such.fleet/html))]
+        (let [db @(:seon.boot/cluster-connection instance)
+              source {:seon.db/db db
+                      :seon.boot/instance instance}
+              failure (oversight/block-html source)
+              surface (block/surface
+                       source
+                       {:seon.render.block/name :fleet-oversight
+                        :seon.render.block/priority 15
+                        :seon.render/html `oversight/block-html}
+                       :seon.render/html)
+              ^HttpResponse response (fetch-root instance)
+              body (.body response)]
+          (testing "the nested render boundary returns the original error"
+            (is (= :seon.render/unresolvable
+                   (:seon.error/kind failure)))
+            (is (= failure (:seon.error/value surface))))
+          (testing "the real page renders the report instead of faulting"
+            (is (= 200 (.statusCode response)))
+            (is (str/includes? body "id=\"surface-fleet-oversight\""))
+            (is (str/includes? body "seon-error-card"))
+            (is (str/includes? body
+                               "no.such.fleet/html does not resolve"))))))))

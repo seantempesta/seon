@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, oversight, errors]
 ---
@@ -73,3 +73,12 @@ failure branch.
   renders any other failed block.
 - A regression seeds a fleet block whose projection symbol does not resolve and
   asserts the page still renders, carrying the router's error value.
+
+## Resolution
+
+Resolved in the commit that archives this note. `seon.oversight/projection`
+returns the router's flat error value, and `seon.render.block/surface`
+preserves a valid error returned by a nested render boundary as the surface's
+`:seon.error/value` sibling. The regression boots a real cluster, injects an
+unresolvable fleet projection, and proves both the original
+`:seon.render/unresolvable` value and a 200 root page carrying its error card.

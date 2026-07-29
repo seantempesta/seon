@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (13)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -19,7 +19,6 @@ See `README.md` for the convention.
 | [Bound http-kit streaming writes for slow SSE consumers](http-kit-streaming-writes-have-an-unbounded-socket-queue.md) | blocker | UI |
 | [Bound submission startup by the declared time limit](flow-submit-waits-forever-before-time-limit.md) | blocker | Core |
 | [Derive prompts through render units](prompt-assembly-bypasses-the-render-router.md) | blocker | agent |
-| [Fleet oversight throws, and throws a keyword as ex-data](fleet-oversight-throws-a-keyword-as-ex-data.md) | blocker | general |
 | [Keep a failed cluster stop addressable](cluster-stop-release-failure-becomes-unaddressable.md) | blocker | Core |
 | [Keep evaluation failures inside total admission](sci-eval-failure-bypasses-total-admission.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |

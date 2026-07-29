@@ -269,19 +269,20 @@
   (when-let [built (unit source)]
     (let [rendered (render/render {:seon.render/unit built
                                    :seon.render/kind kind})]
-      (if-let [failure (:seon.error/kind rendered)]
-        (throw (ex-info (:seon.error/message rendered) failure))
+      (if (:seon.error/kind rendered)
+        rendered
         (:seon.render/output rendered)))))
 
 (defn block-ai
   "Build and route root's live fleet prose, or omit it."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe [:or :string :seon.error/value]]]}
   [source]
   (projection source :seon.render/ai))
 
 (defn block-html
   "Build and route root's live fleet table, or omit it."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
+                  [:maybe [:or :seon.render/hiccup :seon.error/value]]]}
   [source]
   (projection source :seon.render/html))
