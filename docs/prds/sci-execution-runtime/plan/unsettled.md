@@ -192,6 +192,36 @@ executor; current rendering is complete snapshots plus per-tab deltas
 The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
 which is why the independent pass exists.
 
+## THE OWNER'S CLUSTER IS PRIMED (2026-07-29 night, owner watching)
+
+`bin/seon index default` ran against the live cluster on 7994. Before → after:
+function rows **0 → 121**, namespace rows 69 → 149, test rows **0 → 492**;
+messages 366 → 366, runs 229 → 229, agents [helper root] unchanged. **The live
+cluster can query its own code for the first time**, and every fact it already
+held survived — accretion, as ruling 28 required. A second run reported
+`:converged? true, :operations 0`, so priming is idempotent and safe to repeat
+(the destructive path stays the separately-named `bin/seon reset`).
+
+It took three attempts, each informative rather than damaging, and all three
+are now recorded as findings rather than folklore:
+(1) `No such var: seon.cluster/index!` — the stale-JVM trap in person; the code
+was correct in the tree and the JVM was from the morning.
+(2) After reloading `seon.cluster`, a CONTRACT VIOLATION: the reloaded caller
+passed `:seon.ancestor/digest` to a stale `seon.fn`'s closed schema. **Armed
+instrumentation caught version skew that would otherwise have transacted
+against an old contract.** Issue:
+`partial-hot-reload-produces-mixed-code-with-no-warning.md`.
+(3) Reloading both namespaces and re-applying `seon.instrument/apply!` worked —
+**hot reload closed the gap with no bounce; the cluster never went down.**
+Also filed: `cluster-reset-shadows-clojure-core-reset.md` (the new `reset!`
+shadows `clojure.core/reset!` inside a namespace full of atoms).
+
+Priming itself landed green at 566/2445/0 (`41b9ba6a9`, `9ca8b0652`,
+`74d148c44`, `d12be8d59`): baseline refresh with no cluster named, per-cluster
+priming when named, `bin/seon reset` per ruling 26, and startup denying
+INCOHERENCE (ns rows without fn rows) while a complete older corpus still
+starts normally.
+
 ## RECOVERED FROM A DATA-LOSS INCIDENT (2026-07-29 night) — read before resuming cluster-priming
 
 A cluster-reset TEST FIXTURE followed repository symlinks out of its scratch
