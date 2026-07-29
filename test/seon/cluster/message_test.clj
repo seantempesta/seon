@@ -595,6 +595,7 @@
                  {:seon.cluster.wake/connection connection
                   :seon.cluster.wake/channels
                   (fn [] {alice-eid alice bob-eid bob})
+                  :seon.cluster.wake/fenced? (fn [_ _] false)
                   :seon.cluster.wake/armer-channel armer
                   :seon.cluster.wake/render-channel render
                   :seon.cluster.wake/fault-channel faults

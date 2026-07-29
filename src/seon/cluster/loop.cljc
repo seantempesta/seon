@@ -365,8 +365,21 @@
            ;; Keeping a second run ref on the recorder fact would store
            ;; the same connection twice; agent attribution is the one
            ;; connection the next prompt needs to reach the fact.
-           recording (error-tx cluster db source now
-                               (dissoc attribution :seon.cluster.run/id))
+           recording
+           (try
+             (error-tx cluster db source now
+                       (dissoc attribution :seon.cluster.run/id))
+             ;; Instrumentation guards `error/normalize`'s declared
+             ;; output. If malformed source makes construction violate
+             ;; that contract, translate the guardrail into this seam's
+             ;; named core fault rather than letting instrumentation
+             ;; replace the incident it was observing.
+             (catch #?(:clj Throwable :cljs :default) _
+               (terminal-settlement-fault!
+                cluster
+                "Terminal refusal settlement could not be constructed."
+                {::admitted-outcome
+                 (:seon.sci.admit/value admitted)})))
            fact (first recording)
            failure (error/value fact)
            valid?

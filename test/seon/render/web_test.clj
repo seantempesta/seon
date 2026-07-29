@@ -149,6 +149,7 @@
           (flow.core/resume graph)
           (wake/route! {:seon.cluster.wake/connection connection
                         :seon.cluster.wake/channels (constantly {})
+                        :seon.cluster.wake/fenced? (fn [_ _] false)
                         :seon.cluster.wake/armer-channel
                         (async/chan (async/sliding-buffer 1))
                         :seon.cluster.wake/render-channel render-channel

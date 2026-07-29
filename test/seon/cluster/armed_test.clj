@@ -343,7 +343,25 @@
                     "the function never reported a settlement that did not land")
                 (is (nil? (:seon.cluster.run/closed-at run)))
                 (is (some? (:seon.cluster.run/process run))
-                    "the held state is left for boot recovery")))))
+                    "the held state is left for boot recovery"))
+              (testing "the fence is a RECOGNIZED state, not a second
+                        failure: the agent stays armed and routed with
+                        its mailbox closed in place, and the durable
+                        explanation message the same commit produced
+                        reaches that closed route without becoming a
+                        fresh core fault about the quarantine"
+                (is (true? (agent/fenced? routing "root")))
+                (is (some? (agent/armed routing "root"))
+                    "still armed — the entry is what makes the closed
+                     channel mean the fence rather than a teardown")
+                (is (empty?
+                     (filter #(= :seon.cluster.wake/undeliverable-wake
+                                 (:seon.error/kind %))
+                             (errors @connection)))
+                    "no secondary undeliverable-wake faults")
+                (is (seq (messages-to @connection "root"))
+                    "and the notice is a durable fact for the fresh
+                     mailbox to derive after reboot")))))
         (finally
           (cluster/stop! instance))))
 
@@ -381,9 +399,9 @@
                        {:receipt receipt :run run}))))]
             (is (some? recovered)
                 "reboot marked the dangling receipt interrupted")
-            (is (nil? (:seon.cluster.run/closed-at
-                       (:run recovered)))
-                "recovery does not invent a successful run close")
+            (is (some? (:seon.cluster.run/closed-at
+                        (:run recovered)))
+                "recovery ends the interrupted run without inventing success")
             (is (pos? (:seon.boot/recovered-runs restarted)))
             (is (zero? @(:seon.error/drops restarted))))
           (finally

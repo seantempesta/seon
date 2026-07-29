@@ -31,6 +31,7 @@
             [seon.cluster.run :as run]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
+            [seon.instrument :as instrument]
             [sci.core :as sci.core]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
@@ -708,6 +709,33 @@
                  (:seon.cluster.eval/interrupted-at
                   (d/pull @connection '[*]
                           [:seon.cluster.eval/id (pr-str [run-id 0])]))))))
+
+        (testing "instrumentation cannot preempt the named construction fault"
+          (let [receipt
+                (running-refusal-receipt! cluster "instrumented-string-kind")
+                run-id (:seon.cluster.run/id receipt)
+                failure
+                (try
+                  (instrument/apply! {:seon.config/on-core-error :panic})
+                  (try
+                    (terminal-refused!
+                     cluster
+                     {:seon.error/kind "not-a-keyword"
+                      :seon.error/message "hostile kind"}
+                     receipt)
+                    nil
+                    (catch clojure.lang.ExceptionInfo exception
+                      exception))
+                  (finally
+                    (instrument/remove!)))]
+            (is (= :seon.cluster.loop/terminal-refusal-settlement-refused
+                   (:seon.error/kind (ex-data failure)))
+                "armed and unarmed construction expose the same seam")
+            (is (false?
+                 (run/terminal?
+                  (d/pull @connection '[*]
+                          [:seon.cluster.eval/id (pr-str [run-id 0])]))))
+            (is (true? (recover-terminal-refusal! cluster receipt)))))
 
         (testing "even a post-construction commit refusal cannot return true"
           (let [receipt

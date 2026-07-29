@@ -133,11 +133,14 @@ there is no recovery resume path. Everything else in attempt 6 passed:
 refusal variants, episode-cap behavior, wake accounting, the
 transaction-outcome fence, the three-writer census, gate 552/2360/0.
 
-The remaining blocker found by attempt 6 is
-`instrumentation-preempts-terminal-settlement-core-fault`: armed
-   instrumentation raises `:seon.instrument/contract-violated` before
-   the named settlement core fault, so the honest fault is masked by
-   its own guardrail.
+Attempt 6's other blocker is also resolved: malformed terminal-settlement
+construction now translates an armed normalization contract violation into
+`:seon.cluster.loop/terminal-refusal-settlement-refused`, the same named fault
+the unarmed path raises. Both invalid construction and a refused settlement
+close the affected mailbox and leave the running receipt for boot recovery.
+The exact still-routed closed mailbox is derived as quarantine, so the durable
+explanation message produces no second fault; closed render routes and
+saturated live routes remain loud.
 
 ## Live lane state (2026-07-29 evening, end of the owner-present day)
 
@@ -148,9 +151,10 @@ observation harness, the cold-resume dissolution reasoning); their fixes
 were left uncommitted and ENTANGLED in the tree, leaving the gate at
 **557 tests / 8 failures**. A sol lane
 (`finish-inherited-recovery-and-quarantine`) adopted the whole state
-with orders to review it critically rather than adopt it, and to land
-ruling 25's settle-and-close recovery and the derived quarantine
-recognition as separate coherent commits.
+with orders to review it critically rather than adopt it. Ruling 25's
+settle-and-close recovery landed as `811ec4356`. The inherited quarantine
+classifier was narrowed during adoption: closedness alone is not benign; only
+the agent owner's exact still-routed closed mailbox is a fence.
 
 Also running: `skills-independent-verify` (the blast-radius law's
 adversarial pass — trusts neither the orchestrator's authored skill nor

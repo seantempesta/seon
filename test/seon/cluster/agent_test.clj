@@ -244,6 +244,9 @@
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
+                          :seon.cluster.wake/fenced?
+                          (fn [agent-eid channel]
+                            (agent/fenced-route? routing agent-eid channel))
                           :seon.cluster.wake/armer-channel armer-channel
                           :seon.cluster.wake/render-channel
                           (async/chan (async/sliding-buffer 1))
@@ -320,6 +323,57 @@
 ;;; ---------------------------------------------------------------------------
 ;;; 2. park-wake-test — seed 2026072812
 ;;; ---------------------------------------------------------------------------
+
+(deftest fenced-is-the-derived-quarantine-state
+  (with-connection
+    (fn [connection]
+      (let [routing (armory)]
+        (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+        (try
+          (is (false? (agent/fenced? routing "agent-a"))
+              "an unarmed agent has no fence")
+          (let [entry (arm-one! connection routing "agent-a")
+                eid (:seon.cluster.agent/eid entry)
+                mailbox (:seon.cluster.wake/channel entry)
+                stale (async/chan)]
+            (is (false? (agent/fenced? routing "agent-a")))
+            (is (false? (agent/fenced-route? routing eid mailbox)))
+            (async/close! mailbox)
+            (is (true? (agent/fenced? routing "agent-a"))
+                "armed + closed in place is the management view")
+            (is (true? (agent/fenced-route? routing eid mailbox))
+                "the exact current route is recognizable by the router")
+            (async/close! stale)
+            (is (false? (agent/fenced-route? routing eid stale))
+                "closedness alone does not bless a stale route"))
+          (finally
+            (disarm-all! routing)))
+        (is (false? (agent/fenced? routing "agent-a"))
+            "ordinary teardown drops the entry before close")))))
+
+(deftest disarm-drops-the-route-before-closing-it
+  (with-connection
+    (fn [connection]
+      (let [routing (armory)
+            _ (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+            entry (arm-one! connection routing "agent-a")
+            eid (:seon.cluster.agent/eid entry)
+            channel (:seon.cluster.wake/channel entry)
+            observed (atom nil)
+            real-close async/close!]
+        (with-redefs [async/close!
+                      (fn [candidate]
+                        (when (identical? candidate channel)
+                          (reset! observed
+                                  {:routed?
+                                   (contains? (agent/channels routing) eid)
+                                   :armed?
+                                   (some? (agent/armed routing "agent-a"))}))
+                        (real-close candidate))]
+          (agent/disarm! {:seon.cluster.agent/id "agent-a"
+                          :seon.cluster.agent/routing routing}))
+        (is (= {:routed? false :armed? false} @observed)
+            "the route is already absent when orderly teardown closes")))))
 
 (deftest park-wake-test
   (with-connection
@@ -932,6 +986,9 @@
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
+                          :seon.cluster.wake/fenced?
+                          (fn [agent-eid channel]
+                            (agent/fenced-route? routing agent-eid channel))
                           :seon.cluster.wake/armer-channel armer-channel
                           :seon.cluster.wake/render-channel
                           (async/chan (async/sliding-buffer 1))

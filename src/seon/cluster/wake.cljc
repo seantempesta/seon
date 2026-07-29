@@ -92,6 +92,74 @@
   []
   #{:seon.cluster.message/to :seon.cluster.agent/id})
 
+(defn delivery
+  "`offer!`'s answers plus the route owner's derived fence, named.
+
+  core.async reports whether a non-blocking offer delivered, met a
+  closed channel, or would have parked:
+
+  - `true` — `::delivered`. The wake is in the buffer.
+  - `false` — the route is CLOSED
+    (`reference-code/core.async/.../impl/channels.clj:80-84` returns
+    `(box false)` on the closed branch and only there). This is
+    `::fenced` ONLY when the agent routing owner derives that the exact
+    mailbox is still its current closed route; otherwise it is
+    `::refused`.
+  - `nil` — `::refused`. The route is LIVE and would have to park
+    (`:139-140`, `:159-160`, `:171` — the non-blockable handler
+    returns no box). This is the genuinely non-accepting route, and it
+    stays loud.
+
+  A CLOSED AGENT MAILBOX MAY BE A LIFECYCLE STATE, but closedness alone
+  cannot establish that: a closed render route is a broken live
+  registration and remains loud. The agent construction order is what
+  makes its narrower answer derivable rather than assumed:
+  `agent/disarm!` drops the routing entry BEFORE it closes the mailbox,
+  so an ordinary teardown is never visible here at all — the recipient
+  simply has no entry and the armer belt takes the wake. A channel
+  still REACHABLE through the routing map and already closed was
+  therefore closed by the one thing that closes a mailbox in place: the
+  terminal-settlement fence in `seon.cluster.loop`, which stops the
+  agent taking another pass over its still-running receipt before boot
+  recovery marks it interrupted. `agent/fenced-route?` derives that
+  exact delivery-side state; `agent/fenced?` is its management view.
+
+  Dropping a wake there loses nothing, by this namespace's own
+  doctrine: the wake carries no information, the MESSAGE is a durable
+  fact, and the fresh mailbox `arm!` creates after reboot is primed
+  once with a pass that derives every message from facts. What the
+  router must not do is call the fence a new failure — the fault the
+  fence raised is the whole report, and its own explanation message
+  arriving at the fenced mailbox is not a second incident.
+
+  Sliding-1 buffers are never full
+  (`impl/buffers.clj` — `SlidingBuffer.full?` is constantly false), so
+  for a correctly built mailbox, a `nil` refusal is unrepresentable."
+  {:malli/schema [:=> [:cat :seon.cluster.wake/offer-result :boolean]
+                  :seon.cluster.wake/delivery]}
+  [offered fenced?]
+  (cond
+    (true? offered) ::delivered
+    (and (false? offered) fenced?) ::fenced
+    :else ::refused))
+
+(defn- deliver!
+  "`offer!` one payload-free wake and classify the answer.
+  `fenced?` is a zero-arg derived check invoked only after a closed
+  offer. Faults on `::refused` — one classifier and one error kind.
+  Returns the delivery."
+  [fault-channel key route channel fenced?]
+  (let [offered (async/offer! channel ::wake)
+        outcome (delivery offered
+                          (and (false? offered) (boolean (fenced?))))]
+    (when (= ::refused outcome)
+      (async/offer! fault-channel
+                    (ex-info "a wake route refused delivery"
+                             {:seon.error/kind ::undeliverable-wake
+                              ::key key
+                              ::route route})))
+    outcome))
+
 (defn route!
   "Register the ROUTING wake handler on a connection (F1 §4).
   The per-agent successor of `listen!`'s one-channel delivery, under
@@ -117,16 +185,19 @@
   One line under the same two prohibitions, and one listener per
   cluster instead of resurrecting a second registration.
 
-  A closed mailbox refusing delivery is a FAULT fact, exactly as in
+  A route refusing delivery is a FAULT fact, exactly as in
   `listen!` — a swallowed failure nobody hears about is an invisible
-  one. Coalescing on every `(sliding-buffer 1)` target is safe by the
-  standing argument: a wake says only \"look\", and the woken pass
-  derives everything from facts. L8 holds by construction: the armer's
+  one. Only an exact mailbox route the agent owner derives as fenced is
+  benign; a closed render route is still a failure. Coalescing on every
+  `(sliding-buffer 1)` target is safe by the standing argument: a wake
+  says only \"look\", and the woken pass derives everything from facts.
+  L8 holds by construction: the armer's
   own work commits no wake-set attribute (arming writes nothing; the
   prime is an `offer!`)."
   {:malli/schema [:=> [:cat :seon.cluster.wake/route-request]
                   :seon.cluster.wake/key]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
+           :seon.cluster.wake/fenced?
            :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
   (d/listen
@@ -138,11 +209,7 @@
        ;; is derived from facts, so the pass wants only "look" — and
        ;; putting it ahead of the routing keeps it unconditional by
        ;; construction rather than by a reviewer checking every arm
-       (when-not (async/offer! render-channel ::wake)
-         (async/offer! fault-channel
-                       (ex-info "the render channel refused delivery"
-                                {:seon.error/kind ::undeliverable-wake
-                                 ::key key})))
+       (deliver! fault-channel key ::render render-channel (constantly false))
        (doseq [datom (:tx-data report)]
          (case (nth datom 1)
            :seon.cluster.agent/id
@@ -150,11 +217,9 @@
 
            :seon.cluster.message/to
            (if-let [channel (get (channels) (nth datom 2))]
-             (when-not (async/offer! channel ::wake)
-               (async/offer! fault-channel
-                             (ex-info "the wake channel refused delivery"
-                                      {:seon.error/kind ::undeliverable-wake
-                                       ::key key})))
+             (let [agent-eid (nth datom 2)]
+               (deliver! fault-channel key ::mailbox channel
+                         #(fenced? agent-eid channel)))
              (async/offer! armer-channel ::wake))
 
            nil))

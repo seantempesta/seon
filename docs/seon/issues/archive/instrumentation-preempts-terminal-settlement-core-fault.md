@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent-runtime, instrumentation, run-loop]
 ---
@@ -74,3 +74,13 @@ armed.
 
 - `docs/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md` —
   seam re-audit attempt 6 carries the full live proof.
+
+## Resolution
+
+Settlement construction now catches a normalization contract violation at its
+own boundary and raises
+`:seon.cluster.loop/terminal-refusal-settlement-refused`. This happens before
+any transaction exists, closes the agent's mailbox, and leaves the running
+receipt for boot recovery. The recurring test applies process-wide
+instrumentation, submits the hostile string kind, observes the same named fault
+as the unarmed path, and verifies zero terminal receipt was committed.

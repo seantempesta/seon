@@ -17,6 +17,7 @@
   the one thing that matters, which is what datahike does INSIDE the
   transaction's go block before it delivers."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -60,21 +61,24 @@
   "Register the production listener with this test's own channels.
   Returns the channels plus the registered key, so every test speaks to
   the same wiring `arm-agents!` builds."
-  [connection mailbox]
-  (let [armer (async/chan (async/sliding-buffer 1))
-        render (async/chan (async/sliding-buffer 1))
-        faults (async/chan (async/sliding-buffer 1))]
-    {:mailbox mailbox
-     :armer armer
-     :render render
-     :faults faults
-     :key (wake/route! {:seon.cluster.wake/connection connection
-                        :seon.cluster.wake/channels
-                        (fn [] {(agent-eid connection) mailbox})
-                        :seon.cluster.wake/armer-channel armer
-                        :seon.cluster.wake/render-channel render
-                        :seon.cluster.wake/fault-channel faults
-                        :seon.cluster.wake/key ::probe})}))
+  ([connection mailbox]
+   (route-probe! connection mailbox (fn [_ _] false)))
+  ([connection mailbox fenced?]
+   (let [armer (async/chan (async/sliding-buffer 1))
+         render (async/chan (async/sliding-buffer 1))
+         faults (async/chan (async/sliding-buffer 1))]
+     {:mailbox mailbox
+      :armer armer
+      :render render
+      :faults faults
+      :key (wake/route! {:seon.cluster.wake/connection connection
+                         :seon.cluster.wake/channels
+                         (fn [] {(agent-eid connection) mailbox})
+                         :seon.cluster.wake/fenced? fenced?
+                         :seon.cluster.wake/armer-channel armer
+                         :seon.cluster.wake/render-channel render
+                         :seon.cluster.wake/fault-channel faults
+                         :seon.cluster.wake/key ::probe})})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C1 — the routed set and its three traps
@@ -165,37 +169,107 @@
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
 
-(deftest a-closed-channel-delivers-a-fault-and-never-hangs-the-writer
-  ;; THE hazard: datahike fires listeners inside the transaction's go
-  ;; block BEFORE (deliver p tx-report) (writer.cljc:384-386). An
-  ;; escaping exception means the deliver never happens and the
-  ;; committing caller waits forever. The handler must therefore catch
-  ;; everything — including a mailbox that has been closed under it.
+(deftest delivery-requires-both-a-closed-offer-and-the-derived-fence
+  ;; `offer!` establishes transport state; the route owner establishes
+  ;; lifecycle meaning. Closedness alone cannot turn a broken render
+  ;; route into an intentional agent fence.
+  (let [closed (async/chan 1)
+        full (async/chan 1)
+        open (async/chan 1)
+        sliding (async/chan (async/sliding-buffer 1))]
+    (async/close! closed)
+    (async/offer! full :fill)
+    (async/offer! sliding :fill)
+    (is (= :seon.cluster.wake/fenced
+           (wake/delivery (async/offer! closed :wake) true))
+        "a closed, still-routed agent mailbox is the fence")
+    (is (= :seon.cluster.wake/refused
+           (wake/delivery false false))
+        "the same closed transport without a derived fence stays loud")
+    (is (= :seon.cluster.wake/refused
+           (wake/delivery (async/offer! full :wake) false))
+        "a LIVE route that cannot take it is the loud case")
+    (is (= :seon.cluster.wake/delivered
+           (wake/delivery (async/offer! open :wake) false)))
+    (is (= :seon.cluster.wake/delivered
+           (wake/delivery (async/offer! sliding :wake) false))
+        "a sliding buffer is never full, so `refused` cannot arise on a
+         mailbox and the classification is total there")))
+
+(deftest a-fenced-mailbox-is-recognized-and-never-hangs-the-writer
+  ;; THE hazard is unchanged: datahike fires listeners inside the
+  ;; transaction's go block BEFORE (deliver p tx-report)
+  ;; (writer.cljc:384-386), so an escaping exception means the
+  ;; committing caller waits forever. What CHANGED is the verdict on a
+  ;; closed mailbox. `seon.cluster.loop`'s terminal settlement fence
+  ;; closes an agent's mailbox in place so it takes no further pass over
+  ;; a still-running receipt; committing that very fault also commits
+  ;; its explanation message, so routing used to turn the quarantine
+  ;; into a fresh core fault about itself. It is a lifecycle state, and
+  ;; the router now says so.
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
-            {:keys [faults key]} (route-probe! connection mailbox)]
+            {:keys [faults key]}
+            (route-probe!
+             connection mailbox
+             (fn [recipient channel]
+               (and (= recipient (agent-eid connection))
+                    (identical? channel mailbox)
+                    (async.protocols/closed? channel))))]
         (try
           (async/close! mailbox)
           (let [committed (future (d/transact connection (message-tx "m-9")))]
             (is (map? (test-support/await-event!
-                       committed "throwing-listener transaction"))
+                       committed "fenced-mailbox transaction"))
                 "the committing caller returned — the handler swallowed
                  its own failure instead of hanging the writer forever")
-            ;; surviving is only half of it: a swallowed failure that
-            ;; reports nothing is an invisible fault, so the payload
-            ;; must ARRIVE
-            (let [fault (test-support/await-event! faults
-                                                   "wake listener fault")]
-              (is (some? fault) "the fault reached the fault channel")))
+            ;; The listener runs to completion INSIDE the transaction
+            ;; before the caller is delivered, so once the future has a
+            ;; report the handler has already decided. `poll!` is an
+            ;; ordering fact here, not a race with a sleep in it.
+            (is (nil? (async/poll! faults))
+                "and the fence produced NO core fault about itself"))
+          (is (= ["m-9"]
+                 (d/q '[:find [?id ...]
+                        :where [_ :seon.cluster.message/id ?id]]
+                      @connection))
+              "the message stays a durable fact — the fresh mailbox
+               `arm!` builds after recovery derives it from facts")
+          (finally
+            (wake/unlisten! {:seon.cluster.wake/connection connection
+                             :seon.cluster.wake/key key})))))))
+
+(deftest a-live-but-non-accepting-route-still-faults-loudly
+  ;; The half that must NOT go quiet. A route that is open and cannot
+  ;; take the wake is losing a wake nobody will re-derive, which is the
+  ;; invisible-failure class the fault fact exists for.
+  (with-connection
+    (fn [connection]
+      (let [mailbox (async/chan 1)
+            {:keys [faults key]} (route-probe! connection mailbox)]
+        (try
+          ;; fixed-1, saturated and unread: the next offer! must park,
+          ;; so it returns nil rather than false
+          (async/offer! mailbox ::filler)
+          (let [committed (future (d/transact connection (message-tx "m-f")))]
+            (is (map? (test-support/await-event!
+                       committed "saturated-route transaction")))
+            (let [fault (test-support/await-event! faults "route fault")]
+              (is (= :seon.cluster.wake/undeliverable-wake
+                     (:seon.error/kind (ex-data fault)))
+                  "one classifier, one kind — no second fault path")
+              (is (= :seon.cluster.wake/mailbox
+                     (:seon.cluster.wake/route (ex-data fault)))
+                  "and it names WHICH route, so the fault is actionable")))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
 
 (deftest a-closed-render-channel-delivers-a-fault
-  ;; the third delivery is under the SAME contract as the other two: a
-  ;; render channel nobody can reach means a page that silently stops
-  ;; updating, which is exactly the invisible-failure class
+  ;; Production shutdown unlistens before closing render. A closed
+  ;; render route while this listener is live is therefore a broken
+  ;; delivery, not an agent quarantine.
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
@@ -206,8 +280,11 @@
             (is (map? (test-support/await-event!
                        committed "closed-render transaction"))
                 "the writer still returned")
-            (is (some? (test-support/await-event! faults "render fault"))
-                "and the undeliverable render wake was reported"))
+            (let [fault (test-support/await-event! faults "render fault")]
+              (is (= :seon.cluster.wake/undeliverable-wake
+                     (:seon.error/kind (ex-data fault))))
+              (is (= :seon.cluster.wake/render
+                     (:seon.cluster.wake/route (ex-data fault))))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
@@ -244,6 +321,7 @@
                          {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] {(agent-eid connection) mailbox})
+                          :seon.cluster.wake/fenced? (fn [_ _] false)
                           :seon.cluster.wake/armer-channel armer
                           :seon.cluster.wake/render-channel render
                           :seon.cluster.wake/fault-channel faults

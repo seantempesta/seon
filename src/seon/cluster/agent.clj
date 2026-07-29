@@ -61,6 +61,7 @@
   custody; NOTHING re-executes a form or refires a paid call. No row
   depends on a channel for recovery."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.cluster.loop :as cluster.loop]
@@ -290,12 +291,54 @@
   [routing agent-id]
   (get-in @routing [::armed agent-id]))
 
+(defn fenced?
+  "True when this agent is QUARANTINED: armed, routed, mailbox closed.
+
+  DERIVED from the two process-local artifacts that already exist —
+  presence of the routing entry and the channel's own `closed?` — so
+  there is no quarantine flag, no fenced-id set, and nothing to keep in
+  sync. The state is real and is the one `seon.cluster.loop`'s terminal
+  settlement fence creates: the agent must take no further pass over
+  its still-running receipt until boot recovery marks that receipt
+  interrupted, so its mailbox is closed IN PLACE while its entry stays,
+  and `arm!`'s idempotence then leaves it alone until the next boot.
+
+  It is a total answer for the three states an agent can be in:
+  unarmed (no entry) is `false`, live is `false`, fenced is `true`. An
+  ordinarily disarmed agent never reads `true` because `disarm!` drops
+  the entry BEFORE closing the channel — that ordering is what lets
+  `wake/delivery` read a closed reachable route as the fence rather
+  than as a teardown race."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/routing
+                       :seon.cluster.agent/id]
+                  :boolean]}
+  [routing agent-id]
+  (boolean
+   (some-> (armed routing agent-id)
+           :seon.cluster.wake/channel
+           async.protocols/closed?)))
+
 (defn channels
   "The current entity-id → mailbox-channel map, for `wake/route!`."
   {:malli/schema [:=> [:cat :seon.cluster.agent/routing]
                   [:map-of :int :seon.flow/channel]]}
   [routing]
   (::channels @routing))
+
+(defn fenced-route?
+  "True when `channel` is the CURRENT route for `agent-eid` and closed.
+
+  This is the delivery-side quarantine predicate. Identity matters: a
+  stale channel retained by a caller after re-arm is not the agent's
+  fence, and a closed non-agent route is not represented here at all."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/routing
+                       :int
+                       :seon.flow/channel]
+                  :boolean]}
+  [routing agent-eid channel]
+  (boolean
+   (and (identical? channel (get (::channels @routing) agent-eid))
+        (async.protocols/closed? channel))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
@@ -366,7 +409,16 @@
   after the active transform — including a seconds-long model call —
   has returned), then drop the routing entry and close the mailbox.
   Stop drops conn contents — safe by the transport law; triggers are
-  rows and survive."
+  rows and survive.
+
+  THE ORDER OF THE LAST TWO STEPS IS LOAD-BEARING, not stylistic: the
+  entry is dropped BEFORE the channel is closed, so `wake/route!` can
+  never reach a channel this function closed. That is what makes a
+  closed-but-reachable route mean exactly one thing — the terminal
+  settlement fence — and lets `fenced-route?` make the exact route
+  recognizable to `wake/delivery` without a flag. Closing first would
+  put an ordinary teardown into the same state and the recognition
+  would become a guess."
   {:malli/schema [:=> [:cat :seon.cluster.agent/disarm-request] :nil]}
   [{agent-id :seon.cluster.agent/id
     routing :seon.cluster.agent/routing}]

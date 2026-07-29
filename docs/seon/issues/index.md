@@ -10,13 +10,11 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (5)
+## Blocker (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Closed agent mailboxes fault on durable notice delivery](closed-agent-mailbox-turns-durable-fault-notice-into-core-fault.md) | blocker | agent |
 | [Five skills teach the deleted pod system, and no skill teaches flow](five-skills-teach-the-deleted-pod-system.md) | blocker | general |
-| [Instrumentation preempts the terminal settlement core fault](instrumentation-preempts-terminal-settlement-core-fault.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 

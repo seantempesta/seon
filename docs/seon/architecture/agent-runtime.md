@@ -126,6 +126,14 @@ central to route: each agent's graph wakes only for its own triggers and keeps
 no private queue of runs. Database interests are ephemeral wakeups that request
 another derivation; the query and transaction transition determine authority.
 
+A terminal-settlement core fault closes that agent's process-local mailbox in
+place so the graph cannot take another pass over its still-running receipt.
+Quarantine is derived from the exact mailbox remaining the agent's current
+route while closed; there is no status flag or fenced-agent set. A durable
+explanation message committed by the fault remains a database fact and the
+closed mailbox drops only its payload-free wake. No other delivery is excused:
+a saturated live mailbox or a closed render route remains a core fault.
+
 Phase eligibility says who may claim; the derived execution plan says whether
 the cluster JVM can run this particular work. After parsing a proposed
 invocation and before entering the eval phase, the graph derives the plan at

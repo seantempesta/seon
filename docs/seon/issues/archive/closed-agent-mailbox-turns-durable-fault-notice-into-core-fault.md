@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, runtime]
 ---
@@ -48,3 +48,17 @@ The `seon.cluster.agent` disarm/quarantine boundary and
   facts and are available to the fresh mailbox after reboot.
 - Intentional mailbox closure produces no secondary core fault.
 - Delivery to a genuinely live but non-accepting route remains loud.
+
+## Resolution
+
+`seon.cluster.agent/fenced-route?` derives quarantine from the exact mailbox
+remaining the recipient entity's current route while closed.
+`seon.cluster.wake/route!` consults that predicate only after `offer!` reports a
+closed mailbox. It drops that payload-free wake without reporting a second
+fault; the message remains a database fact for the fresh arm after recovery.
+
+The inherited implementation classified every closed channel as fenced. That
+was rejected because it hid a broken render route. The final classifier
+requires both closed transport and the agent owner's derived fence. A
+saturated live mailbox and a closed render channel both still emit
+`:seon.cluster.wake/undeliverable-wake`.

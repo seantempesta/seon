@@ -756,6 +756,9 @@
     (wake/route! {:seon.cluster.wake/connection connection
                   :seon.cluster.wake/channels
                   (fn [] (cluster.agent/channels routing))
+                  :seon.cluster.wake/fenced?
+                  (fn [agent-eid channel]
+                    (cluster.agent/fenced-route? routing agent-eid channel))
                   :seon.cluster.wake/armer-channel armer-channel
                   :seon.cluster.wake/render-channel render-channel
                   :seon.cluster.wake/fault-channel
