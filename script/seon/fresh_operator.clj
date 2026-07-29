@@ -407,13 +407,7 @@
      `(do
         (require 'seon.cluster
                  'seon.config
-                 'seon.instrument
-                 'seon.schema.edn)
-        ;; Source reload can add registered schemas before this live JVM
-        ;; starts another cluster. Populate Malli's schema registry before
-        ;; collecting current function contracts; otherwise the refresh below
-        ;; can fail on a contract whose named schema has not been loaded yet.
-        (seon.schema.edn/load! {})
+                 'seon.instrument)
         ;; The live JVM may still carry wrappers compiled from a schema
         ;; that source reload has replaced. Refresh against one already
         ;; running cluster's effective dial BEFORE current `start!`

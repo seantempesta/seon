@@ -197,9 +197,13 @@
   this tree — so it says so on stderr rather than passing quietly.
 
   Call it again after re-evaluating anything: a re-`defn` silently
-  strips the wrapper and no watch fires."
+  strips the wrapper and no watch fires. Every apply first reloads the
+  classpath schema population because collecting current contracts cannot
+  compile a named reference that a fresh or hot-reloaded process has not yet
+  contributed."
   {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
+  (schema.edn/load! {})
   (let [registered (count (mi/clj-collect! {:ns (all-ns)}))]
     (case mode
       :panic

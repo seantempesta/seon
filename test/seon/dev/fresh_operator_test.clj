@@ -127,72 +127,150 @@
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
-(defn- fresh-process-pre-start
-  [root add-form]
-  (let [code
-        (pr-str
-         `(do
-            (require 'seon.cluster
-                     'seon.instrument
-                     'seon.render.value
-                     'seon.schema)
-            (let [original-resolve# seon.cluster/resolve-bootstrap
-                  instances-var#
-                  (ns-resolve 'seon.cluster (symbol "running-instances"))]
-              (with-redefs
-               [seon.cluster/resolve-bootstrap
-                (fn [overrides#]
-                  (original-resolve#
-                   (assoc overrides# :seon.boot/root ~(str root))))]
-                (seon.cluster/start!
-                 {:seon.boot/cluster-name "anchor"})
-                (let [state# (seon.schema/snapshot-state)
-                      stale-state#
-                      (-> state#
-                          (update :seon.schema.state/candidate-forms
-                                  dissoc
-                                  :seon.render/value)
-                          (assoc :seon.schema.state/projection nil))]
-                  (seon.schema/restore-state! stale-state#)
-                  (try
-                    (let [result# (eval (read-string ~add-form))
-                          scratch# (get @@instances-var# "scratch")]
-                      (prn
-                       {:seon.dev.fresh-operator-test/result result#
-                        :seon.dev.fresh-operator-test/scratch-ready?
-                        (boolean
-                         (get-in scratch#
-                                 [:seon.boot/advertisement
-                                  :seon.render.web/url]))}))
-                    (finally
-                      (seon.instrument/remove!)
-                      (doseq [instance# (vals @@instances-var#)]
-                        (seon.cluster/stop! instance#)))))
-                (flush)
-                (System/exit 0)))))
-        process
+(defn- process-output
+  [^Process process]
+  (future
+    (try
+      (slurp (.getInputStream process))
+      (catch java.io.IOException error
+        (str "The child output stream closed after termination: "
+             (ex-message error))))))
+
+(defn- run-operator
+  [root & arguments]
+  (let [process
         (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["clojure" "-M:test" "-e" code])
+         (doto (ProcessBuilder.
+                ^java.util.List
+                (apply operator-command root arguments))
            (.directory project-root)
            (.redirectErrorStream true)))
-        output-future
-        (future
-          (try
-            (slurp (.getInputStream process))
-            (catch java.io.IOException error
-              (str "The child output stream closed after termination: "
-                   (ex-message error)))))
-        completed? (.waitFor process 60 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (deref output-future 10000
-                      "The child output reader did not finish.")]
+        output-future (process-output process)
+        completed? (.waitFor process 30 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))]
     {:seon.dev.fresh-operator-test/completed? completed?
      :seon.dev.fresh-operator-test/exit
      (when completed? (.exitValue process))
-     :seon.dev.fresh-operator-test/output output}))
+     :seon.dev.fresh-operator-test/output
+     (deref output-future 10000
+            "The operator output reader did not finish.")}))
+
+(defn- prepl-eval
+  [advertisement form]
+  (with-open [socket (java.net.Socket.)]
+    (.connect socket
+              (java.net.InetSocketAddress.
+               ^String (:seon.boot/prepl-host advertisement)
+               (int (:seon.boot/prepl-port advertisement)))
+              10000)
+    (.setSoTimeout socket 10000)
+    (with-open [writer (io/writer socket)
+                reader (java.io.PushbackReader. (io/reader socket))]
+      (.write writer form)
+      (.write writer "\n")
+      (.flush writer)
+      (loop []
+        (let [event (edn/read {:eof ::eof} reader)]
+          (cond
+            (= ::eof event)
+            (throw (ex-info "The child prepl closed before returning." {}))
+
+            (= :ret (:tag event))
+            (if (:exception event)
+              (throw
+               (ex-info "The child prepl rejected the operation."
+                        {:seon.dev.fresh-operator-test/event event}))
+              (:val event))
+
+            :else
+            (recur)))))))
+
+(defn- registry-without-render-value-form
+  []
+  (pr-str
+   '(let [state (seon.schema/snapshot-state)]
+      (seon.schema/restore-state!
+       (-> state
+           (update :seon.schema.state/candidate-forms
+                   dissoc
+                   :seon.render/value)
+           (assoc :seon.schema.state/projection nil)))
+      :schema-stale)))
+
+(defn- fresh-process-operator-paths
+  [root]
+  (with-open [ready-server
+              (ServerSocket.
+               0 1 (java.net.InetAddress/getLoopbackAddress))]
+    (.setSoTimeout ready-server 30000)
+    (let [launch-form
+          (operator-private-value
+           'launch-form "anchor" {} (.getLocalPort ready-server))
+          code
+          (pr-str
+           `(do
+              (require 'seon.cluster
+                       'seon.instrument
+                       'seon.render.value
+                       'seon.schema)
+              (let [state# (seon.schema/snapshot-state)
+                    original-resolve# seon.cluster/resolve-bootstrap]
+                (seon.schema/restore-state!
+                 (-> state#
+                     (update :seon.schema.state/candidate-forms
+                             dissoc
+                             :seon.render/value)
+                     (assoc :seon.schema.state/projection nil)))
+                (with-redefs
+                  [seon.cluster/resolve-bootstrap
+                  (fn [overrides#]
+                    (original-resolve#
+                     (assoc overrides#
+                            :seon.boot/root
+                            ~(str (io/file root "data" "clusters")))))]
+                  (eval (read-string ~launch-form))))))
+          child
+          (.start
+           (doto
+            (ProcessBuilder.
+             ^java.util.List
+             ["clojure" "-M:test" "-e" code])
+             (.directory project-root)
+             (.redirectErrorStream true)))
+          child-output (process-output child)]
+      (try
+        (with-open [ready-socket (.accept ready-server)
+                    ready-reader (io/reader ready-socket)]
+          (when-not (= "ready"
+                       (.readLine ^java.io.BufferedReader ready-reader))
+            (throw (ex-info "The anchor returned malformed readiness." {}))))
+        (let [anchor-advertisement
+              (edn/read-string
+               (slurp (io/file root "data" "clusters"
+                               "anchor" "prepl.edn")))
+              _ (prepl-eval anchor-advertisement
+                            (registry-without-render-value-form))
+              added (run-operator root "start" "scratch")
+              scratch-advertisement
+              (when (zero? (or (::exit added) 1))
+                (edn/read-string
+                 (slurp (io/file root "data" "clusters"
+                                 "scratch" "prepl.edn"))))]
+          {::anchor-ready? true
+           ::add-completed? (::completed? added)
+           ::add-exit (::exit added)
+           ::add-output (::output added)
+           ::scratch-ready?
+           (boolean (:seon.render.web/url scratch-advertisement))})
+        (finally
+          (when (.isAlive child)
+            (run-operator root "stop" "scratch")
+            (run-operator root "stop" "anchor"))
+          (when (.isAlive child)
+            (.destroyForcibly child))
+          (.waitFor child 10 TimeUnit/SECONDS)
+          (deref child-output 10000
+                 "The anchor output reader did not finish."))))))
 
 (deftest config-command-selection-defaults-cluster-and-start-accepts-config
   (is (= {:seon.fresh-operator/name "default"
@@ -277,27 +355,18 @@
         (alter-meta! start-var (constantly start-meta))
         (reset! (var-get instances-var) instances-before)))))
 
-(deftest fresh-process-loads-schema-before-refresh-and-start
+(deftest fresh-process-loads-schema-before-every-operator-instrumentation
   (let [root (fresh-root)]
     (try
-      (let [{::keys [completed? exit output]}
-            (fresh-process-pre-start
-             root
-             (operator-private-value 'add-form "scratch" {}))]
-        (is completed? "the fresh-process pre-start exceeded sixty seconds")
-        (is (= 0 exit) output)
-        (is
-         (=
-          {::result "scratch"
-           ::scratch-ready? true}
-          (some
-           (fn [line]
-             (when (str/starts-with?
-                    line
-                    "#:seon.dev.fresh-operator-test")
-               (edn/read-string line)))
-           (str/split-lines output)))
-         output))
+      (let [{::keys [anchor-ready? add-completed? add-exit add-output
+                     scratch-ready?]}
+            (fresh-process-operator-paths root)]
+        (is anchor-ready?
+            "the generated launch form instrumented before publishing ready")
+        (is add-completed? "the generated add form exceeded thirty seconds")
+        (is (= 0 add-exit) add-output)
+        (is scratch-ready?
+            "the added scratch cluster published its web URL"))
       (finally
         (delete-recursively! root)))))
 
