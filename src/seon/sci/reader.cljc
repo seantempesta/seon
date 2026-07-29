@@ -234,7 +234,9 @@
             :seon.fn/private?
             (boolean (or (= "defn-" (name operation))
                          (:private metadata)))}
-            qualified (assoc :seon.fn/sym qualified)
+            qualified (assoc :seon.fn/sym (str qualified))
+            namespace-name
+            (assoc :seon.fn/ns [:seon.ns/name namespace-name])
             doc (assoc :seon.fn/doc doc)
             schema (assoc :seon.fn/spec (pr-str schema))
             (contains? #{:io :compute} workload)
@@ -247,19 +249,23 @@
              (= "deftest" (name (first form)))
              (symbol? (second form)))
     (when-let [qualified (qualified-symbol namespace-name (second form))]
-      {:seon.test/sym qualified})))
+      {:seon.test/sym (str qualified)
+       :seon.test/ns [:seon.ns/name namespace-name]})))
 
 (defn- declaration-facts
-  [form namespace-name]
-  (merge
-   (when (and (seq? form)
-              (symbol? (first form))
-              (= "ns" (name (first form))))
+  [form namespace-name source]
+  (if (and (seq? form)
+           (symbol? (first form))
+           (= "ns" (name (first form))))
+    (assoc
      (select-keys
       (namespace-info form)
-      [:seon.ns/name :seon.ns/doc :seon.ns/require-edges]))
-   (function-declaration form namespace-name)
-   (test-declaration form namespace-name)))
+      [:seon.ns/name :seon.ns/doc :seon.ns/require-edges])
+     :seon.ns/source source)
+    (if-let [function (function-declaration form namespace-name)]
+      (assoc function :seon.fn/source source)
+      (when-let [test (test-declaration form namespace-name)]
+        (assoc test :seon.test/source source)))))
 
 (def ^:private namespace-stable-operations
   #{"comment" "declare" "def" "defmacro" "defn" "defn-" "defonce"
@@ -353,7 +359,8 @@
                    {::ns (::ns state)})
                  (declaration-facts
                   form
-                  (when (::attribution? state) (::ns state))))]
+                  (when (::attribution? state) (::ns state))
+                  source))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
 

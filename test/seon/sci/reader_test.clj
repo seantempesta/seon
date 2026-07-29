@@ -325,11 +325,14 @@
   (let [read-events
         (events (slurp (io/file "src/seon/sci/reader.cljc")))
         read-event
-        (first
-         (filter #(= 'seon.sci.reader/read (:seon.fn/sym %))
-                 read-events))
+        (first (filter #(= "seon.sci.reader/read" (:seon.fn/sym %))
+                       read-events))
         read-metadata (meta #'reader/read)]
-    (is (= 'seon.sci.reader/read (:seon.fn/sym read-event)))
+    (is (= "seon.sci.reader/read" (:seon.fn/sym read-event)))
+    (is (= [:seon.ns/name 'seon.sci.reader]
+           (:seon.fn/ns read-event)))
+    (is (= (:seon.sci.reader/source read-event)
+           (:seon.fn/source read-event)))
     (is (= (:doc read-metadata) (:seon.fn/doc read-event)))
     (is (= (pr-str (:arglists read-metadata))
            (:seon.fn/arglists read-event)))
@@ -344,24 +347,33 @@
               "(defn- ^{:seon.workload :io} hidden [x] x) "
               "(deftest hidden-test (is true))"))]
     (is (= {:seon.ns/name 'sample
+            :seon.ns/source
+            "(ns sample \"Sample namespace.\" (:require [clojure.string :as str]))"
             :seon.ns/doc "Sample namespace."
             :seon.ns/require-edges
             #{{:seon.ns.require/target 'clojure.string
                :seon.ns.require/alias 'str}}}
            (select-keys
             (first read-events)
-            [:seon.ns/name :seon.ns/doc
+            [:seon.ns/name :seon.ns/source :seon.ns/doc
              :seon.ns/require-edges])))
-    (is (= {:seon.fn/sym 'sample/hidden
+    (is (= {:seon.fn/sym "sample/hidden"
+            :seon.fn/ns [:seon.ns/name 'sample]
+            :seon.fn/source
+            "(defn- ^{:seon.workload :io} hidden [x] x)"
             :seon.fn/arglists "([x])"
             :seon.fn/private? true
             :seon.fn/workload :io}
            (select-keys
             (second read-events)
-            [:seon.fn/sym :seon.fn/arglists
+            [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
              :seon.fn/private? :seon.fn/workload])))
-    (is (= 'sample/hidden-test
-           (:seon.test/sym (nth read-events 2))))))
+    (is (= {:seon.test/sym "sample/hidden-test"
+            :seon.test/ns [:seon.ns/name 'sample]
+            :seon.test/source "(deftest hidden-test (is true))"}
+           (select-keys
+            (nth read-events 2)
+            [:seon.test/sym :seon.test/ns :seon.test/source])))))
 
 (def ^:private surface-exemptions
   {"src/seon/schema/edn.clj"
