@@ -314,7 +314,7 @@
       (let [line (sci/get-line-number source-reader)
             column (sci/get-column-number source-reader)
             start (cursor-offset starts text-length line column)
-            [form source]
+            [form _]
             (sci/parse-next+string
              ctx source-reader
              (parse-options
@@ -335,6 +335,8 @@
                 source-start (+ start
                                 (- (count consumed)
                                    (count (str/triml consumed))))
+                source-end (+ start (count (str/trimr consumed)))
+                source (subs text source-start source-end)
                 [source-line source-column]
                 (offset-cursor starts source-start)
                 event
@@ -344,6 +346,7 @@
                   ::start start
                   ::end end
                   ::source-start source-start
+                  ::source-end source-end
                   ::line source-line
                   ::column source-column}
                  (when (and (::attribution? state) (::ns state))

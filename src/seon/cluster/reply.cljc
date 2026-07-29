@@ -125,11 +125,12 @@
       events
       (mapv (fn [event]
               (let [start (:seon.sci.reader/source-start event)
+                    end (:seon.sci.reader/source-end event)
                     form-source (:seon.sci.reader/source event)]
                 (cond-> {::form (:seon.sci.reader/form event)
                          ::source form-source
                          ::start start
-                         ::end (+ start (count form-source))}
+                         ::end end}
                   (:seon.sci.reader/ns event)
                   (assoc ::ns (:seon.sci.reader/ns event)))))
             events))))

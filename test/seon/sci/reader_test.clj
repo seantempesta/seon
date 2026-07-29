@@ -117,6 +117,17 @@
               (events "😀" {:seon.sci.reader/max-chars 1})
               [:seon.error/data :seon.sci.reader/length]))))))
 
+(deftest original-source-spans-preserve-crlf-and-utf16
+  (let [text "; 😀 note\r\n(+ 1 2)\r\n\"😀\"\r\n"
+        read-events (events text)]
+    (is (= ["; 😀 note\r\n(+ 1 2)" "\"😀\""]
+           (mapv :seon.sci.reader/source read-events)))
+    (is (= text (apply str (event-slices text read-events))))
+    (doseq [event read-events]
+      (let [{:seon.sci.reader/keys [source source-start source-end]} event]
+        (is (= source (subs text source-start source-end)))
+        (is (<= source-start source-end (count text)))))))
+
 (deftest the-accepted-tag-set-is-total-and-read-eval-is-always-refused
   (let [tag-cases
         [['inst "#inst \"2020-01-01\""]

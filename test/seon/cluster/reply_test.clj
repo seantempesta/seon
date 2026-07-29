@@ -102,6 +102,17 @@
     (is (= ["; I will run (+ 1 2) now.\n(+ 1 2)"]
            (sources "I will run (+ 1 2) now.\n(+ 1 2)")))))
 
+(deftest crlf-events-stay-within-the-original-reply
+  (let [text "; 😀 note\r\n(+ 1 2)\r\n"
+        events (#'reply/parsed-events text)]
+    (is (vector? events))
+    (doseq [event events]
+      (let [{::reply/keys [source start end]} event]
+        (is (= source (subs text start end)))
+        (is (<= start end (count text)))))
+    (is (= ["; 😀 note\r\n(+ 1 2)"]
+           (sources text)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Forms and prose — comments record text, only forms run
 ;;; ---------------------------------------------------------------------------
