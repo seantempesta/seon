@@ -22,7 +22,8 @@
   repeatedly and from different directions: can presentation change the
   answer? A throwing sink, a slow sink, no sink at all — same
   completion."
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -184,6 +185,28 @@
     (is (false? (get one-shot "stream")))
     (is (nil? (get one-shot "stream_options"))
         "a non-streaming request must not carry streaming options")))
+
+(deftest a-loopback-provider-receives-the-descriptor-output-budget
+  (let [received (promise)
+        server
+        (http/run-server
+         (fn [request]
+           (deliver received (json/parse-string (slurp (:body request))))
+           {:status 200
+            :headers {"content-type" "application/json"}
+            :body
+            "{\"choices\":[{\"message\":{\"content\":\"bounded\"}}]}"})
+         {:ip "127.0.0.1" :port 0 :legacy-return-value? false})]
+    (try
+      (let [endpoint (str "http://127.0.0.1:" (http/server-port server)
+                          "/v1/chat/completions")
+            completion (ai/complete (request endpoint {}))
+            document @received]
+        (is (= "bounded" (:seon.ai/text completion)))
+        (is (= 8192 (get document "max_tokens")))
+        (is (= "fixture" (get document "model"))))
+      (finally
+        (http/server-stop! server)))))
 
 (deftest a-stream-that-produces-no-text-is-an-error-not-an-empty-reply
   ;; A provider that streamed nothing has failed the call however
