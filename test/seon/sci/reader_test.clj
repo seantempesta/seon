@@ -343,16 +343,22 @@
   (let [read-events
         (events
          (str "(ns sample \"Sample namespace.\" "
-              "(:require [clojure.string :as str])) "
+              "(:require [clojure.string :as str] "
+              "[seon.schema :as schema])) "
               "(defn- ^{:seon.workload :io} hidden [x] x) "
+              "(schema/register! ::amount [:int {:min 0}]) "
               "(deftest hidden-test (is true))"))]
     (is (= {:seon.ns/name 'sample
             :seon.ns/source
-            "(ns sample \"Sample namespace.\" (:require [clojure.string :as str]))"
+            (str "(ns sample \"Sample namespace.\" "
+                 "(:require [clojure.string :as str] "
+                 "[seon.schema :as schema]))")
             :seon.ns/doc "Sample namespace."
             :seon.ns/require-edges
             #{{:seon.ns.require/target 'clojure.string
-               :seon.ns.require/alias 'str}}}
+               :seon.ns.require/alias 'str}
+              {:seon.ns.require/target 'seon.schema
+               :seon.ns.require/alias 'schema}}}
            (select-keys
             (first read-events)
             [:seon.ns/name :seon.ns/source :seon.ns/doc
@@ -368,11 +374,17 @@
             (second read-events)
             [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
              :seon.fn/private? :seon.fn/workload])))
+    (is (= {:seon.schema/key :sample/amount
+            :seon.schema/form "[:int {:min 0}]"
+            :seon.schema/ns [:seon.ns/name 'sample]}
+           (select-keys
+            (nth read-events 2)
+            [:seon.schema/key :seon.schema/form :seon.schema/ns])))
     (is (= {:seon.test/sym "sample/hidden-test"
             :seon.test/ns [:seon.ns/name 'sample]
             :seon.test/source "(deftest hidden-test (is true))"}
            (select-keys
-            (nth read-events 2)
+            (nth read-events 3)
             [:seon.test/sym :seon.test/ns :seon.test/source])))))
 
 (def ^:private surface-exemptions

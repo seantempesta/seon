@@ -252,8 +252,30 @@
       {:seon.test/sym (str qualified)
        :seon.test/ns [:seon.ns/name namespace-name]})))
 
+(defn- resolved-operation
+  [operation aliases]
+  (when (symbol? operation)
+    (if-let [operation-namespace (namespace operation)]
+      (if-let [target (get aliases (symbol operation-namespace))]
+        (symbol (str target) (name operation))
+        operation)
+      operation)))
+
+(defn- schema-declaration
+  [form aliases]
+  (when (and (seq? form)
+             (= 3 (count form))
+             (= 'seon.schema/register!
+                (resolved-operation (first form) aliases))
+             (qualified-keyword? (second form)))
+    (let [schema-key (second form)]
+      {:seon.schema/key schema-key
+       :seon.schema/form (pr-str (nth form 2))
+       :seon.schema/ns
+       [:seon.ns/name (symbol (namespace schema-key))]})))
+
 (defn- declaration-facts
-  [form namespace-name source]
+  [form namespace-name aliases source]
   (if (and (seq? form)
            (symbol? (first form))
            (= "ns" (name (first form))))
@@ -262,10 +284,12 @@
       (namespace-info form)
       [:seon.ns/name :seon.ns/doc :seon.ns/require-edges])
      :seon.ns/source source)
-    (if-let [function (function-declaration form namespace-name)]
-      (assoc function :seon.fn/source source)
-      (when-let [test (test-declaration form namespace-name)]
-        (assoc test :seon.test/source source)))))
+    (or
+     (when-let [function (function-declaration form namespace-name)]
+       (assoc function :seon.fn/source source))
+     (when-let [test (test-declaration form namespace-name)]
+       (assoc test :seon.test/source source))
+     (schema-declaration form aliases))))
 
 (def ^:private namespace-stable-operations
   #{"comment" "declare" "def" "defmacro" "defn" "defn-" "defonce"
@@ -293,7 +317,9 @@
         (assoc state ::attribution? false))
 
       (or (not (seq? form))
-          (contains? namespace-stable-operations operation))
+          (contains? namespace-stable-operations operation)
+          (= 'seon.schema/register!
+             (resolved-operation (first form) (::aliases state))))
       state
 
       ;; An arbitrary top-level invocation may be a macro that changes the
@@ -360,6 +386,7 @@
                  (declaration-facts
                   form
                   (when (::attribution? state) (::ns state))
+                  (::aliases state)
                   source))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
