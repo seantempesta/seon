@@ -835,6 +835,17 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (23) NOTHING RE-FIRES — the turn cap is the only retry budget
+  (owner, correcting the hot-loop fix framing): "an agent fucks up,
+  they only get another turn to fix it if they haven't hit the max
+  turns for that episode. We don't keep rerunning it." A refused
+  terminal commit settles the receipt as its terminal error fact (one
+  minimal un-refusable commit); the error is simply the eval's result,
+  visible to the agent's next turn IF the episode cap allows one;
+  ZERO automatic re-execution, re-delivery, or per-event escalation —
+  the hot loop is made impossible by construction, never bounded.
+  Recurrence-signature escalation exists for repeated NEW mistakes
+  across turns, not for one event.
   (22) THE §7 RULINGS + THE READ SEAM (owner, at the checkpoint):
   (a) RENDERS CALL seon.db, NEVER datahike.api directly — "so we can
   intercept and do whatever we want." The facade RETURNS, mined not
