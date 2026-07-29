@@ -506,7 +506,11 @@
                               ;; behaviour we have proven.
                               (HttpResponse$BodyHandlers/ofInputStream)
                               (HttpResponse$BodyHandlers/ofString)))
-            status (.statusCode response)
+            ;; `HttpResponse.statusCode()` is a JVM Integer, while the
+            ;; durable `:seon.ai/http-status` attribute is Datahike
+            ;; `:db.type/long`, whose validator accepts java.lang.Long
+            ;; exactly. Convert once where the foreign value enters.
+            status (long (.statusCode response))
             ;; a non-2xx body has to be readable either way, and a
             ;; stream's body is only readable once
             read-body (fn [] (if stream?

@@ -30,10 +30,12 @@
             [datahike.api :as d]
             [org.httpkit.server :as http]
             [seon.ai :as ai]
+            [seon.cluster.loop]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.root :as root]
-            [seon.test-support :as support]))
+            [seon.test-support :as support])
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Canned wire
@@ -200,6 +202,38 @@
         (is (= 429 (:seon.ai/http-status (:seon.error/data completion))))
         (is (str/includes? (str (:seon.ai/body (:seon.error/data completion)))
                            "slow down"))))))
+
+(deftest a-real-jdk-provider-status-commits-with-its-attempt
+  (with-provider {:status 502 :body "upstream unavailable"}
+    (fn [endpoint]
+      (let [target (dissoc (request endpoint {}) :seon.ai/prompt)
+            failure (ai/complete (assoc target :seon.ai/prompt "hello"))
+            status (:seon.ai/http-status (:seon.error/data failure))]
+        (is (= :seon.ai/provider-error (:seon.error/kind failure)))
+        (is (instance? Long status)
+            "the JDK Integer is normalized at the HTTP boundary")
+        (support/with-database
+          (fn [connection]
+            (d/transact connection
+                        [{:seon.cluster.agent/id "status-agent"}
+                         {:seon.cluster.run/id "status-run"}])
+            ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+             {:seon.store/branch-connection connection
+              :seon.cluster.run/process "process/status-test"
+              :seon.config.error/recurrence-limit 3
+              :seon.sci.admit/caps caps}
+             {:seon.ai/target target
+              :seon.error/value failure
+              :seon.cluster.run/id "status-run"
+              :seon.cluster.agent/id "status-agent"
+              :seon.ai.attempt/ordinal 0}
+             (Date. 1785319000000))
+            (let [attempt
+                  (d/pull @connection '[*]
+                          [:seon.ai.attempt/id "status-run-attempt-0"])]
+              (is (= 502 (:seon.ai/http-status attempt)))
+              (is (some? (:seon.ai.attempt/error attempt))
+                  "the provider error and attempt committed together"))))))))
 
 (deftest a-broken-sink-cannot-fail-a-real-call
   (with-provider {}
