@@ -87,6 +87,22 @@ the turn→render-memory read path is UNPROVEN and breaks first. FIVE
 OPEN DECISIONS in the report §7 — chiefly: land the proc before the
 read seam (recommended), and where render memory lives for turn
 reads. Await the owner's §7 rulings at the debt review.
+**CHECKPOINT AUDIT RETURNED (8b5581b64): DOES NOT GRADUATE.** One real
+blocker — a REFUSED terminal program transaction leaves its receipt
+running and re-fires as a durable-error hot loop (the midday
+refusal-loop sighting was real, not mid-edit weather; issue:
+refused-terminal-transaction-leaves-a-running-receipt-hot-loop). Fix
+lane refusal-hotloop-fix DISPATCHED (test-forward, storm-bound proof).
+Two lesser finds also fix-dispatched/filed: the value renderer caching
+FILE-derived config (renderer-config-fact-fix lane — runtime reads
+facts only) and fresh-operator stale instrumentation (filed, queued).
+VERIFIED SOLID by the audit's own reproductions: same-transaction
+fn/schema/test publication, negative admission (expression/def/
+uncontracted defn/failed eval), fact-backed acquisition across a real
+JVM restart, zero-overlay config + single-registration dial + explicit
+absence, the fork's bound holding (239,188 bytes vs the 524,288
+bound), full gate 531/2183/0 independently green. The checkpoint
+graduates when the hot-loop fix lands + re-audit of that seam passes.
 
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
