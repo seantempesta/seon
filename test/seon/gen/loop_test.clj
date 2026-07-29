@@ -29,6 +29,7 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.context :as context]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
@@ -107,7 +108,10 @@
   (let [connection (:seon.store/branch-connection cluster)]
     (loop [passes 0]
       (when (< passes limit)
-        (let [at (Date.)
+        ;; a deterministic clock that still advances: run order is a
+        ;; fact this suite reads, and a wall clock makes two runs in the
+        ;; same millisecond order themselves at random
+        (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
               work (some (fn [agent-id]
                            (when-let [orphan (work/interruption @connection
                                                                 agent-id)]
@@ -336,6 +340,21 @@
                          db assignment-tx))
                  "no window in which an assignment exists and the red
                   receipt explaining it does not")))
+
+         (testing "the assigned owner is TOLD how to answer, and nobody
+                   else is"
+           ;; A value an agent cannot discover is not a surface. The
+           ;; block is present exactly while the facts are.
+           (let [told (context/assignment-ai
+                       {:seon.db/db db :seon.cluster.agent/id "beta"})]
+             (is (str/includes? told (pr-str (work/problem-id run-id 5)))
+                 "the exact identity the join needs, not a description
+                  of it")
+             (is (str/includes? told "my.message/decline")))
+           (is (nil? (context/assignment-ai
+                      {:seon.db/db db :seon.cluster.agent/id "root"}))
+               "an agent with no assignment is never told about
+                declining"))
 
          (testing "the owner's declination settles ITS form, and settles
                    nothing else"

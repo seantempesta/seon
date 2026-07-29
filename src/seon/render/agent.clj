@@ -51,7 +51,8 @@
 
   Crash walk: pure renders over a database value. A kill loses a prompt
   that re-derives."
-  (:require [seon.render.block :as block]
+  (:require [datahike.api :as d]
+            [seon.render.block :as block]
             [seon.render.walk :as walk]))
 
 ;;; ---------------------------------------------------------------------------
@@ -85,6 +86,265 @@
   (when-let [text (agent-ai unit)]
     [:article {:class "seon-family-entry seon-agent-entry"}
      [:p text]]))
+
+(defn agent-header-html
+  "Agent identity and state, derived from presence at this database value."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        agent (when (and db agent-id)
+                (d/pull db
+                        [:seon.cluster.agent/id
+                         :seon.cluster.agent/namespace
+                         :seon.cluster.agent/run]
+                        [:seon.cluster.agent/id agent-id]))
+        state (cond
+                (nil? (:seon.cluster.agent/id agent)) :missing
+                (:seon.cluster.agent/run agent) :running
+                :else :idle)]
+    [:header {:id (block/surface-id :agent-header)
+              :class "seon-agent-header"
+              :data-agent-state (name state)}
+     [:div {:class "seon-agent-heading"}
+      [:a {:class "seon-agent-back" :href "/"} "← agents"]
+      [:span {:class "seon-agent-name"} (or agent-id "unknown agent")]
+      (when-let [namespace (:seon.cluster.agent/namespace agent)]
+        [:span {:class "seon-agent-namespace"} (str namespace)])]
+     [:span {:class "seon-agent-state"}
+      [:span {:class "seon-agent-state-dot" :aria-hidden "true"} "●"]
+      [:span (name state)]]]))
+
+(defn- agent-entity-id
+  [db agent-id]
+  (d/q '[:find ?agent .
+         :in $ ?agent-id
+         :where [?agent :seon.cluster.agent/id ?agent-id]]
+       db agent-id))
+
+(defn- transcript-entity-ids
+  "Entity ids in one agent's conversation, in commit order."
+  [db agent-id]
+  (when-let [agent (agent-entity-id db agent-id)]
+    (into
+     (sorted-set)
+     (map first)
+     (concat
+      (d/q '[:find ?message
+             :in $ ?agent
+             :where [?message :seon.cluster.message/to ?agent]]
+           db agent)
+      (d/q '[:find ?message
+             :in $ ?agent
+             :where [?message :seon.cluster.message/from ?agent]]
+           db agent)
+      (d/q '[:find ?run
+             :in $ ?agent
+             :where [?run :seon.cluster.run/agent ?agent]]
+           db agent)
+      (d/q '[:find ?receipt
+             :in $ ?agent
+             :where
+             [?run :seon.cluster.run/agent ?agent]
+             [?receipt :seon.cluster.eval/run ?run]]
+           db agent)
+      (d/q '[:find ?error
+             :in $ ?agent
+             :where [?error :seon.error/agent ?agent]]
+           db agent)
+      (d/q '[:find ?error
+             :in $ ?agent
+             :where
+             [?run :seon.cluster.run/agent ?agent]
+             [?error :seon.error/run ?run]]
+           db agent)))))
+
+(defn- render-node
+  [db caps entity-id distance]
+  (walk/neighborhood
+   {:seon.db/db db
+    :seon.render.walk/lookup entity-id
+    :seon.render/kind :seon.render/html
+    :seon.render/floor `block/data-panel
+    :seon.render/overrides {}
+    :seon.render/distance distance
+    :seon.sci.admit/caps caps}))
+
+(defn- node-output
+  [node]
+  (if-let [failure (:seon.error/value node)]
+    [:p {:class "seon-neighborhood-error"}
+     (:seon.error/message failure)]
+    (:seon.render/output node)))
+
+(defn- node-html
+  [node]
+  (let [children (into []
+                       (keep node-html)
+                       (:seon.render.walk/neighbours node))
+        attribute (:seon.render.walk/attribute node)
+        output (node-output node)]
+    (when (or output (seq children))
+      [:li {:class "seon-neighborhood-entry"}
+       (when attribute
+         [:span {:class "seon-neighborhood-connection"} (str attribute)])
+       output
+       (when (seq children)
+         (into [:ul {:class "seon-neighborhood-list"}] children))])))
+
+(defn- transcript-role
+  [agent-entity unit]
+  (cond
+    (:seon.cluster.message/id unit)
+    (let [from (get-in unit [:seon.cluster.message/from :db/id])]
+      (cond
+        (nil? from) :human
+        (= agent-entity from) :agent
+        :else :peer))
+
+    (:seon.error/id unit) :system
+    (or (:seon.cluster.run/id unit)
+        (:seon.cluster.eval/id unit)) :activity
+    :else :context))
+
+(defn- transcript-entry
+  [db caps agent-entity entity-id]
+  (let [unit (d/pull db '[*] entity-id)
+        role (transcript-role agent-entity unit)]
+    [:li {:class (str "seon-transcript-entry seon-transcript-" (name role))
+          :data-transcript-entity (str entity-id)
+          :data-transcript-role (name role)}
+     (node-output (render-node db caps entity-id 0))]))
+
+(defn transcript-html
+  "The agent's messages, runs, receipts, and errors in commit order."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        caps (:seon.sci.admit/caps unit)
+        agent-entity (when (and db agent-id)
+                       (agent-entity-id db agent-id))
+        entity-ids (when agent-entity
+                     (transcript-entity-ids db agent-id))]
+    [:section {:id (block/surface-id :transcript)
+               :class "seon-transcript"}
+     [:h2 {:class "seon-agent-section-label"} "transcript"]
+     (if (seq entity-ids)
+       (into [:ol {:class "seon-transcript-list"}]
+             (map (partial transcript-entry db caps agent-entity))
+             entity-ids)
+       [:p {:class "seon-agent-empty"}
+        (if agent-entity
+          "No conversation yet. Send a message above to begin."
+          "This agent does not exist. Return to the agent list.")])]))
+
+(defn unit-html
+  "One database unit through its family lens at the requested distance."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [db (:seon.db/db unit)
+        caps (:seon.sci.admit/caps unit)
+        entity-id (:db/id unit)
+        distance (:seon.render/distance unit 1)
+        node (when (and db caps entity-id)
+               (render-node db caps entity-id distance))]
+    [:div {:class "seon-focus-unit"
+           :data-focus-entity (str entity-id)
+           :data-render-distance (str distance)}
+     (if-let [content (some-> node node-html)]
+       [:ul {:class "seon-neighborhood-list"} content]
+       [:p {:class "seon-agent-empty"}
+        "This unit has nothing to render at this distance."])]))
+
+(defn- selection
+  [entity-id]
+  (str "entity-" entity-id))
+
+(defn- unit-label
+  [unit]
+  (cond
+    (:seon.cluster.agent/id unit)
+    (str "agent " (:seon.cluster.agent/id unit))
+
+    (:seon.cluster.message/id unit)
+    (str "message " (:seon.cluster.message/id unit))
+
+    (:seon.cluster.run/id unit)
+    (str "run " (:seon.cluster.run/id unit))
+
+    (:seon.cluster.eval/id unit)
+    (str "form " (:seon.cluster.eval/ordinal unit))
+
+    (:seon.error/id unit)
+    (str "error " (:seon.error/kind unit))
+
+    :else (str "entity " (:db/id unit))))
+
+(defn- focus-entity-ids
+  [db agent-id]
+  (when-let [agent (agent-entity-id db agent-id)]
+    (into [agent] (transcript-entity-ids db agent-id))))
+
+(defn- focal-panel
+  [unit distance]
+  (let [entity-id (:db/id unit)
+        selected (selection entity-id)]
+    [:section {:id (str "focus-panel-" selected)
+               :class "seon-focus-panel"
+               :data-focus-panel selected
+               :data-show (str "$selected === '" selected "'")}
+     [:div {:class "seon-focus-panel-label"} (unit-label unit)]
+     (unit-html (assoc unit :seon.render/distance distance))]))
+
+(defn- rail-card
+  [unit]
+  (let [entity-id (:db/id unit)
+        selected (selection entity-id)]
+    [:div {:id (str "focus-rail-" selected)
+           :class "seon-rail-card"
+           :role "button"
+           :tabindex "0"
+           :data-focus-card selected
+           :data-show (str "$selected !== '" selected "'")
+           (keyword "data-on:click") (str "$selected = '" selected "'")
+           (keyword "data-on:keydown")
+           (str "(evt.key === 'Enter' || evt.key === ' ') && "
+                "($selected = '" selected "')")}
+     [:div {:class "seon-rail-label"} (unit-label unit)]
+     [:div {:class "seon-rail-preview" :aria-hidden "true"}
+      (unit-html (assoc unit :seon.render/distance 0))]]))
+
+(defn focus-html
+  "A focal unit and its rail previews through one renderer at two distances."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        distance (:seon.render/distance unit 1)
+        entity-ids (when (and db agent-id)
+                     (focus-entity-ids db agent-id))
+        units (mapv #(assoc (d/pull db '[*] %)
+                            :seon.db/db db
+                            :seon.sci.admit/caps (:seon.sci.admit/caps unit))
+                    entity-ids)
+        initial (some-> units first :db/id selection)]
+    [:section
+     (cond-> {:id (block/surface-id :focus)
+              :class "seon-focus"}
+       initial (assoc :data-signals__ifmissing
+                      (str "{selected:'" initial "'}")))
+     [:h2 {:class "seon-agent-section-label"} "focus"]
+     (if (seq units)
+       [:div {:class "seon-focus-layout"}
+        (into [:div {:class "seon-focus-primary"}]
+              (map #(focal-panel % distance))
+              units)
+        (into [:aside {:class "seon-rail" :aria-label "Context rail"}]
+              (map rail-card)
+              units)]
+       [:p {:class "seon-agent-empty"}
+        "Nothing is focusable yet. Send a message to create context."])]))
 
 (defn namespace-ai
   "`:seon.render/ai` — THE PILOT: this agent's world, at a distance.
@@ -142,42 +402,23 @@
         agent-id (get unit :seon.cluster.agent/id)
         caps (get unit :seon.sci.admit/caps)]
     (when (and db agent-id caps)
-      (letfn [(node-html [node]
-                (let [children (into []
-                                     (keep node-html)
-                                     (:seon.render.walk/neighbours node))
-                      attribute (:seon.render.walk/attribute node)
-                      failure (:seon.error/value node)
-                      output (get node :seon.render/output)]
-                  (when (or failure output (seq children))
-                    [:li {:class "seon-neighborhood-entry"}
-                     (when attribute
-                       [:span {:class "seon-neighborhood-connection"}
-                        (str attribute)])
-                     (if failure
-                       [:p {:class "seon-neighborhood-error"}
-                        (:seon.error/message failure)]
-                       output)
-                     (when (seq children)
-                       (into [:ul {:class "seon-neighborhood-list"}]
-                             children))])))]
-        (when-let [content
-                   (node-html
-                    (walk/neighborhood
-                     (cond-> {:seon.db/db db
-                              :seon.render.walk/lookup
-                              [:seon.cluster.agent/id agent-id]
-                              :seon.render/kind :seon.render/html
-                              :seon.render/floor `block/data-panel
-                              :seon.render/overrides {}
-                              :seon.sci.admit/caps caps}
-                       (get unit :seon.render/distance)
-                       (assoc :seon.render/distance
-                              (get unit :seon.render/distance)))))]
-          [:section {:id (block/surface-id :namespace)
-                     :class "seon-card seon-neighborhood"}
-           [:h2 "namespace"]
-           [:ul {:class "seon-neighborhood-list"} content]])))))
+      (when-let [content
+                 (node-html
+                  (walk/neighborhood
+                   (cond-> {:seon.db/db db
+                            :seon.render.walk/lookup
+                            [:seon.cluster.agent/id agent-id]
+                            :seon.render/kind :seon.render/html
+                            :seon.render/floor `block/data-panel
+                            :seon.render/overrides {}
+                            :seon.sci.admit/caps caps}
+                     (get unit :seon.render/distance)
+                     (assoc :seon.render/distance
+                            (get unit :seon.render/distance)))))]
+        [:section {:id (block/surface-id :namespace)
+                   :class "seon-card seon-neighborhood"}
+         [:h2 "namespace"]
+         [:ul {:class "seon-neighborhood-list"} content]]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The seed
@@ -187,11 +428,10 @@
   "An ordinary agent's default block set — CONTENT, not a classification
   rule, and the same vector-of-block-data shape root's seed uses.
 
-  THE SCAFFOLD PLUS THE VIEW. Three anchor blocks say what the walk can
-  never derive (who you are, how your reply is evaluated, how to address
-  a peer), one dynamic block says what you were asked, and `:namespace`
-  is everything else — your runs, your receipts, your messages, your
-  errors — rendered by their owners at the requested distance.
+  THE SCAFFOLD PLUS THE TWO BOUNDARIES. AI keeps its three stable
+  scaffold blocks, trigger, and namespace-at-distance view. HTML is the
+  existing message bar plus exactly three agent-page blocks: header,
+  ordered transcript, and focus-with-rail.
 
   Priorities leave gaps so a block can be inserted between two without
   renumbering anything. `:namespace` sits in the `:dynamic` band ahead
@@ -206,17 +446,34 @@
     :seon.render/ai 'seon.context/execution-ai}
    {:seon.render.block/name :peers
     :seon.render.block/band :anchor
-    :seon.render.block/priority 20
+   :seon.render.block/priority 20
     :seon.render/ai 'seon.context/peers-ai}
+   ;; the routed problems this agent owns — absent for an agent with
+   ;; none, which is every agent until one is assigned
+   {:seon.render.block/name :assignments
+    :seon.render.block/band :dynamic
+    :seon.render.block/priority 85
+    :seon.render/ai 'seon.context/assignment-ai}
+   {:seon.render.block/name :agent-header
+    :seon.render.block/band :anchor
+    :seon.render.block/priority 25
+    :seon.render/html `agent-header-html}
    {:seon.render.block/name :message-bar
     :seon.render.block/band :anchor
     :seon.render.block/priority 30
     :seon.render/html 'seon.render.web/message-bar-html}
+   {:seon.render.block/name :transcript
+    :seon.render.block/band :dynamic
+    :seon.render.block/priority 40
+    :seon.render/html `transcript-html}
+   {:seon.render.block/name :focus
+    :seon.render.block/band :dynamic
+    :seon.render.block/priority 50
+    :seon.render/html `focus-html}
    {:seon.render.block/name :namespace
     :seon.render.block/band :dynamic
     :seon.render.block/priority 80
-    :seon.render/ai `namespace-ai
-    :seon.render/html `namespace-html}
+    :seon.render/ai `namespace-ai}
    {:seon.render.block/name :trigger
     :seon.render.block/band :dynamic
     :seon.render.block/priority 90

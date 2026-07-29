@@ -111,6 +111,46 @@
            "with my.run/wait after asking. Return a vector of "
            "sends to message several."))))
 
+(defn assignment-ai
+  "The problems routed to this agent, and the two ways to answer them.
+  Present exactly while the facts are: an agent with no assignment is
+  never told about declining, and an agent that has one is never left
+  to guess the identity string the join needs.
+
+  THE IDENTITY IS SHOWN, not described, for the same reason `peers-ai`
+  shows a real agent id. A declination whose `about` does not name the
+  problem is unjoinable, and settlement reads the reply's SHAPE — so a
+  prompt that only said \"name the problem\" would be asking the model
+  to invent the one string that has to be exact."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [db (get unit :seon.db/db)
+        agent-id (get unit :seon.cluster.agent/id)
+        assigned
+        (sort
+         (d/q '[:find ?problem-id ?from-id
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?message :seon.cluster.message/to ?agent]
+                [?message :seon.cluster.message/about ?problem]
+                [?problem :seon.problems/id ?problem-id]
+                [?message :seon.cluster.message/from ?assigner]
+                [?assigner :seon.cluster.agent/id ?from-id]]
+              db agent-id))]
+    (when (seq assigned)
+      (let [[problem-id assigner] (first assigned)]
+        (str "Problems routed to you, by identity: "
+             (str/join ", " (map (comp pr-str first) assigned))
+             ". Repair one in your own namespace and say what you did. "
+             "If you cannot — the code is not yours to change, or "
+             "nothing in your namespace could satisfy it — return "
+             "(my.message/decline \"" assigner "\" "
+             (pr-str problem-id) " \"why you cannot\"), naming the "
+             "agent that assigned it and the problem identity exactly "
+             "as listed above. Declining settles the problem as "
+             "answered; saying nothing leaves it open forever.")))))
+
 (defn trigger-ai
   "What the agent was asked, and WHO asked when the sender is another
   agent. The unit carries the HELD RUN's id, and the trigger is the
