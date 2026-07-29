@@ -22,6 +22,7 @@
             [seon.cluster.agent]
             [seon.cluster.ancestor :as ancestor]
             [seon.cluster.process :as cluster.process]
+            [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -29,7 +30,8 @@
             [seon.flow :as seon.flow]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
@@ -42,10 +44,7 @@
     root))
 
 (defn- delete-recursively! [path]
-  (let [file (io/file path)]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
+  (test-support/delete-recursively! path))
 
 (defn- prepl-eval
   "Open a real socket to `host:port`, evaluate `form-string` through
@@ -450,39 +449,49 @@
   [failure]
   (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
 
-(deftest start-denies-a-stale-source-digest-with-both-explicit-remedies
+(deftest start-allows-an-older-complete-program-without-indexing
   (let [root (fresh-root)
         cluster-name "stale-program"
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
         stale-digest (apply str (repeat 64 "f"))]
     (try
-      (let [instance (cluster/start! request)
-            connection (:seon.boot/cluster-connection instance)
-            ancestor-eid
-            (d/q '[:find ?ancestor .
-                   :where [?ancestor :seon.ancestor/digest _]]
-                 @connection)]
-        (d/transact
-         connection
-         [[:db.fn/retractAttribute ancestor-eid :seon.ancestor/digest]
-          {:db/id ancestor-eid :seon.ancestor/digest stale-digest}])
-        (cluster/stop! instance))
-      (let [failure (start-refusal request)
-            message (ex-message failure)
-            refused-instance (:seon.boot/instance (ex-data failure))]
+      (let [program-transactions-before
+            (let [instance (cluster/start! request)
+                  connection (:seon.boot/cluster-connection instance)
+                  ancestor-eid
+                  (d/q '[:find ?ancestor .
+                         :where [?ancestor :seon.ancestor/digest _]]
+                       @connection)]
+              (d/transact
+               connection
+               [[:db.fn/retractAttribute ancestor-eid :seon.ancestor/digest]
+                {:db/id ancestor-eid :seon.ancestor/digest stale-digest}])
+              (let [program-transactions
+                    (d/q '[:find ?symbol ?tx
+                           :where
+                           [?function :seon.fn/sym ?symbol]
+                           [?function :seon.fn/source _ ?tx]]
+                         @connection)]
+                (cluster/stop! instance)
+                program-transactions))
+            restarted (cluster/start! request)]
         (try
-          (is (some? failure))
-          (is (str/includes? message
-                             (str "bin/seon index " cluster-name)))
-          (is (str/includes? message
-                             (str "bin/seon reset " cluster-name)))
-          (is (str/includes? message "preserves history"))
-          (is (str/includes? message "destroys history"))
-          (is (nil? (:seon.cluster.agent/routing refused-instance))
-              "the program-currentness gate runs before agents arm")
+          (testing "an older complete corpus is a sovereign cluster world"
+            (is (some? (:seon.cluster.agent/routing restarted)))
+            (is (= stale-digest
+                   (d/q '[:find ?digest .
+                          :where [_ :seon.ancestor/digest ?digest]]
+                        @(:seon.boot/cluster-connection restarted)))))
+          (testing "reopen never indexes or advances the recorded digest"
+            (is (= program-transactions-before
+                   (d/q '[:find ?symbol ?tx
+                          :where
+                          [?function :seon.fn/sym ?symbol]
+                          [?function :seon.fn/source _ ?tx]]
+                        @(:seon.boot/cluster-connection restarted)))))
           (finally
-            (stop-refused-instance! failure))))
+            (cluster/stop! restarted))))
       (finally
         (delete-recursively! root)))))
 
@@ -492,7 +501,7 @@
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
         current-digest
-        (ancestor/digest {:seon.ancestor/roots seon.fn/source-roots})]
+        (ancestor/digest {:seon.ancestor/roots cluster/ancestor-roots})]
     (try
       (let [instance (cluster/start! request)
             connection (:seon.boot/cluster-connection instance)]
@@ -548,6 +557,65 @@
           (finally
             (cluster/stop! restarted))))
       (finally
+        (delete-recursively! root)))))
+
+(deftest baseline-refresh-rolls-without-touching-existing-clusters
+  (let [root (fresh-root)
+        store-dir (str (io/file root "store"))
+        old-digest (apply str (repeat 64 "a"))
+        current-digest
+        (ancestor/digest {:seon.ancestor/roots cluster/ancestor-roots})
+        opened (store/open-store! {:seon.store/dir store-dir})
+        old-ancestor
+        (try
+          (ancestor/ensure!
+           {:seon.store/store opened
+            :seon.ancestor/digest old-digest
+            :seon.ancestor/populate `cluster/populate-ancestor!})
+          (finally
+            (store/release-store! opened)))
+        old-world
+        (cluster/start!
+         {:seon.boot/cluster-name "old-world"
+          :seon.boot/root root
+          :seon.boot/ancestor-branch
+          (:seon.ancestor/branch old-ancestor)})]
+    (try
+      (let [old-connection (:seon.boot/cluster-connection old-world)
+            old-basis (:max-tx @old-connection)
+            refreshed (cluster/refresh-baseline! root)
+            roster
+            (registry/roster (:seon.store/store old-world))]
+        (testing "a new content-addressed baseline joins the roster"
+          (is (not= old-digest current-digest))
+          (is (true? (:seon.ancestor/built? refreshed)))
+          (is (= (ancestor/ancestor-branch current-digest)
+                 (:seon.ancestor/branch refreshed)))
+          (is (contains? roster (:seon.ancestor/branch old-ancestor)))
+          (is (contains? roster (:seon.ancestor/branch refreshed))))
+        (testing "the existing cluster remains on its independent corpus"
+          (is (= old-basis (:max-tx @old-connection)))
+          (is (= old-digest
+                 (d/q '[:find ?digest .
+                        :where [_ :seon.ancestor/digest ?digest]]
+                      @old-connection))))
+        (testing "refresh is convergent and future clusters fork the newest"
+          (is (= {:seon.ancestor/branch
+                  (ancestor/ancestor-branch current-digest)
+                  :seon.ancestor/built? false}
+                 (cluster/refresh-baseline! root)))
+          (let [future (cluster/start!
+                        {:seon.boot/cluster-name "future-world"
+                         :seon.boot/root root})]
+            (try
+              (is (= current-digest
+                     (d/q '[:find ?digest .
+                            :where [_ :seon.ancestor/digest ?digest]]
+                          @(:seon.boot/cluster-connection future))))
+              (finally
+                (cluster/stop! future))))))
+      (finally
+        (cluster/stop! old-world)
         (delete-recursively! root)))))
 
 (deftest reopen-accretes-a-new-config-attribute-before-config-applies
@@ -729,6 +797,42 @@
           (is (nil? (cluster/stop! degraded)))
           (is (nil? (cluster/read-advertisement root "wreck")))))
       (finally
+        (delete-recursively! root)))))
+
+(deftest explicit-reset-destroys-the-old-branch-and-reforks-current-source
+  (let [root (fresh-root)
+        cluster-name "reset-program"
+        instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                  :seon.boot/root root})
+        connection (:seon.boot/cluster-connection instance)]
+    (try
+      (d/transact connection
+                  [{:seon.cluster.message/id "history-reset-destroys"}])
+      (let [result (cluster/reset! instance)
+            replacement
+            (cluster/start! {:seon.boot/cluster-name cluster-name
+                             :seon.boot/root root})]
+        (try
+          (testing "the old branch was replaced from the current ancestor"
+            (is (:seon.cluster/created? result))
+            (is (nil?
+                 (d/q '[:find ?message .
+                        :where
+                        [?message :seon.cluster.message/id
+                         "history-reset-destroys"]]
+                      @(:seon.boot/cluster-connection replacement))))
+            (is (pos?
+                 (or
+                  (d/q '[:find (count ?function) .
+                         :where [?function :seon.fn/sym]]
+                       @(:seon.boot/cluster-connection replacement))
+                  0))))
+          (finally
+            (cluster/stop! replacement))))
+      (finally
+        ;; `reset!` normally stopped it. This is deliberately idempotent
+        ;; cleanup for a failure before that boundary.
+        (cluster/stop! instance)
         (delete-recursively! root)))))
 
 ;;; ---------------------------------------------------------------------------

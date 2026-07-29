@@ -15,6 +15,7 @@
   `readiness` derives its report from the instance and its database.
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
+  (:refer-clojure :exclude [reset!])
   (:require [clojure.core.async :as async]
             [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]
@@ -374,29 +375,43 @@
   (seon.fn/index! {:seon.store/branch-connection connection
                    :seon.db/process
                    [:seon.db.process/id boot-process-identity]
-                   :seon.fn/roots seon.fn/source-roots}))
+                   :seon.fn/roots seon.fn/source-roots})
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The tower above the REPL
 ;;; ---------------------------------------------------------------------------
 
 ;;; The roots the ancestor's identity is computed over. Today the
-;;; population above is derived from these sources; at N5 the indexer
-;;; reads the same tree, so one digest keeps answering "what was I born
-;;; from?" without a second mechanism.
+;;; population above is derived from the Clojure program plus the
+;;; classpath schema population. The indexer reads only Clojure files,
+;;; while the ancestor digest also covers the EDN declarations whose
+;;; Datahike schema and canonical rows are installed into the ancestor.
+(def ancestor-roots
+  "The complete file roots whose content identifies an ancestor."
+  (conj seon.fn/source-roots "resources"))
+
+(defn- current-source-digest
+  []
+  (ancestor/digest {:seon.ancestor/roots ancestor-roots}))
+
+(defn- ensure-current-ancestor!
+  [store]
+  (ancestor/ensure!
+   {:seon.store/store store
+    :seon.ancestor/digest (current-source-digest)
+    :seon.ancestor/populate `populate-ancestor!}))
+
 (defn- ancestor-branch!
   "The ancestor branch this cluster forks from.
   A supplied `:seon.boot/ancestor-branch` is used AS GIVEN — the caller
   named an existing ancestor and `ensure-cluster!` refuses if it is not
   in the roster. Absent, the ancestor of this source tree is ensured
   (idempotent; the roster is the whole cache)."
-  [store config current-digest]
+  [store config]
   (or (:seon.boot/ancestor-branch config)
       (:seon.ancestor/branch
-       (ancestor/ensure!
-        {:seon.store/store store
-         :seon.ancestor/digest current-digest
-         :seon.ancestor/populate `populate-ancestor!}))))
+       (ensure-current-ancestor! store))))
 
 (defn- count-installed
   [db attribute]
@@ -422,35 +437,43 @@
           #{})
         namespace-count (count-installed db :seon.ns/name)
         function-count (count-installed db :seon.fn/sym)
-        partial? (and (pos? namespace-count) (zero? function-count))
-        populated? (and (pos? namespace-count) (pos? function-count))
+        namespace-populated? (pos? namespace-count)
+        function-populated? (pos? function-count)
+        partial? (not= namespace-populated? function-populated?)
+        populated? (and namespace-populated? function-populated?)
+        one-digest? (= 1 (count recorded-digests))
         digest-current? (= #{current-digest} recorded-digests)]
-    {:seon.ancestor/current? (and digest-current? populated?)
+    {:seon.ancestor/coherent? (and one-digest? populated?)
+     :seon.ancestor/current? (and digest-current? populated?)
+     :seon.ancestor/stale? (and one-digest?
+                                populated?
+                                (not digest-current?))
      :seon.ancestor/partial? partial?
      :seon.ancestor/recorded-digests recorded-digests
      :seon.ancestor/current-digest current-digest
      :seon.ancestor/namespace-count namespace-count
      :seon.ancestor/function-count function-count}))
 
-(defn- require-current-program!
+(defn- require-coherent-program!
   [connection cluster-name current-digest]
   (let [currentness (program-currentness @connection current-digest)]
-    (when-not (:seon.ancestor/current? currentness)
+    (when-not (:seon.ancestor/coherent? currentness)
       (let [condition
             (cond
               (:seon.ancestor/partial? currentness)
               (str "partial ("
                    (:seon.ancestor/namespace-count currentness)
-                   " namespace rows and no function rows)")
+                   " namespace rows and "
+                   (:seon.ancestor/function-count currentness)
+                   " function rows)")
 
               (empty? (:seon.ancestor/recorded-digests currentness))
               "unprimed (no recorded source digest)"
 
-              (not= #{current-digest}
-                    (:seon.ancestor/recorded-digests currentness))
-              (str "stale (recorded "
+              (> (count (:seon.ancestor/recorded-digests currentness)) 1)
+              (str "incoherent (multiple recorded source digests "
                    (pr-str (:seon.ancestor/recorded-digests currentness))
-                   ", current " current-digest ")")
+                   ")")
 
               :else
               "unprimed (the source-owned program rows are absent)")]
@@ -463,8 +486,57 @@
           "leaving messages, runs, agents, and agent-authored facts intact. "
           "`bin/seon reset " cluster-name "` destroys history and reforks a "
           "clean cluster from the current ancestor.")
-         currentness))))
-  nil)
+         currentness)))
+    (when (:seon.ancestor/stale? currentness)
+      (log/info
+       (str "seon " cluster-name " source: independent older corpus "
+            (first (:seon.ancestor/recorded-digests currentness))
+            " (current baseline " current-digest
+            "); start allowed, `bin/seon index " cluster-name
+            "` explicitly synchronizes it")))
+    currentness))
+
+(defn refresh-baseline!
+  "Create or reuse the current content-addressed ancestor."
+  {:malli/schema [:=> [:cat :seon.boot/root] :seon.ancestor/ensured]}
+  [root]
+  (let [config (resolve-bootstrap {:seon.boot/root root})
+        store-dir (:seon.boot/store-dir config)
+        held-store (acquire-root-store! store-dir)]
+    (try
+      (ensure-current-ancestor! held-store)
+      (finally
+        (release-root-store! store-dir)))))
+
+(defn index!
+  "Prime one cluster from source while preserving independent facts.
+
+  The current additive schema population is installed first, then the
+  ONE `seon.fn/index!` exact-reconciles only rows whose defining datoms
+  carry the boot process identity. Messages, agents, runs, and
+  agent-authored declarations remain outside that owned slice.
+
+  The recorded `:seon.ancestor/digest` advances in the index
+  transaction. On a primed cluster it means the source digest whose
+  source-owned program facts were last synchronized while independent
+  facts were preserved; it no longer means the ancestor branch from
+  which this cluster was originally forked. A converged call writes
+  nothing."
+  {:malli/schema [:=> [:cat :seon.boot/instance] :seon.reconcile/result]}
+  [instance]
+  (let [connection
+        (or
+         (:seon.boot/cluster-connection instance)
+         (refused!
+          "Source indexing requires an addressable cluster connection."
+          {:seon.boot/cluster-name
+           (get-in instance [:seon.boot/config :seon.boot/cluster-name])}))]
+    (accrete-schema-population! connection)
+    (seon.fn/index!
+     {:seon.store/branch-connection connection
+      :seon.db/process [:seon.db.process/id boot-process-identity]
+      :seon.fn/roots seon.fn/source-roots
+      :seon.ancestor/digest (current-source-digest)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
@@ -920,23 +992,23 @@
   [instance publish! config-request]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
-        current-digest
-        (ancestor/digest {:seon.ancestor/roots seon.fn/source-roots})
+        current-digest (current-source-digest)
         store (acquire-root-store! (:seon.boot/store-dir config))
         instance (publish! (assoc instance :seon.store/store store))
         forked (registry/ensure-cluster!
                 {:seon.store/store store
                  :seon.boot/cluster-name cluster-name
                  :seon.ancestor/branch
-                 (ancestor-branch! store config current-digest)})
+                 (ancestor-branch! store config)})
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance :seon.boot/cluster-connection connection))
         ;; The source tree is consulted only for its digest. Indexing remains
         ;; an explicit fork/index operation and never runs on this reopen path.
         ;; This gate precedes schema accretion, recovery, config, and arming:
-        ;; a stale or partial program graph gets no runtime semantics.
-        _ (require-current-program! connection cluster-name current-digest)
+        ;; an incoherent program graph gets no runtime semantics. A complete
+        ;; older corpus remains a legitimate sovereign world.
+        _ (require-coherent-program! connection cluster-name current-digest)
         ;; A branch may predate this process's additive schema population.
         ;; Install it before recovery or config can transact a newly added
         ;; attribute. This is the same population that creates an ancestor;
@@ -1272,6 +1344,33 @@
                      instances)))
           (throw failure)))))
   nil)
+
+(defn reset!
+  "Destroy one cluster branch and refork the current ancestor.
+
+  An extra hold keeps the process-root store and its flock alive while
+  `stop!` releases the addressed instance and its branch connection.
+  The registry's existing `reset-cluster!` remains the sole
+  delete/refork owner. The current content-addressed ancestor is ensured
+  explicitly here; neither indexing nor reset enters the boot path."
+  {:malli/schema
+   [:=> [:cat :seon.boot/instance]
+    :seon.cluster.registry/branch-result]}
+  [instance]
+  (let [config (:seon.boot/config instance)
+        cluster-name (:seon.boot/cluster-name config)
+        store-dir (:seon.boot/store-dir config)
+        held-store (acquire-root-store! store-dir)]
+    (try
+      (stop! instance)
+      (registry/reset-cluster!
+       {:seon.store/store held-store
+        :seon.boot/cluster-name cluster-name
+        :seon.ancestor/branch
+        (:seon.ancestor/branch
+         (ensure-current-ancestor! held-store))})
+      (finally
+        (release-root-store! store-dir)))))
 
 (defn read-advertisement
   "Read and validate one cluster's advertisement, or nil.
