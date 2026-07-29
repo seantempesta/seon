@@ -134,4 +134,5 @@ ownership is verified, changing an existing JVM's bootstrap root from relative
 correctly refuses it. This operator preserves the live JVM's existing
 bootstrap spelling rather than editing the protected runtime owner. A future
 runtime change should canonicalize that holder key at
-`src/seon/cluster.clj:235-261`.
+`src/seon/cluster.clj:235-261`; the protected seam is tracked in
+[[../root-store-holder-does-not-canonicalize-store-dir]].

@@ -18,13 +18,14 @@ See `README.md` for the convention.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (4)
+## Friction (5)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [Name database-value and transaction-data contracts](database-and-transaction-boundaries-use-anonymous-any-contracts.md) | friction | Core |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
+| [Canonicalize the process-root store holder key](root-store-holder-does-not-canonicalize-store-dir.md) | friction | future runtime |
 | [The issues-index checker disagrees with the schedule convention](issues-index-checker-disagrees-with-the-schedule-convention.md) | friction | general |
 
 ## Cleanup (2)
