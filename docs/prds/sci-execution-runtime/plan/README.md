@@ -835,6 +835,21 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (19) REACTIVITY IS DERIVED FROM THE INPUT CONTRACT (owner + design
+  session): a render function's registered input schema IS its
+  dependency declaration. Schema without :seon.db/db → STATIC:
+  memoized on input equality, no listener, re-executes only inside a
+  caller's render. Schema with :seon.db/db → the current database
+  value is INJECTED and a wake registers. The listener belongs to the
+  DISPLAYED BLOCK, not the function — registration follows the display
+  fact's presence; undisplayed functions cost nothing. A static block
+  whose bytes churn is lying about its inputs — dev flags it loudly.
+  Attribute-narrow waking (captured query plans, widen-to-all
+  fail-closed) is a later measured optimization on the same derived
+  ladder. Nothing is ever declared; agents just write functions.
+  A block = one named independently-rendered region (stable element
+  id) — the unit of morphs, suppression, churn ranking, and the 60fps
+  measurements.
   (18) HTTP-KIT FORK APPROVED + PULL-BASED DELIVERY EXPLORATION
   (owner): the minimal ADDITIVE fork lands (per-channel pending bytes
   + atomic drain-or-close completion; httpkit-write-path-2026-07-29.md
