@@ -30,9 +30,10 @@ the schema loader or the config gate — one owner, no new mechanism.
 
 ## Evidence
 
-The 2026-07-29 `:seon.config.ai/max-tokens` accretion is the second
-observed hand-sync after `:seon.config.ai/no-auth`. One dial required
+The 2026-07-29 `:seon.config.ai/max-tokens` accretion is the third
+observed hand-sync. One dial required
 manual edits to its leaf registration, closed manifest, effective map,
 database entity map, shipped defaults, descriptor/request schemas,
-provider assembly, wire projection, and expectations. The derivation
-remains deliberately out of scope for that blocker repair.
+provider assembly, wire projection, and the honest-population expected
+set. The derivation remains deliberately out of scope for that blocker
+repair.

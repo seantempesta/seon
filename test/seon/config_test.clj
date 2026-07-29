@@ -39,6 +39,7 @@
     :seon.config/on-core-error
     :seon.config.ai/endpoint
     :seon.config.ai/model
+    :seon.config.ai/max-tokens
     :seon.config.ai/api-key-variable
     :seon.config.ai/timeout-ms
     ;; THE BACKUP DESCRIPTOR ROW — four optional dials, and the shipped
