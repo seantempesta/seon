@@ -1059,6 +1059,271 @@ details.tool-call-details[open] .tool-preview {
   color: var(--color-error);
 }
 
+/* --- the ordinary agent page -------------------------------------- */
+
+/* The slice contributes three page blocks. The already-landed message
+   bar remains its own morph target between the header and transcript. */
+.seon-main:has(.seon-focus) {
+  max-width: 116ch;
+}
+
+.seon-agent-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--color-base-800);
+}
+.seon-agent-heading {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 0.65rem;
+}
+.seon-agent-back {
+  color: var(--color-text-500);
+  font-size: 0.62rem;
+  text-decoration: none;
+}
+.seon-agent-back:hover {
+  color: var(--color-signal);
+  text-decoration: underline;
+}
+.seon-agent-name {
+  color: var(--color-text-50);
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.seon-agent-namespace {
+  color: var(--color-text-500);
+  font-size: 0.62rem;
+  overflow-wrap: anywhere;
+}
+.seon-agent-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-left: auto;
+  color: var(--color-text-400);
+  font-size: 0.68rem;
+}
+.seon-agent-state-dot {
+  color: var(--color-text-600);
+  font-size: 0.55rem;
+}
+.seon-agent-header[data-agent-state="running"] .seon-agent-state {
+  color: var(--color-warning);
+}
+.seon-agent-header[data-agent-state="running"] .seon-agent-state-dot {
+  color: var(--color-warning);
+}
+.seon-agent-header[data-agent-state="idle"] .seon-agent-state {
+  color: var(--color-success);
+}
+.seon-agent-header[data-agent-state="idle"] .seon-agent-state-dot {
+  color: var(--color-success);
+}
+.seon-agent-header[data-agent-state="missing"] .seon-agent-state,
+.seon-agent-header[data-agent-state="missing"] .seon-agent-state-dot {
+  color: var(--color-error);
+}
+
+.seon-agent-section-label {
+  margin: 0;
+  color: var(--color-text-400);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.seon-agent-empty {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  color: var(--color-text-500);
+  font-size: 0.7rem;
+}
+
+.seon-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.seon-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.seon-transcript-entry {
+  max-width: 86%;
+  padding: 0.36rem 0.55rem;
+  border-bottom: 1px solid var(--color-base-850);
+  background: transparent;
+  transition: background-color 0.45s ease-out;
+  animation: seon-transcript-change 0.45s ease-out both;
+}
+@keyframes seon-transcript-change {
+  from { background: color-mix(in srgb, var(--color-signal) 12%, transparent); }
+  to { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seon-transcript-entry {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Direction is the transcript's relationship to the page agent. The
+   content remains the family renderer's own hiccup. */
+.seon-transcript-human {
+  align-self: flex-end;
+  padding-left: 1rem;
+  border-right: 2px solid var(--color-signal);
+  color: var(--color-amber-300);
+  text-align: right;
+}
+.seon-transcript-human .seon-message-entry {
+  padding-left: 0;
+  border-left: 0;
+  color: var(--color-amber-300);
+}
+.seon-transcript-agent {
+  align-self: flex-start;
+  border-left: 2px solid var(--color-text-200);
+}
+.seon-transcript-agent .seon-message-entry {
+  padding-left: 0;
+  border-left: 0;
+  color: var(--color-text-100);
+}
+.seon-transcript-peer {
+  align-self: flex-start;
+  margin-left: 1.1rem;
+  border-left: 1px solid var(--color-base-700);
+  color: var(--color-text-400);
+}
+.seon-transcript-peer .seon-message-entry {
+  padding-left: 0;
+  border-left: 0;
+}
+.seon-transcript-activity {
+  align-self: stretch;
+  max-width: none;
+  padding: 0.24rem 0.45rem;
+  color: var(--color-text-500);
+  font-size: 0.64rem;
+}
+.seon-transcript-activity .seon-run-entry,
+.seon-transcript-activity .seon-receipt-entry {
+  color: var(--color-text-400);
+}
+.seon-transcript-activity details {
+  padding: 0.2rem 0;
+}
+.seon-transcript-activity summary {
+  color: var(--color-text-400);
+  cursor: pointer;
+}
+.seon-transcript-system {
+  align-self: center;
+  max-width: 92%;
+  color: var(--color-text-400);
+  font-size: 0.66rem;
+  text-align: center;
+}
+.seon-transcript-system .seon-error-entry {
+  padding-left: 0;
+  border-left: 0;
+  color: var(--color-text-400);
+}
+
+.seon-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.seon-focus-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(15rem, 1fr);
+  gap: 0.65rem;
+  min-height: 20rem;
+}
+.seon-focus-primary {
+  min-width: 0;
+  min-height: 0;
+  max-height: 52rem;
+  overflow: auto;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+}
+.seon-focus-panel {
+  min-height: 100%;
+}
+.seon-focus-panel-label,
+.seon-rail-label {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--color-base-800);
+  color: var(--color-text-500);
+  font-size: 0.56rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.seon-focus-panel > .seon-focus-unit {
+  padding: 0.6rem;
+}
+.seon-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  max-height: 52rem;
+  overflow-y: auto;
+}
+.seon-rail-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  cursor: pointer;
+}
+.seon-rail-card:hover,
+.seon-rail-card:focus {
+  border-color: var(--color-base-700);
+  outline: none;
+}
+.seon-rail-card:focus .seon-rail-label {
+  color: var(--color-signal);
+}
+.seon-rail-preview {
+  max-height: 10rem;
+  padding: 0.4rem 0.5rem;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--color-text-400);
+  font-size: 0.64rem;
+}
+.seon-rail-preview .seon-neighborhood-connection {
+  display: none;
+}
+
+@media (max-width: 52rem) {
+  .seon-main:has(.seon-focus) {
+    max-width: 78ch;
+  }
+  .seon-focus-layout {
+    grid-template-columns: 1fr;
+  }
+  .seon-rail {
+    max-height: 18rem;
+  }
+}
+
 /* --- the fleet panel ----------------------------------------------- */
 
 /* The one section that is a real PANEL, because it is the only one

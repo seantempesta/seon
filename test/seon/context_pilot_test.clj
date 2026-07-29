@@ -205,10 +205,10 @@
       (is (= (prompt-at connection nil) (prompt-at connection 1))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; 1b. The HTML twin is the same neighbourhood on the agent page
+;;; 1b. The HTML twin reaches the same facts through the Slice 2 page
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-agent-page-is-the-rendered-neighbourhood
+(deftest the-agent-page-renders-the-neighbourhood-through-focus
   (with-world
     (fn [connection]
       (let [page (block/page
@@ -224,10 +224,18 @@
         (testing "and a second hop uses the form and receipt family twins"
           (is (str/includes? html "(my.run/wait &quot;waiting on peer&quot;)"))
           (is (str/includes? html "peer owes me the widget count")))
-        (testing "the namespace is one ordinary identified surface"
-          (is (= 1 (count (re-seq #"id=\"surface-namespace\"" html))))
-          (is (str/includes? html "id=\"surface-namespace\""))
-          (is (str/includes? html "class=\"seon-card seon-neighborhood\"")))))))
+        (testing "the converted page has its three ordinary identified blocks"
+          (doseq [surface ["agent-header" "transcript" "focus"]]
+            (is (= 1
+                   (count
+                    (re-seq (re-pattern (str "id=\"surface-" surface "\""))
+                            html)))
+                (str surface " is one morph target")))
+          (is (not (str/includes? html "id=\"surface-namespace\""))
+              "the retired page projection remains only on the AI boundary"))
+        (testing "and the landed bar remains immediately above the transcript"
+          (is (< (.indexOf html "id=\"surface-message-bar\"")
+                 (.indexOf html "id=\"surface-transcript\""))))))))
 
 (deftest every-family-html-twin-preserves-its-ai-facts
   (let [pairs [[run/render-ai run/render-html
