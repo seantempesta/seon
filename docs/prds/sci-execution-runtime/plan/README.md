@@ -847,6 +847,12 @@ may reintroduce a shadow build into the dev feedback path.
   Attribute-narrow waking (captured query plans, widen-to-all
   fail-closed) is a later measured optimization on the same derived
   ladder. Nothing is ever declared; agents just write functions.
+  THE AGENT-FACING DOCTRINE (owner, verbatim-close): "only database
+  changes will auto re-render — declare and store your data if you
+  want it to update." One sentence, honest to the machinery (the wake
+  IS listen! on transactions), steering agents toward facts-with-
+  schemas over atoms by making the database the only path to a live
+  UI. A clock in a renderer won't tick, and that is correct.
   A block = one named independently-rendered region (stable element
   id) — the unit of morphs, suppression, churn ranking, and the 60fps
   measurements.
