@@ -859,33 +859,37 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
-  (25) BOOT COMES UP QUIET; CONFIG OWNS THE KNOWN STATE (owner ruling
-  2026-07-29, closing the crash-suffix blocker): "the config is
+  (25) AGENTS START IDLE; NOTHING RESUMES ITSELF (owner ruling
+  2026-07-29, in his words: "start up the agents so they are in an
+  idle state if they were running before. A message from the user or
+  from root should cause them to start a new episode of turns, and
+  they should see evidence of the interrupt." Plus: "the config is
   supposed to override some state so the system starts back up in a
-  known state. I think stopping all automatic processes would be
-  wise."
-  (a) ARM BUT DO NOT PRIME. Agent graphs stand up at boot and can
-  receive new wakes, but boot no longer runs the derive-all pass that
-  STARTS work from pre-existing facts. Nothing executes because the
-  process restarted; execution resumes only when something new
-  happens. This supersedes the ARM-ALL-AT-BOOT prime (R6) — a message
-  committed while the process was dead now waits for a nudge rather
-  than being answered by a reboot.
-  (b) AN INTERRUPTED RUN SETTLES AND CLOSES. Recovery marks the
-  receipt `interrupted-at`, releases custody, and CLOSES the run; the
-  unstarted plan suffix is NEVER executed. This is the crash model's
-  "the agent adapts" clause made literal — the agent sees the
-  interruption in its next context and decides. Fixes
-  `boot-recovery-executes-unstarted-plan-suffix-after-interruption`
-  and closes the post-crash capability-call hole. Consequence to
-  check: if nothing may execute the suffix, "cold resume loses the
-  defs the plan prefix established" is DISSOLVED — there is no cold
-  resume; archive it as superseded rather than fixing it.
-  (c) CONFIG REACHES DIALS + LIFECYCLE POSTURE, not history. Config
-  apply owns the runtime dials (already true) plus whether agents
-  arm/prime and which agents exist. It does NOT rewrite agent-authored
-  facts, settle runs, or drop messages — a known START is a posture,
-  not a history rewrite.
+  known state — stopping all automatic processes would be wise.")
+  In plain terms, when a cluster starts:
+  (a) EVERY AGENT COMES UP IDLE — present, reachable, doing nothing —
+  including agents that were mid-work when the process died. The
+  system never restarts work just because it restarted.
+  (b) INTERRUPTED WORK IS RECORDED AND ENDED, never continued: the
+  evaluation that was running is marked interrupted, custody is
+  released, and the run is CLOSED. Forms of that plan which had not
+  started never run — this closes the hole where a crash could cause
+  a capability call after reboot. Fixes
+  `boot-recovery-executes-unstarted-plan-suffix-after-interruption`;
+  DISSOLVES `cold-resume-loses-the-defs-...` (there is no resume to
+  restore context for — archive it as superseded, delete the path).
+  (c) A MESSAGE STARTS A NEW EPISODE. A message from the user or from
+  root wakes an idle agent normally; work begins because something
+  new arrived, never because the process came back.
+  (d) THE AGENT SEES THE INTERRUPT. In that next episode its context
+  carries honest evidence of what was cut off — what it had been
+  doing, that it was interrupted, what never finished — so it can
+  decide what to do rather than silently losing the thread. This is
+  the crash model's "the agent adapts" clause made concrete and is a
+  REQUIRED part of the fix, not a nicety.
+  (e) CONFIG SETS POSTURE, NOT HISTORY: config apply owns the runtime
+  dials plus whether agents exist and how they start. It never
+  rewrites agent-authored facts, settles runs, or drops messages.
   (23) NOTHING RE-FIRES — the turn cap is the only retry budget
   (owner, correcting the hot-loop fix framing): "an agent fucks up,
   they only get another turn to fix it if they haven't hit the max
