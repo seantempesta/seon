@@ -628,3 +628,158 @@ Graduation is blocked on the two filed issues: a development cluster cannot
 run a single agent form with instrumentation armed (finding 1), and the
 settlement commit's own success is never checked (finding 5). Both are at the
 newest seams, which is the expected yield.
+
+## Seam re-audit (attempt 6)
+
+### Verdict
+
+**CHECKPOINT NOT GRADUATED.**
+
+The attempt-5 hot-loop and transaction-outcome blockers are fixed, and the
+first-form, mid-plan, episode-cap, settlement-writer, and closed-receipt
+invariants passed with instrumentation armed. The crash contract and the
+armed invalid-construction fault contract did not.
+
+Two blockers were filed:
+
+- `docs/seon/issues/boot-recovery-executes-unstarted-plan-suffix-after-interruption.md`
+- `docs/seon/issues/instrumentation-preempts-terminal-settlement-core-fault.md`
+
+### Isolation and apparatus
+
+The audit used only
+`tmp/seam-reaudit6-operator-root`, with independent clusters
+`seam-reaudit6-20260729` and `seam-reaudit6-hostile`. The root had its own
+database, process coordinates, logs, ports, and JVM. It had no `.env` or
+provider credential. JVM `86782` was the deliberate crash victim and JVM
+`88082` was its same-root successor. The owner's JVM on port 7994 was never
+addressed.
+
+The drive reused attempt 5's apparatus with one current-shape correction:
+`flow/ping` now returns proc keys directly rather than vector-keyed proc
+identities. Each graph's mailbox deliveries and turn passes/turns were read
+from that current result. An independent `d/listen` observer replayed
+`wake/route!`'s attribute-interest rule at each transaction report.
+`seon.ai/complete` was stubbed before all message-triggered work, and no paid
+provider call was possible from the credential-free root. Probe scripts and
+the full-gate log remain under `tmp/seam-reaudit6/`.
+
+Instrumentation was active throughout the drive: the primary process armed
+357 vars and both real agent-turn variants completed with zero instrumentation
+faults. The hostile sibling later reported 358 armed vars after the audit
+defined its additional helper.
+
+### Hot-loop and episode variants
+
+The first-form refusal used the protected program deletion from attempt 5. Its
+one trigger produced:
+
+```clojure
+{:model-calls 1
+ :flow {:deliveries [1 4] :passes [1 4] :turns [0 3]}
+ :listener {:agent-wakes 1 :armer-wakes 0}
+ :run {:closed? true :held? false :agent-pointer nil}
+ :receipts [{:ordinal 0 :kind :seon.cluster.run/refused}]
+ :durable-refusal-errors 1
+ :program-row-unchanged? true
+ :more-work? false}
+```
+
+The listener saw seven later render-relevant commits in the observation
+window, but only the trigger transaction matched the agent wake rule. The
+settlement transaction did not wake the agent.
+
+The mid-plan variant committed ordinal 0 successfully, refused the protected
+deletion at ordinal 1, and never created ordinal 2. It made one target model
+call, closed and released the run, retracted the pointer, recorded exactly one
+durable refusal error, left the protected row unchanged, and again observed
+one agent wake: the trigger.
+
+Below the episode cap, the next target prompt contained the
+`program-delete-not-owned` refusal evidence and its error identity. The
+refusal-error count remained one. At a one-run cap, the episode stayed at one
+run, the follow-up trigger remained deferred, and the target model-call count
+remained one. There was no automatic retry or escalation call.
+
+### Settlement construction and outcome fences
+
+Ordinary hostile payloads passed through the current admission encoder and
+settled: a 200,000-character message plus 20,000-item data value, empty and
+absent messages, and opaque connection/function/atom values all produced a
+bounded terminal receipt and a closed unheld run.
+
+The transaction-outcome fence also passed. A candidate with a valid encoded
+refusal and a `java.time.Instant` reached Datahike, which rejected the
+`:inst` value. `terminal-refused!` raised the named
+`:seon.cluster.loop/terminal-refusal-settlement-refused` core fault, returned
+no silent `true`, committed zero transactions, and left the running receipt
+for recovery. An injected store rejection produced the same named fault.
+
+The armed construction fence failed before that point. Supplying a string
+`:seon.error/kind` committed nothing but raised
+`:seon.instrument/contract-violated` from `seon.error/normalize`; the explicit
+candidate checks and named settlement fault were never reached. This drive was
+required to treat any instrumentation violation as a finding, and it is a
+real contract-order mismatch, not a database mutation.
+
+### Crash recovery
+
+Before `kill -9 86782`, the isolated database contained one held, open,
+two-form planned run with exactly one running receipt at ordinal 0. No form
+effect existed. Twelve receipts belonging to already-closed runs had digest:
+
+```text
+6abdbc84eb7bd796e627bb10e679d0463b12a35401bd5fec08a3ad0e5cf32458
+```
+
+The same-root reboot recovered one run and stamped exactly ordinal 0
+`interrupted-at` at transaction 536871014. It then violated the checkpoint
+contract by creating and settling ordinal 1 at transaction 536871021:
+
+```clojure
+[{:ordinal 0 :interrupted-at true}
+ {:ordinal 1 :result-edn ":form-one"}]
+```
+
+Thus the running form was not re-executed, but the unstarted suffix was
+executed and the run was closed. The stub recorded no model call in this
+crafted pure suffix, but the derived resume path can execute a later
+capability request, so the mandated no-re-fire property is not established.
+The 12 pre-existing closed-run receipts were exactly equal before and after
+reboot and retained the same digest.
+
+This is current intended source behavior, not a timing artifact:
+`work/next-ordinal` treats `interrupted-at` as completed and advances, and
+`next-agent-work` resumes an unheld planned run. Existing tests explicitly
+require that continuation. The source/test contract must be reconciled with
+ruling 23 and the checkpoint crash mandate.
+
+### Settlement-writer census
+
+The static census remains green. Exactly three transaction functions can add
+terminal receipt attributes, all in `seon.cluster.run`:
+
+- `receipt-settle-call`
+- `receipt-refusal-call`
+- `recover-call`, through `interrupt-stamps`
+
+The first two share `receipt-terminal-assertions`; all three fence on terminal
+fact presence. Matches in `seon.sci.eval` and `seon.cluster.loop` construct
+ordinary requests for those writers. No direct fourth
+`:db/add` terminal-receipt writer exists under `src/`.
+
+### Full gate and cleanup
+
+The mandatory full gate completed against an unchanged `src/` and `test/`
+tree:
+
+```text
+Ran 552 tests containing 2360 assertions.
+0 failures, 0 errors.
+```
+
+The green gate does not cover the two live-contract failures above; current
+tests explicitly require the crash suffix continuation. Both isolated
+clusters were stopped through their own operator, and their now-empty JVM
+`88082` exited. The owner's JVM remained listening on port 7994 as process
+`61316`.
