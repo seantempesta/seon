@@ -16,6 +16,10 @@
  ; composes the ordinary per-fact line and a digger has the id, the
  ; kind, the refs and the projected data without a second lookup.
  :seon.problems/occurrences [:int {:min 1}]
+ ; Agent-held identity for one red receipt's derived problem. This is an
+ ; identity on the receipt, not stored problem state: redness, routing and
+ ; settlement remain pure derivations over current facts.
+ :seon.problems/id [:string {:min 1 :seon.db/identity true}]
  :seon.problems/error-signature [:map {:closed true} [:seon.error/signature :seon.error/signature] [:seon.error/kind :seon.error/kind] [:seon.problems/occurrences :seon.problems/occurrences] [:seon.error/fact :seon.error/fact]]
 
  ; A run held by a process that is NOT in the live set. Not "old" and
@@ -34,6 +38,28 @@
  ; erroring is something a human wants to see, so it is a problem
  ; without being a fault, and the distinction survives into this value.
  :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
+
+ ; One red evaluation that may be assigned. The namespace owner is derived
+ ; from the form's parse-time `/ns`; author is the total fallback.
+ :seon.problems/form-problem
+ [:map {:closed true}
+  [:seon.problems/id :seon.problems/id]
+  [:seon.cluster.eval/id :seon.cluster.eval/id]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.problems/author :seon.cluster.agent/id]
+  [:seon.error/kind :seon.error/kind]
+  [:seon.cluster.eval/error :seon.cluster.eval/error]]
+
+ :seon.problems/form-problem-request
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]
+
+ :seon.problems/author :seon.cluster.agent/id
 
  ; An agent the episode cap is deferring (F1 §7). PRESENCE, derived:
  ; the count is `work/episode-runs`, the deferrals are the unanswered

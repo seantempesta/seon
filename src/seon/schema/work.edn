@@ -27,4 +27,26 @@
  ; Runs since (and including) the one answering the last OUTSIDE
  ; trigger — the episode, derived purely from committed facts.
  :seon.cluster.work/episode-runs [:int {:min 0}]
- :seon.cluster.work/now :inst}
+ :seon.cluster.work/now :inst
+
+ ; THE SEVEN STATES OF ONE FROZEN FORM. These are derived values, never
+ ; stored status attributes. Run closure is intentionally absent.
+ :seon.cluster.work/form-state
+ [:enum :unevaluated :running :succeeded :routed :unrouted-red
+  :owner-fixed :owner-declared-cant]
+ :seon.cluster.work/settled? :boolean
+ :seon.cluster.work/form-settlement
+ [:map {:closed true}
+  [:seon.cluster.run.form/id :seon.cluster.run.form/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
+  [:seon.problems/id {:optional true} :seon.problems/id]
+  [:seon.cluster.work/form-state :seon.cluster.work/form-state]
+  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
+ :seon.cluster.work/plan-settlement
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]]
+  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
+ :seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]}

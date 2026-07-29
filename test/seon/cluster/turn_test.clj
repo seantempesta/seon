@@ -462,6 +462,76 @@
                               [_ :seon.cluster.eval/error ?error]]
                             @connection))))))))
 
+(deftest a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster
+                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            route-run "route-run"]
+        (d/transact
+         connection
+         [{:seon.ns/name 'my.gen.planner}
+          {:seon.ns/name 'my.gen.alpha}
+          {:seon.cluster.agent/id "agent-b"
+           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+          {:seon.cluster.run/id route-run
+           :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/process process
+           :seon.cluster.run/plan-digest "route-digest"}])
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id "agent-a"
+           :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]
+           :seon.cluster.agent/run [:seon.cluster.run/id route-run]}
+          {:seon.cluster.run.form/id "route-form-0"
+           :seon.cluster.run.form/run [:seon.cluster.run/id route-run]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(do (declare zz) zz)"
+           :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}
+          {:seon.cluster.run.form/id "route-form-1"
+           :seon.cluster.run.form/run [:seon.cluster.run/id route-run]
+           :seon.cluster.run.form/ordinal 1
+           :seon.cluster.run.form/source "42"
+           :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}])
+        (let [report
+              (cluster.loop/turn
+               {:seon.cluster.loop/cluster cluster
+                :seon.cluster.work/next
+                {:seon.cluster.work/situation :resume
+                 :seon.cluster.run/id route-run
+                 :seon.cluster.agent/id "agent-a"
+                 :seon.cluster.run.form/ordinal 0}}
+               now)
+              settlement (work/plan-settlement @connection route-run)]
+          (is (= 2 (:seon.cluster.loop/forms-run report))
+              "the fold attempted the sibling after the red form")
+          (is (= [:routed :succeeded]
+                 (mapv :seon.cluster.work/form-state
+                       (:seon.cluster.work/forms settlement))))
+          (is (false? (:seon.cluster.work/settled? settlement)))
+          (is (= #{["agent-a" "agent-b" 0]}
+                 (d/q '[:find ?from-id ?to-id ?ordinal
+                        :where
+                        [?assignment :seon.cluster.message/about ?problem]
+                        [?problem :seon.problems/id _]
+                        [?assignment :seon.cluster.message/from ?from]
+                        [?from :seon.cluster.agent/id ?from-id]
+                        [?assignment :seon.cluster.message/to ?to]
+                        [?to :seon.cluster.agent/id ?to-id]
+                        [?problem :seon.cluster.eval/ordinal ?ordinal]]
+                      @connection))
+              "the red problem routes to the parse-time namespace owner")
+          (is (= 1
+                 (d/q '[:find (count ?tx) .
+                        :where
+                        [?assignment :seon.cluster.message/about ?problem ?tx]
+                        [?problem :seon.problems/id _]
+                        [?problem :seon.cluster.eval/error _ ?tx]]
+                      @connection))
+              "the terminal receipt and its E3 assignment land in one tx"))))))
+
 (deftest a-whole-turn-runs-from-trigger-to-closed-run
   (with-cluster
     (fn [cluster]

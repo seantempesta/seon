@@ -15,6 +15,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
+            [seon.cluster.work :as work]
             [seon.schema]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
@@ -109,6 +110,15 @@
         "the loop reads its disposition out of exactly this"))
   (let [evaluation (run "(my.run/wait \"later\")")]
     (is (= :wait (:my.run/disposition (:seon.sci.admit/value evaluation))))))
+
+(deftest an-unbound-var-remains-structured-after-production-admission
+  (let [evaluation (run "(do (declare zz) zz)")
+        admitted (:seon.sci.admit/value evaluation)]
+    (is (= {:seon.sci.admit/opaque "sci.impl.vars.SciUnbound"} admitted)
+        "the real door preserves a value-level marker; no error string is parsed")
+    (is (work/unbound-value? admitted))
+    (is (nil? (:seon.cluster.eval/error evaluation))
+        "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit

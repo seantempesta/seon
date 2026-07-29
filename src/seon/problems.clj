@@ -149,6 +149,70 @@
                 :seon.error/kind kind
                 :seon.cluster.eval/error error}))))
 
+(defn form-problem
+  "A routable red evaluation attributed to its namespace owner, or nil.
+  X2 is the one exclusion clause: process-history failures at or after an
+  interrupted ordinal stay red but are never blamed on an owner."
+  {:malli/schema [:=> [:cat :any :seon.problems/form-problem-request]
+                  [:maybe :seon.problems/form-problem]]}
+  [db {:keys [:seon.cluster.run/id :seon.cluster.run.form/ordinal
+              :seon.sci.eval/evaluation]}]
+  (let [form
+        (d/q '[:find (pull ?form [*]) .
+               :in $ ?run-id ?ordinal
+               :where
+               [?run :seon.cluster.run/id ?run-id]
+               [?form :seon.cluster.run.form/run ?run]
+               [?form :seon.cluster.run.form/ordinal ?ordinal]]
+             db id ordinal)
+        admitted (:seon.sci.admit/value evaluation)
+        ordinary-error (:seon.cluster.eval/error evaluation)
+        interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
+        unbound? (work/unbound-value? admitted)
+        red? (or ordinary-error interrupted? unbound?)
+        artifact? (and red?
+                       (work/resume-artifact? db id ordinal interrupted?))]
+    (when (and red? (not artifact?))
+      (let [owner-id (work/form-owner db form)
+            author-id
+            (d/q '[:find ?author-id .
+                   :in $ ?form
+                   :where
+                   [?form :seon.cluster.run.form/run ?run]
+                   [?run :seon.cluster.run/agent ?author]
+                   [?author :seon.cluster.agent/id ?author-id]]
+                 db (:db/id form))
+            kind (or (:seon.error/kind admitted)
+                     (when unbound? ::unbound-var)
+                     ::evaluation-failed)
+            error (or ordinary-error
+                      (when unbound?
+                        "The admitted result contains an unbound var.")
+                      "The evaluation was interrupted.")]
+        {:seon.problems/id (work/problem-id id ordinal)
+         :seon.cluster.eval/id (pr-str [id ordinal])
+         :seon.cluster.run/id id
+         :seon.cluster.run.form/ordinal ordinal
+         :seon.cluster.run.form/source
+         (:seon.cluster.run.form/source form)
+         :seon.cluster.agent/id owner-id
+         :seon.problems/author author-id
+         :seon.error/kind kind
+         :seon.cluster.eval/error error}))))
+
+(defn assignment-value
+  "The E3 message value routing one problem to its derived owner."
+  {:malli/schema [:=> [:cat :seon.problems/form-problem]
+                  :my.message/message]}
+  [problem]
+  {:my.message/to (:seon.cluster.agent/id problem)
+   :my.message/about (:seon.problems/id problem)
+   :my.message/content
+   (str "Repair problem " (:seon.problems/id problem)
+        " from run " (:seon.cluster.run/id problem)
+        ", form " (:seon.cluster.run.form/ordinal problem)
+        ": " (:seon.cluster.eval/error problem))})
+
 (defn- deferred-agents
   "Agents whose pending triggers the episode cap is deferring (F1 §7).
   A derivation over derivations — `work/episode-runs` and

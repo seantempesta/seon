@@ -62,7 +62,8 @@
     the completion lands one wake later;
   - kill during recovery itself: `recover-tx` is idempotent and every
     terminal receipt is byte-untouched, so the derivation is unchanged."
-  (:require [datahike.api :as d]
+  (:require [clojure.edn :as edn]
+            [datahike.api :as d]
             [seon.cluster.run :as run]
             [seon.schema.edn :as schema.edn]))
 
@@ -122,6 +123,222 @@
                                   :seon.cluster.eval/interrupted-at _])]
                            db run-id))]
     (first (sort (remove settled ordinals)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Routed-problem settlement — derived, never stored
+;;; ---------------------------------------------------------------------------
+
+(def ^:private sci-unbound-class "sci.impl.vars.SciUnbound")
+
+(defn unbound-value?
+  "True when an admitted value contains sci's structured unbound marker.
+  Admission has already bounded the ordinary value, so this walks data only;
+  no class object or stringified exception crosses this seam."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (boolean
+   (some (fn [node]
+           (and (map? node)
+                (= sci-unbound-class (:seon.sci.admit/opaque node))))
+         (tree-seq coll? seq value))))
+
+(defn problem-id
+  "The unambiguous identity of one form's derived problem."
+  {:malli/schema [:=> [:cat :seon.cluster.run/id
+                       :seon.cluster.run.form/ordinal]
+                  :seon.problems/id]}
+  [run-id ordinal]
+  (str "problem-" (pr-str [run-id ordinal])))
+
+(defn- receipt-value
+  [receipt]
+  (when-let [printed (:seon.cluster.eval/result-edn receipt)]
+    (try
+      (edn/read-string printed)
+      (catch #?(:clj Throwable :cljs :default) _
+        nil))))
+
+(defn red-receipt?
+  "True when a terminal receipt is red: error, interruption, or unbound."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [receipt]
+  (boolean
+   (or (:seon.cluster.eval/error receipt)
+       (:seon.cluster.eval/interrupted-at receipt)
+       (unbound-value? (receipt-value receipt)))))
+
+(defn resume-artifact?
+  "True when this ordinal's failure belongs to interrupted process history.
+  A directly interrupted receipt and every later ordinal after an interrupted
+  prefix are excluded from owner routing; neither says owner code is wrong."
+  {:malli/schema [:=> [:cat :any :seon.cluster.run/id
+                       :seon.cluster.run.form/ordinal :boolean]
+                  :boolean]}
+  [db run-id ordinal interrupted?]
+  (boolean
+   (or interrupted?
+       (d/q '[:find ?receipt .
+              :in $ ?run-id ?ordinal
+              :where
+              [?run :seon.cluster.run/id ?run-id]
+              [?receipt :seon.cluster.eval/run ?run]
+              [?receipt :seon.cluster.eval/ordinal ?prior]
+              [(< ?prior ?ordinal)]
+              [?receipt :seon.cluster.eval/interrupted-at _]]
+            db run-id ordinal))))
+
+(defn form-owner
+  "The parse-time namespace owner, or the run author as the total fallback."
+  {:malli/schema [:=> [:cat :any :map] :seon.cluster.agent/id]}
+  [db form]
+  (let [form-eid (:db/id form)
+        namespace-owner
+        (when (contains? (:schema db) :seon.cluster.run.form/ns)
+          (d/q '[:find ?owner-id .
+                 :in $ ?form
+                 :where
+                 [?form :seon.cluster.run.form/ns ?namespace]
+                 [?owner :seon.cluster.agent/namespace ?namespace]
+                 [?owner :seon.cluster.agent/id ?owner-id]]
+               db form-eid))]
+    (or namespace-owner
+        (d/q '[:find ?author-id .
+               :in $ ?form
+               :where
+               [?form :seon.cluster.run.form/run ?run]
+               [?run :seon.cluster.run/agent ?author]
+               [?author :seon.cluster.agent/id ?author-id]]
+             db form-eid))))
+
+(defn- terminal-receipt?
+  [receipt]
+  (boolean
+   (and receipt
+        (or (:seon.cluster.eval/result-edn receipt)
+            (:seon.cluster.eval/error receipt)
+            (:seon.cluster.eval/interrupted-at receipt)))))
+
+(defn- form-receipt
+  [db form]
+  (d/q '[:find (pull ?receipt [*]) .
+         :in $ ?run ?ordinal
+         :where
+         [?receipt :seon.cluster.eval/run ?run]
+         [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+       db
+       (:db/id (:seon.cluster.run.form/run form))
+       (:seon.cluster.run.form/ordinal form)))
+
+(defn- form-run-id
+  [db form]
+  (d/q '[:find ?run-id .
+         :in $ ?form
+         :where
+         [?form :seon.cluster.run.form/run ?run]
+         [?run :seon.cluster.run/id ?run-id]]
+       db (:db/id form)))
+
+(defn- assignment-facts
+  [db form receipt owner-id]
+  (let [form-eid (:db/id form)
+        receipt-eid (:db/id receipt)
+        author-eid
+        (d/q '[:find ?author .
+               :in $ ?form
+               :where
+               [?form :seon.cluster.run.form/run ?run]
+               [?run :seon.cluster.run/agent ?author]]
+             db form-eid)
+        owner-eid
+        (d/q '[:find ?owner .
+               :in $ ?owner-id
+               :where [?owner :seon.cluster.agent/id ?owner-id]]
+             db owner-id)
+        assignment?
+        (boolean
+         (and receipt-eid owner-eid author-eid
+              (d/q '[:find ?assignment .
+                     :in $ ?problem ?author ?owner
+                     :where
+                     [?assignment :seon.cluster.message/about ?problem]
+                     [?assignment :seon.cluster.message/from ?author]
+                     [?assignment :seon.cluster.message/to ?owner]]
+                   db receipt-eid author-eid owner-eid)))
+        declination?
+        (boolean
+         (and assignment?
+              (d/q '[:find ?declination .
+                     :in $ ?problem ?author ?owner
+                     :where
+                     [?declination :seon.cluster.message/about ?problem]
+                     [?declination :seon.cluster.message/from ?owner]
+                     [?declination :seon.cluster.message/to ?author]
+                     [?declination :my.message/reason _]]
+                   db receipt-eid author-eid owner-eid)))]
+    {:seon.cluster.work/assignment? assignment?
+     :seon.cluster.work/declination? declination?}))
+
+(def ^:private settled-states
+  #{:succeeded :owner-fixed :owner-declared-cant})
+
+(defn form-settlement
+  "One frozen form's exactly-one derived state at this database value."
+  {:malli/schema [:=> [:cat :any :seon.cluster.run.form/id]
+                  :seon.cluster.work/form-settlement]}
+  [db form-id]
+  (let [form (d/pull db '[*] [:seon.cluster.run.form/id form-id])
+        receipt (form-receipt db form)
+        owner-id (form-owner db form)
+        {:seon.cluster.work/keys [assignment? declination?]}
+        (assignment-facts db form receipt owner-id)
+        red? (and (terminal-receipt? receipt) (red-receipt? receipt))
+        artifact? (and red?
+                       (resume-artifact?
+                        db
+                        (form-run-id db form)
+                        (:seon.cluster.run.form/ordinal form)
+                        (boolean (:seon.cluster.eval/interrupted-at receipt))))
+        state (cond
+                (nil? receipt) :unevaluated
+                (not (terminal-receipt? receipt)) :running
+                declination? :owner-declared-cant
+                artifact? :unrouted-red
+                (and red? assignment?) :routed
+                red? :unrouted-red
+                assignment? :owner-fixed
+                :else :succeeded)]
+    (cond-> {:seon.cluster.run.form/id
+             (:seon.cluster.run.form/id form)
+             :seon.cluster.run.form/ordinal
+             (:seon.cluster.run.form/ordinal form)
+             :seon.cluster.agent/id owner-id
+             :seon.cluster.work/form-state state
+             :seon.cluster.work/settled? (contains? settled-states state)}
+      receipt
+      (assoc :seon.cluster.eval/id (:seon.cluster.eval/id receipt))
+      (:seon.problems/id receipt)
+      (assoc :seon.problems/id (:seon.problems/id receipt)))))
+
+(defn plan-settlement
+  "Every form state and whether all forms of `run-id` are settled."
+  {:malli/schema [:=> [:cat :any :seon.cluster.run/id]
+                  :seon.cluster.work/plan-settlement]}
+  [db run-id]
+  (let [form-ids
+        (d/q '[:find ?form-id ?ordinal
+               :in $ ?run-id
+               :where
+               [?run :seon.cluster.run/id ?run-id]
+               [?form :seon.cluster.run.form/run ?run]
+               [?form :seon.cluster.run.form/id ?form-id]
+               [?form :seon.cluster.run.form/ordinal ?ordinal]]
+             db run-id)
+        forms (mapv (fn [[form-id _]] (form-settlement db form-id))
+                    (sort-by second form-ids))]
+    {:seon.cluster.run/id run-id
+     :seon.cluster.work/forms forms
+     :seon.cluster.work/settled?
+     (every? :seon.cluster.work/settled? forms)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The derivations

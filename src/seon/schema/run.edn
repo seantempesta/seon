@@ -67,7 +67,12 @@
   [:seon.cluster.run.form/id :seon.cluster.run.form/id]
   [:seon.cluster.run.form/run :seon.cluster.run.form/run]
   [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
-  [:seon.cluster.run.form/source :seon.cluster.run.form/source]]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  ; Parse-time namespace-in-effect. Optional until the one reader's
+  ; plan-row integration lands; absence routes a red form to its author.
+  [:seon.cluster.run.form/ns
+   {:optional true}
+   :seon.cluster.run.form/ns]]
 
  ; The eval receipt entity. The optionals ARE the states — absence is
  ; the state, never a stored nil and never a status label: a running
@@ -87,10 +92,15 @@
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
   [:seon.cluster.eval/interrupted-at {:optional true}
    :seon.cluster.eval/interrupted-at]
+  ; An unambiguous agent-held identity for the derived problem. The
+  ; receipt and form identities intentionally share `[run ordinal]`, so
+  ; assignment resolution cannot use either string without ambiguity.
+  [:seon.problems/id {:optional true} :seon.problems/id]
   [:seon.error/kind {:optional true} :seon.error/kind]
   [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
 
  :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.run.form/ns :seon.db/ref
  :seon.cluster.run.form/ordinal [:int {:min 0}]
  :seon.cluster.run.form/run :seon.db/ref
  :seon.cluster.run.form/source [:string {:min 1}]}

@@ -46,6 +46,7 @@
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.error :as error]
+            [seon.problems :as problems]
             [seon.render :as render]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
@@ -726,12 +727,18 @@
                ran 0]
           (if skipped?
             (report :released ran)
-            (let [started (store/transact!
-                           connection
-                           (run/receipt-start-tx
-                            {:seon.cluster.run/id run-id
-                             :seon.cluster.eval/ordinal ordinal
-                             :seon.cluster.eval/at now}))]
+            (let [receipt-id (pr-str [run-id ordinal])
+                  problem-id (work/problem-id run-id ordinal)
+                  started
+                  (store/transact!
+                   connection
+                   (conj
+                    (run/receipt-start-tx
+                     {:seon.cluster.run/id run-id
+                      :seon.cluster.eval/ordinal ordinal
+                      :seon.cluster.eval/at now})
+                    [:db/add [:seon.cluster.eval/id receipt-id]
+                     :seon.problems/id problem-id]))]
             (if (refused! cluster started now
                           {:seon.cluster.agent/id agent-id
                            :seon.cluster.run/id run-id})
@@ -747,6 +754,12 @@
                                  (:seon.config.eval/time-limit-ms cluster)
                                  :seon.config/on-core-error
                                  (:seon.config/on-core-error cluster)})
+                    problem
+                    (problems/form-problem
+                     @connection
+                     {:seon.cluster.run/id run-id
+                      :seon.cluster.run.form/ordinal ordinal
+                      :seon.sci.eval/evaluation evaluation})
                     settled (disposition (:seon.sci.admit/value evaluation))
                     ;; THE SECOND AGENT-FACING VALUE, resolved against
                     ;; the same database value this receipt is about.
@@ -774,7 +787,9 @@
                                           :seon.cluster.agent/id agent-id}
                                    trigger
                                    (assoc :seon.cluster.message/trigger
-                                          trigger)))))
+                                          trigger))))
+                              (when problem
+                                (problems/assignment-value problem)))
                     delivery
                     (when asked
                       (message/delivery
@@ -808,19 +823,23 @@
                       (:seon.cluster.eval/result-edn evaluation)
                       (assoc :seon.cluster.eval/result-edn
                              (:seon.cluster.eval/result-edn evaluation))
-                      (:seon.cluster.eval/error evaluation)
+                      (or (:seon.cluster.eval/error evaluation)
+                          (:seon.cluster.eval/error problem))
                       (assoc :seon.cluster.eval/error
-                             (:seon.cluster.eval/error evaluation))
+                             (or (:seon.cluster.eval/error evaluation)
+                                 (:seon.cluster.eval/error problem)))
                       ;; the cut instant rides through as the one
                       ;; interrupted fact — presence is the state
                       (:seon.cluster.eval/interrupted-at evaluation)
                       (assoc :seon.cluster.eval/interrupted-at
                              (:seon.cluster.eval/interrupted-at evaluation))
-                      (:seon.error/kind
-                       (:seon.sci.admit/value evaluation))
+                      (or (:seon.error/kind
+                           (:seon.sci.admit/value evaluation))
+                          (:seon.error/kind problem))
                       (assoc :seon.error/kind
-                             (:seon.error/kind
-                              (:seon.sci.admit/value evaluation)))
+                             (or (:seon.error/kind
+                                  (:seon.sci.admit/value evaluation))
+                                 (:seon.error/kind problem)))
                       (:seon.cluster.eval/output evaluation)
                       (assoc :seon.cluster.eval/output
                              (:seon.cluster.eval/output evaluation))
