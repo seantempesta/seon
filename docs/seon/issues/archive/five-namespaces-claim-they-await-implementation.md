@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, docs, render, context]
 ---
@@ -46,3 +46,11 @@ Each namespace owns its own docstring.
   sealed the implementation lane fills the stubs" instruction to a lane that has
   already finished.
 - `rg 'awaits implementation' src/` returns nothing.
+
+## Resolution
+
+Resolved in the commit that archives this note. The five namespace
+docstrings now describe their implemented mechanisms without contract-draft,
+stub-filling, or `awaits implementation` claims. The render router's literal
+projection paragraph now also states its landed string/vector behavior.
+`rg 'awaits implementation' src/` returns no matches.

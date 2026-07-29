@@ -1,14 +1,6 @@
 (ns seon.cluster.export
   "Export: a self-contained copy of a store, re-identified to its new path.
 
-  CONTRACT LAYER (drafted + SEALED 2026-07-27, implemented green a35c95d0a — the
-  B2 rung, grounded in research/b2-plan-2026-07-27.md §0.8, §2.1-§2.4,
-  §5.6 and §9). Nothing here is implemented: every body throws
-  `awaits implementation`. Once sealed, the implementation lane fills
-  the stubs until test/seon/cluster/export_test.clj is green and may not
-  loosen a schema or a test. Friction is reported, never resolved by
-  weakening.
-
   The model:
 
   - Branch-per-cluster won the creation path (b2-plan §0), so clone is

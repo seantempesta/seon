@@ -2,11 +2,6 @@
   "THE ONE PROJECTION ROUTER. A map declares what it can become; this
   resolves and applies it.
 
-  CONTRACT LAYER (drafted 2026-07-27 for ORCHESTRATOR SEAL — step 1 of
-  the error-wiring order, from the owner's night direction generalizing
-  the projections concept). Nothing here is implemented: every body
-  throws `awaits implementation`.
-
   THE WHOLE MECHANISM, in one sentence: a UNIT is any map carrying, per
   OUTPUT KIND, the fully qualified symbol of the function that projects
   the unit into that kind, and `render` resolves the symbol and applies
@@ -54,13 +49,10 @@
   the no-hand-maintained-lists rule applied to the one place a registry
   would have been the obvious design.
 
-  NOT YET ADMISSIBLE, and named so the accretion is visible: ui.md also
-  allows an ai render to be a VERBATIM STRING rather than a symbol. That
-  is a literal projection, and folding it in is one `:or` in
-  `:seon.render/projection` plus one branch here (a non-symbol
-  declaration is its own output). It is deliberately out of step 1: N4
-  owns the block renders and should take that accretion with the ui.md
-  revision the seal writes.
+  LITERALS ARE DECLARATIONS. An AI render may be a verbatim string and
+  an HTML render may be a hiccup vector rather than a symbol.
+  `declaration?` admits those two narrow runtime shapes, and `render`
+  returns a non-symbol declaration as its own output.
 
   Crash walk: pure resolution plus one call. Nothing here opens,
   commits, or holds anything, so a kill during a render loses a value

@@ -1,10 +1,8 @@
 (ns seon.render.hiccup
   "Hiccup → an HTML string. The one serializer, and the one grammar.
 
-  CONTRACT LAYER (drafted 2026-07-27 for ORCHESTRATOR SEAL — N4 package
-  1). `hiccup?`, the generator and `raw` are REAL because the schema
-  gate resolves and runs them at load; every transform below throws
-  `awaits implementation`.
+  `hiccup?`, its generator, `raw`, and the transforms below implement
+  one total serializer over the admitted grammar.
 
   QUARRIED, NOT COPIED. `src-old/seon/ui/html.cljc` (353 lines) is a
   well-considered file and most of its decisions survive verbatim as

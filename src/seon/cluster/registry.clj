@@ -1,15 +1,6 @@
 (ns seon.cluster.registry
   "The registry: the ONE owner of branch lifecycle on a physical store.
 
-  CONTRACT LAYER (drafted + SEALED 2026-07-27, implemented green a35c95d0a — the
-  B2 rung, grounded in research/b2-plan-2026-07-27.md §0, §5 and §9;
-  every rule below carries file:line evidence there or in a committed
-  probe). Nothing here is implemented: every body throws
-  `awaits implementation`. Once the orchestrator seals it the
-  implementation lane fills the stubs until
-  test/seon/cluster/registry_test.clj is green, and may not loosen a
-  schema or a test. Friction is reported, never resolved by weakening.
-
   The model — BRANCH-PER-CLUSTER (b2-plan §0 verdict, owner-adopted):
 
   - One physical store per process root; a cluster is a BRANCH of it.

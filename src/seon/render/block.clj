@@ -1,9 +1,6 @@
 (ns seon.render.block
   "Blocks — the one mechanism behind every page and every prompt.
 
-  CONTRACT LAYER (drafted 2026-07-27 for ORCHESTRATOR SEAL — N4 package
-  1). Every body throws `awaits implementation`.
-
   THE OWNER'S RULING, 2026-07-27 night, is the whole design: the root
   interface \"is really just different context blocks that return
   :seon.render/ai and :seon.render/html\", so root and agent views are
