@@ -835,6 +835,14 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (16) FRESHNESS OUTRANKS CACHE (owner): "I'm okay with seon being a
+  weird system where we accept a larger amount of context churn in
+  exchange for always up to date information." Every turn derives ALL
+  context fresh from its one db copy — views are never frozen or
+  staled for cache stability; the churn-sorted ordering harvests
+  whatever prompt-cache hits exist but never gates freshness. The
+  experiment protocol (context-walk-experiment-protocol.md) runs
+  under this dial.
   (15) CHURN ORDERING CLARIFIED (owner): agent context is dynamically
   rendered, NEVER stored. The churn key is "has this piece changed
   since the last turn," measured by BYTE-IDENTICAL comparison of the
