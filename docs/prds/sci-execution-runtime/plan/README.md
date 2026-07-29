@@ -806,6 +806,15 @@ may reintroduce a shadow build into the dev feedback path.
   everything stays plain Clojure with sci interpreting untrusted
   code. Scheduling designs must not depend on a capability door that
   does not exist yet.
+  (10) PRIORITY ORDER (owner, planning session): RESTORE PREVIOUS
+  SYSTEM FUNCTIONALITY FIRST, by mining — "stop redoing the same
+  mistakes." Correctness attention: turn loop + settlement, boot +
+  store + config, reader + repair, in that spirit; the RENDER WALK IS
+  A DRAFT — whatever exists is not settled design, do not harden or
+  fence it with tests yet. io-metadata smart scheduling is real but
+  LOWER priority than correctness elsewhere. Schema-home decision
+  deferred to the config-aero mining's return. Helper re-armed
+  live 2026-07-29 (armer-step direct invocation, the boot idiom).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
