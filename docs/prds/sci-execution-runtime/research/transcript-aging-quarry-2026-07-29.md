@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [prd, agent, context, transcript, planning]
+tags: [prd, research, agent, context, quarry]
 ---
 
 # Transcript aging and `my.plan` quarry
