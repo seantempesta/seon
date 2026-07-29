@@ -50,14 +50,15 @@
     (Date/from (.get optional))))
 
 (defn- operator-command
-  [root name]
-  ["bb"
-   "--config" (str (io/file project-root "bb.edn"))
-   "--deps-root" (str project-root)
-   "--classpath" (str (io/file project-root "script"))
-   "-m" "seon.fresh-operator"
-   "--seon-root" (str root)
-   "stop" name])
+  [root & arguments]
+  (into
+   ["bb"
+    "--config" (str (io/file project-root "bb.edn"))
+    "--deps-root" (str project-root)
+    "--classpath" (str (io/file project-root "script"))
+    "-m" "seon.fresh-operator"
+    "--seon-root" (str root)]
+   arguments))
 
 (defn- child-environment
   [root]
@@ -138,7 +139,11 @@
           :seon.fresh-operator/config-path "config/sparse.edn"}
          (operator-private-value
           'parse-config-apply-arguments
-          ["beta" "config/sparse.edn"]))))
+          ["beta" "config/sparse.edn"])))
+  (is (= {:seon.fresh-operator/name "beta"
+          :seon.fresh-operator/force? true}
+         (operator-private-value
+          'parse-stop-arguments ["--force" "beta"]))))
 
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)
@@ -189,7 +194,7 @@
             process
             (.start
              (doto (ProcessBuilder.
-                    ^java.util.List (operator-command root name))
+                    ^java.util.List (operator-command root "stop" name))
                (.directory project-root)
                (.redirectErrorStream true)))
             completed? (.waitFor process 10 TimeUnit/SECONDS)
@@ -215,6 +220,74 @@
           (is (not= ::timeout stop-form))
           (is (str/includes? stop-form "seon.cluster/stop!"))
           (is child-stopped? "The fallback did not stop the advertised PID.")))
+      (finally
+        (.close server)
+        (deref served 1000 nil)
+        (when (.isAlive child)
+          (.destroyForcibly child)
+          (.waitFor child 10 TimeUnit/SECONDS))
+        (delete-recursively! root)))))
+
+(deftest eval-failure-refuses-to-sigterm-a-shared-jvm-without-force
+  (let [root (fresh-root)
+        name "shared-target"
+        sibling "shared-sibling"
+        child (start-disposable-process!)
+        server (ServerSocket.
+                0 1 (java.net.InetAddress/getLoopbackAddress))
+        received (promise)
+        served
+        (future
+          (with-open [socket (.accept server)
+                      reader (io/reader socket)
+                      writer (io/writer socket)]
+            (deliver received (.readLine ^java.io.BufferedReader reader))
+            (.write writer
+                    (str (pr-str {:tag :ret
+                                  :val "nil"
+                                  :exception true})
+                         "\n"))
+            (.flush writer)))]
+    (try
+      (let [start-instant (process-start-date child)
+            target-advertisement
+            {:seon.boot/cluster-name name
+             :seon.boot/pid (.pid child)
+             :seon.boot/start-instant start-instant
+             :seon.boot/prepl-host "127.0.0.1"
+             :seon.boot/prepl-port (.getLocalPort server)}
+            sibling-advertisement
+            (assoc target-advertisement
+                   :seon.boot/cluster-name sibling
+                   :seon.boot/prepl-port (inc (.getLocalPort server)))]
+        (doseq [[cluster advertisement]
+                [[name target-advertisement]
+                 [sibling sibling-advertisement]]]
+          (let [directory (io/file root "data" "clusters" cluster)]
+            (.mkdirs directory)
+            (spit (io/file directory "prepl.edn")
+                  (pr-str advertisement))))
+        (let [process
+              (.start
+               (doto
+                (ProcessBuilder.
+                 ^java.util.List (operator-command root "stop" name))
+                 (.directory project-root)
+                 (.redirectErrorStream true)))
+              completed? (.waitFor process 10 TimeUnit/SECONDS)
+              _ (when-not completed? (.destroyForcibly process))
+              output (slurp (.getInputStream process))
+              stop-form (deref received 10000 ::timeout)]
+          (is completed? "the refusal exceeded ten seconds")
+          (is (= 1 (when completed? (.exitValue process))) output)
+          (is (str/includes? output "Refusing SIGTERM for shared JVM")
+              output)
+          (is (str/includes? output sibling) output)
+          (is (str/includes? output (str "stop --force " name)) output)
+          (is (.isAlive child)
+              "the target and sibling process survived the refused fallback")
+          (is (not= ::timeout stop-form))
+          (is (str/includes? stop-form "seon.cluster/stop!"))))
       (finally
         (.close server)
         (deref served 1000 nil)

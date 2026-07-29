@@ -136,6 +136,32 @@
     {:seon.fresh-operator/name name
      :seon.fresh-operator/config-path path}))
 
+(defn- parse-stop-arguments
+  [arguments]
+  (loop [remaining (seq arguments)
+         selected {:seon.fresh-operator/force? false}]
+    (if-not remaining
+      selected
+      (let [argument (first remaining)]
+        (cond
+          (= "--force" argument)
+          (recur (next remaining)
+                 (assoc selected :seon.fresh-operator/force? true))
+
+          (str/starts-with? argument "--")
+          (fail! "Unknown stop option."
+                 {:seon.fresh-operator/argument argument})
+
+          (:seon.fresh-operator/name selected)
+          (fail! "Use `stop [--force] [NAME]`."
+                 {:seon.fresh-operator/arguments arguments})
+
+          :else
+          (recur (next remaining)
+                 (assoc selected
+                        :seon.fresh-operator/name
+                        (valid-name! argument))))))))
+
 (defn- sparse-manifest
   [root path]
   (let [selected (fs/path path)
@@ -549,35 +575,48 @@
         :absent))))
 
 (defn- sibling-names
-  [root pid]
+  [root pid target-name]
   (into []
         (comp
          (filter :seon.fresh-operator/alive?)
          (filter #(= pid
                      (get-in % [:seon.fresh-operator/advertisement
                                 :seon.boot/pid])))
+         (remove #(= target-name (:seon.fresh-operator/name %)))
          (map :seon.fresh-operator/name))
         (advertisement-rows root)))
 
 (defn- sigterm!
-  [root name ad reason]
+  [root name ad reason force?]
   (let [pid (:seon.boot/pid ad)
-        siblings (sibling-names root pid)
+        siblings (sibling-names root pid name)
         handle (java.lang.ProcessHandle/of (long pid))]
     (when-not (.isPresent handle)
       (fail! "The advertised process disappeared before SIGTERM."
              {:seon.fresh-operator/name name
               :seon.boot/pid pid}))
+    (when (and (seq siblings) (not force?))
+      (fail!
+       (str "Refusing SIGTERM for shared JVM pid " pid
+            "; sibling clusters would also stop: "
+            (str/join ", " siblings)
+            ". Escalate explicitly with `stop --force " name "`.")
+       {:seon.fresh-operator/name name
+        :seon.boot/pid pid
+        :seon.fresh-operator/siblings siblings
+        :seon.fresh-operator/force-command
+        (str "stop --force " name)}))
     (println (str "! prepl unavailable (" reason "); SIGTERM pid " pid
                   " affects shared-JVM clusters: "
-                  (str/join ", " siblings)))
+                  (str/join ", " (cons name siblings))))
     (.destroy ^java.lang.ProcessHandle (.get handle))
     (println (str "● " name " stop path=SIGTERM"))))
 
 (defn- stop-empty-jvm!
   [root advertisement]
   (let [pid (:seon.boot/pid advertisement)]
-    (when (empty? (sibling-names root pid))
+    (when (empty? (sibling-names root pid
+                                 (:seon.boot/cluster-name advertisement)))
       (when-let [handle
                  (let [optional (java.lang.ProcessHandle/of (long pid))]
                    (when (.isPresent optional) (.get optional)))]
@@ -593,16 +632,16 @@
 
 (defn- stop!
   [root arguments]
-  (when (> (count arguments) 1)
-    (fail! "Use `stop [NAME]`."
-           {:seon.fresh-operator/arguments arguments}))
-  (let [name (selected-name root (first arguments))
+  (let [{requested-name :seon.fresh-operator/name
+         force? :seon.fresh-operator/force?}
+        (parse-stop-arguments arguments)
+        name (selected-name root requested-name)
         ad (require-advertisement! root name)
         events
         (try
           (prepl-eval! ad (stop-form name))
           (catch Throwable error
-            (sigterm! root name ad (ex-message error))
+            (sigterm! root name ad (ex-message error) force?)
             nil))]
     (when events
       (let [value (terminal-value events)]
@@ -646,7 +685,8 @@
     "                 reconcile one live cluster; absent cluster means default\n"
     "  status         list every advertisement and derived liveness\n"
     "  open [NAME]    open the advertised web URL\n"
-    "  stop [NAME]    stop the cluster through its advertised prepl\n"
+    "  stop [--force] [NAME]\n"
+    "                 stop through prepl; force permits shared-JVM SIGTERM\n"
     "  logs [NAME]    show the cluster log\n")))
 
 (defn -main
