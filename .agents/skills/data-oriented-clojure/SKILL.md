@@ -55,11 +55,13 @@ effective, and database-entity composites from the leaf registrations.
 a second dial roster (`src/seon/schema/edn.clj:87-111`;
 `src/seon/config.cljc:137-229`).
 
-**Selective corpus admission:** only durable declarations become program-graph
-rows — contracted functions (`defn` with `:malli/schema`), schema registrations,
-and tests. Arbitrary evals, scratch defs, and atoms are process-local. Receipts
-retain history but never reconstruct code. `src/seon/fn.clj` is the computed
-selection (`src/seon/fn.clj:11-70`).
+**The complete source graph and selective runtime publication are different
+admission domains:** source indexing records every `defn` and `defn-`, including
+private and uncontracted helpers, because call reachability cannot cross a
+missing node (`src/seon/fn.clj:21-48,68-125`). Agent runtime publication admits
+only fully contracted functions, plus schema and test declarations
+(`src/seon/sci/eval.clj:321-347`). Arbitrary evals, scratch defs, and atoms are
+process-local. Receipts retain history but never reconstruct code.
 
 ## The reflexes, and what to write instead
 

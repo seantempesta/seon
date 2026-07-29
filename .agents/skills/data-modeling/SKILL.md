@@ -231,13 +231,16 @@ every loaded public var carrying `:malli/schema` in development, with no
 namespace allow list. Tests and generators still prove the contract rather
 than relying only on runtime checks.
 
-### Selective corpus admission
+### Source-graph completeness and runtime admission
 
-Only durable declarations enter the program graph: contracted functions
-(`defn` carrying `:malli/schema`), schema registrations, and tests. Arbitrary
-evals, scratch defs, and atoms remain context-local and die with the process;
-receipts preserve history but never reconstruct code. `src/seon/fn.clj` applies
-this as a computed selection, not a durability flag.
+Source indexing records every `defn` and `defn-`, including private and
+uncontracted helpers, so workload and call reachability never stop at a missing
+node (`src/seon/fn.clj:21-48,68-125`). Runtime publication is deliberately
+stricter: an agent-authored function needs a complete Malli contract, while
+schema and test declarations use their own admitted row shapes
+(`src/seon/sci/eval.clj:321-347`). Arbitrary evals, scratch defs, and atoms
+remain context-local; receipts preserve history but never reconstruct code.
+This distinction is producer admission, never a stored durability flag.
 
 ## The schema IS the generator — generative testing
 

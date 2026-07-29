@@ -194,13 +194,15 @@ A config attribute is declared once in `resources/seon/schema/*.edn`.
 three composite maps or a second dial roster. `config/default.edn` is the
 complete shipped decision document; it is data, not another schema list.
 
-### Corpus admission is selective
+### Source indexing and runtime publication have explicit admission
 
-Only durable declarations become program-graph rows: contracted functions
-(`defn` carrying `:malli/schema`), schema registrations, and tests. Arbitrary
-evals, scratch defs, and atoms remain process-local. Receipts preserve history
-but never reconstruct code. `src/seon/fn.clj` computes this selection; never
-add a stored durability flag.
+Source indexing records every `defn` and `defn-`, including private and
+uncontracted helpers, because graph reachability cannot traverse a missing row
+(`src/seon/fn.clj:21-48,68-125`). Runtime publication admits only fully
+contracted agent-authored functions, plus admitted schema and test declarations
+(`src/seon/sci/eval.clj:321-347`). Arbitrary evals, scratch defs, and atoms
+remain process-local. Receipts preserve history but never reconstruct code.
+Never turn this producer policy into a stored durability flag.
 
 ### Bridge derivation (live-verified)
 
@@ -468,7 +470,8 @@ sanctioned alternative to polling or a tuned timeout.
 | `src/seon/schema/datahike.cljc` | the Malli→Datahike bridge (extend it here) |
 | `src/seon/cluster/run.cljc` | EXEMPLAR: identity, refs, in-transaction transitions |
 | `test/seon/cluster/run_test.clj` | the fixture + how to assert commit and refusal |
-| `src/seon/fn.clj` | selective corpus rows: contracted fns, schemas, tests |
+| `src/seon/fn.clj` | complete source graph: all functions, schemas, tests |
+| `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 

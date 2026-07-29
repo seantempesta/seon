@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: friction
+severity: blocker
 tags: [issue, sci, program-graph, testing]
 ---
 
@@ -17,6 +17,16 @@ FUNCTIONS only. `seon.sci.eval/program-row` publishes three shapes
 agent evaluating a `seon.schema/register!` or a `deftest` through the turn path
 and asserts the resulting row. A proof that exists only in a lane transcript
 counts as not covered.
+
+Six-generation git archaeology established that this is not merely a missing
+test. `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
+`seon.cluster.run/program-row-tx` independently restate the declaration-row
+contract. The resulting drift is live: runtime schemas persist unevaluated
+syntax, tests are committed but never materialized or acquired, `ns-unmap`
+deletes only function identities, and one database's schema projection replaces
+process-global state used by every cluster. The evidence and historical
+precedents are recorded in
+`docs/prds/sci-execution-runtime/research/registration-archaeology-2026-07-29.md`.
 
 ## Evidence
 
@@ -102,9 +112,21 @@ files were protected during the indexer fix that produced this note.
 
 ## Acceptance
 
-One recurring test drives an agent evaluating a `seon.schema/register!` and a
-`deftest` through the real turn path and asserts the committed
-`:seon.schema/key` and `:seon.test/sym` rows with their `:seon.ns` refs, plus a
-negative case proving neither shape appears for uncontracted code. The build
-and eval admission gates for a `:seon.fn` row are reconciled to one stated
-rule.
+One shared pure owner defines canonical identities, owned attributes, row
+construction, exact replacement, and typed deletion for functions, schemas,
+and tests. Build and runtime call it after their explicit producer admission:
+build indexes every function; runtime publishes only fully contracted
+functions. No transaction owner restates that contract.
+
+The recurring proof matrix then establishes:
+
+- build/runtime canonical row parity over their shared admitted domain;
+- evaluated, canonical schema values rather than reader syntax, with failed
+  registration leaving neither a row nor staged state;
+- exact function/schema/test redefinition and stale source reconciliation;
+- `ns-unmap` removing both function and test identities;
+- installation from the successful terminal transaction report's exact
+  `db-after`, never from receipts or a pre-commit runtime mutation;
+- current function, schema, and test materialization after cluster reopen; and
+- two incompatible cluster projections alternating in one JVM without global
+  registry bleed.
