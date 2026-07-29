@@ -43,6 +43,39 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**COMPACTION HANDOFF v2 (2026-07-29 midday — supersedes v1 below).**
+THE VERIFICATION HAPPENED: the owner answered the how-it-works check.
+His reply is recorded VERBATIM-HEAVY in plan/README.md "Rulings
+2026-07-29 late morning" — READ IT FIRST; it is next session's charter:
+(1) agent MODES (chat vs goal-seeking program-call with limited turns;
+goal = schema'd return or TEST-BASED: the namespace's tests all pass —
+this SUPERSEDES the owner-fixed recommendation and answers
+goal-completion); (2) context = MOSTLY TRANSCRIPT with age-varying
+detail (blocks survive only as static scaffold: system message, REPL
+instructions, AGENTS.md); (3) routed problems carry arbitrary context
+(planner's markdown description); context renders in PARALLEL, sorted
+by change timestamp (stable first, churn last) for caching; (4) root
+uses the same context system + full-system view + BATCHED error wakes
+(all queued errors = one wake; stop alarms, diagnose in-session);
+(5) thinking budgets PER CALL (planner hard, repairers minimal,
+no-thinking fast-local enables one-form-at-a-time repl style);
+(6) from-less-outside is FRAGILE — modes replace message hacks.
+LANES RUNNING: noise-fixes (helper lens nil-overrides + S8 routing
+scope; helper is DISARMED on default until it lands);
+dial-authority-fix (owner-scheduled, analyze-then-derive);
+transcript-aging-quarry (+ my.plan status: NEVER ported — document).
+LANE RULES: chunked mode always (<5min slices), never stack resumes,
+big sessions relaunch fresh, one model server (Ollama, shared).
+DEFAULT CLUSTER: live on 7994, Ollama via facts (max-tokens 32768 —
+tighten per load table: thinking=99.24% of tokens, ~4 turns/min@10ag),
+message bar + transcript live. The /goal Stop hook evaluates
+retroactively and loops — the owner may clear it; do not fight it.
+GATE ~481/2042/0+. The FRAMED QUEUE below stands; the owner's
+verification flags are RESOLVED by his reply (routing scope: S8
+confirmed by his generate-code enthusiasm + problems-with-context;
+owner-fixed: superseded by test-based goals; root context: same
+system + root-specific, ruled).
+
 **COMPACTION HANDOFF (2026-07-29 morning — read FIRST).** The owner is
 PRESENT and was given a how-the-system-works explanation to verify
 (the successor should NOT redo it — ask for the verdict): three
