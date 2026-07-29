@@ -104,6 +104,31 @@
         "the registered default retains eight values without caller config")
     (is (str/includes? output "partial view of vector 20 items"))))
 
+(deftest applied-config-changes-the-next-database-backed-render
+  (test-support/with-database
+    (fn [connection]
+      (let [cluster-name "value-renderer-live-config"
+            raw (vec (range 20))
+            apply-cap!
+            (fn [maximum]
+              (config/apply!
+               {:seon.config/connection connection
+                :seon.boot/cluster-name cluster-name
+                :seon.config/manifest
+                {:seon.config.eval.result/max-collection maximum}}))
+            shown-count
+            (fn []
+              (count
+               (:seon.render.value/shown
+                (:seon.render.value/tree
+                 (value/prepare {:seon.db/db @connection
+                                 :seon.render/value raw})))))]
+        (apply-cap! 3)
+        (is (= 3 (shown-count)))
+        (apply-cap! 6)
+        (is (= 6 (shown-count))
+            "the next immutable database value changes caps without restart")))))
+
 (deftest small-values-preserve-their-structure
   (is (= [1 2 3]
          (:seon.render.value/shown

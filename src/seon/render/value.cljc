@@ -23,11 +23,14 @@
   port. `seon.render.walk` remains untouched.
 
   Presentation defaults are registrations in `schema/render_value.edn`.
-  Calls may narrow them through `:seon.render.value/options`; admission config
-  caps supplied on a unit remain hard maxima. Nothing here opens resources or
-  writes facts."
+  Calls may narrow them through `:seon.render.value/options`; a database-backed
+  unit derives admission's hard maxima from that same database value. Pure
+  database-free calls may supply effective config or caps explicitly and
+  otherwise use only the registered presentation defaults. Nothing here opens
+  resources or writes facts."
   (:require [clojure.set :as set]
             [clojure.string :as str]
+            [datahike.api :as d]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -40,9 +43,6 @@
 ;;; ---------------------------------------------------------------------------
 
 #?(:clj (schema.edn/load! {}))
-
-(def ^:private default-effective
-  (delay (config/defaults)))
 
 (defn- registered-option-defaults
   []
@@ -73,8 +73,7 @@
 
 (defn- presentation-options
   [effective caps overrides]
-  (let [effective (merge @default-effective effective)
-        defaults @default-options
+  (let [defaults @default-options
         requested
         (reduce-kv
          (fn [result key configured]
@@ -98,15 +97,50 @@
      requested
      admission-maxima)))
 
+(defn- database-effective
+  [db]
+  (let [clusters
+        (into
+         (sorted-set)
+         (d/q '[:find [?cluster ...]
+                :where [_ :seon.config/cluster ?cluster]]
+              db))]
+    (when-not (= 1 (count clusters))
+      (throw
+       (ex-info
+        "A database-backed render needs exactly one cluster config row."
+        {:seon.error/kind :core-bug
+         ::rule ::single-cluster-config
+         :seon.config/clusters clusters})))
+    (let [effective (config/effective db (first clusters))]
+      (when-not
+        (schema/valid-candidate-value? :seon.config/effective effective)
+        (throw
+         (ex-info
+          "A database-backed render needs a complete effective config row."
+          {:seon.error/kind :core-bug
+           ::rule ::complete-effective-config
+           :seon.schema/explanation
+           (schema/explain-candidate-value
+            :seon.config/effective effective)})))
+      effective)))
+
+(defn- unit-effective
+  [unit]
+  (if-some [db (:seon.db/db unit)]
+    (database-effective db)
+    (or (:seon.config/effective unit) {})))
+
 (defn- unit-value
   [unit]
   (get unit :seon.render/value unit))
 
 (defn- unit-options
-  [unit]
+  [unit effective]
   (presentation-options
-   (:seon.config/effective unit)
-   (:seon.sci.admit/caps unit)
+   effective
+   (when-not (:seon.db/db unit)
+     (:seon.sci.admit/caps unit))
    (:seon.render.value/options unit)))
 
 (defn- bounded-pr-str
@@ -759,8 +793,8 @@
                   :seon.render.value/projection]}
   [unit]
   (let [raw (unit-value unit)
-        options (unit-options unit)
-        effective (merge @default-effective (:seon.config/effective unit))
+        effective (unit-effective unit)
+        options (unit-options unit effective)
         skeleton (sample effective raw options)
         incomplete? (truncated? skeleton)
         statuses (schema-statuses raw incomplete?)]
