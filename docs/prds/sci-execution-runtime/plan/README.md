@@ -535,14 +535,14 @@ may reintroduce a shadow build into the dev feedback path.
   **Ruling 2026-07-28 post-midnight (owner, conversational — DISTANCE
   AND SIGNALS):** (1) the neighborhood view needs NO new noun: the ONE
   render request gains :seon.render/distance (optional, default 1) —
-  how many hops of the care-graph to render, each hop by its owner'''s
+  how many hops of the care-graph to render, each hop by its owner's
   lens, overridable at any point; representation is the request
-  parameter, never a new kind (consistent with the N5 plan'''s hop
+  parameter, never a new kind (consistent with the N5 plan's hop
   ruling). (2) CONTEXT CREATION converges on this mechanism: static
-  context blocks shrink toward the system-message scaffold; an agent'''s
+  context blocks shrink toward the system-message scaffold; an agent's
   context is increasingly "render my namespace at distance N" —
   staged: entity-graph distance now, code-graph distance at N5, via
-  the sealed contract'''s derived-membership half. (3) THE NETWORK
+  the sealed contract's derived-membership half. (3) THE NETWORK
   EFFECT: namespaces curate their renders/docstrings/performance from
   DERIVED USAGE SIGNALS in their own context — error-rate-by-caller on
   my fns, latency-by-call-site, unused-but-relevant (data matching my
@@ -555,29 +555,29 @@ may reintroduce a shadow build into the dev feedback path.
   **Ruling 2026-07-28 post-midnight #2 (owner, verbatim): "I want to
   try building up the WHOLE render system this way. Namespace and
   distance centric context for agents."** This is the organizing
-  principle, not a feature: an agent'''s context IS render(its
-  namespace, distance N) — every hop by its owner'''s lens,
+  principle, not a feature: an agent's context IS render(its
+  namespace, distance N) — every hop by its owner's lens,
   redirectable at any slot, distance implied 1. The call convention:
   distance is an argument TO the renderer (never a property of it);
-  opting deeper is the renderer'''s compositional act — delegate
+  opting deeper is the renderer's compositional act — delegate
   neighbors to THEIR renderers through the one router, expansion
   decrements per hop, distance 0 = name only; a slot may carry an
   explicit projection symbol (the override point), captured in
   provenance like every projection choice. Static context blocks
   shrink to the scaffold (system message, basics). The N5 plan
   re-centers on this at its post-falsification revision; the PILOT —
-  one agent'''s prompt derived as its namespace view at entity-graph
+  one agent's prompt derived as its namespace view at entity-graph
   distance — dispatches when the distance accretion lands.
   **Ruling 2026-07-28 post-midnight #3 (owner — override resolution +
   code is the floor):** per-slot renderer resolution, most-specific
   first: (1) explicit slot redirect by the delegating renderer; (2)
-  the VIEWER'''s local override for the data type — and the viewer is
+  the VIEWER's local override for the data type — and the viewer is
   constant through the whole walk (hop 3 renders through the original
-  agent'''s overrides; perspective never silently shifts to
-  intermediate namespaces); (3) the owning namespace'''s default; (4)
-  the floor: code/data panels — "code is a good fallback as it'''s the
+  agent's overrides; perspective never silently shifts to
+  intermediate namespaces); (3) the owning namespace's default; (4)
+  the floor: code/data panels — "code is a good fallback as it's the
   truth of the system." A NAMESPACE is itself a rendered data type:
-  default = the quarry'''s namespace context render (signatures +
+  default = the quarry's namespace context render (signatures +
   docstrings, bodies by budget — mine it, never reinvent);
   distance 1 = signatures+docstrings, deeper = bodies, 0 = the name.
   Mostly this is about writing REALLY GOOD DEFAULT RENDERERS;
@@ -585,7 +585,7 @@ may reintroduce a shadow build into the dev feedback path.
   provenance-captured.
   **The bar (owner, closing the 2026-07-28 design night): "an elegant
   solution that is obvious to agents because the concept is so simple.
-  It'''s just data in and out. Write a new function to change it."**
+  It's just data in and out. Write a new function to change it."**
   This is the GRADUATION CRITERION for the pilot and N5: a fresh agent,
   told one sentence, changes what it sees by writing one defn — no
   registration ceremony, no API to learn. Evaluate it as an agent eval
@@ -596,7 +596,7 @@ may reintroduce a shadow build into the dev feedback path.
   read; no function anywhere identifies its own distance or gains a
   new argument/annotation. Discovery uses only metadata durable defns
   already carry. ALL machinery lives in dedicated namespaces: the
-  traversal in seon.render.walk (clojure.walk'''s vocabulary —
+  traversal in seon.render.walk (clojure.walk's vocabulary —
   "care-graph" is retired as coinage), explanation in seon.data, the
   router the one entry. A design element requiring edits outside the
   render family + seon.data + schema EDN + the N5 indexer is
@@ -606,13 +606,13 @@ may reintroduce a shadow build into the dev feedback path.
   eligibility = registered input schema name + public + same-namespace
   duplicates refuse (cross-namespace same-signature = DIFFERENT renders,
   possibly distance-differentiated — never duplicates). Precedence by
-  SPECIFICITY: slot redirect → viewer'''s own defn → owner'''s defn →
+  SPECIFICITY: slot redirect → viewer's own defn → owner's defn →
   schema-attached default (general, optional) → the generic floor.
   Function contracts/docstrings/tests are corpus facts by construction
   (not a separate decision); the corpus updates at INDEX time and
   DYNAMICALLY at eval. Ambiguous bare values: no refusal — cheap schema
   FINGERPRINTING upgrades confident matches, the generic floor takes
-  the rest. The competent generic walker ALREADY EXISTS: seon.sci.admit'''s
+  the rest. The competent generic walker ALREADY EXISTS: seon.sci.admit's
   bounded projection (the eval-result renderer) — the panel layers
   presentation over it, no second walker. seon.data = brains
   (census/fingerprint/explain), render family = floor. MESSAGE DELIVERY
@@ -631,36 +631,36 @@ may reintroduce a shadow build into the dev feedback path.
   **Rulings 2026-07-29 (owner, batch 3):** AGENT BIRTH: every created
   agent is seeded with the distance-based namespace view — own
   namespace in full, required namespaces partial, exactly the old
-  namespace-context renderer'''s shape reconceived under distance —
+  namespace-context renderer's shape reconceived under distance —
   plus system instructions and the scaffold; default renderers for all
   namespaces, overridden and improved as we go (quarry the old
-  namespace renderer BEFORE building — the owner: "there'''s good
-  stuff in there"). FACTS LINK: an agent row'''s facts link opens the
-  /data drill rooted at THAT AGENT'''S ENTITY, drillable; the schema
-  vocabulary stays on /data'''s front page.
+  namespace renderer BEFORE building — the owner: "there's good
+  stuff in there"). FACTS LINK: an agent row's facts link opens the
+  /data drill rooted at THAT AGENT'S ENTITY, drillable; the schema
+  vocabulary stays on /data's front page.
   **Rulings 2026-07-29 (owner, batch 4):** (1) FOLD/DELEGATION
   SEMANTICS (supersedes stop-at-first-red): a failed form belongs to a
-  NAMESPACE — its owner agent is tasked FIRST, carrying the planner'''s
-  context; only an owner'''s explicit can'''t-fix makes it FAIL to the
+  NAMESPACE — its owner agent is tasked FIRST, carrying the planner's
+  context; only an owner's explicit can't-fix makes it FAIL to the
   planner. Successes and owner-fixed parts simply land; the planner
   sees results (diffs). The fold continues per-form; every red form is
   a routed problem, never a silent continue and never a global abort;
   completion = all forms settled (succeeded | owner-fixed |
-  owner-declared-can'''t). (2) NAMESPACE ATTRIBUTION IS PARSE-TIME,
+  owner-declared-can't). (2) NAMESPACE ATTRIBUTION IS PARSE-TIME,
   REPL SEMANTICS (D8): the parser associates forms with the namespace
   in effect exactly like a REPL paste of (ns a)(defn x)(ns b)(defn y)
-  — the old parser did this; the ONE reader'''s per-event
-  namespace-in-effect IS this mechanism. E1'''s receipt fact records
+  — the old parser did this; the ONE reader's per-event
+  namespace-in-effect IS this mechanism. E1's receipt fact records
   evaluation truth as the complement; disagreement between the two is
   a detectable anomaly, not a design choice. (3) UI slice 3 SEALED as
   redesigned: closed authored-hiccup grammar ordered before the sole
   action-emitting rewrite; REFUSAL not sanitizing (owner-flagged
   divergence accepted — stripping is symptom-side containment).
-  **Ruling 2026-07-29 (owner, D10): can'''t-fix is a STRUCTURED REPLY,
+  **Ruling 2026-07-29 (owner, D10): can't-fix is a STRUCTURED REPLY,
   no new disposition.** The two-disposition seal stands: an owner
   agent that cannot fix a routed problem simply COMPLETES, and its
-  reply is a registered schema'''d value (which problem + why); the
-  planner'''s settlement derivation reads the reply'''s shape. One new
+  reply is a registered schema'd value (which problem + why); the
+  planner's settlement derivation reads the reply's shape. One new
   value schema, zero new lifecycle.
   **Ruling 2026-07-29 (owner): the project LOCAL model server is
   OLLAMA** — 127.0.0.1:11434, qwen3.5:35b-a3b-coding-nvfp4, no-auth
@@ -690,15 +690,15 @@ may reintroduce a shadow build into the dev feedback path.
   messages can set up the planning system — my.plan was NEVER ported
   (quarry only); the v0 planner works via plain messages.
   (2) CONTEXT IS MOSTLY TRANSCRIPT: "the blocks were too rigid... I
-  was hand coding each agent'''s context which just wasn'''t going to
+  was hand coding each agent's context which just wasn't going to
   scale." Blocks SURVIVE for static scaffold only (system message,
-  REPL instructions, AGENTS.md loading). The agent'''s context is
+  REPL instructions, AGENTS.md loading). The agent's context is
   mostly its transcript — DIG UP the previous transcript work ("it
   changed the amount of detail stored over time and aged old items
-  out"). Next session'''s focus.
+  out"). Next session's focus.
   (3) CONTEXT ORDERING FOR CACHING: routed problems carry ARBITRARY
-  CONTEXT (the planner'''s original markdown problem description,
-  instructions) + the owner'''s dynamic context; "context can be
+  CONTEXT (the planner's original markdown problem description,
+  instructions) + the owner's dynamic context; "context can be
   rendered in parallel and then sorted by change timestamp so we can
   have more context caching — the parts that change more flow to the
   end" (transcript last). Designing this for generate-code designs it
