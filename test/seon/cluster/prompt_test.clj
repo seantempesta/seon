@@ -44,12 +44,15 @@
    {:seon.render.block/name :peers :seon.render.block/band :anchor
     :seon.render.block/priority 20
     :seon.render/ai 'seon.context/peers-ai}
-   {:seon.render.block/name :interruption :seon.render.block/band :continuity
-    :seon.render.block/priority 30
-    :seon.render/ai 'seon.context/interruption-ai}
-   {:seon.render.block/name :continuity :seon.render.block/band :continuity
-    :seon.render.block/priority 40
-    :seon.render/ai 'seon.context/continuity-ai}
+   ;; THE NEIGHBOURHOOD VIEW replaces the retired `:interruption` and
+   ;; `:continuity` blocks (owner ruling 2026-07-28 post-midnight #2:
+   ;; static context blocks shrink toward the scaffold). Every
+   ;; behavioural class below is unchanged and now proves the SURVIVING
+   ;; mechanism — the run and receipt family lenses, reached by walking
+   ;; the agent's own connections.
+   {:seon.render.block/name :namespace :seon.render.block/band :dynamic
+    :seon.render.block/priority 80
+    :seon.render/ai 'seon.render.agent/namespace-ai}
    {:seon.render.block/name :trigger :seon.render.block/band :dynamic
     :seon.render.block/priority 90
     :seon.render/ai 'seon.context/trigger-ai}])
@@ -309,7 +312,8 @@
       (let [text (text-of connection)]
         (is (str/includes? text "asked bob for the prime count for the human")
             "the note my.run/wait promised the agent's next prompt")
-        (is (str/includes? text "You paused your previous run")))))
+        (is (str/includes? text "It paused, leaving this note")
+            "the run's own lens, one hop from the agent"))))
 
   (testing "a previous run that COMPLETED leaves no pause note"
     (with-database
@@ -329,7 +333,7 @@
            (pr-str {:my.run/disposition :completed
                     :my.run/result "done"})}])
         (open-run! connection)
-        (is (not (str/includes? (text-of connection) "You paused"))))))
+        (is (not (str/includes? (text-of connection) "It paused"))))))
 
   (testing "and unreadable result-edn answers nil rather than taking the turn down"
     (with-database

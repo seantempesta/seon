@@ -2,7 +2,16 @@
   "The compiled core AI projections, and the pre-provider capture.
 
   THE PROMPT'S PROSE LIVES HERE NOW, one named block projection per
-  piece (context-blocks contract §3.5, sealed 2026-07-28).
+  piece (context-blocks contract §3.5, sealed 2026-07-28) — and it is
+  SHRINKING TOWARD THE SCAFFOLD, which is the 2026-07-28 post-midnight
+  ruling working as intended. What survives here says what an agent
+  cannot see by looking: who it is, how its reply is evaluated, who its
+  peers are, which message this run answers. What LEFT — `interruption-ai`
+  and `continuity-ai` — restated neighbourhood facts, and now lives in
+  the lenses of the families that own those facts
+  (`seon.cluster.run/render-ai`, `render-receipt-ai`), where a page, a
+  debug view and another agent's neighbourhood are told the same true
+  thing by the same function instead of only the prompt.
   `seon.cluster.prompt` keeps only selection, validation, ordered
   reduction and the returned rendered-context value; every sentence it
   used to own is a block whose stored `:seon.render/ai` symbol points
@@ -32,12 +41,10 @@
   no attempt, a plain interrupted run; kill between capture and attempt
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
-            [seon.cluster.run :as run]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]))
@@ -138,117 +145,6 @@
           (if sender
             (str "Agent " sender " sent you:\n\n" content)
             (str "You have been asked:\n\n" content)))))))
-
-(defn- previous-run
-  "The agent's most recent run OTHER than the one being planned, or nil.
-  The warning is about the LAST run, not any run: an agent cut once,
-  recovered, and working for a week is not still interrupted.
-
-  EXCLUDING THE RUN BEING PLANNED is the whole correction, and it was
-  measured rather than reasoned: the loop CLAIMS BEFORE it calls the
-  model, so by the time a prompt is derived the agent's newest run is
-  the one this prompt is for. The run being planned is exactly the one
-  the agent POINTER names, so excluding that leaves the run the warning
-  is actually about. When no run is open nothing is excluded and the
-  newest run is the previous one — the same answer by the same rule."
-  [db agent-id]
-  (let [current (d/q '[:find ?id .
-                       :in $ ?agent-id
-                       :where
-                       [?agent :seon.cluster.agent/id ?agent-id]
-                       [?agent :seon.cluster.agent/run ?run]
-                       [?run :seon.cluster.run/id ?id]]
-                     db agent-id)]
-    (->> (d/q '[:find [(pull ?run [*]) ...]
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?run :seon.cluster.run/agent ?agent]]
-              db agent-id)
-         (remove #(= current (:seon.cluster.run/id %)))
-         (sort-by #(inst-ms (:seon.cluster.run/opened-at %)))
-         last)))
-
-(defn- run-receipts
-  [db run-id]
-  (d/q '[:find [(pull ?receipt [*]) ...]
-         :in $ ?run-id
-         :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?receipt :seon.cluster.eval/run ?run]]
-       db run-id))
-
-(defn- run-forms
-  [db run-id]
-  (d/q '[:find [(pull ?form [*]) ...]
-         :in $ ?run-id
-         :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?form :seon.cluster.run.form/run ?run]]
-       db run-id))
-
-(defn interruption-ai
-  "The ONE warning sentence when a prior run was cut; nil when clean.
-
-  PRESENCE READS ONLY (the sealed presence model): a cut fold is
-  derived from forms and receipts (`run/interrupted-warning` —
-  `result-edn`/`error` presence, `interrupted-at`), a lost model call
-  from the settled run's own shape (no plan, closed), a failed turn
-  from `:seon.cluster.run/error`. Both crash shapes say MAY, because
-  rows 6 and 7 of the crash walk are indistinguishable from the facts
-  and a confident claim would be a lie the agent then reasons from."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (let [db (get unit :seon.db/db)
-        agent-id (get unit :seon.cluster.agent/id)]
-    (when-let [previous (previous-run db agent-id)]
-      (let [run-id (:seon.cluster.run/id previous)]
-        (if-let [cut (run/interrupted-warning (run-forms db run-id)
-                                              (run-receipts db run-id))]
-          (str "Your previous run was interrupted at form "
-               (:seon.cluster.eval/ordinal cut)
-               ". That form's effect may have happened; "
-               (:seon.cluster.run/missing-results cut)
-               " result(s) are missing. Nothing was retried — adapt from here.")
-          ;; no receipts to derive from: the run was cut before its plan
-          ;; existed, so the model call was lost and nothing re-called it
-          (cond
-            ;; the turn failed for a reason we recorded — say the reason
-            (:seon.cluster.run/error previous)
-            (str "Your previous request did not run: "
-                 (:seon.cluster.run/error previous)
-                 " Nothing was retried, and nothing you asked for ran.")
-
-            (and (nil? (:seon.cluster.run/plan-digest previous))
-                 (some? (:seon.cluster.run/closed-at previous)))
-            (str "Your previous request was interrupted before you replied, "
-                 "and nothing was retried. Nothing you asked for ran.")))))))
-
-(defn continuity-ai
-  "The note the agent left itself when it paused, or nil.
-
-  CONTINUITY WITH NO MEMORY RUNG: the disposition IS the last form's
-  admitted value, so the note is already durable in that form's
-  `result-edn`, and this reads it back as a `my.run/wait` value. Total
-  by construction: unreadable EDN, a value that is not a wait, and a
-  run with no receipts all answer nil, because a prompt that threw
-  would take the turn down with it."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (let [db (get unit :seon.db/db)
-        agent-id (get unit :seon.cluster.agent/id)]
-    (when-let [previous (previous-run db agent-id)]
-      (let [last-value
-            (some->> (run-receipts db (:seon.cluster.run/id previous))
-                     (sort-by :seon.cluster.eval/ordinal)
-                     last
-                     :seon.cluster.eval/result-edn
-                     (#(try (edn/read-string %)
-                            (catch Throwable _ nil))))]
-        (when (and (map? last-value)
-                   (= :wait (:my.run/disposition last-value)))
-          (str "You paused your previous run, leaving yourself this note: "
-               (:my.run/note last-value)))))))
 
 (defn execution-ai
   "The reply grammar: how this agent's answer is evaluated, and the

@@ -89,12 +89,12 @@
    {:seon.render.block/name :peers :seon.render.block/band :anchor
     :seon.render.block/priority 20
     :seon.render/ai 'seon.context/peers-ai}
-   {:seon.render.block/name :interruption :seon.render.block/band :continuity
-    :seon.render.block/priority 30
-    :seon.render/ai 'seon.context/interruption-ai}
-   {:seon.render.block/name :continuity :seon.render.block/band :continuity
-    :seon.render.block/priority 40
-    :seon.render/ai 'seon.context/continuity-ai}
+   ;; the neighbourhood view, which retired `:interruption` and
+   ;; `:continuity` — their doctrine now lives in the run and receipt
+   ;; family lenses
+   {:seon.render.block/name :namespace :seon.render.block/band :dynamic
+    :seon.render.block/priority 80
+    :seon.render/ai 'seon.render.agent/namespace-ai}
    {:seon.render.block/name :trigger :seon.render.block/band :dynamic
     :seon.render.block/priority 90
     :seon.render/ai 'seon.context/trigger-ai}])
@@ -1225,9 +1225,21 @@
           (is (str/includes? prompt-text "count the widgets")
               "the provider request carries the trigger the run OPENED
                on — the run's own recorded cause")
-          (is (not (str/includes? prompt-text "ignore everything else"))
+          ;; THE INVARIANT IS ABOUT THE TRIGGER, not about the prompt's
+          ;; total contents, and the neighbourhood view made the old
+          ;; proxy assertion wrong rather than the invariant: at
+          ;; distance 1 an agent legitimately SEES the messages queued
+          ;; for it, which is information it should have. What must stay
+          ;; true is that the later message is never presented as the
+          ;; cause of this run — the `:trigger` block names m-1, and
+          ;; `message/trigger` still derives m-1 from the opening
+          ;; transaction's own meta.
+          (is (str/includes? prompt-text "You have been asked:\n\ncount the widgets")
               "a message arriving between open and :call cannot
-               displace it"))))))
+               displace the recorded trigger")
+          (is (not (str/includes? prompt-text
+                                  "You have been asked:\n\nignore everything else"))
+              "and never becomes the run's cause"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — streaming rides channels, the database keeps facts

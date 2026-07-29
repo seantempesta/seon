@@ -1000,9 +1000,13 @@
     (fn [connection]
       (plant! connection
               {:agent-id "agent-a"
-               :blocks [(block-row :interruption 30 :continuity
+               ;; the neighbourhood view, which retired `:interruption`:
+               ;; "your previous run was cut" is a fact about a RUN, so
+               ;; it is now the run family's own lens, reached by walking
+               ;; the agent's connections
+               :blocks [(block-row :namespace 80 :dynamic
                                    :seon.render/ai
-                                   'seon.context/interruption-ai)
+                                   'seon.render.agent/namespace-ai)
                         (block-row :trigger 90 :dynamic
                                    :seon.render/ai 'seon.context/trigger-ai)]
                :run-id "run-colocation-2026072802"
@@ -1028,9 +1032,12 @@
             warned (ask)]
         (testing "empty plan-style facts derive the content alternative
                   with no interruption teaching"
-          (is (= [:trigger] (names empty-state))))
+          (is (= [:namespace :trigger] (names empty-state)))
+          (is (not (str/includes? (str/lower-case
+                                   (:seon.cluster.prompt/text empty-state))
+                                  "interrupt"))))
         (testing "non-empty facts derive the teaching, from planted state"
-          (is (= [:interruption :trigger] (names warned)))
+          (is (= [:namespace :trigger] (names warned)))
           (is (str/includes? (str/lower-case
                               (:seon.cluster.prompt/text warned))
                              "interrupt")))
