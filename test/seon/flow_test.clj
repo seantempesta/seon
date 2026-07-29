@@ -7,17 +7,50 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.core :as datahike]
+            [malli.core :as m]
+            [malli.generator :as mg]
             [seon.cluster.loop :as cluster.loop]
             [seon.config :as config]
             [seon.flow :as sut]
+            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net ServerSocket URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
             WebSocket WebSocket$Listener]
-           [java.util.concurrent CountDownLatch ExecutorService Future
+            [java.util.concurrent CountDownLatch ExecutorService Future
             TimeUnit]))
+
+(def ^:private callback-schema-keys
+  [:seon.flow/commit-drop!
+   :seon.flow/commit-fault!
+   :seon.flow/compile-namespace-fn
+   :seon.flow/deliver!
+   :seon.flow/fix-step-fn
+   :seon.flow/panic!
+   :seon.flow/plan-step-fn
+   :seon.flow/read-core-error-mode
+   :seon.flow/read-sources
+   :seon.flow/work-fn])
+
+(deftest callback-contracts-construct-functions-that-honor-their-outputs
+  (let [registry
+        (:seon.schema.projection/registry (schema/current-projection))]
+    (doseq [[ordinal schema-key] (map-indexed vector callback-schema-keys)]
+      (testing (str schema-key)
+        (let [compiled (m/schema schema-key {:registry registry})
+              function-schema (m/deref compiled)
+              {:keys [input output]} (m/-function-info function-schema)
+              callback (mg/generate compiled {:seed (+ 2026072900 ordinal)})
+              args (mg/generate input {:seed (+ 2026072910 ordinal)})
+              result (apply callback args)]
+          (is (ifn? callback))
+          (is (m/validate compiled callback))
+          (is (m/validate output result)
+              (pr-str {:schema schema-key
+                       :args args
+                       :result result})))))))
 
 (def ^:private fault-schema
   [{:db/ident ::core-error-config-id

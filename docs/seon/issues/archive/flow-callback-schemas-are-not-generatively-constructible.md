@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, schema]
 ---
@@ -47,3 +47,18 @@ runtime-boundary exclusion. No bare `fn?` registration remains in schema EDN.
 **REAL-BUT-QUEUED — Flow/schema honesty rung.** Ten bare `fn?` declarations
 remain in the current resource file, but these are process-local callback
 boundaries and do not block today’s live spine.
+
+## Resolution
+
+Re-verification confirmed ten current callbacks; the original thirteen-count
+was stale because `read-facts`, `step-fn`, and `stopped!` no longer exist.
+Each remaining callback now names a truthful `:=>` input/output contract.
+Ignored callback returns use one closed ordinary-value union rather than
+`:any`; the work callback's genuinely polymorphic result references the
+existing SCI-admission value boundary.
+
+The recurring `seon.flow-test` gate compiles each callback through the current
+schema population, generates a function and its arguments at fixed seeds,
+invokes the function, and validates the result against the declared output.
+`bin/test seon.flow-test` ran 19 tests and 117 assertions with zero failures
+or errors. Resolved in the commit that archives this note.
