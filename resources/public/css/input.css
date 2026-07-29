@@ -1049,3 +1049,147 @@ details.tool-call-details[open] .tool-preview {
   font-size: 0.7rem;
 }
 .seon-problems-healthy-mark { font-size: 0.6rem; }
+
+/* ============================================================
+   THE DRILL — /data, the cluster's own facts.
+
+   A drilled value is TABULAR, not prose. Two rules follow from
+   that, and the first was a real bug the measure exposed rather
+   than caused.
+   ============================================================ */
+
+/* THE GRID WAS FIGHTING ITSELF. `.seon-data-map` is a two-column
+   grid built for a flat `dt`/`dd` sequence — the generic data
+   panel's shape, where the pairs ARE the direct children. The
+   drill wraps each pair in its own `.seon-data-entry`, so every
+   entry landed in ONE CELL of that grid: entries 0 and 1 side by
+   side, and the value column crushed to one character per line.
+
+   `display: contents` is the fix rather than a second grid on the
+   entry, and the difference is real: the entry stops generating a
+   box, its `dt`/`dd` become the map's own grid items, and the key
+   column sizes to the widest key ACROSS ALL ROWS. A per-entry grid
+   cannot do that — each entry would size independently and the
+   keys would come out ragged. `fit-content` caps the column so one
+   pathological key cannot push every value off the panel. */
+.seon-data-window > .seon-data-map {
+  display: grid;
+  grid-template-columns: fit-content(30ch) 1fr;
+  padding: 0.15rem 0.6rem;
+}
+.seon-data-entry {
+  display: contents;
+}
+.seon-data-entry > dt,
+.seon-data-entry > dd {
+  padding: 0.22rem 0;
+  border-top: 1px solid var(--color-base-850);
+}
+.seon-data-entry > dt { padding-right: 1.5rem; }
+.seon-data-entry:first-child > dt,
+.seon-data-entry:first-child > dd { border-top: 0; }
+/* an element with `display: contents` generates no box but still
+   matches `:hover`, so the row highlight survives — and with the
+   column gap carried as padding rather than `gap`, it is unbroken
+   across both columns */
+.seon-data-entry:hover > dt,
+.seon-data-entry:hover > dd { background: var(--color-base-850); }
+
+/* The measure is for prose and lists. A grid of keys and values
+   needs the room, so the page holding one opts out — one rule, no
+   page flag, and every other page keeps its column. */
+.seon-main:has(.seon-data-drill) {
+  max-width: none;
+}
+
+/* The trail says where you are, so it reads as a path and not as a
+   row of links: dim separators, the current position in cream. */
+.seon-data-crumbs {
+  align-items: baseline;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-base-800);
+  gap: 0.4rem;
+}
+.seon-data-crumb {
+  color: var(--color-text-400);
+  border-bottom: 0;
+}
+.seon-data-crumb:last-child {
+  color: var(--color-text-50);
+}
+.seon-data-crumb:hover {
+  color: var(--color-signal);
+  text-decoration: underline;
+}
+
+/* The window is a panel of readings. The range line sits in its
+   own header strip, because "you are looking at part of this" is
+   the frame around the numbers rather than one of them. */
+.seon-data-window {
+  padding: 0;
+  overflow: hidden;
+}
+.seon-data-range {
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  background: var(--color-base-850);
+  border-bottom: 1px solid var(--color-base-800);
+  color: var(--color-text-400);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.seon-data-key {
+  color: var(--color-text-400);
+  overflow-wrap: anywhere;
+}
+.seon-data-step {
+  color: var(--color-text-200);
+  border-bottom: 0;
+}
+.seon-data-step:hover {
+  color: var(--color-signal);
+  text-decoration: underline;
+}
+.seon-data-value {
+  color: var(--color-text-100);
+}
+
+/* The pager is the window's footer, and it says which way each
+   step goes. `justify-content: space-between` puts previous and
+   next at the ends, so a single available direction still lands on
+   the side it moves toward. */
+.seon-data-pager {
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  border-top: 1px solid var(--color-base-800);
+  background: var(--color-base-850);
+}
+.seon-data-pager:empty {
+  display: none;
+}
+.seon-data-page {
+  color: var(--color-text-300);
+  border-bottom: 0;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.seon-data-page:hover {
+  color: var(--color-signal);
+  text-decoration: underline;
+}
+/* a lone "next" belongs on the right, where next is */
+.seon-data-page:only-child:last-child {
+  margin-left: auto;
+}
+
+.seon-data-leaf {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  font-size: 0.72rem;
+}
