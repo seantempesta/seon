@@ -835,6 +835,19 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (20) THE RENDERING NORTH STAR (owner, closing the design session):
+  implementation-neutral; the DESIGN must be simple to understand,
+  easy to use and compose, and fast BY DESIGN. EACH NAMESPACE RENDERS
+  AS AN AGENT-OWNED WORLD — a page is that namespace's agent rendered
+  (its blocks, canvas, transcript), INTERACTIVE through the agent and
+  the user communicating (messages are the interaction model, not
+  widgets-with-callbacks). Parallelism and efficiency are
+  requirements: agents-are-flows gives page-level parallelism by
+  construction; blocks render independently (parallel within a page);
+  serialize-once + packages give delivery efficiency (measured).
+  The agent-side contract stays three sentences: write a function of
+  the database; point a display fact at it; only database changes
+  re-render.
   (19) REACTIVITY IS DERIVED FROM THE INPUT CONTRACT (owner + design
   session): a render function's registered input schema IS its
   dependency declaration. Schema without :seon.db/db → STATIC:
