@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, runtime]
 ---
@@ -34,3 +34,30 @@ The detached load-test launch recipe in
 A detached one-shot drive survives the launching lane, runs exactly once, and
 leaves one proxy-ready/proxy-stopped pair after normal success. Cleanup removes
 the registered job without racing a restart.
+
+## Stale verdict
+
+Archived as stale on 2026-07-29. The recorded launchd restart is valid
+historical evidence, but the claimed owner no longer exists in current,
+tracked source: there is no detached load launcher or `launchctl submit`
+recipe to correct. The maintained research document describes the completed
+drive and points at an ignored, project-local `tmp/load-testing/scripts/run.sh`;
+that script owns the proxy subprocess but contains no launchd registration.
+
+Reverification:
+
+```text
+rg -n "launchctl submit|LaunchOnlyOnce|KeepAlive" \
+  script bin src test \
+  docs/prds/sci-execution-runtime/research/load-testing-2026-07-29.md
+# no matches
+
+git ls-files tmp/load-testing/scripts/run.sh \
+  docs/prds/sci-execution-runtime/research/load-testing-2026-07-29.md
+docs/prds/sci-execution-runtime/research/load-testing-2026-07-29.md
+```
+
+Adding a launcher only to fix this ghost would create a second operator
+surface. If detached load driving becomes maintained code again, its launcher
+must publish a one-shot completion/cleanup contract and receive a new
+regression at that real owner.
