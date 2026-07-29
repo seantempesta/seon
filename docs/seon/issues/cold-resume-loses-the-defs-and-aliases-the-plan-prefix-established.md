@@ -81,6 +81,40 @@ contract the answer needs.
 - `docs/prds/sci-execution-runtime/plan/parse-primitives-plan-2026-07-29.md`
   §1.6 — the reading-context half, and D8's frozen starting context.
 
+## Live reproduction and superseding recommendation 2026-07-29 (REPL lane)
+
+Reproduced deterministically in-process, no `kill -9` required: the precondition
+is not a crash but a fold STARTING mid-plan with a fresh ctx, which is just
+facts (terminal receipts on the prefix). `tmp/repl-experiments/cold_resume_probe.clj`:
+
+- `["(def x 41)" "(inc x)"]`, ordinal 0 pre-settled → ordinal 1 errors
+  `Unable to resolve symbol: x` (evaluation context lost);
+- `["(require '[clojure.string :as s])" "(s/upper-case \"hi\")"]` → ordinal 1
+  errors `Unable to resolve symbol: s/upper-case` (reading context lost);
+- `["(+ 1 1)" "(+ 2 2)"]` → ordinal 1 **succeeds**, which is the sibling issue's
+  safety hole rather than this issue's failure.
+
+Two corrections to the analysis above, both measured:
+
+- a failed form does **not** break the fold — `next-ordinal` branches on the
+  TRANSACTION outcome, not the evaluation (`loop.cljc:1053-1062`), so a plan
+  with a red form runs to completion in one pass. That answers
+  `a-failed-form-does-not-stop-the-fold.md` empirically;
+- consequently the only route into cold resume is genuine custody loss.
+
+**Recommendation: archive as SUPERSEDED rather than fix.** A plan is a fold over
+one ctx, so a fold starting at ordinal k > 0 executes a different program than
+the agent authored. The dissolution — "a plan may only be executed by a fold
+that starts at its FIRST ordinal; an open planned run whose first unsettled
+ordinal is not its first is an interruption to settle" — makes this issue
+unrepresentable and closes
+`boot-recovery-executes-unstarted-plan-suffix-after-interruption.md` at the same
+time. Full argument, alternatives considered, exact edit list and the ownership
+boundary that stopped the lane from landing it:
+`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md` §7.
+Awaiting an owner ruling because it reverses a deliberate documented contract
+and deletes two sealed test oracles.
+
 ## Triage 2026-07-29
 
 **PRESSING — parser-merge wave.** Resume still forks a fresh SCI context while

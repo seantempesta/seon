@@ -78,6 +78,43 @@ terminal transition for an interrupted run.
    whose correctness depends on reconstructing an interrupted plan's prefix
    context.
 
+## Independent confirmation 2026-07-29 (REPL lane)
+
+Reproduced on a separate isolated cluster with an **observable capability** in
+the suffix, satisfying acceptance criterion 4 by evidence rather than argument.
+Two-form plan; ordinal 1 is `my.message/send`, which commits a durable message
+row. Before `kill -9` of pid 90996: one running receipt on ordinal 0, no
+terminal fact, no messages to `peer`. After reboot of the same root and cluster:
+
+```clojure
+{:receipts ({:ordinal 0 :interrupted-at #inst "2026-07-29T19:33:34.693Z"}
+            {:ordinal 1 :result-edn "{:my.message/to \"peer\", :my.message/content
+                                      \"THE SUFFIX EXECUTED AFTER THE CRASH\"}"})
+ :run {:closed-at #inst "2026-07-29T19:33:35.586Z"}
+ :messages-to-peer ["THE SUFFIX EXECUTED AFTER THE CRASH"]}
+```
+
+The message did not exist before the kill. Post-crash external effect confirmed.
+Script: `docs/prds/sci-execution-runtime/research/scripts/crash-suffix-falsifier-2026-07-29.clj`.
+
+The same defect is reachable **without any crash**, in milliseconds, because the
+precondition is not process death but a fold starting mid-plan with a fresh ctx
+— which is just facts. Pre-stamping terminal receipts on the prefix reproduces
+all three outcomes (lost def, lost alias, and silently-executed independent
+suffix): `…/scripts/cold-resume-probe-2026-07-29.clj`. That makes criterion 4's
+recurring test cheap — it needs no JVM kill.
+
+Recommended fix is a dissolution that closes this issue and
+`cold-resume-…md` together: **a plan may only be executed by a fold that starts
+at its FIRST ordinal; an open planned run whose first unsettled ordinal is not
+its first ordinal is not work but an interruption to settle** — reusing
+`work/interruption` and `loop/settle-interruption!`, which already exist. Full
+argument, alternatives rejected, and the exact edit list (including the two
+sealed test oracles it deletes):
+`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md` §7.5-7.6.
+Not landed: the rule's home is `seon.cluster.work`, outside that lane's
+ownership, and reversing a deliberate documented contract is an owner ruling.
+
 ## Related
 
 - `cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md` —
