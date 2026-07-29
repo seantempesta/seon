@@ -188,6 +188,9 @@
   [:seon.config.ai/model {:optional true} :seon.config.ai/model]
   [:seon.config.ai/api-key-variable
    {:optional true} :seon.config.ai/api-key-variable]
+  ; the declared no-auth state (local servers) — admitted here so a
+  ; manifest can actually CONFIGURE it; hosted stays fail-closed
+  [:seon.config.ai/no-auth {:optional true} :seon.config.ai/no-auth]
   [:seon.config.ai/timeout-ms {:optional true} :seon.config.ai/timeout-ms]
   [:seon.config.ai.backup/model
    {:optional true} :seon.config.ai.backup/model]
