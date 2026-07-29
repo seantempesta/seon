@@ -69,13 +69,45 @@ was rejected by the harness because commit `335764cd2` changed three `src/`
 files during the run. The reported Clojure exception was therefore the
 intentional source-stability fence, not a parser or load-driver failure.
 
+## Chunk 2 detached launch
+
+The 10-agent sustained drive launched at `2026-07-29T06:02:42-04:00` from Git
+HEAD `4d53ff17bcb7f8ac4a060beef02ab2aa97b4bcac`. Per-user `launchd` owns the two
+outer processes so they survive the bounded lane:
+
+| process | launchd label | PID | durable output |
+|---|---|---:|---|
+| Ollama provider | `seon.loadtest.ollama-20260729` | 60634 | `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/ollama-server.log` |
+| 10-agent drive | `seon.loadtest.ollama-p8-10a-600s-20260729` | 60657 | `tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/drive.out` |
+
+`run.sh` owns its recording proxy as PID 60676 and will stop it through the
+existing exit trap. The drive's PID files are
+`tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/{drive,ollama-server}.pid`.
+Its database is isolated under
+`tmp/load-testing/runtime/ollama-p8-10a-600s-20260729`; the web server selected
+ephemeral port 61565. The existing default listener on port 7994 was observed
+as PID 66709 and was not contacted or changed.
+
+At the approximately 30-second production check, both outer jobs were
+`running`, the proxy was listening, the isolated runtime contained 518 regular
+files, and the timing log held 14 `request-sent`, 5 `upstream-headers`, and 4
+`done` events across all ten named agents. This is launch evidence only, not a
+partial performance row.
+
+An initial `nohup` attempt was reaped with the lane's tool-owned process group
+before it created a database or provider timing log. The `launchd` jobs above
+are the first actual sustained-drive launch.
+
 ## Next chunk
 
-First verify that no source-editing checkpoint overlaps the drive, then run:
+Resume after approximately `2026-07-29T06:13:42-04:00`. Verify that the drive
+job has exited and inspect:
 
 ```bash
-bash tmp/load-testing/scripts/run.sh \
-  ollama-p8-10a-600s-20260729 10:600
+launchctl print \
+  gui/$(id -u)/seon.loadtest.ollama-p8-10a-600s-20260729
+tail -80 \
+  tmp/load-testing/evidence/ollama-p8-10a-600s-20260729/drive.out
 ```
 
 Accept the row only when `run.edn` says `:load-testing/source-stable? true`,
