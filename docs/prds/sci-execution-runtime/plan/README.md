@@ -815,6 +815,17 @@ may reintroduce a shadow build into the dev feedback path.
   "default"), multi-cluster correct; SMART DEFAULTS for every config
   entry — zero-overlay boot is a fully working system. Independent
   validation lanes on every returned chunk.
+  (12) UI TABLED (owner): the proper UI cannot be built until the
+  context rendering system is understood — table UI restoration; FOCUS
+  everything on reaching that understanding. The path: (a) code-graph
+  end-to-end mining (the living-corpus substrate for namespace views
+  and renderer discovery); (b) old-context-system mining (how the old
+  agent context was actually assembled — blocks, the namespace
+  renderer, transcript, what was hand-built vs derived); (c) then the
+  context rendering design session WITH the owner (walker + distance +
+  transcript aging + churn-sorted caching + modes), grounded in both
+  quarries; UI restoration builds on top of that design. The existing
+  UI quarry + falsified plan stay filed for that day.
   (10) PRIORITY ORDER (owner, planning session): RESTORE PREVIOUS
   SYSTEM FUNCTIONALITY FIRST, by mining — "stop redoing the same
   mistakes." Correctness attention: turn loop + settlement, boot +
