@@ -114,6 +114,36 @@ wakes/0 false vs 60/40; two-agent dedupe proven),
 `context-walk/s0-baseline` + `s1-shadow` (six verbatim side-by-sides —
 **await owner read**).
 
+## Active blocker — one registration contract
+
+Six-generation git archaeology (`research/registration-archaeology-2026-07-29.md`)
+confirmed the owner's report that function, schema, and test registration has
+already been rebuilt repeatedly. The fresh tree currently restates the same
+contract three times: `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
+`seon.cluster.run/program-row-tx`. Their drift is observed, not hypothetical:
+runtime schema rows contain unevaluated syntax, tests commit but are neither
+installed nor acquired, `ns-unmap` deletes only functions, and one cluster's
+schema projection replaces process-global registry state.
+
+The ordered repair is:
+
+1. one pure owner for declaration identity, canonical row shape, owned
+   attributes, exact replacement, and typed deletion;
+2. explicit producer admission around it — build indexes every function,
+   runtime publishes only fully contracted functions;
+3. runtime schema evaluation in an isolated registration delta, followed by
+   the same canonicalizer and terminal commit;
+4. function/schema/test materialization only from the terminal transaction
+   report's `db-after`, with schema projection scoped to the cluster; and
+5. the recurring matrix covering parity, redefinition, deletion, refusal,
+   reopen, and two incompatible clusters in one JVM.
+
+The first implementation slice is in flight through native Codex delegation.
+The inherited Claude-started `indexer-adversarial-review` remains read-only on
+source/test and will be collected under the revised delegation law. Root
+`AGENTS.md` now says Codex orchestrators use native collaboration tools while
+Claude orchestrators use `bin/codex-agent` (`6e5b0a925`).
+
 ## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under
