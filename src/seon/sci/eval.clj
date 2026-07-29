@@ -82,7 +82,7 @@
 
   THE CTX IS SUPPLIED, NOT BUILT HERE. `base` is the minimum N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus the two `my.run` dispositions and `my.message/send` — and a
+  plus the two `my.run` dispositions and both `my.message` values — and a
   caller may pass its own.
   The computed binding table (capability functions derived from
   program-graph facts, filtered by a derived namespace policy) is N5's
@@ -153,7 +153,13 @@
          ;; so copying the var into the base ctx is the whole binding —
          ;; there is no capability to thread, no connection to close
          ;; over, and nothing an agent could hold onto after the eval
-         'my.message {'send (sci/copy-var my.message/send message-ns)}}
+         'my.message {'send (sci/copy-var my.message/send message-ns)
+                      ;; the can't-fix answer is the same kind of value,
+                      ;; so it is the same kind of binding. Without it a
+                      ;; routed problem has no third arm at all: the
+                      ;; owner's only reachable answers are "fixed" —
+                      ;; which no fact can confirm — and silence.
+                      'decline (sci/copy-var my.message/decline message-ns)}}
         ;; two broad roots rather than an enumeration of exception
         ;; subclasses — an agent needs to catch things, not to be given
         ;; a curated taxonomy
