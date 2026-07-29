@@ -179,6 +179,68 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
 - **Long-running work dies sometimes** (upstream API errors, machine load).
   Commit in small coherent slices so churn costs minutes, not hours.
 
+## What is actually broken right now
+
+Nothing here is hidden and nothing is a surprise waiting for you. All of it is
+filed with evidence and acceptance criteria in `docs/seon/issues/`; this is the
+honest shape of the debt as of 2026-07-29 night.
+
+**Blockers (4).**
+- `priming-indexes-with-the-live-jvms-loaded-code` — `bin/seon index` reads
+  source files from disk but interprets them with the reader the target JVM
+  loaded at BOOT, then records the ancestor digest from the disk files. So the
+  recorded digest lies about which code produced the corpus, and priming a
+  long-lived cluster silently writes a stale corpus and reports success. This
+  cost the orchestrator an hour and two wrong diagnoses in one evening.
+- `program-graph-render-declarations-name-absent-functions` — the render
+  catalog advertises projection functions that do not exist, so an advertised
+  family can return unresolvable.
+- `fresh-operator-instrumentation-cannot-resolve-render-value-schema` — a
+  boot-ordering hazard between instrumentation and the schema registry; the
+  choke-point fix landed, this is the residue.
+- `finish-deleting-the-old-operator-classpath-from-retained-tooling` — the hook
+  linters and one test runner still need the mixed quarry classpath, which is
+  the last thing keeping the dead operator's classpath alive.
+
+**The two that tell you most about the system's real state.**
+- `eval-time-schema-and-test-rows-have-no-recurring-proof` — writing that test
+  exposed why it was missing: schema activation rebuilds the WHOLE projection
+  from one database's rows through a PROCESS-GLOBAL call, so a fixture holding
+  one agent-authored schema collapses the registry and kills unrelated tests in
+  the same JVM. That contradicts "clusters share no mutable state," which is a
+  design law, not a test inconvenience.
+- `observable-graph-transitions-are-polled-in-tests` — tests still sleep where
+  an event exists. Standing doctrine says interfaces publish their own
+  readiness; this is where they do not yet.
+
+**Sharp edges you will personally hit.**
+- `partial-hot-reload-produces-mixed-code-with-no-warning` — `:reload` reloads
+  one namespace, not its dependencies, so a live JVM happily runs a NEW caller
+  against an OLD callee. Armed instrumentation catches it; nothing else does,
+  and the error names a schema rather than the actual problem.
+- `root-store-holder-does-not-canonicalize-store-dir` — equivalent relative and
+  absolute store paths produce different holder keys, so path identity is
+  treated casually in a place where it decides cluster identity.
+- `cluster-reset-shadows-clojure-core-reset` — a new `reset!` shadows
+  `clojure.core/reset!` inside a namespace full of atoms.
+- `development-mcp-advertises-deleted-cljs-tools`,
+  `fresh-cluster-docstrings-teach-deleted-bin-repl`,
+  `loadable-skills-component-describes-deleted-pod-importer` — tooling and docs
+  still pointing at the deleted pod era. Assume anything you read may be stale
+  and verify it.
+
+**Contract quality.** `database-and-transaction-boundaries-use-anonymous-any-contracts`
+and `flow-config-dials-have-two-registration-owners` are real; `:any` at a
+database boundary is a boundary nobody has proven.
+
+**Known incomplete, by choice.** The UI is deliberately tabled until the
+context rendering system is proven — do not build UI. Context is still
+hand-assembled blocks; the walk-rendered replacement is designed, falsified,
+and measured but unbuilt. `:seon.fn/calls` reachability does not exist yet, so
+the 808 private function rows are groundwork rather than a working call graph.
+The checkpoint has failed graduation six times and every failure found
+something real; that loop is the most valuable machinery here.
+
 ## The mentality
 
 Each of these is a standing ruling. Violating one is a bug, not a style
