@@ -835,6 +835,24 @@ may reintroduce a shadow build into the dev feedback path.
   correction). (f) FROZEN CHECKPOINT after the current fix wave
   lands: full gate + independent verification + audit calibration +
   joint debt review BEFORE new construction.
+  (17) CODE-AS-FACTS IS GO, HIGH PRIORITY (owner): the end-to-end
+  mining landed (code-graph-end-to-end-2026-07-29.md) — implement the
+  indexing + ongoing saving of ALL functions, schemas, and tests NOW.
+  NOTHING that depends on this data pushes until the data is there
+  (renderer discovery, distance-2 code rendering, workload
+  reachability, usage signals all FENCED behind it). Sealed contract
+  decisions (orchestrator, from the report's boundaries + standing
+  rulings): fn identity = STRING (the canonical schema's declaration
+  wins; the reader converts); :seon.fn/workload registers canonically;
+  the evaluator consumes READER EVENTS (the second sci/parse-string
+  dies — one-parser ruling); commit-first: program rows commit in the
+  form's terminal transaction, SCI installation derives from db-after
+  (never mutate-then-hope); eval namespace FOLLOWS parse-time
+  attribution (D8 — in-ns works, agent namespace is the default when
+  no ns form governs; receipts record evaluation truth; divergence
+  commits as a detectable anomaly, never silent). Build indexer
+  populates the ancestor at cluster init; acquisition installs current
+  rows at boot. Graduation: live defn → restart → cross-agent call.
   (16) FRESHNESS OUTRANKS CACHE (owner): "I'm okay with seon being a
   weird system where we accept a larger amount of context churn in
   exchange for always up to date information." Every turn derives ALL
