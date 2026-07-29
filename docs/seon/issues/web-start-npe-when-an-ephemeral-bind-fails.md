@@ -48,3 +48,9 @@ map this function receives but not its binding logic.
 `seon.render.web/start!`, but the afternoon ruling forbids hardening or
 test-fencing the draft render family; carry this failure mode into the eventual
 web-render design.
+
+## Schedule 2026-07-29
+
+**RUNNING — `small-correctness-batch`.** The final owner schedule explicitly
+pulls this data-losing failure classification into the bounded correctness
+batch despite the earlier draft-surface hold.

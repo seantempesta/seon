@@ -29,7 +29,7 @@ predicate successfully.
 Transaction-data output is independently inlined at
 `reconcile.cljc:313,433`, `context.clj:296`, `error.clj:767-768`,
 `render/agent.clj:506`, `render/root.clj:269`, and
-`render/block.clj:1070-1072`, despite `src/seon/schema/store.edn:11` already
+`render/block.clj:1070-1072`, despite `resources/seon/schema/store.edn:11` already
 owning the transaction boundary.
 
 Genuinely open values remain legitimate: SCI admission source/value, generic

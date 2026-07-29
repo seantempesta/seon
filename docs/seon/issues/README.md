@@ -7,7 +7,8 @@ tags: [reference, issue, index]
 # Issues — Lightweight Tracking
 
 One note per problem. Tracking is deliberately lightweight: a single lifecycle,
-a single severity vocab, an `archive/` for closed notes, and a DERIVED index.
+a single severity vocab, an `archive/` for closed notes, and one ranked owner
+schedule.
 
 ## Lifecycle (`status`)
 
@@ -36,7 +37,7 @@ separate severity).
 ```text
 issues/
   README.md     ← this file (the convention)
-  index.md      ← GENERATED — do not hand-edit (see below)
+  index.md      ← ranked schedule for every open note
   *.md          ← OPEN issues only
   archive/*.md  ← resolved + superseded issues
 ```
@@ -44,23 +45,20 @@ issues/
 After triage, top-level `*.md` is ONLY open issues. When an issue is fixed or
 no longer applies, set its `status` and `git mv` it into `archive/`.
 
-## The index is derived
+## The index is the schedule
 
-`index.md` is a projection, regenerated — never hand-maintained (Seon "derive
-don't store"). Regenerate after any frontmatter change:
+`index.md` is the owner's ranked execution schedule. Every top-level open issue
+appears exactly once with one disposition:
 
-```bash
-bin/issues-index
-```
+- a named running lane;
+- a named future wave; or
+- after verification makes it moot, a resolved/superseded archive entry with
+  the dissolving commit or ruling.
 
-It scans the OPEN issues' frontmatter and groups them by severity (blocker →
-friction → cleanup), with a derived lane (Core / UI / agent / …) per row.
-
-Validate without writing:
-
-```bash
-bin/issues-index --check
-```
+Severity still ranks the work inside those destinations; it is not itself a
+destination. Update the schedule whenever an issue opens, closes, or changes
+owner. The older `bin/issues-index` command emits only a severity inventory and
+cannot represent named destinations, so it is not the authority for this file.
 
 ## Frontmatter template
 

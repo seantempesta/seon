@@ -52,11 +52,11 @@ that owns them, here `seon.render.block`). The agent link keeps its name
 `:seon.block/*` are both losing vocabularies.
 
 Source and tests were renamed in the context-blocks wave (2026-07-28):
-`src/seon/schema/block.edn`, `src/seon/schema/context.edn`,
+`resources/seon/schema/block.edn`, `resources/seon/schema/context.edn`,
 `src/seon/render/block.clj`, `src/seon/render/web.clj`,
 `src/seon/render/root.clj`, and the block/web/problems/stream/boot tests.
 Residual noted for the boot owner: `:seon.block/count`
-(`src/seon/schema/boot.edn`, `src/seon/cluster.clj`) is boot's readiness
+(`resources/seon/schema/boot.edn`, `src/seon/cluster.clj`) is boot's readiness
 count, not a block entity attribute — colocation names it under boot's own
 namespace when that owner next touches it.
 

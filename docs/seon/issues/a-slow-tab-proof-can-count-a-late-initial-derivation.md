@@ -42,3 +42,9 @@ constants or relaxed pass-count assertions.
 **DRAFT-SURFACE — render walk.** The sampling race remains evidence about the
 draft, but the afternoon ruling explicitly forbids adding a readiness fence or
 hardening this render test before the walk’s real design exists.
+
+## Schedule 2026-07-29
+
+**RUNNING — `small-correctness-batch`.** The final owner schedule explicitly
+pulls this bounded proof race into the batch despite the earlier draft-surface
+hold.

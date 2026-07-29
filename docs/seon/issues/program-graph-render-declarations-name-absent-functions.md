@@ -16,10 +16,11 @@ only return `:seon.render/unresolvable` for them.
 
 ## Evidence
 
-`src/seon/schema.cljc:538-575` declares six projection symbols under
+`resources/seon/schema/program.edn:15-17,27-30,47-50` declares six projection
+symbols under
 `seon.render.handlers.fn`, `seon.render.handlers.schema`, and
-`seon.render.handlers.ns`. `src/seon/schema.cljc:1121-1190` copies those
-declarations into the derived entity catalog.
+`seon.render.handlers.ns`. `src/seon/schema.cljc:1135-1207` copies qualified
+render declarations from entity shapes into the derived entity catalog.
 
 There is no `src/seon/render/handlers/` path and no namespace matching any of
 the six symbols in `src/`. `seon.render/render` resolves every declaration with
@@ -44,7 +45,13 @@ The N5 program-graph projection builders, composed with the one
 
 ## Triage 2026-07-29
 
-**DRAFT-SURFACE — render walk.** `src/seon/schema.cljc` still publishes all six
-`seon.render.handlers.{fn,schema,ns}` symbols and no such namespace exists, but
-the afternoon ruling declares the whole render walk draft: preserve this as
-design input, without a fix plan or new test fence.
+**DRAFT-SURFACE — render walk.** `resources/seon/schema/program.edn` still
+publishes all six `seon.render.handlers.{fn,schema,ns}` symbols and no such
+namespace exists, but the afternoon ruling declares the whole render walk
+draft: preserve this as design input, without a fix plan or new test fence.
+
+## Schedule 2026-07-29
+
+**FUTURE — `render implementation wave` (UNBLOCKED).** The graph data already
+exists as `:seon.fn`, `:seon.ns`, and `:seon.schema` facts; the wave owns the
+draft projections once it begins.

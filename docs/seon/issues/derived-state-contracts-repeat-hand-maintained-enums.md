@@ -14,11 +14,11 @@ referencing or computing from their existing owner.
 
 ## Evidence
 
-- `src/seon/schema/block.edn:48` owns the render-band schema, but
-  `src/seon/schema/context.edn:80-81` repeats the same five enum members for
+- `resources/seon/schema/block.edn:48` owns the render-band schema, but
+  `resources/seon/schema/context.edn:80-81` repeats the same five enum members for
   `:seon.context.contribution/band`. The contribution is explicitly evidence
   of the block band, so this is one constraint with two authorities.
-- `src/seon/schema/work.edn:34-36` owns all derived form states, while
+- `resources/seon/schema/work.edn:34-36` owns all derived form states, while
   `src/seon/cluster/work.cljc:292-293` separately lists the three settled
   states and line 327 uses that list to derive `settled?`. The same `cond` at
   lines 312-320 already knows which evidence makes a form settled.

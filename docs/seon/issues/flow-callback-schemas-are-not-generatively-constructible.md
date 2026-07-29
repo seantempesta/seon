@@ -9,16 +9,16 @@ tags: [issue, flow, schema]
 
 ## Problem
 
-Thirteen converted `seon.flow` callback declarations remain bare `fn?` symbols.
+Ten converted `seon.flow` callback declarations remain bare `fn?` symbols.
 They are readable Malli forms, but they have no constructible generator and do
 not meet the B2 generative-honesty design for function-valued boundaries.
 
 ## Evidence
 
-`src/seon/schema/flow.edn` retains the exact prior forms for `work-fn`,
-`deliver!`, `read-facts`, `step-fn`, `stopped!`, `commit-fault!`,
-`commit-drop!`, `read-core-error-mode`, `panic!`, `plan-step-fn`,
-`fix-step-fn`, `read-sources`, and `compile-namespace-fn`.
+`resources/seon/schema/flow.edn:12-16,27,42,44,46-47,55` retains bare `fn?`
+forms for `work-fn`, `deliver!`, `commit-fault!`, `commit-drop!`,
+`read-core-error-mode`, `panic!`, `plan-step-fn`, `fix-step-fn`,
+`read-sources`, and `compile-namespace-fn`.
 
 The sealed schema-EDN gate checks authored `[:fn ...]` predicate forms; these
 bare predicate symbols therefore remain outside that lint. The B2 research
@@ -38,12 +38,12 @@ runtime-boundary exclusion. No bare `fn?` registration remains in schema EDN.
 
 ## Triage 2026-07-27
 
-- **OPEN-CURRENT.** `src/seon/schema/flow.edn:12-14,17,27,41,43,45-47,52-53,57`
-  still declares all thirteen callback shapes as bare `fn?`, outside the
+- **OPEN-CURRENT.** The then-current schema EDN declared thirteen callback
+  shapes as bare `fn?`, outside the
   `[:fn ...]` honesty check in `src/seon/schema/edn.clj:193-248`.
 
 ## Triage 2026-07-29
 
 **REAL-BUT-QUEUED — Flow/schema honesty rung.** Ten bare `fn?` declarations
-remain in the current file (the note’s count of thirteen is stale), but these
-are process-local callback boundaries and do not block today’s live spine.
+remain in the current resource file, but these are process-local callback
+boundaries and do not block today’s live spine.

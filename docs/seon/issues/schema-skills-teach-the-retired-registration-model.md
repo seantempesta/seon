@@ -12,7 +12,7 @@ tags: [issue, docs, schema, database]
 The three mandatory Clojure/data skills teach the pre-fresh-tree
 `schema/register!` authoring workflow and two claim runtime instrumentation
 does not exist. An agent following them will put durable attribute schemas in
-code instead of `src/seon/schema/*.edn`, may recreate a retired `seon.db`
+code instead of `resources/seon/schema/*.edn`, may recreate a retired `seon.db`
 boundary, and will reason incorrectly about legal in-memory omission.
 
 ## Evidence
@@ -28,7 +28,7 @@ boundary, and will reason incorrectly about legal in-memory omission.
   not instrumented. `src/seon/instrument.clj:180-220` implements the live
   collector/instrumenter and fresh boot reports its applied count.
 - `.agents/skills/data-oriented-clojure/SKILL.md:99-102` states a startup ban
-  on every `[:maybe X]`, while `src/seon/schema/context.edn:101-120` correctly
+  on every `[:maybe X]`, while `resources/seon/schema/context.edn:101-120` correctly
   uses omission-by-nil for explicitly in-memory render results. The ban belongs
   to stored attributes, not all function returns.
 - `.agents/skills/data-oriented-clojure/SKILL.md:123-127` cites fresh

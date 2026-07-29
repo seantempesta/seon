@@ -53,7 +53,7 @@ kept in a process/classpath that cannot load the fresh owner twice.
 ## Triage 2026-07-27
 
 - **OPEN-DEFERRED.** Fresh ownership has moved to
-  `src/seon/schema/flow.edn:1-2`, but the duplicate declarations remain only in
+  `resources/seon/schema/flow.edn:1-2`, but the duplicate declarations remain only in
   quarry configuration at `src-old/seon/config/resolve.cljc:343-365`; the
   explicit old-system alias at `deps.edn:75-84` is the remaining collision
   surface and dies with that machinery.
@@ -64,3 +64,10 @@ kept in a process/classpath that cannot load the fresh owner twice.
 when an explicit quarry alias loads both generations. The mining report names
 the two visible config generations; patching is frozen and this dies with the
 quarry rather than receiving an independent fix plan.
+
+## Schedule 2026-07-29
+
+**FUTURE — `config follow-up`.** Commit `68a5de51f` compiled one effective
+manifest but did not remove the duplicate quarry declarations:
+`src-old/seon/config/resolve.cljc:343-365` still declares both Flow dials, and
+the explicit `:writer` alias in `deps.edn` still loads `src` plus `src-old`.

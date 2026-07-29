@@ -38,7 +38,7 @@ SB2) and recorded in that plan's §1.6
 
 The durable facts are narrower than resume needs: `run/plan-call` commits form
 id, run, ordinal and **source only** (`src/seon/cluster/run.cljc:391-411`;
-`src/seon/schema/run.edn:59-70,93-96`). Nothing durable describes what the
+`resources/seon/schema/run.edn:59-70,93-96`). Nothing durable describes what the
 prefix installed.
 
 Note the failure is silent in the ordinary case: a plan whose forms are

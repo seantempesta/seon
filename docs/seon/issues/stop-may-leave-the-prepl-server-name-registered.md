@@ -9,14 +9,13 @@ severity: friction
 
 ## Evidence
 
-Flagged by a Gemini review during the failover unit (2026-07-27
-night), NOT yet verified: `seon.cluster/stop!` closes the prepl
-`ServerSocket` directly instead of calling
-`clojure.core.server/stop-server`, which would leave the server NAME
-registered in clojure.core.server's registry — a same-name
-`start-server` in the SAME JVM would then fail. The cross-process
-restart case is proven live (the crash drill); the same-JVM
-stop-then-start-same-name case is the open question.
+Flagged by a Gemini review during the failover unit (2026-07-27 night), then
+source-verified 2026-07-29: `seon.cluster/start!` registers the named PREPL
+through `clojure.core.server/start-server` (`src/seon/cluster.clj:969-974`) and
+its failed-start cleanup calls `clojure.core.server/stop-server` (line 997),
+but ordinary `seon.cluster/stop!` closes the raw `ServerSocket` directly (line
+1170). The same-JVM stop-then-start-same-name behavioral reproduction remains
+the batch's acceptance proof.
 
 ## Acceptance
 

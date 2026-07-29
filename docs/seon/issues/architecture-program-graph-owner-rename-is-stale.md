@@ -30,7 +30,7 @@ canonical schemas and current roadmap require the existing identities.
   owner ruling: program-graph facts stay top-level, explicitly superseding the
   `seon.code.*` rename.
 - Fresh canonical identities remain `:seon.fn/sym`, `:seon.ns/name`, and
-  `:seon.schema/key` at `src/seon/schema.cljc:427-501`.
+  `:seon.schema/key` in `resources/seon/schema/program.edn:4-54`.
 
 ## Owner
 
