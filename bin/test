@@ -3,19 +3,54 @@
 #
 #   bin/test                        # run everything under test/
 #   bin/test seon.cluster.run-test  # run exactly these namespaces
+#   bin/test --result-cluster scratch [namespaces...]
 #
 # Source classpath, in-memory Datahike, no artifact, no operator —
-# seconds per cycle. Exit code is the suite verdict.
+# seconds per cycle. Exit code is the suite verdict. Result facts are
+# opt-in only and refuse the owner's `default` cluster.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 source bin/_java-home-resolver
 
-if [ $# -gt 0 ]; then
-  namespaces=("$@")
+result_cluster=${SEON_TEST_RESULT_CLUSTER:-}
+result_root=${SEON_TEST_RESULT_ROOT:-data/clusters}
+namespaces=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --result-cluster)
+      if [ $# -lt 2 ]; then
+        echo "bin/test: --result-cluster requires a name" >&2
+        exit 2
+      fi
+      result_cluster=$2
+      shift 2
+      ;;
+    --result-root)
+      if [ $# -lt 2 ]; then
+        echo "bin/test: --result-root requires a path" >&2
+        exit 2
+      fi
+      result_root=$2
+      shift 2
+      ;;
+    --)
+      shift
+      namespaces+=("$@")
+      break
+      ;;
+    *)
+      namespaces+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ ${#namespaces[@]} -gt 0 ]; then
+  :
 else
-  namespaces=()
   while IFS= read -r file; do
     ns=${file#test/}
     ns=${ns%.clj}
@@ -29,6 +64,16 @@ fi
 if [ ${#namespaces[@]} -eq 0 ]; then
   echo "bin/test: no test namespaces found under test/" >&2
   exit 1
+fi
+
+if [ -n "$result_cluster" ]; then
+  if [ "$result_cluster" = "default" ]; then
+    echo "bin/test: refusing to write result facts into the default cluster" >&2
+    exit 2
+  fi
+  git_sha=$(git rev-parse HEAD)
+  exec clojure -M:test -m seon.test.runner \
+    "$result_cluster" "$result_root" "$git_sha" "${namespaces[@]}"
 fi
 
 requires=""

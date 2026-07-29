@@ -25,7 +25,8 @@ cascade-retract component relationships, its **blocks** (`:seon.agent/ctx` →
 and its **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron
 maps). It POINTS (plain ref) at its current **run** (`:seon.agent/run`) and at
 the agent that started it (`:seon.agent/parent`), and uniquely POINTS at its
-resident program namespace (`:seon.agent/namespace` → `:seon.ns/name`); a run points back
+resident program namespace (`:seon.cluster.agent/namespace` →
+`:seon.ns/name`); a run points back
 (`:seon.agent.run/agent`); **turns** point up to their run
 (`:seon.agent.turn/run`) and own their **evals**
 (`:seon.agent.turn/evals`). **Messages** (`:seon.agent.message`) and the one
@@ -66,7 +67,7 @@ its `[:or …]` body. Every ref attribute REFERENCES this shape — never inline
 `[:or :int :string …]`.
 
 A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
-`:seon.agent/run`, `:seon.agent/parent`, `:seon.agent/namespace`,
+`:seon.agent/run`, `:seon.agent/parent`, `:seon.cluster.agent/namespace`,
 `:seon.agent.run/agent`,
 `:seon.agent.run/cause`, `:seon.agent.turn/run`,
 `:seon.agent.turn/cause-message`, `:seon.fn/ns`, `:seon.schema/ns`,
@@ -99,7 +100,7 @@ is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
 resolves to the agent's eid, so a write can reference an entity by its natural
 key without first querying its eid.
 
-`:seon.agent/namespace` is additionally a unique-value ref. Datahike first
+`:seon.cluster.agent/namespace` is additionally a unique-value ref. Datahike first
 resolves its `[:seon.ns/name ...]` value to the namespace eid, then enforces
 ordinary AVET uniqueness on that eid. Consequently one namespace has at most
 one active resident agent, while messages, runs, plans, and parent refs keep
@@ -455,6 +456,7 @@ bridge-storable. See [[library-grounding]].
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.agent/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/human-readable} :seon.db.id/agent-value]` | string / one / identity | readable agent identity; reserved `root` is reconciled |
+| `:seon.cluster.agent/namespace` | `[:and {:seon.db/unique true} :seon.db/ref]` | ref / one / unique value | required at formal creation; → the one `:seon.ns` entity this agent owns; ordinary transact reassigns it |
 | `:seon.agent/parent` | `:seon.db/ref` | ref / one | optional; → the agent that started this one (absent on the root agent — the base case) |
 | `:seon.agent/run` | `:seon.db/ref` | ref / one | optional; → current run; the fencing pointer + derived-state spine |
 | `:seon.agent/terminated-at` | `:inst` | instant / one | optional; presence ⇒ derived `:terminated` |
@@ -865,7 +867,21 @@ refers. Namespace source and require-edge facts are committed together; the
 database edge rows are the one runtime authority.
 | `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, plus source/spec/arglists/doc strings; renderer reads are runtime observations, not stored keyword literals |
 | `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.schema/ns :seon.db/ref`, full canonical untruncated EDN form |
-| `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`, last-passed-at/last-failed-at insts |
+| `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`; each run references this stable declaration row |
+
+Test outcomes are append-only observations, never last-passed/last-failed
+attributes on the declaration:
+
+| entity | identity and facts | refs |
+|---|---|---|
+| `:seon.test.run` | identity, run instant, Git SHA | none; one explicitly opted-in `bin/test` invocation |
+| `:seon.test.result` | identity, `:pass` or `:fail` outcome | exact `:seon.test` and `:seon.test.run`; optional component failure |
+| `:seon.test.failure` | identity and bounded message | owned by the result so diagnostic text remains a referenced fact |
+
+The result sink only opens an explicitly named non-default cluster. Normal
+`bin/test` execution does not open a database. A failure-to-owner query follows
+result → test → namespace → the agent whose
+`:seon.cluster.agent/namespace` ref names that namespace.
 
 The entity identity/required/render catalog is derived once per validated Malli
 registry generation from those canonical forms. It is process-local projection
