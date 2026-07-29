@@ -751,6 +751,35 @@ may reintroduce a shadow build into the dev feedback path.
   without keeping a nil-vs-absent distinction alive (applies the
   omission ruling; the walk-forwarding `contains?` fix is queued for
   this simplification).
+  **Rulings 2026-07-29 afternoon (owner, the planning session):**
+  (1) THE QUAGMIRE DIAGNOSIS (all four named modes, plus the owner's
+  own): separate processes with bugs and slowness concentrated at the
+  communication boundaries, and hand-built rule/prose context. The
+  countermeasure is the standing direction: PUSH the generic Datahike
+  entity walker + distance renderer as THE dynamic context mechanism —
+  fewer prose interventions, more derived context.
+  (2) TEST-BASED DEVELOPMENT IS THE MODEL, extended to the product:
+  the planner agent writes the DATA MODEL + the TESTS + the desired
+  API, and namespace agents turn those tests (plus their namespace's
+  standing tests) green. This is generate-code's target shape; the
+  owner designs `seon.ai/generate-code` PERSONALLY with the
+  orchestrator (chat before mining/design, then review + iterate).
+  (3) ONE ROBUST PARSER, merged not new: a prior session built a new
+  parser and old bug classes recurred; the OLD parser was more robust.
+  Mine both, merge the best ideas into the one reader — verify this
+  merge actually happened; if not it is S-tier work.
+  (4) DESIGN REVIEW GATE (standing): mining/analysis lanes run free;
+  every S/A design stops for the owner's review before implementation;
+  B/C fixes flow after orchestrator review.
+  (5) STANDING AUDIT CADENCE WIDENED: keep launching audit lanes at
+  the codebase — docstrings and schema QUALITY especially; lanes must
+  trigger the datahike/data-modeling/clojurescript skills; if a skill
+  does not match the system design, UPDATING THE SKILL IS HIGH
+  PRIORITY (skills are load-bearing context, not documentation).
+  (6) Per-call/per-agent LLM configs were PREVIOUSLY BUILT — quarry
+  before designing; thinking budgets are likely new and per-model.
+  Unlimited local testing on the Ollama qwen server is sanctioned
+  (documented in research/local-provider-2026-07-28.md).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
