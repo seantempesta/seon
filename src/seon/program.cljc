@@ -47,19 +47,48 @@
             [identity-attribute value]))
         identity-attributes))
 
+(defn- row-identities
+  [row]
+  (into []
+        (keep (fn [identity-attribute]
+                (when-some [value (get row identity-attribute)]
+                  [identity-attribute value])))
+        identity-attributes))
+
+(defn- declaration-refused!
+  [message identities data]
+  (throw
+   (ex-info message
+            (merge {:seon.error/kind :seon.program/declaration-refused
+                    :seon.program/identities identities}
+                   data))))
+
 (defn canonical-row
   "The exact non-nil attributes owned by one declaration row."
   {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :map]]}
   [row]
-  (when-let [[identity-attribute _] (row-identity row)]
-    (into {}
-          (remove (fn [[attribute value]]
-                    (or (nil? value)
-                        (and (= :seon.ns/require-edges attribute)
-                             (empty? value)))))
-          (select-keys row
-                       (:seon.program/owned-attributes
-                        (shape identity-attribute))))))
+  (let [identities (row-identities row)]
+    (when (> (count identities) 1)
+      (declaration-refused!
+       "A declaration row carries more than one identity family."
+       identities
+       {}))
+    (when-let [[identity-attribute _] (first identities)]
+      (into {}
+            (remove (fn [[attribute value]]
+                      (or (nil? value)
+                          (and (= :seon.ns/require-edges attribute)
+                               (empty? value)))))
+            (select-keys row
+                         (:seon.program/owned-attributes
+                          (shape identity-attribute)))))))
+
+(def ^:private declaration-required-attributes
+  {:seon.ns/name [:seon.ns/source]
+   :seon.fn/sym [:seon.fn/ns :seon.fn/source :seon.fn/arglists
+                 :seon.fn/private?]
+   :seon.schema/key [:seon.schema/form]
+   :seon.test/sym [:seon.test/ns :seon.test/source]})
 
 (defn declaration-row
   "Canonical declaration row for a reader event under a function policy.
@@ -70,17 +99,30 @@
   {:malli/schema
    [:=> [:cat :map [:enum :all :contracted]] [:maybe :map]]}
   [event function-policy]
-  (canonical-row
-   (cond
-     (:seon.ns/name event) event
-     (and (:seon.fn/sym event)
-          (or (= :all function-policy)
-              (and (= :contracted function-policy)
-                   (:seon.fn/spec event))))
-     event
-     (:seon.schema/key event) event
-     (:seon.test/sym event) event
-     :else nil)))
+  (let [candidate
+        (cond
+          (:seon.ns/name event) event
+          (and (:seon.fn/sym event)
+               (or (= :all function-policy)
+                   (and (= :contracted function-policy)
+                        (:seon.fn/spec event))))
+          event
+          (:seon.schema/key event) event
+          (:seon.test/sym event) event
+          :else nil)
+        row (canonical-row candidate)]
+    (when row
+      (let [[identity-attribute _ :as identity] (row-identity row)
+            missing
+            (into []
+                  (remove #(contains? row %))
+                  (get declaration-required-attributes identity-attribute))]
+        (when (seq missing)
+          (declaration-refused!
+           "A declaration row is missing required attributes."
+           [identity]
+           {:seon.program/missing-attributes missing}))))
+    row))
 
 (defn changed-attributes
   "Owned non-identity attributes whose exact values differ."

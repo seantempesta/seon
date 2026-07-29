@@ -244,11 +244,13 @@
             (contains? #{:io :compute} workload)
             (assoc :seon.fn/workload workload)))))))
 
+(declare resolved-operation)
+
 (defn- test-declaration
-  [form namespace-name]
+  [form namespace-name context]
   (when (and (seq? form)
-             (symbol? (first form))
-             (= "deftest" (name (first form)))
+             (= 'clojure.test/deftest
+                (resolved-operation (first form) context))
              (symbol? (second form)))
     (when-let [qualified (qualified-symbol namespace-name (second form))]
       {:seon.test/sym (str qualified)
@@ -265,13 +267,13 @@
   `seon.sci.eval/program-row` the build indexer has no `malli-form?`
   admission gate. See
   `docs/seon/issues/eval-time-schema-and-test-rows-have-no-recurring-proof.md`."
-  [operation {::keys [aliases]}]
+  [operation {::keys [aliases refers]}]
   (when (symbol? operation)
     (if-let [operation-namespace (namespace operation)]
       (if-let [target (get aliases (symbol operation-namespace))]
         (symbol (str target) (name operation))
         operation)
-      operation)))
+      (get refers operation operation))))
 
 (defn- schema-declaration
   [form context]
@@ -299,7 +301,7 @@
     (or
      (when-let [function (function-declaration form namespace-name)]
        (assoc function :seon.fn/source source))
-     (when-let [test (test-declaration form namespace-name)]
+     (when-let [test (test-declaration form namespace-name context)]
        (assoc test :seon.test/source source))
      (schema-declaration form context))))
 

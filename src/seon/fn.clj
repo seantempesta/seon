@@ -1,9 +1,11 @@
 (ns seon.fn
   "Build-time indexing of the Clojure program graph through the one reader."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.program :as program]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
 
@@ -279,16 +281,35 @@
               [desired-row])))
          desired)
         stale
-        (when (not= :seon.schema/key identity-attr)
-          (into
-           []
-           (keep
-            (fn [[identity current-row]]
-              (when (and (= process-id (::process-id current-row))
-                         (not (contains? desired identity)))
-                [:db.fn/retractEntity (::entity current-row)])))
-           current))]
+        (into
+         []
+         (keep
+          (fn [[identity current-row]]
+            (when (and (= process-id (::process-id current-row))
+                       (not (contains? desired identity)))
+              [:db.fn/retractEntity (::entity current-row)])))
+         current)]
     (into changes stale)))
+
+(defn- desired-program-rows
+  [request]
+  (let [source-rows (rows request)
+        canonical-schemas (schema/canonical-schema-rows (java.util.Date. 0))
+        canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
+        source-only
+        (remove (fn [row]
+                  (contains? canonical-keys (:seon.schema/key row)))
+                source-rows)]
+    (doseq [{schema-key :seon.schema/key
+             form-string :seon.schema/form}
+            (filter :seon.schema/key source-only)]
+      (when-not (and form-string
+                     (schema/malli-form? (edn/read-string form-string)))
+        (throw
+         (ex-info "Source indexing refused a non-Malli schema declaration."
+                  {:seon.error/kind ::index-refused
+                   :seon.schema/key schema-key}))))
+    (into (vec source-only) canonical-schemas)))
 
 (defn- digest-plan
   [db desired-digest]
@@ -318,8 +339,10 @@
   Rows whose current defining datom carries `:seon.db/process` are owned
   only when that process matches this request. Agent-authored rows and all
   non-program facts are therefore outside the reconciled slice. Namespace,
-  function, and test rows absent from the source are removed; schema rows
-  accrete because the canonical schema population shares their identities.
+  function, schema, and test rows absent from the desired population are
+  removed. The desired schema population is the canonical evaluated registry
+  plus source-only declarations, so canonical rows do not need a family-wide
+  stale-removal exemption.
 
   When `:seon.ancestor/digest` is supplied, its one current value advances
   only after the program rows commit. After priming, that value means “this
@@ -331,7 +354,7 @@
   [{connection :seon.store/branch-connection
     process :seon.db/process
     :as request}]
-  (let [program-rows (rows request)
+  (let [program-rows (desired-program-rows request)
         _ (assert-one-row-per-identity! program-rows)
         _ (assert-populated! program-rows)
         process-id (process-identity @connection process)
