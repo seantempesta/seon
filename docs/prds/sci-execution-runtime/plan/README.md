@@ -667,6 +667,12 @@ may reintroduce a shadow build into the dev feedback path.
   descriptor row, OLLAMA_NUM_PARALLEL for parallel processing. The
   src-needle mlx server is EXPERIMENTAL only, never the project
   server. (Hosted default remains DeepSeek.)
+  **Ruling 2026-07-29 (owner): ONE MODEL SERVER AT A TIME during
+  testing.** Never have two large models resident simultaneously —
+  the 2026-07-29 ~03:30 memory-pressure reaping (Ollama death + the
+  background-wrapper SIGTERM wave) happened with mlx (19GB) + Ollama
+  (28.7GB incl. 8-slot KV) both loaded. The project server is Ollama;
+  fleet experiments SHARE the one server, never spawn siblings.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
