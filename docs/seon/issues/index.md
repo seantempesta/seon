@@ -14,11 +14,11 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Instrumented `assert-compilable-schema!` refuses every agent turn](instrumented-assert-compilable-schema-refuses-every-agent-turn.md) | blocker | Core |
-| [`terminal-refused!` never checks its own settlement commit](terminal-refusal-never-checks-its-own-settlement-commit.md) | blocker | Core |
-| [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
+| [Closed agent mailboxes fault on durable notice delivery](closed-agent-mailbox-turns-durable-fault-notice-into-core-fault.md) | blocker | agent |
 | [Cold resume loses the defs and aliases the plan prefix established](cold-resume-loses-the-defs-and-aliases-the-plan-prefix-established.md) | blocker | general |
+| [Instrumented `assert-compilable-schema!` refuses every agent turn](instrumented-assert-compilable-schema-refuses-every-agent-turn.md) | blocker | agent |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
+| [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
 ## Friction (5)
 

@@ -10,141 +10,157 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
-**WORKING EDGE (2026-07-29 afternoon — the owner-present design +
-restoration session; supersedes handoff v2 below).** Rulings 7–21 in
-README (read the 2026-07-29 midday/afternoon batches) are the day's
-charter. LANDED, all owner-ruled and gated: THE LIVING CODE GRAPH
-(0fc110286 + f9e587ec0 — reader→rows string identities, selective
-admission = contracted fns/schemas/tests ONLY, one parser, commit-first
-terminal transactions, lazy acquisition from facts never receipts,
-indexing only at ancestor population; GRADUATION PROVEN: agent defn →
-cluster restart → cross-agent call → 42; full gate 530/2181/0); the
-CONFIG UNFUCK (dial-authority derivation, one manifest compiler +
-explicit-absence semantics, bin/seon start --config + config apply via
-one apply!, apply-before-arm locked-state repair, 30-entry
-application-proof sweep, multi-cluster no-bleed; resources/ move = the
-in-flight final slice); the UNIVERSAL VALUE RENDERER ported
-(263de0563, router precedence per ruling 14, live proofs);
-schema-cycle refusal (009b079b8); the HTTP-KIT WRITE-STATE FORK
-(submodule 238a85c + 875353668 — parked SSE writer, boundedness
-falsifiers green; upstream PR pending OWNER GO); compute-door
-(evals through the bounded launcher on virtual threads); CRLF spans;
-integer coercion at transact; failed-stop addressability; S8 routing;
-helper re-armed live. RESEARCH IN: render-pipeline-design (composite
-package + keyframes, pull variant measured and REJECTED +24.8%/race;
-five-generation history table), query-invalidation (read-tracing
-FALSIFIED; datahike result-cache inheritance 22µs; old E/A/V
-registration located src-old/seon/db/writer.clj:2756-3205),
-workload-scheduling truth, submit-probe, parser-merge (NOT merged; 24
-bug classes; repair pass ruled), config-aero quarry, old-context
-assembly, transcript-aging, code-graph end-to-end, httpkit write path,
-tree-audit chunks 1–2, test-problems triage (8 waves), S0/S1 context
-shadow outputs (AWAIT OWNER READ). RUNNING: Opus falsifier
-(agent-flow renders, one registration mechanism for html+context —
-must reuse the old E/A/V machinery), config final slice.
-NEXT, in order: (1) config slice lands → FROZEN CHECKPOINT (quiet-tree
-full gate + armed-test wedge verdict + independent post-wave audit +
-joint debt review with the owner); (2) the falsifier verdict → the
-render/context implementation wave (contracts test-forward, owner
-review first); (3) S1 outputs read with the owner → S2 guinea pig
-(unfenced: graph data exists); (4) parser merge wave (S1–S6 + repair
-front door); (5) test-dissolution waves 1–4 (design review); UI stays
-TABLED until the context rendering system is proven. PENDING OWNER:
-upstream http-kit PR go; render-design doc read; S1 shadow read;
-generate-code design conversation (parked).
-**CHECKPOINT ENTERED (2026-07-29 late afternoon).** Config wave CLOSED
-(nine commits, both issues archived, resources/ move done, exit gate
-531/2183/0). The armed-test wedge did NOT reproduce on the quiet tree —
-exonerated as mid-edit contention. In flight: the independent
-orchestrator gate rerun; checkpoint-audit-0729 (the standing post-wave
-adversarial sweep — re-verifies the code-graph terminal seam, selective
-admission edges, zero-overlay boot from resources/, the fork's
-boundedness, and sweeps today's diffs for the known failure modes);
-the Opus agent-flow render falsifier (REPL-only). The issue queue follows
-the ranked schedule in `docs/seon/issues/index.md`; the debt review with
-the owner runs on the audit's return.
-**BABASHKA FRESH-ONLY DEPENDENCY (2026-07-29).** Plain `bb` still
-includes `src-old`, and the isolated removal is unsafe. The maintained
-Markdown/docstring edit hook dynamically loads
-`seon.dev.markdown`, `seon.dev.docstring`, and `seon.ai.tokens` from
-the quarry; non-`start`/`config` `bin/seon` commands still enter
-`seon.dev.cli` and its quarry configuration chain; writer/operator
-helpers also invoke those script owners through the root config.
-Giving that chain an explicit old-first classpath does not restore it:
-Babashka reaches Datahike JVM source and fails on native-image
-reflection. Exit is deletion/port of those named consumers followed by
-one root `bb.edn` cut and three falsifiers: plain `bb` rejects
-`seon.time`, the maintained edit hook still validates Markdown, and
-every surviving `bin/seon` command uses the fresh operator. Do not land
-the root-only path removal before those consumers move.
-**FALSIFIER RETURNED (f8c260dd7): the third proc SURVIVES — all four
-targets pass** (agent-flow-render-falsification-2026-07-29.md +
-committed prototype scripts). Measured: interest routing adapted from
-the OLD machinery (reverse candidate index, plan→attribute reduction,
-:all fail-open; ::by-scope and the settle-delay scheduler dropped —
-flow's sliding-1 already is that) addressed 1 of 1,001 interests at
-0.49µs/report and registered ABSENCE dependence (the case that killed
-returned-(e,a) tracing); 100 parked three-proc agents = +8.9KB heap
-each, ZERO new platform threads, +19µs arm; ONE mechanism proven — 12
-registrations (8 ai + 4 html) in one memory/digest pass, one commit
-re-deriving an ai context piece and two html blocks together,
-churn-ordered assembly served from proc state; cross-namespace
-production through a plain defn, B needs no proc. HONEST BREAKS
-(design inputs, not failures): the fresh tree has NO READ SEAM (render
-owners call datahike.api directly) so narrow waking is blocked and
-today's unconditional wake is CORRECT; (d/pull '[*]) plans to :all —
-focus/namespace renderers can never narrow as written;
-RE-REGISTRATION-EVERY-PASS IS LOAD-BEARING (captured plans lag one
-render on data-dependent branches — install-once-at-arm would be
-wrong); real memory = held outputs (~85KB/transcript) not the proc;
-the turn→render-memory read path is UNPROVEN and breaks first. FIVE
-OPEN DECISIONS in the report §7 — chiefly: land the proc before the
-read seam (recommended), and where render memory lives for turn
-reads. Await the owner's §7 rulings at the debt review.
-**CHECKPOINT AUDIT RETURNED (8b5581b64): DOES NOT GRADUATE.** One real
-blocker — a REFUSED terminal program transaction leaves its receipt
-running and re-fires as a durable-error hot loop (the midday
-refusal-loop sighting was real, not mid-edit weather; issue:
-refused-terminal-transaction-leaves-a-running-receipt-hot-loop). Fix
-lane refusal-hotloop-fix DISPATCHED (test-forward, storm-bound proof).
-Two lesser finds also fix-dispatched/filed: the value renderer caching
-FILE-derived config (renderer-config-fact-fix lane — runtime reads
-facts only) and fresh-operator stale instrumentation (filed, queued).
-VERIFIED SOLID by the audit's own reproductions: same-transaction
-fn/schema/test publication, negative admission (expression/def/
-uncontracted defn/failed eval), fact-backed acquisition across a real
-JVM restart, zero-overlay config + single-registration dial + explicit
-absence, the fork's bound holding (239,188 bytes vs the 524,288
-bound), full gate 531/2183/0 independently green. The checkpoint
-graduates when the hot-loop fix lands + re-audit of that seam passes.
-**GRADUATION ORDER (2026-07-29 evening):** hot-loop fix LANDED to
-ruling 23 (e7d9f14c3 — one refusal = one atomic terminal receipt +
-error fact + run close, zero re-fires; gate 538/2242/0); the seam
-re-audit correctly REFUSED to certify while the contracts batch holds
-uncommitted store.clj transact-encoder edits under the refusal path —
-it relaunches when that batch lands, then the checkpoint closes.
-Facade quarry resumed with the combined ruling-24 brief (full surface,
-port-best-for-datahike-internals, dual-use pass-bound capture,
-two-level dedupe); orchestrator authors the contract spec on its
-return.
-**EVERYTHING SCHEDULED (owner order, 2026-07-29 evening).** Ruling 23
-(nothing re-fires; the episode turn cap is the only retry budget)
-corrected the hot-loop fix mid-flight. NINE lanes running:
-refusal-hotloop-fix (corrected), renderer-config-fact-fix,
-skills-update (priority — agents consume skills), seondb-facade-quarry
-(ruling 22a — mine the three old generations, dual-arity auto-db),
-small-correctness-batch (9 issues), contracts-quality-batch (5),
-hygiene-batch (5), lane-tooling-fix (codex-agent stop/resume
-verification), issue-triage final chunks (rebuilding index.md as THE
-SCHEDULE — every open issue gets a running lane, a named future wave,
-or dies with evidence). Future-wave assignments: parser merge
-(cold-resume), render implementation (walk-overlap +
-program-graph-render-declarations — UNBLOCKED, graph data exists),
-test-dissolution (polled transitions), deps/vendor review (datahike
-planner defects, malli vendor), config follow-up (flow-dials
-two-owners — possibly dissolved by the derivation). OWNER PENDING
-unchanged: render-design read, S1 shadow read, upstream PR go,
-generate-code conversation.
+**WORKING EDGE — 2026-07-29, the owner-present design + restoration day.
+This block supersedes every dated block below it.** README rulings 7–24
+(the 2026-07-29 midday/afternoon/evening batches) are the charter; read
+them before designing anything. `docs/seon/issues/index.md` is THE
+SCHEDULE (every open note carries a running lane, a named future wave,
+or died with evidence). Verify any claim here with one live command
+before acting on it.
+
+## Landed and gated today
+
+- **THE LIVING CODE GRAPH** (`0fc110286`, `f9e587ec0`) — reader→rows with
+  string identities; SELECTIVE ADMISSION (contracted fns/schemas/tests
+  only; scratch defs/expressions get receipts, never rows); one parser
+  (the evaluator's second `sci/parse-string` deleted); commit-first
+  terminal transactions (SCI installation derives from `:db-after`);
+  parse-time namespace attribution (D8) with divergence queryable; lazy
+  acquisition from facts, never receipts; indexing ONLY at ancestor
+  population, never boot. **Graduation proven: agent defn → cluster
+  restart → a second agent called it → 42.**
+- **THE CONFIG AUTHORITY WAVE** (nine commits, `42887d234`…`06068eb67`)
+  — one registration derives manifest-admissibility + database
+  installation + defaults (three hand-maintained maps and their
+  cross-check tests DELETED); one manifest compiler (defaults + sparse
+  overlay + explicit env → validated effective map + digest → one
+  desired-config row); omission inherits the shipped default, explicit
+  `:seon.config/absent` is the only "off"; `bin/seon start [cluster]
+  [--config <path>]` and `bin/seon config apply` through the ONE
+  `seon.config/apply!`; cluster name optional everywhere (absent =
+  default); apply → launcher → arm ordering with the locked-state
+  repair drill; all 30 configured entries proven CONSUMED by the
+  running system with per-entry update modes documented; multi-cluster
+  no-bleed; all schema EDN moved to `resources/seon/schema/`.
+- **THE UNIVERSAL VALUE RENDERER** (`263de0563`, ported per ruling 14)
+  — the old structural skeleton renderer (bounded depth/breadth,
+  navigation-preserving, lazy-safe, opaque handles, controllable caps)
+  is the FLOOR for any data; router precedence lands as ruled: value's
+  own render keys → namespace override defns → schema-attached default
+  → floor. Caps derive from database facts (`08a436d02`), live-apply
+  proven without restart.
+- **THE HTTP-KIT WRITE-STATE FORK** (submodule `238a85c` + `875353668`)
+  — additive per-channel pending-byte state + atomic drain-or-close
+  completion (`send!`/`tryWrite` semantics preserved, JUnit covered);
+  our SSE writer PARKS on it. Stalled-tab growth bounded (audit
+  measured 239,188 bytes against the 524,288 bound; before: 12 MB
+  unbounded). **Upstream PR against http-kit #180/#474 pending owner
+  go** — the fork retires if upstream merges.
+- **Fixes**: compute-door (evals through the bounded launcher on
+  virtual threads, both startup-wait defects dead); CRLF exact source
+  spans; Integer→Long coercion at the ONE transact choke point; failed
+  stop stays addressable; S8 goal-chain routing scope; schema-cycle
+  refusal; the 9-issue small-correctness batch; the 5-issue contracts
+  batch; the 5-item hygiene batch; instrumentation ordering fixed AT
+  THE CHOKE POINT (`b69310347` — `seon.instrument/apply!` loads the
+  registry itself; per-site ordering knowledge deleted).
+- **SKILLS + RUBRIC UPDATED (owner priority)** — datahike,
+  data-modeling, data-oriented-clojure, clojure-testing now teach the
+  current system (resources/ schema EDN, dial derivation,
+  presence-not-kinds, selective admission, the omission ruling); the
+  review hook's rubric corrected and PROVEN corrected (both documented
+  false-positive classes re-reviewed clean).
+- **Lane tooling hardened** (`74a65d53d`) — verified stops, refusal to
+  resume a live session, atomic summary freshness, name-collision
+  refusal; the doubled-session state is unrepresentable.
+
+## Research corpus produced today (read before re-deriving anything)
+
+`code-graph-end-to-end` (the living graph, three generations, five
+gaps), `config-aero-quarry` (the workflow was the loss, not the files),
+`parser-merge` (NOT merged; 24 bug classes; the repair pass is the
+front door), `old-context-assembly` (rendering was derived, MEMBERSHIP
+was hand-built — the scaling wall), `transcript-aging-quarry` (aging
+was always render-derived; no compaction job ever existed),
+`query-invalidation` (read-tracing FALSIFIED — misses absence; Datahike
+inherits cached results across bases at ~22 µs; the old E/A/V
+registration located), `workload-scheduling-truth` (`:mixed` is not a
+splitting scheduler; the CPU-permit-across-io measurement),
+`submit-probe` (the dream needs the code graph; boring-for-now wins),
+`render-pipeline-design` (serialize-once/mult 1.17 ms at 50 tabs;
+block morph 1.2–1.5 ms; explicit pull REJECTED — +24.8% bytes and a
+race; five-generation history table), `httpkit-write-path` (a real
+upstream gap, not our misunderstanding), `seondb-facade-quarry` (seven
+generations; entity must be eager-bounded; datoms range evidence 20
+wakes/0 false vs 60/40; two-agent dedupe proven),
+`agent-flow-render-falsification` (the third proc SURVIVES),
+`test-problems-triage` (8 class-dissolving waves, ~84 tests),
+`tree-audit` + `checkpoint-audit` (the standing adversarial sweeps),
+`context-walk/s0-baseline` + `s1-shadow` (six verbatim side-by-sides —
+**await owner read**).
+
+## The checkpoint — NOT graduated, one lane from it
+
+Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under
+every ruled scenario**: one refused terminal commit → exactly one
+settled receipt + one durable error fact + closed run + the only wake
+being the trigger commit itself; first-form and mid-plan refusals,
+below-cap (next turn carries the refusal) and at-cap (episode ends
+clean) all correct; `kill -9` recovery marks `interrupted-at`, nothing
+re-executes, ready in 968 ms; one settlement path, three fenced
+writers, no second mechanism. It found two blockers standing in front
+of the claim:
+
+1. **`terminal-refusal-never-checks-its-own-settlement-commit`** —
+   FIXED AND LANDED (`6ab646eb6`): settlement data bounded and
+   validated before construction, the transaction's own outcome
+   checked, refusal raises a named core fault instead of returning
+   true, reboot recovery marks `interrupted-at`. Gate 552/2360/0.
+   Follow-on filed: `closed-agent-mailbox-turns-durable-fault-notice-into-core-fault`.
+2. **`instrumented-assert-compilable-schema-refuses-every-agent-turn`**
+   — fix complete in tree, UNCOMMITTED (a bound-definition named schema
+   at the activation boundary + source-form binding before Malli
+   compilation + an instrumented `:panic` scratch-cluster turn
+   regression). Its lane stopped honestly because the full gate was
+   blocked by lane 1's in-flight test; lane 1 has since landed, and the
+   lane is resumed to gate + commit + archive.
+
+**Graduation = that commit + re-audit attempt 6** (the attempt-5 spec,
+on an isolated root — never the owner's JVM on 7994). Then the joint
+debt review.
+
+## Awaiting the owner only
+
+- **Read**: `render-pipeline-design-2026-07-29.md` (the composite
+  package/keyframe design), `context-walk/s1-shadow/` (six verbatim
+  outputs — the S2 gate), `plan/seondb-facade-contract-spec.md` (my
+  authored spec; one embedded decision: reads return the BARE result,
+  evidence flows only through the bound pass — override if wrong).
+- **Go/no-go**: the upstream http-kit PR (a public action on the
+  owner's identity).
+- **Conversation**: `seon.ai/generate-code` design (parked at owner's
+  request), and the render-proc §7 decisions (three already ruled in
+  ruling 22; memory-bound ruled at-most-once).
+- **Housekeeping**: the owner's live default JVM (pid 61316, port 7994)
+  predates every landing today — a bounce is NON-DESTRUCTIVE (reopen
+  accretes today's schema rows; helper's transcript and all facts
+  survive) and brings it onto current code with instrumentation armed
+  at boot.
+
+## Next, in order
+
+1. acquisition-fix commit → **re-audit attempt 6** → checkpoint closes.
+2. The render/context implementation wave — contracts authored
+   test-forward from `agent-flow-render-falsification` + the owner's
+   §7 rulings; the third proc lands BEFORE the read seam.
+3. The `seon.db` facade — port Generation G per the contract spec after
+   owner review; then the 27-file migration in owner-lane groups.
+4. Context-walk S2 (the live guinea-pig) — unfenced now that the code
+   graph exists; needs the owner's S1 read first.
+5. The parser merge wave (S1–S6 + the repair front door) and the
+   test-dissolution waves (8 classes, ~84 tests) — both design-gated.
+6. UI restoration stays TABLED until the context rendering system is
+   proven (owner ruling 12).
 
 **DELEGATION PRECONDITIONS P2 + P3 LANDED (2026-07-29 early).** Agent
 namespace assignment is the unique-value
@@ -179,7 +195,7 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
-**COMPACTION HANDOFF v2 (2026-07-29 midday — supersedes v1 below).**
+**[SUPERSEDED — historical] COMPACTION HANDOFF v2 (2026-07-29 midday).**
 THE VERIFICATION HAPPENED: the owner answered the how-it-works check.
 His reply is recorded VERBATIM-HEAVY in plan/README.md "Rulings
 2026-07-29 late morning" — READ IT FIRST; it is next session's charter:
@@ -212,7 +228,7 @@ confirmed by his generate-code enthusiasm + problems-with-context;
 owner-fixed: superseded by test-based goals; root context: same
 system + root-specific, ruled).
 
-**COMPACTION HANDOFF (2026-07-29 morning — read FIRST).** The owner is
+**[SUPERSEDED — historical] COMPACTION HANDOFF (2026-07-29 morning).** The owner is
 PRESENT and was given a how-the-system-works explanation to verify
 (the successor should NOT redo it — ask for the verdict): three
 uncertainty flags await his answer: (1) should the GENERIC cluster
@@ -235,7 +251,7 @@ unit pre-thought. Lanes: noise-fixes running (chunked mode — resume
 with small slices; never stack resumes; big sessions do not resume,
 relaunch fresh). One model server at a time (Ollama), fleets share it.
 
-**THE FRAMED QUEUE (2026-07-29 morning — every pending unit with its
+**[SUPERSEDED by the schedule in docs/seon/issues/index.md] THE FRAMED QUEUE (2026-07-29 morning — every pending unit with its
 pre-dispatch thought, written BEFORE dispatch per the /goal
 discipline).** Format: unit — what we'd learn if unnecessary | the
 dissolution preferred over completion.
@@ -1477,30 +1493,3 @@ Recorded because the failure mode is systematic, not incidental:
 
 **So: re-grep a row's evidence before acting on it.** Every claim in this file
 was verified on 2026-07-26 and may already be stale.
-
-**GRADUATION ATTEMPT 2 (evening): blocked at boot, not the seam** — the
-re-audit found bin/seon start failing pre-boot: the
-instrumentation-refresh-before-start! fix (79d02f6fd) runs before
-seon.schema.edn/load! populates the registry, so contracts referencing
-registered schemas (first casualty :seon.render/value) cannot compile.
-Orchestrator-verified ordering defect between two correct fixes;
-instrumentation-order-fix lane dispatched (schema load precedes
-refresh; both regressions must survive + a fresh-process boot
-regression). Re-audit attempt 3 relaunches on its landing.
-
-**GRADUATION ATTEMPT 5 (Opus, 80b12d8f3): the SEAM IS GREEN under
-every ruled scenario (wrappers stripped; one terminal receipt + one
-error fact + closed run; the only wake = the trigger commit; crash
-recovery 968ms, nothing re-executes; one settlement path, three
-fenced writers) — but NOT GRADUATED: two NEW blockers found.
-(1) instrumented-assert-compilable-schema-refuses-every-agent-turn —
-acquire!'s activation hands BOUND forms to a contract declaring EDN
-forms; armed :panic instrumentation kills every agent turn (the green
-gate never exercised acquisition under armed instrumentation).
-(2) terminal-refusal-never-checks-its-own-settlement-commit — the
-minimal settlement commit CAN refuse and terminal-refused! returns
-true anyway (latent hot-loop precondition; un-refusable was an
-argument, not a fence). BOTH FIX LANES DISPATCHED (test-forward from
-the audit's reproductions; disjoint owners). Attempt 6 after both
-land. Owner-recommended: bounce the default JVM (morning code) at
-convenience — non-destructive reopen, facts survive, schemas accrete.
