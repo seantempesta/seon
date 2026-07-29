@@ -91,6 +91,66 @@
            {:seon.fresh-operator/name name}))
   name)
 
+(defn- parse-start-arguments
+  [arguments]
+  (loop [remaining (seq arguments)
+         selected {}]
+    (if-not remaining
+      (merge {:seon.fresh-operator/name "default"} selected)
+      (let [argument (first remaining)]
+        (cond
+          (= "--config" argument)
+          (let [path (second remaining)]
+            (when (or (str/blank? path)
+                      (str/starts-with? path "--"))
+              (fail! "`--config` requires a path."
+                     {:seon.fresh-operator/arguments arguments}))
+            (recur (nnext remaining)
+                   (assoc selected
+                          :seon.fresh-operator/config-path path)))
+
+          (str/starts-with? argument "--")
+          (fail! "Unknown start option."
+                 {:seon.fresh-operator/argument argument})
+
+          (:seon.fresh-operator/name selected)
+          (fail! "Use `start [CLUSTER] [--config PATH]`."
+                 {:seon.fresh-operator/arguments arguments})
+
+          :else
+          (recur (next remaining)
+                 (assoc selected
+                        :seon.fresh-operator/name (valid-name! argument))))))))
+
+(defn- parse-config-apply-arguments
+  [arguments]
+  (let [[name path]
+        (case (count arguments)
+          1 ["default" (first arguments)]
+          2 [(valid-name! (first arguments)) (second arguments)]
+          (fail! "Use `config apply [CLUSTER] PATH`."
+                 {:seon.fresh-operator/arguments arguments}))]
+    (when (str/blank? path)
+      (fail! "The config path must not be blank."
+             {:seon.fresh-operator/arguments arguments}))
+    {:seon.fresh-operator/name name
+     :seon.fresh-operator/config-path path}))
+
+(defn- sparse-manifest
+  [root path]
+  (let [selected (fs/path path)
+        selected (if (fs/absolute? selected)
+                   selected
+                   (fs/path root selected))]
+    (when-not (fs/regular-file? selected)
+      (fail! "The selected config manifest does not exist."
+             {:seon.config/path (str selected)}))
+    (let [manifest (edn/read-string (slurp (str selected)))]
+      (when-not (map? manifest)
+        (fail! "The selected config manifest must be one EDN map."
+               {:seon.config/path (str selected)}))
+      manifest)))
+
 (defn- process-start-instant
   [pid]
   (try
@@ -273,14 +333,15 @@
          :seon.config.eval.result/max-nodes])})))
 
 (defn- launch-form
-  [name ready-port]
+  [name manifest ready-port]
   (let [instance (gensym "instance")]
     (pr-str
      `(do
         (require 'seon.cluster 'seon.config 'seon.instrument)
         (let [~instance
               (seon.cluster/start!
-               {:seon.boot/cluster-name ~name})
+               {:seon.boot/cluster-name ~name
+                :seon.config/manifest ~manifest})
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "ready — instrumented"
                    (:seon.instrument/instrumented applied#) "vars")
@@ -294,14 +355,15 @@
           @(promise))))))
 
 (defn- add-form
-  [name]
+  [name manifest]
   (let [instance (gensym "instance")]
     (pr-str
      `(do
         (require 'seon.cluster 'seon.config 'seon.instrument)
         (let [~instance
               (seon.cluster/start!
-               {:seon.boot/cluster-name ~name})
+               {:seon.boot/cluster-name ~name
+                :seon.config/manifest ~manifest})
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "added — instrumented"
                    (:seon.instrument/instrumented applied#) "vars")
@@ -315,11 +377,11 @@
     path))
 
 (defn- launch!
-  [root name ready-port]
+  [root name manifest ready-port]
   (let [log (create-log! root name)
         command ["python3" "-c" detach-python
                  (str (fs/path root)) (str log)
-                 "clojure" "-M:dev" "-e" (launch-form name ready-port)]
+                 "clojure" "-M:dev" "-e" (launch-form name manifest ready-port)]
         builder (doto (ProcessBuilder. ^java.util.List command)
                   (.directory (.toFile (fs/path root)))
                   (.redirectErrorStream true))
@@ -368,16 +430,6 @@
      (remove alive-names
              (map #(str "exp-" %) (iterate inc 1))))))
 
-(defn- start-name
-  [rows argument]
-  (if argument
-    (valid-name! argument)
-    (if (some #(and (= "default" (:seon.fresh-operator/name %))
-                    (:seon.fresh-operator/alive? %))
-              rows)
-      (generated-name rows)
-      "default")))
-
 (defn- print-started!
   [root name value]
   (println (format "● %-20s %s  prepl=%s  log=%s"
@@ -388,11 +440,10 @@
 
 (defn- start!
   [root arguments]
-  (when (> (count arguments) 1)
-    (fail! "Use `start [NAME]`."
-           {:seon.fresh-operator/arguments arguments}))
-  (let [rows (advertisement-rows root)
-        name (start-name rows (first arguments))
+  (let [{:seon.fresh-operator/keys [name config-path]}
+        (parse-start-arguments arguments)
+        manifest (if config-path (sparse-manifest root config-path) {})
+        rows (advertisement-rows root)
         existing (some #(and (= name (:seon.fresh-operator/name %))
                              (:seon.fresh-operator/alive? %))
                        rows)]
@@ -401,7 +452,7 @@
              {:seon.fresh-operator/name name}))
     (if-let [anchor (first (filter :seon.fresh-operator/alive? rows))]
       (let [anchor-ad (:seon.fresh-operator/advertisement anchor)
-            _ (prepl-eval! anchor-ad (add-form name))
+            _ (prepl-eval! anchor-ad (add-form name manifest))
             value (require-advertisement! root name)]
         (create-log! root name)
         (spit (str (log-path root name))
@@ -412,9 +463,38 @@
       (with-open [ready-server
                   (ServerSocket.
                    0 1 (java.net.InetAddress/getLoopbackAddress))]
-        (launch! root name (.getLocalPort ready-server))
+        (launch! root name manifest (.getLocalPort ready-server))
         (print-started! root name
                         (await-advertisement! root name ready-server))))))
+
+(defn- config-apply-form
+  [name manifest]
+  (pr-str
+   `(let [instances# @@(ns-resolve 'seon.cluster
+                                   (symbol "running-instances"))
+          instance# (get instances# ~name)]
+      (when-not instance#
+        (throw (ex-info "The cluster is not running."
+                        {:seon.boot/cluster-name ~name})))
+      (seon.config/apply!
+       {:seon.config/connection
+        (:seon.boot/cluster-connection instance#)
+        :seon.boot/cluster-name ~name
+        :seon.config/manifest ~manifest}))))
+
+(defn- config!
+  [root arguments]
+  (when-not (= "apply" (first arguments))
+    (fail! "Use `config apply [CLUSTER] PATH`."
+           {:seon.fresh-operator/arguments arguments}))
+  (let [{:seon.fresh-operator/keys [name config-path]}
+        (parse-config-apply-arguments (vec (rest arguments)))
+        manifest (sparse-manifest root config-path)
+        advertisement (require-advertisement! root name)
+        result (terminal-value
+                (prepl-eval! advertisement
+                             (config-apply-form name manifest)))]
+    (println (str "● " name " config applied " result))))
 
 (defn- status!
   [root arguments]
@@ -560,7 +640,10 @@
   (println
    (str
     "Usage: bin/seon-fresh COMMAND\n\n"
-    "  start [NAME]   start one cluster; generates a name when default is busy\n"
+    "  start [CLUSTER] [--config PATH]\n"
+    "                 start one cluster; absent cluster means default\n"
+    "  config apply [CLUSTER] PATH\n"
+    "                 reconcile one live cluster; absent cluster means default\n"
     "  status         list every advertisement and derived liveness\n"
     "  open [NAME]    open the advertised web URL\n"
     "  stop [NAME]    stop the cluster through its advertised prepl\n"
@@ -575,6 +658,7 @@
     (try
       (case command
         "start" (start! root command-arguments)
+        "config" (config! root command-arguments)
         "status" (status! root command-arguments)
         "open" (open! root command-arguments)
         "stop" (stop! root command-arguments)

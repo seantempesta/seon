@@ -2,6 +2,11 @@
 set -euo pipefail
 
 SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${1:-}" == "start" || "${1:-}" == "config" ]]; then
+  exec bb --config "$SEON_ROOT/bb.edn" --deps-root "$SEON_ROOT" \
+    --classpath "$SEON_ROOT/script" \
+    -m seon.fresh-operator --seon-root "$SEON_ROOT" "$@"
+fi
 exec bb --config "$SEON_ROOT/bb.edn" --deps-root "$SEON_ROOT" \
   -m seon.dev.cli \
   --seon-root "$SEON_ROOT" "$@"

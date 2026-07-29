@@ -90,6 +90,56 @@
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
+(defn- operator-private-value
+  [function-name arguments]
+  (let [code
+        (pr-str
+         `(do
+            (require 'seon.fresh-operator)
+            (prn
+             ((var-get
+               (ns-resolve 'seon.fresh-operator '~function-name))
+              ~arguments))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" (str (io/file project-root "script"))
+            "-e" code])
+           (.directory project-root)
+           (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The fresh operator parser probe failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    (edn/read-string output)))
+
+(deftest config-command-selection-defaults-cluster-and-start-accepts-config
+  (is (= {:seon.fresh-operator/name "default"
+          :seon.fresh-operator/config-path "config/sparse.edn"}
+         (operator-private-value
+          'parse-start-arguments ["--config" "config/sparse.edn"])))
+  (is (= {:seon.fresh-operator/name "alpha"
+          :seon.fresh-operator/config-path "config/sparse.edn"}
+         (operator-private-value
+          'parse-start-arguments ["alpha" "--config" "config/sparse.edn"])))
+  (is (= {:seon.fresh-operator/name "default"
+          :seon.fresh-operator/config-path "config/sparse.edn"}
+         (operator-private-value
+          'parse-config-apply-arguments ["config/sparse.edn"])))
+  (is (= {:seon.fresh-operator/name "beta"
+          :seon.fresh-operator/config-path "config/sparse.edn"}
+         (operator-private-value
+          'parse-config-apply-arguments
+          ["beta" "config/sparse.edn"]))))
+
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)
         dotenv (io/file root ".env")]

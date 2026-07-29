@@ -171,4 +171,16 @@
   [:seon.config/applied-manifest-digest
    :seon.config/applied-manifest-digest]
   [:seon.config/desired-row :seon.config/entity]
-  [:seon.config/resolved-attributes [:set :qualified-keyword]]]}
+  [:seon.config/resolved-attributes [:set :qualified-keyword]]]
+
+ :seon.boot/start-request
+ [:map {:closed true}
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.boot/root {:optional true} :seon.boot/root]
+  [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host]
+  [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port]
+  [:seon.boot/log-dir {:optional true} :seon.boot/log-dir]
+  [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]
+  [:seon.boot/ancestor-branch {:optional true} :seon.boot/ancestor-branch]
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]]}
