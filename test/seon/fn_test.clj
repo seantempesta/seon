@@ -38,6 +38,35 @@
            "(deftest contracted-test)"))
     root))
 
+(defn- write-program-version!
+  [root version]
+  (let [file (io/file root "versioned.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit
+     file
+     (case version
+       :v1
+       (str "(ns versioned (:require [clojure.test :refer [deftest]] "
+            "[seon.schema :as schema]))\n"
+            "(defn ^{:malli/schema [:=> [:cat] :int]} "
+            "target \"v1 doc\" [] 1)\n"
+            "(defn anchor [] :v1)\n"
+            "(schema/register! ::value :int)\n"
+            "(deftest target-test (is (= 1 1)))")
+
+       :v2
+       (str "(ns versioned (:require [clojure.test :refer [deftest]] "
+            "[seon.schema :as schema]))\n"
+            "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 2)\n"
+            "(defn anchor [] :v2)\n"
+            "(schema/register! ::value :string)\n"
+            "(deftest target-test (is (= 2 2)))")
+
+       :v3
+       (str "(ns versioned)\n"
+            "(defn anchor [] :v3)")))
+    root))
+
 (deftest index-rows-admit-only-the-canonical-program
   (let [root (write-program! (str "tmp/fn-test/" (random-uuid)))]
     (let [rows (seon.fn/rows {:seon.fn/roots [root]})]
@@ -260,3 +289,93 @@
                     :seon.reconcile/operations 0}
                    result))
             (is (= before (:max-tx @connection)))))))))
+
+(deftest indexing-redefines-removes-and-converges-every-declaration-family
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        authored-ns 'my.agents.registration-owner]
+    (write-program-version! root :v1)
+    (test-support/with-database
+      (fn [connection]
+        (d/transact connection
+                    [{:seon.db.process/id "seon.db.process/agent"}])
+        (d/transact
+         connection
+         {:tx-data
+          [{:seon.ns/name authored-ns
+            :seon.ns/source "(ns my.agents.registration-owner)"}
+           {:seon.fn/sym "my.agents.registration-owner/survives"
+            :seon.fn/ns [:seon.ns/name authored-ns]
+            :seon.fn/source "(defn survives [] 42)"
+            :seon.fn/arglists "([])"
+            :seon.fn/private? false
+            :seon.fn/spec "[:=> [:cat] :int]"}
+           {:seon.schema/key :my.agents.registration-owner/value
+            :seon.schema/ns [:seon.ns/name authored-ns]
+            :seon.schema/form ":int"}
+           {:seon.test/sym "my.agents.registration-owner/survives-test"
+            :seon.test/ns [:seon.ns/name authored-ns]
+            :seon.test/source "(deftest survives-test)"}]
+          :tx-meta {:seon.db/process agent-process}})
+        (let [request {:seon.store/branch-connection connection
+                       :seon.db/process boot-process
+                       :seon.fn/roots [root]}]
+          (testing "V1 installs one current row for each source declaration"
+            (is (pos? (:seon.reconcile/operations (seon.fn/index! request))))
+            (is (= "v1 doc"
+                   (:seon.fn/doc
+                    (d/pull @connection '[*]
+                            [:seon.fn/sym "versioned/target"]))))
+            (is (= ":int"
+                   (:seon.schema/form
+                    (d/pull @connection '[*]
+                            [:seon.schema/key :versioned/value]))))
+            (is (= "(deftest target-test (is (= 1 1)))"
+                   (:seon.test/source
+                    (d/pull @connection '[*]
+                            [:seon.test/sym "versioned/target-test"])))))
+
+          (write-program-version! root :v2)
+          (testing "V2 exactly replaces source and retracts omitted optionals"
+            (is (pos? (:seon.reconcile/operations (seon.fn/index! request))))
+            (let [function
+                  (d/pull @connection '[*]
+                          [:seon.fn/sym "versioned/target"])]
+              (is (= "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 2)"
+                     (:seon.fn/source function)))
+              (is (not (contains? function :seon.fn/doc))))
+            (is (= ":string"
+                   (:seon.schema/form
+                    (d/pull @connection '[*]
+                            [:seon.schema/key :versioned/value]))))
+            (is (= "(deftest target-test (is (= 2 2)))"
+                   (:seon.test/source
+                    (d/pull @connection '[*]
+                            [:seon.test/sym "versioned/target-test"])))))
+
+          (write-program-version! root :v3)
+          (testing "V3 removes every absent source-owned declaration family"
+            (is (pos? (:seon.reconcile/operations (seon.fn/index! request))))
+            (is (nil? (d/pull @connection [:db/id]
+                              [:seon.fn/sym "versioned/target"])))
+            (is (nil? (d/pull @connection [:db/id]
+                              [:seon.schema/key :versioned/value])))
+            (is (nil? (d/pull @connection [:db/id]
+                              [:seon.test/sym "versioned/target-test"]))))
+
+          (testing "source reconciliation never owns agent-authored rows"
+            (is (some? (d/pull @connection [:db/id]
+                               [:seon.fn/sym
+                                "my.agents.registration-owner/survives"])))
+            (is (some? (d/pull @connection [:db/id]
+                               [:seon.schema/key
+                                :my.agents.registration-owner/value])))
+            (is (some? (d/pull @connection [:db/id]
+                               [:seon.test/sym
+                                "my.agents.registration-owner/survives-test"]))))
+
+          (testing "the converged V3 writes no transaction"
+            (let [before (:max-tx @connection)]
+              (is (= {:seon.reconcile/converged? true
+                      :seon.reconcile/operations 0}
+                     (seon.fn/index! request)))
+              (is (= before (:max-tx @connection))))))))))
