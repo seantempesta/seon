@@ -28,11 +28,13 @@
 
 (defn- parse-root
   [arguments]
-  (if (= "--seon-root" (first arguments))
-    [(or (second arguments)
-         (fail! "`--seon-root` requires a path." {}))
-     (vec (drop 2 arguments))]
-    [(System/getProperty "user.dir") (vec arguments)]))
+  (let [[root remaining]
+        (if (= "--seon-root" (first arguments))
+          [(or (second arguments)
+               (fail! "`--seon-root` requires a path." {}))
+           (vec (drop 2 arguments))]
+          [(System/getProperty "user.dir") (vec arguments)])]
+    [(.getCanonicalPath (java.io.File. root)) remaining]))
 
 (defn- cluster-root
   [root]
@@ -122,6 +124,16 @@
                  (assoc selected
                         :seon.fresh-operator/name (valid-name! argument))))))))
 
+(defn- explicit-start-name?
+  [arguments]
+  (loop [remaining (seq arguments)]
+    (when remaining
+      (let [argument (first remaining)]
+        (cond
+          (= "--config" argument) (recur (nnext remaining))
+          (str/starts-with? argument "--") (recur (next remaining))
+          :else true)))))
+
 (defn- parse-config-apply-arguments
   [arguments]
   (let [[name path]
@@ -210,9 +222,10 @@
   [root name]
   (read-advertisement-path (advertisement-path root name)))
 
-(defn- advertisement-rows
+(defn- advertisement-observations
   [root]
-  (let [directory (cluster-root root)]
+  (let [root (.getCanonicalPath (java.io.File. root))
+        directory (cluster-root root)]
     (if-not (fs/directory? directory)
       []
       (->> (fs/list-dir directory)
@@ -220,12 +233,17 @@
             (fn [cluster-dir]
               (when (fs/directory? cluster-dir)
                 (let [path (fs/path cluster-dir "prepl.edn")
-                      value (read-advertisement-path path)]
-                  (when value
-                    {:seon.fresh-operator/name
-                     (str (:seon.boot/cluster-name value))
-                     :seon.fresh-operator/advertisement value
-                     :seon.fresh-operator/alive? (boolean (alive? value))})))))
+                      advertised? (fs/regular-file? path)]
+                  (when advertised?
+                    (let [value (read-advertisement-path path)]
+                      {:seon.fresh-operator/name
+                       (str (fs/file-name cluster-dir))
+                       :seon.fresh-operator/root root
+                       :seon.fresh-operator/path (str path)
+                       :seon.fresh-operator/advertised? true
+                       :seon.fresh-operator/advertisement value
+                       :seon.fresh-operator/process-alive?
+                       (boolean (alive? value))}))))))
            (sort-by :seon.fresh-operator/name)
            vec))))
 
@@ -251,51 +269,579 @@
          (str/includes? form
                         "(clojure.core/deref (clojure.core/promise))"))))
 
-(defn- orphan-operator-jvm-pids
-  [rows]
-  (let [advertised-pids
-        (into #{}
-              (comp
-               (filter :seon.fresh-operator/alive?)
-               (map #(get-in % [:seon.fresh-operator/advertisement
-                                :seon.boot/pid])))
-              rows)]
-    (with-open [processes (java.lang.ProcessHandle/allProcesses)]
-      (->> (iterator-seq (.iterator processes))
-           (filter operator-launch-process?)
-           (map #(.pid ^java.lang.ProcessHandle %))
-           (remove advertised-pids)
-           sort
-           vec))))
+(defn- seon-cluster-jvm?
+  [^java.lang.ProcessHandle handle]
+  (let [info (.info handle)
+        command (optional-value (.command info))
+        arguments (some-> (optional-value (.arguments info)) vec)
+        form (last arguments)]
+    (and (.isAlive handle)
+         (string? command)
+         (str/ends-with? command "/java")
+         (string? form)
+         (str/includes? form "seon.cluster")
+         (str/includes? form "start!"))))
 
-(defn- require-advertisement!
-  [root name]
-  (valid-name! name)
-  (let [value (advertisement root name)]
-    (when-not value
-      (fail! "The cluster has no advertisement."
+(defn- live-process-handle
+  [pid]
+  (try
+    (let [optional (java.lang.ProcessHandle/of (long pid))]
+      (when (.isPresent optional)
+        (let [handle (.get optional)]
+          (when (.isAlive handle) handle))))
+    (catch Throwable _
+      nil)))
+
+(defn- process-root-property
+  [^java.lang.ProcessHandle handle]
+  (let [arguments (some-> (optional-value (.arguments (.info handle))) vec)]
+    (some
+     (fn [argument]
+       (when (str/starts-with? argument "-Dseon.operator.root=")
+         (subs argument (count "-Dseon.operator.root="))))
+     arguments)))
+
+(defn- proc-working-directory
+  [pid]
+  (try
+    (let [path (java.nio.file.Path/of
+                (str "/proc/" pid "/cwd")
+                (make-array String 0))]
+      (when (java.nio.file.Files/isSymbolicLink path)
+        (str (java.nio.file.Files/readSymbolicLink path))))
+    (catch Throwable _
+      nil)))
+
+(defn- lsof-working-directory
+  [pid]
+  (try
+    (let [process
+          (.start
+           (ProcessBuilder.
+            ^java.util.List
+            ["lsof" "-a" "-p" (str pid) "-d" "cwd" "-Fn"]))
+          completed? (.waitFor process 3 TimeUnit/SECONDS)]
+      (when-not completed?
+        (.destroyForcibly process))
+      (when completed?
+        (some
+         #(when (str/starts-with? % "n") (subs % 1))
+         (str/split-lines (slurp (.getInputStream process))))))
+    (catch Throwable _
+      nil)))
+
+(defn- process-root
+  [^java.lang.ProcessHandle handle]
+  (some-> (or (process-root-property handle)
+              (proc-working-directory (.pid handle))
+              (lsof-working-directory (.pid handle)))
+          java.io.File.
+          .getCanonicalPath))
+
+(defn- operator-process-observations
+  []
+  (with-open [processes (java.lang.ProcessHandle/allProcesses)]
+    (->> (iterator-seq (.iterator processes))
+         (filter operator-launch-process?)
+         (keep
+          (fn [^java.lang.ProcessHandle handle]
+            (when-let [start (process-start-instant (.pid handle))]
+              {:seon.fresh-operator/root (process-root handle)
+               :seon.fresh-operator/process
+               {:seon.boot/pid (.pid handle)
+                :seon.boot/start-instant (java.util.Date/from start)
+                :seon.fresh-operator/alive? true}})))
+         (sort-by #(get-in % [:seon.fresh-operator/process :seon.boot/pid]))
+         vec)))
+
+(defn- branch-cluster-name
+  [branch]
+  (let [branch-name (some-> branch name)]
+    (when (and branch-name (str/starts-with? branch-name "cluster-"))
+      (subs branch-name (count "cluster-")))))
+
+(defn- jvm-snapshot-form
+  []
+  (pr-str
+   '(do
+      (require 'datahike.connections
+               'seon.cluster
+               'seon.cluster.process)
+      (let [instances#
+            @@(ns-resolve 'seon.cluster (symbol "running-instances"))
+            configured-cluster-root#
+            (fn [instance#]
+              (some->
+               (get-in instance# [:seon.boot/config :seon.boot/root])
+               java.io.File.
+               .getCanonicalFile))
+            operator-root#
+            (fn [instance#]
+              (some-> (configured-cluster-root# instance#)
+                      .getParentFile
+                      .getParentFile
+                      .getCanonicalPath))
+            registered-roots#
+            (into #{} (keep operator-root#) (vals instances#))
+            process-root#
+            (or
+             (when (= 1 (count registered-roots#))
+               (first registered-roots#))
+             (System/getProperty "seon.operator.root")
+             (.getCanonicalPath
+              (java.io.File. (System/getProperty "user.dir"))))]
+        {:seon.fresh-operator/root process-root#
+         :seon.fresh-operator/process
+         (assoc (seon.cluster.process/current-identity)
+                :seon.fresh-operator/alive? true)
+         :seon.fresh-operator/registrations
+         (into
+          []
+          (map
+           (fn [[cluster-name# instance#]]
+             (merge
+              {:seon.fresh-operator/name cluster-name#
+               :seon.fresh-operator/root
+               (or (operator-root# instance#) process-root#)
+               :seon.fresh-operator/reserved? (not (map? instance#))}
+              (when (map? instance#)
+                {:seon.fresh-operator/advertisement
+                 (:seon.boot/advertisement instance#)
+                 :seon.fresh-operator/configured-root
+                 (some-> (configured-cluster-root# instance#)
+                         .getCanonicalPath)}))))
+          instances#)
+         :seon.fresh-operator/branch-connections
+         (into
+          #{}
+          (keep
+           (fn [connection-id#]
+             (let [branch# (when (vector? connection-id#)
+                             (peek connection-id#))]
+               (when (keyword? branch#) branch#))))
+          (keys @datahike.connections/*connections*))}))))
+
+(declare prepl-eval! terminal-value)
+
+(defn- prepl-value!
+  [advertisement form]
+  (edn/read-string (terminal-value (prepl-eval! advertisement form))))
+
+(defn- process-matches-advertisement?
+  [process advertisement]
+  (and (= (:seon.boot/pid process)
+          (:seon.boot/pid advertisement))
+       (inst? (:seon.boot/start-instant process))
+       (inst? (:seon.boot/start-instant advertisement))
+       (= (inst-ms (:seon.boot/start-instant process))
+          (inst-ms (:seon.boot/start-instant advertisement)))))
+
+(defn- probe-advertisement
+  [process advertisements]
+  (some
+   (fn [observation]
+     (let [value (:seon.fresh-operator/advertisement observation)]
+       (when (and (:seon.fresh-operator/process-alive? observation)
+                  (process-matches-advertisement? process value))
+         value)))
+   advertisements))
+
+(defn- observe-jvm
+  [process-observation advertisements]
+  (let [process (:seon.fresh-operator/process process-observation)
+        probe (probe-advertisement process advertisements)]
+    (if-not probe
+      (assoc process-observation :seon.fresh-operator/reachable? false)
+      (try
+        (merge
+         process-observation
+         (prepl-value! probe (jvm-snapshot-form))
+         {:seon.fresh-operator/probe-advertisement probe
+          :seon.fresh-operator/reachable? true})
+        (catch Throwable error
+          (assoc process-observation
+                 :seon.fresh-operator/probe-advertisement probe
+                 :seon.fresh-operator/reachable? false
+                 :seon.fresh-operator/error (ex-message error)))))))
+
+(defn- source-observations
+  [root]
+  (let [root (.getCanonicalPath (java.io.File. root))
+        discovered-processes (operator-process-observations)
+        roots (into #{root}
+                    (keep :seon.fresh-operator/root)
+                    discovered-processes)
+        advertisements (into [] (mapcat advertisement-observations) roots)
+        advertised-processes
+        (into
+         []
+         (keep
+          (fn [observation]
+            (when-let [handle
+                       (and
+                        (:seon.fresh-operator/process-alive? observation)
+                        (live-process-handle
+                         (get-in observation
+                                 [:seon.fresh-operator/advertisement
+                                  :seon.boot/pid])))]
+              (when (seon-cluster-jvm? handle)
+                {:seon.fresh-operator/root
+                 (:seon.fresh-operator/root observation)
+                 :seon.fresh-operator/process
+                 (assoc
+                  (select-keys
+                   (:seon.fresh-operator/advertisement observation)
+                   [:seon.boot/pid :seon.boot/start-instant])
+                  :seon.fresh-operator/alive? true)}))))
+         advertisements)
+        processes
+        (->> (concat discovered-processes advertised-processes)
+             (reduce
+              (fn [by-process process]
+                (assoc
+                 by-process
+                 [(get-in process [:seon.fresh-operator/process
+                                   :seon.boot/pid])
+                  (get-in process [:seon.fresh-operator/process
+                                   :seon.boot/start-instant])]
+                 process))
+              {})
+             vals
+             (sort-by #(get-in % [:seon.fresh-operator/process
+                                  :seon.boot/pid]))
+             vec)
+        jvms
+        (into
+         []
+         (map #(observe-jvm % advertisements))
+         processes)]
+    {:seon.fresh-operator/advertisements advertisements
+     :seon.fresh-operator/jvms jvms}))
+
+(defn- expected-branch
+  [cluster-name]
+  (keyword (str "cluster-" cluster-name)))
+
+(defn- inconsistency-values
+  [name advertisement-observations registrations branch-jvms]
+  (cond-> []
+    (some #(and (:seon.fresh-operator/advertised? %)
+                (not (:seon.fresh-operator/process-alive? %)))
+          advertisement-observations)
+    (conj :seon.fresh-operator/stale-advertisement)
+
+    (some
+     #(not= name
+            (get-in % [:seon.fresh-operator/advertisement
+                       :seon.boot/cluster-name]))
+     (filter :seon.fresh-operator/advertisement
+             advertisement-observations))
+    (conj :seon.fresh-operator/misnamed-advertisement)
+
+    (and (seq registrations) (empty? advertisement-observations))
+    (conj :seon.fresh-operator/missing-advertisement)
+
+    (and (seq branch-jvms) (empty? registrations))
+    (conj :seon.fresh-operator/branch-without-registration)
+
+    (and (seq registrations) (empty? branch-jvms))
+    (conj :seon.fresh-operator/registration-without-branch)))
+
+(defn- derive-cluster-truth
+  [operator-root advertisements jvms]
+  (let [operator-root (.getCanonicalPath (java.io.File. operator-root))
+        registrations
+        (into [] (mapcat :seon.fresh-operator/registrations) jvms)
+        branch-pairs
+        (into
+         #{}
+         (mapcat
+          (fn [{root :seon.fresh-operator/root
+                branches :seon.fresh-operator/branch-connections}]
+            (keep
+             (fn [branch]
+               (when-let [cluster-name (branch-cluster-name branch)]
+                 [root cluster-name]))
+             branches)))
+         jvms)
+        pairs
+        (into
+         branch-pairs
+         (concat
+          (map (juxt :seon.fresh-operator/root
+                     :seon.fresh-operator/name)
+               advertisements)
+          (map (juxt :seon.fresh-operator/root
+                     :seon.fresh-operator/name)
+               registrations)))]
+    (->> pairs
+         (map
+          (fn [[root name]]
+            (let [advertisement-observations
+                  (filterv
+                   #(and (= root (:seon.fresh-operator/root %))
+                         (= name (:seon.fresh-operator/name %)))
+                   advertisements)
+                  registrations
+                  (filterv
+                   #(and (= root (:seon.fresh-operator/root %))
+                         (= name (:seon.fresh-operator/name %)))
+                   registrations)
+                  branch (expected-branch name)
+                  branch-jvms
+                  (filterv
+                   #(and (= root (:seon.fresh-operator/root %))
+                         (contains?
+                          (:seon.fresh-operator/branch-connections %)
+                          branch))
+                   jvms)
+                  owning-jvms
+                  (filterv
+                   (fn [jvm]
+                     (or
+                      (some
+                       #(process-matches-advertisement?
+                         (:seon.fresh-operator/process jvm)
+                         (:seon.fresh-operator/advertisement %))
+                       advertisement-observations)
+                      (some
+                       (fn [registration]
+                         (and
+                          (= root (:seon.fresh-operator/root registration))
+                          (= name
+                             (:seon.fresh-operator/name registration))))
+                       (:seon.fresh-operator/registrations jvm))
+                      (and
+                       (= root (:seon.fresh-operator/root jvm))
+                       (contains?
+                        (:seon.fresh-operator/branch-connections jvm)
+                        branch))))
+                   jvms)
+                  advertisement
+                  (some :seon.fresh-operator/advertisement
+                        advertisement-observations)
+                  registered-advertisement
+                  (some :seon.fresh-operator/advertisement registrations)
+                  transport-advertisement
+                  (or
+                   (some
+                    (fn [observation]
+                      (when (:seon.fresh-operator/process-alive? observation)
+                        (:seon.fresh-operator/advertisement observation)))
+                    advertisement-observations)
+                   (some
+                    (fn [jvm]
+                      (when (:seon.fresh-operator/reachable? jvm)
+                        (:seon.fresh-operator/probe-advertisement jvm)))
+                    owning-jvms))
+                  process
+                  (or (some :seon.fresh-operator/process owning-jvms)
+                      (when advertisement
+                        (select-keys
+                         advertisement
+                         [:seon.boot/pid :seon.boot/start-instant])))
+                  inconsistencies
+                  (inconsistency-values
+                   name advertisement-observations registrations branch-jvms)]
+              {:seon.fresh-operator/name name
+               :seon.fresh-operator/root root
+               :seon.fresh-operator/operator-root? (= operator-root root)
+               :seon.fresh-operator/advertised?
+               (boolean (seq advertisement-observations))
+               :seon.fresh-operator/advertisement advertisement
+               :seon.fresh-operator/advertisement-observations
+               advertisement-observations
+               :seon.fresh-operator/registered?
+               (boolean (seq registrations))
+               :seon.fresh-operator/registrations registrations
+               :seon.fresh-operator/branch-open?
+               (boolean (seq branch-jvms))
+               :seon.fresh-operator/branch branch
+               :seon.fresh-operator/owning-jvms owning-jvms
+               :seon.fresh-operator/process process
+               :seon.fresh-operator/process-alive?
+               (boolean
+                (or
+                 (some :seon.fresh-operator/process-alive?
+                       advertisement-observations)
+                 (some
+                  #(get-in % [:seon.fresh-operator/process
+                              :seon.fresh-operator/alive?])
+                  owning-jvms)))
+               :seon.fresh-operator/reachable?
+               (boolean
+                (some :seon.fresh-operator/reachable? owning-jvms))
+               :seon.fresh-operator/registered-advertisement
+               registered-advertisement
+               :seon.fresh-operator/transport-advertisement
+               transport-advertisement
+               :seon.fresh-operator/inconsistencies inconsistencies})))
+         (sort-by (juxt :seon.fresh-operator/root
+                        :seon.fresh-operator/name))
+         vec)))
+
+(defn- cluster-truth
+  [root]
+  (let [{:seon.fresh-operator/keys [advertisements jvms]}
+        (source-observations root)]
+    (derive-cluster-truth root advertisements jvms)))
+
+(defn- own-cluster-truth
+  [truth]
+  (filterv :seon.fresh-operator/operator-root? truth))
+
+(defn- existing-names
+  [truth]
+  (into []
+        (comp
+         (filter :seon.fresh-operator/operator-root?)
+         (map :seon.fresh-operator/name)
+         (distinct))
+        truth))
+
+(defn- select-anchor
+  [truth]
+  (first
+   (filter
+    #(and (:seon.fresh-operator/operator-root? %)
+          (:seon.fresh-operator/registered? %)
+          (:seon.fresh-operator/process-alive? %)
+          (:seon.fresh-operator/reachable? %)
+          (:seon.fresh-operator/transport-advertisement %))
+    truth)))
+
+(defn- named-cluster-row
+  [truth name]
+  (or
+   (some
+    #(when (and (:seon.fresh-operator/operator-root? %)
+                (= name (:seon.fresh-operator/name %)))
+       %)
+    truth)
+   (when-let [foreign
+              (seq
+               (into
+                []
+                (comp
+                 (remove :seon.fresh-operator/operator-root?)
+                 (filter #(= name (:seon.fresh-operator/name %)))
+                 (map :seon.fresh-operator/root)
+                 (distinct))
+                truth))]
+     (fail!
+      (str "Cluster " name " belongs to foreign operator "
+           (if (= 1 (count foreign)) "root " "roots ")
+           (str/join ", " foreign) ".")
+      {:seon.fresh-operator/name name
+       :seon.fresh-operator/foreign-roots foreign}))
+   (fail!
+    (str "Cluster " name " does not exist in this operator root"
+         (when-let [names (seq (existing-names truth))]
+           (str "; existing clusters: " (str/join ", " names)))
+         ".")
+    {:seon.fresh-operator/name name
+     :seon.fresh-operator/existing (existing-names truth)})))
+
+(defn- select-destructive-name
+  [truth requested-name]
+  (if requested-name
+    (:seon.fresh-operator/name
+     (named-cluster-row truth (valid-name! requested-name)))
+    (let [candidates (existing-names truth)]
+      (case (count candidates)
+        0 (fail! "There are no clusters to stop."
+                 {:seon.fresh-operator/candidates []})
+        1 (first candidates)
+        (fail!
+         (str "Refusing an ambiguous destructive command; "
+              "name one cluster: " (str/join ", " candidates) ".")
+         {:seon.fresh-operator/candidates candidates})))))
+
+(defn- repair-actions
+  [truth]
+  (into
+   []
+   (mapcat
+    (fn [row]
+      (let [inconsistencies
+            (set (:seon.fresh-operator/inconsistencies row))
+            stale?
+            (or
+             (contains?
+              inconsistencies
+              :seon.fresh-operator/stale-advertisement)
+             (contains?
+              inconsistencies
+              :seon.fresh-operator/misnamed-advertisement))
+            remove-observations
+            (when stale?
+              (:seon.fresh-operator/advertisement-observations row))
+            restore-advertisement
+            (when (and
+                   (contains?
+                    inconsistencies
+                    :seon.fresh-operator/missing-advertisement)
+                   (alive?
+                    (:seon.fresh-operator/registered-advertisement row)))
+              (:seon.fresh-operator/registered-advertisement row))]
+        (concat
+         (map
+          (fn [observation]
+            {:seon.fresh-operator/action :delete-advertisement
+             :seon.fresh-operator/name
+             (:seon.fresh-operator/name row)
+             :seon.fresh-operator/path
+             (:seon.fresh-operator/path observation)})
+          remove-observations)
+         (when restore-advertisement
+           [{:seon.fresh-operator/action :write-advertisement
+             :seon.fresh-operator/name
+             (:seon.fresh-operator/name row)
+             :seon.fresh-operator/root
+             (:seon.fresh-operator/root row)
+             :seon.fresh-operator/advertisement
+             restore-advertisement}])))))
+   (own-cluster-truth truth)))
+
+(defn- apply-repair!
+  [{:seon.fresh-operator/keys [action name path root advertisement]}]
+  (case action
+    :delete-advertisement
+    (do
+      (fs/delete-if-exists path)
+      (println (str "↻ repaired " name ": removed stale advertisement")))
+
+    :write-advertisement
+    (let [path (advertisement-path root name)]
+      (fs/create-dirs (fs/parent path))
+      (spit (str path) (str (pr-str advertisement) "\n"))
+      (println (str "↻ repaired " name ": restored advertisement "
+                    "from the live JVM registry")))))
+
+(defn- reconciled-truth!
+  [root]
+  (loop [truth (cluster-truth root)]
+    (let [repairs (repair-actions truth)]
+      (if (seq repairs)
+        (do
+          (doseq [repair repairs]
+            (apply-repair! repair))
+          (recur (cluster-truth root)))
+        truth))))
+
+(defn- require-live-row!
+  [truth name]
+  (let [row (named-cluster-row truth (valid-name! name))]
+    (when-not (:seon.fresh-operator/process-alive? row)
+      (fail! "The cluster has no live process."
              {:seon.fresh-operator/name name
-              :seon.fresh-operator/path
-              (str (advertisement-path root name))}))
-    (when-not (alive? value)
-      (fail! "The cluster advertisement is stale."
-             {:seon.fresh-operator/name name
-              :seon.boot/pid (:seon.boot/pid value)}))
-    value))
+              :seon.fresh-operator/inconsistencies
+              (:seon.fresh-operator/inconsistencies row)}))
+    row))
 
 (defn- selected-name
-  [root argument]
-  (if argument
-    (valid-name! argument)
-    (let [alive-names
-          (into []
-                (comp
-                 (filter :seon.fresh-operator/alive?)
-                 (map :seon.fresh-operator/name))
-                (advertisement-rows root))]
-      (or (when (some #{"default"} alive-names) "default")
-          (first alive-names)
-          "default"))))
+  [_root argument]
+  (valid-name! (or argument "default")))
 
 (defn- prepl-eval!
   [advertisement form]
@@ -435,7 +981,9 @@
   (let [log (create-log! root name)
         command ["python3" "-c" detach-python
                  (str (fs/path root)) (str log)
-                 "clojure" "-M:dev" "-e" (launch-form name manifest ready-port)]
+                 "clojure"
+                 (str "-J-Dseon.operator.root=" root)
+                 "-M:dev" "-e" (launch-form name manifest ready-port)]
         builder (doto (ProcessBuilder. ^java.util.List command)
                   (.directory (.toFile (fs/path root)))
                   (.redirectErrorStream true))
@@ -472,18 +1020,6 @@
              {:seon.fresh-operator/name name}))
     value))
 
-(defn- generated-name
-  [rows]
-  (let [alive-names
-        (into #{}
-              (comp
-               (filter :seon.fresh-operator/alive?)
-               (map :seon.fresh-operator/name))
-              rows)]
-    (first
-     (remove alive-names
-             (map #(str "exp-" %) (iterate inc 1))))))
-
 (defn- print-started!
   [root name value]
   (println (format "● %-20s %s  prepl=%s  log=%s"
@@ -496,18 +1032,52 @@
   [root arguments]
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-start-arguments arguments)
+        explicit-name? (boolean (explicit-start-name? arguments))
         manifest (if config-path (sparse-manifest root config-path) {})
-        rows (advertisement-rows root)
-        existing (some #(and (= name (:seon.fresh-operator/name %))
-                             (:seon.fresh-operator/alive? %))
-                       rows)]
+        truth (reconciled-truth! root)
+        existing
+        (some
+         #(when (and (:seon.fresh-operator/operator-root? %)
+                     (= name (:seon.fresh-operator/name %)))
+            %)
+         truth)]
     (when existing
-      (fail! "The cluster is already alive."
-             {:seon.fresh-operator/name name}))
-    (if-let [anchor (first (filter :seon.fresh-operator/alive? rows))]
-      (let [anchor-ad (:seon.fresh-operator/advertisement anchor)
-            _ (prepl-eval! anchor-ad (add-form name manifest))
-            value (require-advertisement! root name)]
+      (fail! "The cluster already has live operator state."
+             {:seon.fresh-operator/name name
+              :seon.fresh-operator/inconsistencies
+              (:seon.fresh-operator/inconsistencies existing)}))
+    (when (and
+           explicit-name?
+           (some
+            #(and (not (:seon.fresh-operator/operator-root? %))
+                  (= name (:seon.fresh-operator/name %)))
+            truth))
+      (named-cluster-row truth name))
+    (if-let [anchor (select-anchor truth)]
+      (let [anchor-ad
+            (:seon.fresh-operator/transport-advertisement anchor)
+            _
+            (try
+              (prepl-eval! anchor-ad (add-form name manifest))
+              (catch Throwable error
+                ;; A start can fail above the REPL after registering the
+                ;; partial instance. Reconcile before returning the failure,
+                ;; so the next `stop NAME` addresses that carried value.
+                (reconciled-truth! root)
+                (throw
+                 (ex-info
+                  (str (ex-message error)
+                       " The partial cluster remains addressable as "
+                       name ".")
+                  (assoc (ex-data error)
+                         :seon.fresh-operator/name name)
+                  error))))
+            value
+            (:seon.fresh-operator/registered-advertisement
+             (named-cluster-row (reconciled-truth! root) name))]
+        (when-not (and value (alive? value))
+          (fail! "The added cluster did not publish live registry state."
+                 {:seon.fresh-operator/name name}))
         (create-log! root name)
         (spit (str (log-path root name))
               (str "Cluster " name " joined the JVM advertised by "
@@ -544,31 +1114,91 @@
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-config-apply-arguments (vec (rest arguments)))
         manifest (sparse-manifest root config-path)
-        advertisement (require-advertisement! root name)
+        truth (reconciled-truth! root)
+        row (require-live-row! truth name)
+        advertisement
+        (or (:seon.fresh-operator/transport-advertisement row)
+            (fail! "The live cluster has no reachable JVM."
+                   {:seon.fresh-operator/name name}))
         result (terminal-value
                 (prepl-eval! advertisement
                              (config-apply-form name manifest)))]
     (println (str "● " name " config applied " result))))
+
+(defn- row-state
+  [row]
+  (cond
+    (and (:seon.fresh-operator/registered? row)
+         (:seon.fresh-operator/branch-open? row)
+         (:seon.fresh-operator/process-alive? row))
+    "alive"
+
+    (and (:seon.fresh-operator/registered? row)
+         (:seon.fresh-operator/process-alive? row))
+    "reserved"
+
+    (and (:seon.fresh-operator/branch-open? row)
+         (:seon.fresh-operator/process-alive? row))
+    "branch"
+
+    (:seon.fresh-operator/process-alive? row)
+    "drift"
+
+    :else
+    "stale"))
 
 (defn- status!
   [root arguments]
   (when (seq arguments)
     (fail! "`status` takes no arguments."
            {:seon.fresh-operator/arguments arguments}))
-  (let [rows (advertisement-rows root)
-        alive-count (count (filter :seon.fresh-operator/alive? rows))
-        orphan-pids (orphan-operator-jvm-pids rows)]
-    (println (format "%-22s %8s %-7s %7s %s"
-                     "CLUSTER" "PID" "STATE" "PREPL" "URL"))
-    (println (apply str (repeat 78 "-")))
-    (doseq [{:seon.fresh-operator/keys [name advertisement alive?]} rows]
+  (let [root (.getCanonicalPath (java.io.File. root))
+        truth (reconciled-truth! root)
+        rows (own-cluster-truth truth)
+        associated-pids
+        (into
+         #{}
+         (keep #(get-in % [:seon.fresh-operator/process :seon.boot/pid]))
+         rows)
+        orphan-pids
+        (into
+         []
+         (comp
+          (filter #(= root (:seon.fresh-operator/root %)))
+          (map #(get-in % [:seon.fresh-operator/process :seon.boot/pid]))
+          (remove associated-pids))
+         (operator-process-observations))
+        alive-count
+        (count
+         (filter
+          #(and (:seon.fresh-operator/registered? %)
+                (:seon.fresh-operator/process-alive? %))
+          rows))]
+    (println (format "%-22s %8s %-9s %7s %-24s %s"
+                     "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
+    (println (apply str (repeat 112 "-")))
+    (doseq [row rows]
+      (let [{:seon.fresh-operator/keys
+             [name advertisement registered-advertisement
+              transport-advertisement inconsistencies]}
+            row
+            value (or advertisement registered-advertisement
+                      transport-advertisement)]
       (println
-       (format "%-22s %8s %-7s %7s %s"
+       (format "%-22s %8s %-9s %7s %-24s %s"
                name
-               (or (:seon.boot/pid advertisement) "-")
-               (if alive? "alive" "stale")
-               (or (:seon.boot/prepl-port advertisement) "-")
-               (or (:seon.render.web/url advertisement) "-"))))
+               (or (get-in row [:seon.fresh-operator/process
+                                :seon.boot/pid])
+                   (:seon.boot/pid value)
+                   "-")
+               (row-state row)
+               (or (:seon.boot/prepl-port value) "-")
+               (or (:seon.render.web/url
+                    (or advertisement registered-advertisement))
+                   "-")
+               (if (seq inconsistencies)
+                 (str/join ", " (map clojure.core/name inconsistencies))
+                 "-")))))
     (println (str alive-count "/" (count rows) " clusters alive"))
     (println
      (str "orphan seon JVMs: "
@@ -582,8 +1212,11 @@
     (fail! "Use `open [NAME]`."
            {:seon.fresh-operator/arguments arguments}))
   (let [name (selected-name root (first arguments))
-        ad (require-advertisement! root name)
-        url (or (:seon.render.web/url ad)
+        truth (reconciled-truth! root)
+        row (require-live-row! truth name)
+        url (or (:seon.render.web/url
+                 (or (:seon.fresh-operator/advertisement row)
+                     (:seon.fresh-operator/registered-advertisement row)))
                 (fail! "The live cluster has not advertised a web URL."
                        {:seon.fresh-operator/name name}))
         process (doto (ProcessBuilder. ^java.util.List ["/usr/bin/open" url])
@@ -599,25 +1232,35 @@
    `(let [instances# @@(ns-resolve 'seon.cluster
                                    (symbol "running-instances"))]
       (if-let [instance# (get instances# ~name)]
-        (do (seon.cluster/stop! instance#) :stopped)
+        (if (map? instance#)
+          (do (seon.cluster/stop! instance#) :stopped)
+          (do
+            (swap! (var-get
+                    (ns-resolve 'seon.cluster (symbol "running-instances")))
+                   dissoc ~name)
+            :released-reservation))
         :absent))))
 
 (defn- sibling-names
-  [root pid target-name]
+  [truth pid target-name]
   (into []
         (comp
-         (filter :seon.fresh-operator/alive?)
-         (filter #(= pid
-                     (get-in % [:seon.fresh-operator/advertisement
-                                :seon.boot/pid])))
+         (filter :seon.fresh-operator/operator-root?)
+         (filter :seon.fresh-operator/process-alive?)
+         (filter
+          #(= pid
+              (or
+               (get-in % [:seon.fresh-operator/process :seon.boot/pid])
+               (get-in % [:seon.fresh-operator/advertisement
+                          :seon.boot/pid]))))
          (remove #(= target-name (:seon.fresh-operator/name %)))
          (map :seon.fresh-operator/name))
-        (advertisement-rows root)))
+        truth))
 
 (defn- sigterm!
-  [root name ad reason force?]
+  [truth name ad reason force?]
   (let [pid (:seon.boot/pid ad)
-        siblings (sibling-names root pid name)
+        siblings (sibling-names truth pid name)
         handle (java.lang.ProcessHandle/of (long pid))]
     (when-not (.isPresent handle)
       (fail! "The advertised process disappeared before SIGTERM."
@@ -641,10 +1284,9 @@
     (println (str "● " name " stop path=SIGTERM"))))
 
 (defn- stop-empty-jvm!
-  [root advertisement]
-  (let [pid (:seon.boot/pid advertisement)]
-    (when (empty? (sibling-names root pid
-                                 (:seon.boot/cluster-name advertisement)))
+  [root pid stopped-name]
+  (let [truth (reconciled-truth! root)]
+    (when (empty? (sibling-names truth pid stopped-name))
       (when-let [handle
                  (let [optional (java.lang.ProcessHandle/of (long pid))]
                    (when (.isPresent optional) (.get optional)))]
@@ -663,24 +1305,33 @@
   (let [{requested-name :seon.fresh-operator/name
          force? :seon.fresh-operator/force?}
         (parse-stop-arguments arguments)
-        name (selected-name root requested-name)
-        ad (require-advertisement! root name)
+        truth (reconciled-truth! root)
+        name (select-destructive-name truth requested-name)
+        row (named-cluster-row truth name)
+        ad
+        (or (:seon.fresh-operator/transport-advertisement row)
+            (:seon.fresh-operator/advertisement row)
+            (fail! "The cluster has no reachable JVM."
+                   {:seon.fresh-operator/name name
+                    :seon.fresh-operator/inconsistencies
+                    (:seon.fresh-operator/inconsistencies row)}))
         events
         (try
           (prepl-eval! ad (stop-form name))
           (catch Throwable error
-            (sigterm! root name ad (ex-message error) force?)
+            (sigterm! truth name ad (ex-message error) force?)
             nil))]
     (when events
       (let [value (terminal-value events)]
-        (when-not (= ":stopped" value)
+        (when-not (#{"stopped" "released-reservation"}
+                   (some-> value edn/read-string clojure.core/name))
           (fail! "The live JVM did not own the advertised cluster."
                  {:seon.fresh-operator/name name
                   :seon.fresh-operator/result value}))
         (println (str "● " name " stop path=prepl"))
         ;; Reading :ret is the observable flush boundary. Only then may
         ;; the client terminate a JVM whose last advertisement is gone.
-        (stop-empty-jvm! root ad)))))
+        (stop-empty-jvm! root (:seon.boot/pid ad) name)))))
 
 (defn- logs!
   [root arguments]
@@ -688,6 +1339,8 @@
     (fail! "Use `logs [NAME]`."
            {:seon.fresh-operator/arguments arguments}))
   (let [name (selected-name root (first arguments))
+        truth (reconciled-truth! root)
+        _ (named-cluster-row truth name)
         path (log-path root name)]
     (when-not (fs/regular-file? path)
       (fail! "The cluster has no log."
@@ -711,10 +1364,11 @@
     "                 start one cluster; absent cluster means default\n"
     "  config apply [CLUSTER] PATH\n"
     "                 reconcile one live cluster; absent cluster means default\n"
-    "  status         list every advertisement and derived liveness\n"
+    "  status         reconcile and list every cluster in this operator root\n"
     "  open [NAME]    open the advertised web URL\n"
-    "  stop [--force] [NAME]\n"
-    "                 stop through prepl; force permits shared-JVM SIGTERM\n"
+    "  stop|down [--force] [NAME]\n"
+    "                 omit NAME only when exactly one cluster exists;\n"
+    "                 force permits shared-JVM SIGTERM after prepl failure\n"
     "  logs [NAME]    show the cluster log\n")))
 
 (defn -main
@@ -730,13 +1384,17 @@
         "status" (status! root command-arguments)
         "open" (open! root command-arguments)
         "stop" (stop! root command-arguments)
+        "down" (stop! root command-arguments)
         "logs" (logs! root command-arguments)
         ("help" "--help" "-h" nil) (help!)
         (fail! "Unknown fresh Seon command."
-               {:seon.fresh-operator/command command}))
+               {:seon.fresh-operator/command command
+                :seon.fresh-operator/usage? true}))
       (catch Throwable error
         (binding [*out* *err*]
           (println (str "✗ " (ex-message error)))
           (when-let [data (not-empty (ex-data error))]
-            (prn data)))
+            (prn data))
+          (when (:seon.fresh-operator/usage? (ex-data error))
+            (help!)))
         (System/exit 1)))))
