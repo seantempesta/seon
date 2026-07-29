@@ -100,3 +100,25 @@ directory. It now derives those values inside `seon.dev.changed-test`, and
 graph to enqueue fresh JVM tests. This closes the edit-hook instance while the
 issue remains open for plain Babashka and the explicitly old `bin/seon`
 launcher.
+
+## Frozen-checkpoint evidence 2026-07-29
+
+The schema-resource move in `79cef0144` added `resources/` to `bb.edn`, but it
+did not close the mixed fresh/quarry dependency graph. At current HEAD:
+
+```bash
+bin/seon --help
+```
+
+still exits 1. Babashka resolves `src/seon/schema.cljc` through the ambient
+fresh `src/` path, then fails because `datahike.api` is absent from
+`bb.edn`'s dependency closure. The stack continues through quarry
+`src-old/seon/content_hash.cljc`, quarry `seon.config.resolve`, and the old
+operator.
+
+The fresh JVM path independently loaded all schema EDN from
+`resources/seon/schema`, and `bin/seon start` reaches the fresh operator's
+script-only classpath. The failed `--help` proof therefore narrows the defect:
+the resource classpath is present, but the default Babashka graph still
+combines owners that require incompatible dependency closures. The existing
+owner and acceptance criteria remain current.

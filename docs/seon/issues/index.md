@@ -10,7 +10,7 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (5)
+## Blocker (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -19,8 +19,9 @@ See `README.md` for the convention.
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Mixed-union Datahike declaration lacks the fresh EDN codec](mixed-union-datahike-declaration-lacks-fresh-edn-codec.md) | blocker | Core |
 | [Replace bare flow callback predicates with honest contracts](flow-callback-schemas-are-not-generatively-constructible.md) | blocker | Core |
+| [Terminalize a receipt when its terminal transaction is refused](refused-terminal-transaction-leaves-a-running-receipt-hot-loop.md) | blocker | agent |
 
-## Friction (17)
+## Friction (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -35,6 +36,7 @@ See `README.md` for the convention.
 | [Prevent a detached load drive from restarting after success](detached-load-launch-restarts-after-success.md) | friction | general |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Re-ground schema skills in the fresh EDN and instrumentation system](schema-skills-teach-the-retired-registration-model.md) | friction | Core |
+| [Refresh instrumentation before the fresh operator calls start](fresh-operator-start-enters-stale-instrumentation-before-refresh.md) | friction | general |
 | [Route ordinary stderr presentations through log renders](stderr-presentations-bypass-the-log-render-kind.md) | friction | general |
 | [Stop fallback kills innocent shared-JVM clusters](stop-fallback-kills-innocent-shared-jvm-clusters.md) | friction | general |
 | [The design language's font is redistributed without its license, and only at one weight](the-bundled-font-has-no-license-and-only-one-weight.md) | friction | UI |
@@ -42,7 +44,7 @@ See `README.md` for the convention.
 | [Three smaller defects in the vendored Datahike, found beside the card-many scan bug](datahike-planner-and-caches-carry-three-smaller-defects.md) | friction | Core |
 | [stop! may leave the prepl server name registered](stop-may-leave-the-prepl-server-name-registered.md) | friction | general |
 
-## Cleanup (6)
+## Cleanup (7)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -50,5 +52,6 @@ See `README.md` for the convention.
 | [Derive repeated state vocabularies from their owning schemas](derived-state-contracts-repeat-hand-maintained-enums.md) | cleanup | Core |
 | [Give (pid, start-instant) liveness one owner](process-liveness-check-has-no-single-owner.md) | cleanup | general |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
+| [Remove file-derived effective config from the value renderer](value-renderer-caches-file-derived-effective-config.md) | cleanup | general |
 | [Remove the stale program-graph owner rename](architecture-program-graph-owner-rename-is-stale.md) | cleanup | Core |
 | [Unify the nested-data walk shared by admission and rendering](value-admission-render-walk-overlap.md) | cleanup | general |
