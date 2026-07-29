@@ -60,12 +60,13 @@ the web URL (`src/seon/cluster.clj:963-986,909-924`).
 For the shared default root, use:
 
 ```bash
-bin/seon-fresh status
+bin/seon status
 ```
 
-`bin/seon status` is currently excluded by the open blocker
-`docs/seon/issues/bin-seon-status-cannot-load-datahike-through-babashka.md`;
-until that issue is resolved, teach and use `bin/seon-fresh status`.
+`bin/seon` and `bin/seon-fresh` now both enter `seon.fresh-operator`; the
+former broken `seon.dev.cli` status path was removed in `c073093e2`
+(`bin/seon:4-7`; `bin/seon-fresh:5-8`). `bin/seon-fresh status` is therefore
+an equivalent explicit entry, not the only working one.
 
 The fresh status path reads every `prepl.edn`, checks `(pid, start-instant)`
 liveness, and separately reports detached operator JVMs with no live

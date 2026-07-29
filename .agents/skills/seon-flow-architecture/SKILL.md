@@ -92,9 +92,9 @@ When a scratch cluster fails partway up the tower, read
 - inspect the carried `:seon.boot/instance`; absent keys identify the last
   published layer (`src/seon/cluster.clj:845-924,926-1023`);
 - inspect the advertisement and prove both the named cluster and any detached
-  operator JVM are gone; until the open
-  `docs/seon/issues/bin-seon-status-cannot-load-datahike-through-babashka.md`
-  blocker is resolved, use `bin/seon-fresh status`;
+  operator JVM are gone with `bin/seon status`; `bin/seon` and
+  `bin/seon-fresh` now enter the same fresh operator
+  (`bin/seon:4-7`; `bin/seon-fresh:5-8`);
 - remember that `bin/seon start <name>` adds to an already-running JVM when
   one is advertised, so its Var roots may predate the source edit
   (`script/seon/fresh_operator.clj:495-522`); use a lane-owned operator root
