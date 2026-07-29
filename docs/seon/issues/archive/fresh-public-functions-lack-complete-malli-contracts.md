@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema]
 ---
@@ -56,3 +56,30 @@ A reader-based fresh-tree check finds zero public `defn`s without a complete
 `:malli/schema`; every opaque predicate contract is constructible; `-main`
 has an observed-behavior docstring; and `instrument/apply!` collects the
 formerly omitted vars without a special allowlist.
+
+## Resolution
+
+Re-verification found the original inventory current except that `file-lock?`
+and `malli->datahike-schema` had already gained contracts during the database
+boundary work, while the codec work had added three already-contracted public
+functions. Every remaining public function now carries a complete contract.
+
+The six work-launcher functions reference one named, constructible launcher
+shape. Runtime-object predicates accept the named ordinary value boundary and
+their registered predicate schemas retain generators that construct real
+server sockets, Datahike connections and database values, file locks, SCI
+interrupt functions, and SCI contexts.
+
+The recurring check reads every fresh `.clj` and `.cljc` form with
+`clojure.tools.reader`, including reader conditionals and namespace aliases; it
+has no source roster or exception list. The instrumentation proof confirms the
+six launcher vars are collected by the existing computed public-var rule.
+
+Proof:
+
+```text
+bin/test seon.public-contract-test seon.instrument-test seon.flow-test \
+  seon.schema-test seon.schema.datahike-test
+Ran 35 tests containing 184 assertions.
+0 failures, 0 errors.
+```

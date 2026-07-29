@@ -51,6 +51,14 @@
  :seon.flow/indexer-proc-request [:map [:seon.flow/compile-namespace-fn :seon.flow/compile-namespace-fn] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
  :seon.flow/launcher [:fn {:gen/gen seon.flow/proc-launcher-generator} seon.flow/proc-launcher?]
  :seon.flow/launcher-configuration [:map {:closed true} [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]
+ :seon.flow/started [:map {:closed true} [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]
+ :seon.flow/work-launcher
+ [:map {:closed true}
+  [:seon.flow/graph :seon.flow/graph]
+  [:seon.flow/started :seon.flow/started]
+  [:seon.flow/active-work :seon.flow/active-work]
+  [:seon.flow/compute-executor :seon.flow/executor]
+  [:seon.flow/configuration :seon.flow/launcher-configuration]]
  :seon.flow/lineage-status [:enum :seon.flow/iterating :seon.flow/escalated :seon.flow/done]
  :seon.flow/lineage-status-request [:map [:seon.flow/owner-count :seon.flow/owner-count] [:seon.flow/successful-owners :seon.flow/successful-owners] [:seon.flow/escalated? :seon.flow/escalated?] [:seon.flow/admitted? :seon.flow/admitted?]]
  :seon.flow/mailbox-request [:map [:seon.flow/deliver! :seon.flow/deliver!]]
@@ -71,6 +79,16 @@
  :seon.flow/source-enumerator-proc-request [:map [:seon.flow/read-sources :seon.flow/read-sources]]
  :seon.flow/sources [:map-of :symbol :string]
  :seon.flow/submission-id [:or :uuid :keyword :string]
+ :seon.flow/submission-wait-ms [:int {:min 0}]
+ :seon.flow/work-result
+ [:or
+  [:map {:closed true}
+   [:seon.flow/outcome [:= :seon.flow/time-limit]]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]
+  [:map {:closed true}
+   [:seon.flow/outcome [:= :seon.flow/completed]]
+   [:seon.flow/value :seon.sci.admit/value]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]]
  :seon.flow/successful-owners [:set :keyword]
  :seon.flow/turn-count [:int {:min 0}]
  :seon.flow/started! [:=> [:cat] :nil]

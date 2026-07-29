@@ -57,6 +57,7 @@
 
 (defn socket-server?
   "True for the java.net.ServerSocket an io-prepl listens on."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (instance? java.net.ServerSocket value))
 

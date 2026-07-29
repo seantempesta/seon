@@ -118,6 +118,7 @@
   Sci's own vocabulary and its own shape: `sci/init` returns a map
   carrying the interpreter's environment, and `sci/fork` derives one
   from another."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (and (map? value) (contains? value :env)))
 

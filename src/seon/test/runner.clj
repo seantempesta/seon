@@ -208,6 +208,11 @@
         (cluster/stop! instance)))))
 
 (defn -main
+  "Run the selected test namespaces, record the result in the named
+  non-default cluster, and exit zero exactly when no test failed or errored."
+  {:malli/schema
+   [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string [:* :string]]
+    :nil]}
   [cluster-name root git-sha & namespace-names]
   (let [namespaces (mapv symbol namespace-names)
         _ (doseq [test-namespace namespaces]

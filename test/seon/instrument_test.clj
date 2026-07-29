@@ -19,6 +19,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [malli.instrument :as mi]
             [seon.error :as error]
+            [seon.flow :as flow]
             [seon.instrument :as instrument]
             [seon.schema]))
 
@@ -169,3 +170,15 @@
                    wrapped)
            "and every wrapped var carries a schema: the selection is the
             computation, not a roster")))))
+
+(deftest the-work-launcher-api-is-collected-without-an-allowlist
+  (instrumented!
+   (fn [_]
+     (doseq [boundary [#'flow/start-work-launcher!
+                       #'flow/stop-work-launcher!
+                       #'flow/install-work-launcher!
+                       #'flow/stop-installed-work-launcher!
+                       #'flow/current-work-launcher
+                       #'flow/submit!!]]
+       (is (some? (mi/-schema boundary))
+           (str boundary " was omitted from Malli collection"))))))

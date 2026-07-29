@@ -208,6 +208,7 @@
 
 (defn canonical-data-fingerprint
   "Portable content fingerprint for ordinary data."
+  {:malli/schema [:=> [:cat :seon.schema/value] :int]}
   [value]
   (portable-string-hash (canonical-data-string value)))
 
@@ -222,6 +223,7 @@
 
    This is the portable content oracle used by projection fingerprints and by
    the preprocessed-base composition proof. Runtime objects are rejected."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [value]
   (cond
     (nil? value) "n"
@@ -251,6 +253,8 @@
 
 (defn sha-256
   "Lowercase SHA-256 hex digest of ordered byte arrays."
+  {:malli/schema [:=> [:cat [:sequential bytes?]]
+                  [:string {:min 64 :max 64}]]}
   [byte-arrays]
   (let [digester (MessageDigest/getInstance "SHA-256")]
     (doseq [bytes byte-arrays]
@@ -602,6 +606,7 @@
    Uses Seon's current
    candidate registry. This is intentionally structural; validation remains a
    separate operation."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (try
     (let [encoded (pr-str value)
@@ -673,6 +678,7 @@
 
    Uses its derived
    admission source. Returns non-terminal advisories."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{:seon.schema/keys [identity definition forms admission admissions
                        pure-predicate-symbols predicate-functions
                        direct-predicate-symbols

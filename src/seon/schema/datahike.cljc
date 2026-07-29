@@ -12,6 +12,8 @@
 
 (defn form-children
   "The non-property children of one Malli form."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] [:vector :seon.schema/value]]}
   [form]
   (if (vector? form)
     (into [] (remove map?) (rest form))
@@ -19,6 +21,8 @@
 
 (defn resolve-malli-form
   "Resolve registered Malli aliases without crossing into compiled schemas."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
   (cond
     (= :seon.db/ref form) form
@@ -45,11 +49,15 @@
 
 (defn form-head
   "The head of one Malli form."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] :seon.schema/value]}
   [form]
   (if (vector? form) (first form) form))
 
 (defn resolve-datahike-form
   "Resolve aliases and wrappers to the form stored by Datahike."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
   (let [resolved (resolve-malli-form form)]
     (if (= :and (form-head resolved))
@@ -84,6 +92,7 @@
 
 (defn form->datahike-value-type
   "The Datahike value-type keyword represented by a Malli form."
+  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
   [form]
   (let [resolved (resolve-datahike-form form)
         head (form-head resolved)]
@@ -139,6 +148,7 @@
 
 (defn form->cardinality
   "The Datahike cardinality represented by one Malli form."
+  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)
@@ -148,6 +158,8 @@
 
 (defn form->child-form
   "The stored child form for a collection schema, or the scalar form."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)
@@ -157,6 +169,7 @@
 
 (defn malli->datahike-attr
   "Derive one ordinary Datahike attribute declaration."
+  {:malli/schema [:=> [:cat :keyword] :map]}
   [attr]
   (let [raw (or (schema/schema-definition attr)
                 (throw (ex-info

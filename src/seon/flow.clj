@@ -401,6 +401,9 @@
 
 (defn start-work-launcher!
   "Start the one bounded work launcher from acquired config facts."
+  {:malli/schema
+   [:=> [:cat :seon.flow/work-launcher-request]
+    :seon.flow/work-launcher]}
   [{::keys [configuration]}]
   (let [configuration (required-launcher-configuration configuration)
         queue-depth
@@ -430,6 +433,7 @@
 
 (defn stop-work-launcher!
   "Stop a work launcher and interrupt its owned compute executor."
+  {:malli/schema [:=> [:cat :seon.flow/work-launcher] :nil]}
   [{::keys [graph compute-executor]}]
   (when graph
     (flow/stop graph))
@@ -442,6 +446,9 @@
 
 (defn install-work-launcher!
   "Replace the process work launcher with one built from acquired facts."
+  {:malli/schema
+   [:=> [:cat :seon.flow/work-launcher-request]
+    :seon.flow/work-launcher]}
   [{::keys [configuration]}]
   (let [launcher
         (start-work-launcher! {::configuration configuration})
@@ -453,6 +460,7 @@
 
 (defn stop-installed-work-launcher!
   "Stop and forget the process work launcher."
+  {:malli/schema [:=> [:cat] :nil]}
   []
   (when-let [launcher
              (first
@@ -462,6 +470,7 @@
 
 (defn current-work-launcher
   "Return the installed work launcher or fail the readiness check."
+  {:malli/schema [:=> [:cat] :seon.flow/work-launcher]}
   []
   (or @installed-work-launcher
       (throw
@@ -471,6 +480,8 @@
 
 (defn submit!!
   "Submit compute work with fixed-buffer backpressure and await its result."
+  {:malli/schema
+   [:=> [:cat :seon.flow/work-submission] :seon.flow/work-result]}
   [{::keys [submission-id workload work-fn time-limit-ms]}]
   (let [{::keys [graph active-work]} (current-work-launcher)
         result (promise)

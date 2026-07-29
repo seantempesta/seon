@@ -32,6 +32,7 @@
   Admission is HANDED this fn; it never builds one, never owns the
   timer, and never decides when it fires — it only guarantees that a
   realization step cannot proceed without calling it."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (ifn? value))
 

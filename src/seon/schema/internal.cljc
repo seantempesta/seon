@@ -62,6 +62,7 @@
    Canonical references are not followed here; `seon.schema` recursively
    validates them with each referenced declaration's own admission source.
    Returns advisory findings that remain non-terminal."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{:seon.schema/keys [identity definition compiled role admission
                        predicate-symbols pure-predicate-symbols
                        canonical-keys]}]
@@ -164,6 +165,8 @@
      [:string  {:seon.db/identity true}]
      [:keyword {:seon.db/identity true}]
      [:and {:seon.db/identity true} :seon.db/id]"
+  {:malli/schema
+   [:=> [:cat :map :keyword] :boolean]}
   [schemas attr-key]
   (boolean
    (some-> (get schemas attr-key) form/attr-form-properties :seon.db/identity)))
@@ -186,6 +189,8 @@
    envelope that merely carries an id entry must NOT become a catalogued
    kind. The derived id-attr makes a declared schema self-describing for
    the renderer's discovery walk — no per-row `:seon.entity/kind` stamp."
+  {:malli/schema
+   [:=> [:cat :map :seon.schema/definition] [:maybe :keyword]]}
   [schemas v]
   (when (:seon.db/entity (form/schema-properties v))
     (map-identity-entry-key schemas v)))
@@ -194,6 +199,8 @@
   "Entry keys of `:map` form `v` whose props do NOT carry `{:optional
    true}` (excluding the `::m/default` sentinel) — the required-attrs
    index for schemas-as-queryable-data."
+  {:malli/schema
+   [:=> [:cat :seon.schema/definition] [:maybe [:vector :keyword]]]}
   [v]
   (when (form/map-shape? v)
     (into []
@@ -211,6 +218,8 @@
   "Attach `{:seon.entity/id-attr <k>}` to `v`'s props when `v` is a
    DECLARED entity kind with an identity-attr entry; preserves existing
    props (`:seon.render/ai`, etc). Pass-through otherwise."
+  {:malli/schema
+   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
   [schemas v]
   (if-let [id-attr (derive-entity-id-attr schemas v)]
     (let [head     (first v)
@@ -241,6 +250,10 @@
    ex-info naming the key, the bad form, and common storable types.
    Requires every referenced schema to exist in the complete population,
    without depending on declaration order or Malli's process-global default."
+  {:malli/schema
+   [:function
+    [:=> [:cat :map :keyword :seon.schema/definition] :nil]
+    [:=> [:cat :map :keyword :seon.schema/definition :map] :nil]]}
   ([schemas k v]
    (assert-compilable-schema! schemas k v {}))
   ([schemas k v compile-options]
@@ -286,6 +299,8 @@
 
    `schemas` is accepted because projection validation passes the complete
    population through the same gate; the decision depends only on `v`."
+  {:malli/schema
+   [:=> [:cat :map :keyword :seon.schema/definition] :nil]}
   [_schemas k v]
   (when (form/nilable-value-schema? v)
     (let [body (rest v)
@@ -311,6 +326,7 @@
    ≥2 segments — a single-segment namespace collides with code-namespace
    roots and fragments the reuse surface. Throws a guiding `:user-input`
    ex-info naming a corrected multi-segment example."
+  {:malli/schema [:=> [:cat :keyword] :nil]}
   [k]
   (let [ns-str (namespace k)]
     (when (and ns-str (not (str/includes? ns-str ".")))

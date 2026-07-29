@@ -38,6 +38,7 @@
   Grounded in the fork's own connection spec: a datahike.connector
   Connection whose wrapped state is not `:released`
   (reference-code/datahike/src/datahike/connector.cljc:104)."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (and (instance? datahike.connector.Connection value)
        (some? (:wrapped-atom value))
@@ -53,6 +54,7 @@
   forbid the case the function exists to handle, which instrumentation
   found on its first run. Liveness stays required where work is done
   through it (`transact!`, the loop handle, the wake listener)."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (instance? datahike.connector.Connection value))
 
