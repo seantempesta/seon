@@ -1,5 +1,5 @@
 (ns seon.program
-  "Pure declaration identities and exact-row ownership for the program graph.")
+  "Pure declaration identities and exact-row ownership for program rows.")
 
 (def identity-attributes
   "Program-row identity attributes in deterministic admission order."
@@ -64,7 +64,8 @@
 (defn declaration-row
   "Canonical declaration row for a reader event under a function policy.
 
-  `:all` indexes every build-time function for graph reachability;
+  `:all` indexes every directly read top-level build function as future graph
+  input;
   `:contracted` admits only runtime functions carrying a complete contract."
   {:malli/schema
    [:=> [:cat :map [:enum :all :contracted]] [:maybe :map]]}

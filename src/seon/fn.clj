@@ -21,8 +21,8 @@
 
 (defn- durable-row
   [event]
-  ;; Build indexing needs every function, including private and uncontracted
-  ;; helpers, so call-graph reachability cannot disappear at an ordinary form.
+  ;; Build indexing keeps every directly read top-level function, including
+  ;; private and uncontracted helpers, as input to the future call graph.
   (program/declaration-row event :all))
 
 (defn- unadmitted-functions
