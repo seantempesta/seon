@@ -1,105 +1,125 @@
 ---
 name: seon-context-config
-description: "Customize the startup manifest that seeds Seon's database-backed context, namespace policy, skill corpus, routes, and render caps. Use when editing config/system.edn or another SEON_CONFIG manifest, changing agent context blocks, or diagnosing why a block or namespace is present."
+description: "Change or diagnose Seon's fresh database-backed cluster configuration. Load this when editing config/default.edn, adding a resources/seon/schema config dial, applying a sparse cluster overlay, tracing a runtime config read, or deciding whether a change is live versus arm-time. Also load it when old instructions mention config/system.edn, SEON_CONFIG, context-block manifests, routes, or skill corpus so you do not restore the deleted pod model."
 ---
 
-# Seon context and config
+# Seon cluster configuration
 
-The startup manifest is desired-state input. At pod boot, Seon validates it,
-resolves it, and reconciles the corresponding facts into the database. Runtime
-code reads those database facts after the connection is attached.
+Fresh configuration is one compiled and reconciled database row per cluster.
+It is not the deleted pod's Aero-style `config/system.edn` manifest.
 
-Read these sources before changing configuration:
+Read these current owners:
 
-- src-old/seon/config.cljs
-- config/system.edn
-- src-old/seon/agent/ctx.cljs
-- src-old/seon/agent/ctx/namespaces.cljs
+- `resources/seon/schema/config.edn` — registered config attributes;
+- `config/default.edn` — one shipped decision for every dial;
+- `src/seon/config.cljc` — read, validate, compile, reconcile, and query;
+- `src/seon/cluster.clj` — boot ordering and consumers; and
+- `script/seon/fresh_operator.clj` — operator apply/start commands.
 
-## Select one manifest
+Treat `config/system.edn`, `SEON_CONFIG`, and `src-old/seon/config.cljs` as
+historical quarry only.
 
-config/system.edn is the default. SEON_CONFIG selects a different complete EDN
-file. There is no active profile layer in the pod configuration path.
+## Author a dial
 
-Every manifest key is optional. An absent file resolves as an empty map. Unknown
-keys fail startup validation rather than being ignored.
+Configuration design and database schema design are one act:
 
-## What boot reconciles
+1. Declare the namespaced attribute and value schema under
+   `resources/seon/schema/*.edn`.
+2. Add its explicit shipped decision to `config/default.edn`.
+3. Read the value from `seon.config/effective` at the owning runtime boundary.
+4. Prove whether the consumer reads live database values or captures the value
+   during arming/start.
 
-- :seon.config/agent-context is the base configuration copied into a newly
-  created agent.
-- :seon.config/root-context is a sparse override for the agent whose
-  :seon.agent/id is "root". Block maps merge by :seon.agent.ctx/name.
-- :seon.config/namespaces controls which framework namespace sources are
-  available in full. The per-agent namespaces block alone controls which
-  namespaces and tests render at full detail.
-- :seon.config/render supplies cluster-wide rendering limits.
-- :seon.config/database supplies generous Datahike query and pull runaway-work
-  ceilings. `max-results` counts retained result nodes, not top-level rows;
-  `max-result-weight` is shallow Datahike weight, not bytes.
-- :seon.config/skills-dir selects the one directory scanned into the pull-reference
-  corpus. Corpus entries do not become standing context blocks.
-- :seon.config/routes adds or removes database-backed route facts.
+`seon.config/default-decisions` refuses missing and unknown defaults
+(`src/seon/config.cljc:137-168`). Do not add an environment-variable read at
+the consumer or a second config registry.
 
-The boot seed also reconciles the :seon.config singleton. Once the database is
-attached, runtime startup acquires it once and installs the decoded ordinary
-map in the existing async transaction context. Accessors and centralized
-request normalization inherit it without rereading the database or treating
-the file as runtime state; an explicit operation option wins.
+## Compile a sparse overlay
 
-## Agent context is explicit
+An overlay is one plain EDN map. Omitted keys inherit shipped defaults.
+Unknown keys and invalid values are refused
+(`src/seon/config.cljc:104-135,170-229`).
 
-:seon.agent/ctx is the complete base block vector. There is no hidden default
-tree and no implicit skills block. The shipped minimal tree currently includes
-namespaces, canvas, plan, and transcript blocks.
+Precedence is:
 
-The other agent-context inputs are:
+```text
+shipped defaults → selected sparse overlay → explicit typed environment map
+```
 
-- :seon.eval/home-requires: the namespaces available in a fresh agent's home
-  namespace. Each entry must use :as or :refer.
-- :seon.agent.runtime/wake?: an optional wake-policy override.
+The environment map is a caller-supplied typed bootstrap input, not an
+invitation for runtime code to read ambient environment variables.
 
-A root block with the same :seon.agent.ctx/name updates that base block; a new
-name appends a block. Root is selected by its id, not by an entity kind.
+Use `:seon.config/absent` to retract an optional defaulted attribute. The
+compiler refuses it for a required attribute and never stores the marker or
+nil (`src/seon/config.cljc:31-37,183-229`).
 
-## Namespace rendering
+## Apply and inspect
 
-:seon.config/always is the one namespace-source storage superset. The agent's
-current namespace and its requires determine what is shown. The namespaces
-block's :seon.agent.ctx.namespaces/full-source presence-set selects additional
-full source; its other three dials control current/test detail. Namespace render
-config never falls back to attributes on the agent entity. Do not add a second
-namespace allowlist, current-namespace switch, or renderer.
+Start a cluster with an overlay:
 
-## Skills stay pull-based
+```text
+bin/seon start CLUSTER --config path/to/overlay.edn
+```
 
-The skills section only chooses corpus directories. A skill is available for
-explicit lookup or import; it is not injected into every prompt. Keep the
-skills context block absent unless a measured use case proves it belongs there.
+Apply an overlay to a live cluster:
 
-## Apply and verify
+```text
+bin/seon config apply CLUSTER path/to/overlay.edn
+```
 
-For a manifest-only change:
+The current operator grammar is
+`script/seon/fresh_operator.clj:705-730`; `bin/seon:4-8` routes `start` and
+`config` to it.
 
-    bin/seon restart
-    bin/seon status
-    bin/seon logs pod --follow
+`seon.config/apply!` exact-reconciles the desired row
+(`src/seon/config.cljc:237-252`). Runtime code reads the effective ordinary
+map from a database value with `seon.config/effective`
+(`src/seon/config.cljc:254-275`).
 
-Existing agents retain the block entities copied at creation. Use a cluster
-reset only when the work explicitly requires a completely fresh database:
+Verify the resulting datoms and consumer behavior. File contents are desired
+input; the database row is runtime truth.
 
-    bin/seon cluster reset default
+## Distinguish live and arm-time consumers
 
-Do not use reset merely to hide a reconciliation bug. Query the resulting
-database facts and fix the reconcile path.
+Applying a row does not magically rebuild a proc, executor, web server, or
+other process-local structure.
+
+The July 29 proof found:
+
+- the maximum-runs-per-episode dial is read from current facts and applies on
+  the next episode;
+- render coalescing reads current facts and applies on the next pass; and
+- structural values captured during boot/arming need their owning topology or
+  process operation before they change.
+
+Read the exact matrix and probes in
+`docs/prds/sci-execution-runtime/research/config-application-proof-2026-07-29.md`.
+For a new dial, document its acquisition boundary in the owning code and test
+that boundary. Do not add polling or a generic config-change dispatcher.
+
+## Context and UI are not config manifests
+
+The deleted manifest seeded context blocks, namespace policy, skill corpus,
+routes, and render caps. Fresh Seon does not expose that model.
+
+Current context/render design is still being settled, and broader UI
+restoration is tabled by ruling 12
+(`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`). Read
+`docs/seon/architecture/context.md` and `docs/seon/architecture/ui.md` as
+target documents before proposing new context or UI dials.
+
+Do not place route trees, prose blocks, namespace allowlists, skill scans, or
+rendered output into fresh configuration merely because the old manifest did.
+First identify the surviving database facts and deriving owner.
 
 ## Durable rules
 
-- Use fully namespaced keys.
-- Treat an explicit :seon.agent/ctx vector as the complete base tree.
-- Keep root customization sparse and merge it by block name.
-- Store operational configuration as database facts after boot.
-- Keep skills out of default context.
-- Change context structure through block data and render functions, not by
-  appending prose to the agent's system text.
-- Display sizes as estimated tokens through seon.ai.tokens/estimate.
+- Use fully namespaced config attributes.
+- Keep defaults complete and overlays sparse.
+- Refuse unknown keys.
+- Store absence by omitting the datom, never by storing nil.
+- Read runtime decisions from the database.
+- Apply one reconcile mechanism through `seon.config/apply!`.
+- Make structural acquisition explicit; do not claim an applied row rewired a
+  live graph.
+- Mine old manifests for requirements only, never for fresh structure.

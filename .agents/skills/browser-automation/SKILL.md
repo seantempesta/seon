@@ -1,89 +1,84 @@
 ---
 name: browser-automation
-description: "Verify Seon's own web UI in a real browser. Use for the root view, an /agent/{id} page, /data, an agent debug page, Datastar morphs, canvas controls, layout, or console errors on http://127.0.0.1:7890. Keep browser tabs agent-owned, and verify long-lived gzip SSE feeds with a server-side client because the browser bridge may return 503."
+description: "Verify Seon's current cluster JVM web UI in a real browser. Load this for /, /agent/{id}, /data, /feed/{id}, message submission, Datastar block morphs, layout, or console errors. Discover the advertised cluster URL first—ports are dynamic—and use a server-side client when the browser bridge cannot hold SSE."
 ---
 
-# Browser Automation — verifying the Seon pod UI
+# Browser automation for Seon
 
-You have Chrome MCP tools (`mcp__claude-in-chrome__*`) to look at the **pod's own
-web UI** on `http://127.0.0.1:7890` — root `/`, an `/agent/{id}` page,
-the `/data` database browser, and `/agent/{id}/debug`. This skill is coordination (don't clobber peer tabs)
-+ the one hard limit (SSE doesn't verify in-browser).
+Verify the current JVM UI, not the deleted pod UI. The actual URL comes from
+the cluster advertisement:
 
-**Tool names:** shorthand here (`navigate`, `computer screenshot`) maps to
-`mcp__claude-in-chrome__*` (e.g. `mcp__claude-in-chrome__navigate`). Load them
-via ToolSearch first (one batched `select:` call — see the MCP server note).
-
-## The KEY limit: SSE streams DON'T verify in the browser agent
-
-The Datastar UI is `view = f(db)` morphed over a long-lived
-`text/event-stream` (`/agent/root/feed`, `/agent/{id}/feed`, `/data/feed`,
-and `/agent/{id}/debug/feed`). The in-tool Chrome
-agent's network layer **503s long-lived event-streams**, so the page may load
-the shim but never receive a morph in the agent's view — that is a tooling
-artifact, NOT a broken feed.
-
-So: confirm a feed actually pushes **server-side**, not in the browser.
-
-- A server-side client that GETs the `/feed` URL and prints the
-  `datastar-patch-elements` frames. Loopback defaults to identity encoding;
-  explicitly configured remote mode negotiates `Content-Encoding: gzip`.
-- `bin/seon logs pod --follow` — the `FEED OPEN` / `broadcast` lines prove the
-  tx-listener fired and pushed.
-- A human eyeball on the real page.
-
-The browser agent is for the STATIC render (did the shim load, is the layout/
-theme right, console errors, a `@post` button firing) — not for proving liveness.
-SSE mechanics → the **`datastar-web-ui`** skill.
-
-## Tab ownership (don't step on peers)
-
-Agents share the browser. Make your own tab; never reuse one you didn't create.
-
-```
-tabs_context_mcp     # see existing tabs
-tabs_create_mcp      # YOUR tab — remember its id for the session
-navigate <url>       # load your page
-# leave tabs open — the orchestrator/human cleans up
+```text
+bin/seon-fresh status
+bin/seon-fresh open NAME
 ```
 
-If a tab id goes invalid, `tabs_context_mcp` for fresh ids. Element refs
-invalidate on navigation — re-`find` after navigating.
+The advertisement gains the bound web URL and port only after the server is
+ready (`src/seon/cluster.clj:900-922`). Never assume port 7890.
 
-## Pod URLs (active, port 7890)
+## Own the tab
 
-| Page | Path |
+Browser tabs are shared. Create a new tab for this task, remember its ID, and
+do not navigate or close a tab you did not create. Re-read tab state after
+navigation because element references become stale.
+
+Use the configured Browser or Chrome control skill rather than relying on old
+MCP tool names. Inspect:
+
+- the screenshot and visible text;
+- stable block IDs and layout;
+- browser console errors;
+- the network request around an action; and
+- focus/value retention while a render update arrives.
+
+## Current paths
+
+Only test routes that current source serves:
+
+| path | current purpose |
 |---|---|
-| Root agent view | `/` |
-| Agent page | `/agent/{id}` |
-| Datom browser | `/data` |
-| Agent debug (exact LLM bytes) | `/agent/{id}/debug` |
+| `/` | selected cluster agent page |
+| `/agent/{id}` | agent page |
+| `/data` | database/schema drill |
+| `/feed/{id}` | Datastar SSE feed |
+| `POST /agent/{id}/message` | inbound message |
 
-## Verify a static UI change
+The dispatcher is `src/seon/render/web.clj:734-840`. Debug pages, debug feeds,
+canvas controls, agent creation, and `/call` are tabled design, not current
+browser targets.
 
-```
-1. tabs_create_mcp                  → your tab
-2. navigate http://127.0.0.1:7890/
-3. computer screenshot              → layout + Phosphor theme correct?
-4. read_console_messages            → JS errors? (pattern "error|Datastar")
-5. find / computer left_click       → exercise a @post button (e.g. + new agent)
-6. read_network_requests            → POST fired? (call it BEFORE the click)
-```
+## Handle SSE honestly
 
-## Common issues
+Some browser-control bridges fail or return 503 for long-lived
+`text/event-stream` requests. A loaded shell with no morph does not by itself
+prove either a server defect or server health.
 
-| Problem | Fix |
-|---|---|
-| Page loads but never updates live | EXPECTED — browser agent 503s SSE; verify the feed server-side |
-| Tab id invalid | `tabs_context_mcp` for fresh ids |
-| Element ref stale | re-`find` after any navigation |
-| No network captured | call `read_network_requests` BEFORE the action |
-| `data-on:click` does nothing | it's `data-on:click` with a COLON, not a hyphen — see `datastar-web-ui` |
+When the bridge is ambiguous:
 
-## Key files
+1. use a server-side HTTP client against the advertised `/feed/{id}`;
+2. inspect the selected cluster log with `bin/seon-fresh logs NAME`;
+3. make a database change through an existing supported path; and
+4. confirm a Datastar patch arrives.
 
-| File | Purpose |
-|---|---|
-| `src-old/seon/web/serve.cljs` | the pod HTTP server (port 7890) + POST handlers |
-| `src-old/seon/web/datastar.cljs` | root + agent pages and their shared gzip SSE mechanism |
-| `src-old/seon/web/router.cljs` | reitit routes from `:seon.route/*` datoms |
+Use the browser again for the user-visible effect. Server-side frames prove
+delivery; the browser proves morph/layout/focus behavior.
+
+The current feed gives each tab a sliding-1 tap and an initial full paint at
+`src/seon/render/web.clj:530-608`. Socket writes park on the fork's drain state
+at `src/seon/render/web.clj:502-528`.
+
+## Minimal verification pass
+
+1. Discover the selected cluster's advertised URL.
+2. Create your own browser tab.
+3. Open `/`, `/agent/{id}`, or `/data`.
+4. Capture a screenshot and console messages.
+5. Start network observation before submitting a message.
+6. Verify the POST status and unchanged input affordance.
+7. If SSE is not observable, use the server-side check above.
+8. Record the exact cluster, URL, route, and evidence.
+
+Load `datastar-web-ui` for current render mechanics. Read
+`docs/seon/architecture/ui.md` and ruling 12 at
+`docs/prds/sci-execution-runtime/plan/README.md:1087-1097` before testing or
+proposing any broader target UI.

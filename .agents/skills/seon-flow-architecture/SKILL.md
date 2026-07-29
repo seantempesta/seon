@@ -5,10 +5,11 @@ description: "How Seon is architected on core.async.flow — procs, workloads, b
 
 # Seon flow architecture
 
-Seon's runtime is `core.async.flow` graphs in one JVM per cluster. There is
-no central loop, no dispatcher, no scheduler entity — that shape is banned
-by owner ruling ("a JavaScript event loop inside Clojure"). If you are
-about to write one, stop and read *The banned shapes* below.
+Seon's runtime is `core.async.flow` graphs in one JVM process; one JVM may host
+several sovereign clusters (`src/seon/cluster.clj:924-940`). There is no
+central loop, no dispatcher, no scheduler entity — that shape is banned by
+owner ruling ("a JavaScript event loop inside Clojure"). If you are about to
+write one, stop and read *The banned shapes* below.
 
 This skill is the map. Sections marked **[TARGET]** describe designs that
 are ruled and evidenced but **not built yet** — never write code that
@@ -16,15 +17,16 @@ assumes them without checking the tree first.
 
 ## Read the source, not your memory
 
-Every claim here carries a `file:line`. This program has repeatedly been
-misled by day-old prose; verify with one live command (`rg`, `bin/test`)
-before acting. The dependency's own source is vendored under
+Every source claim here points at its current owner; measured claims point at
+their owning research note. This program has repeatedly been misled by
+day-old prose, so verify with one live command (`rg`, `bin/test`) before
+acting. The dependency's own source is vendored under
 `reference-code/` precisely so you can check semantics rather than guess:
 
 | question | read |
 |---|---|
 | what a proc/channel/buffer really does | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj` + `flow/impl.clj` + `flow/spi.clj` |
-| what `:io`/`:compute`/`:mixed` actually construct | `reference-code/core.async/.../impl/dispatch.clj:71-96` |
+| what `:io`/`:compute`/`:mixed` actually construct | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96` |
 | how the graph monitors itself | `reference-code/core.async.flow-monitor/` |
 | transactions, listeners, query planning | `reference-code/datahike/` (our fork — internal calls are sanctioned) |
 | the interrupt hook, contexts, forks | `reference-code/sci/doc/interrupt.md`, `reference-code/sci/src/sci/` |
@@ -37,6 +39,20 @@ Deeper research, all with evidence, lives in
 `agent-flow-render-falsification-2026-07-29.md`,
 `render-pipeline-design-2026-07-29.md`. Cite them; don't re-derive them.
 
+Read the progressive-disclosure references when the map is not enough:
+
+- `references/workloads-and-scheduling.md` — executor ownership, parking,
+  admission, and the measured scheduling probes.
+- `references/agent-graphs.md` — the current two-proc blueprint, arming,
+  custody, episode caps, and the proposed `::renders` proc.
+- `references/wakes-and-faults.md` — listener constraints, selective interest,
+  the old E/A/V design worth reusing, and fault fan-out.
+- `references/render-delivery.md` — the current snapshot/delta renderer,
+  target packages/keyframes, buffer laws, http-kit drain state, and frame
+  budgets.
+- `references/decisions.md` — the rulings, rationale, and rejected
+  predecessors.
+
 ## The tower — where a new mechanism belongs
 
 Boot is layered, each layer reading only the one below and publishing its
@@ -44,40 +60,47 @@ own readiness (`src/seon/cluster.clj`):
 
 1. **Process** — REPL opens at second zero; identity is
    `(cluster-name, pid, start-instant)`.
-2. **Store** — one Datahike store per cluster under a lifetime `flock`;
-   a second opener refuses loudly.
+2. **Store** — one process-root Datahike store under a lifetime lock; sibling
+   clusters use distinct branches and reuse the held root store.
 3. **Facts** — the config manifest reconciles into database facts; runtime
    reads the database, never files or env vars.
 4. **Flow** — the cluster graph and one graph per agent.
 
-Ordering at start is `config apply → work launcher install → agent arm`.
-Before adding a mechanism, ask which layer owns it. Most "new machinery"
-is a proc in an existing graph or a derivation over facts — not a new
-subsystem.
+The full current order is store/fork/connection → schema accretion → recovery
+→ config apply → root seed → work-launcher install → agent arm → web serve
+(`src/seon/cluster.clj:843-922`). Before adding a mechanism, ask which layer
+owns it. Most "new machinery" is a proc in an existing graph or a derivation
+over facts — not a new subsystem.
 
-The process root owns **one bounded `:compute` executor (parallelism =
-available processors, a computed hardware fact) and one `:io` executor**
-shared by every graph (`src/seon/cluster.clj:158-166`). Note that
-core.async itself defaults both `:compute` and `:mixed` to an *unbounded
-cached platform pool* — the bound is Seon's, not the library's
-(`dispatch.clj:71-96`; measured in `workload-scheduling-truth`).
+The process root constructs a bounded platform `:compute` executor
+(parallelism = available processors) and a cached platform `:io` executor
+(`src/seon/cluster.clj:156-179`), but **only the work-launcher graph currently
+receives that pair** (`src/seon/flow.clj:381-425`). Ordinary cluster and
+agent graphs use core.async's defaults: virtual-per-task `:io` when the JDK
+supports it, cached platform `:compute`, and cached platform `:mixed`
+(`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`).
+The work launcher separately owns a virtual-per-task executor for evaluation
+tasks (`src/seon/flow.clj:402-432`).
 
 ## Building a proc
 
-Use `seon.flow/var-process` (`src/seon/flow.clj:83`). Two things matter:
+Use `seon.flow/var-process` (`src/seon/flow.clj:83-115`). Two things matter:
 
 **Reference the step-fn as a var (`#'f`), never a value.** This is what
 makes live update work: re-evaluating a `defn` against the running system
 changes proc behavior immediately, zero restart. Topology changes (procs,
 conns, buffers) instead rebuild the graph — stop → `create-flow` → start,
-measured ~0.3 ms — which is safe because channel contents are losable by
-construction.
+measured 0.343 ms median for a three-proc
+create/start/resume/ping-ready/stop round trip in the documented JDK 26 probe
+— which is safe only when every channel's contents are losable by construction
+(`docs/prds/sci-execution-runtime/research/flow-dynamic-update-2026-07-27.md`).
 
 **Declare the workload explicitly.** `var-process` **refuses a missing or
-`:mixed` workload at construction** (`src/seon/flow.clj:88-89`) because
-`:mixed` pins one platform thread per proc forever and is the one scaling
-cliff. Refusing at construction means the mistake is unrepresentable
-rather than discovered under load.
+`:mixed` workload at construction** (`src/seon/flow.clj:91-100`) because the
+default `:mixed` execution path occupies one cached platform thread for the
+proc's blocking loop and inline transform. This is a scaling cliff; call it
+thread occupation, not Loom carrier pinning. Refusing at construction makes
+the mistake unrepresentable rather than discovered under load.
 
 ```clojure
 (seon.flow/var-process #'turn-step :io
@@ -86,27 +109,31 @@ rather than discovered under load.
 
 ## Workloads: the measured truth
 
-- **`:io`** — a virtual thread per task. May block (model calls, database
-  transactions, SSE writes); must not compute. Blocking parks for free;
-  on our JDK `synchronized` no longer pins the carrier (probed: true on
-  26.0.1, false on 21 — `workload-scheduling-truth-2026-07-29.md`).
-- **`:compute`** — the bounded platform pool. Must never block: one
-  blocked thread is a whole core of capacity gone.
+- **`:io`** — core.async's default is a virtual thread per task on a
+  virtual-thread-capable JDK; the work-launcher graph overrides it with the
+  process-root cached platform executor. May block; must not compute.
+  Ordinary parking releases a carrier. The documented probe found a
+  `synchronized` sleep pinned on JDK 21 but not JDK 26.0.1; native or critical
+  sections can still pin (`workload-scheduling-truth-2026-07-29.md`).
+- **`:compute`** — the whole transform is submitted to the graph's compute
+  executor. It is bounded only where Seon supplies the process-root executor;
+  core.async's default is cached and unbounded. It must never block.
 - **`:mixed`** — **not a splitting scheduler.** It runs the proc's entire
   blocking loop and transform inline on one cached platform thread
-  (`flow/impl.clj:243-323`). It is a fail-closed bucket for code the
+  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:243-323`).
+  It is a fail-closed bucket for code the
   graph cannot resolve, and Seon refuses it outright.
 
 `:compute` never identifies I/O *inside* a transform — the executor hop
 moves the whole transform. So a chain that both computes and blocks must
 be split at an explicit boundary, or run on `:io` and stay honest about
 it. Classification is per-function and **derived** where possible: key
-capability leaves carry `^{:seon.workload :io}` metadata lifted at parse
-time into `:seon.fn/workload` (`src/seon/sci/reader.cljc:231-241`); a
-function the program graph proves pure counts as `:compute` implicitly.
-**[TARGET]** Full reachability derivation over `:seon.fn/calls` waits on
-the code-graph corpus; until then, unresolved code is treated as unknown
-and kept off `:compute`.
+capability leaves carry `^{:seon.workload :io}` or `:compute` metadata lifted
+at parse time into `:seon.fn/workload`
+(`src/seon/sci/reader.cljc:198-245`). **[TARGET]** No current runtime derives
+workload by reachability over `:seon.fn/calls`, including the planned
+pure-implies-compute case. Until that owner exists, do not claim that
+unannotated program-graph functions have a derived workload.
 
 ## Buffers: the loss semantics *are* the design
 
@@ -117,7 +144,7 @@ or superseded by a newer complete value.
 
 | buffer | meaning | example |
 |---|---|---|
-| `(sliding-buffer 1)` | latest-wins mailbox; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:268`), armer, render, stream channels (`src/seon/cluster.clj:678-679`) |
+| `(sliding-buffer 1)` | latest-wins mailbox; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:246-270`), armer/render/stream/page taps (`src/seon/cluster.clj:638-783`) |
 | fixed | backpressure — the producer must wait | bounded work submission |
 | counted-dropping | observation that must never block the producer | flow's error/report channels |
 
@@ -128,9 +155,9 @@ belongs in the database.
 ## Agent graphs
 
 Every agent is its own flow graph, created with the agent from one
-blueprint, parked between episodes (~2 virtual threads, ~8.5 KB per
-parked proc) and kicked off by the messages it receives
-(`src/seon/cluster/agent.clj:245` `graph-definition`):
+blueprint, parked between episodes (two `:io` procs; the measured baseline is
+~8.5 KB and one virtual thread per parked proc) and kicked off by the messages
+it receives (`src/seon/cluster/agent.clj:246-270`):
 
 - **`::mailbox`** (`:io`) — total and instant: forwards a payload-free
   wake; it cannot recurse because the pass derives from facts.
@@ -147,35 +174,47 @@ episode's remaining turns.
 agent's world (html blocks *and* its own AI context pieces), memoized in
 proc state with byte digests. Falsification passed
 (`agent-flow-render-falsification-2026-07-29.md`: +8.9 KB/agent, zero new
-platform threads, one mechanism for both render kinds), contract not yet
-authored. Production is per-agent; delivery stays per-cluster.
+platform threads, 12 registrations in one measured pass), but it also exposed
+unresolved interest-narrowness and unbounded-memory seams. The proc and its
+contract are not authored: the current graph definition contains only
+`::mailbox` and `::turn` (`src/seon/cluster/agent.clj:246-270`). Production
+delivery stays per-cluster.
 
 ## Wakes, faults, and streaming
 
 **Wakes are event-driven, never polled.** One `listen!` per cluster routes
-committed transactions to interested mailboxes (`src/seon/cluster/wake.cljc`).
+committed transactions to agent and render inputs
+(`src/seon/cluster/wake.cljc:156-217`). Message/agent creation routing is
+datom-selective; the current render input receives every transaction report.
 Two rules that cost real debugging to learn (documented at
-`wake.cljc:6-25`): the listener **must never throw** (Datahike fires
-listeners inside the transaction's critical path — a probe's 800 ms
-listener stalled the triggering transaction), and a routed attribute
-re-asserted with an identical value produces **zero** wakes, silently.
+`src/seon/cluster/wake.cljc:6-63`): the listener **must never throw or park**
+(Datahike invokes it before transaction delivery; an 800 ms listener made the
+transaction take 804 ms), and re-asserting an identical value produces no
+datom and therefore no routed wake.
 
 **Faults ride flow's error channel** into `fault-committer-proc`
 (`src/seon/flow.clj:593-602`), which commits each as a durable fact with
 provenance — so "who should fix this" is a query, not a router. Agent
 *mistakes* are different: they never touch these channels, they become
-flat `:seon.error` values the agent sees. One config dial decides dev
-panic vs prod degrade; the recorder itself never panics ("the fire alarm
-doesn't burn").
+flat `:seon.error` values the agent sees. One config dial selects `:record` or
+`:panic` (`resources/seon/schema/config.edn:7-8`). In current `:panic` mode the
+cluster handler still commits the fault and prints it; it does not throw from
+the recorder (`src/seon/cluster.clj:708-747`).
 
-**Streaming**: partials ride channels; only the settled reply commits.
-Delivery is measured (`render-pipeline-design-2026-07-29.md`): serialize
-once and `mult` the bytes (1.17 ms p95 at 50 tabs vs up to 53 ms
-per-tab), morph per block (1.2–1.5 ms for a 250-event block). Our
+**Streaming**: partials ride channels; only the settled reply commits. The
+current JVM renderer emits complete page snapshots, mults them, and computes
+per-tab changed blocks (`src/seon/render/web.clj:229-285,530-608`).
+**[TARGET]** Revisioned packages/keyframes would serialize shared bytes once.
+The falsifier measured 0.872–1.171 ms p95 for once+mult at 50 tabs versus
+31.783–42.479 ms p50 for per-tab serialization, and 1.2–1.5 ms p95 for a
+250-event Chrome block morph
+(`render-pipeline-design-2026-07-29.md`). Our
 http-kit fork adds per-channel pending-byte state and a drain-or-close
 completion so the `:io` writer **parks** on real backpressure — stock
-`send!` reports channel openness, not socket drain, and grew to 12 MB on
-a stalled tab (`httpkit-write-path-2026-07-29.md`).
+`send!` reports channel openness, not socket drain
+(`src/seon/render/web.clj:502-528`;
+`reference-code/http-kit/src/org/httpkit/server.clj:321-326`;
+`httpkit-write-path-2026-07-29.md`).
 
 ## Evaluation and the guarded door
 
@@ -185,7 +224,8 @@ and has no step concept (`reference-code/sci/doc/interrupt.md`). The
 interrupt fires at every interpreted function-body entrance and throws an
 uncatchable marker; the known ceiling is code stuck inside a *host* call,
 where no interpreted entrance occurs. Evaluations go through the one
-bounded submission owner (`seon.flow/submit!!`, `src/seon/flow.clj:481`)
+bounded submission owner (`seon.flow/submit!!`,
+`src/seon/flow.clj:469-497`; `src/seon/cluster/loop.cljc:218-234`)
 rather than inline on a turn thread, so eval concurrency is bounded and
 observable.
 
@@ -211,12 +251,13 @@ is a regression even if tests pass:
 
 ## Working effectively
 
-- **Probe before you plan.** `mcp__seon_cljs__eval_clj` against a live
-  cluster answers most design questions in one form. The REPL is the
-  first design surface; the checked-in source is the durable authority.
+- **Probe before you plan.** Use the selected cluster's `eval_clj` operation;
+  one live form answers most design questions. The REPL is the first design
+  surface; checked-in source is the durable authority.
 - **Use scratch clusters.** Live proof belongs on your own named cluster;
-  never reset or bounce someone else's. Clusters are sovereign — one
-  store, one flock, no shared mutable state.
+  never reset or bounce someone else's. Clusters have distinct database
+  branches and graph state even when sibling clusters share the process-root
+  store and executors (`src/seon/cluster.clj:924-940`).
 - **Measure, never assert.** Every performance claim in this skill
   carries the conditions it was measured under, because this program has
   been misled twice by a number without its context.

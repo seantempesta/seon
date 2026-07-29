@@ -1,185 +1,91 @@
 ---
 name: ui-canvas
-description: "Build the focal agent-controlled canvas with my.canvas. Use when an agent should show a persistent dashboard, table, chart, status view, button, input, select, toggle, or form. Covers one static or database-derived renderer, the AI twin, agent-local state, and the existing reactive call/feed path."
+description: "Assess or design Seon's agent-controlled canvas after confirming its current status. Load this whenever a task asks for my.canvas, dashboards, tables, charts, buttons, inputs, toggles, or forms: the old effectful API is deleted and the fresh canvas/action surface is tabled, so this skill prevents inventing a usable API and points to the required target design."
 ---
 
-# Agent canvas
+# Agent canvas — tabled target
 
-The canvas is the focal view on an agent page. Use it for content that should
-remain visible or interactive. A normal message belongs in the transcript.
-Smaller renderable context views are surfaces; a card is only a visual grouping.
+There is no usable fresh `my.canvas` API. The old
+`src-old/my/canvas.cljc` surface belonged to the deleted CLJS pod, and fresh
+`src/` contains no replacement.
 
-There is one public agent API: src-old/my/canvas.cljs. Do not create a route, call
-the web server directly, or write an agent id into the request. The runtime
-injects :seon.agent/id, and renderers receive the frozen :seon.db/db value.
+Do not write or recommend calls such as:
 
-## Choose static or derived content
+- `my.canvas/show!`;
+- `my.canvas/clear!`;
+- `my.canvas/pinned`;
+- `my.canvas/state` or `my.canvas/save!`;
+- `my.canvas/button`, `input`, `select`, `toggle`, or `form`; or
+- a `/call` request.
 
-Show static semantic hiccup:
+They are not current capabilities. The old functions also mixed agent eval,
+database mutation, rendering, and HTTP dispatch—the exact effectful shape the
+fresh execution model is deleting.
 
-    (my.canvas/show!
-      {:my.canvas/content
-       [:section
-        [:h2 "Ready"]
-        [:p "The import finished."]]})
+## What exists now
 
-Inspect :seon.db/ok? on the returned transaction envelope.
+The current JVM web renderer can:
 
-For content that changes, define a qualified renderer in the agent's current
-namespace and pin its symbol. A canvas renderer accepts
-:seon.render/system-input and returns :seon.render/html-response:
+- derive identified HTML surfaces from database facts;
+- render a stable agent page;
+- stream partial output over channels;
+- morph changed blocks through Datastar; and
+- accept a human message through `POST /agent/{id}/message`.
 
-    (defn ^:async dashboard
-      {:malli/schema
-       [:=> [:cat :seon.render/system-input]
-        :seon.render/html-response]}
-      [{dbv :seon.db/db agent-id :seon.agent/id}]
-      (let [values
-            (await
-              (my.canvas/state
-                {:my.canvas/attributes [::count]
-                 :seon.db/db dbv
-                 :seon.agent/id agent-id}))
-            count (get values ::count 0)]
-        (my.canvas/view
-          {:my.canvas/content
-           [:section
-            [:h2 "Counter"]
-            [:p (str count)]]
-           :my.canvas/ai
-           (str "The counter is " count ".")})))
+Read `src/seon/render/web.clj:1-45,119-180,229-285,687-840`. This narrow
+surface is not an agent-controlled canvas and does not provide generalized
+controls.
 
-    (my.canvas/show!
-      {:my.canvas/content
-       (symbol (str (ns-name *ns*)) "dashboard")})
+## Why restoration is paused
 
-The :my.canvas/ai string is the model-facing twin of the visual. State what the
-view means; do not repeat a large document verbatim.
+Ruling 12 tables proper UI restoration until context rendering is understood:
+`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`.
 
-A normal database transaction causes the existing Datastar feed to render the
-canvas again. Derive the next view from the supplied database value. Do not
-store a second presentation snapshot.
+The required dependency order is:
 
-## Agent-local state
+1. mine the code graph end to end;
+2. mine how the old context system assembled blocks, namespace source, and
+   transcript;
+3. settle context rendering with the owner; and
+4. build UI on that settled derivation.
 
-Register each domain attribute once in the namespace that owns it:
+Do not bypass that order by reviving the old canvas because a task asks for a
+dashboard.
 
-    (seon.schema/register! ::count :int)
-    (seon.schema/register! ::note :string)
+## Target design, not current API
 
-Read selected attributes from the current agent entity:
+`docs/seon/architecture/ui.md` describes the aspirational render contract.
+`docs/prds/sci-execution-runtime/plan/ui-conversion-plan-2026-07-29.md`
+contains the filed, falsified conversion plan. Read both before designing
+here, and label every proposed mechanism **[TARGET]**.
 
-    (my.canvas/state
-      {:my.canvas/attributes [::count ::note]})
+The intended direction is simpler than the deleted API:
 
-Write qualified values to that same entity:
+- pure renderer code returns ordinary AI/HTML render values;
+- durable domain facts remain in the database;
+- ephemeral partial presentation remains on channels;
+- a genuine user action eventually crosses one guarded capability boundary;
+- control constructors return data rather than performing runtime mutation;
+- the agent-owned render proc derives both AI and HTML views; and
+- cluster delivery owns sockets and tabs.
 
-    (my.canvas/save!
-      {:my.canvas/values {::count 1}})
+None of the agent-owned `::renders` proc, generalized controls, guarded action
+boundary, or `/call` route is built. The `::renders` feasibility probe also
+left interest-narrowness and retained-memory contracts unresolved; read
+`.agents/skills/seon-flow-architecture/references/agent-graphs.md`.
 
-Both calls are asynchronous and receive the current agent id through the normal instrumentation
-boundary. In a renderer, pass its explicit :seon.db/db and :seon.agent/id as in
-the example above, and `await` `state`, so the view stays tied to the render
-snapshot.
+## Respond to a canvas request
 
-save! returns the standard transaction envelope. Check :seon.db/ok? before
-claiming a click or submission worked.
+When asked to build a canvas today:
 
-Use seon.db directly for state that is not naturally attached to the current
-agent or for graph queries beyond a simple pull.
+1. State that the public canvas/control API does not exist.
+2. Determine whether the request can be represented by the current derived
+   HTML surfaces without new interaction.
+3. If interaction is essential, record the requirement against the tabled UI
+   plan rather than inventing an endpoint or effectful eval helper.
+4. If the owner explicitly resumes the UI rung, begin from the architecture
+   and conversion plan, then re-verify current source before implementation.
 
-## Buttons
-
-my.canvas/button returns ordinary hiccup. It invokes one of the current agent's
-qualified handler functions through the existing call gate:
-
-    (seon.schema/register! ::empty-request [:map])
-
-    (defn ^:async increment!
-      {:malli/schema
-       [:=> [:cat ::empty-request] :seon.db/transact-response]}
-      [_]
-      (let [values (await
-                     (my.canvas/state
-                      {:my.canvas/attributes [::count]}))
-            next-count (inc (get values ::count 0))]
-        (await
-          (my.canvas/save!
-            {:my.canvas/values {::count next-count}}))))
-
-    (my.canvas/button
-      {:my.canvas/label "Add one"
-       :my.canvas/handler 'increment!})
-
-A button handler receives the value of :my.canvas/data directly. When data is
-omitted it receives an empty map. Captured data uses fully qualified keys:
-
-    (my.canvas/button
-      {:my.canvas/label "Open"
-       :my.canvas/handler 'open-item!
-       :my.canvas/data {::item-id "item-42"}})
-
-The renderer qualifies a bare handler symbol to the renderer's namespace. A
-qualified handler symbol is also accepted. Buttons do not create dynamic routes.
-
-## Forms
-
-Fields use qualified keywords. The handler receives one map with those exact
-keys:
-
-    (seon.schema/register! ::save-note-request
-      [:map [::note :string]])
-
-    (defn ^:async save-note!
-      {:malli/schema
-       [:=> [:cat ::save-note-request] :seon.db/transact-response]}
-      [{::keys [note]}]
-      (await
-        (my.canvas/save!
-          {:my.canvas/values {::note note}})))
-
-    (my.canvas/form
-      {:my.canvas/handler 'save-note!
-       :my.canvas/label "Save"
-       :my.canvas/controls
-       [(my.canvas/input
-          {:my.canvas/field ::note
-           :my.canvas/label "Note"
-           :my.canvas/placeholder "Write a note"})]})
-
-Available controls:
-
-- my.canvas/input for text
-- my.canvas/select for string value/label option pairs
-- my.canvas/toggle for a boolean
-- my.canvas/form to submit a vector of controls
-
-Compose these values inside the renderer's :my.canvas/content. The call adapter
-decodes the field signals, invokes the handler, and returns handler errors to the
-UI. The handler writes facts; the ordinary transaction feed refreshes the view.
-
-## Clear or inspect the pin
-
-Read the explicit canvas pin:
-
-    (my.canvas/pinned {})
-
-Remove it and return to the derived default:
-
-    (my.canvas/clear! {})
-
-Defining a renderer does not deliberately change the canvas. Call show! when
-the agent intends to focus it.
-
-## Rendering rules
-
-- Prefer semantic hiccup such as section, headings, paragraphs, lists, tables,
-  details, forms, and buttons.
-- Keep map keys and database attributes fully namespaced.
-- Give every public renderer and handler a complete Malli function schema.
-- Keep the renderer pure over its input database value.
-- Persist domain facts, not computed HTML or counters that a query can derive.
-- Build higher-level helpers in the agent's own namespace by composing
-  my.canvas; do not add another canvas API.
-- If a renderer throws or emits invalid hiccup, fix the reported error. The
-  core shows a visible safe error response instead of silently dropping it.
+Do not provide executable pseudo-examples with nonexistent functions. A
+target-shaped data sketch is acceptable only when clearly labeled
+aspirational and tied to a settled design decision.
