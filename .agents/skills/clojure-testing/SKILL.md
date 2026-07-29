@@ -12,7 +12,7 @@ example tests that teach the call shapes, and a seeded state-machine property
 over the real database.
 
 > Hand-offs: what a Datahike transaction/query actually does →
-> **`datahike`**; what shape to register and why → **`data-modeling`**;
+> **`datahike`**; what shape to declare and why → **`data-modeling`**;
 > errors-as-values / no-bare-keys mindset → **`data-oriented-clojure`**.
 
 **The CLJS build is OFF** (owner ruling 2026-07-27) — `bin/test-cljs` and
@@ -55,42 +55,37 @@ spawns a child JVM re-pays the full ~7 s.
 
 ## Fresh in-memory Datahike per test
 
-Every database test opens its own `:memory` store (a fresh random `:id`, so
-tests never see each other's data), installs the attributes it needs, and
-releases in a `finally`. There is no ambient connection and nothing to `set!` —
-pass the connection.
+Use the production population owner through `seon.test-support/with-database`.
+It opens a fresh `:memory` store, calls `cluster/populate-ancestor!` to install
+the current `resources/seon/schema/*.edn` population and program rows, and
+releases in a `finally`. There is no ambient connection.
 
 ```clojure
 (ns seon.cluster.run-test
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.test-support :as test-support]))
 
-(def ^:private model-attributes
-  [:seon.cluster.run/id :seon.cluster.run/opened-at :seon.cluster.run/closed-at])
-
-(defn- with-model-database [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema model-attributes))
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+(deftest canonical-population-is-installed
+  (test-support/with-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.run/id "r1"}])
+      (is (= "r1"
+             (d/q '[:find ?id .
+                    :where [_ :seon.cluster.run/id ?id]]
+                  @connection))))))
 ```
 
 **Attributes must be INSTALLED before they are transacted.** Under
-`:schema-flexibility :write` a registered-but-uninstalled attribute throws
-`Bad entity attribute … not defined in current schema` (REPL-verified
-2026-07-27). `schema/register!` teaches the Malli registry; transacting
-`(schema.datahike/malli->datahike-schema attrs)` is what teaches the database.
-Listing the attributes explicitly, as above, is a feature: the list is the
-test's declared surface, and a missing entry fails loudly instead of silently
-widening.
+`:schema-flexibility :write` a loaded-but-uninstalled attribute throws.
+Ordinary tests use the production population owner above. Only a test whose
+subject is schema installation passes explicit synthetic Datahike declarations
+through `:seon.test-support/extra-schema`.
+
+`d/transact` accepts BOTH `{:tx-data [...] :tx-meta {...}}` and raw
+vector/sequence forms. The production fixture itself uses the arg-map form;
+never flag it as invalid. Datahike normalizes both in
+`reference-code/datahike/src/datahike/api/impl.cljc:30-48`.
 
 Give the test a **deterministic clock** rather than reading the wall clock —
 Seon's transitions take time as an explicit input precisely so a property can
@@ -110,10 +105,13 @@ agreeable while the write did not happen:
 ```clojure
 (deftest reads-back-a-row
   (testing "a transacted value comes back out"
-    (with-model-database
+    (test-support/with-database
       (fn [connection]
-        (d/transact connection [{::name "Alpha"}])
-        (is (= "Alpha" (d/q '[:find ?n . :where [_ ::name ?n]] @connection)))))))
+        (d/transact connection [{:seon.cluster.run/id "r1"}])
+        (is (= "r1"
+               (d/q '[:find ?id .
+                      :where [_ :seon.cluster.run/id ?id]]
+                    @connection)))))))
 ```
 
 For a boundary that returns an envelope, assert on `::ok?` explicitly —
@@ -151,8 +149,8 @@ failure, never an expected refusal; do not fall back to message matching.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Bad entity attribute … not defined in current schema` | attribute registered but not installed on this connection | add it to the fixture's attribute list |
-| "Unregistered attributes" from a Seon boundary | missing `schema/register!` | register it in the owning ns |
+| `Bad entity attribute … not defined in current schema` | current EDN population was not installed on this connection | use `test-support/with-database`; add `extra-schema` only when installation is the subject |
+| "Unregistered attributes" from a Seon boundary | missing `resources/seon/schema/*.edn` declaration or activation | add it to the owning EDN file and use the production population owner |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
 | A property passes but the code is wrong | the property observes only the returned value, or its checker never reads the facts the command wrote | observe durable facts independently of the return; extend the checker |
 | Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per generative trial; nothing global to restore |
@@ -164,9 +162,8 @@ failure, never an expected refusal; do not fall back to message matching.
 
 Malli generators do not create a third test mechanism. Put the property in a
 normal `clojure.test` namespace and run it through `bin/test`. Database
-properties use a fresh connection and exercise the same
-`schema/register!` → install → transact → read-back boundary as the
-application.
+properties use a fresh connection and exercise the same EDN population →
+install → transact → read-back boundary as the application.
 
 A generator gate is three separate assertions, never one:
 

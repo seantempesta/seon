@@ -111,7 +111,7 @@ must declare which vars unify with the outer query.
 A PLAIN ref with no sub-pattern pulls back as `{:db/id N}` — name it with a
 sub-pattern (`{::parent [::name]}`) to pull its fields. A COMPONENT ref expands
 to a nested map under `[*]`. Reverse-ref navigation (`::parent` →
-`{:my.ns/_parent [...]}`) is free — see `references/data-modeling.md`.
+`{:my.ns/_parent [...]}`) is free — see the `data-modeling` skill.
 
 ## Inspecting the index (debugging only)
 

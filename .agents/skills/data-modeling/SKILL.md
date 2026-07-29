@@ -1,15 +1,15 @@
 ---
 name: data-modeling
-description: "Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a fn spec over your data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a [:maybe X], a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to register and why); the datahike skill owns the resulting query/transact/pull mechanics — cross-linked, not duplicated."
+description: "Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, authoring resources/seon/schema EDN, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a function contract over the data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to declare and why); the datahike skill owns the resulting query/transact/pull mechanics."
 ---
 
 # Data Modeling — schema design IS database design
 
-In Seon, modeling data, validating it, and storing it are **one act**. You
-`schema/register!` a Malli type for an attribute; that single registration
+In Seon, modeling data, validating it, and storing it are **one act**. Declare
+first-party shapes as EDN under `resources/seon/schema/`; the one classpath
+population
 
-- **validates** every value (tests and generators today; the runtime
-  instrumentation and `transact!` gates re-land on top of the same registration),
+- **validates** values through the active projection and live instrumentation,
 - **auto-derives** the datahike attribute (`:db/valueType`/`:db/cardinality`/
   `:db/unique`/`:db/isComponent`) — you NEVER hand-write datahike schema, and
 - **generates** example data for tests (the schema is a test.check generator).
@@ -28,7 +28,7 @@ datoms it carries. What an entity "is" comes from **which attributes are present
 and **how refs connect it**. Schema attaches to attributes, never entities; one
 entity can carry attrs from several namespaces at once (no migration, no join).
 
-So you never model "a Source table". You register the attributes a source
+So you never model "a Source table". You declare the attributes a source
 *carries* (`:my.kb.source/id`, `/title`, `/author`), and a source IS any entity
 asserting them. Design moves, not tables:
 
@@ -40,50 +40,36 @@ asserting them. Design moves, not tables:
 
 If you write "for each kind" or a `:kind` enum, stop and reframe.
 
-## Authoring an attribute — pick the type, the bridge does the rest
+## Authoring an attribute — EDN first, bridge-derived
 
-Namespace every attr `:seon.<ns>/<name>` where the namespace is a REAL code ns
-that owns the data; inside that ns write `::name` and the reader expands it.
-Register the Malli type; `seon.schema.datahike/malli->datahike-attr`
-(`src/seon/schema/datahike.cljc`) derives the datahike facet. The DESIGN choice
-is which Malli shape expresses your intent:
+Namespace every attr `:seon.<ns>/<name>` where the namespace is a real code
+namespace that owns the data. In EDN, write the full qualified keyword.
+`seon.schema.edn/load!` merges every direct `.edn` child beneath the classpath
+resource `seon/schema`; `seon.schema.datahike/malli->datahike-attr` derives the
+Datahike facet. The design choice is which Malli shape expresses the intent:
 
 ```clojure
-(require '[seon.schema :as schema])
-
-;; scalars — concrete types only (no :any / :some / [:maybe X])
-(schema/register! ::title  :string)
-(schema/register! ::rank   :int)        ; → :db.type/long
-(schema/register! ::ratio  :double)
-(schema/register! ::active :boolean)
-(schema/register! ::when   :inst)       ; java.util.Date — → :db.type/instant
-(schema/register! ::uid    :uuid)
-(schema/register! ::tag    :keyword)
-
-;; constrain the VALUE, not just the type — the constraint is the contract
-(schema/register! ::rating [:int {:min 1 :max 5}])
-(schema/register! ::title2 [:string {:min 1}])     ; non-blank
-
-;; enum = a closed set (stores :db.type/keyword, cardinality one)
-(schema/register! ::status [:enum :open :doing :done])
-
-;; vector/set/sequential → cardinality-MANY (a SET of values, order not kept)
-(schema/register! ::topics [:vector :keyword])
-
-;; ref → points at another entity (:db.type/ref, cardinality one)
-(schema/register! ::author :seon.db/ref)
-
-;; component ref → owned children that CASCADE-retract with the parent
-(schema/register! ::findings [:vector {:seon.db/component true} :seon.db/ref])
-
-;; identity → the natural key; same value ⇒ same entity (UPSERT) + lookup-ref
-(schema/register! ::id [:string {:seon.db/identity true}])
+;; resources/seon/schema/kb.edn
+{:my.kb.source/title :string
+ :my.kb.source/rank :int
+ :my.kb.source/ratio :double
+ :my.kb.source/active :boolean
+ :my.kb.source/when :inst
+ :my.kb.source/uid :uuid
+ :my.kb.source/tag :keyword
+ :my.kb.source/rating [:int {:min 1 :max 5}]
+ :my.kb.source/status [:enum :open :doing :done]
+ :my.kb.source/topics [:vector :keyword]
+ :my.kb.source/author :seon.db/ref
+ :my.kb.source/findings
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :my.kb.source/id [:string {:seon.db/identity true}]}
 ```
 
 What the bridge installs for each (verify live with
 `(seon.schema.datahike/malli->datahike-schema [::attr])`):
 
-| Design intent | Register | Datahike facet |
+| Design intent | EDN declaration | Datahike facet |
 |---|---|---|
 | scalar | `:string`/`:int`/`:keyword`/`:inst`/`:boolean`/`:double`/`:uuid` | matching `:db.type/*`, cardinality one |
 | closed set | `[:enum :a :b]` (keyword members) | `:db.type/keyword`, one |
@@ -93,8 +79,8 @@ What the bridge installs for each (verify live with
 | natural key | `[:string {:seon.db/identity true}]` | + `:db/unique :db.unique/identity` |
 
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
-and same-type `:or`; a `[:maybe X]` and any unmappable shape THROW with a
-message naming the registration to write instead — extend the bridge
+and same-type `:or`; a `[:maybe X]` on a stored attribute and any unmappable
+shape THROW — extend the bridge
 (`src/seon/schema/datahike.cljc`), never hand-write a `:db.type/*`. The other
 properties it reads are `{:seon.db/unique true}` (`:db.unique/value`),
 `{:seon.db/index true}`, and `{:seon.db/no-history? true}`. Full table +
@@ -102,9 +88,10 @@ query/transact mechanics: the **`datahike`** skill.
 
 ### Three design rules the type system enforces
 
-- **Optional = ABSENT, never nil.** Express it `[::field {:optional true} …]` in
-  the `:map`; if present it must be valid. Never store nil; to clear a field,
-  retract it. (`[:maybe X]` is banned — it's the nil door.)
+- **Use the omission ruling exactly.** `[:maybe]` is allowed in in-memory
+  function RETURN contracts (stored attributes stay nil-free — the bridge
+  forces absence there). Express a stored optional field with
+  `{:optional true}`; if present it must be valid. To clear it, retract it.
 - **id / ref / ident: choose deliberately.** Identity is the *natural key* you
   look entities up by and upsert on. A plain `:seon.db/ref` is a *link*. A
   *component* ref additionally OWNS the child (delete cascades) — use it only for
@@ -114,24 +101,33 @@ query/transact mechanics: the **`datahike`** skill.
   there's no order and no duplicates. If you need ordered/positional data,
   that's a different model (child entities with an index attr), not `[:vector]`.
 
-## Shared shapes: register once, reference everywhere
+## Shared shapes: declare once, reference everywhere
 
 If a shape (an id length, a constraint, an enum) would appear in two+
-registrations, register the SHAPE under its own keyword and reference it — never
+declarations, declare the shape under its own keyword and reference it — never
 inline-duplicate (duplication guarantees drift). The canonical shared shape in
-`src/seon/schema.cljc` is `:seon.db/ref`, which every ref attribute references;
+the schema population is `:seon.db/ref`, which every ref attribute references;
 `seon.schema.datahike/resolve-malli-form` is what follows such a reference to
 the shape it names.
 
 ```clojure
-;; A domain identity owns its value schema locally, then references it.
-(schema/register! ::external-id :string)
-(schema/register! ::id
-  [:and {:seon.db/identity true} ::external-id])
+{:my.kb.source/external-id :string
+ :my.kb.source/id
+ [:and {:seon.db/identity true} :my.kb.source/external-id]}
 ```
 
 If the bridge can't follow a reference shape you need, FIX the bridge — don't
 duct-tape by inlining.
+
+## Config is derived from one leaf declaration
+
+Declare each config attribute exactly once in `resources/seon/schema/*.edn`.
+`seon.schema.edn/derive-config-forms` discovers those leaf registrations and
+derives the closed `:seon.config/manifest`, `:seon.config/effective`, and
+`:seon.config/entity` schemas. Never add the same dial to hand-maintained
+composite maps or a separate roster. `config/default.edn` is the complete
+shipped decision document and `seon.config/compile-manifest` applies defaults,
+overlay, and explicit environment data once.
 
 ## Provenance is NOT a domain attribute — the tx already records it
 
@@ -152,65 +148,60 @@ entity schema. Reference your attr schemas by keyword (don't re-inline their
 shapes); mark optional fields `{:optional true}`:
 
 ```clojure
-(schema/register! ::source-entity
-  [:map {:seon.db/entity true}                 ; ← declares a stored entity schema
-   [::id ::id]                                 ; identity attr (required)
-   [::title ::title]
-   [::rating {:optional true} ::rating]        ; absent when unknown
-   [::topics {:optional true} ::topics]
-   [::author {:optional true} ::author]])
+{:my.kb.source/entity
+ [:map {:seon.db/entity true}
+  [:my.kb.source/id :my.kb.source/id]
+  [:my.kb.source/title :my.kb.source/title]
+  [:my.kb.source/rating {:optional true} :my.kb.source/rating]
+  [:my.kb.source/topics {:optional true} :my.kb.source/topics]
+  [:my.kb.source/author {:optional true} :my.kb.source/author]]}
 ```
 
-The `{:seon.db/entity true}` marker is opt-in and load-bearing: `register!`
-derives `:seon.entity/id-attr` and emits a queryable `:seon.schema` row, so the
+The `{:seon.db/entity true}` marker is opt-in and load-bearing: the projection
+derives the identity attribute and emits a queryable `:seon.schema` row, so the
 renderer can enumerate instances by walking that id-attr's index (NO per-row
 `:kind` stamp). Request/response/view maps OMIT the marker — they're contracts,
 not catalogued kinds.
 
 ## Function specs — DEFAULT to map-in / map-out
 
-Functions operate on this data, so spec them with the SAME registered schemas.
+Functions operate on this data, so spec them with the SAME declared schemas.
 **For any API-like surface, default to map-in / map-out:** one
 namespaced-keyword map IN, one map OUT, where the request and response are
-EXPLICIT, NAMED, REGISTERED schemas — `::foo-request` and `::foo-response`. This
+explicit named schemas — `::foo-request` and `::foo-response`. This
 is the primary shape Seon builds.
 
 Why it's the default: a named input schema + a named output schema make the
 function's contract a single unambiguous, discoverable, *referenceable* thing.
 That is exactly what you want a generator (an agent — or the diffusion model
-under guided generation) to produce: register two `:map`s, then the body's
+under guided generation) to produce: declare two `:map`s, then the body's
 `:malli/schema` is trivially `[:=> [:cat ::foo-request] ::foo-response]`. The
 generation target is unambiguous and the parser/oracle's job is easy. It also
 ACCRETES safely — add an optional field to the request and old callers don't
 break.
 
 ```clojure
-;; 1. register the request + response as :map schemas — every key namespaced,
-;;    every value a registered shape, optional fields marked (absent, never nil):
-(schema/register! ::add-request
-  [:map
-   [::title  ::title]                    ; required
-   [::rating {:optional true} ::rating]  ; optional → absent when unknown
-   [::topics {:optional true} ::topics]])
+;; resources/seon/schema/kb.edn
+{:my.kb.source/add-request
+ [:map
+  [:my.kb.source/title :my.kb.source/title]
+  [:my.kb.source/rating {:optional true} :my.kb.source/rating]
+  [:my.kb.source/topics {:optional true} :my.kb.source/topics]]
+ :my.kb.source/add-response
+ [:map
+  [:my.kb.source/ok? :boolean]
+  [:my.kb.source/id {:optional true} :my.kb.source/id]
+  [:seon.error/value {:optional true} :seon.error/value]]}
+```
 
-(schema/register! ::add-response
-  [:map
-   [::ok?   :boolean]
-   [::id    {:optional true} ::id]       ; present on success
-   [::error {:optional true} :string]])  ; present on failure
-
-;; 2. the fn's :malli/schema just references the two named schemas:
+```clojure
+;; The function contract references the named EDN schemas:
 (defn add
-  "Add a source. Map in (::add-request), map out (::add-response)."
-  {:malli/schema [:=> [:cat ::add-request] ::add-response]}
-  [{::keys [title rating topics]}]       ; destructure the named keys
-  (if (str/blank? title)
-    {::ok? false ::error "::title is required"}
-    (let [id (new-id)]
-      (store/transact! {::tx-data [(cond-> {::id id ::title title}
-                                     rating (assoc ::rating rating)
-                                     topics (assoc ::topics topics))]})
-      {::ok? true ::id id})))            ; one namespaced map out
+  {:malli/schema
+   [:=> [:cat :my.kb.source/add-request]
+    :my.kb.source/add-response]}
+  [request]
+  ...)
 ```
 
 The named schemas are reusable: another fn's response can `[::source ::add-request]`
@@ -231,14 +222,22 @@ specced positional one.
   [id new-title] …)
 ```
 
-A wrong schema is a bug, not a doc nit. The fresh tree does not yet instrument
-at runtime, so nothing catches a lying schema for you — the test and the
-generator are what hold it honest. (Agent-facing boundaries return their `::ok?`
-response map instead of throwing — see `data-oriented-clojure`.)
+A wrong schema is a bug, not a doc nit. `seon.instrument/apply!` instruments
+every loaded public var carrying `:malli/schema` in development, with no
+namespace allow list. Tests and generators still prove the contract rather
+than relying only on runtime checks.
+
+### Selective corpus admission
+
+Only durable declarations enter the program graph: contracted functions
+(`defn` carrying `:malli/schema`), schema registrations, and tests. Arbitrary
+evals, scratch defs, and atoms remain context-local and die with the process;
+receipts preserve history but never reconstruct code. `src/seon/fn.clj` applies
+this as a computed selection, not a durability flag.
 
 ## The schema IS the generator — generative testing
 
-A registered schema is **eligible for the standing generator contract**: it
+A declared schema is **eligible for the standing generator contract**: it
 becomes a generator only after construction and generate-then-validate have
 passed on every owning tier. Malli generator overrides REPLACE generation;
 Malli never proves an override's output satisfies the schema it decorates.
@@ -253,8 +252,8 @@ The loop: design schema → prove it generates honestly → assert properties.
 Rules that make a schema generatively honest:
 
 - **Every `[:fn ...]` predicate schema MUST carry an honest `:gen/schema` or
-  `:gen/gen`.** Prefer EDN-readable `:gen/schema` in `schema/register!` forms
-  — registered forms are database facts; test.check generator objects are not
+  `:gen/gen`.** Prefer EDN-readable `:gen/schema` in classpath EDN forms —
+  schema forms are database facts; test.check generator objects are not
   durable data. Honest means every emitted value satisfies the predicate AND
   covers meaningful domain partitions — a canned satisfier (`:gen/return`,
   a single `[:= x]`) green-washes an open domain.
@@ -291,31 +290,26 @@ Model a knowledge base: a **source** (natural key, owns its **findings**, cites 
 shared **author**).
 
 ```clojure
-;; 1. attributes — each carries the namespace of its owning code ns
-(schema/register! :my.kb.source/id     [:string {:seon.db/identity true}]) ; natural key
-(schema/register! :my.kb.source/title  :string)
-(schema/register! :my.kb.source/rating [:int {:min 1 :max 5}])
-(schema/register! :my.kb.source/topics [:vector :keyword])                 ; cardinality-many
-(schema/register! :my.kb.source/author :seon.db/ref)                       ; shared → plain ref
-(schema/register! :my.kb.source/findings
-                  [:vector {:seon.db/component true} :seon.db/ref])        ; owned → component
-(schema/register! :my.kb.author/id     [:string {:seon.db/identity true}])
-(schema/register! :my.kb.author/name   :string)
-(schema/register! :my.kb.finding/id    [:string {:seon.db/identity true}])
-(schema/register! :my.kb.finding/text  :string)
+;; resources/seon/schema/kb.edn
+{:my.kb.source/id [:string {:seon.db/identity true}]
+ :my.kb.source/title :string
+ :my.kb.source/rating [:int {:min 1 :max 5}]
+ :my.kb.source/topics [:vector :keyword]
+ :my.kb.source/author :seon.db/ref
+ :my.kb.source/findings
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :my.kb.author/id [:string {:seon.db/identity true}]
+ :my.kb.author/name :string
+ :my.kb.finding/id [:string {:seon.db/identity true}]
+ :my.kb.finding/text :string}
+```
 
-;; 2. derived datahike schema — TRANSACT this before transacting any data;
-;;    under :schema-flexibility :write an uninstalled attribute throws:
+```clojure
+;; Inspect the derived Datahike declarations:
 (seon.schema.datahike/malli->datahike-schema
   [:my.kb.source/id :my.kb.source/topics :my.kb.source/author :my.kb.source/findings])
-;;=> [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
-;;     :db/unique :db.unique/identity}
-;;    {:db/ident :my.kb.source/topics  :db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-;;    {:db/ident :my.kb.source/author  :db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
-;;    {:db/ident :my.kb.source/findings :db/valueType :db.type/ref    :db/cardinality :db.cardinality/many
-;;     :db/isComponent true}]
 
-;; 3. one tx links author + source + findings via tempids (datahike mechanics → datahike skill):
+;; One tx links author + source + findings via tempids:
 (d/transact connection
   [{:db/id "a1" :my.kb.author/id "auth-1" :my.kb.author/name "Hickey"}
    {:my.kb.source/id "src-1" :my.kb.source/title "Simple Made Easy"
@@ -323,23 +317,25 @@ shared **author**).
     :my.kb.source/author "a1"
     :my.kb.source/findings [{:my.kb.finding/id "f1" :my.kb.finding/text "simple ≠ easy"}]}])
 
-;; 4. the schema is the test oracle — generate, then assert the property:
+;; The schema is the test oracle:
 (mg/generate [:map [:my.kb.source/id :my.kb.source/id]
                    [:my.kb.source/rating :my.kb.source/rating]])
 ```
 
-`src/seon/cluster/run.cljc` is the live worked example — identity attributes,
-refs, a component-free run/form/receipt model, and every transition contract
-written as a `:malli/schema`. `src-old/my/kb.cljc` is the quarry's runnable
-schema-design manual; read it for idiom, do not extend it.
+`resources/seon/schema/run.edn` and `src/seon/cluster/run.cljc` are the live
+worked pair: identity attributes, refs, and transition contracts.
 
 ## Key files
 
 | File | What it gives you |
 |---|---|
-| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
+| `resources/seon/schema/*.edn` | first-party attribute/entity/value schemas |
+| `src/seon/schema/edn.clj` | loading, config derivation, one admission gate |
+| `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.cljc` | `malli->datahike-attr` — the bridge (extend it here) |
 | `src/seon/schema/form.cljc` | shared form inspection the bridge and gates use |
+| `src/seon/fn.clj` | selective durable corpus admission |
+| `src/seon/instrument.clj` | computed public-contracted-var instrumentation |
 | `src/seon/cluster/run.cljc` | a live domain model end to end |
 | `docs/conventions.md` | Malli patterns, request/response, the `:any` boundary |
 | `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |

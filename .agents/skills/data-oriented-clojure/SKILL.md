@@ -1,6 +1,6 @@
 ---
 name: data-oriented-clojure
-description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljc, designing a data model, or implementing a capability, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for what shape to register see data-modeling — this is the mindset that links them."
+description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljc, designing a data model, or implementing a capability, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored derived state, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, or a parallel namespace to house a fix. Use before guessing library behavior instead of reading reference-code/. For EAV mechanics see datahike; for schema EDN design see data-modeling."
 ---
 
 # Data-Oriented Clojure — the Seon mindset
@@ -12,7 +12,7 @@ rewires the most common ones. It is mostly *why*, because once you see why the
 grain runs this direction, the right code is obvious.
 
 For the specifics this skill defers to: **EAV queries → the `datahike` skill;
-what shape to register and why → `data-modeling`; test patterns →
+what shape to declare and why → `data-modeling`; test patterns →
 `clojure-testing`.** The grounding is the vendored source under
 `reference-code/` and the live code in `src/`.
 
@@ -34,11 +34,29 @@ wrong. Ground the concept→file first, then write. A 30-second REPL experiment
 beats hours of debugging. (See the shared instructions, "Slow Is Fast".)
 
 Memory got these wrong recently, the source set them right: an inline tx-fn
-carries a closure and cannot cross a wire, so a fence that must travel is
-`:db.fn/cas`, pure data; `as-of` reports its *origin* db's basis-t, not the
+carries a resolved function while `:db.fn/cas` is pure transaction data;
+`as-of` reports its *origin* db's basis-t, not the
 as-of point; `memoize` on a db value walks the entire index on a cache *hit*;
 and under `:schema-flexibility :write` an attribute is NOT installed lazily —
 transacting an uninstalled attribute throws.
+
+**Current schema path:** first-party attribute/entity/value schemas are EDN
+maps under `resources/seon/schema/`, loaded by `seon.schema.edn/load!` as one
+validated population. Shipped Clojure does not author those schemas with
+load-time `schema/register!`. Runtime agent registrations still pass through
+the same admission gate.
+
+**One config authority:** declare a config attribute once in that EDN
+population. `seon.schema.edn/derive-config-forms` derives the manifest,
+effective, and database-entity composites from the leaf registrations.
+`config/default.edn` supplies one complete shipped decision map; never maintain
+a second dial roster.
+
+**Selective corpus admission:** only durable declarations become program-graph
+rows — contracted functions (`defn` with `:malli/schema`), schema registrations,
+and tests. Arbitrary evals, scratch defs, and atoms are process-local. Receipts
+retain history but never reconstruct code. `src/seon/fn.clj` is the computed
+selection.
 
 ## The reflexes, and what to write instead
 
@@ -70,11 +88,10 @@ migration.
 (defn process [{::keys [pattern paths]}] {::ok? true})      ; RIGHT — ::pattern resolves to this ns
 ```
 
-Namespaced keys are load-bearing: a single Datalog query can join function specs
-to the data they operate on, and "what accepts `:seon.agent.search/pattern`?"
-becomes a DB query instead of a guess. `seon.db/transact!` won't even accept a
-bare attribute. The keyword namespace IS a real code namespace that owns that
-data's schema.
+Namespaced keys are load-bearing: a single Datalog query can join function
+contracts to the data they operate on, and "what accepts
+`:seon.agent.search/pattern`?" becomes a database query instead of a guess. The
+keyword namespace is a real code namespace that owns that data's schema.
 
 ### Public fns carry `:malli/schema` — not `:pre`/`:post`, not hand-rolled checks
 
@@ -85,21 +102,22 @@ data's schema.
 ```
 
 The `:malli/schema` is the contract of record: tests check it, generators
-derive from it, review reads it, and the runtime instrumentation rung will
-switch on it. **The fresh tree does not instrument yet** — `src/` carries no
-`seon.instrument` — which is precisely why a wrong or missing schema is
-dangerous rather than harmless: nothing catches it for you today. Write it
-correctly and check it with a test. `:pre`/`:post` gets none of this — not
+derive from it, review reads it, and `seon.instrument/apply!` instruments every
+loaded public var carrying one in development. The selection is computed —
+public + contracted — with no namespace allow list. Re-run `apply!` after
+re-evaluating a defn because hot reload replaces the wrapper. `:pre`/`:post`
+gets none of this — not
 discoverable, not generatively testable, not a database fact. Two sanctioned
 argument shapes: map-in/map-out
 (preferred for accreting API surfaces) or fully-spec'd positional via `:catn`;
 the invariant is that every arg is named, specced, validated — a bare/unspecced
 arg is the violation, not a positional one.
 
-Use concrete types. `:any`/`:some`/`:nil`/`[:maybe X]` are *banned* (rejected at
-startup) — express optionality with `{:optional true}` in the `:map`, never
-`[:maybe X]`. The one exception: a genuine third-party boundary where the value
-is whatever an external lib hands back and there's no honest tighter type.
+Use concrete types. The omission ruling is exact: `[:maybe]` is allowed in
+in-memory function RETURN contracts (stored attributes stay nil-free — the
+bridge forces absence there). Stored optional fields use `{:optional true}` in
+a map and omit the key. `:any` is reserved for a genuine third-party boundary
+where no tighter honest type exists.
 
 ### Docstring line 1 is a complete ≤72-char sentence — it renders as the summary
 
@@ -120,15 +138,11 @@ missing, >78 chars, or lacks terminal punctuation. Full rule + example:
 {::ok? false ::error "guiding msg" ::raw-error "detail"}   ; failure
 ```
 
-An agent's eval must survive a bad call and read the failure as *data* — the way
-`seon.db/transact!` and `seon.agent.search/grep` do. Envelope verbs that are
-`^:async` with non-simple shapes are STRUCTURALLY exempt from the throwing
-instrumentation wrapper (`seon.instrument/async-unwrappable?` — computed from
-the fn's real shape, never a name list) precisely because a throw would break
-the `::ok?` contract; they validate in their own body. Exceptions-as-control-
-flow break the loop; values let the agent inspect, recover, retry. (A genuine
-*programmer* error deep in private code may still throw — errors-as-values is the
-rule for the agent-facing surface.)
+An agent's eval must survive a bad call and read the failure as data. The
+agent-facing boundary catches dependency failures and returns a flat
+`:seon.error` value. Exceptions-as-control-flow break the loop; values let the
+agent inspect, recover, and retry. A programmer error inside private core code
+may still throw into the core fault path.
 
 ### Derive at render — don't store derived state or "mark-as-seen" flags
 
@@ -138,7 +152,7 @@ rule for the agent-facing surface.)
 
 ;; RIGHT — a section is a pure fn of the DB; renders only when the query has rows
 (defn stale-section [db]
-  (when-let [rows (seq (db/query {::db/db db ::db/query '[…]}))]
+  (when-let [rows (seq (d/q '[:find ?e :where [?e :seon.error/fault]] db))]
     (render rows)))
 ```
 
@@ -163,7 +177,7 @@ joining the datom's tx. See the **`datahike`** skill, "Transaction metadata".
 
 ;; RIGHT — snapshot once, thread the value
 (let [db @*conn*]
-  (let [a (db/query {::db/db db …}) b (db/query {::db/db db …})] ...))
+  (let [a (d/q query-a db) b (d/q query-b db)] ...))
 ```
 
 `d/q`/`d/pull`/`d/entity` are referentially transparent over a db value — it
@@ -171,6 +185,11 @@ can't change under you, so the "race" you think you have is usually re-reading
 the connection three times instead of threading one snapshot. `db` is the
 **first** parameter to functions; never thread a connection or other opaque
 runtime object through an agent-facing call site.
+
+At the co-located write seam, use Datahike's actual API. `d/transact` accepts
+BOTH `{:tx-data [...] :tx-meta {...}}` and the raw vector/sequence shorthand.
+A map without `:tx-data` is invalid. This is dependency source, not a project
+preference: `reference-code/datahike/src/datahike/api/impl.cljc:30-48`.
 
 **The strongest form of this: don't pre-read at all.** When a decision depends
 on current state, make the decision INSIDE the transaction — a
@@ -217,23 +236,26 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
-### Require what you use; full qualification is the always-correct floor
+### Schema EDN and function code have separate homes
 
-Write ordinary `ns` forms with explicit requires — they make the dependencies
-obvious and they are what the call-graph indexer reads:
+Put shipped schema declarations in `resources/seon/schema/*.edn`, then require
+only what function code actually calls:
 
 ```clojure
 (ns seon.expense
-  (:require [seon.schema :as schema]))
+  (:require [datahike.api :as d]))
 
 (defn total [xs] (reduce + xs))
-(schema/register! ::amount :int)
 ```
 
-A fully-qualified call (`seon.schema/register!`) works from any namespace with
-no require and is never wrong. (The agent-facing `my.*` toolkit and the
-convenience aliases wired into an agent's home namespace are quarry surfaces;
-they do not exist in the fresh tree.)
+```clojure
+;; resources/seon/schema/expense.edn
+{:seon.expense/amount :int}
+```
+
+`seon.schema.edn/load!` reads the classpath directory. File boundaries are
+editorial only: duplicate keys refuse, every reference must resolve, and
+predicate schemas require registered predicates plus honest generators.
 
 ### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 
@@ -250,18 +272,17 @@ reports pass/fail as data. A test the gate cannot discover is NOT coverage:
   (is (= 101 (seon.expense/total [45 18 38]))))
 ```
 
-Test patterns (async, fresh in-memory conn, awaiting capability verbs) live in
-the **`clojure-testing`** skill.
+Test fixtures, event backstops, and generative patterns live in the
+**`clojure-testing`** skill.
 
 ## When to read which reference
 
 | You're about to... | Read first |
 |---|---|
 | Write a Datalog query, transact, fence a transition | the **`datahike`** skill |
-| Decide what shape to register and why | the **`data-modeling`** skill |
+| Decide what shape to declare and why | the **`data-modeling`** skill |
 | Write tests, fixtures, generators | the **`clojure-testing`** skill |
 | Build a long-running owner, channel, or executor | `reference-code/core.async/.../flow/` + `src/seon/flow.clj` |
 | Confirm any library's actual behavior | the vendored source in `reference-code/<lib>/` — never guess |
 | Full conventions (Malli shapes, `.internal`, schema composition) | `docs/conventions.md` |
 | What is settled, unsettled, and next | `docs/prds/sci-execution-runtime/plan/README.md` |
-</content>
