@@ -386,6 +386,17 @@
                "the planner's run closed normally — settlement is a
                 derivation over forms, never a run state"))
 
+         (testing "the derivation transacts nothing"
+           ;; The live drive cannot settle this — its cluster is still
+           ;; taking turns while the derivation runs, so `max-tx` moves
+           ;; for reasons that have nothing to do with it. Here the
+           ;; drive has stopped, so the basis is decisive.
+           (let [before (:max-tx @connection)]
+             (work/plan-settlement @connection run-id)
+             (is (= before (:max-tx @connection))
+                 "plan settlement is a pure function of a database
+                  value; deriving it can never commit")))
+
          (testing "the goal scopes the whole conversation by cause alone"
            (is (= 1 (message/chain-depth
                      db

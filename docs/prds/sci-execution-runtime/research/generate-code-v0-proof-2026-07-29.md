@@ -96,7 +96,120 @@ disagreements below.
 
 ## The live drive
 
-<!-- DRIVE EVIDENCE -->
+Scratch cluster `generate-code-v0`, four runs of
+`scripts/generate-code-v0-drive-2026-07-29.clj`. The decisive one is run 4
+(23:46:58 → 00:02:58 EDT); the earlier three are reported under "what went
+wrong on the way" because two of them are evidence in their own right.
+
+**All three milestones OK.** Planner plan frozen 75 s after the goal
+committed; both owners assigned 1 s later; a declination naming its problem
+at 00:02:52.
+
+### Act 1 — the attempt, attributed at parse
+
+```text
+ord  ns              source                                          error
+  0  user            ;; contract checks… (ns my.gen.alpha)           —
+  1  my.gen.alpha    (alpha-contract-check)                          Unable to resolve symbol
+  2  ABSENT          (ns my.gen.beta)                                —
+  3  my.gen.beta     (beta-contract-check)                           Unable to resolve symbol
+  4  ABSENT          (my.message/send "alpha" "Hello alpha…")        —
+  5  ABSENT          (my.message/send "beta" "Hello beta…")          —
+  6  ABSENT          (my.run/wait "Awaiting approval…")              —
+```
+
+Seven forms, seven receipts — the fold continued past both red forms, and
+nothing re-evaluated anything. Ordinals 2 and 4–6 are unattributed because
+each follows an arbitrary top-level invocation; the reader refuses to guess
+and absence routes to the author. Ordinals 1 and 3 carry the namespace the
+model's own `(ns …)` forms established.
+
+### Act 2 — routing, to the owners rather than the author
+
+```text
+problem-["7da07944…" 1]  planner → alpha
+problem-["7da07944…" 3]  planner → beta
+```
+
+Both assignments committed in the terminal transaction of the very form that
+produced them, with the derived `(about, recipient)` identity. The planner
+re-attempted four times across the episode (each attempt routing to both
+owners again) — see the deferral note below.
+
+### Act 3 — settlement, derived and unsettled
+
+```clojure
+{:seon.cluster.run/id "7da07944-d3ca-4b45-9787-e7d375764435"
+ :seon.cluster.work/forms
+ [{:ordinal 0 :owner "planner" :state :succeeded}
+  {:ordinal 1 :owner "alpha"   :state :routed}
+  {:ordinal 2 :owner "planner" :state :succeeded}
+  {:ordinal 3 :owner "beta"    :state :routed}
+  {:ordinal 4 :owner "planner" :state :succeeded}
+  {:ordinal 5 :owner "planner" :state :succeeded}
+  {:ordinal 6 :owner "planner" :state :succeeded}]
+ :seon.cluster.work/settled? false}
+```
+
+Both owners ANSWERED — alpha defined `alpha-contract-check` in its own run,
+beta defined `beta-contract-check` in its — and both forms are still
+`:routed`. That is the blocker below, observed live rather than argued.
+
+### Act 4 — a declination, joined by identity
+
+```text
+problem-["6c221617…" 1] declined: "my/defn is not a valid symbol in Clojure;
+defn comes from clojure.core, not my namespace. The symbol was corrected to
+standard defn in my.agents.alpha"
+```
+
+The declination is real, schema-shaped, and joins its problem by `about` —
+the third settling arm works end to end, and it happened only because the
+`assignment-ai` block taught the surface. It is also the wrong pairing: alpha
+declined a problem assigned to ITSELF, because a red form in an unattributed
+namespace falls back to the author. Nine of the fifteen `about`-carrying
+messages in this drive are alpha→alpha. Filed.
+
+### Obligation 2 is NOT proven by this drive
+
+`max-tx` moved 536871167 → 536871168 across the derivation, and the
+measurement is the reason, not the derivation: the drive read `before` from a
+pinned database value and `after` from the LIVE connection while other agents
+were still taking turns. `plan-settlement` is a pure function of a database
+value and cannot transact. The decisive assertion belongs where the cluster is
+quiet, and it now lives in `test/seon/gen/loop_test.clj`.
+
+### What went wrong on the way, and what it proved
+
+- **Run 2** stalled: one planner generation ran past the 600 s deadline. The
+  provider dial is now 300 s so a wedged generation becomes an ordinary
+  timeout the loop's own backoff answers.
+- **Run 3** met a DEAD Ollama server (it exited between runs). Six
+  `:seon.ai/transport-failure` values with
+  `:request-transmitted? false`, then the retry budget exhausted and the runs
+  closed with the failure as a durable fact. Nothing hung, nothing retried a
+  transmitted request, and no receipt was invented — the provider-death path
+  behaved exactly as designed, unplanned.
+
+### Model residue — Qwen, honestly
+
+- **It never wrote the program.** Asked for code in two namespaces, the
+  planner sent PROSE messages containing draft code and paused, treating the
+  namespace owners as reviewers to be polled rather than as agents whose
+  namespaces it was writing. Four attempts in, it was still asking alpha and
+  beta to "confirm", and it messaged root "Planning complete… ready for
+  deployment" while nothing had been defined anywhere.
+- **Its drafts do not read as Clojure.** Every draft carried
+  `defn total-widgets [counts] …` with no opening paren. Harmless here only
+  because it lived inside a message string.
+- **The owners repaired eagerly and correctly.** Both defined the missing
+  contract check in their own namespace on the first try. The one declination
+  was a lucid diagnosis of its own earlier mistake (`my/defn`).
+- Timings on this machine: planner attempt 75 s; a full four-attempt episode
+  with six owner turns, 16 min wall.
+
+None of this is evidence about the design. The staged failure exists exactly
+so that it is not.
 
 ## Honest disagreements, reported rather than hidden
 

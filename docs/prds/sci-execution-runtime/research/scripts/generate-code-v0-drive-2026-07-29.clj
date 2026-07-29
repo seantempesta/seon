@@ -69,7 +69,11 @@
   {:seon.config.ai/endpoint "http://127.0.0.1:11434/v1/chat/completions"
    :seon.config.ai/model "qwen3.5:35b-a3b-coding-nvfp4"
    :seon.config.ai/no-auth true
-   :seon.config.ai/timeout-ms 600000})
+   ;; Long enough for this model on this machine (a planner turn
+   ;; measured 2m50s), short enough that a wedged generation becomes an
+   ;; ordinary timeout the loop's own backoff answers rather than a
+   ;; drive that watches nothing happen.
+   :seon.config.ai/timeout-ms 300000})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The staged failure, injected at the provider-response boundary
@@ -228,7 +232,7 @@
                                      [?run :seon.cluster.run/plan-digest ?d]]
                                    db run-id)
                           run-id)))
-                    600))
+                    900))
 
       (await-fact "both owners were assigned their own red form" connection
                   (fn [db]
