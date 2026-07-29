@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow]
 ---
@@ -40,3 +40,19 @@ declared time limit settles it without a sleep or an unbounded wait.
 **PRESSING — fold into [[agent-turns-bypass-the-bounded-compute-door]].** This
 is the same bounded-compute fix wave: production agent eval cannot safely adopt
 `submit!!` while submission can wait forever before its declared time limit.
+
+## Resolution
+
+Resolved by commits `f14a6cf7a` and `24544c1d1`.
+
+`submit!!` no longer owns or dereferences a separate `started` promise. Each
+accepted submission publishes one terminal result event carrying its start
+time and value or throwable. The same bounded dereference now covers the
+entire accepted pre-start and execution interval. A timed-out queued
+submission atomically becomes cancelled and is skipped if capacity later
+opens.
+
+`submission-time-limit-covers-the-pre-start-wait` proves both a paused launcher
+and a submission queued behind a fully occupied owner settle within the
+declared limit, without sleeps or an unbounded startup dereference. The
+complete focused flow suite passes with zero failures or errors.

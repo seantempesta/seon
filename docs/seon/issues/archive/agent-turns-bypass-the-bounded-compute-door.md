@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, agent, sci, architecture]
 ---
@@ -71,3 +71,25 @@ describes the observed call path.
 [[submit-awaits-started-with-no-bound]]: both are startup-boundary failures in
 the currently unused launcher that must be corrected as it becomes the
 production agent-eval path.
+
+## Resolution
+
+Resolved by commits `f14a6cf7a`, `24544c1d1`, and `03e7bd11b`.
+
+The production turn now calls `seon.flow/submit!!`; cluster arm installs that
+one launcher from acquired config facts before agent graphs arm, and last
+cluster shutdown stops it after those graphs disarm. The launcher consumes
+`seon.cluster/root-executors` for its flow graph and owns a virtual-thread
+per-task executor for admitted evaluations. Its configured concurrency and
+fixed submission buffer remain the sole lifetime admission bounds.
+
+Recurring proof:
+
+- `production-launcher-bounds-virtual-task-lifetimes` submits five evaluations
+  at capacity two, proves exactly two run concurrently, proves every task runs
+  on a virtual thread, and receives five flat completed values;
+- `turn-evaluation-completion-is-a-flat-diagnostic-value` crosses the actual
+  SCI turn seam and proves the result stays flat while function entries and
+  duration remain recorded and allocated bytes are `-1`; and
+- the complete turn, agent, boot, context, generative-loop, flow, and
+  flow-configuration focused suites pass with zero failures or errors.

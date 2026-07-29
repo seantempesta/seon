@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, flow]
 ---
@@ -41,3 +41,18 @@ wait is converted into a spurious timeout.
 note and [[flow-submit-waits-forever-before-time-limit]] name the same startup
 wait in `submit!!`; preserve both evidence trails during the one fix wave, then
 close them together.
+
+## Resolution
+
+Resolved by commits `f14a6cf7a` and `24544c1d1`.
+
+The launcher publishes a single terminal submission event rather than making
+callers await an independently delivered `started` promise. An accepted
+submission queued behind fully occupied capacity therefore settles through
+the declared time limit, and a later executor start observes its cancelled
+state instead of running it.
+
+`submission-time-limit-covers-the-pre-start-wait` holds the sole admitted
+evaluation with latches, times out the queued caller as a flat
+`::seon.flow/time-limit` outcome, then releases the owner. The complete
+focused flow suite passes with zero failures or errors.
