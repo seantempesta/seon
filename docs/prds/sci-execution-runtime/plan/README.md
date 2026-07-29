@@ -13,8 +13,8 @@ else.**
 
 | file | what it is | trust |
 |---|---|---|
-| **this file** | the ONE ordering: the rulings, the nucleus ladder, the landmines | current as of its last edit |
-| [handbook.md](handbook.md) | the UNDERSTANDING: why the fresh tree, how the construction loop runs, the mentality, where things are defined — read it to GET IT without re-deriving a week of conversation | current |
+| **this file** | the ONE ordering: the numbered owner rulings, the ladder, the landmines | current as of its last edit |
+| [handbook.md](handbook.md) | **THE ORIENTATION** — read it whole if you are new: why there are two implementations, why archaeology precedes design, which skills to load and why they are trustworthy, the loop that works, the warts, the mentality, how the owner works. A fresh session's transfer prompt is a thin pointer at this file (`docs/TRANSFER_PROMPT.md`) — never a second copy of it | current |
 | [unsettled.md](unsettled.md) | what is UNDECIDED (needs a ruling), UNKNOWN (needs an experiment), UNBUILT — and where the primitives do not yet compose | current |
 | [history.md](history.md) | what was tried before, with commit hashes, and the mistakes worth not repeating | permanent |
 
