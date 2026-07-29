@@ -60,6 +60,26 @@
 
 (declare form->datahike-value-type)
 
+(defn- literal->datahike-value-type
+  [literal]
+  (cond
+    (string? literal) :db.type/string
+    (boolean? literal) :db.type/boolean
+    (keyword? literal) :db.type/keyword
+    (symbol? literal) :db.type/symbol
+    (uuid? literal) :db.type/uuid
+    (inst? literal) :db.type/instant
+    #?(:clj (instance? Long literal)
+       :cljs (and (number? literal) (js/Number.isSafeInteger literal)))
+    :db.type/long
+    #?(:clj (instance? Double literal)
+       :cljs (number? literal))
+    :db.type/double
+    #?(:clj (instance? Float literal)
+       :cljs false)
+    :db.type/float
+    :else nil))
+
 (defn form->datahike-value-type
   "The Datahike value-type keyword represented by a Malli form."
   [form]
@@ -67,6 +87,16 @@
         head (form-head resolved)]
     (cond
       (= :seon.db/ref head) :db.type/ref
+      (= := head)
+      (or (some-> resolved form-children first
+                  literal->datahike-value-type)
+          (throw
+           (ex-info
+            (str "Only scalar Malli literals are storable. Register a "
+                 "literal whose value has a native Datahike type, for "
+                 "example "
+                 (registration-form :my.domain/enabled [:= true]) ".")
+            {::form resolved :seon.error/kind :user-input})))
       (= :enum head)
       (if (every? keyword? (form-children resolved))
         :db.type/keyword

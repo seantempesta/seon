@@ -1,10 +1,13 @@
 (ns seon.config-test
   "Sealed acceptance draft for manifest-to-config-facts."
   (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.ai :as ai]
             [seon.config :as config]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
@@ -76,6 +79,27 @@
                         (first entry)))))
         (drop 2 (schema/schema-definition :seon.config/effective))))
 
+(defn- observed-provider-dials
+  []
+  (let [observed (atom #{})
+        values
+        (assoc (config/defaults)
+               :seon.config.ai.backup/model "backup-model"
+               :seon.config.ai.backup/endpoint "http://backup.invalid"
+               :seon.config.ai.backup/api-key-variable "BACKUP_API_KEY"
+               :seon.config.ai.backup/timeout-ms 1000)
+        dials
+        (reify clojure.lang.ILookup
+          (valAt [_ key]
+            (swap! observed conj key)
+            (get values key))
+          (valAt [_ key not-found]
+            (swap! observed conj key)
+            (get values key not-found)))]
+    (ai/targets dials)
+    (ai/retry-strategy dials)
+    @observed))
+
 (deftest the-default-document-has-one-canonical-location
   (is (.equals "config/default.edn" config/default-manifest-path))
   (is (.isFile (io/file config/default-manifest-path))))
@@ -106,6 +130,23 @@
         (is (schema/valid-candidate-value? dial (get manifest dial))
             (pr-str (schema/explain-candidate-value dial (get manifest dial))))))
     (is (schema/valid-candidate-value? :seon.config/effective manifest))))
+
+(deftest every-provider-assembly-dial-is-admitted-and-installable
+  (test-support/with-database
+    (fn [connection]
+      (let [provider-dials (observed-provider-dials)
+            installed (set (keys (:schema @connection)))]
+        (is (set/subset? provider-dials dial-attributes)
+            "every dial the provider assembly actually reads is admitted by
+             the closed manifest map")
+        (is (set/subset? provider-dials installed)
+            "every admitted provider dial is installed as a database
+             attribute by canonical schema population")
+        (doseq [dial provider-dials]
+          (is (= dial
+                 (:db/ident
+                  (schema.datahike/malli->datahike-attr dial)))
+              (str dial " derives one installable declaration")))))))
 
 (deftest result-caps-are-derived-from-the-effective-configuration
   (let [effective (config/defaults)]

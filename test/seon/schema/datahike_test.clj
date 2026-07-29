@@ -87,6 +87,24 @@
     :seed 202607280701)
    "supported schema AST equivalence"))
 
+(deftest literal-schemas-derive-their-native-datahike-value-type
+  (doseq [[literal expected]
+          [[true :db.type/boolean]
+           ["one" :db.type/string]
+           [:one :db.type/keyword]
+           ['one :db.type/symbol]
+           [1 :db.type/long]
+           [1.0 :db.type/double]]]
+    (testing (pr-str literal)
+      (let [snapshot (schema/snapshot-state)]
+        (try
+          (schema/register! ::literal [:= literal])
+          (is (= expected
+                 (:db/valueType
+                  (schema.datahike/malli->datahike-attr ::literal))))
+          (finally
+            (schema/restore-state! snapshot)))))))
+
 (def ^:private refused-form-generator
   (gen/elements
    [{:form [:maybe :string] :rule :nilable}

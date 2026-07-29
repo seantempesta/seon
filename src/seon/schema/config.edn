@@ -247,6 +247,11 @@
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
+  ; The explicit unauthenticated target shape. Literal true is optional:
+  ; absence selects the credential-variable shape, while false is not a
+  ; second spelling for it.
+  [:seon.config.ai/no-auth
+   {:optional true} :seon.config.ai/no-auth]
   [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
   ; OPTIONAL, and absence is the whole contract: no backup dial means no
   ; backup target, which means `disposition` never returns
@@ -304,6 +309,8 @@
   [:seon.config.ai/endpoint :seon.config.ai/endpoint]
   [:seon.config.ai/model :seon.config.ai/model]
   [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
+  [:seon.config.ai/no-auth
+   {:optional true} :seon.config.ai/no-auth]
   [:seon.config.ai/timeout-ms :seon.config.ai/timeout-ms]
   [:seon.config.ai.backup/model
    {:optional true} :seon.config.ai.backup/model]
