@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, architecture, config, render]
 ---
@@ -53,3 +53,19 @@ boundary.
   presentation fallback, not an implicit read of `config/default.edn`.
 - Changing a cluster's config affects its next render without process restart
   and cannot bleed into another cluster.
+
+## Resolution
+
+Resolved by `08a436d02`. Database-backed structural renders now derive the
+single cluster's complete effective config from the unit's own immutable
+`:seon.db/db` value. A missing, duplicate, or incomplete config row is a named
+core boundary error. Database-free pure calls retain only schema-registered
+presentation defaults and any explicitly supplied effective config or caps;
+the renderer no longer calls `config/defaults` or caches effective config.
+
+The regression first failed both assertions because database caps of 3 and 6
+each rendered the cached default head of 8. After the fix,
+`seon.render.value-test` passed 21 tests / 66 assertions, and the combined
+renderer/config gate passed 106 tests / 353 assertions. The same connection
+receives two `config/apply!` calls and the next immutable database value expands
+the rendered head from 3 to 6 without a process or renderer restart.

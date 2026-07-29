@@ -44,7 +44,7 @@ See `README.md` for the convention.
 | [Three smaller defects in the vendored Datahike, found beside the card-many scan bug](datahike-planner-and-caches-carry-three-smaller-defects.md) | friction | Core |
 | [stop! may leave the prepl server name registered](stop-may-leave-the-prepl-server-name-registered.md) | friction | general |
 
-## Cleanup (7)
+## Cleanup (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -52,6 +52,5 @@ See `README.md` for the convention.
 | [Derive repeated state vocabularies from their owning schemas](derived-state-contracts-repeat-hand-maintained-enums.md) | cleanup | Core |
 | [Give (pid, start-instant) liveness one owner](process-liveness-check-has-no-single-owner.md) | cleanup | general |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
-| [Remove file-derived effective config from the value renderer](value-renderer-caches-file-derived-effective-config.md) | cleanup | general |
 | [Remove the stale program-graph owner rename](architecture-program-graph-owner-rename-is-stale.md) | cleanup | Core |
 | [Unify the nested-data walk shared by admission and rendering](value-admission-render-walk-overlap.md) | cleanup | general |
