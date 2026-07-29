@@ -288,3 +288,43 @@
        {:seon.cluster.message/rows []
         :seon.error/values []}
        (map-indexed vector candidates)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The family default render
+;;; ---------------------------------------------------------------------------
+
+(defn render-ai
+  "`:seon.render/ai` — one message, as the sentence it was.
+
+  Declared on `:seon.cluster.message/message` in
+  `src/seon/schema/message.edn`, so every reader of a message — a
+  prompt, a page, an agent's neighbourhood — is handed the same
+  sentence by the same function.
+
+  ABSENCE OF `from` IS THE OTHER HALF OF THE CONTRACT and it is read
+  here exactly as the schema states it: a message with no sender came
+  from outside the agent population — the human, or the system's own
+  error recorder — so this says so rather than inventing a sender. That
+  is the same rule the retired prompt prose applied, moved to the
+  family that owns the fact.
+
+  The refs pull as `{:db/id N}`, so naming the agents costs one small
+  query against the database value riding on the unit. Nil without one:
+  a unit with no database value cannot name anybody, and a projection
+  with nothing to say says nothing."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [db (get unit :seon.db/db)
+        content (get unit ::content)
+        agent-id (fn [ref]
+                   (when (and db (:db/id ref))
+                     (d/q '[:find ?id .
+                            :in $ ?agent
+                            :where [?agent :seon.cluster.agent/id ?id]]
+                          db (:db/id ref))))]
+    (when content
+      (let [from (agent-id (get unit ::from))
+            to (agent-id (get unit ::to))]
+        (str (if from (str "Agent " from " said") "From outside this cluster")
+             (when to (str " to " to))
+             ": " content)))))

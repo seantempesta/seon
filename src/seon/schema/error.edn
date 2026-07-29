@@ -73,7 +73,8 @@
  ; only as standalone leaves installs nothing but its identity —
  ; the fixture-vs-live-boot class that cost the N3 drive two rounds.
  :seon.error/fact
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.error/render-ai}
   [:seon.error/id :seon.error/id]
   [:seon.error/at :seon.error/at]
   [:seon.error/process :seon.error/process]

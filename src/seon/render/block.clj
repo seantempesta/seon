@@ -987,6 +987,53 @@
       (str "This panel needs :seon.sci.admit/caps on the unit; without "
            "them nothing bounds what it would print.")]]))
 
+(defn data-prose
+  "`:seon.render/ai`'s GENERIC default: any value, as readable EDN.
+
+  THE OTHER KIND'S FLOOR, and the owner's own justification for it:
+  \"code is a good fallback as it's the truth of the system.\" An agent
+  reads Clojure; a value it has no specialist for is still legible to it
+  as the data it actually is, so nothing in a neighbourhood is ever
+  unrenderable and no family has to write a lens before it can be seen.
+
+  Deliberately the LOWEST-fidelity ai render, the same way `data-panel`
+  is for html: a floor that tried to be clever would compete with the
+  family defaults instead of backstopping them.
+
+  Same value selection and the same ONE bounding owner as `data-panel` —
+  a non-nil `:seon.render/value` when the producer supplies one, the
+  unit minus its own declarations otherwise, bounded by the caps the
+  eval door already carries. Caps are REQUIRED and there is no shipped
+  constant, because a second set of size dials would drift from the
+  first."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (if-let [caps (:seon.sci.admit/caps unit)]
+    (let [value (if-some [value (get unit :seon.render/value)]
+                  value
+                  (let [omitted-render-keys
+                        (into []
+                              (comp
+                               (filter #(= "seon.render" (namespace %)))
+                               (filter #(nil? (get unit %))))
+                              (keys unit))]
+                    (apply dissoc unit
+                           :seon.db/db :seon.render/distance
+                           :seon.sci.admit/caps
+                           (concat (render/kinds unit) omitted-render-keys))))
+          {:seon.sci.admit/keys [value capped?]}
+          (admit/admit {:seon.sci.admit/value value
+                        :seon.sci.admit/caps caps
+                        :seon.sci.admit/interrupt-fn (fn [])
+                        :seon.config/on-core-error :log})]
+      (str (pr-str value)
+           ;; the honest signal, kept: a reader must never have to guess
+           ;; whether an elision marker was the value's own data
+           (when capped?
+             " (elided — this value is larger than the configured caps)")))
+    (str "This projection needs :seon.sci.admit/caps on the unit; without "
+         "them nothing bounds what it would say.")))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Writing a block set
 ;;; ---------------------------------------------------------------------------

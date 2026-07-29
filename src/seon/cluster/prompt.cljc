@@ -160,6 +160,19 @@
                             (select-keys request
                                          [:seon.cluster.agent/id
                                           :seon.sci.admit/caps
+                                          ;; the ONE render request's
+                                          ;; distance, threaded exactly
+                                          ;; as caps are (owner ruling
+                                          ;; 2026-07-28 post-midnight).
+                                          ;; The reduction is unchanged;
+                                          ;; this is the same optional
+                                          ;; parameter the surfaces,
+                                          ;; page and expansion requests
+                                          ;; already carry, reaching the
+                                          ;; one unit builder so a
+                                          ;; projection is CALLED with
+                                          ;; the hops it may spend.
+                                          :seon.render/distance
                                           :seon.cluster.run/live-processes]))
         records
         (into []

@@ -7,8 +7,14 @@
  ; path would have failed at run-open, one step past the trigger. Same
  ; class, same commit. `/run` is optional because an idle agent has no
  ; current run, and absence IS idle (there is no status to read).
+ ; The family lens is declared WHERE THE FAMILY IS (the `:seon.fn` /
+ ; `:seon.ns` / `:seon.schema` idiom in seon.schema.cljc):
+ ; `seon.render.walk/projection` reads it off the matched entity map, so
+ ; a family gains a default render by adding one line here and writing
+ ; one plain function. No registry, no table, no dispatch.
  :seon.cluster.agent/agent
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.agent/agent-ai}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.agent/run {:optional true} :seon.cluster.agent/run]]
  :seon.cluster.eval/at :inst
@@ -45,13 +51,14 @@
  ; present = held, absent = unheld. There is no claim epoch and no
  ; lease clock — the flock + single writer make a competing claimant
  ; unrepresentable, and the settle-once presence fences carry the rest.
- :seon.cluster.run/run [:map {:seon.db/entity true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
+ :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
  ; The ordered form entity. Same reason as the message map: without it
  ; only `/id` installed, so a frozen plan could not be transacted on the
  ; live boot path. Every entry is required — `plan-call` writes all four
  ; together or writes none (run.cljc:409-417).
  :seon.cluster.run.form/form
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.run/render-form-ai}
   [:seon.cluster.run.form/id :seon.cluster.run.form/id]
   [:seon.cluster.run.form/run :seon.cluster.run.form/run]
   [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
@@ -64,7 +71,8 @@
  ; error value as its result; a cut one has interrupted-at. There is no
  ; fourth fact for a discriminator to restate (owner ruling 2026-07-28).
  :seon.cluster.eval/receipt
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.run/render-receipt-ai}
   [:seon.cluster.eval/id :seon.cluster.eval/id]
   [:seon.cluster.eval/run :seon.cluster.eval/run]
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]

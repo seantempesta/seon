@@ -34,7 +34,8 @@
  ; `to`, `content` and `at` installable, and `to` installs WITH its ref
  ; type through the bridge.
  :seon.cluster.message/message
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.message/render-ai}
   [:seon.cluster.message/id :seon.cluster.message/id]
   [:seon.cluster.message/to :seon.cluster.message/to]
   [:seon.cluster.message/content :seon.cluster.message/content]

@@ -52,7 +52,8 @@
   before its plan commits (recovery sees an open unplanned run — the
   known unowned issue), and a receipt started before its eval settles
   (recovery asserts its `interrupted-at`)."
-  (:require [datahike.api :as d]
+  (:require [clojure.edn :as edn]
+            [datahike.api :as d]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -587,3 +588,151 @@
       (into (interrupt-stamps db (:db/id run) now)
             (when (some? holder)
               (retract-custody run))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The family default renders — what a run, a form and a receipt LOOK
+;;; LIKE to an agent reading its own neighbourhood.
+;;;
+;;; Declared on the registered entity maps in `src/seon/schema/run.edn`
+;;; (`:seon.render/ai` properties), which is `seon.schema`'s own idiom
+;;; for `:seon.fn`, `:seon.ns` and `:seon.schema` — so a family declares
+;;; its lens where it declares everything else about itself, and
+;;; `seon.render.walk/projection` finds it with no table.
+;;;
+;;; Each is a PLAIN FUNCTION: one unit map in, prose out. It reads the
+;;; pulled entity it was handed and the database value riding beside it,
+;;; and nothing else. `:seon.render/distance` is on the unit and these
+;;; do not read it — a projection that ignores the budget is correct,
+;;; and how far the walk goes is the walk's business.
+;;;
+;;; THEY CARRY THE DOCTRINE, and that is the point of writing them well.
+;;; "Nothing was retried" used to be a sentence in one context block that
+;;; only the prompt ever saw; here it belongs to the run, so every reader
+;;; of a run — a prompt, a page, a debug view, another agent's
+;;; neighbourhood — is told the same true thing by the same function.
+;;; ---------------------------------------------------------------------------
+
+(defn- run-forms
+  [db run-eid]
+  (d/q '[:find [(pull ?form [*]) ...]
+         :in $ ?run
+         :where [?form :seon.cluster.run.form/run ?run]]
+       db run-eid))
+
+(defn- run-receipts
+  [db run-eid]
+  (d/q '[:find [(pull ?receipt [*]) ...]
+         :in $ ?run
+         :where [?receipt :seon.cluster.eval/run ?run]]
+       db run-eid))
+
+(defn render-ai
+  "`:seon.render/ai` — one run, as the agent's own history of it.
+
+  STATE IS PRESENCE, read exactly as the model stores it: a run with a
+  process is held, one with a `closed-at` is over, one with an error
+  never got a plan, and a cut fold is derived from its forms and
+  receipts through the one `interrupted-warning`. There is no status
+  attribute to restate and this invents none.
+
+  The interruption sentences moved HERE from the retired `:interruption`
+  context block: they are facts about a run, so they belong to the run's
+  own lens and reach every consumer rather than one prompt. Both crash
+  shapes say MAY, because rows 6 and 7 of the crash walk are
+  indistinguishable from the facts and a confident claim would be a lie
+  the agent then reasons from."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [db (get unit :seon.db/db)
+        id (get unit ::id)]
+    (when id
+      (let [opened (get unit ::opened-at)
+            receipts (when db (run-receipts db (:db/id unit)))
+            cut (when db
+                  (interrupted-warning (run-forms db (:db/id unit)) receipts))
+            ;; THE PAUSE NOTE IS A CONDITION OF THE RUN, which is why it
+            ;; is read here and not only on the receipt: a run is one hop
+            ;; from its agent and a receipt is two, so an agent asking
+            ;; for the ordinary reach must still be handed the note it
+            ;; left itself. The disposition IS the last form's admitted
+            ;; value — already durable — so this reads it back and
+            ;; stores nothing.
+            note (some->> receipts
+                          (sort-by :seon.cluster.eval/ordinal)
+                          last
+                          :seon.cluster.eval/result-edn
+                          (#(try (edn/read-string %)
+                                 (catch #?(:clj Throwable :cljs :default) _
+                                   nil)))
+                          (#(when (and (map? %)
+                                       (= :wait (:my.run/disposition %)))
+                              (:my.run/note %))))
+            state
+            (cond
+              cut (str "It was interrupted at form "
+                       (:seon.cluster.eval/ordinal cut)
+                       " — that form's effect may have happened, "
+                       (::missing-results cut)
+                       " result(s) are missing, and nothing was retried.")
+
+              (::error unit)
+              (str "It did not run: " (::error unit)
+                   " Nothing was retried, and nothing it asked for ran.")
+
+              (and (nil? (::plan-digest unit)) (some? (::closed-at unit)))
+              (str "It was interrupted before the reply arrived, and "
+                   "nothing was retried.")
+
+              note (str "It paused, leaving this note: " note)
+
+              (some? (::closed-at unit)) "It completed."
+              (some? (::process unit)) (str "It is running now, held by "
+                                            (::process unit) ".")
+              :else "It is open.")]
+        ;; `pr-str` and never the platform's `toString`: an inst printed
+        ;; through the default formatter carries the RENDERING machine's
+        ;; timezone and locale, so two derivations of one database value
+        ;; would differ by where they ran — which equality suppression
+        ;; and re-derivable capture both forbid. EDN is also the truth an
+        ;; agent already reads.
+        (str "Run " id (when opened (str ", opened " (pr-str opened))) ". "
+             state)))))
+
+(defn render-form-ai
+  "`:seon.render/ai` — one planned form, as the agent wrote it."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [source (get unit :seon.cluster.run.form/source)]
+    (str "Form " (get unit :seon.cluster.run.form/ordinal) ": " source)))
+
+(defn render-receipt-ai
+  "`:seon.render/ai` — one eval receipt, as the outcome of one form.
+
+  PRESENCE IS THE STATE and the optionals ARE the states: a result, an
+  error, an `interrupted-at`, or none of them (still running). Nothing
+  here reads a status, because none is stored.
+
+  IT DOES NOT RESTATE THE PAUSE NOTE, and the omission is the design:
+  the note is a condition of the RUN, which sits one hop from its agent
+  where a receipt sits two, so `render-ai` above owns that sentence. A
+  receipt reached at distance 2 then adds the form-level detail under
+  its run's summary instead of repeating it — two lenses, one fact,
+  said once."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [ordinal (get unit :seon.cluster.eval/ordinal)
+        result (get unit :seon.cluster.eval/result-edn)
+        output (get unit :seon.cluster.eval/output)]
+    (when ordinal
+      (str
+       (cond
+         (get unit :seon.cluster.eval/interrupted-at)
+         (str "Form " ordinal " was interrupted — its effect may have "
+              "happened, and nothing was retried.")
+
+         (get unit :seon.cluster.eval/error)
+         (str "Form " ordinal " failed: " (get unit :seon.cluster.eval/error))
+
+         result (str "Form " ordinal " returned " result)
+         :else (str "Form " ordinal " is still running."))
+       (when output (str " It printed: " output))))))

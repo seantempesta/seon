@@ -1,0 +1,101 @@
+{; ---------------------------------------------------------------------------
+ ; THE NEIGHBOURHOOD TRAVERSAL — `seon.render.walk`.
+ ;
+ ; Every shape here is IN-MEMORY: a walk transacts nothing, and the
+ ; rendered neighbourhood is a value the consumer assembles and drops.
+ ; The durable half of this mechanism is elsewhere and already exists —
+ ; the family default renderers are `:seon.render/ai`/`:seon.render/html`
+ ; properties on the registered ENTITY maps, which is where a family
+ ; declares everything else about itself.
+ ; ---------------------------------------------------------------------------
+
+ ; Anything `d/pull` accepts as an eid: an entity id, or a lookup ref
+ ; like `[:seon.cluster.run/id "run-7f21"]`. `:any` at a genuinely
+ ; polymorphic dependency boundary — the admissible forms are Datahike's
+ ; and restating them here would be a second contract to drift from the
+ ; database's own (`seon.render.block/entity-slot` takes the same value
+ ; under the same rule).
+ :seon.render.walk/lookup :any
+ :seon.render.walk/target :int
+
+ ; WHICH CONNECTION a neighbour was reached through. Named on the node
+ ; so a reader never has to re-query to learn why a neighbour is there,
+ ; and so a consumer can group by relationship without a second walk.
+ :seon.render.walk/attribute :qualified-keyword
+
+ :seon.render.walk/connection
+ [:map {:closed true}
+  [:seon.render.walk/attribute :seon.render.walk/attribute]
+  [:seon.render.walk/target :seon.render.walk/target]]
+
+ ; ---------------------------------------------------------------------------
+ ; THE RESOLUTION CHAIN (owner ruling 2026-07-28 post-midnight #3),
+ ; most specific first. Each step is DATA the caller already holds, so
+ ; "why did it render that way?" is answered by reading one map.
+ ; ---------------------------------------------------------------------------
+
+ ; step 1 — the delegating renderer steered THIS hop to another lens.
+ ; The prose-side twin of `entity-slot`'s second arity.
+ :seon.render/redirect :seon.render/projection
+
+ ; step 2 — the VIEWER's local override for a data type, keyed by the
+ ; registered schema key the value matches. It rides the REQUEST rather
+ ; than the unit precisely because the viewer is constant through the
+ ; whole walk: hop 3 renders through the original agent's overrides, and
+ ; perspective never silently shifts to an intermediate namespace.
+ :seon.render/overrides [:map-of :qualified-keyword :seon.render/projection]
+
+ ; step 4 — the kind's floor. Required, because a kind whose floor could
+ ; be absent would make some value unrenderable, and the floor exists
+ ; precisely so none is: "code is a good fallback as it's the truth of
+ ; the system."
+ :seon.render/floor :seon.render/projection
+
+ :seon.render.walk/resolution
+ [:map {:closed true}
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/floor :seon.render/floor]
+  [:seon.render/redirect {:optional true} :seon.render/redirect]
+  [:seon.render/overrides {:optional true} :seon.render/overrides]]
+
+ ; ---------------------------------------------------------------------------
+ ; THE WALK
+ ; ---------------------------------------------------------------------------
+
+ ; DISTANCE is optional for the same reason it is optional on every
+ ; other render request: implied 1, never required, written in one place
+ ; (`seon.render.block/distance`). Caps are REQUIRED — a walk over a
+ ; graph that fans out and genuinely cycles needs the node budget, and
+ ; the reverse-neighbour width is the same collection dial rather than a
+ ; second one to drift from it.
+ :seon.render.walk/request
+ [:map {:closed true}
+  [:seon.db/db :any]
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/floor :seon.render/floor]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.render/overrides {:optional true} :seon.render/overrides]]
+
+ ; One rendered node. `:seon.render/output` and `:seon.error/value` are
+ ; SIBLINGS, never a key beside each other: a node either rendered or
+ ; said why it could not, and both are values — nothing here throws,
+ ; because the prompt path is an error path.
+ ;
+ ; `:seon.render.walk/neighbours` is `[:vector :map]` rather than a
+ ; self-reference: the population admits no recursive form today, and a
+ ; consumer walks the tree with `get`, so a nominally recursive
+ ; declaration would buy nothing the reader does not already have.
+ :seon.render.walk/neighbours [:vector :map]
+
+ :seon.render.walk/node
+ [:map {:closed true}
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/distance :seon.render/distance]
+  [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
+  [:seon.render/projection {:optional true} :seon.render/projection]
+  [:seon.render/output {:optional true} :seon.render/output]
+  [:seon.error/value {:optional true} :seon.error/value]
+  [:seon.render.walk/neighbours {:optional true}
+   :seon.render.walk/neighbours]]}

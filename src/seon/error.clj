@@ -144,6 +144,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -827,3 +828,39 @@
              (tell escalate-to :no-attributable-agent nil))
            (when (and recurring? (not= escalate-to attributed))
              (tell escalate-to :recurring final-notification))])))
+
+;;; ---------------------------------------------------------------------------
+;;; The family default render
+;;; ---------------------------------------------------------------------------
+
+(defn render-ai
+  "`:seon.render/ai` — one STORED error fact, as steering prose.
+
+  Declared on `:seon.error/fact` in `src/seon/schema/error.edn`, so an
+  agent that reaches a recorded error by walking its own neighbourhood
+  is told what a notice would have told it — WHAT happened, WHAT it
+  means for its work, WHERE the evidence is. There is no second prose
+  owner: this normalizes the pulled entity back to the shape `notice`
+  expects and hands it to the landed selection, so an instrumentation
+  fact still gets `instrumentation-prose` and everything else still gets
+  `ai-prose`. A second implementation here would be the drift the whole
+  router exists to prevent.
+
+  `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
+  which the fact schema admits — `seon.render.walk/transacted` is the
+  one place that unwrapping is written.
+
+  Nil for a unit that is not an error fact: presence of the kind is the
+  whole test, and a projection with nothing to say says nothing."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when (and (:seon.error/kind unit) (:seon.error/id unit))
+    (let [fact (dissoc (walk/transacted unit)
+                       :seon.db/db :seon.sci.admit/caps :seon.render/distance)]
+      (try
+        (render-output (notice {:seon.error/fact fact}) :seon.render/ai)
+        (catch Throwable _
+          ;; TOTAL, because this runs on the error path: a fact the
+          ;; notice builder cannot accept still says what it is, rather
+          ;; than faulting the render that was reporting a fault.
+          (str (:seon.error/kind unit) ": " (:seon.error/message unit)))))))

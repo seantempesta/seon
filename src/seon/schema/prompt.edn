@@ -9,6 +9,14 @@
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  ; HOW MANY HOPS of its own neighbourhood the agent sees (owner ruling
+  ; 2026-07-28 post-midnight). The same optional parameter the surfaces,
+  ; page and expansion requests already carry — the landed accretion
+  ; reached every render request but this one, so a prompt could not ask
+  ; a different question of the same mechanism. Absent is IMPLIED 1,
+  ; written once in `seon.render.block/distance`, so every existing
+  ; caller is unchanged.
+  [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
 
