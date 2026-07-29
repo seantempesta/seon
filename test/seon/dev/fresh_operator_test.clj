@@ -127,6 +127,73 @@
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
+(defn- fresh-process-pre-start
+  [root add-form]
+  (let [code
+        (pr-str
+         `(do
+            (require 'seon.cluster
+                     'seon.instrument
+                     'seon.render.value
+                     'seon.schema)
+            (let [original-resolve# seon.cluster/resolve-bootstrap
+                  instances-var#
+                  (ns-resolve 'seon.cluster (symbol "running-instances"))]
+              (with-redefs
+               [seon.cluster/resolve-bootstrap
+                (fn [overrides#]
+                  (original-resolve#
+                   (assoc overrides# :seon.boot/root ~(str root))))]
+                (seon.cluster/start!
+                 {:seon.boot/cluster-name "anchor"})
+                (let [state# (seon.schema/snapshot-state)
+                      stale-state#
+                      (-> state#
+                          (update :seon.schema.state/candidate-forms
+                                  dissoc
+                                  :seon.render/value)
+                          (assoc :seon.schema.state/projection nil))]
+                  (seon.schema/restore-state! stale-state#)
+                  (try
+                    (let [result# (eval (read-string ~add-form))
+                          scratch# (get @@instances-var# "scratch")]
+                      (prn
+                       {:seon.dev.fresh-operator-test/result result#
+                        :seon.dev.fresh-operator-test/scratch-ready?
+                        (boolean
+                         (get-in scratch#
+                                 [:seon.boot/advertisement
+                                  :seon.render.web/url]))}))
+                    (finally
+                      (seon.instrument/remove!)
+                      (doseq [instance# (vals @@instances-var#)]
+                        (seon.cluster/stop! instance#)))))
+                (flush)
+                (System/exit 0)))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["clojure" "-M:test" "-e" code])
+           (.directory project-root)
+           (.redirectErrorStream true)))
+        output-future
+        (future
+          (try
+            (slurp (.getInputStream process))
+            (catch java.io.IOException error
+              (str "The child output stream closed after termination: "
+                   (ex-message error)))))
+        completed? (.waitFor process 60 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (deref output-future 10000
+                      "The child output reader did not finish.")]
+    {:seon.dev.fresh-operator-test/completed? completed?
+     :seon.dev.fresh-operator-test/exit
+     (when completed? (.exitValue process))
+     :seon.dev.fresh-operator-test/output output}))
+
 (deftest config-command-selection-defaults-cluster-and-start-accepts-config
   (is (= {:seon.fresh-operator/name "default"
           :seon.fresh-operator/config-path "config/sparse.edn"}
@@ -209,6 +276,30 @@
         (mi/unstrument! {:filters [start-filter]})
         (alter-meta! start-var (constantly start-meta))
         (reset! (var-get instances-var) instances-before)))))
+
+(deftest fresh-process-loads-schema-before-refresh-and-start
+  (let [root (fresh-root)]
+    (try
+      (let [{::keys [completed? exit output]}
+            (fresh-process-pre-start
+             root
+             (operator-private-value 'add-form "scratch" {}))]
+        (is completed? "the fresh-process pre-start exceeded sixty seconds")
+        (is (= 0 exit) output)
+        (is
+         (=
+          {::result "scratch"
+           ::scratch-ready? true}
+          (some
+           (fn [line]
+             (when (str/starts-with?
+                    line
+                    "#:seon.dev.fresh-operator-test")
+               (edn/read-string line)))
+           (str/split-lines output)))
+         output))
+      (finally
+        (delete-recursively! root)))))
 
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)

@@ -41,6 +41,20 @@
   [:seon.render.web/url :seon.render.web/url]
   [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]]
 
+ ; The render proc's process-local view, constructed once by
+ ; `seon.cluster/arm-agents!`. Every opaque member references the existing
+ ; predicate schema with its real generator: channels carry wakes, pages, and
+ ; completion; the atom counts watched agents; the mult fans pages to tabs.
+ ; Loss is free by the transport law, so none of this is database data.
+ :seon.render.web/view
+ [:map {:closed true}
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/pages-channel :seon.flow/channel]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/completion :seon.flow/channel]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]]
+
  ; What the handler needs. The database CONNECTION rather than a
  ; database value, because a page derives at whatever basis is current
  ; when the request arrives and a feed derives again on every commit —
