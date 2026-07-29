@@ -243,7 +243,8 @@
         [:th "turn buffer"]]]
       [:tbody
        (for [agent agents]
-         [:tr {:data-agent (:seon.cluster.agent/id agent)}
+         [:tr {:data-agent (:seon.cluster.agent/id agent)
+               :data-state (name (:seon.oversight/state agent))}
           [:td (:seon.cluster.agent/id agent)]
           [:td (name (:seon.oversight/state agent))]
           [:td (or (:seon.cluster.run/id agent) "—")]

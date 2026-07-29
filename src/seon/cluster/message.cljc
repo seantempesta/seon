@@ -328,3 +328,12 @@
         (str (if from (str "Agent " from " said") "From outside this cluster")
              (when to (str " to " to))
              ": " content)))))
+
+(defn render-html
+  "`:seon.render/html` — one message, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (render-ai unit)]
+    [:article {:class "seon-family-entry seon-message-entry"}
+     [:p text]]))

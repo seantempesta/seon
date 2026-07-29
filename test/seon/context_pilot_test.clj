@@ -22,9 +22,13 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
+            [seon.cluster.run :as run]
+            [seon.error :as error]
             [seon.render.agent :as agent]
             [seon.render.block :as block]
+            [seon.render.hiccup :as hiccup]
             [seon.render.walk :as walk]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -161,6 +165,57 @@
       (is (= (prompt-at connection nil) (prompt-at connection 1))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; 1b. The HTML twin is the same neighbourhood on the agent page
+;;; ---------------------------------------------------------------------------
+
+(deftest the-agent-page-is-the-rendered-neighbourhood
+  (with-world
+    (fn [connection]
+      (let [page (block/page
+                  (d/db connection)
+                  {:seon.cluster.agent/id agent-id
+                   :seon.sci.admit/caps caps
+                   :seon.render/distance 2})
+            html (apply str (map hiccup/->string page))]
+        (testing "the page has the same run and message facts as the prompt"
+          (is (str/includes? html previous-run-id))
+          (is (str/includes? html run-id))
+          (is (str/includes? html "count the widgets")))
+        (testing "and a second hop uses the form and receipt family twins"
+          (is (str/includes? html "(my.run/wait &quot;waiting on peer&quot;)"))
+          (is (str/includes? html "peer owes me the widget count")))
+        (testing "the namespace is one ordinary identified surface"
+          (is (= 1 (count page)))
+          (is (str/includes? html "id=\"surface-namespace\""))
+          (is (str/includes? html "class=\"seon-card seon-neighborhood\"")))))))
+
+(deftest every-family-html-twin-preserves-its-ai-facts
+  (let [pairs [[run/render-ai run/render-html
+                {:seon.cluster.run/id "run-html"
+                 :seon.cluster.run/opened-at (Date. 1700000000000)}]
+               [run/render-form-ai run/render-form-html
+                {:seon.cluster.run.form/ordinal 4
+                 :seon.cluster.run.form/source "(inc 4)"}]
+               [run/render-receipt-ai run/render-receipt-html
+                {:seon.cluster.eval/ordinal 4
+                 :seon.cluster.eval/result-edn "5"
+                 :seon.cluster.eval/output "counted"}]
+               [message/render-ai message/render-html
+                {:seon.cluster.message/content "hello from outside"}]
+               [agent/agent-ai agent/agent-html
+                {:seon.cluster.agent/id "html-agent"}]
+               [error/render-ai error/render-html
+                {:seon.error/id "html-error"
+                 :seon.error/kind :seon.test/failure
+                 :seon.error/message "the test failed"}]]]
+    (doseq [[ai html unit] pairs]
+      (let [text (ai unit)
+            rendered (html unit)]
+        (is (string? text))
+        (is (= text (get-in rendered [2 1]))
+            (str "the HTML twin must carry its AI twin's facts: " text))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; 2. Every hop is rendered by its OWNER's lens
 ;;; ---------------------------------------------------------------------------
 
@@ -240,6 +295,27 @@
                   intermediate namespace"
           (is (= 'seon.render.agent/agent-ai
                  (:seon.render/projection node))))))))
+
+(deftest each-html-hop-is-rendered-by-its-family
+  (with-world
+    (fn [connection]
+      (let [node (walk/neighborhood
+                  {:seon.db/db (d/db connection)
+                   :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+                   :seon.render/kind :seon.render/html
+                   :seon.render/floor `block/data-panel
+                   :seon.sci.admit/caps caps
+                   :seon.render/distance 2})
+            projections (into #{}
+                              (map :seon.render/projection)
+                              (tree-seq :seon.render.walk/neighbours
+                                        :seon.render.walk/neighbours
+                                        node))]
+        (is (contains? projections 'seon.render.agent/agent-html))
+        (is (contains? projections 'seon.cluster.run/render-html))
+        (is (contains? projections 'seon.cluster.message/render-html))
+        (is (contains? projections 'seon.cluster.run/render-form-html))
+        (is (contains? projections 'seon.cluster.run/render-receipt-html))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 3. The apparatus is not the world

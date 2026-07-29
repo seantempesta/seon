@@ -85,6 +85,7 @@
             (is (str/includes? html "data-fleet-oversight=\"agents\""))
             (is (str/includes? html "<td>root</td>"))
             (is (str/includes? html "<td>parked</td>"))
+            (is (str/includes? html "data-state=\"parked\""))
             (is (str/includes? html "plumbing passes"))))
         (testing "the prose grammar carries run and episode position"
           (is (= "agent-b: mid-turn on run run-3, 3rd run this episode; agent-c: parked"

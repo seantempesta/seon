@@ -864,3 +864,12 @@
           ;; notice builder cannot accept still says what it is, rather
           ;; than faulting the render that was reporting a fault.
           (str (:seon.error/kind unit) ": " (:seon.error/message unit)))))))
+
+(defn render-html
+  "`:seon.render/html` — one error, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (render-ai unit)]
+    [:article {:class "seon-family-entry seon-error-entry"}
+     [:p text]]))

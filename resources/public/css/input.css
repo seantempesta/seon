@@ -952,6 +952,70 @@ details.tool-call-details[open] .tool-preview {
   font-size: 0.7rem;
 }
 
+/* --- an ordinary agent's rendered neighbourhood ------------------- */
+
+.seon-neighborhood {
+  height: auto;
+  padding: 0.55rem 0.7rem 0.65rem;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+}
+.seon-neighborhood > h2 {
+  margin: 0 0 0.45rem;
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-text-400);
+}
+.seon-neighborhood-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.seon-neighborhood-list .seon-neighborhood-list {
+  margin: 0.25rem 0 0.15rem 0.75rem;
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--color-base-800);
+}
+.seon-neighborhood-entry {
+  min-width: 0;
+  padding: 0.28rem 0;
+}
+.seon-neighborhood-entry + .seon-neighborhood-entry {
+  border-top: 1px solid var(--color-base-850);
+}
+.seon-neighborhood-connection {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--color-text-500);
+  font-size: 0.55rem;
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+.seon-family-entry {
+  min-width: 0;
+  color: var(--color-text-200);
+}
+.seon-family-entry p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.seon-message-entry {
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--color-signal);
+}
+.seon-error-entry {
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--color-error);
+  color: var(--color-error);
+}
+.seon-neighborhood-error {
+  margin: 0;
+  color: var(--color-error);
+}
+
 /* --- the fleet panel ----------------------------------------------- */
 
 /* The one section that is a real PANEL, because it is the only one
@@ -998,6 +1062,44 @@ details.tool-call-details[open] .tool-preview {
 /* striping earns nothing on a handful of rows and costs contrast */
 #surface-fleet-oversight tbody tr:nth-child(even) { background: transparent; }
 #surface-fleet-oversight tbody tr:hover { background: var(--color-base-850); }
+
+/* State is data on the row because CSS cannot derive it from text. */
+#surface-fleet-oversight tbody tr td:nth-child(2)::before {
+  content: "";
+  display: inline-block;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-right: 0.42rem;
+  border-radius: 9999px;
+  vertical-align: 0.03rem;
+  background: var(--color-text-600);
+}
+#surface-fleet-oversight tbody tr[data-state="parked"] td:nth-child(2) {
+  color: var(--color-success);
+}
+#surface-fleet-oversight tbody tr[data-state="parked"] td:nth-child(2)::before {
+  background: var(--color-success);
+}
+#surface-fleet-oversight tbody tr[data-state="mid-turn"] td:nth-child(2) {
+  color: var(--color-warning);
+}
+#surface-fleet-oversight tbody tr[data-state="mid-turn"] td:nth-child(2)::before {
+  background: var(--color-warning);
+}
+#surface-fleet-oversight tbody tr:is(
+  [data-state*="error"],
+  [data-state*="fault"],
+  [data-state*="fail"]
+) td:nth-child(2) {
+  color: var(--color-error);
+}
+#surface-fleet-oversight tbody tr:is(
+  [data-state*="error"],
+  [data-state*="fault"],
+  [data-state*="fail"]
+) td:nth-child(2)::before {
+  background: var(--color-error);
+}
 
 /* the plumbing line is a footnote to the table, not a definition list
    anybody reads as prose */

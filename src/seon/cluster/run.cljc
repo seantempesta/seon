@@ -698,12 +698,30 @@
         (str "Run " id (when opened (str ", opened " (pr-str opened))) ". "
              state)))))
 
+(defn render-html
+  "`:seon.render/html` — one run, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (render-ai unit)]
+    [:article {:class "seon-family-entry seon-run-entry"}
+     [:p text]]))
+
 (defn render-form-ai
   "`:seon.render/ai` — one planned form, as the agent wrote it."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when-let [source (get unit :seon.cluster.run.form/source)]
     (str "Form " (get unit :seon.cluster.run.form/ordinal) ": " source)))
+
+(defn render-form-html
+  "`:seon.render/html` — one form, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (render-form-ai unit)]
+    [:article {:class "seon-family-entry seon-form-entry"}
+     [:p text]]))
 
 (defn render-receipt-ai
   "`:seon.render/ai` — one eval receipt, as the outcome of one form.
@@ -736,3 +754,12 @@
          result (str "Form " ordinal " returned " result)
          :else (str "Form " ordinal " is still running."))
        (when output (str " It printed: " output))))))
+
+(defn render-receipt-html
+  "`:seon.render/html` — one receipt, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (render-receipt-ai unit)]
+    [:article {:class "seon-family-entry seon-receipt-entry"}
+     [:p text]]))

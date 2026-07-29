@@ -77,6 +77,15 @@
            " is running now."
            " is idle."))))
 
+(defn agent-html
+  "`:seon.render/html` — one agent, with the same facts as its AI twin."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [text (agent-ai unit)]
+    [:article {:class "seon-family-entry seon-agent-entry"}
+     [:p text]]))
+
 (defn namespace-ai
   "`:seon.render/ai` — THE PILOT: this agent's world, at a distance.
 
@@ -124,6 +133,52 @@
                             (get unit :seon.render/distance)))))]
         (str "Your namespace, as it stands right now:\n" text)))))
 
+(defn namespace-html
+  "`:seon.render/html` — this agent's world through the family twins."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (let [db (get unit :seon.db/db)
+        agent-id (get unit :seon.cluster.agent/id)
+        caps (get unit :seon.sci.admit/caps)]
+    (when (and db agent-id caps)
+      (letfn [(node-html [node]
+                (let [children (into []
+                                     (keep node-html)
+                                     (:seon.render.walk/neighbours node))
+                      attribute (:seon.render.walk/attribute node)
+                      failure (:seon.error/value node)
+                      output (get node :seon.render/output)]
+                  (when (or failure output (seq children))
+                    [:li {:class "seon-neighborhood-entry"}
+                     (when attribute
+                       [:span {:class "seon-neighborhood-connection"}
+                        (str attribute)])
+                     (if failure
+                       [:p {:class "seon-neighborhood-error"}
+                        (:seon.error/message failure)]
+                       output)
+                     (when (seq children)
+                       (into [:ul {:class "seon-neighborhood-list"}]
+                             children))])))]
+        (when-let [content
+                   (node-html
+                    (walk/neighborhood
+                     (cond-> {:seon.db/db db
+                              :seon.render.walk/lookup
+                              [:seon.cluster.agent/id agent-id]
+                              :seon.render/kind :seon.render/html
+                              :seon.render/floor `block/data-panel
+                              :seon.render/overrides {}
+                              :seon.sci.admit/caps caps}
+                       (get unit :seon.render/distance)
+                       (assoc :seon.render/distance
+                              (get unit :seon.render/distance)))))]
+          [:section {:id (block/surface-id :namespace)
+                     :class "seon-card seon-neighborhood"}
+           [:h2 "namespace"]
+           [:ul {:class "seon-neighborhood-list"} content]])))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The seed
 ;;; ---------------------------------------------------------------------------
@@ -156,7 +211,8 @@
    {:seon.render.block/name :namespace
     :seon.render.block/band :dynamic
     :seon.render.block/priority 80
-    :seon.render/ai `namespace-ai}
+    :seon.render/ai `namespace-ai
+    :seon.render/html `namespace-html}
    {:seon.render.block/name :trigger
     :seon.render.block/band :dynamic
     :seon.render.block/priority 90

@@ -74,7 +74,8 @@
  ; the fixture-vs-live-boot class that cost the N3 drive two rounds.
  :seon.error/fact
  [:map {:seon.db/entity true
-        :seon.render/ai seon.error/render-ai}
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html}
   [:seon.error/id :seon.error/id]
   [:seon.error/at :seon.error/at]
   [:seon.error/process :seon.error/process]
