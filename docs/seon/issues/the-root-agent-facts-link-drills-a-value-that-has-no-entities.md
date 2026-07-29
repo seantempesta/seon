@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, web, render, data]
+tags: [issue, web, render]
 ---
 
 # The root agent facts link drills a value that has no entities
@@ -61,6 +61,16 @@ rather than a repair: either the drill's root value gains the cluster's
 entities (which makes the existing link correct and costs a query whose shape
 and bound need deciding), or the agent list links at a cursor that exists in
 the schema value it actually drills.
+
+## Current state — 2026-07-29
+
+The link now separates the database entity root from navigation within it:
+`entity=[:seon.cluster.agent/id <id>]` selects the agent and `path=[]` starts
+the `get-in` drill at that entity. The protected `/data` route still ignores
+`entity` and supplies `schema/canonical-database-attributes`, so the link half
+is corrected but the issue cannot honestly close until that route resolves the
+lookup ref with `d/pull '[*]`; `/data` without `entity` must keep the schema
+vocabulary as its front page.
 
 ## Acceptance
 

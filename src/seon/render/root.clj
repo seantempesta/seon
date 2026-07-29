@@ -115,9 +115,11 @@
           [:li {:class "seon-root-agent"}
            [:a {:class "seon-root-link" :href (str "/agent/" id)} id]
            [:a {:class "seon-root-drill"
-                :href (str "/data?path="
+                :href (str "/data?entity="
                            (java.net.URLEncoder/encode
                             (pr-str [:seon.cluster.agent/id id]) "UTF-8")
+                           "&path="
+                           (java.net.URLEncoder/encode (pr-str []) "UTF-8")
                            "&offset=0")}
             "facts"]])])]))
 

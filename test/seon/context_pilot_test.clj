@@ -22,6 +22,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.cluster.agent :as cluster-agent]
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
@@ -57,9 +58,11 @@
   asked, a PREVIOUS run that paused with a note and left a receipt, and
   the held run this prompt is for. Every fact is one a real turn commits."
   [connection]
-  (d/transact connection [{:seon.cluster.agent/id agent-id}
-                          {:seon.cluster.agent/id "peer"}])
-  (d/transact connection (agent/seed-tx (d/db connection) agent-id))
+  (d/transact connection
+              (conj (cluster-agent/creation-tx
+                     {:seon.cluster.agent/id agent-id
+                      :seon.ns/name 'my.agents.pilot})
+                    {:seon.cluster.agent/id "peer"}))
   (d/transact connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
@@ -114,6 +117,43 @@
 ;;; ---------------------------------------------------------------------------
 ;;; 1. Distance selects how much of the world the prompt contains
 ;;; ---------------------------------------------------------------------------
+
+(deftest agent-birth-seeds-the-first-prompt
+  (support/with-database
+    (fn [connection]
+      (d/transact connection
+                  (cluster-agent/creation-tx
+                   {:seon.cluster.agent/id agent-id
+                    :seon.ns/name 'my.agents.pilot}))
+      (d/transact connection
+                  [{:seon.cluster.message/id message-id
+                    :seon.cluster.message/to
+                    [:seon.cluster.agent/id agent-id]
+                    :seon.cluster.message/content "show me the first prompt"
+                    :seon.cluster.message/at (Date. 1700000001000)}])
+      (d/transact connection
+                  {:tx-data
+                   [{:seon.cluster.run/id run-id
+                     :seon.cluster.run/agent
+                     [:seon.cluster.agent/id agent-id]
+                     :seon.cluster.run/opened-at (Date. 1700000010000)}
+                    {:seon.cluster.agent/id agent-id
+                     :seon.cluster.agent/run
+                     [:seon.cluster.run/id run-id]}]
+                   :tx-meta
+                   {:seon.db/trigger
+                    [:seon.cluster.message/id message-id]}})
+      (let [text (prompt-at connection 1)
+            names (into #{}
+                        (map :seon.render.block/name)
+                        (block/blocks (d/db connection) agent-id))]
+        (testing "birth installed the distance view, instructions, and scaffold"
+          (is (= (into #{} (map :seon.render.block/name) agent/blocks)
+                 names)))
+        (testing "the first prompt consumes the installed view and instructions"
+          (is (str/includes? text "Your namespace, as it stands right now:"))
+          (is (str/includes? text "Reply with Clojure forms to run, in order."))
+          (is (str/includes? text "show me the first prompt")))))))
 
 (deftest the-prompt-is-the-rendered-neighbourhood
   (with-world
@@ -185,7 +225,7 @@
           (is (str/includes? html "(my.run/wait &quot;waiting on peer&quot;)"))
           (is (str/includes? html "peer owes me the widget count")))
         (testing "the namespace is one ordinary identified surface"
-          (is (= 1 (count page)))
+          (is (= 1 (count (re-seq #"id=\"surface-namespace\"" html))))
           (is (str/includes? html "id=\"surface-namespace\""))
           (is (str/includes? html "class=\"seon-card seon-neighborhood\"")))))))
 
@@ -360,8 +400,10 @@
 (deftest the-retired-interruption-block-is-covered-by-the-run-lens
   (support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id agent-id}])
-      (d/transact connection (agent/seed-tx (d/db connection) agent-id))
+      (d/transact connection
+                  (cluster-agent/creation-tx
+                   {:seon.cluster.agent/id agent-id
+                    :seon.ns/name 'my.agents.pilot}))
       (d/transact connection
                   [{:seon.cluster.message/id message-id
                     :seon.cluster.message/to [:seon.cluster.agent/id agent-id]

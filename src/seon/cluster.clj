@@ -538,7 +538,11 @@
   (d/transact connection
               (cluster.agent/creation-tx
                {:seon.cluster.agent/id root-agent-id
-                :seon.ns/name 'my.agents.root}))
+                :seon.ns/name 'my.agents.root
+                ;; Root's page is already its own complete block set. Suppress
+                ;; the ordinary prompt seed here; root/seed-tx below remains
+                ;; the one convergent owner of the root page.
+                :seon.cluster.agent/seed-blocks []}))
   (let [seed (root/seed-tx @connection root-agent-id)]
     (when (seq seed)
       (d/transact connection seed))))

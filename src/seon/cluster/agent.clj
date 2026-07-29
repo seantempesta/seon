@@ -65,6 +65,7 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.work :as work]
             [seon.flow :as seon.flow]
+            [seon.render.agent :as render.agent]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date]))
 
@@ -79,18 +80,26 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn creation-tx
-  "Create one agent already assigned to its namespace.
+  "Create one agent with its namespace and initial blocks.
 
-  Pure transaction data: the namespace identity and agent identity land in
-  the same commit, so the formal creation path has no ownerless basis."
+  Pure transaction data: the namespace identity, agent identity, distance
+  namespace view, system instructions, and scaffold land in the same commit,
+  so the formal creation path has neither an ownerless nor a contextless
+  basis. `:seon.cluster.agent/seed-blocks` is the one explicit override used
+  by root, whose distinct page blocks remain unchanged."
   {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
                   :seon.cluster.agent/creation-tx]}
-  [{agent-id :seon.cluster.agent/id namespace-name :seon.ns/name}]
-  (let [namespace-tempid (str "namespace:" namespace-name)]
+  [{agent-id :seon.cluster.agent/id namespace-name :seon.ns/name :as request}]
+  (let [namespace-tempid (str "namespace:" namespace-name)
+        seed-blocks (if (contains? request :seon.cluster.agent/seed-blocks)
+                      (:seon.cluster.agent/seed-blocks request)
+                      render.agent/blocks)]
     [{:db/id namespace-tempid
       :seon.ns/name namespace-name}
-     {:seon.cluster.agent/id agent-id
-      :seon.cluster.agent/namespace namespace-tempid}]))
+     (cond-> {:seon.cluster.agent/id agent-id
+              :seon.cluster.agent/namespace namespace-tempid}
+       (seq seed-blocks)
+       (assoc :seon.cluster.agent/blocks (vec seed-blocks)))]))
 
 (defn owner-of
   "The agent id assigned to `namespace-name`, or nil."
