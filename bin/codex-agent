@@ -17,8 +17,8 @@
 #                                   the lane's log; or pass it via
 #                                   LANE_SID). Followup as argument or
 #                                   stdin.
-#   bin/codex-agent stop <name>            kill a lane's codex process
-#                                   (its session survives; resume later).
+#   bin/codex-agent stop <name>            stop a lane's codex process,
+#                                   verify exit, and preserve its session.
 #   bin/codex-agent watch <name>           follow a lane's live transcript.
 #   bin/codex-agent summary <name>         print a lane's -o summary.
 #   bin/codex-agent status                 running lanes + landed summaries.
@@ -42,57 +42,418 @@ set -eu
 export RUST_LOG=${RUST_LOG:-codex_models_manager=off}
 
 dir=tmp/orchestrator
+lanes_dir=$dir/lanes
+sessions_dir=$dir/sessions
 model=${LANE_MODEL:-gpt-5.6-sol}
 effort=${LANE_EFFORT:-high}
+lane_rule="If another lane's in-flight breakage blocks your gate, STOP and report the exact boundary — never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
+pid_is_live() {
+  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+valid_name() {
+  case "${1:-}" in
+    ""|*[!A-Za-z0-9._-]*|.*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+valid_sid() {
+  printf '%s\n' "${1:-}" |
+    grep -Eq '^[0-9a-f][0-9a-f-]{7,}$'
+}
+
+atomic_lines() {
+  atomic_target=$1
+  shift
+  atomic_tmp=$(mktemp "$atomic_target.tmp.XXXXXX")
+  printf '%s\n' "$@" > "$atomic_tmp"
+  mv -f "$atomic_tmp" "$atomic_target"
+}
+
+clear_lane_state() {
+  clear_state=$1
+  rm -f "$clear_state/wrapper.pid" "$clear_state/codex.pid" \
+    "$clear_state/tee.pid" "$clear_state/monitor.pid" "$clear_state/sid" \
+    "$clear_state/command" "$clear_state/prompt" "$clear_state/output.fifo" \
+    "$clear_state/summary.out"
+  rmdir "$clear_state" 2>/dev/null || true
+}
+
+legacy_lane_holder() {
+  legacy_name=$1
+  ps -axo pid=,ppid=,command= |
+    awk -v name="$legacy_name" -v self="$$" '
+      $3 ~ /\/(sh|bash|zsh)$/ &&
+      $4 ~ /(^|\/)bin\/codex-agent$/ &&
+      ($5 == "run" || $5 == "resume") &&
+      $6 == name {
+        candidate[$1] = 1
+        parent[$1] = $2
+      }
+      END {
+        for (pid in candidate) {
+          if (pid != self && !candidate[parent[pid]]) {
+            print pid
+            exit
+          }
+        }
+      }
+    '
+}
+
+lane_holder() {
+  holder_state=$lanes_dir/$1
+  if [ -f "$holder_state/wrapper.pid" ]; then
+    holder_pid=$(sed -n '1p' "$holder_state/wrapper.pid")
+    if pid_is_live "$holder_pid"; then
+      printf '%s\n' "$holder_pid"
+      return 0
+    fi
+    if [ -f "$holder_state/codex.pid" ]; then
+      holder_pid=$(sed -n '1p' "$holder_state/codex.pid")
+      if pid_is_live "$holder_pid"; then
+        printf '%s\n' "$holder_pid"
+        return 0
+      fi
+    fi
+    clear_lane_state "$holder_state"
+  elif [ -d "$holder_state" ]; then
+    echo "bin/codex-agent: lane '$1' has an incomplete ownership record" >&2
+    return 2
+  fi
+
+  holder_pid=$(legacy_lane_holder "$1")
+  if pid_is_live "$holder_pid"; then
+    printf '%s\n' "$holder_pid"
+    return 0
+  fi
+  return 1
+}
+
+acquire_lane() {
+  state=$lanes_dir/$name
+  if holder_pid=$(lane_holder "$name"); then
+    echo "bin/codex-agent: lane '$name' is already running (holder pid $holder_pid)" >&2
+    return 1
+  else
+    holder_status=$?
+    [ "$holder_status" -ne 2 ] || return 1
+  fi
+  if ! mkdir "$state" 2>/dev/null; then
+    echo "bin/codex-agent: lane '$name' acquired concurrently; refusing second instance" >&2
+    return 1
+  fi
+  atomic_lines "$state/wrapper.pid" "$$"
+  atomic_lines "$state/command" "$command"
+  lane_acquired=1
+}
+
+session_holder() {
+  wanted_sid=$1
+  session_state=$sessions_dir/$wanted_sid
+  if [ -f "$session_state/pid" ]; then
+    session_pid=$(sed -n '1p' "$session_state/pid")
+    if pid_is_live "$session_pid"; then
+      printf '%s\n' "$session_pid"
+      return 0
+    fi
+    rm -f "$session_state/pid" "$session_state/lane"
+    rmdir "$session_state" 2>/dev/null || true
+  elif [ -d "$session_state" ]; then
+    echo "bin/codex-agent: session $wanted_sid has an incomplete ownership record" >&2
+    return 2
+  fi
+
+  session_pid=$(ps -axo pid=,command= |
+    awk -v sid="$wanted_sid" '
+      ($2 ~ /(^|\/)node$/ && $4 == "exec" && $5 == "resume" && $6 == sid) ||
+      ($2 ~ /\/codex$/ && $3 == "exec" && $4 == "resume" && $5 == sid) {
+        print $1
+        exit
+      }
+    ')
+  if pid_is_live "$session_pid"; then
+    printf '%s\n' "$session_pid"
+    return 0
+  fi
+  return 1
+}
+
+claim_session() {
+  claim_sid=$1
+  session_state=$sessions_dir/$claim_sid
+  if session_pid=$(session_holder "$claim_sid"); then
+    echo "bin/codex-agent: session $claim_sid is already live (holder pid $session_pid)" >&2
+    return 1
+  else
+    session_status=$?
+    [ "$session_status" -ne 2 ] || return 1
+  fi
+  if ! mkdir "$session_state" 2>/dev/null; then
+    echo "bin/codex-agent: session $claim_sid acquired concurrently; refusing second process" >&2
+    return 1
+  fi
+  atomic_lines "$session_state/pid" "$$"
+  atomic_lines "$session_state/lane" "$name"
+  session_acquired=1
+}
+
+release_session() {
+  if [ -z "${sid:-}" ] && [ -n "${state:-}" ] && [ -f "$state/sid" ]; then
+    sid=$(sed -n '1p' "$state/sid")
+  fi
+  [ -n "${sid:-}" ] || return 0
+  release_state=$sessions_dir/$sid
+  [ -f "$release_state/lane" ] || return 0
+  release_lane=$(sed -n '1p' "$release_state/lane")
+  [ "$release_lane" = "$name" ] || return 0
+  rm -f "$release_state/pid" "$release_state/lane"
+  rmdir "$release_state" 2>/dev/null || true
+}
+
+child_pids() {
+  child_parent=$1
+  pgrep -P "$child_parent" 2>/dev/null || true
+}
+
+terminate_tree() {
+  tree_root=${1:-}
+  pid_is_live "$tree_root" || return 0
+  for tree_child in $(child_pids "$tree_root"); do
+    terminate_tree "$tree_child"
+  done
+  kill "$tree_root" 2>/dev/null || true
+}
+
+cleanup_launch() {
+  cleanup_status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "${monitor_pid:-}" ] && pid_is_live "$monitor_pid"; then
+    kill "$monitor_pid" 2>/dev/null || true
+  fi
+  if [ -n "${codex_pid:-}" ] && pid_is_live "$codex_pid"; then
+    terminate_tree "$codex_pid"
+  fi
+  if [ -n "${tee_pid:-}" ] && pid_is_live "$tee_pid"; then
+    kill "$tee_pid" 2>/dev/null || true
+  fi
+  [ -n "${monitor_pid:-}" ] && wait "$monitor_pid" 2>/dev/null || true
+  [ -n "${codex_pid:-}" ] && wait "$codex_pid" 2>/dev/null || true
+  [ -n "${tee_pid:-}" ] && wait "$tee_pid" 2>/dev/null || true
+  release_session
+  if [ "${lane_acquired:-0}" -eq 1 ]; then
+    clear_lane_state "$state"
+  fi
+  exit "$cleanup_status"
+}
+
+capture_run_session() {
+  while pid_is_live "$$"; do
+    captured_sid=$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
+      "$log" 2>/dev/null | tail -1 | cut -d' ' -f3)
+    if [ -n "$captured_sid" ]; then
+      atomic_lines "$state/sid" "$captured_sid"
+      sid=$captured_sid
+      if claim_session "$sid"; then
+        [ -n "${codex_pid:-}" ] &&
+          atomic_lines "$sessions_dir/$sid/pid" "$codex_pid"
+      else
+        echo "bin/codex-agent: generated session $sid collided with a live process" >&2
+        kill "$$" 2>/dev/null || true
+      fi
+      return
+    fi
+    sleep 0.05
+  done
+}
+
+write_launch_marker() {
+  launched_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  launch_id=$launched_at-$$
+  if [ -n "${sid:-}" ]; then
+    launch_session=$sid
+  else
+    launch_session=pending
+  fi
+  atomic_lines "$summary" \
+    "lane-summary: in-progress" \
+    "launch-id: $launch_id" \
+    "launched-at: $launched_at" \
+    "command: $command" \
+    "session-id: $launch_session"
+}
+
+start_stream() {
+  log_mode=$1
+  shift
+  fifo=$state/output.fifo
+  summary_output=$state/summary.out
+  rm -f "$fifo"
+  mkfifo "$fifo"
+  if [ "$log_mode" = append ]; then
+    tee -a "$log" < "$fifo" &
+  else
+    tee "$log" < "$fifo" &
+  fi
+  tee_pid=$!
+  atomic_lines "$state/tee.pid" "$tee_pid"
+
+  "$@" < "$state/prompt" > "$fifo" 2>&1 &
+  codex_pid=$!
+  atomic_lines "$state/codex.pid" "$codex_pid"
+  if [ "${session_acquired:-0}" -eq 1 ]; then
+    atomic_lines "$sessions_dir/$sid/pid" "$codex_pid"
+  fi
+
+  if [ "$command" = run ]; then
+    capture_run_session &
+    monitor_pid=$!
+    atomic_lines "$state/monitor.pid" "$monitor_pid"
+  fi
+
+  if wait "$codex_pid"; then codex_status=0; else codex_status=$?; fi
+  if wait "$tee_pid"; then tee_status=0; else tee_status=$?; fi
+  [ -n "${monitor_pid:-}" ] && wait "$monitor_pid" 2>/dev/null || true
+
+  if [ -s "$summary_output" ]; then
+    mv -f "$summary_output" "$summary"
+  fi
+  [ "$codex_status" -eq 0 ] || return "$codex_status"
+  return "$tee_status"
+}
+
 [ $# -ge 1 ] || usage
-command=$1; shift
+command=$1
+shift
 
 case "$command" in
-  run)
+  run|resume)
     [ $# -ge 1 ] || usage
-    name=$1; shift
-    mkdir -p "$dir"
-    if [ $# -ge 1 ]; then spec=$1; else spec=$(cat); fi
-    [ -n "$spec" ] || { echo "bin/codex-agent: empty spec" >&2; exit 64; }
-    # Spec rides stdin (codex `-`); stdout streams to the panel AND the
-    # log via tee; the summary lands in -o for the orchestrator.
-    printf '%s' "$spec" |
-      codex exec -m "$model" -c model_reasoning_effort="$effort" \
-        --dangerously-bypass-approvals-and-sandbox \
-        -o "$dir/$name-summary.txt" - 2>&1 |
-      tee "$dir/$name-stdout.log"
-    ;;
-  resume)
-    [ $# -ge 1 ] || usage
-    name=$1; shift
-    # codex prints "session id: <uuid>" in every run header; the last
-    # one in the lane's log is the session to continue.
-    # require a real uuid after the colon — killed sessions can leave a
-    # truncated "session id: " header with no value
-    sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
-      "$dir/$name-stdout.log" 2>/dev/null | tail -1 | cut -d' ' -f3)}
-    [ -n "$sid" ] || {
-      echo "bin/codex-agent: no session id in $dir/$name-stdout.log;" \
-           "pass LANE_SID=<uuid>" >&2
-      exit 65
+    name=$1
+    shift
+    valid_name "$name" || {
+      echo "bin/codex-agent: invalid lane name '$name'" >&2
+      exit 64
     }
-    if [ $# -ge 1 ]; then followup=$1; else followup=$(cat); fi
-    [ -n "$followup" ] || { echo "bin/codex-agent: empty followup" >&2; exit 64; }
-    # resume rejects -o; the final message still lands in the summary
-    # file via tee of stdout — read the tail of the log instead.
-    codex exec resume "$sid" --dangerously-bypass-approvals-and-sandbox "$followup" < /dev/null 2>&1 |
-      tee -a "$dir/$name-stdout.log"
+    mkdir -p "$dir" "$lanes_dir" "$sessions_dir"
+    log=$dir/$name-stdout.log
+    summary=$dir/$name-summary.txt
+    lane_acquired=0
+    session_acquired=0
+    sid=
+    codex_pid=
+    tee_pid=
+    monitor_pid=
+
+    if [ "$command" = resume ]; then
+      sid=${LANE_SID:-$(grep -o 'session id: [0-9a-f][0-9a-f-]\{7,\}' \
+        "$log" 2>/dev/null | tail -1 | cut -d' ' -f3)}
+      valid_sid "$sid" || {
+        echo "bin/codex-agent: no session id in $log; pass LANE_SID=<uuid>" >&2
+        exit 65
+      }
+      if session_pid=$(session_holder "$sid"); then
+        echo "bin/codex-agent: session $sid is already live (holder pid $session_pid)" >&2
+        exit 1
+      else
+        session_status=$?
+        [ "$session_status" -ne 2 ] || exit 1
+      fi
+    fi
+
+    acquire_lane || exit 1
+    trap cleanup_launch EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    if [ "$command" = resume ]; then
+      claim_session "$sid" || exit 1
+      atomic_lines "$state/sid" "$sid"
+      if [ $# -ge 1 ]; then prompt=$1; else prompt=$(cat); fi
+      [ -n "$prompt" ] || {
+        echo "bin/codex-agent: empty followup" >&2
+        exit 64
+      }
+      atomic_lines "$state/prompt" "$prompt"
+      write_launch_marker
+      start_stream append codex exec resume \
+        -o "$state/summary.out" \
+        "$sid" --dangerously-bypass-approvals-and-sandbox -
+    else
+      if [ $# -ge 1 ]; then prompt=$1; else prompt=$(cat); fi
+      [ -n "$prompt" ] || {
+        echo "bin/codex-agent: empty spec" >&2
+        exit 64
+      }
+      atomic_lines "$state/prompt" "$prompt" "" "$lane_rule"
+      write_launch_marker
+      start_stream replace codex exec -m "$model" \
+        -c model_reasoning_effort="$effort" \
+        --dangerously-bypass-approvals-and-sandbox \
+        -o "$state/summary.out" -
+    fi
     ;;
   stop)
     [ $# -ge 1 ] || usage
-    pids=$(pgrep -f "codex exec.*$1-summary.txt" || true)
-    [ -n "$pids" ] || { echo "bin/codex-agent: no running lane '$1'" >&2; exit 1; }
-    kill $pids
-    echo "stopped lane '$1' (pids: $pids); session preserved — resume with:"
-    echo "  bin/codex-agent resume $1 \"<new information / correction>\""
+    name=$1
+    valid_name "$name" || {
+      echo "bin/codex-agent: invalid lane name '$name'" >&2
+      exit 64
+    }
+    mkdir -p "$lanes_dir"
+    if holder_pid=$(lane_holder "$name"); then
+      :
+    else
+      echo "bin/codex-agent: no running lane '$name'" >&2
+      exit 1
+    fi
+    stop_pids=$holder_pid
+    holder_state=$lanes_dir/$name
+    if [ -d "$holder_state" ]; then
+      for pid_file in wrapper.pid codex.pid tee.pid monitor.pid; do
+        [ -f "$holder_state/$pid_file" ] || continue
+        state_pid=$(sed -n '1p' "$holder_state/$pid_file")
+        if pid_is_live "$state_pid"; then
+          stop_pids="$stop_pids $state_pid"
+        fi
+      done
+    fi
+    pending=$holder_pid
+    while [ -n "$pending" ]; do
+      next=
+      for parent_pid in $pending; do
+        for child_pid in $(child_pids "$parent_pid"); do
+          stop_pids="$stop_pids $child_pid"
+          next="$next $child_pid"
+        done
+      done
+      pending=$next
+    done
+    kill $stop_pids 2>/dev/null || true
+
+    attempts=0
+    survivors=$stop_pids
+    while [ -n "$survivors" ] && [ "$attempts" -lt 30 ]; do
+      sleep 0.1
+      survivors=
+      for stopped_pid in $stop_pids; do
+        if pid_is_live "$stopped_pid"; then
+          survivors="$survivors $stopped_pid"
+        fi
+      done
+      attempts=$((attempts + 1))
+    done
+    if [ -n "$survivors" ]; then
+      echo "bin/codex-agent: failed to stop lane '$name'; surviving pids:$survivors" >&2
+      exit 1
+    fi
+    echo "stopped lane '$name' (verified exited pids:$stop_pids); session preserved — resume with:"
+    echo "  bin/codex-agent resume $name \"<new information / correction>\""
     ;;
   watch)
     [ $# -ge 1 ] || usage
