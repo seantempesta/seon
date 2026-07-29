@@ -55,6 +55,7 @@
   a property the crash model does not need today (nothing re-executes)
   and would need the moment anything did."
   (:require [datahike.api :as d]
+            [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -197,6 +198,58 @@
   came from is one nothing has to allocate, remember, or reconcile."
   [run-id ordinal index]
   (str run-id "-" ordinal "-message-" index))
+
+(defn- inbound-message-id
+  "One outside message's identity, derived at the serial writer basis."
+  [db index]
+  (str "inbound-" (:max-tx db) "-" index))
+
+(defn inbound-tx
+  "Derive one outside message row or a flat refusal value.
+
+  Pure over the database value. The web boundary calls this once to
+  turn invalid input into a response, then commits the accepted request
+  through `:db.fn/call` so the identity is derived from the immediate
+  predecessor basis inside Datahike's serial writer. Exactly one row,
+  index zero, because one inbound POST is one message.
+
+  Absence of `:seon.cluster.message/from` is the origin contract: this
+  message came from outside the agent population. Provenance belongs on
+  the transaction and is therefore absent here too."
+  {:malli/schema [:=> [:cat :any
+                       :seon.cluster.message/inbound-request]
+                  :seon.cluster.message/inbound]}
+  [db {:keys [:seon.cluster.agent/id
+              :seon.cluster.message/inbound-content
+              :seon.cluster.message/at
+              :seon.config.eval.result/max-string]}]
+  (cond
+    (not (agent-exists? db id))
+    {:seon.error/kind ::unknown-recipient
+     :seon.error/message
+     (str "There is no agent named \"" id
+          "\" in this cluster, so nothing was sent to it.")
+     :seon.error/data {:seon.cluster.agent/id id}}
+
+    (str/blank? inbound-content)
+    {:seon.error/kind ::blank-content
+     :seon.error/message "A message must contain some text."
+     :seon.error/data {:seon.cluster.agent/id id}}
+
+    (> (count inbound-content) max-string)
+    {:seon.error/kind ::content-too-large
+     :seon.error/message
+     (str "This message is " (count inbound-content)
+          " characters; the configured limit is " max-string ".")
+     :seon.error/data
+     {:seon.cluster.agent/id id
+      :seon.config.eval.result/max-string max-string}}
+
+    :else
+    [{:seon.cluster.message/id (inbound-message-id db 0)
+      :seon.cluster.message/to [:seon.cluster.agent/id id]
+      :seon.cluster.message/content inbound-content
+      :seon.cluster.message/at at}]))
 
 (defn delivery
   "What one admitted message value asks to send, resolved against `db`.

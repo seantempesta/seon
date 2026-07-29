@@ -12,7 +12,8 @@
   delivery refuses, and the property is that it refuses — a polite
   infinite conversation is the failure mode this rung introduces, and
   the one thing that must be proven dead."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.async :as async]
+            [clojure.test :refer [deftest is testing]]
             [clojure.set :as set]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -28,6 +29,20 @@
 
 (def ^:private now (Date. 1700000000000))
 (def ^:private limit 16)
+
+(defn- inbound-request
+  ([id content]
+   (inbound-request id content now))
+  ([id content at]
+   {:seon.cluster.agent/id id
+    :seon.cluster.message/inbound-content content
+    :seon.cluster.message/at at
+    :seon.config.eval.result/max-string 1024}))
+
+(defn- commit-inbound!
+  [connection request]
+  (d/transact connection
+              [[:db.fn/call #'message/inbound-tx request]]))
 
 (defn- with-database
   [body]
@@ -516,3 +531,98 @@
                                       :seon.cluster.message/trigger
                                       "r-1-0-message-0"})))
             "bob's message was caused by the HUMAN's, not by alice's")))))
+
+;;; ---------------------------------------------------------------------------
+;;; Slice 1 — the outside message is ordinary transaction data
+;;; ---------------------------------------------------------------------------
+
+(deftest inbound-tx-omits-from-test
+  (with-database
+    (fn [connection]
+      (commit-inbound! connection (inbound-request "bob" "hello bob"))
+      (let [row (d/q '[:find (pull ?message [*]) .
+                       :where
+                       [?message :seon.cluster.message/content "hello bob"]]
+                     @connection)]
+        (is (string? (:seon.cluster.message/id row)))
+        (is (= "bob"
+               (d/q '[:find ?agent-id .
+                      :in $ ?message-id
+                      :where
+                      [?message :seon.cluster.message/id ?message-id]
+                      [?message :seon.cluster.message/to ?agent]
+                      [?agent :seon.cluster.agent/id ?agent-id]]
+                    @connection
+                    (:seon.cluster.message/id row))))
+        (is (= now (:seon.cluster.message/at row)))
+        (is (not (contains? row :seon.cluster.message/from))
+            "absence, not a human/origin stamp, is the outside contract")))))
+
+(deftest inbound-identity-is-unique-under-burst-test
+  ;; seed 2026072901 — the pre-handler probe, retained as a recurring gate.
+  (with-database
+    (fn [connection]
+      (doseq [index (range 64)]
+        (commit-inbound!
+         connection
+         (inbound-request "bob" (str "burst-" index))))
+      (let [ids (d/q '[:find [?id ...]
+                       :where [?message :seon.cluster.message/id ?id]]
+                     @connection)
+            inbound-ids (filter #(clojure.string/starts-with?
+                                  % "inbound-")
+                                ids)]
+        (is (= 64 (count inbound-ids)))
+        (is (= 64 (count (distinct inbound-ids)))
+            "every accepted writer basis yields a distinct identity")))))
+
+(deftest inbound-wakes-the-named-agent-test
+  ;; seed 2026072902 — no delivery step between commit and route!.
+  (with-database
+    (fn [connection]
+      (let [alice-eid (d/q '[:find ?agent .
+                             :where [?agent :seon.cluster.agent/id "alice"]]
+                           @connection)
+            bob-eid (d/q '[:find ?agent .
+                           :where [?agent :seon.cluster.agent/id "bob"]]
+                         @connection)
+            alice (async/chan (async/sliding-buffer 1))
+            bob (async/chan (async/sliding-buffer 1))
+            armer (async/chan (async/sliding-buffer 1))
+            render (async/chan (async/sliding-buffer 1))
+            faults (async/chan (async/sliding-buffer 1))
+            key (wake/route!
+                 {:seon.cluster.wake/connection connection
+                  :seon.cluster.wake/channels
+                  (fn [] {alice-eid alice bob-eid bob})
+                  :seon.cluster.wake/armer-channel armer
+                  :seon.cluster.wake/render-channel render
+                  :seon.cluster.wake/fault-channel faults
+                  :seon.cluster.wake/key ::inbound-route})]
+        (try
+          (commit-inbound! connection (inbound-request "bob" "wake bob"))
+          (is (some? (test-support/await-event! bob "bob inbound wake")))
+          (is (nil? (async/poll! alice))
+              "the other agent receives no mailbox wake")
+          (is (nil? (async/poll! faults)))
+          (finally
+            (wake/unlisten! {:seon.cluster.wake/connection connection
+                             :seon.cluster.wake/key key})))))))
+
+(deftest blank-and-unknown-are-values-not-throws-test
+  (with-database
+    (fn [connection]
+      (let [requests [(inbound-request "bob" " ")
+                      (assoc (inbound-request "bob" "too large")
+                             :seon.config.eval.result/max-string 3)
+                      (inbound-request "nobody" "hello")]
+            results (mapv #(message/inbound-tx @connection %) requests)]
+        (is (= [::message/blank-content
+                ::message/content-too-large
+                ::message/unknown-recipient]
+               (mapv :seon.error/kind results)))
+        (is (every? #(schema/valid-candidate-value?
+                      :seon.error/value %)
+                    results))
+        (is (not-any? vector? results)
+            "every refusal is a flat value and produces no rows")))))

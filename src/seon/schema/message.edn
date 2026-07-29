@@ -110,4 +110,23 @@
  :seon.cluster.message/delivery
  [:map {:closed true}
   [:seon.cluster.message/rows [:vector :map]]
-  [:seon.error/values [:vector :seon.error/value]]]}
+  [:seon.error/values [:vector :seon.error/value]]]
+
+ ; --------------------------------------------------------------------
+ ; THE BROWSER BOUNDARY. The request content deliberately admits the
+ ; empty string so `inbound-tx` can return the blank-content refusal as
+ ; a VALUE; the durable `/content` attribute remains non-empty.
+ :seon.cluster.message/inbound-content :string
+ :seon.cluster.message/inbound-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/inbound-content
+   :seon.cluster.message/inbound-content]
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.config.eval.result/max-string
+   :seon.config.eval.result/max-string]]
+
+ ; One admitted request becomes one ordinary tx-data row. A refusal is
+ ; the shared flat error value, never a thrown agent-facing result.
+ :seon.cluster.message/inbound
+ [:or [:vector {:min 1 :max 1} :map] :seon.error/value]}

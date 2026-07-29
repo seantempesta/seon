@@ -208,6 +208,10 @@
     :seon.render.block/band :anchor
     :seon.render.block/priority 20
     :seon.render/ai 'seon.context/peers-ai}
+   {:seon.render.block/name :message-bar
+    :seon.render.block/band :anchor
+    :seon.render.block/priority 30
+    :seon.render/html 'seon.render.web/message-bar-html}
    {:seon.render.block/name :namespace
     :seon.render.block/band :dynamic
     :seon.render.block/priority 80

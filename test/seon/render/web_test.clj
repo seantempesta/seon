@@ -35,12 +35,14 @@
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.flow :as flow]
+            [seon.render.agent :as render.agent]
             [seon.render.block :as block]
             [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
   (:import [java.net URI]
-           [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers]))
+           [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
+            HttpResponse$BodyHandlers]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
@@ -212,6 +214,10 @@
   [(block-map :tokens 0 `root/tokens-html)
    (block-map :reply 10 `root/text-html)])
 
+(def ^:private message-blocks
+  [(block-map :message-bar 0 `web/message-bar-html)
+   (block-map :namespace 10 `render.agent/namespace-html)])
+
 (defn- open-run!
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
@@ -230,6 +236,20 @@
                     (.GET)
                     (.build))]
     (.send (client) request (HttpResponse$BodyHandlers/ofString))))
+
+(defn- post-form
+  ([server path body]
+   (post-form server path body nil))
+  ([server path body origin]
+   (let [builder (-> (HttpRequest/newBuilder
+                      (URI/create (str (:seon.render.web/url server) path)))
+                     (.header "content-type"
+                              "application/x-www-form-urlencoded")
+                     (.POST (HttpRequest$BodyPublishers/ofString body)))
+         request (cond-> builder
+                   origin (.header "origin" origin))]
+     (.send (client) (.build request)
+            (HttpResponse$BodyHandlers/ofString)))))
 
 (defn- open-feed
   [server path]
@@ -791,6 +811,111 @@
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
           (is (str/includes? (.body response) "seon-data-drill")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Slice 1 — one POST, the existing route and render chain
+;;; ---------------------------------------------------------------------------
+
+(deftest the-message-appears-on-the-page-wire-test
+  ;; seed 2026072903 — reverse refs do the echo; no message-specific page code.
+  (with-server message-blocks
+    (fn [_connection server _context]
+      (let [stream (open-feed server (str "/feed/" agent-id))]
+        (try
+          (read-patches! stream 2)
+          (let [response (post-form server
+                                    (str "/agent/" agent-id "/message")
+                                    "content=wire-echo-2026072903")]
+            (is (= 204 (.statusCode response)))
+            (is (empty? (.body response))))
+          (let [paint (read-until! stream "wire-echo-2026072903")]
+            (is (str/includes? paint "surface-namespace"))
+            (is (str/includes? paint "wire-echo-2026072903"))
+            (is (not (str/includes? paint "surface-message-bar"))
+                "the existing reverse-ref render changes; the bar does not"))
+          (finally (.close stream)))))))
+
+(deftest the-bar-is-never-patched-test
+  ;; seed 2026072904 — ten commits, one settled wire observation.
+  (with-server [(block-map :message-bar 0 `web/message-bar-html)
+                (block-map :counter 10 `counter-html)]
+    (fn [connection server _context]
+      (let [stream (open-feed server (str "/feed/" agent-id))]
+        (try
+          (let [initial (read-patches! stream 2)]
+            (is (str/includes? initial "surface-message-bar"))
+            (is (str/includes?
+                 initial
+                 (str "placeholder=\"message agent " agent-id))
+                "the target is legible in the dense one-line field"))
+          (doseq [index (range 10)]
+            (d/transact connection
+                        [{:seon.cluster.agent/id
+                          (str "unrelated-2026072904-" index)}]))
+          (let [paint (read-until! stream "agents: 11")]
+            (is (pos? (patches paint)))
+            (is (not (str/includes? paint "surface-message-bar"))
+                "constant bytes leave typed text and caret browser-local"))
+          (finally (.close stream)))))))
+
+(deftest the-inbound-route-is-method-discriminated-test
+  ;; seed 2026072905 — the former prefix-dispatch shadow class.
+  (with-server message-blocks
+    (fn [connection server _context]
+      (d/transact connection [{:seon.cluster.agent/id "bob"}])
+      (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
+      (is (= 404 (.statusCode (post-form server "/agent/bob" "content=x"))))
+      (is (= 404 (.statusCode
+                  (post-form server "/agent/bob/message/extra" "content=x"))))
+      (is (= 404 (.statusCode
+                  (post-form server "/agent/bob/messages" "content=x"))))
+      (is (= 204 (.statusCode
+                  (post-form server "/agent/bob/message" "content=exact")))
+          "only the exact method and whole path reaches inbound"))))
+
+(deftest a-refusal-emits-no-morph-test
+  (with-server message-blocks
+    (fn [connection server _context]
+      (let [stream (open-feed server (str "/feed/" agent-id))]
+        (try
+          (is (= 2 (patches (read-patches! stream 2)))
+              "the feed alone supplies the initial paint")
+          (let [basis-before (:max-tx @connection)
+                response (post-form server
+                                    (str "/agent/" agent-id "/message")
+                                    "content=%20%20")]
+            (is (= 422 (.statusCode response)))
+            (is (= basis-before (:max-tx @connection))
+                "a refusal commits nothing, so route! has no report to paint")
+            (is (not (str/includes? (.body response)
+                                    "datastar-patch-elements"))
+                "the HTTP refusal is text, never a competing morph"))
+          (finally (.close stream)))))))
+
+(deftest a-cross-origin-inbound-is-refused-test
+  ;; seed 2026072906 — one state-changing branch, one same-origin check.
+  (with-server message-blocks
+    (fn [connection server _context]
+      (let [basis-before (:max-tx @connection)
+            response (post-form server
+                                (str "/agent/" agent-id "/message")
+                                "content=forged"
+                                "https://attacker.invalid")]
+        (is (= 403 (.statusCode response)))
+        (is (= basis-before (:max-tx @connection)))
+        (is (empty?
+             (d/q '[:find [?message ...]
+                    :where
+                    [?message :seon.cluster.message/content "forged"]]
+                  @connection)))
+        (is (= 403
+               (.statusCode
+                (post-form server
+                           (str "/agent/" agent-id "/message")
+                           "content=wrong-scheme"
+                           (str "https://127.0.0.1:"
+                                (:seon.render.web/port server)))))
+            "same authority under a different scheme is cross-origin")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Derived ports — bookmarkable, restart-stable, collision-tolerant

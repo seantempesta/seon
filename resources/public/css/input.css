@@ -736,6 +736,49 @@ details.tool-call-details[open] .tool-preview {
   .seon-stream-cursor { animation: none; opacity: 0.6; }
 }
 
+/* The human-to-agent boundary is one terminal line. Transient text,
+   progress, and refusal prose live in Datastar signals, so unrelated
+   database morphs never need to patch this constant block. */
+.seon-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.seon-bar-field {
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.2rem;
+  outline: none;
+  background: var(--color-base-950);
+  color: var(--color-text-100);
+  font: inherit;
+}
+.seon-bar-field::placeholder { color: var(--color-text-500); }
+.seon-bar-field:focus { border-color: var(--color-signal); }
+.seon-bar-send {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--color-base-700);
+  border-radius: 0.2rem;
+  background: var(--color-base-800);
+  color: var(--color-signal);
+  font: inherit;
+  cursor: pointer;
+}
+.seon-bar-send:hover { background: var(--color-base-700); }
+.seon-bar-refusal {
+  grid-column: 1 / -1;
+  color: var(--color-error);
+  font-size: 0.625rem;
+}
+
 /* ============================================================
    THE ROOT VIEW — the cluster looking at itself.
 

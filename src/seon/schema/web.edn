@@ -79,6 +79,17 @@
   [:seon.render/page :seon.render/page]
   [:seon.render.web/feed-url [:string {:min 1}]]]
 
+ ; The parsed body handed from the Ring dispatcher to the one inbound
+ ; boundary. Content is optional at the wire because a missing field is
+ ; a 422 refusal, not a schema/instrumentation throw. When present it may
+ ; still be blank; the message family owns that refusal.
+ :seon.render.web/inbound
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/inbound-content
+   {:optional true}
+   :seon.cluster.message/inbound-content]]
+
  ; What ONE agent's paint needs. A map rather than five positional
  ; arguments because the two optional members carry meaning by
  ; PRESENCE: an agent that is not streaming has no `:seon.ai/partial`

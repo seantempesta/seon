@@ -50,6 +50,7 @@
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [org.httpkit.server :as http]
+            [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.render.block :as block]
             [seon.render.data :as data]
@@ -58,7 +59,9 @@
             [seon.schema.edn :as schema.edn]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar])
-  (:import [java.util.concurrent Executors]))
+  (:import [java.net URI URLDecoder URLEncoder]
+           [java.util Date]
+           [java.util.concurrent Executors]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/web.edn
@@ -106,6 +109,49 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The shell
 ;;; ---------------------------------------------------------------------------
+
+(defn- path-segment
+  [value]
+  (-> (URLEncoder/encode (str value) "UTF-8")
+      (str/replace "+" "%20")))
+
+(defn message-bar-html
+  "`:seon.render/html` — the constant human-to-agent message bar.
+
+  Every transient value lives in a Datastar signal: typed text,
+  request progress, and refusal prose. The render depends only on the
+  agent id, so unrelated facts serialize to identical bytes and the
+  per-tab equality check never morphs this surface or disturbs its
+  caret."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [agent-id (:seon.cluster.agent/id unit)]
+    [:form {:id (block/surface-id :message-bar)
+            :class "seon-bar"
+            :data-signals "{text:'',refusal:''}"
+            (keyword "data-on:submit")
+            (str "$refusal=''; @post('/agent/" (path-segment agent-id)
+                 "/message', {contentType:'form'}); $text=''")
+            (keyword "data-on:datastar-fetch")
+            (str "evt.detail.el===el && ("
+                 "evt.detail.type==='started' ? $refusal='' : "
+                 "evt.detail.type==='error' ? $refusal="
+                 "'Message not sent (HTTP '+evt.detail.argsRaw.status+'). "
+                 "Correct the message and retry.' : null)")}
+     [:input {:class "seon-bar-field"
+              :type "text"
+              :name "content"
+              :data-bind "text"
+              :required true
+              :autocomplete "off"
+              :autofocus true
+              :placeholder (str "message agent " agent-id " …")}]
+     [:button {:class "seon-bar-send" :type "submit"} "send"]
+     [:span {:class "seon-bar-refusal"
+             :role "status"
+             :aria-live "polite"
+             :data-show "$refusal"
+             :data-text "$refusal"}]]))
 
 (defn shell
   "The HTML document for one agent's page.
@@ -540,11 +586,103 @@
                         "application/octet-stream")}
          :body (io/input-stream found)}))))
 
+(def ^:private loopback-hosts
+  #{"127.0.0.1" "localhost" "::1"})
+
+(defn- same-origin?
+  "True when a browser POST is same-origin, or supplies no Origin."
+  [request]
+  (let [headers (:headers request)
+        origin (get headers "origin")]
+    (boolean
+     (or (str/blank? origin)
+         (try
+           (let [uri (URI. origin)
+                 origin-host (.getHost uri)
+                 origin-authority (.getAuthority uri)
+                 request-host (get headers "host")
+                 request-scheme (some-> (:scheme request) name)]
+             (and (= (.getScheme uri) request-scheme)
+                  (or (and request-host (= origin-authority request-host))
+                 (and (nil? request-host)
+                      (contains? loopback-hosts origin-host)))))
+           (catch Throwable _
+             false))))))
+
+(defn- decode-form
+  "One URL-encoded form body as string keys and values."
+  [request]
+  (let [body (:body request)
+        encoded (cond
+                  (nil? body) ""
+                  (string? body) body
+                  :else (slurp body))]
+    (into {}
+          (keep (fn [pair]
+                  (when-not (str/blank? pair)
+                    (let [[key value] (str/split pair #"=" 2)]
+                      [(URLDecoder/decode key "UTF-8")
+                       (URLDecoder/decode (or value "") "UTF-8")]))))
+          (str/split encoded #"&"))))
+
+(defn- agent-exists?
+  [db agent-id]
+  (some?
+   (d/q '[:find ?agent .
+          :in $ ?agent-id
+          :where [?agent :seon.cluster.agent/id ?agent-id]]
+        db agent-id)))
+
+(defn- inbound-tx-meta
+  [db process user-id]
+  (cond-> {:seon.db/process [:seon.db.process/id process]}
+    (agent-exists? db user-id)
+    (assoc :seon.db/user [:seon.cluster.agent/id user-id])))
+
+(defn inbound
+  "Commit one admitted inbound message and return its Ring response.
+
+  The response never paints. A successful POST is 204 with no body;
+  the existing commit → route → render path paints the message and
+  wakes the recipient. Refusals are 422 text values and commit nothing."
+  {:malli/schema [:=> [:cat :seon.render.web/service
+                       :seon.render.web/inbound]
+                  :any]}
+  [{:keys [:seon.store/connection :seon.cluster.agent/id]
+    caps :seon.sci.admit/caps
+    process :seon.cluster.run/process}
+   inbound]
+  (let [request
+        {:seon.cluster.agent/id (:seon.cluster.agent/id inbound)
+         :seon.cluster.message/inbound-content
+         (or (:seon.cluster.message/inbound-content inbound) "")
+         :seon.cluster.message/at (Date.)
+         :seon.config.eval.result/max-string
+         (:seon.config.eval.result/max-string caps)}
+        decision (message/inbound-tx @connection request)]
+    (if (vector? decision)
+      (do
+        (d/transact
+         connection
+         {:tx-data [[:db.fn/call #'message/inbound-tx request]]
+          :tx-meta (inbound-tx-meta @connection process id)})
+        {:status 204 :headers {} :body nil})
+      {:status 422
+       :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (:seon.error/message decision)})))
+
+(defn- exact-agent-id
+  [pattern uri]
+  (some-> (re-matches pattern uri) second
+          (URLDecoder/decode "UTF-8")))
+
 (defn handler
-  "The ring handler. Four routes and no router library yet — reitit and
-  the capability gate are the interaction slice's, and inventing a
-  route table before there are interactions to gate would be the
-  machinery-first mistake."
+  "The one Ring dispatcher, including the exact inbound POST route.
+
+  Reitit remains deferred until nested route data and capability
+  middleware make a tree pay for itself. Method and whole-path
+  discrimination here make the one state-changing route exact without
+  introducing a second dispatcher."
   {:malli/schema [:=> [:cat :seon.render.web/service] fn?]}
   [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps
@@ -552,7 +690,13 @@
     :as service}]
   (fn [request]
     (let [uri (:uri request)
-          agent-of (fn [prefix] (subs uri (count prefix)))
+          method (:request-method request)
+          inbound-agent (when (= :post method)
+                          (exact-agent-id #"/agent/([^/]+)/message" uri))
+          page-agent (when (= :get method)
+                       (exact-agent-id #"/agent/([^/]+)" uri))
+          feed-agent (when (= :get method)
+                       (exact-agent-id #"/feed/([^/]+)" uri))
           ;; ONE page request builder for both html routes, so `/` and
           ;; `/agent/{id}` cannot drift into two answers about who is
           ;; alive. Root IS an agent: the only difference between these
@@ -562,7 +706,19 @@
                           :seon.sci.admit/caps caps
                           :seon.cluster.run/live-processes #{process}})]
       (cond
-        (= "/" uri)
+        inbound-agent
+        (if (same-origin? request)
+          (let [params (decode-form request)]
+            (inbound service
+                     (cond-> {:seon.cluster.agent/id inbound-agent}
+                       (contains? params "content")
+                       (assoc :seon.cluster.message/inbound-content
+                              (get params "content")))))
+          {:status 403
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body "cross-origin POST refused"})
+
+        (and (= :get method) (= "/" uri))
         {:status 200
          :headers {"content-type" "text/html; charset=utf-8"}
          :body (shell {:seon.cluster.agent/id id
@@ -570,8 +726,8 @@
                                                      (page-request id))
                        :seon.render.web/feed-url (str "/feed/" id)})}
 
-        (str/starts-with? uri "/agent/")
-        (let [agent-id (agent-of "/agent/")]
+        page-agent
+        (let [agent-id page-agent]
           {:status 200
            :headers {"content-type" "text/html; charset=utf-8"}
            :body (shell {:seon.cluster.agent/id agent-id
@@ -579,9 +735,9 @@
                          (block/page @connection (page-request agent-id))
                          :seon.render.web/feed-url (str "/feed/" agent-id)})})
 
-        (str/starts-with? uri "/feed/")
+        feed-agent
         (feed request
-              (merge {:seon.cluster.agent/id (agent-of "/feed/")}
+              (merge {:seon.cluster.agent/id feed-agent}
                      (select-keys service
                                   [:seon.store/connection
                                    :seon.sci.admit/caps
@@ -590,7 +746,7 @@
                                    :seon.render.web/registration
                                    :seon.render.web/render-channel])))
 
-        (= "/data" uri)
+        (and (= :get method) (= "/data" uri))
         ;; the drill over the CLUSTER's own facts. Its cursor is
         ;; ordinary query data, so a drilled position is a link
         ;; somebody can send rather than a session somebody holds.
@@ -615,10 +771,10 @@
                          ;; the refresh, and the URL is the state.
                          :seon.render.web/feed-url (str "/feed/" id)})})
 
-        (str/starts-with? uri "/css/")
+        (and (= :get method) (str/starts-with? uri "/css/"))
         (or (resource (subs uri 1)) {:status 404 :body "not found"})
 
-        (str/starts-with? uri "/js/")
+        (and (= :get method) (str/starts-with? uri "/js/"))
         (or (resource (subs uri 1)) {:status 404 :body "not found"})
 
         :else {:status 404
@@ -687,7 +843,18 @@
   a decision like that does not belong in a default."
   {:malli/schema [:=> [:cat :seon.render.web/service] :seon.render.web/server]}
   [service]
-  (let [workers (Executors/newVirtualThreadPerTaskExecutor)
+  (let [connection (:seon.store/connection service)
+        process (:seon.cluster.run/process service)
+        ;; Transaction provenance resolves to a durable process entity.
+        ;; This is convergent: a running service creates its row once,
+        ;; and every later start observes it.
+        _ (when-not
+           (d/q '[:find ?process .
+                  :in $ ?id
+                  :where [?process :seon.db.process/id ?id]]
+                @connection process)
+            (d/transact connection [{:seon.db.process/id process}]))
+        workers (Executors/newVirtualThreadPerTaskExecutor)
         wanted (or (:seon.render.web/port service) 0)
         bind! (fn [port]
                 (http/run-server (handler service)
