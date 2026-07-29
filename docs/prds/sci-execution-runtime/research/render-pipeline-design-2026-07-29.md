@@ -672,3 +672,233 @@ The recommended answers are 1–3 and 6 as written, a 1,000-event conservative
 hot-unit bound for 4, identity encoding for loopback with a separate
 compression experiment before remote defaulting for 5, and cached-keyframe
 embedding for 7 if it can preserve one serialization owner.
+
+## Chunk 2 — history synthesis before another protocol
+
+The earlier designs were not one feed with five names. Git history and the
+colocated reports show five materially different ownership/delivery
+incarnations before this report's proposed sixth.
+
+### Sources added to the dependency ledger
+
+- `plan/reference/jvm-render-design-2026-07-26.md` records the pod resource
+  multiplier, the separate JVM feed, the zero-consumer cache contradiction,
+  the lazy-value containment hole, and the unbounded http-kit socket queue.
+- `research/f2-live-render-proof-2026-07-28.md` proves the current cluster
+  pipeline on a fresh boot with three real SSE sockets.
+- `research/old-ui-quarry-2026-07-29.md`, especially L01–L08 and L14, records
+  the pod and interim JVM feed mechanisms and what the fresh pipeline already
+  replaced.
+- `research/query-invalidation-2026-07-29.md` distinguishes exact E/A/V
+  interests, captured Datahike dependency plans, query-result caching, and
+  unconditional wake plus equality suppression.
+- `research/n4-contracts-2026-07-27.md` supplies the corrected N4 morph costs
+  and the block-targeting decision.
+
+Only gaps in those reports were then read from `src-old` and Git:
+
+- pod direct/gzip write acceptance, newest-pending replacement, normalized
+  subscriptions, first-paint ordering, and view replacement in
+  `src-old/seon/web/datastar.cljs`;
+- interim JVM `.clear` + `.offer` mailboxes and virtual drain threads in
+  `src-old/seon/web/feed.clj`;
+- the transition commits `c6c8d0ff0`, `b19275dca`, `19be862e2`,
+  `1cdb048c3`, `065542731`, `2e372027d`, and `fb1ce96d8`; and
+- the streamed-prefix transport-law rationale in
+  `research/flow-inventory-2026-07-28.md`.
+
+### The five prior generations and the sixth inheritance
+
+“Push” below means the page may first GET a static shim, but current render
+state arrives unsolicited on the long-lived SSE response. None of the first
+five generations implemented a browser-held revision deciding between a
+keyframe GET and a delta subscription.
+
+| incarnation | delivery model | evidence | what ended it | lesson inherited by generation 6 |
+|---|---|---|---|---|
+| 1. June pod whole-page feed (`c6c8d0ff0`, 2026-06-27) | push: GET shim, then gzip Datastar SSE of the complete stable-ID page | historical feed source; N4 replay of the actual whole-page shape | Per-change scope was the page. N4 later measured one 287-byte row at 0.004 ms versus the old 82,893-byte page at 0.460 ms: 289× bytes and 115× serialization CPU. Inputs/feed owners also had to sit outside their own morph target to survive updates. | Stable IDs and reconnecting SSE were sound; page-wide server work was not. |
+| 2. July pod reactive/render-unit feed (`b19275dca` through `b6961bac5`) | push: normalized equivalent subscriptions, captured dependency plans, equality suppression, changed-surface morphs, newest pending event per socket | pod `render-read`, `observe-connection!`, subscription registry, and direct/gzip writer; query-invalidation old precedent | The Great Deletion removed the CLJS self-host/Promise tier. Before deletion, an unrelated selected commit still rebuilt and serialized the whole normalized view before equality: the retained five-surface lower bound was 50,558 bytes and 1.094 ms p50; ten surfaces were 181,078 bytes and 3.880 ms p50 / 6.861 ms p95. Per-connection gzip and lifecycle machinery survived after shared render. | Capture dependency semantics from Datahike, share equivalent work, and suppress bytes; do not port the pod execution/lifecycle shape. |
+| 3. Supervised JVM `/data` feed (`1cdb048c3`, 2026-07-23) | push: one JVM reactive view, per-connection newest-only `ArrayBlockingQueue`, virtual drain thread, SDK/http-kit SSE | `src-old/seon/web/feed.clj`; JVM design report | It was an interim second web/render process and only served the data view. O14 dissolution merged web rendering into the cluster JVM, eliminating the cross-process reason to store derived snapshots. Its Seon mailbox was bounded, but the selected http-kit queue was still unbounded. | A complete latest value is the correct lossy mailbox value; process boundaries do not justify duplicate feed owners. |
+| 4. Fresh per-tab block feed (`065542731`, 2026-07-27) | push: one listener, derivation, byte comparison, and latest mailbox per tab; one Datastar morph per changed block | N4 live socket proof: initial two-block paint 218 bytes, one changed block 102 bytes, unchanged projection 0 bytes | Multiple tabs still duplicated the page derivation. Commit `2e372027d` deleted the per-tab listener/mailbox and moved derivation to one cluster proc plus `mult`. | Block targeting is the right patch boundary; tab count must not multiply rendering. |
+| 5. Current cluster Flow pipeline (`2e372027d`, 2026-07-28) | push: `listen!`/interest wake → one render proc → equality suppression → `mult` of a complete page snapshot → per-tab sliding-1 tap → per-tab diff/write | F2 live proof: 6 initial block morphs, one changed-block morph, byte-identical two-tab output, six-block current repaint on reconnect | Not deleted. It is the surviving owner. Its open seam is that each tab still derives initial `page-of`, stores a complete delivered map, and can safely slide only complete snapshots—not delta-only values. | Strengthen this owner in place: serialize one revisioned complete repair and changed fragments once; never create another renderer or feed registry. |
+| 6. Proposed revisioned composite package (this report) | push with pull-like recovery: one SSE path; connected tabs get deltas, and any join/gap selects the same package's keyframe | Chunk 1 server/browser measurements and loss proof; Chunk 2 comparison below | Owner review pending. | The sixth design inherits block IDs, Datahike-derived interest, equality suppression, cluster-wide render sharing, complete newest repair, and reconnect-as-repaint. |
+
+The history rejects two tempting summaries. Selective invalidation did exist,
+but it did not make delivery pull-based; it selected which shared push
+computation woke. Conversely, a complete newest mailbox did exist, but it did
+not make initial paint share serialized bytes across tabs.
+
+### The streamed-partial arc
+
+The pod-era partial was
+`:seon.ai.attempt/partial-text`: a cardinality-one, unindexed, no-history
+database projection published on a cadence and read by the transcript. That
+kept “one database path” by making high-churn presentation state a database
+value.
+
+The transport law corrected the premise. The attempt row and settled reply are
+facts; a complete text/token prefix is supersedable presentation. Moving the
+prefix onto `(sliding-buffer 1)` removed the partial transaction builder,
+schema attributes, publisher virtual thread, mailbox, cadence state, and
+terminal retraction coupling. The live F2 proof found zero installed
+`:seon.ai.stream/*` attributes.
+
+The first channel version still exposed why “loss is free” must be proved at
+the semantic boundary: a shared sliding-1 stream could displace agent A's
+clear with agent B's newer prefix. `fb1ce96d8` removed the clear message.
+Prefixes now carry run identity, a terminal plan/error/close fact supersedes
+them, and any database-interest repaint is facts-only and clears transient
+prefix state. A delayed prefix is rejected when its immutable database value
+already contains the terminal fact. Reconnect paints facts and never replays a
+half reply.
+
+Generation 6 inherits exactly that rule: a channel may lose a delta only when
+the retained value contains, or can address, a complete repair. It does not
+make a delta durable merely to avoid reasoning about a gap.
+
+## Explicit client pull variant
+
+The honest explicit-pull design is:
+
+1. The browser holds the applied page revision and complete-package hash.
+2. `GET /render/keyframe` returns the already-rendered, already-serialized
+   newest keyframe plus revision and ETag/hash. The handler never calls SCI,
+   Hiccup rendering, or serialization.
+3. The browser opens the diff SSE with its applied revision/hash. Deltas carry
+   `base`, `revision`, and the new complete hash. The SSE `id` is the revision.
+4. A contiguous delta is applied. A base/hash mismatch is discarded; the
+   browser pulls the newest keyframe, installs its revision/hash, and resumes
+   diff consumption.
+5. On reconnect the browser pulls current first. Nothing is replayed.
+
+For step 4 to be true, the frontend must own a custom stream parser that can
+validate before invoking a morph. Datastar's `@get` ignores event names that do
+not start with `datastar`, and a `datastar-patch-signals` event applies its
+signals immediately; neither can conditionally veto the following
+`datastar-patch-elements` event. The bundle does not expose its internal
+patch-elements watcher as a public “apply these validated bytes” action.
+Without a custom parser/morph seam, the server must retain the tab's delivered
+revision and select delta versus keyframe itself—which is the composite
+design—or turn the SSE into wake signals followed by one patch GET per update.
+
+This is not just “plain GET plus SSE.” A naive
+`GET keyframe → subscribe to future diffs` misses an update committed between
+the two requests. The experiment enumerated the update before GET, between GET
+and subscribe, and after subscribe: only **2/3** order classes were safe.
+
+A repaired pull protocol was safe in **3/3** by adding SSE admission:
+the server compares the supplied revision with its current revision and either
+opens the stream or emits `pull-required`. An alternative safe ordering is to
+open/tap the SSE before GET and retain its newest delta while the GET completes.
+Both alternatives add a two-request client state machine. The composite join
+was safe in **3/3** with its existing ordering—tap first, then read the shared
+latest package—without a second route or control event.
+
+Datastar does preserve the last SSE event id during retries of one `@get`
+request (`bundles/datastar.js` updates the `last-event-id` request header), but
+the server has no replay log. Therefore built-in retry cannot repair the page
+from an event id alone. Reconnect still needs a keyframe, either in the SSE
+stream or through the extra GET.
+
+### Pull edge and buffer table
+
+| edge | value/buffer | why loss is free | added obligation |
+|---|---|---|---|
+| listener/provider → render proc | unchanged sliding-1 look/complete prefix | fresh derivation or newer prefix supersedes | none |
+| render proc → shared latest keyframe | one atomic immutable revision/hash/bytes value | GET reads one complete current value; restart re-derives | GET must never trigger per-tab rendering and must reject/refresh a stale cached revision |
+| render proc → diff `mult` | revisioned delta package, source sliding-1 | it is presentation only; a skipped base cannot be applied | package must expose chain metadata to custom browser stream code |
+| diff `mult` → each SSE writer | per-tab `(sliding-buffer 1)` | custom browser parser detects a base/hash gap before morphing and pulls | Datastar `@get` cannot provide this gate |
+| SSE writer → http-kit | unchanged one pending prepared event | exact drain-or-close completion parks the writer | a gap can be known only after the unusable delta crosses the socket |
+| browser gap → keyframe GET | ordinary request/response, no queue | response is one complete newest keyframe | race-safe admission/order, cancellation, retry, and visible failure live in custom client logic |
+
+The pull server is stateless only in the narrow sense that it deletes one
+delivered-revision scalar per tab. It still owns:
+
+- the SSE connection, tap, and http-kit pending-write state;
+- the one shared latest serialized keyframe, because deriving on GET violates
+  render-once/serialize-once;
+- the current revision/hash used to admit the diff stream; and
+- the same render/equality/delta computation as the composite design.
+
+It therefore does not eliminate the shared “last buffer.” It moves gap
+selection from the server writer to browser code.
+
+### Measured protocol comparison
+
+`tmp/render-pipeline/pull_variant_bench.clj` uses SDK-built Datastar events,
+SHA-256 package hashes, 60 revisions of a 250-event page, and sliding-1
+delivery strides. It counts application-protocol bytes only; TCP/TLS and
+browser scheduling are excluded.
+
+Fixture:
+
+| item | bytes |
+|---|---:|
+| keyframe Datastar event | 26,384 |
+| stable-ID hot delta | 149 |
+| pull revision/hash control event | 141 |
+| minimal keyframe GET request + response control | 253 |
+
+The simpler fixture is intentionally independent of Chunk 1's 86 KB
+presentation fixture. Its result is a protocol comparison, not a replacement
+for the 60 fps timings.
+
+| tabs | writer delivery stride | composite bytes / 60 revisions | pull bytes / 60 revisions | pull overhead | pull recoveries after initial |
+|---:|---:|---:|---:|---:|---:|
+| 2 | 1 (fast) | 70,452 | 87,900 | 17,448 (24.8%) | 0 |
+| 10 | 1 (fast) | 352,260 | 439,500 | 87,240 (24.8%) | 0 |
+| 50 | 1 (fast) | 1,761,300 | 2,197,500 | 436,200 (24.8%) | 0 |
+| 50 | 5 | 17,150,150 | 17,491,300 | 341,150 (2.0%) | 12/tab |
+| 50 | 20 | 5,276,950 | 5,371,800 | 94,850 (1.8%) | 3/tab |
+
+Fast pull pays because the 141-byte revision/hash control is almost the
+149-byte hot delta. Under a gap, the stateless writer first sends the newest
+delta and metadata; the browser discards them and performs a GET for the same
+shared keyframe. The composite writer knows its own delivered revision and
+sends the keyframe directly. Both designs send one keyframe per gap in this
+model; pull adds one discarded delta and one request/response control exchange.
+
+### Trade table
+
+| criterion | composite package on one SSE | explicit keyframe GET + diff SSE |
+|---|---|---|
+| render/serialize sharing | one render and serialization; one shared keyframe | same requirement; GET cannot derive per tab |
+| server per-tab page state | one delivered revision scalar plus existing writer state | no delivered revision scalar; existing connection/tap/write state remains |
+| browser protocol | Datastar `@get` applies the selected prepared event | custom SSE parser plus revision/hash, conditional morph, gap, GET, cancellation, and resume state; or one patch GET per update |
+| join race | tap before latest-package read; one path | naive GET-first loses one of three order classes; repaired form needs admission or SSE-first buffering |
+| gap traffic | server selects keyframe directly | unusable delta/control crosses first, then GET keyframe |
+| built-in Datastar fit | ordinary patch-elements SSE | `@get` ignores custom control events and cannot veto a patch; event id supplies no replay |
+| reconnect law | stream sends current keyframe; nothing replays | GET current keyframe; nothing replays |
+| freshness over cache | latest-package read after tap | GET must validate current revision and coordinate with SSE admission |
+| failure surface | one long-lived response | two requests whose partial success and retry ordering must compose |
+| state removed | none | one scalar per tab |
+
+## Chunk 2 recommendation
+
+Keep the **revisioned composite package on one SSE path**.
+
+Explicit pull is a valid loss-free protocol after its race is repaired, and it
+does make the browser the authority on whether its DOM revision is current.
+But that is not a simplification for Seon:
+
+- the shared fully serialized keyframe remains mandatory;
+- the server still owns every expensive and backpressured part;
+- the only server state removed is one revision scalar already colocated with
+  the socket writer;
+- Datastar's automatic retry has no delta replay source;
+- the repaired join adds admission/control semantics or SSE-first buffering;
+  conditional delta application also needs a custom client stream/morph seam;
+  and
+- measured payload is never lower in the tested fast/stalled schedules.
+
+The composite package already gives the frontend pull-like recovery without a
+second delivery path: every retained package says “apply this delta if your
+server-known delivered revision is contiguous, otherwise receive this current
+full copy.” It also keeps the recovery choice next to the only authority that
+knows which bytes were actually submitted and drained.
+
+The owner decision remaining is therefore narrow: accept one per-tab delivered
+revision scalar as the price of one-path recovery. If removing that scalar is
+more important than the extra browser protocol, the repaired explicit-pull
+variant above is the coherent alternative; the naive GET-then-subscribe form
+must not be implemented.
