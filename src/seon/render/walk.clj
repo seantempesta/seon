@@ -383,10 +383,12 @@
                                     :seon.db/db db
                                     :seon.sci.admit/caps caps
                                     :seon.render/distance hops)
-                        chosen (projection unit
-                                           {:seon.render/kind kind
-                                            :seon.render/overrides overrides
-                                            :seon.render/floor floor})
+                        chosen (projection
+                                unit
+                                (cond-> {:seon.render/kind kind
+                                         :seon.render/floor floor}
+                                  (contains? request :seon.render/overrides)
+                                  (assoc :seon.render/overrides overrides)))
                         rendered (render/render
                                   {:seon.render/unit (assoc unit kind chosen)
                                    :seon.render/kind kind})

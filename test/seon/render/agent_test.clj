@@ -256,3 +256,11 @@
             "the identified morph wrapper exists before its first entry")
         (is (str/includes? html "Send a message above to begin.")
             "the empty state teaches what fills it")))))
+
+(deftest namespace-ai-renders-without-overrides-test
+  (support/with-database
+    (fn [connection]
+      (transact-one! connection {:seon.cluster.agent/id agent-id})
+      (is (str/includes? (agent/namespace-ai (render-unit @connection))
+                         (str "Agent " agent-id " is idle."))
+          "an absent override map stays absent through projection resolution"))))
