@@ -72,3 +72,13 @@ the owner of computation coalescing and equality suppression.
 `seon.render.web` now calls Datastar over http-kit, while the vendored
 `ServerAtta.toWrites` remains an unbounded `LinkedList`; the old “quarry only”
 triage is stale, but the underlying claim is current.
+
+## Resolved 2026-07-29
+
+Fork commit 238a85c (additive per-channel pending-byte state + atomic
+drain-or-close completion; send!/tryWrite semantics preserved; JUnit
+covered) + parent 875353668 (deps repoint with retire-on-upstream-merge
+intent, SSE writer parks on drain-or-close, close-on-rejected-write
+kept). Boundedness falsifiers green via the supported accessor;
+renderer/web 31/119/0. Deep-dive evidence: httpkit-write-path-2026-07-29.md;
+upstream PR against http-kit #180/#474 pending owner go.
