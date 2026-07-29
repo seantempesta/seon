@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent-runtime, run-loop, generate-code]
 ---
@@ -49,3 +49,25 @@ unsettled form does — but nothing is delivered, because a message an agent
 sends itself carries no information the agent's own context does not already
 have. One regression asserts that a red form whose owner is its author commits
 zero message rows while remaining visible in the settlement derivation.
+
+## Resolution
+
+Resolved by `700d97fd5` (`Refuse red-form self-assignment`).
+`seon.problems/assignment-value` now returns nil when the derived owner equals
+`:seon.problems/author`. The existing loop already delivers only a non-nil
+assignment value, so the refusal required no edit to the protected loop owner.
+`form-problem` and `work/form-settlement` remain unchanged: the problem still
+derives as the author's and its form remains `:unrouted-red`, unsettled.
+
+`an-author-owned-red-form-remains-unsettled-without-self-assignment` constructs
+an author-fallback red form, executes the loop's conditional delivery shape,
+asserts zero messages about the problem, and proves settlement remains
+`{:form-state :unrouted-red, :settled? false}`.
+
+Focused proof on 2026-07-29:
+
+```text
+bin/test seon.cluster.problem-routing-test
+Ran 4 tests containing 19 assertions.
+0 failures, 0 errors.
+```
