@@ -879,8 +879,16 @@ may reintroduce a shadow build into the dev feedback path.
   DISSOLVES `cold-resume-loses-the-defs-...` (there is no resume to
   restore context for — archive it as superseded, delete the path).
   (c) A MESSAGE STARTS A NEW EPISODE. A message from the user or from
-  root wakes an idle agent normally; work begins because something
-  new arrived, never because the process came back.
+  root wakes an idle agent normally; work begins because a message
+  needs answering, never because the process came back. This INCLUDES
+  a message that arrived before the crash and was never answered
+  (owner, asked directly): on startup the agent notices it and starts
+  an episode — a message you sent is never silently dropped. The
+  distinction that matters is that INTERRUPTED WORK never resumes;
+  unanswered MESSAGES still get answered, exactly as if they had just
+  arrived. (This preserves the trigger-conservation property the old
+  boot prime existed for, while removing the plan-suffix execution
+  that made it dangerous.)
   (d) THE AGENT SEES THE INTERRUPT. In that next episode its context
   carries honest evidence of what was cut off — what it had been
   doing, that it was interrupted, what never finished — so it can
