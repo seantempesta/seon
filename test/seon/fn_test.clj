@@ -1,9 +1,12 @@
 (ns seon.fn-test
   (:require [clojure.java.io :as io]
+            [clojure.set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.cluster.ancestor :as ancestor]
             [seon.fn :as seon.fn]
+            [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -46,6 +49,106 @@
              (into #{} (keep :seon.schema/key) rows)))
       (is (= #{'sample}
              (into #{} (keep :seon.ns/name) rows))))))
+
+(defn- source-files
+  [roots]
+  (->> roots
+       (mapcat (fn [root] (file-seq (io/file root))))
+       (filter (fn [file]
+                 (and (.isFile ^java.io.File file)
+                      (let [file-name (.getName ^java.io.File file)]
+                        (or (str/ends-with? file-name ".clj")
+                            (str/ends-with? file-name ".cljc"))))))))
+
+(defn- read-events
+  [file]
+  (reader/read {:seon.sci.reader/text (slurp file)
+                :seon.sci.reader/features #{:clj}
+                :seon.sci.reader/tags {'inst identity 'uuid identity}}))
+
+(defn- declared-functions
+  "Top-level `defn`/`defn-` names in `events`, counted from the forms.
+
+  Read from the form itself rather than from the reader's lifted facts, so
+  this count cannot agree with the rows by sharing their bug."
+  [events]
+  (into #{}
+        (keep (fn [event]
+                (let [form (:seon.sci.reader/form event)]
+                  (when (and (seq? form)
+                             (symbol? (first form))
+                             (contains? #{"defn" "defn-"}
+                                        (name (first form)))
+                             (symbol? (second form)))
+                    (second form)))))
+        events))
+
+(deftest every-declared-function-in-the-tree-becomes-one-row
+  ;; The invariant, per source file: one `:seon.fn` row for every top-level
+  ;; `defn`/`defn-` form. Not a count a partial graph could still satisfy,
+  ;; and not gated on a contract: call-graph reachability runs through
+  ;; private helpers. A hand list of namespace-stable operations once
+  ;; erased every declaration below the first ordinary top-level call.
+  (let [files (source-files seon.fn/source-roots)
+        rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
+        rows-by-namespace
+        (reduce
+         (fn [index row]
+           (if-some [sym (:seon.fn/sym row)]
+             (update index
+                     (symbol (namespace (symbol sym)))
+                     (fnil conj #{})
+                     (symbol (name (symbol sym))))
+             index))
+         {}
+         rows)]
+    (is (seq files))
+    (doseq [file files
+            :let [events (read-events file)]]
+      (is (vector? events)
+          (str "reader refused " (.getPath ^java.io.File file)))
+      (when (vector? events)
+        (let [declared (declared-functions events)
+              namespace-name (some :seon.ns/name events)]
+          (when (seq declared)
+            (is (some? namespace-name)
+                (str "no namespace declaration in "
+                     (.getPath ^java.io.File file)))
+            (is (= declared
+                   (clojure.set/intersection
+                    declared
+                    (get rows-by-namespace namespace-name #{})))
+                (str "unadmitted declarations in "
+                     (.getPath ^java.io.File file)))))))
+    (testing "private helpers are rows, marked private rather than dropped"
+      (let [private (filter :seon.fn/private? rows)]
+        (is (< 100 (count private)))
+        (is (some (fn [row]
+                    (and (= "seon.fn/source-file?" (:seon.fn/sym row))
+                         (not (contains? row :seon.fn/spec))))
+                  private))))))
+
+(deftest unplaceable-declaration-is-refused-loudly
+  ;; A file that contributes no rows must say so with the reason, never
+  ;; vanish. Silence read as health is this project's recurring failure.
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        file (io/file root "opaque.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit file
+          (str "(ns opaque)\n"
+               "(do (in-ns 'elsewhere))\n"
+               "(defn f [n] n)\n"))
+    (let [failure (try
+                    (seon.fn/rows {:seon.fn/roots [root]})
+                    (catch clojure.lang.ExceptionInfo error error))
+          data (ex-data failure)]
+      (is (instance? clojure.lang.ExceptionInfo failure))
+      (is (= :seon.fn/index-refused (:seon.error/kind data)))
+      (is (str/ends-with? (:seon.fn/file data) "opaque.clj"))
+      (is (= [{:seon.fn/line 3
+               :seon.fn/source "(defn f [n] n)"
+               :seon.fn/reason :seon.fn/namespace-unproven}]
+             (:seon.fn/unadmitted data))))))
 
 (deftest fresh-indexing-fills-canonical-namespace-stubs
   (test-support/with-database

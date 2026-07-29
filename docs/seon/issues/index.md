@@ -10,18 +10,20 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (3)
+## Blocker (4)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Refuse priming when the JVM's indexing code is stale](priming-indexes-with-the-live-jvms-loaded-code.md) | blocker | Core |
 | [Five skills teach the deleted pod system, and no skill teaches flow](five-skills-teach-the-deleted-pod-system.md) | blocker | general |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (5)
+## Friction (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Prove eval-time schema and test rows](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | friction | Core |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [Name database-value and transaction-data contracts](database-and-transaction-boundaries-use-anonymous-any-contracts.md) | friction | Core |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |

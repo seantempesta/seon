@@ -25,7 +25,16 @@
     (select-keys event [:seon.ns/name :seon.ns/source :seon.ns/doc
                         :seon.ns/require-edges])
 
-    (and (:seon.fn/sym event) (:seon.fn/spec event))
+    ;; EVERY `defn`/`defn-` in a source file is a graph row. A contract is
+    ;; the right gate for what agents may DEPEND on, not for what the graph
+    ;; contains: `:seon.fn/calls` reachability — workload derivation, test
+    ;; selection, usage signals, renderer discovery — breaks the moment a
+    ;; chain passes through an unindexed private helper. `:seon.fn/private?`
+    ;; and the presence of `:seon.fn/spec` are ordinary attributes.
+    ;; `seon.sci.eval/program-row` keeps the contract REQUIREMENT, because
+    ;; an agent-authored durable declaration is exactly the depended-upon
+    ;; case the selective-admission ruling governs.
+    (:seon.fn/sym event)
     (select-keys event [:seon.fn/sym :seon.fn/ns :seon.fn/source
                         :seon.fn/arglists :seon.fn/doc :seon.fn/private?
                         :seon.fn/spec :seon.fn/workload])
@@ -37,6 +46,24 @@
     (select-keys event [:seon.test/sym :seon.test/ns :seon.test/source])
 
     :else nil))
+
+(defn- unadmitted-functions
+  "The function declarations this file produced no row for, with the reason.
+
+  The reader lifts `:seon.fn/arglists` from every `defn`/`defn-` it reads and
+  `:seon.fn/sym` only once the namespace is proven, so an arglists event
+  without a symbol is a declaration the index cannot place. Dropping it in
+  silence is the defect — a check reading absence of a row as health — and it
+  is how the graph came to hold 121 rows for 1242 declared functions."
+  [events]
+  (into []
+        (keep (fn [event]
+                (when (and (contains? event :seon.fn/arglists)
+                           (not (:seon.fn/sym event)))
+                  {::line (:seon.sci.reader/line event)
+                   ::source (:seon.sci.reader/source event)
+                   ::reason ::namespace-unproven})))
+        events))
 
 (defn rows
   "Canonical program rows read from the declared source roots."
@@ -65,6 +92,14 @@
                            (assoc (:seon.error/data events)
                                   :seon.fn/file
                                   (.getCanonicalPath ^java.io.File file)))))
+         (when-let [unadmitted (seq (unadmitted-functions events))]
+           (throw
+            (ex-info
+             (str "Source indexing could not place a function "
+                  "declaration in a namespace.")
+             {:seon.error/kind ::index-refused
+              :seon.fn/file (.getCanonicalPath ^java.io.File file)
+              ::unadmitted (vec unadmitted)})))
          events)))
     (keep durable-row))
    roots))

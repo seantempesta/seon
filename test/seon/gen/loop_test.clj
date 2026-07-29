@@ -272,15 +272,19 @@
            (is (= {0 'my.agents.planner
                    1 'my.gen.alpha
                    2 'my.gen.alpha
-                   3 'my.gen.planner
+                   3 'my.gen.alpha
                    4 'my.gen.beta
                    5 'my.gen.beta
-                   6 'my.gen.planner}
+                   6 'my.gen.beta}
                   (form-namespaces db run-id))
                "REPL semantics across two declarations in ONE reply.
-                The agent namespace is the default where no namespace
-                declaration governs, including fail-closed attribution
-                after an arbitrary top-level invocation.")
+                The agent namespace is the default until a namespace
+                declaration governs; from there the last EXPLICIT
+                declaration holds, so `(alpha-helper-missing)` runs in
+                my.gen.alpha where it was written. Presuming an ordinary
+                call moved the namespace is what erased most of the
+                program graph (2026-07-29); only a form that mentions
+                `ns`/`in-ns` below its head clears attribution.")
            (is (= 7 (count (d/q '[:find ?f
                                   :in $ ?run-id
                                   :where

@@ -295,10 +295,24 @@
              (:seon.sci.reader/form (nth read-events 1))))
       (is (= 'clojure.string/join
              (-> read-events (nth 2) :seon.sci.reader/form second)))))
+  (testing "an ordinary top-level call retains the last explicit namespace"
+    ;; A hand list of operations believed namespace-stable erased every
+    ;; declaration below the first `set!` or predicate registration in a
+    ;; file, leaving 121 of 382 contracted functions in the program graph.
+    (doseq [call ["(set! *warn-on-reflection* true)"
+                  "(schema.edn/load! {})"
+                  "(schema/register-core-predicate! 'a/p? p?)"
+                  "(switch-namespace)"]]
+      (let [read-events
+            (events
+             (str "(ns a) " call
+                  " (defn ^{:malli/schema [:=> [:cat :int] :int]} x [n] n)"))
+            declaration (peek read-events)]
+        (is (= 'a (:seon.sci.reader/ns declaration)) call)
+        (is (= "a/x" (:seon.fn/sym declaration)) call))))
   (testing "a switch visible only to evaluation removes attribution"
     (doseq [text
             ["(do (in-ns 'a)) (defn x [])"
-             "(switch-namespace) (defn x [])"
              "(in-ns (symbol s)) (defn x [])"
              "(ns) (defn x [])"]]
       (let [read-events

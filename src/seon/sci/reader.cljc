@@ -255,7 +255,17 @@
        :seon.test/ns [:seon.ns/name namespace-name]})))
 
 (defn- resolved-operation
-  [operation aliases]
+  "The operation symbol as the reading namespace's aliases resolve it.
+
+  An UNQUALIFIED operator is deliberately not resolved through refers or
+  the current namespace yet, so `seon.schema`'s own
+  `(register! ::compiled-validator 'fn?)` does not become a schema row.
+  Recognizing it exposed a real blocker: its static form is
+  `(quote fn?)`, which is not a Malli form, and unlike
+  `seon.sci.eval/program-row` the build indexer has no `malli-form?`
+  admission gate. See
+  `docs/seon/issues/eval-time-schema-and-test-rows-have-no-recurring-proof.md`."
+  [operation {::keys [aliases]}]
   (when (symbol? operation)
     (if-let [operation-namespace (namespace operation)]
       (if-let [target (get aliases (symbol operation-namespace))]
@@ -264,11 +274,11 @@
       operation)))
 
 (defn- schema-declaration
-  [form aliases]
+  [form context]
   (when (and (seq? form)
              (= 3 (count form))
              (= 'seon.schema/register!
-                (resolved-operation (first form) aliases))
+                (resolved-operation (first form) context))
              (qualified-keyword? (second form)))
     (let [schema-key (second form)]
       {:seon.schema/key schema-key
@@ -277,7 +287,7 @@
        [:seon.ns/name (symbol (namespace schema-key))]})))
 
 (defn- declaration-facts
-  [form namespace-name aliases source]
+  [form namespace-name context source]
   (if (and (seq? form)
            (symbol? (first form))
            (= "ns" (name (first form))))
@@ -291,11 +301,25 @@
        (assoc function :seon.fn/source source))
      (when-let [test (test-declaration form namespace-name)]
        (assoc test :seon.test/source source))
-     (schema-declaration form aliases))))
+     (schema-declaration form context))))
 
-(def ^:private namespace-stable-operations
-  #{"comment" "declare" "def" "defmacro" "defn" "defn-" "defonce"
-    "deftest" "fn" "fn*" "quote" "var"})
+(defn- namespace-changing-mention?
+  "True when `form` mentions a namespace-changing call in operator position.
+
+  Only `ns` and `in-ns` change the current namespace. A form that mentions
+  either one below its own head — `(do (in-ns 'other))` — may move the
+  namespace in a way static reading cannot prove, so attribution becomes
+  absent. This is a property derived from the form itself, never a list of
+  operations believed safe: such a list dropped attribution at the first
+  ordinary top-level call, so a `set!` or a predicate registration silently
+  erased every declaration below it in the same file."
+  [form]
+  (and (coll? form)
+       (boolean
+        (or (and (seq? form)
+                 (symbol? (first form))
+                 (contains? #{"ns" "in-ns"} (name (first form))))
+            (some namespace-changing-mention? form)))))
 
 (defn- next-reading-context
   [{::keys [contexts] :as state} form]
@@ -318,16 +342,14 @@
                 ::contexts contexts})
         (assoc state ::attribution? false))
 
-      (or (not (seq? form))
-          (contains? namespace-stable-operations operation)
-          (= 'seon.schema/register!
-             (resolved-operation (first form) (::aliases state))))
-      state
+      ;; Attribution otherwise follows the last explicit valid namespace.
+      ;; Evaluator namespace receipts remain the runtime truth for a change
+      ;; only evaluation can see.
+      (namespace-changing-mention? form)
+      (assoc state ::attribution? false)
 
-      ;; An arbitrary top-level invocation may be a macro that changes the
-      ;; namespace. Parse-time attribution must become absent, never guessed.
       :else
-      (assoc state ::attribution? false))))
+      state)))
 
 (defn- read-events
   [text reading-context]
@@ -388,7 +410,7 @@
                  (declaration-facts
                   form
                   (when (::attribution? state) (::ns state))
-                  (::aliases state)
+                  (select-keys state [::ns ::aliases ::refers])
                   source))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
