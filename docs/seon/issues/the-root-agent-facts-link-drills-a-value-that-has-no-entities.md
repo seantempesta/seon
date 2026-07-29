@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: valid
+severity: friction
 tags: [issue, web, render, data]
 ---
 
