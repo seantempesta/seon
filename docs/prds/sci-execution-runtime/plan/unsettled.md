@@ -43,6 +43,15 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**OVERNIGHT CHARTER (owner, winding down 2026-07-29): press on
+autonomously, nothing crazy.** Keep going through ISSUES; keep AUDITING
+TESTS for what we are not understanding — the simplifications that
+dissolve complexity; awkward testing is a CODE SMELL (a design verdict,
+not a test problem); hunt concept DUPLICATION; and COMPLETE THE UI —
+the old system'''s functionality restored (never the same way, the same
+capability, reconceived). Review every return, redirect early, think
+between dispatches.
+
 **WORKING EDGE (2026-07-29 ~03:00).** Gate 467/1953/0. LANDED since
 midnight: F4 all five drives PASS (6 parallel/83ms, 100 parked at
 2vt+50KiB, SIGKILL zero-replay, cap byte-equal, two clusters); the
