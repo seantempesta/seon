@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, schema, operator, runtime]
 ---
@@ -93,3 +93,53 @@ bin/test
 Ran 549 tests containing 2313 assertions.
 0 failures, 0 errors.
 ```
+
+## Attempt-3 class correction
+
+The first resolution was caller-local and therefore incomplete.
+`fresh_operator.clj` generates more than one form that applies
+instrumentation: the anchor launch form and the add form. Only the add form
+loaded the schema EDN population, so a fresh anchor could still collect
+contracts before `:seon.render/value` existed.
+
+Commit `b69310347` moves the dependency to the one owner:
+`seon.instrument/apply!` now calls `seon.schema.edn/load!` before every
+`mi/clj-collect!`. The add form's schema require and load call were deleted;
+neither operator form now knows the ordering rule. The stale-wrapper refresh
+from `79d02f6fd` remains in place.
+
+The child-JVM regression now evaluates the production generated launch form
+with `:seon.render/value` absent, waits for the anchor's real readiness
+publication, removes the schema again through that anchor's io-prepl, and
+drives the production operator add path. Both paths complete schema load →
+instrumentation refresh → instrumented cluster start, and the scratch cluster
+publishes its web URL.
+
+Proof on 2026-07-29:
+
+```text
+bin/test seon.instrument-test seon.dev.fresh-operator-test
+Ran 14 tests containing 59 assertions.
+0 failures, 0 errors.
+
+bin/test
+Ran 549 tests containing 2314 assertions.
+0 failures, 0 errors.
+```
+
+The requested literal shared-tree proof is not yet countable. The existing
+`default` process (PID 61316, start instant
+`2026-07-29T10:07:59.839Z`) predates the new schema population. After
+hot-reloading `seon.instrument`, its live state reports
+`{:candidate true, :active false}` for `:seon.render/value`: `load!`
+correctly contributes the resource candidate, but Malli's stable registry
+must read the already-published active database projection, which does not
+contain that later schema. Consequently the exact command
+`bin/seon start instrument-class-audit-20260729` still refuses
+`seon.render.value/sample`; it creates no scratch advertisement.
+
+Replacing, stopping, or mutating that live process would cross another
+session's runtime boundary. Per the lane stop rule, this issue is reopened
+until the owner makes a genuinely fresh anchor available and the exact
+literal command can be rerun. The source and recurring full gate are green;
+only that shared live-process acceptance proof remains.
