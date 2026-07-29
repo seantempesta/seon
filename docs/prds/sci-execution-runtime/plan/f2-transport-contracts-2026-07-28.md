@@ -6,6 +6,15 @@ tags: [prd, agent, runtime]
 
 # F2 — transport conversions + the central-loop deletion: contract package (2026-07-28)
 
+**SEAL REVISION (2026-07-29).** The stream clear signal is DELETED.
+Every partial carries its run id, and the render pass admits it only while
+that run has no frozen-plan, error, or closed fact at the pass's immutable
+database value. A database/reconnect interest is a fact-only repaint, so it
+cannot restore process-local partial memory. The settled terminal fact is the
+stream terminal: its ordinary render wake replaces the temporary projection;
+no channel value means "done". This supersedes §2.1's original clear design
+and the corresponding 2026072821 oracle below.
+
 **IMPLEMENTATION NOTE (landed 2026-07-28).** Four path-limited commits in
 the sequenced order: `5daf05e24` (stream conversion + the `seon.ai.stream`
 funeral), `2e372027d` (render proc + `web.clj` conversion + web_test
@@ -204,10 +213,10 @@ or process-local channel machinery.
 
 `seon.ai/stream-fold` and `stream-event` (the pure wire fold) survive
 untouched. The sink becomes one line built by the turn: `(fn
-[snapshot] (async/offer! stream-channel {agent-id + snapshot}))` onto
-the cluster's ONE stream conn — a `(sliding-buffer 1)` in-port of the
-render proc. The turn's `:call` arm passes `:seon.ai/stream? true` and
-that sink in the provider request; the handle
+[snapshot] (async/offer! stream-channel {agent-id + run-id +
+snapshot}))` onto the cluster's ONE stream conn — a `(sliding-buffer
+1)` in-port of the render proc. The turn's `:call` arm passes
+`:seon.ai/stream? true` and that sink in the provider request; the handle
 (`seon.cluster.loop/cluster`, via `loop-handle`) gains the stream
 channel. Streaming is ON by construction: a streamed call and a
 one-shot call already return the same completion value, and the sink
@@ -216,16 +225,21 @@ is one `offer!` — there is no dial to add (the old
 coalescing, and the render proc's coalesce floor is the only repaint
 clock).
 
-Channel value: the agent id plus the complete `:seon.ai/partial`
+Channel value: the agent id, run id, and complete `:seon.ai/partial`
 snapshot `{text, tokens}` — complete, never a delta, so a consumer
 that misses one is briefly behind and the next repairs it. The render
-proc holds `{agent-id → snapshot}` in proc state beside its produced
-memory and passes it into the render unit; the two blocks read
-`:seon.ai/partial` from the unit instead of running a query. When the
-turn's terminal transaction settles, the `:call` arm offers one CLEAR
-for the agent (an entry with no snapshot — presence of text is the
-state, so its absence is the clear); the settled facts commit, the
-database wake repaints from facts, and the proc drops the snapshot.
+proc holds `{agent-id → {run-id + snapshot}}` in proc state beside its
+produced memory. At the pass's ONE database value it retains only
+entries whose run has no `:seon.cluster.run/plan-digest`,
+`:seon.cluster.run/error`, or `:seon.cluster.run/closed-at` fact, then
+passes the admitted snapshot into the render unit; the two blocks read
+`:seon.ai/partial` from the unit instead of running a query.
+
+There is NO clear channel value. The frozen-plan/error/close fact is
+the stream terminal. Its ordinary render interest runs a fact-only
+pass, replaces the temporary projection, and drops cached partials.
+Reconnect uses that same fact-only repaint, so it renders the settled
+fact or nothing and can never restore a partial.
 
 **The database commits only the settled reply.** The attempt row and
 the settled reply were already the durable path's facts; a 20 KB
@@ -392,11 +406,11 @@ by loud-backstop futures, no sleep-as-proof.
 
 | deftest / property | seed | oracle |
 |---|---|---|
-| `streaming-writes-zero-datoms-test` | 2026072821 | a stubbed streamed `:call` through the real turn with the channel sink: the datom census between the capture commit and the terminal transaction contains ONLY the attempt row and the terminal facts — zero streaming datoms (and the registry no longer contains any `:seon.ai.stream/*` attribute to write); the render proc's ping shows the agent streaming during the call and cleared after; the settled reply's text equals the fold's final snapshot text |
+| `streaming-writes-zero-datoms-test` | 2026072821 | a stubbed streamed `:call` through the real turn with the channel sink: the datom census between the capture commit and the terminal transaction contains ONLY the attempt row and the terminal facts — zero streaming datoms (and the registry no longer contains any `:seon.ai.stream/*` attribute to write); a payload-free fact interest supersedes the partial after settlement, with no clear channel value; the settled reply's text equals the fold's final snapshot text |
 | `render-proc-one-derivation-many-tabs-test` | 2026072822 | N real SSE tabs on one agent, one committed change: each tab receives exactly the changed block's morph (counted SSE events, byte-compared); the proc ping pass-count advanced by ONE for the commit, not by N; an untouched block's id appears on no socket |
 | `slow-tab-newest-complete-page-test` | 2026072823 | one tap deliberately unread while K distinct commits land: on read it yields ONE value equal to the newest complete page (every block current — no lost morph, the §1.2 displacement class dead by construction); the proc's pass count advanced K′ ≤ K times (coalescing) and never parked (a fast sibling tab observed every suppressed-distinct repaint) |
-| `reconnect-is-repaint-wire-test` | 2026072824 | the in-process kill projection: drop taps and channel contents mid-stream, reopen the feed — the initial paint derives every block from current facts; the database holds NO partial text at any basis (as-of walk over the call window); nothing is retracted because nothing was written |
-| `concurrent-streams-share-one-conn-test` | 2026072825 | two agents' stubbed streams interleaving offers on the one sliding-1 conn: both agents' tabs end at their exact settled texts (facts, not channel); a displaced live snapshot is superseded by that agent's next offer (ping/delivered evidence); the producers' fold threads never park (ledger timestamps) |
+| `reconnect-is-repaint-wire-test`; `reconnect-mid-stream-is-a-fact-only-repaint` | 2026072824 + seal revision | the in-process kill projection and a retained-proc reconnect: drop taps/channel contents or disconnect mid-stream, reopen the feed — the initial paint derives every block from current facts and no cached partial is restored; the database holds NO partial text at any basis (as-of walk over the call window); nothing is retracted because nothing was written |
+| `concurrent-streams-share-one-conn-test`; `a-terminal-fact-supersedes-a-partial-after-the-lost-clear-ordering` | 2026072825 + seal revision | two agents' streams share the one sliding-1 conn and both settle at their exact fact-backed texts; the audit's A-partial → B-displacement → A-terminal ordering proves A's terminal fact replaces its retained half-reply, and a delayed A partial cannot repaint over that fact; every channel value carries a run id and complete partial, never a clear; provider folds never park |
 | `route-render-wake-and-disjointness-property` | 2026072826 | generated commit batches: the render channel receives a wake for EVERY report; mailbox routing is unchanged by the added delivery; the C2 property holds over the re-grounded computed sets — `(wake-attributes)` vs `(committed-attributes)` — with the message/to delivery intersection asserted from the other direction, exactly as today |
 | `kill-positions-per-agent-test` | 2026072827 | the loop_test crash-walk rows 1–10 re-grounded: `next-agent-work` derives the same expected situation per row under the agent-scoped request; the interrupted ordinal is never re-derived for execution |
 | `coalesce-floor-one-derivation-test` | 2026072828 | M commits inside one floor window: the proc runs exactly one derivation pass after the floor, and each tab receives at most one morph per actually-changed block (wire-level counts against the config fact planted per-trial) |

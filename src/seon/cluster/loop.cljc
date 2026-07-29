@@ -489,7 +489,8 @@
       ;; call" queryable facts rather than claims.
       :call
       (let [;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
-            ;; one `offer!` of the complete `:seon.ai/partial` snapshot
+            ;; one `offer!` of the run id plus the complete
+            ;; `:seon.ai/partial` snapshot
             ;; onto the cluster's ONE sliding-1 stream conn — newest
             ;; wins, a slow render pass can never backpressure the
             ;; provider fold, and a streamed call and a one-shot call
@@ -500,20 +501,13 @@
                    (fn [snapshot]
                      (async/offer! stream-channel
                                    {:seon.cluster.agent/id agent-id
+                                    :seon.cluster.run/id run-id
                                     :seon.ai/partial snapshot})))
-            ;; the CLEAR (F2 §2.1): presence of text IS the state, so an
-            ;; entry with no snapshot is the clear. Offered by the arm's
-            ;; two terminal owners (`freeze!`/`fail!`) — the settled
-            ;; facts commit, the database wake repaints from facts, and
-            ;; the render proc drops the snapshot.
-            clear! (fn []
-                     (when sink
-                       (async/offer! stream-channel
-                                     {:seon.cluster.agent/id agent-id})))
             fail! (fn [failure]
-                    (clear!)
                     ;; ONE transaction: the run closes and WHY it closed
-                    ;; lands with it. Before this the error value
+                    ;; lands with it. This terminal FACT is also the
+                    ;; stream terminal: its render wake replaces any
+                    ;; transient partial. Before this the error value
                     ;; evaporated — the drive sat claimed-with-no-plan
                     ;; for two minutes and the operator had to reproduce
                     ;; the call by hand to learn it was a missing key.
@@ -529,10 +523,11 @@
                     (report :error 0))
             freeze!
             (fn [completion]
-              (clear!)
               ;; the reply became a plan, or it did not: unchanged, and
               ;; deliberately outside the attempt reduce — WHICH target
-              ;; answered stops mattering the moment one did
+              ;; answered stops mattering the moment one did. The frozen
+              ;; plan FACT is the stream terminal; no lossy channel value
+              ;; carries "done".
               (let [sources (reply/sources (:seon.ai/text completion))]
                 (if (:seon.error/kind sources)
                   (fail! sources)

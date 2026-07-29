@@ -36,6 +36,7 @@
             [seon.config :as config]
             [seon.flow :as flow]
             [seon.render.block :as block]
+            [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
   (:import [java.net URI]
@@ -180,6 +181,23 @@
   [context]
   (:seon.render.web/passes (ping-state context)))
 
+(defn- streaming-agents
+  "The number of admitted partials in the render proc."
+  [context]
+  (:seon.render.web/streaming-agents (ping-state context)))
+
+(defn- await-ping!
+  "Wait until `pred` accepts the render proc's published ping state."
+  [context pred label]
+  (support/await-event!
+   (future
+     (loop []
+       (let [state (ping-state context)]
+         (if (pred state)
+           state
+           (recur)))))
+   label))
+
 (defn- block-map
   [name priority projection]
   {:seon.render.block/name name
@@ -189,6 +207,19 @@
 (def ^:private two-blocks
   [(block-map :banner 0 `banner-html)
    (block-map :counter 10 `counter-html)])
+
+(def ^:private stream-blocks
+  [(block-map :tokens 0 `root/tokens-html)
+   (block-map :reply 10 `root/text-html)])
+
+(defn- open-run!
+  "Open a minimal run row for one renderer presence-gate test."
+  [connection run-id]
+  (d/transact connection
+              [{:seon.cluster.run/id run-id
+                :seon.cluster.run/agent
+                [:seon.cluster.agent/id agent-id]
+                :seon.cluster.run/opened-at (java.util.Date.)}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
 
@@ -457,6 +488,12 @@
         (async/tap (:pages-mult context) slow)
         (try
           (read-patches! fast 2)
+          ;; The socket's own on-open wake is not one of the K commits
+          ;; below. Wait until that fact-only pass has published the
+          ;; watched registration before taking the census.
+          (await-ping! context
+                       #(= 1 (:seon.render.web/watched-agents %))
+                       [:slow-tab-initial-pass])
           (let [before (derivations context)
                 k 5]
             ;; nobody reads `slow` for the whole burst
@@ -544,6 +581,116 @@
                                :where [?e :seon.ai.stream/text _]]
                              (d/as-of db t)))
                 (str "no partial row at basis " t))))))))
+
+;;; Seal revision, 2026-07-29 — terminal facts supersede partials
+
+(deftest a-terminal-fact-supersedes-a-partial-after-the-lost-clear-ordering
+  ;; The audit's falsifier, driven through the real render proc and a
+  ;; real socket. A has painted a partial. B's partial then occupies the
+  ;; ONE sliding-1 conn at the point where the deleted design offered
+  ;; A's clear. There is no clear now: A's frozen-plan fact commits,
+  ;; its ordinary interest wake repaints, and the database presence gate
+  ;; removes A's temporary text whatever B did on the stream conn.
+  (with-server stream-blocks
+    (fn [connection server context]
+      (let [run-a "stream-run-a"
+            run-b "stream-run-b"]
+        (open-run! connection run-a)
+        (d/transact connection
+                    [{:seon.cluster.agent/id "agent-b"}
+                     {:seon.cluster.run/id run-b
+                      :seon.cluster.run/agent
+                      [:seon.cluster.agent/id "agent-b"]
+                      :seon.cluster.run/opened-at (java.util.Date.)}])
+        (let [tab (open-feed server (str "/feed/" agent-id))]
+        (try
+          (is (str/includes? (read-patches! tab 2) "idle")
+              "the fact-only initial paint has no partial")
+          (await-ping! context
+                       #(= 1 (:seon.render.web/watched-agents %))
+                       [:initial-fact-paint-derived])
+
+          (async/offer! (:stream-channel context)
+                        {:seon.cluster.agent/id agent-id
+                         :seon.cluster.run/id run-a
+                         :seon.ai/partial {:seon.ai/text "A half reply"
+                                           :seon.ai/tokens 3}})
+          (let [partial (read-patches! tab 2)]
+            (is (str/includes? partial "A half reply"))
+            (is (str/includes? partial ">3<")))
+
+          ;; This is the displacing value from the audit ordering. It
+          ;; changes B's transient entry but cannot carry semantics for A.
+          (async/offer! (:stream-channel context)
+                        {:seon.cluster.agent/id "agent-b"
+                         :seon.cluster.run/id run-b
+                         :seon.ai/partial {:seon.ai/text "B newest"
+                                           :seon.ai/tokens 2}})
+          (await-ping! context
+                       #(= 2 (:seon.render.web/streaming-agents %))
+                       [:both-partials-admitted])
+
+          ;; The frozen plan is the settled provider reply fact. Its
+          ;; normal database wake is the stream terminal.
+          (d/transact connection
+                      [[:db/add [:seon.cluster.run/id run-a]
+                        :seon.cluster.run/plan-digest
+                        (apply str (repeat 64 "a"))]])
+          (let [settled (read-patches! tab 2)]
+            (is (str/includes? settled "idle")
+                "the settled fact replaced A's temporary reply")
+            (is (not (str/includes? settled "A half reply"))
+                "A's stale half-reply cannot survive the terminal fact"))
+          (is (= 0 (streaming-agents context))
+              "the fact-only interest pass retained no channel state")
+
+          (testing "a delayed partial cannot repaint over its terminal fact"
+            (let [before (derivations context)]
+              (async/offer! (:stream-channel context)
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-a
+                             :seon.ai/partial {:seon.ai/text "too late"
+                                               :seon.ai/tokens 99}})
+              (await-ping! context
+                           #(> (:seon.render.web/passes %) before)
+                           [:delayed-partial-considered])
+              (is (= 0 (streaming-agents context))
+                  "the run-id presence gate rejected the delayed partial")))
+          (finally
+            (.close tab))))))))
+
+(deftest reconnect-mid-stream-is-a-fact-only-repaint
+  ;; Partials are channel values, never facts. A new socket therefore
+  ;; paints the current database value or nothing; it cannot restore the
+  ;; old socket's last partial from the render proc's disposable memory.
+  (with-server stream-blocks
+    (fn [connection server context]
+      (let [run-id "stream-reconnect"]
+        (open-run! connection run-id)
+        (let [first-tab (open-feed server (str "/feed/" agent-id))]
+          (read-patches! first-tab 2)
+          (await-ping! context
+                       #(= 1 (:seon.render.web/watched-agents %))
+                       [:first-tab-derived])
+          (async/offer! (:stream-channel context)
+                        {:seon.cluster.agent/id agent-id
+                         :seon.cluster.run/id run-id
+                         :seon.ai/partial {:seon.ai/text "not durable"
+                                           :seon.ai/tokens 2}})
+          (is (str/includes? (read-patches! first-tab 2) "not durable"))
+          (.close first-tab))
+        (let [reconnected (open-feed server (str "/feed/" agent-id))]
+          (try
+            (let [repaint (read-patches! reconnected 2)]
+              (is (str/includes? repaint "idle")
+                  "reconnect repainted from facts")
+              (is (not (str/includes? repaint "not durable"))
+                  "the in-flight partial was never restored"))
+            (await-ping! context
+                         #(zero? (:seon.render.web/streaming-agents %))
+                         [:reconnect-dropped-partials])
+            (finally
+              (.close reconnected))))))))
 
 ;;; 8. coalesce-floor-one-derivation-test — seed 2026072828
 

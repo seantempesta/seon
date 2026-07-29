@@ -157,11 +157,12 @@
   "A per-run token counter updating live while a model call streams.
 
   An ordinary block reading the TRANSIENT `:seon.ai/partial` the render
-  pass placed on its unit — channel-borne presentation, never a fact
-  (F2 §2). The fact that its value changes twenty times a second is the
-  pipeline's problem rather than its own, which is the point of the
-  exercise: nothing here knows it is high-churn, and nothing here
-  queries, because there is no row to query."
+  pass admitted for an unsettled run — channel-borne presentation,
+  never a fact (F2 §2, seal revision 2026-07-29). The fact that its
+  value changes twenty times a second is the pipeline's problem rather
+  than its own, which is the point of the exercise: nothing here knows
+  it is high-churn, and nothing here queries, because there is no row
+  to query."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [snapshot (:seon.ai/partial unit)]
@@ -183,9 +184,10 @@
   mechanism, no streaming-specific render path. The blinking cursor is
   CSS on an empty span rather than a character in the text, so the
   reply's bytes are exactly the model's and a copy-paste does not pick
-  up decoration. When nothing streams the unit carries no
-  `:seon.ai/partial` and the block says idle — presence of text is the
-  state, so its absence is the clear."
+  up decoration. When nothing streams—or the run's terminal fact has
+  superseded its channel presentation—the unit carries no
+  `:seon.ai/partial` and the block says idle. No channel value means
+  done; the settled fact's repaint replaces the temporary text."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [text (:seon.ai/text (:seon.ai/partial unit))]

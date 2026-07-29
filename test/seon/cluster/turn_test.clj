@@ -1272,13 +1272,14 @@
   and its completion."
   [cluster]
   (let [completion (async/promise-chan)
+        render-channel (async/chan (async/sliding-buffer 1))
         graph (flow.core/create-flow
                {:procs
                 {:seon.render.web/render
                  {:proc (seon.flow/var-process
                          #'web/render-step :io
                          {:seon.render.web/render-channel
-                          (async/chan (async/sliding-buffer 1))
+                          render-channel
                           :seon.render.web/pages-channel
                           (async/chan (async/sliding-buffer 1))
                           :seon.render.web/registration (atom {})
@@ -1289,7 +1290,9 @@
     (async/go-loop [] (when (async/<! report-chan) (recur)))
     (async/go-loop [] (when (async/<! error-chan) (recur)))
     (flow.core/resume graph)
-    {:graph graph :completion completion}))
+    {:graph graph
+     :completion completion
+     :render-channel render-channel}))
 
 (defn- streaming-agents
   [{:keys [graph]}]
@@ -1319,7 +1322,7 @@
   ;; only the attempt row, the capture and the terminal facts — ZERO
   ;; streaming datoms, because the registry no longer contains any
   ;; `:seon.ai.stream/*` attribute to write. The render proc's ping
-  ;; shows the agent streaming during the call and CLEARED after, and
+  ;; shows no partial after the terminal FACT repaints, and
   ;; the settled reply's text equals the fold's final snapshot text.
   ;;
   ;; The measured margin this replaces: a channel hand-off is 0.01 ms
@@ -1391,16 +1394,21 @@
                        without one — either way the TEXT never came
                        from the channel")))
 
-              (testing "the render proc saw the stream and then CLEARED it"
-                (await-streaming! proc 0 [:streaming-cleared])
+              (testing "the terminal fact is the stream terminal"
+                ;; Production's one routing listener offers this
+                ;; payload-free interest on the terminal transaction.
+                ;; This turn fixture owns no listener, so publish the
+                ;; already-observed fact wake at the same proc port.
+                (async/offer! (:render-channel proc) ::terminal-fact)
+                (await-streaming! proc 0 [:streaming-superseded])
                 (is (= 0 (streaming-agents proc))
-                    "presence of text IS the state, so the clear is the
-                     absence of an entry — the settled facts repaint
-                     the page and the proc drops the snapshot"))))
+                    "the settled facts repaint the page; no channel
+                     value carries done"))))
           (finally
             (flow.core/stop (:graph proc))
             (test-support/await-event! (future (async/<!! (:completion proc)))
                                        [:render-proc-stopped])
+            (async/close! (:render-channel proc))
             (async/close! stream-channel)))))))
 
 ;;; 5. concurrent-streams-share-one-conn-test — seed 2026072825
@@ -1499,11 +1507,16 @@
             (testing "a displaced snapshot is superseded, never lost work"
               ;; only ONE value is ever pending, and it is the newest
               (let [pending (async/poll! stream-channel)]
-                (is (or (nil? pending)
-                        (contains? #{"agent-a" "agent-b"}
-                                   (:seon.cluster.agent/id pending)))
-                    "at most one newest snapshot, whichever agent won
-                     the race — the other's next chunk repairs it")
+                (is (contains? #{"agent-a" "agent-b"}
+                               (:seon.cluster.agent/id pending))
+                    "exactly one newest snapshot, whichever agent won
+                     the race — the other's next chunk repaired it")
+                (is (string? (:seon.cluster.run/id pending))
+                    "the partial names the run whose terminal facts
+                     supersede it")
+                (is (map? (:seon.ai/partial pending))
+                    "only complete partial snapshots ride the conn;
+                     there is no clear shape")
                 (is (nil? (async/poll! stream-channel))
                     "and never a queue: sliding-1 holds exactly one")))
             (finally

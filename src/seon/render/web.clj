@@ -50,6 +50,7 @@
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [org.httpkit.server :as http]
+            [seon.cluster.run :as run]
             [seon.render.block :as block]
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
@@ -268,6 +269,21 @@
            db)
       0))
 
+(defn- unsettled-stream?
+  "True when a stream entry's run has no settled terminal fact at `db`.
+
+  The provider reply settles as a frozen plan (`::run/plan-digest`) or
+  a durable `::run/error`; `::run/closed-at` covers a run terminated by
+  another path. A missing run is not live. This presence gate makes a
+  delayed partial incapable of repainting over its settled facts."
+  [db stream]
+  (when-let [run-id (:seon.cluster.run/id stream)]
+    (let [row (d/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
+                      [::run/id run-id])]
+      (and (some? row)
+           (not-any? #(contains? row %)
+                     [::run/plan-digest ::run/error ::run/closed-at])))))
+
 (defn- render-pass
   "ONE pass over ONE database value: derive every WATCHED agent's page,
   suppress against the last value PRODUCED, and return
@@ -283,6 +299,13 @@
                       (keep (fn [[agent-id tabs]]
                               (when (pos? (long tabs)) agent-id)))
                       @registration)
+        ;; The run id makes each partial self-describing. Keep only
+        ;; entries whose run is still unsettled at THIS immutable
+        ;; database value; terminal facts supersede and remove them.
+        streams (into {}
+                      (filter (fn [[_agent-id stream]]
+                                (unsettled-stream? db stream)))
+                      (::streams state))
         pages (into {}
                     (map (fn [agent-id]
                            [agent-id
@@ -292,14 +315,16 @@
                                       :seon.sci.admit/caps caps
                                       :seon.cluster.run/live-processes
                                       #{(:seon.cluster.run/process handle)}}
-                               (get-in state [::streams agent-id])
+                               (get-in streams [agent-id :seon.ai/partial])
                                (assoc :seon.ai/partial
-                                      (get-in state
-                                              [::streams agent-id]))))]))
+                                      (get-in streams
+                                              [agent-id
+                                               :seon.ai/partial]))))]))
                     watched)
         state (-> state
                   (update ::passes inc)
-                  (assoc ::watched (count watched)))]
+                  (assoc ::watched (count watched)
+                         ::streams streams))]
     (if (= pages (::produced state))
       [state nil]
       [(assoc state ::produced pages) pages])))
@@ -309,10 +334,10 @@
 
   Two in-ports, both `(sliding-buffer 1)`: `::interest` — the render
   wake channel, a payload-free \"look\"; `::stream` — the cluster's one
-  stream conn carrying `{agent-id + :seon.ai/partial snapshot}` entries
-  (an entry with no snapshot is that agent's CLEAR — presence of text
-  is the state). One out-port, `::pages`, feeding the mult; sliding-1
-  everywhere means the proc never parks.
+  stream conn carrying `{agent-id + run-id + :seon.ai/partial snapshot}`
+  entries. There is NO clear entry: the frozen-plan/error/close fact is
+  the stream terminal. One out-port, `::pages`, feeding the mult;
+  sliding-1 everywhere means the proc never parks.
 
   THE COALESCE FLOOR is honored HERE: a wake arriving inside the floor
   waits out the remainder before the next derivation (this proc is
@@ -323,8 +348,10 @@
   delivered by the routing listener — never a poll.
 
   All state is disposable by the transport law: the produced-memory is
-  rebuilt by one re-render after any restart, and a stream snapshot is
-  superseded or cleared by its producer."
+  rebuilt by one re-render after any restart, and a partial is admitted
+  only while its run lacks a terminal fact. An interest pass is a
+  repaint from facts, so it drops every cached partial before deriving;
+  reconnect can never restore one."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
@@ -388,11 +415,15 @@
      (async/put! (:seon.render.web/completion state) ::stopped))
    state)
   ([state input message]
-   (let [state (if (= ::stream input)
-                 (let [agent-id (:seon.cluster.agent/id message)]
-                   (if-let [snapshot (:seon.ai/partial message)]
-                     (assoc-in state [::streams agent-id] snapshot)
-                     (update state ::streams dissoc agent-id)))
+   (let [state (case input
+                 ;; A repaint is facts only. Partials were never facts,
+                 ;; so a commit wake or reconnect wake cannot restore
+                 ;; process-local stream memory.
+                 ::interest (assoc state ::streams {})
+                 ::stream
+                 (assoc-in state
+                           [::streams (:seon.cluster.agent/id message)]
+                           message)
                  state)
          connection (:seon.store/branch-connection
                      (:seon.cluster.loop/cluster state))
