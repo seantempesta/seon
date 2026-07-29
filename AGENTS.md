@@ -290,8 +290,9 @@ one chain ⇒ `:mixed`, unresolved ⇒ `:mixed`. Never annotate everything;
 scheduling acts at exactly two seams (proc workload tags and the eval/
 capability door) — per-function classification, per-proc execution.
 
-Deeper: `docs/prds/sci-execution-runtime/plan/handbook.md` (the
-construction discipline), plan `README.md` (rulings + ladder), research
+Orientation for anyone new: `docs/TRANSFER_PROMPT.md` (what Seon is, why
+archaeology precedes design, which skills to load, the warts, the
+mentality). Deeper: plan `README.md` (rulings + ladder), research
 docs `flow-mechanics-2026-07-28.md`, `flow-inventory-2026-07-28.md`,
 `workload-classification-2026-07-28.md` (the agents-are-flows model,
 measured), `flow-per-cluster-2026-07-27.md`,
@@ -1020,9 +1021,13 @@ embeddings PRD.
 
 ## Key entry points
 
-- `docs/seon/architecture/architecture.md` — intended system map; read first;
-- `docs/prds/sci-execution-runtime/plan/README.md` — **the one entry point**: ordered
-  plan, generated `state.md`, `unsettled.md`, `history.md`;
+- `docs/TRANSFER_PROMPT.md` — **the orientation**: read it whole if you are new
+  to Seon (what it is, why archaeology precedes design, which skills to load,
+  the warts, the mentality, how the owner works);
+- `docs/seon/architecture/architecture.md` — intended system map;
+- `docs/prds/sci-execution-runtime/plan/README.md` — **the one ordering**: the
+  numbered owner rulings, plus `unsettled.md` (current state) and
+  `history.md`;
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
 - `src-old/seon/AGENTS.md` — State A one-mechanism and runtime ownership table;
