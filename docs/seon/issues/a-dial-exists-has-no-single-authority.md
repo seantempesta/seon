@@ -121,3 +121,73 @@ per-situation model, endpoint, output budget, and thinking values remain
 ordinary call-site `:seon.ai/*` request/target data, with the call-site map
 winning. They do not acquire `:seon.config.*` identities and require no dial
 registration.
+
+## Independent verification 42887d234
+
+Verdict: **the issue remains open.** The file-loader path derives the three
+composite schemas, but the ordinary registration path does not. The deleted
+cross-check failure class is therefore still representable.
+
+1. **FALSE — one registration does not automatically derive every
+   contract.** In `42887d234`, `derive-config-forms` correctly constructs
+   `:seon.config/manifest`, `:seon.config/effective`, and
+   `:seon.config/entity`, but only `schema.edn/load!` calls it, over the forms
+   just read from schema resource files
+   (`src/seon/schema/edn.clj:51-117,226-228`). `schema/register!` contributes a
+   new leaf directly and never invokes that compiler. A clean-checkpoint REPL
+   probe registered
+   `:seon.config.verification428/enabled` as
+   `[:boolean {:seon.config/default false}]`. The leaf registered and
+   `malli->datahike-attr` produced a Boolean declaration, but the automatic
+   results were manifest `false`, effective `false`, entity `false`, and
+   canonical database attribute `false`. Explicitly calling
+   `derive-config-forms` changed all four results to `true`, and
+   `config-registration-defaults` returned `false`. The scratch registration
+   was removed with `schema/restore-state!`; a final check returned
+   `{:scratch-removed? true}`. `git grep` also finds
+   `config-registration-defaults` only at its definition and in
+   `edn_test.clj`; the target commit's `seon.config/defaults` does not consume
+   it.
+2. **FALSE as a claim that the hand-maintained surface is gone.** The three
+   authored definitions are absent from `schema/config.edn`, and ordinary
+   consumers correctly continue reading their generated schema keys. However,
+   `test/seon/cluster/boot_test.clj:345-353` remains a manual writer: after
+   registering a dial it loops over exactly `:seon.config/manifest`,
+   `:seon.config/effective`, and `:seon.config/entity`, then re-registers each
+   with the dial conjoined. This is the old three-map synchronization
+   operation surviving outside the deleted definitions.
+3. **FALSE — the deleted tests' failure class remains representable.** The
+   direct REPL construction registered
+   `:seon.config.verification428/optional-dial`, then validated a manifest
+   containing it. Registration returned true while manifest validation
+   returned false with Malli `:malli.core/extra-key`. Re-running
+   `schema.edn/load!` after the registration still left the scratch dial out of
+   manifest, entity, and `canonical-database-attributes`, because `load!`
+   derives from only its resource-file population. The surviving boot test's
+   manual three-shape widening independently corroborates that the state is
+   constructible. The new `one-config-registration-derives-every-structural-contract`
+   test calls the private compiler directly over a fabricated forms map; it
+   does not exercise the public `schema/register!` producer it claims to
+   prove. Deleting the population cross-check was premature.
+4. **TRUE — optionality metadata preserves absence, not nil.** At a clean
+   `42887d234` checkpoint, applying defaults to a fresh canonical in-memory
+   database and reading `config/effective` produced
+   `{:defaults-contains? false, :effective-contains? false,
+   :effective-get :user/absent, :effective-nil-valued-keys #{}}` for
+   `:seon.config.ai.backup/model`.
+5. **TRUE — the reported flow failure was unrelated.** On an archived clean
+   `42887d234` tree, `bin/test seon.config-test seon.schema.edn-test` ran 15
+   tests / 103 assertions with zero failures, and full `bin/test` ran 487
+   tests / 2,051 assertions with zero failures. The lane's shared-tree failure
+   was
+   `seon.flow-test/production-launcher-wedges-degrade-capacity-by-exactly-n`,
+   which expected `:seon.flow/platform-threads? true` and observed false. Its
+   actual owner is the later `seon.flow` virtual-work-launcher wave:
+   `f14a6cf7a` changed `start-work-launcher!` to use virtual task threads, and
+   `24544c1d1` updated and extended the owning flow tests. Both commits postdate
+   `42887d234`; the clean target checkpoint is green.
+
+Acceptance remains unchanged: every supported registration producer must feed
+the one derivation before manifest admission and canonical database-attribute
+selection, and the regression must exercise that public producer rather than
+calling the derivation helper directly.
