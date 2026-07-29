@@ -3,6 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.program :as program]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
 
@@ -20,32 +21,9 @@
 
 (defn- durable-row
   [event]
-  (cond
-    (:seon.ns/name event)
-    (select-keys event [:seon.ns/name :seon.ns/source :seon.ns/doc
-                        :seon.ns/require-edges])
-
-    ;; EVERY `defn`/`defn-` in a source file is a graph row. A contract is
-    ;; the right gate for what agents may DEPEND on, not for what the graph
-    ;; contains: `:seon.fn/calls` reachability — workload derivation, test
-    ;; selection, usage signals, renderer discovery — breaks the moment a
-    ;; chain passes through an unindexed private helper. `:seon.fn/private?`
-    ;; and the presence of `:seon.fn/spec` are ordinary attributes.
-    ;; `seon.sci.eval/program-row` keeps the contract REQUIREMENT, because
-    ;; an agent-authored durable declaration is exactly the depended-upon
-    ;; case the selective-admission ruling governs.
-    (:seon.fn/sym event)
-    (select-keys event [:seon.fn/sym :seon.fn/ns :seon.fn/source
-                        :seon.fn/arglists :seon.fn/doc :seon.fn/private?
-                        :seon.fn/spec :seon.fn/workload])
-
-    (:seon.schema/key event)
-    (select-keys event [:seon.schema/key :seon.schema/ns :seon.schema/form])
-
-    (:seon.test/sym event)
-    (select-keys event [:seon.test/sym :seon.test/ns :seon.test/source])
-
-    :else nil))
+  ;; Build indexing needs every function, including private and uncontracted
+  ;; helpers, so call-graph reachability cannot disappear at an ordinary form.
+  (program/declaration-row event :all))
 
 (defn- unadmitted-functions
   "The function declarations this file produced no row for, with the reason.
@@ -104,36 +82,9 @@
     (keep durable-row))
    roots))
 
-(def ^:private program-shapes
-  [{::identity-attr :seon.ns/name
-    ::source-attr :seon.ns/source
-    ::owned-attrs
-    [:seon.ns/name :seon.ns/source :seon.ns/doc
-     :seon.ns/require-edges]}
-   {::identity-attr :seon.fn/sym
-    ::source-attr :seon.fn/source
-    ::owned-attrs
-    [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
-     :seon.fn/doc :seon.fn/private? :seon.fn/spec :seon.fn/workload]}
-   {::identity-attr :seon.schema/key
-    ::source-attr :seon.schema/form
-    ::owned-attrs
-    [:seon.schema/key :seon.schema/ns :seon.schema/form]}
-   {::identity-attr :seon.test/sym
-    ::source-attr :seon.test/source
-    ::owned-attrs
-    [:seon.test/sym :seon.test/ns :seon.test/source]}])
-
-(def ^:private shape-by-identity
-  (into {} (map (juxt ::identity-attr identity)) program-shapes))
-
 (defn- row-identity
   [row]
-  (some
-   (fn [{identity-attr ::identity-attr}]
-     (when-some [value (get row identity-attr)]
-       [identity-attr value]))
-   program-shapes))
+  (program/row-identity row))
 
 (defn- ref-value
   [db identity-attr value]
@@ -172,8 +123,8 @@
       (seq refers) (assoc :seon.ns.require/refers (set refers)))))
 
 (defn- canonical-row
-  [db shape row]
-  (let [row (select-keys row (::owned-attrs shape))
+  [db row]
+  (let [row (program/canonical-row row)
         row
         (cond-> row
           (:seon.fn/ns row)
@@ -199,8 +150,8 @@
 
 (defn- current-rows
   [db shape]
-  (let [identity-attr (::identity-attr shape)
-        source-attr (::source-attr shape)
+  (let [identity-attr (:seon.program/identity-attribute shape)
+        source-attr (:seon.program/source-attribute shape)
         provenance
         (into
          {}
@@ -245,7 +196,7 @@
           [[identity-attr identity]
            {::entity entity
             ::process-id (get provenance entity)
-            ::row (canonical-row db shape row)
+            ::row (canonical-row db row)
             ::require-edge-eids
             (into []
                   (keep :db/id)
@@ -280,15 +231,9 @@
 
 (defn- changed-row-tx
   [shape identity desired current]
-  (let [identity-attr (::identity-attr shape)
+  (let [identity-attr (:seon.program/identity-attribute shape)
         current-row (::row current)
-        changed-attrs
-        (into
-         []
-         (filter
-          #(not= (get current-row %) (get desired %)))
-         (disj (into (set (keys current-row)) (keys desired))
-               identity-attr))]
+        changed-attrs (program/changed-attributes current-row desired)]
     (when (seq changed-attrs)
       (let [edge-retracts
             (when (some #{:seon.ns/require-edges} changed-attrs)
@@ -312,14 +257,14 @@
 
 (defn- shape-plan
   [db process-id shape desired]
-  (let [identity-attr (::identity-attr shape)
+  (let [identity-attr (:seon.program/identity-attribute shape)
         current (current-rows db shape)
         desired
         (into {}
               (map
                (fn [row]
                  (let [identity (row-identity row)]
-                   [identity (canonical-row db shape row)])))
+                   [identity (canonical-row db row)])))
               (filter identity-attr desired))
         changes
         (into
@@ -329,7 +274,7 @@
             (if-let [current-row (get current identity)]
               (when (or (= process-id (::process-id current-row))
                         (not (contains? (::row current-row)
-                                        (::source-attr shape))))
+                                        (:seon.program/source-attribute shape))))
                 (changed-row-tx shape identity desired-row current-row))
               [desired-row])))
          desired)
@@ -406,7 +351,7 @@
           (count operations))
         namespace-plan
         (shape-plan @connection process-id
-                    (get shape-by-identity :seon.ns/name)
+                    (program/shape :seon.ns/name)
                     program-rows)
         namespace-operations (transaction namespace-plan)
         declaration-plan
@@ -414,9 +359,10 @@
          []
          (mapcat
           #(shape-plan @connection process-id % program-rows))
-         (remove
-          (comp #{:seon.ns/name} ::identity-attr)
-          program-shapes))
+         (keep (fn [identity-attribute]
+                 (when-not (= :seon.ns/name identity-attribute)
+                   (program/shape identity-attribute)))
+               program/identity-attributes))
         final-plan
         (into declaration-plan
               (digest-plan @connection (:seon.ancestor/digest request)))

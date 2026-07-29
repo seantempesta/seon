@@ -55,6 +55,7 @@
   (recovery asserts its `interrupted-at`)."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -555,61 +556,63 @@
   [request]
   [[:db.fn/call #'receipt-refusal-call request]])
 
-(def ^:private program-attributes
-  {:seon.fn/sym
-   #{:seon.fn/ns :seon.fn/source :seon.fn/arglists :seon.fn/doc
-     :seon.fn/private? :seon.fn/spec :seon.fn/workload}
-   :seon.schema/key
-   #{:seon.schema/ns :seon.schema/form}
-   :seon.test/sym
-   #{:seon.test/ns :seon.test/source}})
-
 (defn- program-row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
-  (if-let [deleted-sym (:seon.fn/delete row)]
-    (let [function (d/pull db
-                           [:db/id {:seon.fn/ns [:db/id]}]
-                           [:seon.fn/sym deleted-sym])
-          namespace-eid (get-in function [:seon.fn/ns :db/id])
+  (if-let [deleted-identities (:seon.program/delete-identities row)]
+    (let [declarations
+          (into []
+                (keep (fn [[identity-attribute identity-value]]
+                        (when-let [declaration
+                                   (d/pull db
+                                           [:db/id
+                                            {:seon.fn/ns [:db/id]}
+                                            {:seon.test/ns [:db/id]}]
+                                           [identity-attribute identity-value])]
+                          declaration)))
+                deleted-identities)
+          namespace-eid (some #(or (get-in % [:seon.fn/ns :db/id])
+                                   (get-in % [:seon.test/ns :db/id]))
+                              declarations)
           owner (when namespace-eid
                   (d/q '[:find ?agent .
                          :in $ ?namespace
                          :where
                          [?agent :seon.cluster.agent/namespace ?namespace]]
                        db namespace-eid))]
-      (when (and function (nil? owner))
+      (when (and (seq declarations) (nil? owner))
         (refuse! `receipt-settle-call ::program-delete-not-owned request))
-      (if function [[:db/retractEntity (:db/id function)]] []))
-    (let [identity (some #(when (contains? row %) %) (keys program-attributes))
-        owned (get program-attributes identity)
-        namespace-ref (or (:seon.fn/ns row)
-                          (:seon.schema/ns row)
-                          (:seon.test/ns row))
-        existing (when identity (d/pull db '[*] [identity (get row identity)]))
-        required? (case identity
-                    :seon.fn/sym
-                    (and (:seon.fn/source row) (:seon.fn/spec row))
-                    :seon.schema/key
-                    (and (:seon.schema/form row)
-                         (schema/malli-form?
-                          (edn/read-string (:seon.schema/form row))))
-                    :seon.test/sym
-                    (some? (:seon.test/source row))
-                    false)]
-    (when-not (and identity required?)
-      (refuse! `receipt-settle-call ::program-row-not-admitted request))
-    (when-not (:db/id (d/pull db [:db/id] namespace-ref))
-      (refuse! `receipt-settle-call ::program-namespace-missing request))
-    (into
-     (if existing
-       (mapv (fn [attribute]
-               [:db/retract (:db/id existing) attribute])
-             (remove #(contains? row %) owned))
-       [])
-      [(assoc row :db/id
-              (or (:db/id existing)
-                  (str (name identity) ":" (get row identity))))]))))
+      (mapv (fn [declaration] [:db/retractEntity (:db/id declaration)])
+            declarations))
+    (let [[identity identity-value] (program/row-identity row)
+          namespace-ref (or (:seon.fn/ns row)
+                            (:seon.schema/ns row)
+                            (:seon.test/ns row))
+          existing (when identity (d/pull db '[*] [identity identity-value]))
+          changed (when existing (program/changed-attributes existing row))
+          required? (case identity
+                      :seon.fn/sym
+                      (and (:seon.fn/source row) (:seon.fn/spec row))
+                      :seon.schema/key
+                      (and (:seon.schema/form row)
+                           (schema/malli-form?
+                            (edn/read-string (:seon.schema/form row))))
+                      :seon.test/sym
+                      (some? (:seon.test/source row))
+                      false)]
+      (when-not (and identity required?)
+        (refuse! `receipt-settle-call ::program-row-not-admitted request))
+      (when-not (:db/id (d/pull db [:db/id] namespace-ref))
+        (refuse! `receipt-settle-call ::program-namespace-missing request))
+      (into
+       (if existing
+         (mapv (fn [attribute]
+                 [:db/retract (:db/id existing) attribute])
+               (filter #(contains? existing %) changed))
+         [])
+       [(assoc row :db/id
+               (or (:db/id existing)
+                   (str (name identity) ":" identity-value)))]))))
 
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn

@@ -102,6 +102,7 @@
             [my.run]
             [sci.core :as sci]
             [sci.interrupt :as sci.interrupt]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
@@ -299,52 +300,31 @@
                       (ex-data throwable)
                       (assoc :seon.sci.eval/data (ex-data throwable)))})
 
-(defn- quoted-symbol
-  [value]
-  (when (and (seq? value) (= 'quote (first value)) (= 2 (count value))
-             (symbol? (second value)))
-    (second value)))
-
-(defn- deletion-row
-  [event]
-  (let [form (:seon.sci.reader/form event)]
-    (when (and (seq? form)
-               (= 'ns-unmap (first form))
-               (= 3 (count form)))
-      (when-let [namespace-name (quoted-symbol (second form))]
-        (when-let [function-name (quoted-symbol (nth form 2))]
-          {:seon.fn/delete (str (symbol (str namespace-name)
-                                             (str function-name)))
-           :seon.fn/source (:seon.sci.reader/source event)
-           :seon.fn/ns [:seon.ns/name namespace-name]})))))
-
 (defn- program-row
   "Return the one reader declaration eligible for durable publication.
   A function without its complete contract is deliberately absent."
   [event]
   (or
-   (deletion-row event)
-   (cond
-    (and (:seon.fn/sym event) (:seon.fn/spec event))
-    (if (schema/malli-form? (edn/read-string (:seon.fn/spec event)))
-      (select-keys event [:seon.fn/sym :seon.fn/ns :seon.fn/source
-                          :seon.fn/arglists :seon.fn/doc :seon.fn/private?
-                          :seon.fn/spec :seon.fn/workload])
-      (throw (ex-info "Function contract is not a registered Malli form."
-                      {:seon.error/kind ::contract-refused
-                       :seon.fn/sym (:seon.fn/sym event)})))
+   (program/deletion-row event)
+   (let [row (program/declaration-row event :contracted)]
+     (cond
+       (:seon.fn/sym row)
+       (if (schema/malli-form? (edn/read-string (:seon.fn/spec row)))
+         row
+         (throw (ex-info "Function contract is not a registered Malli form."
+                         {:seon.error/kind ::contract-refused
+                          :seon.fn/sym (:seon.fn/sym row)})))
 
-    (:seon.schema/key event)
-    (if (schema/malli-form? (edn/read-string (:seon.schema/form event)))
-      (select-keys event [:seon.schema/key :seon.schema/ns :seon.schema/form])
-      (throw (ex-info "Schema registration is not a registered Malli form."
-                      {:seon.error/kind ::schema-refused
-                       :seon.schema/key (:seon.schema/key event)})))
+       (:seon.schema/key row)
+       (if (schema/malli-form? (edn/read-string (:seon.schema/form row)))
+         row
+         (throw (ex-info "Schema registration is not a registered Malli form."
+                         {:seon.error/kind ::schema-refused
+                          :seon.schema/key (:seon.schema/key row)})))
 
-    (:seon.test/sym event)
-    (select-keys event [:seon.test/sym :seon.test/ns :seon.test/source])
+       (:seon.test/sym row) row
 
-     :else nil)))
+       :else nil))))
 
 (defn- one-event
   [source namespace-name]
@@ -375,9 +355,9 @@
         (some (fn [attribute]
                 (when-some [value (get row attribute)]
                   [attribute value]))
-              [:seon.fn/sym :seon.schema/key :seon.test/sym
-               :seon.fn/delete])
-        committed (when-not (= identity :seon.fn/delete)
+              (conj program/identity-attributes
+                    :seon.program/delete-identities))
+        committed (when-not (= identity :seon.program/delete-identities)
                     (d/pull db '[*] [identity value]))]
     (when-not (= (:seon.fn/source row) (:seon.fn/source committed))
       (when (= identity :seon.fn/sym)
@@ -396,13 +376,18 @@
       ;; rows. They are deliberately not executed as arbitrary eval effects.
       :seon.schema/key (activate-program-schemas! db)
       :seon.test/sym true
-      :seon.fn/delete
-      (let [namespace-name (second (:seon.fn/ns row))
-            event (one-event (:seon.fn/source row) namespace-name)]
-        (when (d/pull db [:db/id] [:seon.fn/sym value])
-          (throw (ex-info "Deleted function is still present after commit."
+      :seon.program/delete-identities
+      (let [namespace-name (second (:seon.program/ns row))
+            event (one-event (:seon.program/source row) namespace-name)]
+        (when-let [remaining
+                   (some (fn [[identity-attribute identity-value]]
+                           (when (d/pull db [:db/id]
+                                         [identity-attribute identity-value])
+                             [identity-attribute identity-value]))
+                         value)]
+          (throw (ex-info "Deleted declaration is still present after commit."
                           {:seon.error/kind ::install-delete-mismatch
-                           :seon.fn/sym value})))
+                           :seon.program/identity remaining})))
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         true)
