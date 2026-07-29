@@ -859,6 +859,26 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
+  (26) THE OPERATOR IS MULTICLUSTER WITH SMART DEFAULTS (owner, 
+  2026-07-29): "make sure it's multicluster and has good defaults so
+  you don't have to do obvious things, and we have a good default
+  config." The governing rule is the one already used at the eval
+  boundary: UNAMBIGUOUS IS AUTOMATIC, AMBIGUOUS FAILS LOUDLY — never
+  silently pick, and never make the operator state the obvious.
+  (a) No cluster named ⇒ `default` for single-cluster verbs (start,
+  logs, config apply). (b) `status` reports EVERY cluster, always.
+  (c) A destructive verb with no name (stop, down) acts when there is
+  exactly ONE candidate and REFUSES with the list when there are
+  several — obvious when obvious, safe when not. (d) A named cluster
+  that does not exist gets told what DOES exist, never a bare error.
+  (e) An unknown verb fails loudly with usage; it never falls through
+  to another program (the old bin/seon allowlist silently routed every
+  unlisted verb into the dead seon.dev.cli, producing a datahike load
+  trace that looked like a broken system — that fragility is the
+  defect, not just the broken `status`). (f) The shipped default
+  manifest stays complete: a zero-overlay boot is a fully working
+  system (already ruled and tested by the config wave), so the good
+  default config is the one you get by naming nothing at all.
   (25) AGENTS START IDLE; NOTHING RESUMES ITSELF (owner ruling
   2026-07-29, in his words: "start up the agents so they are in an
   idle state if they were running before. A message from the user or
