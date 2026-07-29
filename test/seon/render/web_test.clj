@@ -41,7 +41,7 @@
             [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
-  (:import [java.net Socket URI]
+  (:import [java.net BindException Socket URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]
            [java.util.concurrent CompletableFuture]))
@@ -212,6 +212,19 @@
            state
            (recur)))))
    label))
+
+(defn- settle-render!
+  "Fence all render work preceding this message and return the pass count
+  produced by the fence's own fact-only derivation."
+  [context]
+  (let [settlement (async/promise-chan)]
+    (is (async/offer!
+         (:render-channel context)
+         {:seon.render.web/settlement settlement})
+        "the settlement request enters the render proc's sliding in-port")
+    (support/await-event!
+     (future (async/<!! settlement))
+     [:render-settled])))
 
 (defn- block-map
   [name priority projection]
@@ -536,13 +549,10 @@
         (async/tap (:pages-mult context) slow)
         (try
           (read-patches! fast 2)
-          ;; The socket's own on-open wake is not one of the K commits
-          ;; below. Wait until that fact-only pass has published the
-          ;; watched registration before taking the census.
-          (await-ping! context
-                       #(= 1 (:seon.render.web/watched-agents %))
-                       [:slow-tab-initial-pass])
-          (let [before (derivations context)
+          ;; The socket's on-open wake is not one of the K commits.
+          ;; Fence it on the render proc's own input and use the exact
+          ;; pass count returned by that completed derivation.
+          (let [before (settle-render! context)
                 k 5]
             ;; nobody reads `slow` for the whole burst
             (doseq [n (range k)]
@@ -573,6 +583,37 @@
           (finally
             (async/untap (:pages-mult context) slow)
             (.close fast)))))))
+
+(deftest failed-ephemeral-bind-preserves-the-bind-failure
+  (support/with-database
+    (fn [connection]
+      (let [pages-channel (async/chan (async/sliding-buffer 1))
+            render-channel (async/chan (async/sliding-buffer 1))
+            failure
+            (with-redefs
+             [http/run-server
+              (fn [_handler _options]
+                (throw (BindException. "injected ephemeral bind failure")))]
+              (try
+                (web/start!
+                 {:seon.store/connection connection
+                  :seon.cluster.agent/id agent-id
+                  :seon.sci.admit/caps caps
+                  :seon.cluster.run/process process
+                  :seon.render.web/pages-mult (async/mult pages-channel)
+                  :seon.render.web/registration (atom {})
+                  :seon.render.web/render-channel render-channel
+                  :seon.render.web/port 0})
+                nil
+                (catch Throwable thrown thrown)))]
+        (try
+          (is (instance? clojure.lang.ExceptionInfo failure))
+          (is (= 0 (:seon.render.web/attempted-port (ex-data failure))))
+          (is (instance? BindException (ex-cause failure)))
+          (is (not (instance? NullPointerException failure)))
+          (finally
+            (async/close! pages-channel)
+            (async/close! render-channel)))))))
 
 (deftest stalled-sse-consumer-has-a-constant-socket-write-bound
   ;; The sliding-1 tap is only the PRE-SOCKET bound. This raw client opens

@@ -443,7 +443,10 @@
      (async/put! (:seon.render.web/completion state) ::stopped))
    state)
   ([state input message]
-   (let [state (case input
+   (let [settlement
+         (when (and (= ::interest input) (map? message))
+           (::settlement message))
+         state (case input
                  ;; A repaint is facts only. Partials were never facts,
                  ;; so a commit wake or reconnect wake cannot restore
                  ;; process-local stream memory.
@@ -466,6 +469,13 @@
        ;; serves it whole
        (Thread/sleep (long remainder)))
      (let [[state pages] (render-pass state)]
+       ;; A settlement request rides the same sliding-1 in-port as the
+       ;; wakes it fences. Its reply is the pass count produced by this
+       ;; exact derivation, so a proof need not sample Flow's published
+       ;; state and accidentally count an earlier pass that finished
+       ;; after the sample.
+       (when settlement
+         (async/put! settlement (::passes state)))
        [(assoc state ::last-pass-nanos (System/nanoTime))
         (when pages {::pages [pages]})]))))
 
@@ -923,8 +933,15 @@
         [server fell-back?]
         (try
           [(bind! wanted) false]
-          (catch java.net.BindException _
-            (when-not (zero? wanted)
+          (catch java.net.BindException cause
+            (if (zero? wanted)
+              (do
+                (.shutdownNow workers)
+                (throw
+                 (ex-info
+                  "The web server could not bind its ephemeral port."
+                  {:seon.render.web/attempted-port wanted}
+                  cause)))
               [(bind! 0) true])))
         bound (http/server-port server)]
     (cond-> {:seon.render.web/server server
