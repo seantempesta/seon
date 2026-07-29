@@ -177,7 +177,40 @@ executor; current rendering is complete snapshots plus per-tab deltas
 The topology measurement was wrong twice (~0.3 → 0.291 → 0.343 ms),
 which is why the independent pass exists.
 
-## Where the tree is (2026-07-29 late evening)
+## Where the tree is (2026-07-29 night)
+
+ORIENTATION CONSOLIDATED: `docs/TRANSFER_PROMPT.md` is now the one standing
+orientation for anyone working on Seon — what it is, why archaeology precedes
+design, which skills to load and why they can be trusted, the loop, the warts,
+the mentality as standing rulings, and how the owner works. The plan handbook
+was ABSORBED into it and deleted (one copy, not two — same reasoning as ruling
+29), and it lives at top-level `docs/` deliberately because it outlives this
+chunk. `AGENTS.md` and the plan README point at it.
+
+SKILLS: one real directory (`.agents/skills`), the other two paths are
+symlinks, and `bin/test` now REFUSES TO RUN if that is broken — the tooling
+lane turned the ruling into a live gate. `browser-automation` deleted (built-in
+browser instructions already cover it). All remaining skills independently
+verified high-trust, with four unverifiable claims DELETED rather than hedged.
+
+LANDED WHILE THE OWNER WATCHED: ruling 28's detect-and-deny is real
+(`de8560cd9`, "Refuse stale cluster program graphs" — 716 lines across
+`seon.fn`, `cluster.clj`, `ancestor.clj` plus boot/fn/admission tests), and the
+operator-reconciliation lane archived the two operator failures it fixed
+(`110080420`). `bin/codex-agent status` now reports named lanes with elapsed
+times instead of raw pids.
+
+STILL RUNNING (3): cluster-priming (`bin/seon index`, the priming procedure +
+coherence detection), operator-reconciliation (ruling 27 — one derivation of
+cluster truth; ~709 lines into `fresh_operator.clj`), tool-sharpening (the
+`bin/test` failure-name output, the obsolete skills generator's deletion, and
+the wider tooling sweep). Each owes a green gate at its own exit.
+
+GRADUATION ATTEMPT 7 still waits for a quiet tree. Both attempt-6 blockers are
+fixed; auditing a moving tree measures other lanes' half-finished work, which
+is what wasted attempts 2 and 3.
+
+## Superseded: where the tree was (late evening)
 
 RULING 25 IS BUILT (`811ec4356`): interrupted runs close atomically,
 custody and pointer clear, NO plan suffix resumes, unanswered messages
