@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: valid
+severity: blocker
 tags: [issue, agent-runtime, run-loop, sci]
 ---
 
