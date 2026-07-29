@@ -43,6 +43,28 @@ retains veto at every recorded ruling point. The quarry documents inventory and
 lessons; the plans derive from the RULED architecture — reconceive or
 retire-with-reason, never copy.
 
+**V0 SEAL REVIEW (orchestrator, ~04:15 — the loop is REAL, three finds
+for morning).** Landed+accepted: parse-time ns attribution live at
+freeze (the splitter now reads through the ONE reader — a second
+reader retired); decline bound + taught via assignment-ai; settlement
+renders beside the reply; live round-trip proven on Ollama through the
+no-auth chain; provider-death path proven by accident (Ollama died
+mid-drive; nothing hung or re-sent). Gate 479/2030/0. FINDS: (1)
+BLOCKER, needs a design ruling — :owner-fixed is UNREACHABLE: the
+problem derives from the immutable red receipt, so no repair ever
+settles it; the clean fix candidate is rev-4'''s own words taken
+seriously — derive the problem from the OBSERVABLE CONDITION (the var
+still unbound, the test still failing) not from receipt redness; where
+no condition is computable, declination is honestly the only settle.
+Orchestrator recommendation drafted; owner confirms before the fix
+lane. (2) D2'''s self-assignment refusal exists in the plan, not in
+code (9/15 drive assignments were alpha→alpha) — small unit. (3) BOOT
+CANNOT SELECT A CONFIG MANIFEST — two drives invented two workarounds;
+the explicit manifest-selection seam (the old SEON_CONFIG idea,
+reconceived) is a real unit. MODEL RESIDUE (evidence, not defect):
+qwen planner messaged prose drafts + declared "ready for deployment"
+with nothing defined — prompt/eval work for the namespace-view era.
+
 **4AM STATE (for the morning resume).** Background codex wrappers are
 being SIGTERM'''d (exit 143; machine load ~6-7) — three resumes died
 but THE WORK SURVIVED: test-smell-audit report COMMITTED (top finding:
