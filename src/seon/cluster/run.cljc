@@ -235,7 +235,7 @@
   Returns the run entity assertion plus the agent pointer assertion —
   BOTH derived from the one `::agent` ref in the request; there is no
   separate agent-id field to disagree with it."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::agent ::agent]
@@ -287,7 +287,7 @@
     revision, Revision 3).
   There are no observed-* fields; the mid-transaction db is the only
   truth consulted."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::process ::process]
@@ -321,7 +321,7 @@
   "Release custody, inside the transaction.
   Retracts the process. Refuses unless the run is open and held by
   exactly `::process`."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::process ::process]]]
@@ -348,7 +348,7 @@
   `::process` — AND refuses `::agent-pointer-broken` when the owning
   agent's pointer does not point at this run: a broken relation is
   settled loudly, never by silently omitting the retraction."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::process ::process]
@@ -385,7 +385,7 @@
   exactly `::process`, and has NO existing `::plan-digest` —
   concurrent replies are mutually exclusive because the second one
   reads the first one's digest and refuses."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::process ::process]
@@ -493,7 +493,7 @@
   alone, so an ordinal that ever had a receipt refuses forever —
   nothing re-executes."
   {:malli/schema
-   [:=> [:cat :any
+   [:=> [:cat :seon.db/database-value
          [:map {:closed true}
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
@@ -754,7 +754,7 @@
   terminal fact refuses `::no-terminal-fact`, because \"settled with
   nothing settled\" is a caller bug."
   {:malli/schema
-   [:=> [:cat :any
+   [:=> [:cat :seon.db/database-value
          [:map {:closed true}
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
@@ -808,7 +808,7 @@
   leaves no derived `:close` work whose wake could be mistaken for a
   retry."
   {:malli/schema
-   [:=> [:cat :any
+   [:=> [:cat :seon.db/database-value
          [:map {:closed true}
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
@@ -883,7 +883,7 @@
   left behind, and a boot that threw on it would wedge the cluster it
   was trying to rescue. So the pointer is retracted exactly when it
   points at this run, and the run closes either way."
-  {:malli/schema [:=> [:cat :any
+  {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map {:closed true}
                         [::id ::id]
                         [::live-processes [:set ::process]]
