@@ -53,7 +53,7 @@ clean loop of the owning gate.
 | B4 | `seon.warn` guidance named removed `*conn*`; ~15 sync facade reads | `src/seon/warn.cljs` | **CLOSED** `0887b1ea`: pure data plane, 14-site example audit (3 fixed incl. one beyond the PRD), live self-heal proof |
 | B5 | remaining sync facade reads | listed files | **CLOSED** `aadc8f33`+`b3c15696`+`beeacff9`: handlers/message fallback deleted (pull-patterns already nested identity), my.skills/my.canvas/web.internal migrated; two live bugs found+fixed in proofs (pinned decode arg order; key-presence error guards -> string? contract) |
 | B6 | Stray repo-root `locks/` from `cli_test` fixture running real `state/with-lock` with nil process-dir | `script/seon/dev/state.clj`, `test/seon/dev/cli_test.clj` | **CLOSED** `3d4aee61` + `a850b343` (relative env coordinates absolutized after the guard exposed `bin/acme`) |
-| B7 | MCP/dev CLJS REPL cannot use `await`/`^:async`; Promises returned unresolved | `bin/mcp-server-cljs` path | **CLOSED** `8116ba1c`: transport bridge mirrors agent auto-await; five-point live proof; MCP clients must restart |
+| B7 | Deleted CLJS tools remained advertised by the development MCP | `bin/mcp-server` + registrations | **CLOSED**: error-only tools deleted; the server advertises only JVM operations; MCP clients must restart |
 | B10 | Default client crash-loops on reload rehost: `:seon.runtime.admission/status :publishing` -> `on-core-error :crash`; required a default cluster reset on 2026-07-20 | `seon.runtime.admission` / reload path | **CLOSED** `1098c061`: publication-scoped mark-unavailable + refusal-value prepare; reproduced twice pre-fix, reload-storm survived post-fix; issue archived |
 | B12 | dead `:seon.eval/record-error` warn check | `src/seon/warn.cljs` | **CLOSED** `0887b1ea`: check DELETED (reviewed deviation — fault datoms carry no structural discriminator, and a rewrite would duplicate `core-faults-block` as a second derived surface over the same datoms); issue archived |
 | B13 | `bin/issues-index` blocked repo-wide by illegal issue `status`/`severity` values | `docs/seon/issues/` | **CLOSED AGAIN** `0d4169ed` after the regression: seven notes normalized, two resolved notes archived, index regenerated; `bin/issues-index --check` passes with 123 open / 362 archived |
@@ -521,7 +521,7 @@ is a real Bun/JVM retained-value page-and-retirement journey, followed by the
 same-artifact route/browser/SSE crossing and query-shape behavioral probe. A
 first frozen default attempt created and coherently parked two fresh proof
 agents without touching existing owners. It stopped before claiming evidence:
-MCP `eval_cljs` selects a pod REPL rather than submitting a managed eval, the
+The historical CLJS MCP selected a pod REPL rather than submitting a managed eval, the
 maintained compiled invocation remained pending, and production intentionally
 does not expose sampler touches/sends or an exact-owner retire-after-start
 control. Review rejected a standalone integration process because database
@@ -681,7 +681,7 @@ code (`bin/seon down`, `bin/acme down`) with recorded absence evidence —
 the rename cannot cross persisted `:seon.dev.process/pod` records, restore
 intents, or pre-rename release manifests. Gate: three suites, `bin/seon up`
 from the quiesced state (never `restart` across the rename) with live
-status/web-UI proof, one MCP `eval_cljs` round-trip after restarting the
+status/web-UI proof, one MCP `eval_clj` round-trip after restarting the
 MCP client, and a vendor-excluded sweep (`rg -vi runpod` — RunPod vendor
 tokens are frozen) returning only `pod-host/`, dated research/history, and
 dependency-owned terminology. No active authority may continue teaching

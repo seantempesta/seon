@@ -185,10 +185,9 @@ bin/acme restart pod          # acme pod picks it up
   `/agent/{id}`, `/agent/{id}/call`, `/agent/{id}/feed`).
 - **Wire-server REPL:** `nc -U`-style on `127.0.0.1:7981` (the loopback socket
   REPL) for writer-side queries.
-- **NOT MCP:** the `mcp__seon_cljs__*` tools only see the live `:client`
-  build's runtime, not `:acme-client`. Drive the acme pod via HTTP + the wire
-  REPL, or add a transient `:acme-client` watch on a non-7889 nREPL port for
-  deep interactive debugging.
+- **NOT MCP:** the repository MCP discovers fresh JVM cluster advertisements;
+  it does not address this historical ACME pod. Drive that pod through its
+  documented HTTP and REPL surfaces.
 - **Live agent drives:** export `SEON_AI_PROVIDER=deepseek` +
   `DEEPSEEK_API_KEY` (cheap, pre-authorized) to drive turns in the acme pod.
 

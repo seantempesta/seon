@@ -170,8 +170,8 @@ bin/seon init --changed PATH  # incremental when safe; complete fallback
 bin/seon init <name> --force  # destructive refork of an existing branch
 ```
 
-For live work: `mcp__seon_cljs__runtime_status`, then
-`mcp__seon_cljs__eval_clj`, cluster-qualified. **The REPL is the first design
+For live work: `mcp__seon__runtime_status`, then
+`mcp__seon__eval_clj`, cluster-qualified. **The REPL is the first design
 surface, not a debugging tool of last resort** — one form against a live
 cluster answers most design questions, and a plan written without a probe is a
 hypothesis.

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "seon_cljs": {
+    "seon": {
       "type": "stdio",
-      "command": "bin/mcp-server-cljs",
+      "command": "bin/mcp-server",
       "args": [],
       "env": {}
     }

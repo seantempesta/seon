@@ -868,8 +868,8 @@ If you are spinning up fresh, this is the loop:
    <your-name>`); never reset, bounce, or write to a cluster someone else is
    using — clusters are sovereign and cheap (a fork is ~17 ms). Load-only
    probes need no cluster at all: `clojure -M:dev` gives you the namespaces.
-2. **Reach it.** `mcp__seon_cljs__runtime_status` lists live clusters and their
-   ports; `mcp__seon_cljs__eval_clj` evaluates in the selected cluster's JVM.
+2. **Reach it.** `mcp__seon__runtime_status` lists live clusters and their
+   ports; `mcp__seon__eval_clj` evaluates in the selected cluster's JVM.
    Qualify the cluster when more than one is live — ambiguity must fail, never
    silently pick. The default session is right for disposable probes; use a
    named `session_id` only when later forms intentionally depend on `*1`/`*2`.
@@ -916,8 +916,8 @@ MCP server loaded by `.codex/config.toml` and `.mcp.json`:
 - keep correctness tests in `bin/test`. MCP eval is the first probe, not
   another test runner.
 
-`eval_cljs` and the pod it addressed are GONE (CLJS off, owner ruling
-2026-07-27); nothing in the fresh system evaluates ClojureScript.
+The repository MCP advertises only JVM operations. Nothing in the fresh system
+evaluates ClojureScript (CLJS off, owner ruling 2026-07-27).
 
 The server discovers live clusters from their advertisements and resolves the
 selected cluster's prepl coordinate. A bare id present in several clusters

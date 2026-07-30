@@ -461,24 +461,10 @@
                    :seon.dev.mcp/error (ex-message throwable)}
                   (ex-data throwable))))))))
 
-;;; ---------------------------------------------------------------------------
-;;; Retained client contract
-;;; ---------------------------------------------------------------------------
-
-(def ^:private cljs-off-message
-  "The CLJS build is off (owner ruling 2026-07-27). Use eval_clj.")
-
-(defn- cljs-off-error
-  []
-  (mcp-error {:seon.dev.mcp/failure :cljs-build-off
-              :seon.dev.mcp/error cljs-off-message}))
-
 (defn- execute-list-sessions
   [_]
   (mcp-success
-   (str cljs-off-message
-        "\nCLJS sessions: (none)"
-        "\nCLJ io-prepl sessions: "
+   (str "CLJ io-prepl sessions: "
         (if (seq @clj-sessions)
           (str/join ", "
                     (sort (map (fn [[cluster session-id]]
@@ -511,25 +497,10 @@
           (if (seq rows)
             (str/join "\n" (map row-status-line rows))
             "  (none)")
-          "\n" cljs-off-message
           "\nCLJ io-prepl sessions: " (count @clj-sessions)))))
 
 (def tools
-  [{:name "eval_cljs"
-    :description "Retained ClojureScript evaluation contract. The CLJS build is off (owner ruling 2026-07-27), so this tool returns a guiding error value."
-    :inputSchema {:type "object"
-                  :properties {:code {:type "string"}
-                               :cluster {:type "string"
-                                         :description "Cluster served by this checkout (default: default). For another live cluster, provide cluster-qualified agent_id."}
-                               :agent_id {:type "string"
-                                          :description "Database agent id, optionally '<cluster>/<id>' for deterministic routing."}
-                               :session_id {:type "string"
-                                            :description "Stateful CLJS session id; default is self-healing after pod/watcher restart."}
-                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}
-                               :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
-                  :required ["code"]}}
-
-   {:name "eval_clj"
+  [{:name "eval_clj"
     :description "Evaluate one Clojure form through the selected cluster's advertised io-prepl. Discovery runs on every call; the default session reconnects after cluster restart."
     :inputSchema {:type "object"
                   :properties {:code {:type "string"}
@@ -539,30 +510,9 @@
                                :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
                   :required ["code"]}}
 
-   {:name "create_session"
-    :description "Retained CLJS session contract. The CLJS build is off (owner ruling 2026-07-27), so this tool returns a guiding error value."
-    :inputSchema {:type "object"
-                  :properties {:build {:type "string"
-                                       :description "Shadow build id keyword string, e.g. ':client'. Defaults to ':client'."}
-                               :cluster {:type "string"
-                                         :description "Cluster name (e.g. 'default'). Pins the session to the single runtime of the build advertising this cluster; errors (listing live advertisements) when none or several do."}}
-                  :required []}}
-
    {:name "list_sessions"
-    :description "List the bridge's active io-prepl sessions and report that CLJS sessions are unavailable."
+    :description "List the bridge's active CLJ io-prepl sessions."
     :inputSchema {:type "object" :properties {} :required []}}
-
-   {:name "stop_session"
-    :description "Retained CLJS session contract. The CLJS build is off, so this tool returns a guiding error value."
-    :inputSchema {:type "object"
-                  :properties {:session_id {:type "string"}}
-                  :required ["session_id"]}}
-
-   {:name "reload_deps"
-    :description "Retained Shadow dependency contract. The CLJS build is off, so this tool returns a guiding error value."
-    :inputSchema {:type "object"
-                  :properties {:session_id {:type "string" :description "Which session's build to reload-deps on. Defaults to 'default'."}}
-                  :required []}}
 
    {:name "runtime_status"
     :description "Report fresh JVM clusters from advertisement files and the current bridge session count."
@@ -580,10 +530,6 @@
         "eval_clj" (execute-clj-eval arguments)
         "runtime_status" (execute-runtime-status arguments)
         "list_sessions" (execute-list-sessions arguments)
-        "eval_cljs" (cljs-off-error)
-        "create_session" (cljs-off-error)
-        "stop_session" (cljs-off-error)
-        "reload_deps" (cljs-off-error)
         (throw (ex-info (str "Unknown tool: " name)
                         {:seon.dev.mcp/tool name}))))))
 
