@@ -508,7 +508,7 @@
                        [:seon.fn/sym "my.agents.agent-a/obsolete"]))
               "the explicit delete retracts the durable identity"))))))
 
-(deftest absent-foreign-ns-unmap-refuses-without-mutating-sci
+(deftest absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -526,23 +526,25 @@
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))]
           (drive! cluster 10)
-          (is (= :seon.cluster.run/refused
-                 (d/q '[:find ?kind .
+          (is (= "nil"
+                 (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 0]
-                        [?receipt :seon.error/kind ?kind]]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
                       @connection))
-              "an absent foreign identity still crosses the ownership fence")
-          (is (some?
+              "an absent program identity is still a successful REPL ns-unmap")
+          (is (nil?
                (sci.core/eval-string*
                 @evaluated-ctx
                 "(resolve 'clojure.string/upper-case)"))
-              "a refused terminal transaction never installs foreign ns-unmap"))))))
+              "the committed deletion installs against the run-local ctx"))))))
 
 (deftest refused-terminal-program-transactions-settle-and-do-not-refire
-  ;; Checkpoint-audit blocker B1, through the real SCI boundary. ONE
-  ;; refused event is the regression: it settles and closes atomically,
-  ;; records once, and generates neither another pass nor another trigger.
+  ;; Checkpoint-audit blocker B1, through the real SCI boundary with the
+  ;; terminal database outcome injected at its one transaction seam. ONE
+  ;; refused event settles and closes atomically, records once, and generates
+  ;; neither another pass nor another trigger. `ns-unmap` itself has ordinary
+  ;; SCI REPL semantics and is not the source of this refusal.
   (doseq [[label cap next-turn?]
           [["below the episode cap" 2 true]
            ["at the episode cap" 1 false]]]
@@ -553,6 +555,7 @@
                                'seon.sci.eval/evaluate)
                 connection (:seon.store/branch-connection cluster)
                 calls (atom [])
+                transact! store/transact!
                 original-install! sci.eval/install-program-row!
                 installations (atom [])]
             (d/transact
@@ -573,6 +576,29 @@
                   (if (= 1 (count @calls))
                     "(ns-unmap (quote seon.config) (quote defaults))"
                     "(my.run/complete \"recovered\")")})
+               store/transact!
+               (fn [target transaction]
+                 (let [tx-data (if (map? transaction)
+                                 (:tx-data transaction)
+                                 transaction)
+                       deletion?
+                       (some
+                        (fn [operation]
+                          (and (vector? operation)
+                               (= :db.fn/call (first operation))
+                               (= #'run/receipt-settle-call
+                                  (second operation))
+                               (seq
+                                (get-in operation
+                                        [2 :seon.sci.eval/program-row
+                                         :seon.program/delete-identities]))))
+                        tx-data)]
+                   (if deletion?
+                     {:seon.error/kind :seon.db/rejected
+                      :seon.error/message
+                      "injected terminal program refusal"
+                      :seon.error/data {:error :transact/program}}
+                     (transact! target transaction))))
                sci.eval/install-program-row!
                (fn [request]
                  (swap! installations conj request)
@@ -594,9 +620,9 @@
                     "the refusal closes in its terminal pass")
                 (is (= 1 (count receipts)))
                 (is (run/terminal? (first receipts)))
-                (is (= :seon.cluster.run/refused
+                (is (= :seon.db/rejected
                        (:seon.error/kind (first receipts))))
-                (is (= :seon.cluster.run/refused
+                (is (= :seon.db/rejected
                        (:seon.error/kind
                         (edn/read-string
                          (:seon.cluster.eval/result-edn
@@ -619,7 +645,8 @@
                           @connection))
                     "a returned error value creates no delivery wake")
                 (is (not-any?
-                     (comp :seon.fn/delete :seon.sci.eval/program-row)
+                     #(seq (get-in % [:seon.sci.eval/program-row
+                                      :seon.program/delete-identities]))
                      @installations)
                     "the refused deletion never installs")
                 (is (= "(defn defaults [] {})"
@@ -645,7 +672,7 @@
                       (is (= 2 (count @calls)))
                       (is (str/includes?
                            (:seon.ai/prompt (second @calls))
-                           "program-delete-not-owned")
+                           "injected terminal program refusal")
                           "the next turn's context sees the refusal fact"))
                     (do
                       (is (empty? next-reports)
@@ -674,11 +701,8 @@
       (let [connection (:seon.store/branch-connection cluster)
             passing
             [["ordinary"
-              {:seon.error/kind :seon.cluster.run/refused
-               :seon.error/message
-               "receipt-settle-call was refused by program-delete-not-owned."
-               :seon.cluster.run/rule
-               :seon.cluster.run/program-delete-not-owned}]
+              {:seon.error/kind :seon.db/rejected
+               :seon.error/message "ordinary terminal program refusal."}]
              ["huge-message"
               {:seon.error/kind :seon.db/rejected
                :seon.error/message (apply str (repeat 200000 "X"))

@@ -566,27 +566,10 @@
           (into []
                 (keep (fn [[identity-attribute identity-value]]
                         (when-let [declaration
-                                   (d/pull db
-                                           [:db/id
-                                            {:seon.fn/ns
-                                             [:db/id :seon.ns/name]}
-                                            {:seon.test/ns
-                                             [:db/id :seon.ns/name]}]
+                                   (d/pull db [:db/id]
                                            [identity-attribute identity-value])]
                           declaration)))
-                deleted-identities)
-          declaration-namespaces
-          (into #{}
-                (keep #(or (get-in % [:seon.fn/ns :seon.ns/name])
-                           (get-in % [:seon.test/ns :seon.ns/name])))
-                declarations)
-          requested-namespace (second (:seon.program/ns row))
-          evaluated-namespace (second (:seon.cluster.eval/ns request))]
-      (when (or (not= evaluated-namespace requested-namespace)
-                (and (seq declarations)
-                     (not= #{requested-namespace}
-                           declaration-namespaces)))
-        (refuse! `receipt-settle-call ::program-delete-not-owned request))
+                deleted-identities)]
       (mapv (fn [declaration] [:db/retractEntity (:db/id declaration)])
             declarations))
     (let [row (or (program/declaration-row row :contracted)

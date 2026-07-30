@@ -23,15 +23,6 @@
     (catch clojure.lang.ExceptionInfo error
       (ex-data error))))
 
-(defn- deepest-ex-data
-  [failure]
-  (loop [throwable failure
-         found nil]
-    (if throwable
-      (recur (ex-cause throwable)
-             (or (not-empty (ex-data throwable)) found))
-      found)))
-
 (deftest reader-events-have-one-canonical-declaration-row
   (let [cases
         [{:label "contracted function"
@@ -131,7 +122,7 @@
     (is (= #{"sample/real-test"}
            (into #{} (keep :seon.test/sym) events)))))
 
-(deftest typed-deletion-retracts-the-function-and-test-sharing-a-symbol
+(deftest typed-cross-namespace-deletion-retracts-function-and-test
   (test-support/with-database
     (fn [connection]
       (let [now (java.util.Date.)
@@ -146,12 +137,15 @@
             {:seon.cluster.run/id "registration-delete"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/result-edn "nil"
-             :seon.cluster.eval/ns namespace-ref
+             :seon.cluster.eval/ns
+             [:seon.ns/name 'my.agents.someone-else]
              :seon.sci.eval/program-row deletion}]
         (d/transact
          connection
          [{:seon.ns/name namespace-name
            :seon.ns/source "(ns my.agents.registration-test)"}
+          {:seon.ns/name 'my.agents.someone-else
+           :seon.ns/source "(ns my.agents.someone-else)"}
           {:seon.cluster.agent/id "registration-test"
            :seon.cluster.agent/namespace namespace-ref}
           {:seon.fn/sym function-sym
@@ -182,23 +176,6 @@
                 "(ns-unmap 'my.agents.registration-test 'same-name)"
                 :seon.program/ns namespace-ref}
                deletion))
-        (let [failure
-              (try
-                (d/transact
-                 connection
-                 (run/receipt-settle-tx
-                  (assoc settlement :seon.cluster.eval/ns
-                         [:seon.ns/name 'my.agents.someone-else])))
-                nil
-                (catch Throwable failure
-                  failure))
-              refusal (deepest-ex-data failure)]
-          (is (= :seon.cluster.run/program-delete-not-owned
-                 (:seon.cluster.run/rule refusal)))
-          (is (some? (d/pull @connection [:db/id]
-                             [:seon.fn/sym function-sym])))
-          (is (some? (d/pull @connection [:db/id]
-                             [:seon.test/sym function-sym]))))
         (d/transact connection (run/receipt-settle-tx settlement))
         (is (nil? (d/pull @connection [:db/id]
                           [:seon.fn/sym function-sym])))
