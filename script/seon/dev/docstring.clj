@@ -48,9 +48,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [rewrite-clj.node :as n]
-            [rewrite-clj.parser :as p]
-            [seon.agent.ctx.ns-name :as ns-name]
-            [seon.schema :as schema]))
+            [rewrite-clj.parser :as p]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Config
@@ -65,6 +63,14 @@
   "A complete sentence ends in one of these."
   #{\. \? \!})
 
+(defn- excluded-namespace?
+  "True for test and internal namespaces omitted from docstring linting."
+  [namespace-name]
+  (let [namespace-name (str namespace-name)]
+    (or (str/ends-with? namespace-name "-test")
+        (str/ends-with? namespace-name ".internal")
+        (str/includes? namespace-name ".internal."))))
+
 (def ^:private wrong-echo-re
   "A RESERVED result-grammar glyph literal in a docstring — result-open `⟹`
    (U+27F9), result-close `⟸` (U+27F8), status-open/close `⋘`/`⋙`
@@ -78,116 +84,6 @@
    is flagged (this is the anti-fabrication inversion of the old
    require-a-`; ⟹`-echo rule)."
   #"[\x{27F9}\x{27F8}\x{22D8}\x{22D9}\x{276F}]")
-
-;;; ---------------------------------------------------------------------------
-;;; Schema Registration
-;;; ---------------------------------------------------------------------------
-
-(schema/register! ::source
-                  [:string {:description "Raw Clojure/ClojureScript source"}])
-
-(schema/register! ::file-path
-                  [:string {:min 1 :description "Path to a .clj/.cljs/.cljc file"}])
-
-(schema/register! ::ns-name
-                  [:string {:description "Namespace name of the source (e.g. seon.foo)"}])
-
-(schema/register! ::fn-name
-                  [:string {:description "The public defn's name"}])
-
-(schema/register! ::rule
-                  [:enum
-                   :missing-docstring
-                   :blank-first-line
-                   :first-line-too-long
-                   :no-terminal-punctuation
-                   :reserved-glyph-literal])
-
-(schema/register! ::line
-                  [:int {:min 1 :description "1-based line of the defn form"}])
-
-(schema/register! ::message
-                  [:string {:description "Human-readable finding message"}])
-
-(schema/register! ::first-line
-                  [:string {:description "The offending docstring first line"}])
-
-(schema/register! ::finding
-                  [:map
-                   [::fn-name ::fn-name]
-                   [::rule ::rule]
-                   [::line ::line]
-                   [::message ::message]
-                   [::first-line {:optional true} ::first-line]
-                   ;; `scan` annotates each finding with its source path.
-                   [::file-path {:optional true} ::file-path]])
-
-(schema/register! ::findings
-                  [:vector ::finding])
-
-(schema/register! ::clean?
-                  :boolean)
-
-(schema/register! ::skipped?
-                  :boolean)
-
-;; Request / response schemas
-(schema/register! ::check-source-request
-                  [:map
-                   [::source ::source]
-                   [::ns-name {:optional true} ::ns-name]])
-
-(schema/register! ::check-response
-                  [:map
-                   [::clean? ::clean?]
-                   [::skipped? ::skipped?]
-                   [::findings ::findings]])
-
-(schema/register! ::check-file-request
-                  [:map
-                   [::file-path ::file-path]])
-
-(schema/register! ::max-length
-                  [:int {:min 1 :description "Max output length in characters"}])
-
-(schema/register! ::format-findings-request
-                  [:map
-                   [::findings ::findings]
-                   [::max-length {:optional true} ::max-length]])
-
-(schema/register! ::formatted
-                  [:string {:description "Formatted findings text"}])
-
-(schema/register! ::format-findings-response
-                  [:map
-                   [::formatted ::formatted]])
-
-(schema/register! ::file-paths
-                  [:vector ::file-path])
-
-(schema/register! ::scan-request
-                  [:map
-                   [::file-paths ::file-paths]])
-
-(schema/register! ::file-count
-                  [:int {:min 0 :description "Files scanned (test/internal skipped)"}])
-
-(schema/register! ::fn-count
-                  [:int {:min 0 :description "Public defn heads inspected"}])
-
-(schema/register! ::finding-count
-                  [:int {:min 0 :description "Total findings across all files"}])
-
-(schema/register! ::by-rule
-                  [:map-of ::rule :int])
-
-(schema/register! ::scan-response
-                  [:map
-                   [::file-count ::file-count]
-                   [::fn-count ::fn-count]
-                   [::finding-count ::finding-count]
-                   [::by-rule ::by-rule]
-                   [::findings ::findings]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Source analysis (rewrite-clj — purely syntactic, no eval)
@@ -322,9 +218,9 @@
                        (catch Exception _ nil))
         nm (or ns-name (some-> top-nodes extract-ns-name))]
     (if (or (nil? top-nodes)
-            (some-> nm ns-name/included-ns? not))
+            (some-> nm excluded-namespace?))
       {::clean? true
-       ::skipped? (boolean (some-> nm ns-name/included-ns? not))
+       ::skipped? (boolean (some-> nm excluded-namespace?))
        ::findings []}
       (let [findings (into []
                            (comp (keep public-defn)
@@ -397,7 +293,7 @@
                               (catch Exception _ nil))
                nm (some-> top-nodes extract-ns-name)]
            (if (or (nil? top-nodes)
-                   (some-> nm ns-name/included-ns? not))
+                   (some-> nm excluded-namespace?))
              acc
              (let [defns (into [] (keep public-defn) top-nodes)
                    findings (into []

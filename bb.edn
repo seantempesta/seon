@@ -1,4 +1,4 @@
-{:paths ["script" "src" "src-old" "resources" "test"]
+{:paths ["script" "src" "resources" "test"]
  :deps {aero/aero {:mvn/version "1.1.6"}
         cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.20.0"}

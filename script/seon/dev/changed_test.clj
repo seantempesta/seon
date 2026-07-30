@@ -477,8 +477,7 @@
     result))
 
 (defn- run-operator! [root test-namespaces]
-  (let [argv (cond-> ["bb" "--config" (str (fs/path root "bb.edn"))
-                      "--deps-root" root "-m" "seon.dev.test-runner"]
+  (let [argv (cond-> [(str (fs/path root "bin/test"))]
                (not= :all test-namespaces)
                (into (map str test-namespaces)))]
     (assoc (run-command! root :operator argv {})
