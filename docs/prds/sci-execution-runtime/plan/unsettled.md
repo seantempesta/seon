@@ -178,6 +178,12 @@ owner of every leaf it references. The recurring replacement-then-removal
 test proves surviving global leaf rows retain installed attributes and accept
 new data. Remaining blockers are the sequential read-eval loop, dynamic
 `ns-unmap` persistence, and an independent build test-declaration census.
+The census blocker is now implemented pending integration review: declaration
+occurrences are a reader signal independent of durable identities, the build
+refuses an unplaceable occurrence for every declaration family, and an
+independent tools.reader census compares per-file function/schema/test
+multiplicity plus exact function/test identities. Its focused gate is 24
+tests / 212 assertions / 0 failures / 0 errors.
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 

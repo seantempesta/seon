@@ -305,6 +305,51 @@
       (or (get refers operation)
           (symbol "clojure.core" (name operation))))))
 
+(defn- declaration-occurrence
+  "The declaration family and independently placeable identity of `form`.
+
+  An occurrence remains present when namespace attribution is unavailable.
+  Build indexing can therefore refuse an unplaceable declaration instead of
+  mistaking the absence of its durable row for the absence of a declaration."
+  [form namespace-name context]
+  (when (seq? form)
+    (let [operation (resolved-operation (first form) context)
+          declared-name (second form)]
+      (cond
+        (contains? #{'clojure.core/defn 'clojure.core/defn-} operation)
+        (let [identity (when (symbol? declared-name)
+                         (qualified-symbol namespace-name declared-name))]
+          (cond-> {::declaration-family :seon.fn/sym}
+            identity (assoc ::declaration-identity (str identity))
+            (nil? identity)
+            (assoc ::declaration-refusal
+                   (if (symbol? declared-name)
+                     ::namespace-unproven
+                     ::malformed-declaration))))
+
+        (= 'clojure.test/deftest operation)
+        (let [identity (when (symbol? declared-name)
+                         (qualified-symbol namespace-name declared-name))]
+          (cond-> {::declaration-family :seon.test/sym}
+            identity (assoc ::declaration-identity (str identity))
+            (nil? identity)
+            (assoc ::declaration-refusal
+                   (if (symbol? declared-name)
+                     ::namespace-unproven
+                     ::malformed-declaration))))
+
+        (= 'seon.schema/register! operation)
+        (let [identity (when (and (= 3 (count form))
+                                  (qualified-keyword? declared-name))
+                         declared-name)]
+          (cond-> {::declaration-family :seon.schema/key}
+            identity (assoc ::declaration-identity identity)
+            (nil? identity)
+            (assoc ::declaration-refusal ::malformed-declaration)))
+
+        :else
+        nil))))
+
 (defn- schema-declaration
   [form context]
   (when (and (seq? form)
@@ -336,13 +381,15 @@
       [:seon.ns/name :seon.ns/doc :seon.ns/requires
        :seon.ns/aliases :seon.ns/refers ::refer-all-targets])
      :seon.ns/source source)
-    (or
-     (when-let [function (function-declaration form namespace-name context)]
-       (assoc function :seon.fn/source source))
-     (when-let [test (test-declaration form namespace-name context)]
-       (assoc test :seon.test/source source))
-     (schema-declaration form context)
-     (schema-unregister form context))))
+    (merge
+     (declaration-occurrence form namespace-name context)
+     (or
+      (when-let [function (function-declaration form namespace-name context)]
+        (assoc function :seon.fn/source source))
+      (when-let [test (test-declaration form namespace-name context)]
+        (assoc test :seon.test/source source))
+      (schema-declaration form context)
+      (schema-unregister form context)))))
 
 (defn- nested-executable-declarations
   "Declaration facts nested directly under an executable top-level `do`.
@@ -360,7 +407,10 @@
                (when-let [facts
                           (declaration-facts child namespace-name context
                                              (pr-str child))]
-                 [facts]))))
+                 [(dissoc facts
+                          ::declaration-family
+                          ::declaration-identity
+                          ::declaration-refusal)]))))
           (rest form))))
 
 (defn- namespace-changing-mention?

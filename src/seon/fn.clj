@@ -27,24 +27,30 @@
   ;; private and uncontracted helpers, as input to the future call graph.
   (program/declaration-row event :all))
 
-(defn- unadmitted-functions
-  "The function declarations this file produced no row for, with the reason.
+(defn- unadmitted-declarations
+  "The declarations this file produced no durable identity for.
 
-  The reader lifts `:seon.fn/arglists` from every `defn`/`defn-` it reads and
-  `:seon.fn/sym` only once the namespace is proven, so an arglists event
-  without a symbol is a declaration the index cannot place. Dropping it in
-  silence is the defect — a check reading absence of a row as health — and it
-  is how the graph came to hold 121 rows for 1242 declared functions."
+  The reader records every recognized function, schema, and test occurrence
+  independently of row construction. An occurrence without an identity is a
+  declaration the index cannot place. Dropping it in silence is the defect —
+  a check reading absence of a row as health — and has previously erased both
+  functions and tests from the program graph."
   [events]
   (into []
         (mapcat
          (fn [event]
            (cond-> []
-             (and (contains? event :seon.fn/arglists)
-                  (not (:seon.fn/sym event)))
+             (and (:seon.sci.reader/declaration-family event)
+                  (not (:seon.sci.reader/declaration-identity event)))
              (conj {::line (:seon.sci.reader/line event)
                     ::source (:seon.sci.reader/source event)
-                    ::reason ::namespace-unproven})
+                    ::family (:seon.sci.reader/declaration-family event)
+                    ::reason
+                    (case (:seon.sci.reader/declaration-refusal event)
+                      :seon.sci.reader/namespace-unproven
+                      ::namespace-unproven
+
+                      ::malformed-declaration)})
 
              (seq (:seon.sci.reader/nested-declarations event))
              (conj {::line (:seon.sci.reader/line event)
@@ -147,11 +153,10 @@
       (mapcat
        (fn [{:keys [file source]}]
          (let [events (read-source-events file source publics)]
-           (when-let [unadmitted (seq (unadmitted-functions events))]
+           (when-let [unadmitted (seq (unadmitted-declarations events))]
              (throw
               (ex-info
-               (str "Source indexing could not place a function "
-                    "declaration in a namespace.")
+               "Source indexing could not place a declaration."
                {:seon.error/kind ::index-refused
                 :seon.fn/file (.getCanonicalPath ^java.io.File file)
                 ::unadmitted (vec unadmitted)})))

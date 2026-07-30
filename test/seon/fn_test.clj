@@ -120,53 +120,99 @@
        (contains? #{operation (symbol "clojure.core" (name operation))}
                   (first form))))
 
-(defn- namespace-aliases
+(defn- namespace-bindings
   [form]
-  (into {}
-        (comp
-         (filter #(and (seq? %) (= :require (first %))))
-         (mapcat rest)
-         (keep (fn [spec]
-                 (when (and (vector? spec) (symbol? (first spec)))
-                   (let [options (apply hash-map (rest spec))
-                         alias (or (:as options) (:as-alias options))]
-                     (when (symbol? alias)
-                       [alias (first spec)]))))))
-        (drop 2 form)))
+  (reduce
+   (fn [bindings spec]
+     (if (and (vector? spec) (symbol? (first spec)))
+       (let [target (first spec)
+             options (apply hash-map (rest spec))
+             alias (or (:as options) (:as-alias options))
+             renames (or (:rename options) {})
+             refers (if (vector? (:refer options)) (:refer options) [])]
+         (cond-> bindings
+           (symbol? alias) (assoc-in [:aliases alias] target)
+           (seq refers)
+           (update :refers
+                   into
+                   (map (fn [target-name]
+                          [(get renames target-name target-name)
+                           (symbol (str target) (str target-name))])
+                        refers))))
+       bindings))
+   {:aliases {} :refers {}}
+   (into []
+         (comp
+          (filter #(and (seq? %) (= :require (first %))))
+          (mapcat rest))
+         (drop 2 form))))
+
+(defn- independently-resolved-operation
+  [operation {:keys [aliases refers]}]
+  (when (symbol? operation)
+    (if-let [operation-namespace (namespace operation)]
+      (if-let [target (get aliases (symbol operation-namespace))]
+        (symbol (str target) (name operation))
+        operation)
+      (or (get refers operation)
+          (symbol "clojure.core" (name operation))))))
+
+(defn- independent-declaration
+  [file namespace-name bindings form]
+  (when (seq? form)
+    (let [operation (independently-resolved-operation (first form) bindings)
+          declared-name (second form)
+          base {:file (.getCanonicalPath ^java.io.File file)
+                :line (:line (meta form))}]
+      (cond
+        (and (contains? #{'clojure.core/defn 'clojure.core/defn-} operation)
+             namespace-name
+             (symbol? declared-name))
+        (assoc base :family :seon.fn/sym
+               :identity (str (symbol (str namespace-name)
+                                      (str declared-name))))
+
+        (and (= 'clojure.test/deftest operation)
+             namespace-name
+             (symbol? declared-name))
+        (assoc base :family :seon.test/sym
+               :identity (str (symbol (str namespace-name)
+                                      (str declared-name))))
+
+        (and (= 'seon.schema/register! operation)
+             (= 3 (count form))
+             (qualified-keyword? declared-name))
+        (assoc base :family :seon.schema/key)
+
+        :else nil))))
 
 (defn- independently-scan-form
-  [file namespace-name aliases form]
+  [file namespace-name bindings form]
   (cond
     (core-operation? form 'ns)
-    [(second form) (namespace-aliases form) []]
+    [(second form) (namespace-bindings form) []]
 
     (core-operation? form 'in-ns)
     [(when (and (seq? (second form))
                 (= 'quote (first (second form))))
        (second (second form)))
-     aliases
+     bindings
      []]
-
-    (or (core-operation? form 'defn)
-        (core-operation? form 'defn-))
-    [namespace-name
-     aliases
-     [{:file (.getCanonicalPath ^java.io.File file)
-       :line (:line (meta form))
-       :sym (str (symbol (str namespace-name) (str (second form))))}]]
 
     (and (seq? form) (= 'do (first form)))
     (reduce
-     (fn [[current current-aliases declarations] child]
-       (let [[next-current next-aliases found]
+     (fn [[current current-bindings declarations] child]
+       (let [[next-current next-bindings found]
              (independently-scan-form
-              file current current-aliases child)]
-         [next-current next-aliases (into declarations found)]))
-     [namespace-name aliases []]
+              file current current-bindings child)]
+         [next-current next-bindings (into declarations found)]))
+     [namespace-name bindings []]
      (rest form))
 
     :else
-    [namespace-name aliases []]))
+    (let [declaration
+          (independent-declaration file namespace-name bindings form)]
+      [namespace-name bindings (cond-> [] declaration (conj declaration))])))
 
 (defn- independent-declarations
   [file]
@@ -174,27 +220,27 @@
         (reader-types/indexing-push-back-reader (slurp file))
         eof (Object.)]
     (loop [namespace-name nil
-           aliases {}
+           bindings {:aliases {} :refers {}}
            declarations []]
-      (let [form (binding [tools.reader/*alias-map* aliases]
+      (let [form (binding [tools.reader/*alias-map* (:aliases bindings)]
                    (tools.reader/read {:eof eof
                                        :read-cond :allow
                                        :features #{:clj}}
                                       source-reader))]
         (if (identical? eof form)
           declarations
-          (let [[next-namespace next-aliases found]
+          (let [[next-namespace next-bindings found]
                 (independently-scan-form
-                 file namespace-name aliases form)]
-            (recur next-namespace next-aliases
+                 file namespace-name bindings form)]
+            (recur next-namespace next-bindings
                    (into declarations found))))))))
 
-(deftest every-declared-function-in-the-tree-becomes-one-row
-  ;; The invariant, per source file: one `:seon.fn` row for every top-level
-  ;; `defn`/`defn-` form. Not a count a partial graph could still satisfy,
-  ;; and not gated on a contract: call-graph reachability runs through
-  ;; private helpers. A hand list of namespace-stable operations once
-  ;; erased every declaration below the first ordinary top-level call.
+(deftest every-declaration-in-the-tree-becomes-one-family-row
+  ;; The independent census counts function, schema, and test occurrences
+  ;; with per-file multiplicity. It does not use the production reader's
+  ;; lifted declaration facts as its oracle. Functions and tests additionally
+  ;; retain exact identity comparison. A hand list once erased functions below
+  ;; an ordinary call; a missing test signal later made the same silence legal.
   (let [files (source-files seon.fn/source-roots)
         declared (into [] (mapcat independent-declarations) files)
         rows-by-file
@@ -205,8 +251,20 @@
             (let [canonical-file (.getCanonicalPath ^java.io.File file)]
               (into []
                     (keep (fn [row]
-                            (when-some [sym (:seon.fn/sym row)]
-                              {:file canonical-file :sym sym})))
+                            (cond
+                              (:seon.fn/sym row)
+                              {:file canonical-file
+                               :family :seon.fn/sym
+                               :identity (:seon.fn/sym row)}
+
+                              (:seon.schema/key row)
+                              {:file canonical-file
+                               :family :seon.schema/key}
+
+                              (:seon.test/sym row)
+                              {:file canonical-file
+                               :family :seon.test/sym
+                               :identity (:seon.test/sym row)})))
                     (seon.fn/rows {:seon.fn/roots [canonical-file]})))))
          files)
         rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
@@ -215,8 +273,18 @@
         ;; multiplicity without reparsing production source to manufacture a
         ;; line number. The independent scan still requires every expected
         ;; occurrence to carry its tools.reader line.
-        expected (frequencies (map (juxt :file :sym) declared))
-        actual (frequencies (map (juxt :file :sym) rows-by-file))]
+        expected (frequencies (map (juxt :file :family) declared))
+        actual (frequencies (map (juxt :file :family) rows-by-file))
+        expected-identities
+        (frequencies
+         (keep (fn [{:keys [file family identity]}]
+                 (when identity [file family identity]))
+               declared))
+        actual-identities
+        (frequencies
+         (keep (fn [{:keys [file family identity]}]
+                 (when identity [file family identity]))
+               rows-by-file))]
     (is (seq files))
     (is (every? (comp some? :line) declared))
     (is (= expected actual)
@@ -233,6 +301,8 @@
                           (cond-> m (pos? extra) (assoc sym extra))))
                       {}
                       actual)}))
+    (is (= expected-identities actual-identities)
+        "function and test identities match the independent source census")
     (testing "private helpers are rows, marked private rather than dropped"
       (let [private (filter :seon.fn/private? rows)]
         (is (< 100 (count private)))
@@ -260,6 +330,28 @@
       (is (str/ends-with? (:seon.fn/file data) "opaque.clj"))
       (is (= [{:seon.fn/line 3
                :seon.fn/source "(defn f [n] n)"
+               :seon.fn/family :seon.fn/sym
+               :seon.fn/reason :seon.fn/namespace-unproven}]
+             (:seon.fn/unadmitted data))))))
+
+(deftest unplaceable-test-declaration-is-refused-loudly
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        file (io/file root "opaque_test.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit file
+          (str "(ns opaque.test (:require [clojure.test]))\n"
+               "(in-ns (symbol \"opaque.test\"))\n"
+               "(clojure.test/deftest survives-indexing)\n"))
+    (let [failure (try
+                    (seon.fn/rows {:seon.fn/roots [root]})
+                    (catch clojure.lang.ExceptionInfo error error))
+          data (ex-data failure)]
+      (is (instance? clojure.lang.ExceptionInfo failure))
+      (is (= :seon.fn/index-refused (:seon.error/kind data)))
+      (is (str/ends-with? (:seon.fn/file data) "opaque_test.clj"))
+      (is (= [{:seon.fn/line 3
+               :seon.fn/source "(clojure.test/deftest survives-indexing)"
+               :seon.fn/family :seon.test/sym
                :seon.fn/reason :seon.fn/namespace-unproven}]
              (:seon.fn/unadmitted data))))))
 

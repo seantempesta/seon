@@ -24,7 +24,10 @@ found four remaining blockers. Its shared-attribute blocker is fixed: physical
 Datahike changes now derive from a diff of the complete current and candidate
 global projections, so replacing or removing an entity schema cannot retract a
 leaf attribute whose global schema row survives. The real read-eval loop,
-dynamic `ns-unmap`, and independent build test census remain open.
+and dynamic `ns-unmap` remain open. The build test census is repaired: the
+reader now emits an occurrence fact for every recognized function, schema, or
+test declaration independently of durable row construction, and indexing
+refuses any occurrence without a canonical identity.
 
 ## Evidence
 
@@ -69,6 +72,14 @@ test: it replaces an entity schema with a smaller map, removes the entity
 schema, proves both global leaf rows and both Datahike attributes survive, and
 writes through them. `seon.schema-usage-guard-test` passes 11 tests / 62
 assertions / 0 failures / 0 errors.
+
+The adversarial audit's test-drop falsifier is now a recurring refusal:
+`(in-ns (symbol "opaque.test"))` followed by a qualified `deftest` cannot
+silently disappear. A tools.reader-based per-file census independently counts
+function, schema, and test occurrences with multiplicity, and also compares
+exact function and test identities. `seon.fn-test` plus
+`seon.sci.reader-test` passes 24 tests / 212 assertions / 0 failures / 0
+errors.
 
 ## Owner
 
