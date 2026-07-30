@@ -180,6 +180,22 @@
         (str "The child output stream closed after termination: "
              (ex-message error))))))
 
+(deftest legacy-operator-jvm-roles-remain-visible-to-orphan-detection
+  (doseq [arguments
+          [["clojure.main" "-m" "seon.web.server" "{}"]
+           ["clojure.main" "-m" "seon.host" "{}"]
+           ["-jar" "/checkout/target/seon-database-server-standalone.jar"]
+           ["clojure.main" "-m" "shadow.cljs.devtools.cli" "watch"
+            "client"]]]
+    (is (true?
+         (operator-private-value 'legacy-operator-arguments? arguments))))
+  (doseq [arguments
+          [["clojure.main" "-e" "(clojure.test/run-tests)"]
+           ["clojure.main" "-m" "shadow.cljs.devtools.cli" "compile"
+            "client"]]]
+    (is (false?
+         (operator-private-value 'legacy-operator-arguments? arguments)))))
+
 (defn- run-operator
   [root & arguments]
   (let [process

@@ -271,6 +271,37 @@
          (str/includes? form
                         "(clojure.core/deref (clojure.core/promise))"))))
 
+(defn- legacy-operator-arguments?
+  "True for the retired multi-process JVM roles that a fresh operator must
+   report instead of losing outside its advertisement census."
+  [arguments]
+  (let [arguments (vec arguments)]
+    (boolean
+     (or
+      (some
+       (fn [argument]
+         (and
+          (string? argument)
+          (some #(str/includes? argument %)
+                ["seon.web.server"
+                 "seon.host"
+                 "seon-database-server-standalone.jar"])))
+       arguments)
+      (and (some #{"shadow.cljs.devtools.cli"} arguments)
+           (some #{"watch"} arguments))))))
+
+(defn- operator-process?
+  [^java.lang.ProcessHandle handle]
+  (or
+   (operator-launch-process? handle)
+   (let [info (.info handle)
+         command (optional-value (.command info))
+         arguments (some-> (optional-value (.arguments info)) vec)]
+     (and (.isAlive handle)
+          (string? command)
+          (str/ends-with? command "/java")
+          (legacy-operator-arguments? arguments)))))
+
 (defn- seon-cluster-jvm?
   [^java.lang.ProcessHandle handle]
   (let [info (.info handle)
@@ -344,7 +375,7 @@
   []
   (with-open [processes (java.lang.ProcessHandle/allProcesses)]
     (->> (iterator-seq (.iterator processes))
-         (filter operator-launch-process?)
+         (filter operator-process?)
          (keep
           (fn [^java.lang.ProcessHandle handle]
             (when-let [start (process-start-instant (.pid handle))]
