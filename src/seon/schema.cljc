@@ -19,6 +19,7 @@
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
             [malli.registry :as mr]
+            [clojure.set :as set]
             [clojure.walk :as walk]
             [datahike.api :as d]
             [seon.schema.form :as form]
@@ -317,6 +318,31 @@
                       (remove seen'))
                     frontier)]
           (recur next-frontier seen'))))))
+
+(defn schema-removal-blockers
+  "Schema and function identities preventing removal of `schema-key`.
+
+   Blockers are derived from the immutable projection. Schema blockers are
+   reverse-transitive dependents; function blockers are contracts referencing
+   the removed key or one of those dependents. The target itself is never a
+   blocker."
+  {:malli/schema [:=> [:catn [::projection :map]
+                             [::registry-key :keyword]]
+                  [:map
+                   [:seon.schema.blockers/schema-keys [:set :keyword]]
+                   [:seon.schema.blockers/function-symbols
+                    [:set :qualified-symbol]]]]}
+  [projection schema-key]
+  (let [affected (dependent-schema-keys projection #{schema-key})
+        schema-keys (disj affected schema-key)
+        function-symbols
+        (into #{}
+              (keep (fn [[function-symbol dependencies]]
+                      (when (seq (set/intersection affected dependencies))
+                        function-symbol)))
+              (:seon.schema.projection/function-dependencies projection))]
+    {:seon.schema.blockers/schema-keys schema-keys
+     :seon.schema.blockers/function-symbols function-symbols}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registry Setup
@@ -962,6 +988,25 @@
            (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
              (throw e))))))
   (update-candidate-forms! assoc k v)
+  k)
+
+(defn unregister!
+  "Stage removal of one schema from the current evaluation delta.
+
+   Removal is published only if the evaluation's terminal transaction
+   commits. Calling this outside an isolated registration delta refuses rather
+   than mutating the process-wide candidate population."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
+                  ::registry-key]}
+  [k]
+  (when-not *candidate-forms-overlay*
+    (throw
+     (ex-info
+      "schema/unregister! requires an evaluation registration delta."
+      {:seon.schema/error :seon.schema/unregister-outside-delta
+       :seon.schema/key k
+       :seon.error/kind :user-input})))
+  (swap! *candidate-forms-overlay* dissoc k)
   k)
 
 (defn ^:no-doc contribute-candidate-forms!
@@ -1764,6 +1809,46 @@
       :seon.schema/predicate-functions
       (:seon.schema.projection/predicate-functions projection)})))
 
+(defn projection-without-schema
+  "Validate the projection produced by removing one unused schema.
+
+   Removal refuses while any schema or function contract depends on the
+   affected key. Database-value usage is guarded separately by the terminal
+   transaction function that owns schema-attribute retraction."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection]
+                [::registry-key ::registry-key]]
+    ::projection]}
+  [projection schema-key]
+  (let [{:seon.schema.blockers/keys [schema-keys function-symbols]
+         :as blockers}
+        (schema-removal-blockers projection schema-key)]
+    (when (or (seq schema-keys) (seq function-symbols))
+      (throw
+       (ex-info
+        (str "Schema removal refused for " schema-key
+             ": installed contracts still depend on it.")
+        (assoc blockers
+               :seon.schema/error :seon.schema/schema-in-use
+               :seon.schema/key schema-key
+               :seon.error/kind :user-input))))
+    (build-projection
+     (dissoc (:seon.schema.projection/forms projection) schema-key)
+     (:seon.schema.projection/function-contracts projection)
+     {:seon.schema/schema-admissions
+      (dissoc (:seon.schema.projection/schema-admissions projection)
+              schema-key)
+      :seon.schema/function-admissions
+      (:seon.schema.projection/function-admissions projection)
+      :seon.schema/function-source-admissions
+      (:seon.schema.projection/function-source-admissions projection)
+      :seon.schema/artifact-exports
+      (:seon.schema.projection/artifact-exports projection)
+      :seon.schema/pure-predicate-symbols
+      (:seon.schema.projection/pure-predicate-symbols projection)
+      :seon.schema/predicate-functions
+      (:seon.schema.projection/predicate-functions projection)})))
+
 (defn projection-with-function-contract
   "Validate the projection produced by one function-contract replacement."
   {:malli/schema
@@ -1891,9 +1976,11 @@
 
 (defn- changed-candidate-keys [before after]
   (into #{}
-        (keep (fn [[k form]]
-                (when (not= form (get before k ::absent)) k)))
-        after))
+        (keep (fn [k]
+                (when (not= (get before k ::absent)
+                            (get after k ::absent))
+                  k)))
+        (into (set (keys before)) (keys after))))
 
 (defn changed-keys
   "Schema keys whose canonical form differs from `before`, including new keys."

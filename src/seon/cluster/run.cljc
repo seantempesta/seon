@@ -558,11 +558,79 @@
   [request]
   [[:db.fn/call #'receipt-refusal-call request]])
 
+(defn- current-schema-data-attributes
+  "Installed affected attributes carrying current datoms in `db`."
+  [db projection schema-keys]
+  (into []
+        (comp
+         (filter #(contains? (:schema db) %))
+         (filter #(seq (d/datoms db :aevt %))))
+        (sort (schema/dependent-schema-keys projection schema-keys))))
+
+(defn- assert-schema-data-unused!
+  "Refuse schema change while affected attributes carry current data."
+  [db projection schema-keys]
+  (let [attributes
+        (current-schema-data-attributes db projection schema-keys)]
+    (when (seq attributes)
+      (throw
+       (ex-info
+        (str "Schema change refused: current data uses " attributes ".")
+        {:seon.schema/error :seon.schema/current-data-blocks-change
+         :seon.schema/keys schema-keys
+         :seon.schema/data-attributes attributes
+         :seon.error/kind :user-input})))))
+
+(defn- schema-attribute-change-tx
+  "Deterministic Datahike retractions/declarations for affected schemas."
+  [db current-projection candidate-projection schema-keys]
+  (let [affected
+        (schema/dependent-schema-keys current-projection schema-keys)
+        installed (set (filter #(contains? (:schema db) %) affected))
+        candidate-attributes
+        (if candidate-projection
+          (set
+           (schema.form/database-attributes
+            (:seon.schema.projection/forms candidate-projection)))
+          #{})
+        declarations
+        (if candidate-projection
+          (schema.datahike/malli->datahike-schema-in
+           candidate-projection
+           (into []
+                 (filter candidate-attributes)
+                 (sort affected)))
+          [])]
+    (into
+     (mapv (fn [attribute] [:db.fn/retractEntity attribute])
+           (sort installed))
+     declarations)))
+
 (defn- program-row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
   (if-let [deleted-identities (:seon.program/delete-identities row)]
-    (let [declarations
+    (let [schema-keys
+          (into #{}
+                (keep (fn [[identity-attribute identity-value]]
+                        (when (= :seon.schema/key identity-attribute)
+                          identity-value)))
+                deleted-identities)
+          current-projection
+          (when (seq schema-keys) (schema/projection-from-database db))
+          candidate-projection
+          (reduce schema/projection-without-schema
+                  current-projection
+                  (sort schema-keys))
+          _ (when (seq schema-keys)
+              (assert-schema-data-unused!
+               db current-projection schema-keys))
+          schema-tx
+          (if (seq schema-keys)
+            (schema-attribute-change-tx
+             db current-projection candidate-projection schema-keys)
+            [])
+          declarations
           (into []
                 (keep (fn [[identity-attribute identity-value]]
                         (when-let [declaration
@@ -570,7 +638,9 @@
                                            [identity-attribute identity-value])]
                           declaration)))
                 deleted-identities)]
-      (mapv (fn [declaration] [:db/retractEntity (:db/id declaration)])
+      (into schema-tx
+            (map (fn [declaration]
+                   [:db/retractEntity (:db/id declaration)]))
             declarations))
     (let [row (or (program/declaration-row row :contracted)
                   (refuse! `receipt-settle-call
@@ -586,6 +656,14 @@
       (let [current-projection
             (when (#{:seon.fn/sym :seon.schema/key} identity)
               (schema/projection-from-database db))
+            schema-replacement?
+            (and (= identity :seon.schema/key)
+                 existing
+                 (not= (:seon.schema/form existing)
+                       (:seon.schema/form row)))
+            _ (when schema-replacement?
+                (assert-schema-data-unused!
+                 db current-projection #{identity-value}))
             candidate-projection
             (case identity
               :seon.schema/key
@@ -603,20 +681,23 @@
               nil)
             schema-declarations
             (if (= identity :seon.schema/key)
-              (let [current-attributes
-                    (schema.form/database-attributes
-                     (:seon.schema.projection/forms current-projection))
-                    candidate-attributes
-                    (schema.form/database-attributes
-                     (:seon.schema.projection/forms candidate-projection))
-                    required
-                    (into []
-                          (comp
-                           (remove (set current-attributes))
-                           (remove #(contains? (:schema db) %)))
-                          (sort candidate-attributes))]
-                (schema.datahike/malli->datahike-schema-in
-                 candidate-projection required))
+              (if schema-replacement?
+                (schema-attribute-change-tx
+                 db current-projection candidate-projection #{identity-value})
+                (let [current-attributes
+                      (schema.form/database-attributes
+                       (:seon.schema.projection/forms current-projection))
+                      candidate-attributes
+                      (schema.form/database-attributes
+                       (:seon.schema.projection/forms candidate-projection))
+                      required
+                      (into []
+                            (comp
+                             (remove (set current-attributes))
+                             (remove #(contains? (:schema db) %)))
+                            (sort candidate-attributes))]
+                  (schema.datahike/malli->datahike-schema-in
+                   candidate-projection required)))
               [])]
         (into
          schema-declarations
