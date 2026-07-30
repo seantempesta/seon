@@ -306,6 +306,17 @@
   (let [source-rows (rows request)
         canonical-schemas (schema/canonical-schema-rows (java.util.Date. 0))
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
+        source-namespaces (into #{} (keep :seon.ns/name) source-rows)
+        canonical-namespace-stubs
+        (into
+         []
+         (comp
+          (keep (comp :seon.ns/name :seon.schema/ns))
+          (remove source-namespaces)
+          (distinct)
+          (map (fn [namespace-name]
+                 {:seon.ns/name namespace-name})))
+         canonical-schemas)
         source-only
         (remove (fn [row]
                   (contains? canonical-keys (:seon.schema/key row)))
@@ -319,7 +330,8 @@
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key}))))
-    (into (vec source-only) canonical-schemas)))
+    (into (into (vec source-only) canonical-namespace-stubs)
+          canonical-schemas)))
 
 (defn- digest-plan
   [db desired-digest]
