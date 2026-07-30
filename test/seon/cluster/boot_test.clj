@@ -871,16 +871,16 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest explicit-reset-destroys-the-old-branch-and-reforks-current-source
+(deftest explicit-refork-destroys-the-old-branch-and-forks-current-source
   (let [root (fresh-root)
-        cluster-name "reset-program"
+        cluster-name "refork-program"
         instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                   :seon.boot/root root})
         connection (:seon.boot/cluster-connection instance)]
     (try
       (d/transact connection
-                  [{:seon.cluster.message/id "history-reset-destroys"}])
-      (let [result (cluster/reset! instance)
+                  [{:seon.cluster.message/id "history-refork-destroys"}])
+      (let [result (cluster/refork! instance)
             replacement
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
@@ -891,7 +891,7 @@
                  (d/q '[:find ?message .
                         :where
                         [?message :seon.cluster.message/id
-                         "history-reset-destroys"]]
+                         "history-refork-destroys"]]
                       @(:seon.boot/cluster-connection replacement))))
             (is (pos?
                  (or
@@ -902,7 +902,7 @@
           (finally
             (cluster/stop! replacement))))
       (finally
-        ;; `reset!` normally stopped it. This is deliberately idempotent
+        ;; `refork!` normally stopped it. This is deliberately idempotent
         ;; cleanup for a failure before that boundary.
         (cluster/stop! instance)
         (delete-recursively! root)))))

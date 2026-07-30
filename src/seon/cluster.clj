@@ -15,7 +15,6 @@
   `readiness` derives its report from the instance and its database.
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
-  (:refer-clojure :exclude [reset!])
   (:require [clojure.core.async :as async]
             [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]
@@ -1183,9 +1182,8 @@
         ;; instruments the whole JVM, so a suite's outcome depends on
         ;; whether an earlier suite happened to boot one — and a
         ;; CLUSTER-scoped dial silently mutating PROCESS-global var
-        ;; roots is the wrong seam besides. The dev loop turns it on
-        ;; (`bin/repl`, and the drive scripts), which is where a human
-        ;; is watching. See `seon.instrument`.
+        ;; roots is the wrong seam besides. The fresh operator turns it on
+        ;; where a human is watching. See `seon.instrument`.
         _ (flow/install-work-launcher!
            {::flow/configuration
             (select-keys (config/effective @connection cluster-name)
@@ -1346,8 +1344,7 @@
   changes, and a banner nobody can regenerate is a log line rather than
   a readout.
 
-  Returns ordinary data; `bin/repl` prints it. A caller that wants one
-  field takes one field."
+  Returns ordinary data. A caller that wants one field takes one field."
   {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
   [instance]
   (let [connection (:seon.boot/cluster-connection instance)
@@ -1490,7 +1487,7 @@
           (throw failure)))))
   nil)
 
-(defn reset!
+(defn refork!
   "Destroy one cluster branch and refork the published source commit.
 
   An extra hold keeps the process-root store and its flock alive while

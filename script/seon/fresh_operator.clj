@@ -1286,7 +1286,7 @@
         operation
         (if force?
           `(if (map? ~instance)
-             (seon.cluster/reset! ~instance)
+             (seon.cluster/refork! ~instance)
              (seon.cluster.registry/reset-cluster! ~request))
           `(seon.cluster.registry/ensure-cluster! ~request))]
     `(fn [~store ~source ~instance]
