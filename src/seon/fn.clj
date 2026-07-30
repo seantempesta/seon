@@ -2,19 +2,44 @@
   "Build-time indexing of the Clojure program graph through the one reader."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.reader :as reader]))
+            [seon.sci.reader :as reader])
+  (:import [java.nio.file FileVisitOption Files LinkOption Path]))
 
 (schema.edn/load! {})
 
 (def source-roots
   "The Clojure source roots admitted to the program graph."
   ["src" "test"])
+
+(defn- project-root
+  []
+  (let [resource (io/resource "seon/fn.clj")]
+    (when-not (= "file" (.getProtocol resource))
+      (throw
+       (ex-info
+        "Program indexing requires a source checkout."
+        {:seon.error/kind ::index-refused
+         ::resource (str resource)})))
+    (-> resource
+        .toURI
+        io/file
+        .getParentFile
+        .getParentFile
+        .getParentFile
+        .getCanonicalFile)))
+
+(defn- rooted-file
+  [root]
+  (let [file (io/file root)]
+    (.getCanonicalFile
+     (if (.isAbsolute file)
+       file
+       (io/file (project-root) root)))))
 
 (defn- source-file?
   [file]
@@ -27,7 +52,7 @@
   (let [files
         (into []
               (mapcat (fn [root]
-                        (->> (file-seq (io/file root))
+                        (->> (file-seq (rooted-file root))
                              (filter source-file?)
                              (sort-by (fn [file]
                                         (.getCanonicalPath
@@ -53,6 +78,7 @@
          (ns-refers namespace-object))})
 
 (defonce ^:private inspected-rows (atom {}))
+(defonce ^:private resolved-index-classpaths (atom {}))
 
 (def ^:private default-jvm-imports
   (let [name (symbol (str "seon.fn.jvm-defaults." (random-uuid)))
@@ -309,28 +335,163 @@
                               (ex-data error))}))
         (throw error)))))
 
+(defn- start-process
+  [arguments redirect-error-stream?]
+  (.start
+   (doto (ProcessBuilder. ^java.util.List arguments)
+     (.redirectErrorStream redirect-error-stream?)
+     (.directory (project-root)))))
+
+(defn- resolve-index-classpath
+  []
+  (let [process (start-process ["clojure" "-Spath" "-M:test"] false)
+        error-output (promise)
+        error-reader
+        (Thread/startVirtualThread
+         #(deliver error-output (slurp (.getErrorStream process))))
+        output (slurp (.getInputStream process))
+        exit (.waitFor process)
+        _ (.join error-reader)
+        error-output @error-output]
+    (when-not (zero? exit)
+      (throw
+       (ex-info
+        "Could not resolve the program index classpath."
+        {:seon.error/kind ::index-refused
+         ::inspector-output error-output
+         ::inspector-exit exit})))
+    (into []
+          (map (fn [path]
+                 (.getCanonicalFile
+                  (let [file (io/file path)]
+                    (if (.isAbsolute file)
+                      file
+                      (io/file (project-root) path))))))
+          (str/split (str/trim output)
+                     (re-pattern
+                      (java.util.regex.Pattern/quote
+                       java.io.File/pathSeparator))))))
+
+(defn- regular-files
+  [file]
+  (cond
+    (.isFile ^java.io.File file) [file]
+    (not (.isDirectory ^java.io.File file)) []
+    :else
+    (with-open [paths (Files/walk (.toPath ^java.io.File file)
+                                  (make-array FileVisitOption 0))]
+      (->> (iterator-seq (.iterator paths))
+           (filter (fn [^Path path]
+                     (Files/isRegularFile
+                      path
+                      (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))))
+           (map #(.toFile ^Path %))
+           (sort-by #(.getCanonicalPath ^java.io.File %))
+           (into [])))))
+
+(defn- repo-local?
+  [file]
+  (.startsWith (.toPath ^java.io.File file)
+               (.toPath ^java.io.File (project-root))))
+
+(defn- dependency-manifests
+  [classpath]
+  (let [root (project-root)]
+    (into #{}
+          (mapcat
+           (fn [entry]
+             (when (repo-local? entry)
+               (loop [directory (if (.isDirectory ^java.io.File entry)
+                                  entry
+                                  (.getParentFile ^java.io.File entry))
+                      manifests []]
+                 (if (or (nil? directory)
+                         (not (.startsWith (.toPath ^java.io.File directory)
+                                           (.toPath ^java.io.File root))))
+                   manifests
+                   (let [manifest (io/file directory "deps.edn")]
+                     (recur (.getParentFile ^java.io.File directory)
+                            (cond-> manifests
+                              (.isFile manifest)
+                              (conj (.getCanonicalFile manifest))))))))))
+          classpath)))
+
+(defn- manifest-state
+  [manifests]
+  (into (sorted-map)
+        (map (fn [file]
+               [(.getCanonicalPath ^java.io.File file) (slurp file)]))
+        manifests))
+
+(defn- unchanged-manifests?
+  [expected]
+  (every? (fn [[path content]]
+            (let [file (io/file path)]
+              (and (.isFile file)
+                   (= content (slurp file)))))
+          expected))
+
+(defn- resolved-index-classpath
+  []
+  (let [root-manifest (io/file (project-root) "deps.edn")
+        root-content (slurp root-manifest)
+        cached (get @resolved-index-classpaths root-content)]
+    (if (and cached (unchanged-manifests? (:manifests cached)))
+      (:classpath cached)
+      (let [classpath (resolve-index-classpath)
+            manifests (manifest-state (dependency-manifests classpath))]
+        (swap! resolved-index-classpaths
+               assoc root-content
+               {:classpath classpath :manifests manifests})
+        classpath))))
+
+(defn- update-digest-file!
+  [digest file]
+  (.update digest
+           (.getBytes (.getCanonicalPath ^java.io.File file)
+                      java.nio.charset.StandardCharsets/UTF_8))
+  (.update digest (byte-array [(byte 0)]))
+  (with-open [input (io/input-stream file)]
+    (let [buffer (byte-array 8192)]
+      (loop []
+        (let [read (.read input buffer)]
+          (when-not (= -1 read)
+            (.update digest buffer 0 read)
+            (recur))))))
+  (.update digest (byte-array [(byte 0)])))
+
 (defn- content-digest
   [request]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")
-        files (source-files
-               (distinct (conj (:seon.fn/roots request) "src")))]
-    (doseq [value (concat [(System/getProperty "java.class.path")]
-                          (mapcat (fn [file]
-                                    [(.getCanonicalPath ^java.io.File file)
-                                     (slurp file)])
-                                  files))]
-      (.update digest (.getBytes (str value) java.nio.charset.StandardCharsets/UTF_8))
+        classpath (resolved-index-classpath)
+        requested-files (source-files (:seon.fn/roots request))
+        local-classpath-files
+        (into []
+              (comp (filter repo-local?)
+                    (mapcat regular-files))
+              classpath)
+        manifests (dependency-manifests classpath)
+        files (->> (concat manifests
+                            requested-files
+                            local-classpath-files)
+                   (distinct)
+                   (sort-by #(.getCanonicalPath ^java.io.File %)))]
+    (doseq [entry classpath]
+      (.update digest
+               (.getBytes (.getCanonicalPath ^java.io.File entry)
+                          java.nio.charset.StandardCharsets/UTF_8))
       (.update digest (byte-array [(byte 0)])))
+    (doseq [file files]
+      (update-digest-file! digest file))
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- isolated-rows
   [request]
-  (let [directory (io/file "tmp" "program-index")
+  (let [directory (io/file (project-root) "tmp" "program-index")
         digest (content-digest request)
         id (str (random-uuid))
         request-file (io/file directory (str id ".request.edn"))
-        output-file (io/file directory (str id ".result.edn"))
-        java (io/file (System/getProperty "java.home") "bin" "java")]
+        output-file (io/file directory (str id ".result.edn"))]
     (.mkdirs directory)
     (spit request-file
           (pr-str (select-keys request [:seon.fn/roots])))
@@ -338,16 +499,11 @@
       (if-let [cached (get @inspected-rows digest)]
         cached
         (let [process
-            (.start
-             (doto
-              (ProcessBuilder.
-               ^java.util.List
-               [(.getCanonicalPath java)
-                "-cp" (System/getProperty "java.class.path")
-                "clojure.main" "-m" "seon.fn"
-                "--inspect" (.getCanonicalPath request-file)
-                (.getCanonicalPath output-file)])
-               (.redirectErrorStream true)))
+            (start-process
+             ["clojure" "-M:test" "-m" "seon.fn"
+              "--inspect" (.getCanonicalPath request-file)
+              (.getCanonicalPath output-file)]
+             true)
             output (slurp (.getInputStream process))
             exit (.waitFor process)
             result (when (.isFile output-file)

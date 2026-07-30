@@ -138,11 +138,23 @@ evaluated global schema registry. Final absence therefore handles unmap and
 unregister without a second delta mechanism, and definitions created through
 `eval` are attributed through their compiler metadata even when they enter a
 third namespace and return. All side effects die with that process. A
-content-keyed process-local cache
-reuses only an identical source population in the same JVM. The cache key
-includes the classpath, requested source, and loaded `src/` dependencies.
-Namespace rows preserve exact empty alias/refer sets and explicit nil-mask
-components when code unmaps a default JVM import.
+content-keyed process-local cache reuses only an identical source population
+in the same JVM. The inspector launches through the existing `:test` alias
+because `test/` is a declared source root and its namespaces require the
+test-only flow monitor. Its cache key covers the resolved classpath, every
+requested source, every repo-local classpath file (including schema resources
+and vendored sources), and every repo-local dependency manifest. External
+immutable dependencies key by resolved path. Resolved classpaths are reused
+only while those manifests stay byte-identical. Namespace rows preserve exact
+empty alias/refer sets and explicit nil-mask components when code unmaps a
+default JVM import.
+
+The production/default-parent proof indexes the complete source roots from
+`clojure -M:dev`: 116 namespace rows, 1,330 function rows, 552 schema rows, and
+608 test rows. Cold evaluation took 16,181 ms; the exact second call returned
+the same rows in 114 ms. The cache-invalidation regression independently
+changes a requested source, schema resource, vendored/local classpath source,
+and dependency manifest, and gets a different key after each change.
 
 Evaluated Var metadata exposed one final serialization defect: Clojure resolves
 raw Malli predicate symbols to callable roots, whose default printer emits

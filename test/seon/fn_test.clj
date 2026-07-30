@@ -377,29 +377,43 @@
              (:seon.ns/name
               (get by-identity [:seon.ns/name 'audit.third])))))))
 
-(deftest inspection-cache-key-includes-source-and-loaded-dependencies
-  (let [root (str "tmp/fn-test/" (random-uuid))
-        source (io/file root "source.clj")
-        dependency (io/file root "dependency.clj")
-        request {:seon.fn/roots [root]}
+(deftest inspection-cache-key-includes-every-local-classpath-input
+  (let [root (.getCanonicalFile
+              (io/file (str "tmp/fn-test/" (random-uuid))))
+        source-root (io/file root "program")
+        source (io/file source-root "source.clj")
+        resources (io/file root "resources")
+        schema (io/file resources "schema/example.edn")
+        vendored-source (io/file root "reference-code/example/src")
+        dependency (io/file vendored-source "example/dependency.clj")
+        manifest (io/file root "deps.edn")
+        request {:seon.fn/roots [(.getPath source-root)]}
         digest (fn [] (#'seon.fn/content-digest request))]
-    (.mkdirs (.getParentFile source))
+    (doseq [file [source schema dependency manifest]]
+      (.mkdirs (.getParentFile file)))
     (spit source "(ns cache.source)\n(defn value [] 1)\n")
-    (spit dependency "(ns cache.dependency)\n(defn value [] 1)\n")
+    (spit schema "{:cache/value :int}\n")
+    (spit dependency "(ns example.dependency)\n(defn value [] 1)\n")
+    (spit manifest "{:paths [\"program\" \"resources\"]}\n")
     (with-redefs-fn
-      {#'seon.fn/source-files
-       (fn [roots]
-         (if (some #{"src"} roots)
-           [source dependency]
-           [source]))}
+      {#'seon.fn/project-root (constantly root)
+       #'seon.fn/resolved-index-classpath
+       (constantly [resources vendored-source])}
       (fn []
         (let [initial (digest)]
           (spit source "(ns cache.source)\n(defn value [] 2)\n")
           (let [source-changed (digest)]
             (is (not= initial source-changed))
-            (spit dependency
-                  "(ns cache.dependency)\n(defn value [] 2)\n")
-            (is (not= source-changed (digest)))))))))
+            (spit schema "{:cache/value :string}\n")
+            (let [resource-changed (digest)]
+              (is (not= source-changed resource-changed))
+              (spit dependency
+                    "(ns example.dependency)\n(defn value [] 2)\n")
+              (let [local-dependency-changed (digest)]
+                (is (not= resource-changed local-dependency-changed))
+                (spit manifest
+                      "{:paths [\"program\" \"resources\" \"extra\"]}\n")
+                (is (not= local-dependency-changed (digest)))))))))))
 
 (deftest fresh-indexing-fills-canonical-namespace-stubs
   (test-support/with-database

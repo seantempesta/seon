@@ -233,7 +233,13 @@ aliases, imports, refers, unmaps, unregisters, and `in-ns` attribution therefore
 use the same final state that compilation produced. Process isolation contains
 top-level namespace/schema/test effects; a content-keyed process-local cache
 makes repeated identical populations ordinary map reads without risking stale
-results across JVMs.
+results across JVMs. The child launches in the existing `:test` dependency
+environment because `test/` is one indexed root. Its exact input key derives
+requested sources, schema resources, all repo-local files on the resolved
+classpath (including vendored sources), repo-local dependency manifests, and
+resolved external paths. A default `-M:dev` parent produced 116 namespace /
+1,330 function / 552 schema / 608 test rows in 16,181 ms; an identical cached
+call returned the same rows in 114 ms.
 
 The evaluated snapshot also revealed that Clojure Var metadata contains live
 predicate roots, not their source symbols. The one schema owner now performs
