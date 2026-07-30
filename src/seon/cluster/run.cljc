@@ -558,14 +558,23 @@
   [request]
   [[:db.fn/call #'receipt-refusal-call request]])
 
+(defn- affected-schema-attributes
+  "Database attributes derived by the affected schema forms."
+  [projection affected]
+  (set
+   (schema.form/database-attributes
+    (select-keys (:seon.schema.projection/forms projection) affected))))
+
 (defn- current-schema-data-attributes
-  "Installed affected attributes carrying current datoms in `db`."
+  "Installed affected database attributes carrying current datoms in `db`."
   [db projection schema-keys]
-  (into []
-        (comp
-         (filter #(contains? (:schema db) %))
-         (filter #(seq (d/datoms db :aevt %))))
-        (sort (schema/dependent-schema-keys projection schema-keys))))
+  (let [affected
+        (schema/dependent-schema-keys projection schema-keys)]
+    (into []
+          (comp
+           (filter #(contains? (:schema db) %))
+           (filter #(seq (d/datoms db :aevt %))))
+          (sort (affected-schema-attributes projection affected)))))
 
 (defn- assert-schema-data-unused!
   "Refuse schema change while affected attributes carry current data."
@@ -586,20 +595,19 @@
   [db current-projection candidate-projection schema-keys]
   (let [affected
         (schema/dependent-schema-keys current-projection schema-keys)
-        installed (set (filter #(contains? (:schema db) %) affected))
+        current-attributes
+        (affected-schema-attributes current-projection affected)
+        installed
+        (set (filter #(contains? (:schema db) %) current-attributes))
         candidate-attributes
         (if candidate-projection
-          (set
-           (schema.form/database-attributes
-            (:seon.schema.projection/forms candidate-projection)))
+          (affected-schema-attributes candidate-projection affected)
           #{})
         declarations
         (if candidate-projection
           (schema.datahike/malli->datahike-schema-in
            candidate-projection
-           (into []
-                 (filter candidate-attributes)
-                 (sort affected)))
+           (sort candidate-attributes))
           [])]
     (into
      (mapv (fn [attribute] [:db.fn/retractEntity attribute])

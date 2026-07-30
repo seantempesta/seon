@@ -5,12 +5,16 @@
             [seon.cluster.run :as run]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private base-key :seon.schema-usage-guard/base)
 (def ^:private direct-key :seon.schema-usage-guard/direct)
 (def ^:private transitive-key :seon.schema-usage-guard/transitive)
 (def ^:private unrelated-key :seon.schema-usage-guard/unrelated)
+(def ^:private entity-key :seon.schema-usage-guard/entity)
+(def ^:private entity-id-key :seon.schema-usage-guard/entity-id)
+(def ^:private entity-child-key :seon.schema-usage-guard/entity-child)
 
 (def ^:private forms
   {base-key [:int {:seon.db/index true}]
@@ -55,7 +59,7 @@
      connection
      (into
       (schema.datahike/malli->datahike-schema-in
-       projection (sort (keys selected-forms)))
+       projection (schema.form/database-attributes selected-forms))
       (map (fn [[schema-key definition]]
              (schema-row schema-key definition)))
       selected-forms))))
@@ -213,6 +217,61 @@
               "schema replacement does not purge historical data")
           (is (not (contains? (:schema @connection) unrelated-key))
               "replacement does not install unrelated absent attributes"))))))
+
+(deftest entity-child-data-blocks-entity-schema-change
+  (test-support/with-database
+    (fn [connection]
+      (let [entity-form
+            [:map {:seon.db/entity true}
+             [entity-id-key entity-id-key]
+             [entity-child-key :int]]
+            replacement-form
+            [:map {:seon.db/entity true}
+             [entity-id-key entity-id-key]
+             [entity-child-key [:int {:min 1}]]]
+            selected-forms
+            {entity-id-key [:string {:seon.db/identity true}]
+             entity-child-key [:int {:seon.db/index true}]
+             entity-key entity-form}]
+        (install-forms! connection selected-forms)
+        (d/transact
+         connection
+         [(schema-row unrelated-key [:string {:seon.db/index true}])])
+        (d/transact connection [{entity-child-key 7}])
+        (let [before @connection
+              refusal
+              (transact-result
+               connection
+               (program-row-tx (schema-row entity-key replacement-form)))]
+          (is (= :seon.schema/current-data-blocks-change
+                 (get-in refusal [:error :seon.schema/error])))
+          (is (= [entity-child-key]
+                 (get-in refusal [:error :seon.schema/data-attributes])))
+          (is (= (:max-tx before) (:max-tx @connection)))
+          (is (= (pr-str entity-form)
+                 (:seon.schema/form
+                  (d/pull @connection [:seon.schema/form]
+                          [:seon.schema/key entity-key])))))
+        (let [entity
+              (d/q '[:find ?entity .
+                     :in $ ?attribute
+                     :where [?entity ?attribute _]]
+                   @connection entity-child-key)]
+          (d/transact connection [[:db/retract entity entity-child-key]])
+          (let [result
+                (transact-result
+                 connection
+                 (program-row-tx
+                  (schema-row entity-key replacement-form)))]
+            (is (nil? (:error result)))
+            (is (= (pr-str replacement-form)
+                   (:seon.schema/form
+                    (d/pull @connection [:seon.schema/form]
+                            [:seon.schema/key entity-key]))))
+            (is (contains? (:schema @connection) entity-child-key))
+            (is (contains? (:schema @connection) entity-id-key))
+            (is (not (contains? (:schema @connection) unrelated-key))
+                "entity replacement leaves unrelated attributes absent")))))))
 
 (deftest generic-schema-deletion-removes-unused-row-and-attribute
   (test-support/with-database
