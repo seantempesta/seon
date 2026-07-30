@@ -18,6 +18,8 @@
   suite reproduces the shape rather than inventing one."
   (:require [clojure.test :refer [deftest is testing]]
             [malli.instrument :as mi]
+            [seon.dev.docstring :as docstring]
+            [seon.dev.markdown :as markdown]
             [seon.error :as error]
             [seon.flow :as flow]
             [seon.instrument :as instrument]
@@ -182,3 +184,26 @@
                        #'flow/submit!!]]
        (is (some? (mi/-schema boundary))
            (str boundary " was omitted from Malli collection"))))))
+
+(deftest dependency-free-linters-join-production-instrumentation
+  (instrumented!
+   (fn [_]
+     (let [wrapped (instrument/instrumented)]
+       (is (contains? wrapped #'docstring/check-source))
+       (is (contains? wrapped #'markdown/parse)))
+     (is (:seon.dev.docstring/clean?
+          (docstring/check-source
+           {:seon.dev.docstring/source "(ns example)"})))
+     (is (= "# Example\n"
+            (:seon.dev.markdown/content
+             (markdown/parse
+              {:seon.dev.markdown/content "# Example\n"}))))
+     (doseq [failure [(try
+                        (docstring/check-source
+                         {:seon.dev.docstring/source 1})
+                        (catch Exception thrown thrown))
+                      (try
+                        (markdown/parse {:seon.dev.markdown/content 1})
+                        (catch Exception thrown thrown))]]
+       (is (= :seon.instrument/contract-violated
+              (:seon.error/kind (ex-data failure))))))))

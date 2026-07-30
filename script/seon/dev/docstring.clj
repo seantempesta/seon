@@ -86,6 +86,59 @@
   #"[\x{27F9}\x{27F8}\x{22D8}\x{22D9}\x{276F}]")
 
 ;;; ---------------------------------------------------------------------------
+;;; Contracts (ordinary Vars keep this Babashka-loadable)
+;;; ---------------------------------------------------------------------------
+
+(def ^:private rule-schema
+  [:enum
+   :missing-docstring
+   :blank-first-line
+   :first-line-too-long
+   :no-terminal-punctuation
+   :reserved-glyph-literal])
+
+(def ^:private finding-schema
+  [:map
+   [::fn-name :string]
+   [::rule #'rule-schema]
+   [::line [:int {:min 1}]]
+   [::message :string]
+   [::first-line {:optional true} :string]
+   [::file-path {:optional true} [:string {:min 1}]]])
+
+(def ^:private findings-schema [:vector #'finding-schema])
+
+(def ^:private check-source-request-schema
+  [:map [::source :string] [::ns-name {:optional true} :string]])
+
+(def ^:private check-response-schema
+  [:map
+   [::clean? :boolean]
+   [::skipped? :boolean]
+   [::findings #'findings-schema]])
+
+(def ^:private check-file-request-schema
+  [:map [::file-path [:string {:min 1}]]])
+
+(def ^:private format-findings-request-schema
+  [:map
+   [::findings #'findings-schema]
+   [::max-length {:optional true} [:int {:min 1}]]])
+
+(def ^:private format-findings-response-schema [:map [::formatted :string]])
+
+(def ^:private scan-request-schema
+  [:map [::file-paths [:vector [:string {:min 1}]]]])
+
+(def ^:private scan-response-schema
+  [:map
+   [::file-count [:int {:min 0}]]
+   [::fn-count [:int {:min 0}]]
+   [::finding-count [:int {:min 0}]]
+   [::by-rule [:map-of #'rule-schema :int]]
+   [::findings #'findings-schema]])
+
+;;; ---------------------------------------------------------------------------
 ;;; Source analysis (rewrite-clj — purely syntactic, no eval)
 ;;; ---------------------------------------------------------------------------
 
@@ -212,7 +265,8 @@
 
    Purely syntactic (rewrite-clj) — never evals, tolerant of `#js` and
    reader conditionals. WARN-ONLY: it reports, never blocks."
-  {:malli/schema [:=> [:cat ::check-source-request] ::check-response]}
+  {:malli/schema
+   [:=> [:cat #'check-source-request-schema] #'check-response-schema]}
   [{::keys [source ns-name]}]
   (let [top-nodes (try (n/children (p/parse-string-all source))
                        (catch Exception _ nil))
@@ -238,7 +292,8 @@
 
    Response keys: same as `check-source`. A missing file returns clean +
    skipped (nothing to lint) rather than throwing."
-  {:malli/schema [:=> [:cat ::check-file-request] ::check-response]}
+  {:malli/schema
+   [:=> [:cat #'check-file-request-schema] #'check-response-schema]}
   [{::keys [file-path]}]
   (let [f (io/file file-path)]
     (if (.exists f)
@@ -254,7 +309,10 @@
 
    Response keys:
      ::formatted - The formatted string (truncated to max-length)."
-  {:malli/schema [:=> [:cat ::format-findings-request] ::format-findings-response]}
+  {:malli/schema
+   [:=>
+    [:cat #'format-findings-request-schema]
+    #'format-findings-response-schema]}
   [{::keys [findings max-length]}]
   (let [max-len (or max-length 1000)
         lines (map (fn [v]
@@ -281,7 +339,7 @@
      ::by-rule      - Findings grouped/counted by rule
      ::findings     - All findings, each carrying the source path in
                       `::file-path`."
-  {:malli/schema [:=> [:cat ::scan-request] ::scan-response]}
+  {:malli/schema [:=> [:cat #'scan-request-schema] #'scan-response-schema]}
   [{::keys [file-paths]}]
   (reduce
    (fn [acc path]

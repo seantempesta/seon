@@ -18,6 +18,81 @@
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
+;;; Contracts (ordinary Vars keep this Babashka-loadable)
+;;; ---------------------------------------------------------------------------
+
+(def ^:private heading-schema
+  [:map
+   [::level [:int {:min 1 :max 6}]]
+   [::text :string]
+   [::line [:int {:min 1}]]])
+
+(def ^:private link-schema
+  [:map
+   [::type [:enum :wikilink :markdown :bare-url]]
+   [::target [:string {:min 1}]]
+   [::text {:optional true} :string]
+   [::line [:int {:min 1}]]])
+
+(def ^:private section-schema
+  [:map
+   [::heading #'heading-schema]
+   [::content :string]
+   [::line-start [:int {:min 1}]]
+   [::line-end [:int {:min 1}]]])
+
+(def ^:private document-schema
+  [:map
+   [::content :string]
+   [::frontmatter {:optional true} [:map-of :keyword :string]]
+   [::headings [:vector #'heading-schema]]
+   [::links [:vector #'link-schema]]
+   [::sections [:vector #'section-schema]]])
+
+(def ^:private violation-schema
+  [:map
+   [::rule :keyword]
+   [::severity [:enum :error :warning :info]]
+   [::line {:optional true} [:int {:min 1}]]
+   [::message :string]
+   [::fix {:optional true} :string]])
+
+(def ^:private violations-schema [:vector #'violation-schema])
+
+(def ^:private parse-request-schema [:map [::content :string]])
+
+(def ^:private validate-request-schema
+  [:map
+   [::content :string]
+   [::rules {:optional true} [:set :keyword]]
+   [::vault-root {:optional true} [:string {:min 1}]]
+   [::file-path {:optional true} [:string {:min 1}]]])
+
+(def ^:private validate-response-schema
+  [:map
+   [::valid? :boolean]
+   [::violations #'violations-schema]
+   [::document #'document-schema]])
+
+(def ^:private validate-file-request-schema
+  [:map
+   [::file-path [:string {:min 1}]]
+   [::vault-root {:optional true} [:string {:min 1}]]])
+
+(def ^:private format-violations-request-schema
+  [:map
+   [::violations #'violations-schema]
+   [::max-length {:optional true} [:int {:min 1}]]])
+
+(def ^:private format-violations-response-schema
+  [:map [::formatted :string]])
+
+(def ^:private fix-request-schema [:map [::content :string]])
+
+(def ^:private fix-response-schema
+  [:map [::content :string] [::fixed-count [:int {:min 0}]]])
+
+;;; ---------------------------------------------------------------------------
 ;;; Parsing Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -774,7 +849,7 @@
    Example:
      (parse {::content \"---\\ntype: component\\n---\\n# Title\\n\\nBody\"})
      ;; => {::content \"...\" ::frontmatter {:type \"component\"} ::headings [...] ...}"
-  {:malli/schema [:=> [:cat ::parse-request] ::parse-response]}
+  {:malli/schema [:=> [:cat #'parse-request-schema] #'document-schema]}
   [{::keys [content]}]
   (let [[frontmatter _remaining _fm-end-line] (parse-frontmatter content)
         lines (str/split-lines content)
@@ -804,7 +879,8 @@
    Example:
      (validate {::content \"# Test\\n\"})
      ;; => {::valid? false ::violations [...] ::document {...}}"
-  {:malli/schema [:=> [:cat ::validate-request] ::validate-response]}
+  {:malli/schema
+   [:=> [:cat #'validate-request-schema] #'validate-response-schema]}
   [{::keys [content rules vault-root file-path]}]
   (let [[_fm _remaining fm-end-line] (parse-frontmatter content)
         document (parse {::content content})
@@ -837,7 +913,8 @@
    Example:
      (validate-file {::file-path \"docs/seon/components/database.md\"
                      ::vault-root \"docs\"})"
-  {:malli/schema [:=> [:cat ::validate-file-request] ::validate-response]}
+  {:malli/schema
+   [:=> [:cat #'validate-file-request-schema] #'validate-response-schema]}
   [{::keys [file-path vault-root]}]
   (let [f (io/file file-path)]
     (if (.exists f)
@@ -865,7 +942,10 @@
 
    Example:
      (format-violations {::violations [...] ::max-length 500})"
-  {:malli/schema [:=> [:cat ::format-violations-request] ::format-violations-response]}
+  {:malli/schema
+   [:=>
+    [:cat #'format-violations-request-schema]
+    #'format-violations-response-schema]}
   [{::keys [violations max-length]}]
   (let [max-len (or max-length 1000)
         by-severity (group-by ::severity violations)
@@ -915,7 +995,7 @@
    Example:
      (fix {::content \"# No blank after\\ntext\"})
      ;; => {::content \"# No blank after\\n\\ntext\\n\" ::fixed-count 2}"
-  {:malli/schema [:=> [:cat ::fix-request] ::fix-response]}
+  {:malli/schema [:=> [:cat #'fix-request-schema] #'fix-response-schema]}
   [{::keys [content]}]
   (let [fixes (atom 0)
         apply-fix (fn [c fix-fn]

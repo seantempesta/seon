@@ -671,7 +671,9 @@
 ;; Before first activation it reads module declarations so namespace loading
 ;; can bootstrap normally. Normal activation never repoints Malli's default.
 (defonce ^:private seon-registry
-  (let [defaults (mr/fast-registry (m/default-schemas))]
+  (let [defaults (mr/composite-registry
+                  (mr/fast-registry (m/default-schemas))
+                  (mr/var-registry))]
     (reify
       mr/Registry
       (-schema [this type]
