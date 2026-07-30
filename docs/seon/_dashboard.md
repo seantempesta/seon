@@ -49,7 +49,6 @@ were removed and are identified only by
 | [[components/web-brand]] | Database-derived product branding |
 | [[components/agent-reply-segmenter]] | Reply parsing into executable forms and prose |
 | [[components/namespaces-render]] | Database-backed namespace context render |
-| [[components/loadable-skills]] | Optional imported skill content; disabled in the default context |
 | [[components/capability-gates]] | Host-owned grants for agent operations |
 | [[components/testing]] | Focused CLJS and JVM database-server gates |
 
