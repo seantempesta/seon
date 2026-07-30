@@ -1,6 +1,7 @@
 (ns seon.cluster.program-restart-test
   "Live restart proof for database-backed SCI program acquisition."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
@@ -75,6 +76,18 @@
          :where [?receipt :seon.cluster.eval/id _]]
        db))
 
+(defn- authored-program-settled?
+  "The complete first-agent plan committed, including its final disposition."
+  [db]
+  (and (program-present? db)
+       (= 15 (receipt-count db))
+       (some? (d/q '[:find ?closed .
+                     :where
+                     [?agent :seon.cluster.agent/id "restart-a"]
+                     [?run :seon.cluster.run/agent ?agent]
+                     [?run :seon.cluster.run/closed-at ?closed]]
+                   db))))
+
 (defn- restarted-call-present?
   [db]
   (boolean
@@ -122,6 +135,7 @@
                    "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
+                   "(missing-independent-form 4)\n"
                    "(deftest persisted-test :reopened)\n"
                    "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
                    "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -133,10 +147,21 @@
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
-             program-present?
+             authored-program-settled?
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
+          (is (= 15 (receipt-count @connection))
+              "fourteen valid forms settle despite one independent refusal")
+          (is (= :seon.cluster.loop/lint-rejected
+                 (:seon.error/kind
+                  (edn/read-string
+                   (d/q '[:find ?result .
+                          :where
+                          [?receipt :seon.cluster.eval/ordinal 9]
+                          [?receipt :seon.cluster.eval/result-edn ?result]]
+                        @connection))))
+              "the invalid ordinal is one flat value, not a plan-wide abort")
           (is (nil? (d/pull @connection [:db/id]
                             [:seon.fn/sym
                              "my.agents.restart-a/removed-before-restart"])))

@@ -133,10 +133,19 @@
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "count the widgets"
                     :seon.cluster.message/at now}])
-      (body {:seon.store/branch-connection connection
-             :seon.cluster.run/process process
-             :seon.cluster.wake/channel
-             (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
+      ;; This fixture installs the production schema but deliberately has no
+      ;; packaged program graph. Static admission derives its resolver context
+      ;; from that graph, so exercising it here would turn every ordinary
+      ;; `my.*` call into a fixture-induced unresolved-namespace refusal.
+      ;; The source-populated restart test owns the integrated lint/eval proof;
+      ;; these turn tests keep their narrower transaction and REPL semantics.
+      (with-redefs
+        [cluster.loop/lint-plan
+         (fn [{sources :seon.cluster.reply/sources}] sources)]
+        (body {:seon.store/branch-connection connection
+               :seon.cluster.run/process process
+               :seon.cluster.wake/channel
+               (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
              ;; ONE target and NO backup: the default shape, where
              ;; `disposition` can never return :failover-now. The
              ;; failover fixtures add :seon.ai/backup explicitly.
@@ -170,11 +179,11 @@
              ;; max-string bounds BOTH eval-result admission and every
              ;; prompt contribution now (the one cap set) — sized so a
              ;; real prompt is never elided while eval results stay small
-             :seon.sci.admit/caps
-             {:seon.config.eval.result/max-depth 6
-              :seon.config.eval.result/max-collection 8
-              :seon.config.eval.result/max-string 4096
-              :seon.config.eval.result/max-nodes 256}})
+               :seon.sci.admit/caps
+               {:seon.config.eval.result/max-depth 6
+                :seon.config.eval.result/max-collection 8
+                :seon.config.eval.result/max-string 4096
+                :seon.config.eval.result/max-nodes 256}}))
       (finally
         (seon.flow/stop-installed-work-launcher!)
         (d/release connection)
