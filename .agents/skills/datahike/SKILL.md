@@ -197,14 +197,15 @@ complete shipped decision document; it is data, not another schema list.
 ### Source indexing and runtime publication have explicit admission
 
 Source indexing records every directly read top-level `defn` and `defn-`,
-including private and uncontracted helpers (`src/seon/fn.clj:22-26,46-83`;
-`src/seon/program.cljc:64-83`). Declarations inside executable top-level forms
-remain an open blocker, and graph reachability is `[TARGET]`. Runtime
-publication admits only fully contracted agent-authored functions, plus
-admitted schema and test declarations (`src/seon/sci/eval.clj:303-327`).
-Arbitrary evals, scratch defs, and atoms remain process-local. Receipts preserve
-history but never reconstruct code. Never turn this producer policy into a
-stored durability flag.
+including private and uncontracted helpers (`src/seon/fn.clj:24-28,57-94`;
+`src/seon/program.cljc:93-125`). An executable top-level `do` containing a
+declaration is refused with source evidence rather than silently omitted
+(`src/seon/sci/reader.cljc:302-319,423-429`; `src/seon/fn.clj:49-54,84-91`).
+Graph reachability is `[TARGET]`. Runtime publication admits only fully
+contracted agent-authored functions, plus admitted schema and test declarations
+(`src/seon/sci/eval.clj:317-339`). Arbitrary evals, scratch defs, and atoms
+remain process-local. Receipts preserve history but never reconstruct code.
+Never turn this producer policy into a stored durability flag.
 
 ### Bridge derivation (live-verified)
 

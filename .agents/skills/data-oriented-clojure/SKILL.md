@@ -58,12 +58,14 @@ a second dial roster (`src/seon/schema/edn.clj:87-111`;
 **Direct source inventory and selective runtime publication are different
 admission domains:** source indexing records every directly read top-level
 `defn` and `defn-`, including private and uncontracted helpers
-(`src/seon/fn.clj:22-26,46-83`; `src/seon/program.cljc:64-83`). Declarations
-inside executable top-level forms remain an open blocker; call reachability is
-`[TARGET]`, not implemented. Agent runtime publication admits only fully
-contracted functions, plus schema and test declarations
-(`src/seon/sci/eval.clj:303-327`). Arbitrary evals, scratch defs, and atoms are
-process-local. Receipts retain history but never reconstruct code.
+(`src/seon/fn.clj:24-28,57-94`; `src/seon/program.cljc:93-125`). An executable
+top-level `do` containing a declaration is refused with source evidence rather
+than silently omitted (`src/seon/sci/reader.cljc:302-319,423-429`;
+`src/seon/fn.clj:49-54,84-91`). Call reachability is `[TARGET]`, not
+implemented. Agent runtime publication admits only fully contracted functions,
+plus schema and test declarations (`src/seon/sci/eval.clj:317-339`). Arbitrary
+evals, scratch defs, and atoms are process-local. Receipts retain history but
+never reconstruct code.
 
 ## The reflexes, and what to write instead
 

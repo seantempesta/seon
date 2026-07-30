@@ -83,69 +83,100 @@ The primary historical source anchors are
 - Mutating a runtime before committing its row left runtime state ahead of
   database truth. The fresh commit-first order is retained.
 
-## Current falsified assumptions
+## What the fresh implementation had to resolve
 
-### Raw schema syntax is not the registered schema value
+### Raw schema syntax was not the registered schema value
 
-`src/seon/sci/reader.cljc:276-285` stores the unevaluated third argument of
+`src/seon/sci/reader.cljc:274-285` stores the unevaluated third argument of
 `seon.schema/register!`. The call `(register! ::compiled-validator 'fn?)`
 therefore produces `(quote fn?)`, although `register!` receives `fn?`.
-Computed schema expressions have the same defect. Runtime currently skips the
-declaration's evaluation entirely and commits raw syntax
-(`src/seon/sci/eval.clj:303-327,506-518`). The isolated registration delta at
-`src/seon/schema.cljc:1768-1819` is an available primitive for staging an
-evaluated value without publishing process state before commit; the SCI base
-does not yet expose `register!`, so this is not an integrated runtime seam.
+Computed schema expressions exposed the same defect. Commit `10dfe0ff4` makes
+the intended distinction explicit in source: the reader supplies identity and
+exact source, while evaluation stages `register!` in an isolated delta and
+replaces the raw form with the evaluated canonical definition
+(`src/seon/sci/eval.clj:539-575`;
+`src/seon/schema.cljc:1861-1931`). Candidate projection validation happens
+before the row can leave evaluation. The adversarial runtime gate below shows
+that this source shape has not yet graduated.
 
-### Schema projection is not cluster-sovereign
+### Schema projection was not cluster-sovereign
 
-`seon.sci.eval/activate-program-schemas!` reads one database and calls the
-process-global `seon.schema/activate-projection!`
-(`src/seon/sci/eval.clj:396-424`; `src/seon/schema.cljc:325-332,1702-1716`).
-Malli's default registry is likewise process-global
+Before `10dfe0ff4`, `seon.sci.eval/activate-program-schemas!` read one database
+and replaced process-global schema state. Malli's default registry is likewise
+process-global
 (`reference-code/malli/src/malli/registry.cljc:40-52`), while Malli compilation
 accepts an explicit registry (`reference-code/malli/src/malli/core.cljc:309-333`).
-A sparse fixture database has already replaced the JVM registry and broken
-unrelated later tests. Two clusters with incompatible forms for the same key
-cannot currently be sovereign.
+The current runtime source derives an immutable projection from each supplied
+database value and carries it in the SCI ctx (`src/seon/schema.cljc:1701-1765`;
+`src/seon/sci/eval.clj:357-492`). The intended alternating-cluster proof lives
+at `test/seon/cluster/turn_test.clj:1062-1129`, but currently errors while
+compiling the cluster-specific schema; cluster sovereignty is not yet proven.
 
-### Tests are rows without a runtime materialization contract
+### Tests were rows without a runtime materialization contract
 
-`src/seon/sci/eval.clj:395-399` treats test installation as `true`, and
-`acquire!` queries only functions. `src/seon/test/runner.clj:81-109,210-225`
-runs explicitly loaded JVM namespaces and never discovers program-graph test
-rows. Registration and result recording are different mechanisms; the latter
-must not manufacture evidence that the former works.
+Before `10dfe0ff4`, test installation returned `true` without evaluating the
+committed source, and acquisition queried only functions. Current source now
+evaluates the exact test source pulled from `db-after`, and acquisition queries
+agent-authored test rows alongside functions (`src/seon/sci/eval.clj:356-490`).
+The intended restart proof executes the acquired test Var's `:test` function
+(`test/seon/cluster/program_restart_test.clj:79-181`), but the current run times
+out before the declaration fact commits. Registration and result recording
+remain different mechanisms; test materialization is not yet proven.
 
-The reader also classifies any operator whose unqualified name is `deftest`
-as a test (`src/seon/sci/reader.cljc:246-254`), without proving that the symbol
-resolves to `clojure.test/deftest`. This repeats the analyzer-flag failure in a
-new form: literal form-head classification must still use resolved operator
-identity, not a coincidental name.
+Commit `87726eae2` closed the reader-identity defect: function, test, namespace,
+and namespace-changing operations now use resolved operator identity
+(`src/seon/sci/reader.cljc:200-285,287-362`). Qualified lookalikes and quoted
+`in-ns` forms remain ordinary data, while real core and referred operations
+retain their semantics (`test/seon/sci/reader_test.clj:405-431`).
 
-### A runtime schema row is not yet a usable database attribute
+### A runtime schema row did not make a usable database attribute
 
-The terminal transaction exact-upserts `:seon.schema/key` and
-`:seon.schema/form`, but it does not derive and install the corresponding
-Datahike schema declaration. A row can therefore claim a runtime attribute is
-registered while a fact using it is still refused by the database. The
-candidate projection and `seon.schema.datahike/malli->datahike-schema` output
-must be validated and committed in the same terminal transaction as the row;
-post-commit global Malli activation cannot repair the database schema.
+The old terminal transaction exact-upserted `:seon.schema/key` and
+`:seon.schema/form` without deriving the corresponding Datahike declaration.
+Commit `10dfe0ff4` rebuilds the candidate projection at the transaction's
+database value and prepends the newly required Datahike schema transaction data
+to the same receipt/program transaction (`src/seon/cluster/run.cljc:589-633`;
+`src/seon/schema/datahike.cljc:213-274`). The recurring turn proof commits a computed
+schema form, observes the row and receipt in one transaction, and immediately
+transacts a fact using the installed attribute
+(`test/seon/cluster/turn_test.clj:880-936`), but that proof currently fails.
 
-Source reconciliation has the inverse defect: `seon.fn/current-rows` excludes
-schema rows from stale removal, so deleting a source registration can leave its
-old row indefinitely. Canonical resource rows and agent-authored rows must be
-preserved by provenance, not by exempting the entire identity family.
+### The first integrated runtime gate is red
+
+After `10dfe0ff4`, `5a517dab7`, `2c2ea1b79`, and the global-schema cleanup were
+present in the shared tree, the independent focused command
+`bin/test seon.cluster.turn-test seon.cluster.program-restart-test` ran 33 tests
+and 208 assertions with 5 failures and 2 errors. The failing classes were:
+
+- evaluated runtime schema publication and immediate Datahike use;
+- discard after a rejected terminal transaction, where candidate forms and the
+  Datahike attribute remained changed;
+- alternating incompatible cluster projections, which raised an invalid-schema
+  error for the shared key; and
+- restart acquisition, which timed out waiting for the declaration fact.
+
+The commits establish the intended seams and recurring tests, not graduation.
+These failures remain the working edge.
+
+Commit `16afa2a10` removed the schema-family stale-removal exemption. The later
+global-schema cleanup supersedes `eb4ac8167`'s temporary namespace-stub repair:
+the desired population now combines canonical resource rows with source-only
+declarations under one global key identity, and schemas do not acquire
+namespace ownership from keyword spelling. Provenance preserves
+agent-authored rows while stale source-owned rows are removed
+(`src/seon/fn.clj:266-318`). The focused recurring gate exercises redefinition,
+stale removal, preservation, and a zero-operation second pass
+(`test/seon/fn_test.clj:370-457`).
 
 ### The three duplicate owners were consolidated
 
 Before `52423e362`, `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
 `seon.cluster.run/program-row-tx` separately defined identities, owned
 attributes, deletion, and exact replacement. `seon.program` now owns those
-shared facts and typed function/test deletion. Producer-specific Malli
-admission remains outside it, and the evaluated-schema, cluster-projection,
-test-materialization, and source-reconciliation gaps remain open.
+shared facts and typed function/test deletion, and the transaction owner calls
+that declaration admission before replacement (`src/seon/cluster/run.cljc:561-599`).
+Producer-specific Malli admission remains outside it. The evaluated-schema,
+cluster-projection, and test-materialization gaps remain open.
 
 ## Required recurring proof
 
@@ -169,6 +200,6 @@ One class-covering matrix must establish:
 - two incompatible cluster schema projections alternating in one JVM without
   bleed.
 
-The existing function reopen test at
-`test/seon/cluster/program_restart_test.clj:69-132` is the surviving harness.
-It should be extended rather than shadowed by a second restart mechanism.
+The surviving reopen harness was extended in place at
+`test/seon/cluster/program_restart_test.clj:79-181`; its current timeout is part
+of the red integrated gate above, not a reason to add a second mechanism.

@@ -171,14 +171,31 @@
   ;; private helpers. A hand list of namespace-stable operations once
   ;; erased every declaration below the first ordinary top-level call.
   (let [files (source-files seon.fn/source-roots)
-        rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
         declared (into [] (mapcat independent-declarations) files)
-        expected (frequencies (map :sym declared))
-        actual (frequencies (keep :seon.fn/sym rows))]
+        rows-by-file
+        (into
+         []
+         (mapcat
+          (fn [file]
+            (let [canonical-file (.getCanonicalPath ^java.io.File file)]
+              (into []
+                    (keep (fn [row]
+                            (when-some [sym (:seon.fn/sym row)]
+                              {:file canonical-file :sym sym})))
+                    (seon.fn/rows {:seon.fn/roots [canonical-file]})))))
+         files)
+        rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
+        ;; Program rows deliberately do not store reader coordinates. Comparing
+        ;; per-file symbol frequencies preserves file identity and occurrence
+        ;; multiplicity without reparsing production source to manufacture a
+        ;; line number. The independent scan still requires every expected
+        ;; occurrence to carry its tools.reader line.
+        expected (frequencies (map (juxt :file :sym) declared))
+        actual (frequencies (map (juxt :file :sym) rows-by-file))]
     (is (seq files))
     (is (every? (comp some? :line) declared))
     (is (= expected actual)
-        (str "independent declaration mismatch: "
+        (str "independent per-file declaration mismatch: "
              {:missing (reduce-kv
                         (fn [m sym n]
                           (let [missing (- n (get actual sym 0))]
@@ -370,7 +387,6 @@
             :seon.fn/private? false
             :seon.fn/spec "[:=> [:cat] :int]"}
            {:seon.schema/key :my.agents.registration-owner/value
-            :seon.schema/ns [:seon.ns/name authored-ns]
             :seon.schema/form ":int"}
            {:seon.test/sym "my.agents.registration-owner/survives-test"
             :seon.test/ns [:seon.ns/name authored-ns]
