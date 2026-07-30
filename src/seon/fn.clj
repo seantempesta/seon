@@ -206,8 +206,7 @@
                       start-line (or (:line (meta form))
                                      (:seon.sci.reader/line event))
                       end-line (+ start-line
-                                  (count (re-seq #"\n" source)))
-                      before-names (into #{} (map ns-name) (all-ns))]
+                                  (count (re-seq #"\n" source)))]
                   (swap! observation update-in [:spans canonical-path]
                          (fnil conj [])
                          {:start start-line :end end-line :source source})
@@ -215,14 +214,6 @@
                     (swap! observation assoc-in
                            [:namespace-sources namespace-name] source))
                   (eval form)
-                  (doseq [namespace-name
-                          (set/difference
-                           (into #{} (map ns-name) (all-ns))
-                           before-names)]
-                    (swap! observation update :namespace-sources
-                           #(if (contains? % namespace-name)
-                              %
-                              (assoc % namespace-name source))))
                   (recur))))))))))
 
 (defn- source-at
