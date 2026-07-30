@@ -115,11 +115,22 @@
    ;; Always explicit: never inherit SCI's dynamic *read-eval* policy.
    :read-eval reject-read-eval})
 
-(defn- require-edge
-  [require-spec]
+(defn- alias-binding
+  [local-name target-ns]
+  {:seon.ns.alias/local local-name
+   :seon.ns.alias/target-ns target-ns})
+
+(defn- refer-binding
+  [local-name target-ns target-name]
+  {:seon.ns.refer/local local-name
+   :seon.ns.refer/target-ns target-ns
+   :seon.ns.refer/target-name target-name})
+
+(defn- require-bindings
+  [require-spec publics]
   (cond
     (symbol? require-spec)
-    {:seon.ns.require/target require-spec}
+    {:requires #{require-spec}}
 
     (and (vector? require-spec)
          (symbol? (first require-spec)))
@@ -129,23 +140,31 @@
                     (catch #?(:clj Throwable :cljs :default) _
                       {}))
           alias (or (:as options) (:as-alias options))
-          refers (:refer options)]
-      (cond-> {:seon.ns.require/target target}
-        (symbol? alias)
-        (assoc :seon.ns.require/alias alias)
-
-        (and (symbol? (:as-alias options))
-             (nil? (:as options)))
-        (assoc :seon.ns.require/as-alias? true)
-
-        (sequential? refers)
-        (assoc :seon.ns.require/refers (set refers))
-
-        (= :all refers)
-        (assoc :seon.ns.require/refer-all? true)))
+          refers (:refer options)
+          renames (or (:rename options) {})
+          referred-names (cond
+                           (sequential? refers) refers
+                           (= :all refers) (get publics target #{})
+                           :else [])]
+      {:aliases
+       (cond-> #{}
+         (symbol? alias) (conj (alias-binding alias target)))
+       :refers
+       (into #{}
+             (map (fn [target-name]
+                    (refer-binding (get renames target-name target-name)
+                                   target
+                                   target-name)))
+             referred-names)
+       :requires
+       (cond-> #{}
+         (nil? (:as-alias options)) (conj target))
+       ::refer-all-targets
+       (cond-> #{}
+         (= :all refers) (conj target))})
 
     :else
-    nil))
+    {}))
 
 (defn- namespace-clauses
   [form]
@@ -158,33 +177,36 @@
       after-doc)))
 
 (defn- namespace-info
-  [form]
+  [form context]
   (when-let [namespace-name (symbol-name (second form))]
     (let [doc (when (string? (nth form 2 nil)) (nth form 2))
           requires (->> (namespace-clauses form)
                         (filter #(and (seq? %) (= :require (first %))))
                         (mapcat rest))
-          edges (into #{} (keep require-edge) requires)
-          aliases
-          (into {}
-                (keep (fn [{:seon.ns.require/keys [target alias]}]
-                        (when alias [alias target])))
-                edges)
-          refers
-          (into {}
-                (mapcat
-                 (fn [{:seon.ns.require/keys [target refers]}]
-                   (map (fn [referred]
-                          [referred
-                           (symbol (str target) (str referred))])
-                        refers)))
-                edges)]
+          bindings (map #(require-bindings % (::publics context)) requires)
+          alias-rows (into #{} (mapcat :aliases) bindings)
+          refer-rows (into #{} (mapcat :refers) bindings)
+          required-targets (into #{} (mapcat :requires) bindings)
+          refer-all-targets (into #{} (mapcat ::refer-all-targets) bindings)
+          aliases (into {}
+                        (map (juxt :seon.ns.alias/local
+                                   :seon.ns.alias/target-ns))
+                        alias-rows)
+          refers (into {}
+                       (map (fn [{:seon.ns.refer/keys
+                                  [local target-ns target-name]}]
+                              [local (symbol (str target-ns)
+                                             (str target-name))]))
+                       refer-rows)]
       (cond->
        {::ns namespace-name
         ::aliases aliases
         ::refers refers
         :seon.ns/name namespace-name
-        :seon.ns/require-edges edges}
+        :seon.ns/requires required-targets
+        :seon.ns/aliases alias-rows
+        :seon.ns/refers refer-rows
+        ::refer-all-targets refer-all-targets}
         doc (assoc :seon.ns/doc doc)))))
 
 (defn- quoted-symbol
@@ -194,6 +216,18 @@
              (= 2 (count value))
              (symbol? (second value)))
     (second value)))
+
+(defn- quoted-value
+  [value]
+  (when (and (seq? value)
+             (= 'quote (first value))
+             (= 2 (count value)))
+    (second value)))
+
+(defn- literal-require-bindings
+  [form publics]
+  (map #(require-bindings (or (quoted-value %) %) publics)
+       (rest form)))
 
 (declare resolved-operation)
 
@@ -289,8 +323,9 @@
               (resolved-operation (first form) context)))
     (assoc
      (select-keys
-      (namespace-info form)
-      [:seon.ns/name :seon.ns/doc :seon.ns/require-edges])
+      (namespace-info form context)
+      [:seon.ns/name :seon.ns/doc :seon.ns/requires
+       :seon.ns/aliases :seon.ns/refers ::refer-all-targets])
      :seon.ns/source source)
     (or
      (when-let [function (function-declaration form namespace-name context)]
@@ -335,9 +370,10 @@
                     (resolved-operation (first form) state))]
     (cond
       (= 'clojure.core/ns operation)
-      (if-let [info (namespace-info form)]
+      (if-let [info (namespace-info form state)]
         (let [context (select-keys info [::ns ::aliases ::refers])]
           (assoc context
+                 ::publics (::publics state)
                  ::attribution? true
                  ::contexts (assoc contexts (::ns context) context)))
         (assoc state ::attribution? false))
@@ -349,6 +385,29 @@
                {::attribution? true
                 ::contexts contexts})
         (assoc state ::attribution? false))
+
+      (= 'clojure.core/require operation)
+      (let [bindings (literal-require-bindings form (::publics state))]
+        (-> state
+            (update ::aliases
+                    into
+                    (mapcat
+                     (fn [{:keys [aliases]}]
+                       (map (juxt :seon.ns.alias/local
+                                  :seon.ns.alias/target-ns)
+                            aliases))
+                     bindings))
+            (update ::refers
+                    into
+                    (mapcat
+                     (fn [{:keys [refers]}]
+                       (map
+                        (fn [{:seon.ns.refer/keys
+                              [local target-ns target-name]}]
+                          [local (symbol (str target-ns)
+                                         (str target-name))])
+                        refers))
+                     bindings))))
 
       ;; Attribution otherwise follows the last explicit valid namespace.
       ;; Evaluator namespace receipts remain the runtime truth for a change
@@ -367,7 +426,7 @@
         text-length (count text)
         initial-context
         (let [context (select-keys reading-context
-                                   [::ns ::aliases ::refers])]
+                                   [::ns ::aliases ::refers ::publics])]
           (assoc context
                  ::attribution? true
                  ::contexts
@@ -383,7 +442,7 @@
              ctx source-reader
              (parse-options
               (merge reading-context
-                     (select-keys state [::ns ::aliases ::refers]))))
+                     (select-keys state [::ns ::aliases ::refers ::publics]))))
             end-line (sci/get-line-number source-reader)
             end-column (sci/get-column-number source-reader)
             end (cursor-offset starts text-length end-line end-column)]
@@ -418,7 +477,7 @@
                  (declaration-facts
                   form
                   (when (::attribution? state) (::ns state))
-                  (select-keys state [::ns ::aliases ::refers])
+                  (select-keys state [::ns ::aliases ::refers ::publics])
                   source)
                  (when-let [nested
                             (seq
@@ -444,6 +503,7 @@
     namespace-name ::ns
     aliases ::aliases
     refers ::refers
+    publics ::publics
     features ::features
     tags ::tags
     max-chars ::max-chars}]
@@ -451,6 +511,7 @@
         {::ns (or namespace-name 'user)
          ::aliases (or aliases {})
          ::refers (or refers {})
+         ::publics (or publics {})
          ::features (or features #{:clj})
          ::tags (or tags {})
          ::max-chars (or max-chars default-max-chars)}]

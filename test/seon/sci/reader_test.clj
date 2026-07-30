@@ -370,17 +370,20 @@
                  "[clojure.test :refer [deftest]] "
                  "[seon.schema :as schema]))")
             :seon.ns/doc "Sample namespace."
-            :seon.ns/require-edges
-            #{{:seon.ns.require/target 'clojure.string
-               :seon.ns.require/alias 'str}
-              {:seon.ns.require/target 'clojure.test
-               :seon.ns.require/refers #{'deftest}}
-              {:seon.ns.require/target 'seon.schema
-               :seon.ns.require/alias 'schema}}}
+            :seon.ns/requires #{'clojure.string 'clojure.test 'seon.schema}
+            :seon.ns/aliases
+            #{{:seon.ns.alias/local 'str
+               :seon.ns.alias/target-ns 'clojure.string}
+              {:seon.ns.alias/local 'schema
+               :seon.ns.alias/target-ns 'seon.schema}}
+            :seon.ns/refers
+            #{{:seon.ns.refer/local 'deftest
+               :seon.ns.refer/target-ns 'clojure.test
+               :seon.ns.refer/target-name 'deftest}}}
            (select-keys
             (first read-events)
             [:seon.ns/name :seon.ns/source :seon.ns/doc
-             :seon.ns/require-edges])))
+             :seon.ns/requires :seon.ns/aliases :seon.ns/refers])))
     (is (= {:seon.fn/sym "sample/hidden"
             :seon.fn/ns [:seon.ns/name 'sample]
             :seon.fn/source
@@ -403,6 +406,47 @@
            (select-keys
             (nth read-events 3)
             [:seon.test/sym :seon.test/ns :seon.test/source])))))
+
+(deftest renamed-and-refer-all-bindings-resolve-to-exact-targets
+  (let [read-events
+        (reader/read
+         {:seon.sci.reader/text
+          (str "(ns exact.bindings "
+               "(:require [clojure.test :refer [deftest] "
+               ":rename {deftest dt}] "
+               "[clojure.set :refer :all]))\n"
+               "(dt renamed-test :ok)\n"
+               "(defn united [a b] (union a b))")
+          :seon.sci.reader/publics
+          {'clojure.set #{'union 'intersection 'difference}}})]
+    (is (= "exact.bindings/renamed-test"
+           (:seon.test/sym (second read-events))))
+    (is (= #{{:seon.ns.refer/local 'dt
+              :seon.ns.refer/target-ns 'clojure.test
+              :seon.ns.refer/target-name 'deftest}
+             {:seon.ns.refer/local 'union
+              :seon.ns.refer/target-ns 'clojure.set
+              :seon.ns.refer/target-name 'union}
+             {:seon.ns.refer/local 'intersection
+              :seon.ns.refer/target-ns 'clojure.set
+              :seon.ns.refer/target-name 'intersection}
+             {:seon.ns.refer/local 'difference
+              :seon.ns.refer/target-ns 'clojure.set
+              :seon.ns.refer/target-name 'difference}}
+           (:seon.ns/refers (first read-events))))))
+
+(deftest standalone-require-advances-the-next-forms-reading-context
+  (let [read-events
+        (events
+         (str "(require '[clojure.test :refer [deftest] "
+              ":rename {deftest dt}])\n"
+              "(require '[missing.reader.namespace :as-alias ghost])\n"
+              "(dt renamed-after-require ::ghost/value)"))]
+    (is (= "user/renamed-after-require"
+           (:seon.test/sym (nth read-events 2))))
+    (is (= :missing.reader.namespace/value
+           (nth (:seon.sci.reader/form (nth read-events 2)) 2))
+        "a prior literal :as-alias governs later keyword auto-resolution")))
 
 (deftest declaration-and-namespace-semantics-use-resolved-operator-identity
   (let [read-events

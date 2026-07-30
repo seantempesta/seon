@@ -10,8 +10,8 @@
     (is (= [:enum :io :compute]
            (schema/schema-definition :seon.fn/workload)))
     (is (contains? attributes :seon.fn/workload))
-    (is (contains? attributes :seon.ns.require/target))
-    (is (contains? attributes :seon.ns.require/refers)))
+    (is (contains? attributes :seon.ns.alias/local))
+    (is (contains? attributes :seon.ns.refer/target-name)))
   (is (schema/valid-candidate-value?
        :seon.fn/fn
        {:seon.fn/sym "sample/f"
@@ -24,4 +24,6 @@
        :seon.ns/ns
        {:seon.ns/name 'sample
         :seon.ns/source "(ns sample)"
-        :seon.ns/require-edges #{}})))
+        :seon.ns/requires #{}
+        :seon.ns/aliases #{}
+        :seon.ns/refers #{}})))

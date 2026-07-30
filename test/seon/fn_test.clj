@@ -79,6 +79,31 @@
       (is (= #{'sample}
              (into #{} (keep :seon.ns/name) rows))))))
 
+(deftest index-expands-refer-all-and-preserves-renamed-test-identity
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        file (io/file root "exact_bindings.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit file
+          (str "(ns exact.bindings "
+               "(:require [clojure.test :refer [deftest] "
+               ":rename {deftest dt}] "
+               "[clojure.set :refer :all]))\n"
+               "(dt renamed-test :ok)\n"
+               "(defn united [a b] (union a b))"))
+    (let [rows (seon.fn/rows {:seon.fn/roots [root]})
+          namespace-row (some #(when (:seon.ns/name %) %) rows)]
+      (is (= #{"exact.bindings/renamed-test"}
+             (into #{} (keep :seon.test/sym) rows)))
+      (is (contains? (:seon.ns/requires namespace-row) 'clojure.set))
+      (is (contains? (:seon.ns/refers namespace-row)
+                     {:seon.ns.refer/local 'dt
+                      :seon.ns.refer/target-ns 'clojure.test
+                      :seon.ns.refer/target-name 'deftest}))
+      (is (contains? (:seon.ns/refers namespace-row)
+                     {:seon.ns.refer/local 'union
+                      :seon.ns.refer/target-ns 'clojure.set
+                      :seon.ns.refer/target-name 'union})))))
+
 (defn- source-files
   [roots]
   (->> roots

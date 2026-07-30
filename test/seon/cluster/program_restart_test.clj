@@ -42,7 +42,16 @@
       (let [observed (deref result 20000 ::timeout)]
         (when (= ::timeout observed)
           (throw (ex-info "The scratch cluster did not commit the expected fact."
-                          {:seon.error/kind ::commit-timeout})))
+                          {:seon.error/kind ::commit-timeout
+                           ::receipts
+                           (d/q '[:find ?ordinal ?result ?error
+                                  :where
+                                  [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                                  [?receipt :seon.cluster.eval/result-edn ?result]
+                                  [(get-else $ ?receipt
+                                             :seon.cluster.eval/error nil)
+                                   ?error]]
+                                @connection)})))
         observed)
       (finally
         (datahike/unlisten! connection listener-key)))))
@@ -98,10 +107,16 @@
                 (if (str/includes? prompt "You are agent restart-a")
                   (str
                    "(require '[seon.schema :as schema])\n"
-                   "(require '[clojure.string :as s])\n"
+                   "(require '[clojure.string :as s1])\n"
+                   "(require '[clojure.string :as s2])\n"
+                   "(require '[clojure.string :refer [upper-case] "
+                   ":rename {upper-case up}])\n"
+                   "(require 'clojure.set)\n"
+                   "(require '[missing.restart.namespace :as-alias ghost])\n"
                    "(require '[clojure.test :refer [deftest]])\n"
                    "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
-                   "persisted [x] (s/upper-case x))\n"
+                   "persisted [x] (do (s1/lower-case x) "
+                   "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
                    "(deftest persisted-test :reopened)\n"
@@ -114,6 +129,14 @@
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
           (is (pos? (receipt-count @connection)))
+          (let [namespace-row
+                (d/pull @connection [:seon.ns/requires]
+                        [:seon.ns/name 'my.agents.restart-a])]
+            (is (some #{'clojure.set} (:seon.ns/requires namespace-row))
+                "a plain require remains an exact load dependency")
+            (is (not (some #{'missing.restart.namespace}
+                           (:seon.ns/requires namespace-row)))
+                ":as-alias is not reclassified as a load dependency"))
           (finally
             (cluster/stop! first-instance))))
 
@@ -149,6 +172,18 @@
                    (sci/eval-string*
                     ctx "(my.agents.restart-a/persisted \"ok\")"))
                 "the reopened function is installed in the fresh ctx")
+            (let [{:keys [aliases refers] :as bindings}
+                  (sci/namespace-bindings ctx 'my.agents.restart-a)]
+              (is (= 'clojure.string (get aliases 's1)))
+              (is (= 'clojure.string (get aliases 's2))
+                  "multiple aliases to one target survive acquisition")
+              (is (= 'missing.restart.namespace (get aliases 'ghost))
+                  ":as-alias survives without loading its target")
+              (is (= 'clojure.string/upper-case (get refers 'up))
+                  "a renamed refer retains its target Var identity")
+              (is (some #{'clojure.set} (:requires bindings)))
+              (is (not (some #{'missing.restart.namespace}
+                             (:requires bindings)))))
             (is (= :reopened
                    (sci/eval-string*
                     ctx

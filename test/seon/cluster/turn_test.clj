@@ -1222,6 +1222,75 @@
                          @connection))
               "the second run's fresh ctx materialized current program facts"))))))
 
+(deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
+  (test-support/with-database
+    (fn [connection]
+      (d/transact
+       connection
+       [{:seon.ns/name 'authored.target
+         :seon.ns/source "(ns authored.target)"}
+        {:seon.ns/name 'authored.consumer
+         :seon.ns/source "(ns authored.consumer)"
+         :seon.ns/requires ['authored.target]
+         :seon.ns/aliases
+         [{:seon.ns.alias/local 'target
+           :seon.ns.alias/target-ns 'authored.target}]
+         :seon.ns/refers
+         [{:seon.ns.refer/local 'plus
+           :seon.ns.refer/target-ns 'authored.target
+           :seon.ns.refer/target-name 'increment}]}
+        {:seon.ns/name 'alias.cycle-a
+         :seon.ns/source "(ns alias.cycle-a)"
+         :seon.ns/aliases
+         [{:seon.ns.alias/local 'b
+           :seon.ns.alias/target-ns 'alias.cycle-b}
+          {:seon.ns.alias/local 'ghost
+           :seon.ns.alias/target-ns 'not.loaded}]}
+        {:seon.ns/name 'alias.cycle-b
+         :seon.ns/source "(ns alias.cycle-b)"
+         :seon.ns/aliases
+         [{:seon.ns.alias/local 'a
+           :seon.ns.alias/target-ns 'alias.cycle-a}]}])
+      (d/transact
+       connection
+       [{:seon.fn/sym "authored.target/increment"
+         :seon.fn/ns [:seon.ns/name 'authored.target]
+         :seon.fn/source
+         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+              "increment [x] (inc x))")
+         :seon.fn/arglists "([x])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat :int] :int]"}
+        {:seon.fn/sym "authored.consumer/call-plus"
+         :seon.fn/ns [:seon.ns/name 'authored.consumer]
+         :seon.fn/source
+         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+              "call-plus [x] (plus (target/increment x)))")
+         :seon.fn/arglists "([x])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat :int] :int]"}])
+      (let [ctx (sci.core/fork (sci.eval/base))
+            acquired
+            (sci.eval/acquire!
+             {:seon.sci.eval/ctx ctx
+              :seon.db/db @connection})]
+        (is (= 43
+               (sci.core/eval-string*
+                ctx "(authored.consumer/call-plus 41)"))
+            "refer and aliased target Vars exist before the consumer")
+        (is (= 'authored.target/increment
+               (get-in (sci.core/namespace-bindings ctx 'authored.consumer)
+                       [:refers 'plus])))
+        (is (= 'alias.cycle-b
+               (get-in (sci.core/namespace-bindings ctx 'alias.cycle-a)
+                       [:aliases 'b]))
+            "alias-only cycles do not become acquisition dependencies")
+        (is (= 'not.loaded
+               (get-in (sci.core/namespace-bindings ctx 'alias.cycle-a)
+                       [:aliases 'ghost]))
+            "an effective as-alias target need not be loaded")
+        (is (= 6 (:seon.sci.eval/installed acquired)))))))
+
 (deftest a-settled-orphan-stops-wedging-the-agent
   ;; The crash drill's headline: a process died holding a claimed,
   ;; unplanned run. Boot recovery released the dead CUSTODY, but until

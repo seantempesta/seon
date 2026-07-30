@@ -347,18 +347,12 @@
   admission.  The table is SCI's existing per-ctx state, not a second registry
   (`reference-code/sci/src/sci/impl/namespaces.cljc:488-554`)."
   [ctx namespace-name]
-  (let [namespace-state
-        (get-in @(:env ctx) [:namespaces namespace-name])]
+  (let [{:keys [aliases refers requires]}
+        (sci/namespace-bindings ctx namespace-name)]
     {:seon.sci.reader/ns namespace-name
-     :seon.sci.reader/aliases (or (:aliases namespace-state) {})
-     :seon.sci.reader/refers
-     (into {}
-           (keep
-            (fn [[local-name referred-var]]
-              (let [{target-ns :ns target-name :name} (meta referred-var)]
-                (when (and target-ns target-name)
-                  [local-name (symbol (str target-ns) (str target-name))]))))
-           (:refers namespace-state))}))
+     :seon.sci.reader/aliases aliases
+     :seon.sci.reader/refers refers
+     ::requires requires}))
 
 (defn- one-event
   [source namespace-name ctx]
@@ -377,58 +371,53 @@
                       {:seon.error/kind ::reader-event-count
                        :seon.sci.reader/event-count (count events)})))))
 
-(defn- require-edges
-  "Derive the complete namespace dependency set from SCI's reader context."
+(defn- binding-rows
+  "Project SCI's effective resolver inputs into namespace components."
   [{aliases :seon.sci.reader/aliases
-    refers :seon.sci.reader/refers}]
-  (let [by-target
-        (reduce-kv
-         (fn [edges alias target]
-           (assoc-in edges [target :seon.ns.require/alias] alias))
-         {}
-         aliases)]
-    (->> refers
-         (reduce-kv
-          (fn [edges local-name referred]
-            (let [target (some-> referred namespace symbol)]
-              (if target
-                (update-in edges [target :seon.ns.require/refers]
-                           (fnil conj #{}) local-name)
-                edges)))
-          by-target)
-         (map (fn [[target edge]]
-                (assoc edge :seon.ns.require/target target)))
-         set)))
+    refers :seon.sci.reader/refers
+    requires ::requires}]
+  {:seon.ns/requires
+   requires
+   :seon.ns/aliases
+   (into #{}
+         (map (fn [[local target-ns]]
+                {:seon.ns.alias/local local
+                 :seon.ns.alias/target-ns target-ns}))
+         aliases)
+   :seon.ns/refers
+   (into #{}
+         (keep (fn [[local target]]
+                 (when-let [target-ns (some-> target namespace symbol)]
+                   {:seon.ns.refer/local local
+                    :seon.ns.refer/target-ns target-ns
+                    :seon.ns.refer/target-name (symbol (name target))})))
+         refers)})
+
+(defn- row-bindings
+  [row]
+  {:aliases
+   (into {}
+         (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
+         (:seon.ns/aliases row))
+   :refers
+   (into {}
+         (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
+                [local (symbol (str target-ns) (str target-name))]))
+         (:seon.ns/refers row))
+   :requires (or (:seon.ns/requires row) #{})})
 
 (defn- namespace-context-row
   [namespace-name source before after]
   (when (not= (select-keys before [:seon.sci.reader/aliases
-                                   :seon.sci.reader/refers])
+                                   :seon.sci.reader/refers ::requires])
               (select-keys after [:seon.sci.reader/aliases
-                                  :seon.sci.reader/refers]))
+                                  :seon.sci.reader/refers ::requires]))
     (program/declaration-row
-     {:seon.ns/name namespace-name
-      :seon.ns/source source
-      :seon.ns/require-edges (require-edges after)}
+     (merge
+      {:seon.ns/name namespace-name
+       :seon.ns/source source}
+      (binding-rows after))
      :contracted)))
-
-(defn- require-form
-  [edges]
-  (list*
-   'require
-   (map
-    (fn [{target :seon.ns.require/target
-          alias :seon.ns.require/alias
-          refers :seon.ns.require/refers
-          refer-all? :seon.ns.require/refer-all?
-          as-alias? :seon.ns.require/as-alias?}]
-      (list
-       'quote
-       (cond-> [target]
-         alias (conj (if as-alias? :as-alias :as) alias)
-         (seq refers) (conj :refer (vec (sort refers)))
-         refer-all? (conj :refer :all))))
-    (sort-by (comp str :seon.ns.require/target) edges))))
 
 (defn install-program-row!
   "Install one declaration from the terminal transaction's db-after.
@@ -449,7 +438,9 @@
         committed (when-not (= identity :seon.program/delete-identities)
                     (d/pull db
                             (if (= identity :seon.ns/name)
-                              '[* {:seon.ns/require-edges [*]}]
+                              '[* :seon.ns/requires
+                                  {:seon.ns/aliases [*]}
+                                  {:seon.ns/refers [*]}]
                               '[*])
                             [identity value]))]
     (when (and (#{:seon.fn/sym :seon.test/sym} identity)
@@ -464,9 +455,8 @@
     (case identity
       :seon.ns/name
       (let [namespace-name (:seon.ns/name committed)]
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-          (sci/eval-form ctx
-                         (require-form (:seon.ns/require-edges committed))))
+        (sci/install-namespace-bindings!
+         ctx namespace-name (row-bindings committed))
         {:seon.schema/projection projection
          :seon.sci.eval/installed 1})
 
@@ -534,7 +524,9 @@
           (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
           (map (fn [[namespace-name _ _]]
                  (d/pull db
-                         '[* {:seon.ns/require-edges [*]}]
+                         '[* :seon.ns/requires
+                             {:seon.ns/aliases [*]}
+                             {:seon.ns/refers [*]}]
                          [:seon.ns/name namespace-name]))))
          (d/q '[:find ?namespace-name ?source ?source-tx
                 :where
@@ -565,35 +557,111 @@
                 [?test :seon.test/ns ?namespace]
                 [?namespace :seon.ns/name ?namespace-name]]
               db))
-        rows
-        (concat
-         (sort-by :seon.ns/name namespace-rows)
-         (map (fn [[sym source namespace-name _]]
-                {:seon.fn/sym sym
-                 :seon.fn/source source
-                 :seon.fn/ns [:seon.ns/name namespace-name]})
-              (sort-by first function-rows))
-         (map (fn [[sym source namespace-name _]]
-                {:seon.test/sym sym
-                 :seon.test/source source
-                 :seon.test/ns [:seon.ns/name namespace-name]})
-              (sort-by first test-rows)))]
-    (reduce
-     (fn [state row]
-       (let [installed
-             (install-program-row!
-              {:seon.sci.eval/ctx
-               (assoc ctx :seon.schema/projection
-                      (:seon.schema/projection state))
-               :seon.db/db db
-               :seon.sci.eval/program-row row})]
-         {:seon.schema/projection (:seon.schema/projection installed)
-          :seon.sci.eval/installed
-          (+ (:seon.sci.eval/installed state)
-             (:seon.sci.eval/installed installed))}))
-     {:seon.schema/projection projection
-      :seon.sci.eval/installed 0}
-     rows)))
+        function-rows-by-ns
+        (group-by #(nth % 2) function-rows)
+        test-rows-by-ns
+        (group-by #(nth % 2) test-rows)
+        namespace-row-by-name
+        (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
+        namespace-names
+        (into (set (keys namespace-row-by-name))
+              (concat (keys function-rows-by-ns)
+                      (keys test-rows-by-ns)))
+        dependencies
+        (into {}
+              (map
+               (fn [namespace-name]
+                 (let [bindings
+                       (row-bindings
+                        (get namespace-row-by-name namespace-name))]
+                   [namespace-name
+                    (into #{}
+                          (comp
+                           (filter namespace-names)
+                           (remove #{namespace-name}))
+                          (concat
+                           (:requires bindings)
+                           (keep (comp symbol namespace)
+                                 (vals (:refers bindings)))))])))
+              namespace-names)
+        namespace-order
+        (loop [remaining dependencies
+               ordered []]
+          (if (empty? remaining)
+            ordered
+            (let [ready (->> remaining
+                             (keep (fn [[namespace-name required]]
+                                     (when (empty? required) namespace-name)))
+                             (sort-by str)
+                             vec)]
+              (when (empty? ready)
+                (throw
+                 (ex-info
+                  "Program acquisition found a namespace binding cycle."
+                  {:seon.error/kind ::namespace-binding-cycle
+                   :seon.sci.eval/dependencies remaining})))
+              (let [released (set ready)]
+                (recur
+                 (into {}
+                       (map (fn [[namespace-name required]]
+                              [namespace-name
+                               (apply disj required released)]))
+                       (apply dissoc remaining ready))
+                 (into ordered ready))))))
+        install-row
+        (fn [state row]
+          (let [installed
+                (install-program-row!
+                 {:seon.sci.eval/ctx
+                  (assoc ctx :seon.schema/projection
+                         (:seon.schema/projection state))
+                  :seon.db/db db
+                  :seon.sci.eval/program-row row})]
+            {:seon.schema/projection (:seon.schema/projection installed)
+             :seon.sci.eval/installed
+             (+ (:seon.sci.eval/installed state)
+                (:seon.sci.eval/installed installed))}))]
+    ;; Create every namespace and publish aliases first. Alias targets need not
+    ;; exist: this is the effective behavior of SCI's `:as-alias` too.
+    (doseq [[namespace-name row] namespace-row-by-name]
+      (sci/install-namespace-bindings!
+       ctx namespace-name (assoc (row-bindings row) :refers {})))
+    (let [functions-installed
+          (reduce
+           (fn [state namespace-name]
+             ;; Refer Vars are installed only after all target namespaces on
+             ;; this dependency edge have published their functions.
+             (when-let [row (get namespace-row-by-name namespace-name)]
+               (sci/install-namespace-bindings!
+                ctx namespace-name (row-bindings row)))
+             (reduce
+              install-row
+              (cond-> state
+                (contains? namespace-row-by-name namespace-name)
+                (update :seon.sci.eval/installed inc))
+              (map (fn [[sym source _ _]]
+                     {:seon.fn/sym sym
+                      :seon.fn/source source
+                      :seon.fn/ns [:seon.ns/name namespace-name]})
+                   (sort-by first
+                            (get function-rows-by-ns namespace-name)))))
+           {:seon.schema/projection projection
+            :seon.sci.eval/installed 0}
+           namespace-order)]
+      ;; Tests resolve only after every namespace's functions and exact
+      ;; bindings are present. This makes renamed `deftest` deterministic.
+      (reduce
+       (fn [state namespace-name]
+         (reduce
+          install-row
+          state
+          (map (fn [[sym source _ _]]
+                 {:seon.test/sym sym
+                  :seon.test/source source
+                  :seon.test/ns [:seon.ns/name namespace-name]})
+               (sort-by first (get test-rows-by-ns namespace-name)))))
+       functions-installed
+       namespace-order))))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.

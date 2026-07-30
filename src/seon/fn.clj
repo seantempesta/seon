@@ -54,44 +54,110 @@
                     (count (:seon.sci.reader/nested-declarations event))}))))
         events))
 
+(defn- read-source-events
+  [file source publics]
+  (let [events
+        (reader/read
+         {:seon.sci.reader/text source
+          :seon.sci.reader/features #{:clj}
+          :seon.sci.reader/publics publics
+          ;; Standard data literals are source data, not an escape hatch. The
+          ;; index needs their forms, never host objects.
+          :seon.sci.reader/tags {'inst identity
+                                 'uuid identity}})]
+    (when (map? events)
+      (throw (ex-info (:seon.error/message events)
+                      (assoc (:seon.error/data events)
+                             :seon.fn/file
+                             (.getCanonicalPath ^java.io.File file)))))
+    events))
+
+(defn- refer-all-publics
+  [source-units]
+  (let [source-publics
+        (reduce
+         (fn [publics {:keys [events]}]
+           (reduce
+            (fn [publics event]
+              (cond
+                (and (:seon.fn/sym event)
+                     (not (:seon.fn/private? event)))
+                (update publics
+                        (symbol (namespace (symbol (:seon.fn/sym event))))
+                        (fnil conj #{})
+                        (symbol (name (symbol (:seon.fn/sym event)))))
+
+                (:seon.test/sym event)
+                (update publics
+                        (symbol (namespace (symbol (:seon.test/sym event))))
+                        (fnil conj #{})
+                        (symbol (name (symbol (:seon.test/sym event)))))
+
+                :else publics))
+            publics
+            events))
+         {}
+         source-units)
+        targets
+        (into #{}
+              (mapcat (fn [{:keys [events]}]
+                        (mapcat :seon.sci.reader/refer-all-targets events)))
+              source-units)]
+    (reduce
+     (fn [publics target]
+       (if (seq (get publics target))
+         publics
+         (do
+           (require target)
+           (let [target-ns (find-ns target)]
+             (when-not target-ns
+               (throw
+                (ex-info
+                 "Source indexing could not resolve a :refer :all target."
+                 {:seon.error/kind ::index-refused
+                  :seon.ns/target target})))
+             (assoc publics target (set (keys (ns-publics target-ns))))))))
+     source-publics
+     targets)))
+
 (defn rows
   "Canonical program rows read from the declared source roots."
   {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :map]]}
   [{roots :seon.fn/roots}]
-  (into
-   []
-   (comp
-    (mapcat (fn [root]
-              (->> (file-seq (io/file root))
-                   (filter source-file?)
-                   (sort-by (fn [file]
-                              (.getCanonicalPath ^java.io.File file))))))
-    (mapcat
-     (fn [file]
-       (let [events
-             (reader/read
-              {:seon.sci.reader/text (slurp file)
-               :seon.sci.reader/features #{:clj}
-               ;; Standard data literals are source data, not an escape
-               ;; hatch. The index needs their forms, never host objects.
-               :seon.sci.reader/tags {'inst identity
-                                      'uuid identity}})]
-         (when (map? events)
-           (throw (ex-info (:seon.error/message events)
-                           (assoc (:seon.error/data events)
-                                  :seon.fn/file
-                                  (.getCanonicalPath ^java.io.File file)))))
-         (when-let [unadmitted (seq (unadmitted-functions events))]
-           (throw
-            (ex-info
-             (str "Source indexing could not place a function "
-                  "declaration in a namespace.")
-             {:seon.error/kind ::index-refused
-              :seon.fn/file (.getCanonicalPath ^java.io.File file)
-              ::unadmitted (vec unadmitted)})))
-         events)))
-    (keep durable-row))
-   roots))
+  (let [files
+        (into []
+              (mapcat (fn [root]
+                        (->> (file-seq (io/file root))
+                             (filter source-file?)
+                             (sort-by (fn [file]
+                                        (.getCanonicalPath
+                                         ^java.io.File file))))))
+              roots)
+        source-units
+        (mapv (fn [file]
+                (let [source (slurp file)]
+                  {:file file
+                   :source source
+                   :events (read-source-events file source {})}))
+              files)
+        publics (refer-all-publics source-units)]
+    (into
+     []
+     (comp
+      (mapcat
+       (fn [{:keys [file source]}]
+         (let [events (read-source-events file source publics)]
+           (when-let [unadmitted (seq (unadmitted-functions events))]
+             (throw
+              (ex-info
+               (str "Source indexing could not place a function "
+                    "declaration in a namespace.")
+               {:seon.error/kind ::index-refused
+                :seon.fn/file (.getCanonicalPath ^java.io.File file)
+                ::unadmitted (vec unadmitted)})))
+           events)))
+      (keep durable-row))
+     source-units)))
 
 (defn- row-identity
   [row]
@@ -128,11 +194,9 @@
          db
          (if (map? process) (:db/id process) process))))
 
-(defn- require-edge
-  [edge]
-  (let [refers (:seon.ns.require/refers edge)]
-    (cond-> (dissoc edge :db/id :seon.ns.require/refers)
-      (seq refers) (assoc :seon.ns.require/refers (set refers)))))
+(defn- component-binding
+  [binding]
+  (dissoc binding :db/id))
 
 (defn- canonical-row
   [db row]
@@ -145,15 +209,25 @@
           (:seon.test/ns row)
           (update :seon.test/ns #(ref-value db :seon.ns/name %))
 
-          (contains? row :seon.ns/require-edges)
-          (update :seon.ns/require-edges
-                  #(into #{} (map require-edge) %)))]
+          (contains? row :seon.ns/aliases)
+          (update :seon.ns/aliases
+                  #(into #{} (map component-binding) %))
+
+          (contains? row :seon.ns/refers)
+          (update :seon.ns/refers
+                  #(into #{} (map component-binding) %))
+
+          (contains? row :seon.ns/requires)
+          (update :seon.ns/requires set))]
     (into
      {}
      (remove
       (fn [[attribute value]]
         (or (nil? value)
-            (and (= :seon.ns/require-edges attribute)
+            (and (contains? #{:seon.ns/requires
+                              :seon.ns/aliases
+                              :seon.ns/refers}
+                            attribute)
                  (empty? value)))))
      row)))
 
@@ -186,13 +260,16 @@
                 identity-attr
                 source-attr
                 :seon.ns/doc
-                {:seon.ns/require-edges
+                :seon.ns/requires
+                {:seon.ns/aliases
                  [:db/id
-                  :seon.ns.require/target
-                  :seon.ns.require/alias
-                  :seon.ns.require/refers
-                  :seon.ns.require/refer-all?
-                  :seon.ns.require/as-alias?]}
+                  :seon.ns.alias/local
+                  :seon.ns.alias/target-ns]}
+                {:seon.ns/refers
+                 [:db/id
+                  :seon.ns.refer/local
+                  :seon.ns.refer/target-ns
+                  :seon.ns.refer/target-name]}
                 {:seon.fn/ns [:db/id :seon.ns/name]}
                 :seon.fn/arglists
                 :seon.fn/doc
@@ -205,10 +282,8 @@
            {::entity entity
             ::process-id (get provenance entity)
             ::row (canonical-row db row)
-            ::require-edge-eids
-            (into []
-                  (keep :db/id)
-                  (:seon.ns/require-edges row))}])))
+            ::alias-eids (into [] (keep :db/id) (:seon.ns/aliases row))
+            ::refer-eids (into [] (keep :db/id) (:seon.ns/refers row))}])))
      (d/q '[:find ?entity ?identity
             :in $ ?identity-attr
             :where [?entity ?identity-attr ?identity]]
@@ -241,18 +316,23 @@
   [shape identity desired current]
   (let [identity-attr (:seon.program/identity-attribute shape)
         current-row (::row current)
-        changed-attrs (program/changed-attributes current-row desired)]
+        changed-attrs (program/changed-attributes current-row desired)
+        binding-attrs #{:seon.ns/aliases :seon.ns/refers}]
     (when (seq changed-attrs)
       (let [edge-retracts
-            (when (some #{:seon.ns/require-edges} changed-attrs)
-              (mapv (fn [eid] [:db.fn/retractEntity eid])
-                    (::require-edge-eids current)))
+            (into []
+                  (map (fn [eid] [:db.fn/retractEntity eid]))
+                  (concat
+                   (when (some #{:seon.ns/aliases} changed-attrs)
+                     (::alias-eids current))
+                   (when (some #{:seon.ns/refers} changed-attrs)
+                     (::refer-eids current))))
             retracts
             (into
              (vec edge-retracts)
              (keep
               (fn [attribute]
-                (when (and (not= :seon.ns/require-edges attribute)
+                (when (and (not (contains? binding-attrs attribute))
                            (contains? current-row attribute)
                            (not= (get current-row attribute)
                                  (get desired attribute)))

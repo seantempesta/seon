@@ -41,7 +41,10 @@
  :seon.ns/name [:symbol {:seon.db/identity true}]
  :seon.ns/source [:string {:min 1}]
  :seon.ns/doc :string
- :seon.ns/require-edges
+ :seon.ns/requires [:set :symbol]
+ :seon.ns/aliases
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/refers
  [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/ns
  [:map {:seon.db/entity true
@@ -50,26 +53,27 @@
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/source :seon.ns/source]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
-  [:seon.ns/require-edges {:optional true} :seon.ns/require-edges]]
+  [:seon.ns/requires {:optional true} :seon.ns/requires]
+  [:seon.ns/aliases {:optional true} :seon.ns/aliases]
+  [:seon.ns/refers {:optional true} :seon.ns/refers]]
 
- ; Component rows have no independent identity or life. The containing
- ; namespace owns the complete set and replacement retracts the old children.
- :seon.ns.require/target :symbol
- :seon.ns.require/alias :symbol
- :seon.ns.require/refers [:set :symbol]
- :seon.ns.require/refer-all? :boolean
- :seon.ns.require/as-alias? :boolean
- :seon.ns.require/edge
+ ; Effective bindings are namespace-owned components. They preserve SCI's
+ ; resolver inputs rather than the require operations that produced them.
+ :seon.ns.alias/local :symbol
+ :seon.ns.alias/target-ns :symbol
+ :seon.ns.alias/binding
  [:map {:seon.db/entity true}
-  [:seon.ns.require/target :seon.ns.require/target]
-  [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
-  [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
-  [:seon.ns.require/refer-all?
-   {:optional true}
-   :seon.ns.require/refer-all?]
- [:seon.ns.require/as-alias?
-   {:optional true}
-   :seon.ns.require/as-alias?]]
+  [:seon.ns.alias/local :seon.ns.alias/local]
+  [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]]
+
+ :seon.ns.refer/local :symbol
+ :seon.ns.refer/target-ns :symbol
+ :seon.ns.refer/target-name :symbol
+ :seon.ns.refer/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.refer/local :seon.ns.refer/local]
+  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
+  [:seon.ns.refer/target-name :seon.ns.refer/target-name]]
 
  :seon.fn/roots [:vector [:string {:min 1}]]
  :seon.fn/index-request

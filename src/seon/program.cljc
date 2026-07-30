@@ -12,7 +12,7 @@
     :seon.program/source-attribute :seon.ns/source
     :seon.program/owned-attributes
     [:seon.ns/name :seon.ns/source :seon.ns/doc
-     :seon.ns/require-edges]}
+     :seon.ns/requires :seon.ns/aliases :seon.ns/refers]}
    :seon.fn/sym
    {:seon.program/identity-attribute :seon.fn/sym
     :seon.program/source-attribute :seon.fn/source
@@ -77,7 +77,10 @@
       (into {}
             (remove (fn [[attribute value]]
                       (or (nil? value)
-                          (and (= :seon.ns/require-edges attribute)
+                          (and (contains? #{:seon.ns/requires
+                                            :seon.ns/aliases
+                                            :seon.ns/refers}
+                                          attribute)
                                (empty? value)))))
             (select-keys row
                          (:seon.program/owned-attributes
