@@ -5,16 +5,14 @@
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [datahike.core :as datahike]
+            [sci.core :as sci]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.message :as message]))
-
-(defn- delete-recursively! [path]
-  (let [file (io/file path)]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
+            [seon.cluster.message :as message]
+            [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
+            [seon.test-support :as test-support]))
 
 (defn- transact-inbound!
   [connection agent-id content]
@@ -49,10 +47,22 @@
       (finally
         (datahike/unlisten! connection listener-key)))))
 
-(defn- function-present?
+(defn- program-present?
   [db]
-  (some? (d/pull db [:seon.fn/sym]
-                 [:seon.fn/sym "my.agents.restart-a/persisted"])))
+  (and
+   (some? (d/pull db [:seon.fn/sym]
+                  [:seon.fn/sym "my.agents.restart-a/persisted"]))
+   (some? (d/pull db [:seon.schema/key]
+                  [:seon.schema/key :my.agents.restart-a/nonnegative]))
+   (some? (d/pull db [:seon.test/sym]
+                  [:seon.test/sym
+                   "my.agents.restart-a/persisted-test"]))))
+
+(defn- receipt-count
+  [db]
+  (d/q '[:find (count ?receipt) .
+         :where [?receipt :seon.cluster.eval/id _]]
+       db))
 
 (defn- restarted-call-present?
   [db]
@@ -87,16 +97,22 @@
                {:seon.ai/text
                 (if (str/includes? prompt "You are agent restart-a")
                   (str
+                   "(require '[seon.schema :as schema])\n"
+                   "(require '[clojure.test :refer [deftest]])\n"
                    "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "persisted [x] (inc x))\n"
-                   "(my.run/complete \"definition committed\")")
+                   "(schema/register! ::nonnegative "
+                   "(vector :int {:min 0}))\n"
+                   "(deftest persisted-test :reopened)\n"
+                   "(my.run/complete \"program committed\")")
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
-             function-present?
+             program-present?
              #(transact-inbound! connection "restart-a"
-                                 "Define the durable increment function.")))
-          (is (function-present? @connection))
+                                 "Define a durable function, schema, and test.")))
+          (is (program-present? @connection))
+          (is (pos? (receipt-count @connection)))
           (finally
             (cluster/stop! first-instance))))
 
@@ -105,8 +121,39 @@
                              :seon.boot/root root})
             connection (:seon.boot/cluster-connection second-instance)]
         (try
-          (is (function-present? @connection)
-              "the reopened cluster reads the committed definition")
+          (is (program-present? @connection)
+              "the reopened database retains every current declaration")
+          (is (not (contains?
+                    (d/pull @connection '[*]
+                            [:seon.schema/key
+                             :my.agents.restart-a/nonnegative])
+                    :seon.schema/ns))
+              "the reopened global schema identity has no namespace owner")
+          (let [receipts-before-acquire (receipt-count @connection)
+                ctx (sci/fork (sci.eval/base))
+                acquired
+                (sci.eval/acquire!
+                 {:seon.sci.eval/ctx ctx
+                  :seon.db/db @connection})
+                projection (:seon.schema/projection acquired)
+                validate-nonnegative
+                (schema/projection-validator
+                 projection :my.agents.restart-a/nonnegative)]
+            (is (= receipts-before-acquire (receipt-count @connection))
+                "reopen acquisition materializes current state without replay")
+            (is (true? (validate-nonnegative 4)))
+            (is (false? (validate-nonnegative -1))
+                "the reopened schema is active in the fresh projection")
+            (is (= 42
+                   (sci/eval-string*
+                    ctx "(my.agents.restart-a/persisted 41)"))
+                "the reopened function is installed in the fresh ctx")
+            (is (= :reopened
+                   (sci/eval-string*
+                    ctx
+                    (str "((:test (meta (resolve "
+                         "'my.agents.restart-a/persisted-test))))")))
+                "the reopened test Var's :test function executes"))
           (d/transact
            connection
            (agent/creation-tx
@@ -131,4 +178,4 @@
           (finally
             (cluster/stop! second-instance))))
       (finally
-        (delete-recursively! root)))))
+        (test-support/delete-recursively! root)))))

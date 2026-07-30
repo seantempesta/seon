@@ -877,6 +877,257 @@
                        [:seon.fn/sym "my.agents.agent-a/bad"]))
               "the failed declaration commits no program fact"))))))
 
+(deftest runtime-schema-registration-commits-the-evaluated-form-and-attribute
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            persistent-key :my.agents.agent-a/nonnegative
+            value-key :my.agents.agent-a/label]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! ::nonnegative "
+               "(vector :int {:min 0 :seon.db/index true}))\n"
+               "(schema/register! ::label (vector :string {:min 1}))\n"
+               "(my.run/complete \"schemas committed\")")})]
+          (drive! cluster 10)
+          (let [db @connection
+                persistent-row
+                (d/pull db '[*] [:seon.schema/key persistent-key])
+                value-row (d/pull db '[*] [:seon.schema/key value-key])
+                tx-pairs
+                (d/q '[:find ?schema-tx ?receipt-tx
+                       :in $ ?schema-key
+                       :where
+                       [?schema :seon.schema/key ?schema-key]
+                       [?schema :seon.schema/form _ ?schema-tx]
+                       [?receipt :seon.cluster.eval/ordinal 1]
+                       [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
+                     db persistent-key)]
+            (is (= "[:int {:min 0, :seon.db/index true}]"
+                   (:seon.schema/form persistent-row))
+                "the row contains evaluated canonical EDN, not `(vector ...)`")
+            (is (= "[:string {:min 1}]"
+                   (:seon.schema/form value-row)))
+            (is (not (contains? persistent-row :seon.schema/ns))
+                "schema identity is global, never namespace-owned")
+            (is (= 1 (count tx-pairs)))
+            (is (every? (fn [[schema-tx receipt-tx]]
+                          (= schema-tx receipt-tx))
+                        tx-pairs)
+                "the schema row and terminal receipt are one commit")
+            (is (contains? (:schema db) persistent-key)
+                "an explicit persistence facet installs the Datahike attribute")
+            (is (not (contains? (:schema db) value-key))
+                "a value schema does not invent a Datahike attribute")
+            (when (contains? (:schema db) persistent-key)
+              (d/transact connection [{persistent-key 7}])
+              (is (= 7
+                     (d/q '[:find ?value .
+                            :in $ ?attribute
+                            :where [?entity ?attribute ?value]]
+                          @connection persistent-key))
+                  "the committed attribute accepts a fact immediately"))))))))
+
+(deftest refused-runtime-schema-registration-mutates-neither-row-nor-projection
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            schema-key :my.agents.agent-a/refused
+            global-projection (schema/current-projection)
+            global-forms (schema/registered-schemas)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! ::refused (vector :missing/schema))")})]
+          (drive! cluster 10)
+          (is (some?
+               (d/q '[:find ?error .
+                      :where [?receipt :seon.cluster.eval/error ?error]]
+                    @connection))
+              "the rejected form leaves a terminal error receipt")
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.schema/key schema-key]))
+              "a rejected registration leaves no program row")
+          (is (not (contains? (:schema @connection) schema-key))
+              "a rejected registration installs no Datahike attribute")
+          (is (identical? global-projection (schema/current-projection))
+              "candidate evaluation never mutates the global projection")
+          (is (= global-forms (schema/registered-schemas))
+              "candidate evaluation never mutates global declarations"))))))
+
+(deftest runtime-declarations-install-only-from-a-successful-terminal-db-after
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            schema-key :my.agents.agent-a/not-committed
+            transact! store/transact!
+            install! sci.eval/install-program-row!
+            installations (atom [])
+            global-forms (schema/registered-schemas)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! ::not-committed "
+               "(vector :int {:seon.db/index true}))")})
+           store/transact!
+           (fn [target transaction]
+             (let [tx-data (if (map? transaction)
+                             (:tx-data transaction)
+                             transaction)
+                   declaration?
+                   (some
+                    (fn [operation]
+                      (and (vector? operation)
+                           (= :db.fn/call (first operation))
+                           (= #'run/receipt-settle-call (second operation))
+                           (= schema-key
+                              (get-in operation
+                                      [2 :seon.sci.eval/program-row
+                                       :seon.schema/key]))))
+                    tx-data)]
+               (if declaration?
+                 {:seon.error/kind :seon.db/rejected
+                  :seon.error/message "injected declaration refusal"
+                  :seon.error/data {:error :transact/schema}}
+                 (transact! target transaction))))
+           sci.eval/install-program-row!
+           (fn [request]
+             (swap! installations conj request)
+             (install! request))]
+          (drive! cluster 10)
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.schema/key schema-key])))
+          (is (not (contains? (:schema @connection) schema-key)))
+          (is (not-any? #(= schema-key
+                            (get-in % [:seon.sci.eval/program-row
+                                       :seon.schema/key]))
+                        @installations)
+              "a rejected transaction report never reaches installation")
+          (is (= global-forms (schema/registered-schemas))
+              "a transaction refusal discards the evaluation overlay"))))))
+
+(deftest runtime-tests-install-run-redefine-and-delete-exactly
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            test-sym "my.agents.agent-a/versioned-test"]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[clojure.test :refer [deftest]])\n"
+               "(deftest versioned-test :v1)\n"
+               "((:test (meta (resolve 'versioned-test))))\n"
+               "(deftest versioned-test :v2)\n"
+               "((:test (meta (resolve 'versioned-test))))\n"
+               "(ns-unmap 'my.agents.agent-a 'versioned-test)\n"
+               "(resolve 'versioned-test)")})]
+          (drive! cluster 12)
+          (let [results
+                (into {}
+                      (d/q '[:find ?ordinal ?result
+                             :where
+                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                             [?receipt :seon.cluster.eval/result-edn ?result]]
+                           @connection))]
+            (is (= ":v1" (get results 2))
+                "V1 resolves and its SCI :test function runs")
+            (is (= ":v2" (get results 4))
+                "V2 replaces the live test exactly")
+            (is (= "nil" (get results 6))
+                "ns-unmap removes the live SCI binding")
+            (is (nil? (d/pull @connection [:db/id]
+                              [:seon.test/sym test-sym]))
+                "ns-unmap removes the committed test row")))))))
+
+(deftest incompatible-clusters-alternate-runtime-schema-validation-without-bleed
+  (with-cluster
+    (fn [cluster-a]
+      (let [cluster-a (assoc cluster-a :seon.cluster.loop/evaluate
+                             'seon.sci.eval/evaluate)
+            connection-a (:seon.store/branch-connection cluster-a)
+            shared-key :seon.runtime.registration/shared
+            a-only-key :seon.runtime.registration/a-only
+            global-projection (schema/current-projection)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! :seon.runtime.registration/shared "
+               "(vector :int {:min 0}))\n"
+               "(schema/register! :seon.runtime.registration/a-only "
+               ":keyword)\n"
+               "(my.run/complete \"cluster A registered\")")})]
+          (drive! cluster-a 10))
+        (with-cluster
+          (fn [cluster-b]
+            (let [cluster-b (assoc cluster-b :seon.cluster.loop/evaluate
+                                   'seon.sci.eval/evaluate)
+                  connection-b (:seon.store/branch-connection cluster-b)]
+              (with-redefs
+                [ai/complete
+                 (fn [_]
+                   {:seon.ai/text
+                    (str
+                     "(require '[seon.schema :as schema])\n"
+                     "(schema/register! :seon.runtime.registration/shared "
+                     "(vector :string {:min 1}))\n"
+                     "(my.run/complete \"cluster B registered\")")})]
+                (drive! cluster-b 10))
+              (let [acquire
+                    (fn [connection]
+                      (:seon.schema/projection
+                       (sci.eval/acquire!
+                        {:seon.sci.eval/ctx (sci.core/fork (sci.eval/base))
+                         :seon.db/db @connection})))
+                    projection-a-1 (acquire connection-a)
+                    projection-b (acquire connection-b)
+                    projection-a-2 (acquire connection-a)
+                    validate-a-1
+                    (schema/projection-validator projection-a-1 shared-key)
+                    validate-b
+                    (schema/projection-validator projection-b shared-key)
+                    validate-a-2
+                    (schema/projection-validator projection-a-2 shared-key)]
+                (is (true? (validate-a-1 7)))
+                (is (false? (validate-a-1 "seven")))
+                (is (true? (validate-b "seven")))
+                (is (false? (validate-b 7)))
+                (is (true? (validate-a-2 7))
+                    "returning to A preserves A's incompatible declaration")
+                (is (false? (validate-a-2 "seven")))
+                (is (contains?
+                     (:seon.schema.projection/forms projection-a-2)
+                     a-only-key))
+                (is (not (contains?
+                          (:seon.schema.projection/forms projection-b)
+                          a-only-key))
+                    "an absent key in B never bleeds from A")
+                (is (identical? global-projection
+                                (schema/current-projection))
+                    "A-B-A acquisition never repoints the global registry")))))))))
+
 (deftest a-new-agent-ctx-acquires-and-calls-the-committed-definition
   (with-cluster
     (fn [cluster]
