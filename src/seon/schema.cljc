@@ -2058,17 +2058,33 @@
      :seon.schema.delta/candidate-forms (atom before)})))
 
 (defn call-with-registration-delta
-  "Call `f` with registrations staged in `delta`."
+  "Call the function with registrations staged in the supplied delta.
+
+   Runtime evaluation defaults to agent admission. Build indexing passes core
+   admission explicitly; the overlay mechanism is identical, but the two
+   producers retain their distinct contract strictness."
   {:malli/schema
-   [:=>
-    [:catn [:seon.schema/registration-delta :map]
-           [:seon.schema/body [:fn clojure.core/ifn?]]]
-    :any]}
-  [delta f]
-  (binding [*candidate-forms-overlay*
-            (:seon.schema.delta/candidate-forms delta)
-            *registration-admission-source* :agent]
-    (f)))
+   [:function
+    [:=>
+     [:catn [:seon.schema/registration-delta :map]
+            [:seon.schema/body [:fn clojure.core/ifn?]]]
+     :any]
+    [:=>
+     [:catn
+      [:seon.schema/registration-delta :map]
+      [:seon.schema/admission
+       [:map [:seon.schema.admission/source [:enum :core :agent]]]]
+      [:seon.schema/body [:fn clojure.core/ifn?]]]
+     :any]]}
+  ([delta f]
+   (call-with-registration-delta
+    delta {:seon.schema.admission/source :agent} f))
+  ([delta admission f]
+   (binding [*candidate-forms-overlay*
+             (:seon.schema.delta/candidate-forms delta)
+             *registration-admission-source*
+             (:seon.schema.admission/source admission)]
+     (f))))
 
 (defn- changed-candidate-keys [before after]
   (into #{}

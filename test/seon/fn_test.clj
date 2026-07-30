@@ -90,6 +90,21 @@
             "(defn united [a b] (union a b))"))
       (write-source!
        root
+       "schema_1_register.clj"
+       (str "(ns audit.schema-register "
+            "(:require [seon.schema :as schema]))\n"
+            "(schema/register! :audit.lifecycle/remove-me :int)\n"
+            "(schema/register! :audit.lifecycle/core-predicate "
+            "[:fn {:gen/schema [:enum :int]} "
+            "'seon.schema/malli-form?])\n"))
+      (write-source!
+       root
+       "schema_2_unregister.clj"
+       (str "(ns audit.schema-unregister "
+            "(:require [seon.schema :as schema]))\n"
+            "(schema/unregister! :audit.lifecycle/remove-me)\n"))
+      (write-source!
+       root
        "evaluated_test.clj"
        (str "(ns audit.evaluated)\n"
             "(eval '(alias 'schema 'seon.schema))\n"
@@ -366,6 +381,11 @@
       (is (= ":string"
              (:seon.schema/form
               (get by-identity [:seon.schema/key :audit.changed/changed]))))
+      (is (not (contains? by-identity
+                          [:seon.schema/key :audit.lifecycle/remove-me])))
+      (is (contains? by-identity
+                     [:seon.schema/key :audit.lifecycle/core-predicate]))
+      (is (contains? by-identity [:seon.schema/key :sample/amount]))
       (is (contains? by-identity [:seon.fn/sym "audit.changed/direct"]))
       (is (contains? by-identity [:seon.fn/sym "audit.changed/indirect"]))
       (is (contains? by-identity [:seon.fn/sym "audit.third/nested"]))

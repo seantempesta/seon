@@ -320,12 +320,25 @@
   [request output-path]
   (let [observation (atom {:files #{}
                            :spans {}
-                           :namespace-sources {}})]
+                           :namespace-sources {}})
+        base-schemas (schema/registered-schemas)
+        schema-delta (schema/begin-registration-delta)]
     (try
-      (doseq [file (source-files (:seon.fn/roots request))]
-        (inspect-source-file file observation))
+      (let [rows
+            (schema/call-with-registration-delta
+             schema-delta
+             {:seon.schema.admission/source :core}
+             (fn []
+               (doseq [file (source-files (:seon.fn/roots request))]
+                 (inspect-source-file file observation))
+               (observed-rows @observation)))]
+        (when-not (= base-schemas (schema/registered-schemas))
+          (throw
+           (ex-info
+            "Isolated program inspection mutated the base schema registry."
+            {:seon.error/kind ::index-refused})))
       (spit output-path
-            (pr-str {:seon.fn/rows (observed-rows @observation)}))
+              (pr-str {:seon.fn/rows rows})))
       (catch Throwable error
         (spit output-path
               (pr-str {:seon.error/message (or (ex-message error)
