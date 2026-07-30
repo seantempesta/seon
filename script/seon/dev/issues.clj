@@ -1,5 +1,6 @@
 (ns seon.dev.issues
   "Validate Seon's issue-note authority and derive its index."
+  (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
             [clojure.string :as str]))
 
@@ -7,15 +8,6 @@
 (def ^:private legal-closed-statuses #{"resolved" "superseded"})
 (def ^:private severity-order ["blocker" "friction" "cleanup"])
 (def ^:private non-note-files #{"AGENTS.md" "README.md" "index.md"})
-
-(def ^:private lane-rules
-  [["web" "UI"]
-   ["agent" "agent"]
-   ["flow" "Core"]
-   ["database" "Core"]
-   ["schema" "Core"]
-   ["reference" "docs"]
-   ["component" "docs"]])
 
 (defn- frontmatter [content]
   (let [lines (str/split-lines content)]
@@ -26,9 +18,9 @@
                                   (when (= "---" line) index))))]
         (->> (take end (rest lines))
              (keep (fn [line]
-                     (when-let [[_ key value]
+                     (when-let [[_ field value]
                                 (re-matches #"([^:]+):\s*(.*)" line)]
-                       [(str/trim key) (str/trim value)])))
+                       [(str/trim field) (str/trim value)])))
              (into {}))))))
 
 (defn- parse-tags [value]
@@ -123,51 +115,61 @@
             (for [title (sort duplicate-titles)]
               {::problem :duplicate-title ::actual title})))))
 
-(defn- lane [{::keys [tags]}]
-  (or (some (fn [[tag label]] (when (contains? tags tag) label)) lane-rules)
-      "general"))
+(def ^:private schedule-row-pattern
+  #"^\|\s+\[[^\]]+\]\(([^)]+\.md)\)\s+\|\s+([^|]+?)\s+\|\s+([^|]+?)\s+\|\s*$")
 
-(defn render-index
-  "Render the deterministic open-issue projection."
-  [issue-notes]
-  (let [open-notes (->> issue-notes
-                        (filter #(= :open (::location %)))
-                        (sort-by ::title))
-        by-severity (group-by #(get-in % [::metadata "severity"]) open-notes)]
-    (str
-      "---\n"
-      "type: orchestrator\n"
-      "status: active\n"
-      "tags: [orchestrator, issue, index]\n"
-      "---\n\n"
-      "# Open Issues — Index\n\n"
-      "GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.\n"
-      "Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.\n"
-      "See `README.md` for the convention.\n\n"
-      (str/join
-        "\n"
-        (for [severity severity-order
-              :let [rows (get by-severity severity)]
-              :when (seq rows)]
-          (str "## " (str/capitalize severity) " (" (count rows) ")\n\n"
-               "| Issue | Severity | Lane |\n"
-               "|-------|----------|------|\n"
-               (str/join
-                 "\n"
-                 (for [row rows]
-                   (str "| [" (::title row) "](" (::file row) ") | "
-                        severity " | " (lane row) " |")))
-               "\n"))))))
+(defn- schedule-rows [content]
+  (into []
+        (keep (fn [line]
+                (when-let [[_ file severity destination]
+                           (re-matches schedule-row-pattern line)]
+                  {::file file
+                   ::severity (str/trim severity)
+                   ::destination (str/trim destination)})))
+        (str/split-lines content)))
+
+(defn- schedule-errors [open-notes index-content]
+  (let [rows (schedule-rows index-content)
+        open-by-file (into {} (map (juxt ::file identity)) open-notes)
+        counts (frequencies (map ::file rows))]
+    (into []
+          (concat
+           (for [{::keys [file]} open-notes
+                 :when (zero? (get counts file 0))]
+             {::path file ::problem :missing-schedule-row})
+           (for [[file occurrence-count] (sort-by key counts)
+                 :when (> occurrence-count 1)]
+             {::path file ::problem :duplicate-schedule-row
+              ::actual occurrence-count})
+           (for [{::keys [file]} rows
+                 :when (nil? (get open-by-file file))]
+             {::path file ::problem :scheduled-note-is-not-open})
+           (for [{::keys [file severity]} rows
+                 :let [issue-note (get open-by-file file)]
+                 :when (and issue-note
+                            (not= severity
+                                  (get-in issue-note [::metadata "severity"])))]
+             {::path file ::problem :schedule-severity-mismatch
+              ::expected (get-in issue-note [::metadata "severity"])
+              ::actual severity})
+           (for [{::keys [file destination]} rows
+                 :when (str/blank? destination)]
+             {::path file ::problem :missing-schedule-destination})))))
 
 (defn- issue-state [root]
   (let [issue-notes (notes root)
         errors (validation-errors issue-notes)
-        indexable-notes (filterv #(empty? (row-errors %)) issue-notes)]
+        indexable-notes (filterv #(empty? (row-errors %)) issue-notes)
+        path (fs/path root "docs/seon/issues/index.md")
+        index-content (when (fs/regular-file? path) (slurp (str path)))
+        open-notes (filterv #(= :open (::location %)) indexable-notes)]
     {::notes issue-notes
      ::indexable-notes indexable-notes
-     ::errors errors
-     ::index (render-index indexable-notes)
-     ::path (fs/path root "docs/seon/issues/index.md")}))
+     ::errors (into errors
+                    (if index-content
+                      (schedule-errors open-notes index-content)
+                      [{::path (str path) ::problem :missing-index}]))
+     ::path path}))
 
 (defn- require-valid! [result errors]
   (when (seq errors)
@@ -177,34 +179,16 @@
   result)
 
 (defn check!
-  "Validate issue notes and require the checked-in index to match."
+  "Validate issue notes and require one scheduled row per open note."
   [root]
-  (let [{::keys [indexable-notes errors index path]} (issue-state root)
-        actual (when (fs/regular-file? path) (slurp (str path)))]
-    (when-not (= index actual)
-      (throw (ex-info "Issue index is stale; run bin/issues-index."
-                      {::path (str path)
-                       ::errors errors})))
+  (let [{::keys [indexable-notes errors path]} (issue-state root)]
     (require-valid!
       {::clean? true
+       ::path (str path)
        ::open-count (count (filter #(= :open (::location %)) indexable-notes))
        ::archive-count (count (filter #(= :archive (::location %))
                                      indexable-notes))}
       errors)))
-
-(defn write!
-  "Atomically index valid issue notes, then report every invalid note."
-  [root]
-  (let [{::keys [indexable-notes errors index path]} (issue-state root)
-        temporary (fs/path (str path "." (random-uuid) ".tmp"))
-        result {::path (str path)
-                ::open-count (count (filter #(= :open (::location %))
-                                            indexable-notes))
-                ::archive-count (count (filter #(= :archive (::location %))
-                                               indexable-notes))}]
-    (spit (str temporary) index)
-    (fs/move temporary path {:replace-existing true :atomic-move true})
-    (require-valid! result errors)))
 
 (defn- print-errors! [errors]
   (doseq [{::keys [path problem] :as error} errors]
@@ -216,7 +200,7 @@
   [root arguments]
   (try
     (let [result (case (vec arguments)
-                   [] (write! root)
+                   [] (check! root)
                    ["--check"] (check! root)
                    (throw (ex-info "Usage: bin/issues-index [--check]" {})))]
       (println (pr-str result))
