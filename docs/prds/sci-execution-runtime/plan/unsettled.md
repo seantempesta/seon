@@ -45,8 +45,9 @@ commit (measured branch-off approximately 17 ms). Existing clusters remain
 sovereign and are never updated from files; explicit `init NAME --force`
 destroys and reforks one named cluster.
 
-**Earliest unsettled contract:** finish the destructive-fallback and failed-
-analysis halves of the edit-hook proof. The ordinary edit path is now live:
+**Earliest unsettled contract:** restore agreement between admitted source,
+published digest, and database rows before completing the fallback proof. The
+ordinary edit path is now live:
 an actual `apply_patch` ran clj-kondo, retained its advisory findings, and
 advanced `current-src`. The proof exposed and removed four false restrictions
 instead of working around them: process-root store identity now canonicalizes
@@ -57,11 +58,24 @@ branch descends from the retired name. Datahike source and a live GC regression
 prove that every remaining branch head independently retains its parent
 commits.
 
+The independent adversarial review found two blockers ahead of the remaining
+proof. An unreported edit to X followed by a reported edit to Y can publish the
+current whole-tree digest while retaining X's stale rows; complete publication
+can then trust digest equality and preserve the lie. Separately, repository
+indexing blocks two finding types rather than every error-level clj-kondo
+finding, so unresolved symbols and similar errors can enter the packaged base
+even though runtime admission refuses them. The durable reproductions and
+additional ranked friction are in
+`research/current-src-adversarial-review-2026-07-30.md`; both blockers now have
+scheduled issue notes.
+
 The live operator was then destroyed, `current-src` republished, and `default`
 reforked with `init default --force`. The fresh cluster contains 1,367 function
 rows, 559 global schema rows, 622 test rows, and zero messages; one JVM is live
 and no orphan JVM remains. Focused boot/registry/schema/function proof passed
-43 tests / 235 assertions. The isolated fresh-operator suite still has one
+43 tests / 235 assertions. This proves the reset and repaired operational
+seams; it does not seal source/database agreement until the two blockers above
+are fixed. The isolated fresh-operator suite still has one
 unrelated readiness-test defect: its child eventually publishes readiness but
 crosses the test's hard 30-second socket timeout and survives cleanup. That
 exact child was terminated; the existing readiness issue remains open and no

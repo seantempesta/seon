@@ -13,12 +13,14 @@
     (catch clojure.lang.ExceptionInfo failure
       failure)))
 
-(deftest canonical-definition-keeps-resolvable-predicate-symbols
+(deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition
         [:=> [:cat :qualified-symbol [:fn 'clojure.core/ifn?]]
          :qualified-symbol]]
     (is (= definition (schema/canonical-definition definition {})))
-    (is (schema/malli-form? definition))))
+    (is (schema/malli-form? definition))
+    (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
+        "schema validation never loads an arbitrary predicate namespace")))
 
 (deftest canonical-self-references-refuse-at-registration
   (let [state (schema/snapshot-state)

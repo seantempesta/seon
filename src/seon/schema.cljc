@@ -142,7 +142,10 @@
              bound
              (when (qualified-symbol? predicate)
                (or (get predicate-functions predicate)
-                   #?(:clj (some-> predicate requiring-resolve deref)
+                   #?(:clj (when (= "clojure.core" (namespace predicate))
+                             (some-> (ns-resolve 'clojure.core
+                                                 (symbol (name predicate)))
+                                     deref))
                       :cljs nil)))]
          (cond
            (and (ifn? predicate)

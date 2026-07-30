@@ -337,17 +337,30 @@
                                 (registry/cluster-branch "alice")})))))
             (finally
               (d/release connection)))))
-      (testing "retiring a source name preserves its descendant through GC"
-        (is (nil? (registry/retire-branch! {:seon.store/store opened
-                                            :seon.store/branch source-branch})))
-        (is (not (contains? (registry/roster opened) source-branch)))
-        (is (pos? (registry/collect! opened)))
-        (let [connection (store/open-branch!
-                          opened (registry/cluster-branch "alice"))]
-          (try
-            (is (= #{"ancestral" "alice-wrote"} (markers connection)))
-            (finally
-              (d/release connection)))))
+      (testing "retiring a source name preserves its descendant history through GC"
+        (let [source-commit
+              (registry/branch-commit-id {:seon.store/store opened
+                                          :seon.store/branch source-branch})]
+          (is (nil? (registry/retire-branch! {:seon.store/store opened
+                                              :seon.store/branch source-branch})))
+          (is (not (contains? (registry/roster opened) source-branch)))
+          (is (pos? (registry/collect! opened)))
+          (let [connection (store/open-branch!
+                            opened (registry/cluster-branch "alice"))]
+            (try
+              (is (= #{"ancestral" "alice-wrote"} (markers connection)))
+              (finally
+                (d/release connection))))
+          (is (true? (:seon.cluster/created?
+                      (registry/branch! {:seon.store/store opened
+                                         :seon.cluster.registry/from source-commit
+                                         :seon.store/branch :retained-history}))))
+          (let [connection (store/open-branch! opened :retained-history)]
+            (try
+              (is (= #{"ancestral"} (markers connection))
+                  "the ancestor commit itself remains branchable after GC")
+              (finally
+                (d/release connection))))))
       (testing "a source that names nothing refuses"
         (is (= :seon.cluster.registry/source-absent
                (:seon.cluster.registry/rule

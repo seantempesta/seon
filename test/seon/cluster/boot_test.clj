@@ -85,8 +85,13 @@
         (try
           (is (identical? relative absolute)
               "relative and absolute paths share one process-root store")
+          (release! relative-store)
+          (is (= 1
+                 (get-in @(var-get (ns-resolve 'seon.cluster
+                                               'root-store-holder))
+                         [absolute-store :seon.cluster/holders]))
+              "the first alias release leaves the second holder counted")
           (finally
-            (release! relative-store)
             (release! absolute-store))))
       (let [reopened (store/open-store! {:seon.store/dir absolute-store})]
         (try

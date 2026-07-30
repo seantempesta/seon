@@ -10,14 +10,16 @@ GENERATED FILE — do not hand-edit. Regenerate with `bin/issues-index`.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (4)
+## Blocker (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Finish deleting the old operator classpath from retained tooling](finish-deleting-the-old-operator-classpath-from-retained-tooling.md) | blocker | general |
+| [Refuse incremental publication after an unreported source edit](current-src-incremental-can-bless-unreported-edits.md) | blocker | Core |
 | [Make program graph render declarations resolvable](program-graph-render-declarations-name-absent-functions.md) | blocker | Core |
 | [Priming indexes with the live JVM's loaded code and records a digest that lies](priming-indexes-with-the-live-jvms-loaded-code.md) | blocker | general |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
+| [Refuse error-level clj-kondo findings during repository indexing](repository-indexing-admits-clj-kondo-errors.md) | blocker | Core |
 
 ## Friction (8)
 

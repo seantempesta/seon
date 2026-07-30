@@ -39,7 +39,7 @@ The one static program-graph build and publication path:
 ## Resolution
 
 The projection now passes a deterministic sorted sequence, registered custom
-predicates still win before CLJ resolves ordinary qualified predicate symbols,
-and complete refresh delegates with `[]`. Focused schema/function/boot tests
+predicates still win and only `clojure.core` predicate symbols resolve without
+registration, and complete refresh delegates with `[]`. Focused schema/function/boot tests
 are green, the edit hook advanced `current-src`, and live `init default
 --force` completed.
