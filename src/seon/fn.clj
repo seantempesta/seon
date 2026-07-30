@@ -27,10 +27,10 @@
   ;; private and uncontracted helpers, as input to the future call graph.
   (program/declaration-row event :all))
 
-(def ^:private not-literal ::not-literal)
+(def ^:private not-literal (Object.))
 
 (defn- literal-value
-  "The value of syntax requiring no evaluation, or `::not-literal`."
+  "The value of syntax requiring no evaluation, or the private sentinel."
   [form]
   (cond
     (and (seq? form) (= 'quote (first form)) (= 2 (count form)))
@@ -41,14 +41,15 @@
 
     (vector? form)
     (let [values (mapv literal-value form)]
-      (if (some #{not-literal} values) not-literal values))
+      (if (some #(identical? not-literal %) values) not-literal values))
 
     (map? form)
     (reduce-kv
      (fn [result key value]
        (let [key (literal-value key)
              value (literal-value value)]
-         (if (or (= not-literal key) (= not-literal value))
+         (if (or (identical? not-literal key)
+                 (identical? not-literal value))
            (reduced not-literal)
            (assoc result key value))))
      (empty form)
@@ -56,7 +57,7 @@
 
     (set? form)
     (let [values (into #{} (map literal-value) form)]
-      (if (contains? values not-literal) not-literal values))
+      (if (some #(identical? not-literal %) values) not-literal values))
 
     (symbol? form)
     not-literal
@@ -79,7 +80,7 @@
   (if-let [schema-key (:seon.schema/key event)]
     (let [value (literal-value
                  (nth (:seon.sci.reader/form event) 2 not-literal))]
-      (when (= not-literal value)
+      (when (identical? not-literal value)
         (throw
          (ex-info
           "Build indexing requires schema declarations to be literal data."
