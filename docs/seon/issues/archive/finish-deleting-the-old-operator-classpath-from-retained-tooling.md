@@ -1,6 +1,6 @@
 ---
 type: issue
-status: fixed
+status: resolved
 severity: blocker
 tags: [issue, tooling, operator, testing]
 ---
