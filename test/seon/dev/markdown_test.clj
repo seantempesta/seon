@@ -174,7 +174,27 @@
   (testing "passes with markdown links"
     (let [result (md/validate {::md/content "Visit [example](https://example.com) for more\n"
                                ::md/rules #{:no-bare-urls}})]
-      (is (::md/valid? result)))))
+      (is (::md/valid? result))))
+
+  (testing "duplicate text uses each URL occurrence's own context"
+    (let [document (md/parse
+                    {::md/content
+                     "[linked](https://example.com) then https://example.com"})]
+      (is (= [:markdown :bare-url]
+             (mapv ::md/type (::md/links document)))))))
+
+(deftest validate-blanks-around-fences-test
+  (testing "flags content touching either side of a fenced block"
+    (let [before (md/validate
+                  {::md/content "prose\n```clj\n(+ 1 2)\n```\n"
+                   ::md/rules #{:blanks-around-fences}})
+          after (md/validate
+                 {::md/content "```clj\n(+ 1 2)\n```\nprose\n"
+                  ::md/rules #{:blanks-around-fences}})]
+      (is (= ["Missing blank line before code fence"]
+             (mapv ::md/message (::md/violations before))))
+      (is (= ["Missing blank line after code fence"]
+             (mapv ::md/message (::md/violations after)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Format Tests

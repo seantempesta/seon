@@ -111,15 +111,21 @@
                       ::text (nth m 1)
                       ::line line-num}))
             ;; Bare URLs
-            (doseq [m (re-seq #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+" stripped)]
-              ;; Only if not already inside a markdown link or angle brackets
-              (let [before-url (subs stripped 0 (or (str/index-of stripped m) 0))]
-                (when-not (or (re-find #"\]\($" before-url)
-                              (str/ends-with? before-url "<"))
-                  (swap! results conj
-                         {::type :bare-url
-                          ::target m
-                          ::line line-num}))))))))
+            (let [matcher
+                  (re-matcher
+                   #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+"
+                   stripped)]
+              (loop []
+                (when (.find matcher)
+                  (let [target (.group matcher)
+                        before-url (subs stripped 0 (.start matcher))]
+                    (when-not (or (re-find #"\]\($" before-url)
+                                  (str/ends-with? before-url "<"))
+                      (swap! results conj
+                             {::type :bare-url
+                              ::target target
+                              ::line line-num})))
+                  (recur))))))))
     @results))
 
 (defn- extract-sections
@@ -282,26 +288,38 @@
 (defn- rule-blanks-around-fences
   "Blank line before and after ``` code blocks."
   [lines code-lines fm-end-line]
-  (into []
-        (keep-indexed
-         (fn [idx line]
-           (let [line-num (inc idx)
-                 trimmed (str/trim line)]
-             ;; Only check fence markers (which are in code-lines set)
-             (when (and (contains? code-lines line-num)
-                        (>= line-num fm-end-line) ; skip fences inside frontmatter region
+  (loop [idx 0, inside? false, violations []]
+    (if (= idx (count lines))
+      violations
+      (let [line (nth lines idx)
+            line-num (inc idx)
+            trimmed (str/trim line)
+            fence? (and (contains? code-lines line-num)
                         (or (str/starts-with? trimmed "```")
                             (str/starts-with? trimmed "~~~")))
-               ;; Check if previous line is not blank (and exists)
-               (when (and (pos? idx)
-                          (not (str/blank? (nth lines (dec idx))))
-                          (not (contains? code-lines idx))) ; prev line not in code
-                 {::rule :blanks-around-fences
-                  ::severity :warning
-                  ::line line-num
-                  ::message "Missing blank line before code fence"
-                  ::fix "Add blank line before code fence"})))))
-        lines))
+            relevant? (and fence? (>= line-num fm-end-line))
+            missing-before? (and relevant? (not inside?) (pos? idx)
+                                 (not (str/blank? (nth lines (dec idx)))))
+            missing-after? (and relevant? inside? (< (inc idx) (count lines))
+                                (not (str/blank? (nth lines (inc idx)))))
+            violation
+            (cond
+              missing-before?
+              {::rule :blanks-around-fences
+               ::severity :warning
+               ::line line-num
+               ::message "Missing blank line before code fence"
+               ::fix "Add blank line before code fence"}
+
+              missing-after?
+              {::rule :blanks-around-fences
+               ::severity :warning
+               ::line line-num
+               ::message "Missing blank line after code fence"
+               ::fix "Add blank line after code fence"})]
+        (recur (inc idx)
+               (if fence? (not inside?) inside?)
+               (cond-> violations violation (conj violation)))))))
 
 (defn- rule-trailing-newline
   "File ends with exactly one newline."
