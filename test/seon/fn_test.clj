@@ -157,6 +157,20 @@
       (or (get refers operation)
           (symbol "clojure.core" (name operation))))))
 
+(defn- independent-schema-value
+  [form]
+  (cond
+    (and (seq? form) (= 'quote (first form)) (= 2 (count form)))
+    (second form)
+
+    (vector? form) (mapv independent-schema-value form)
+    (map? form) (into (empty form)
+                      (map (fn [[k v]] [(independent-schema-value k)
+                                        (independent-schema-value v)]))
+                      form)
+    (set? form) (into #{} (map independent-schema-value) form)
+    :else form))
+
 (defn- independent-declaration
   [file namespace-name bindings form]
   (when (seq? form)
@@ -182,7 +196,9 @@
         (and (= 'seon.schema/register! operation)
              (= 3 (count form))
              (qualified-keyword? declared-name))
-        (assoc base :family :seon.schema/key)
+        (assoc base :family :seon.schema/key
+               :identity [declared-name
+                          (pr-str (independent-schema-value (nth form 2)))])
 
         :else nil))))
 
@@ -218,22 +234,34 @@
   [file]
   (let [source-reader
         (reader-types/indexing-push-back-reader (slurp file))
-        eof (Object.)]
-    (loop [namespace-name nil
-           bindings {:aliases {} :refers {}}
-           declarations []]
-      (let [form (binding [tools.reader/*alias-map* (:aliases bindings)]
-                   (tools.reader/read {:eof eof
-                                       :read-cond :allow
-                                       :features #{:clj}}
-                                      source-reader))]
-        (if (identical? eof form)
-          declarations
-          (let [[next-namespace next-bindings found]
-                (independently-scan-form
-                 file namespace-name bindings form)]
-            (recur next-namespace next-bindings
-                   (into declarations found))))))))
+        eof (Object.)
+        created (atom #{})
+        namespace-object
+        (fn [namespace-name]
+          (or (find-ns (or namespace-name 'user))
+              (let [namespace-name (or namespace-name 'user)]
+                (swap! created conj namespace-name)
+                (create-ns namespace-name))))]
+    (try
+      (loop [namespace-name nil
+             bindings {:aliases {} :refers {}}
+             declarations []]
+        (let [form (binding [*ns* (namespace-object namespace-name)
+                             tools.reader/*alias-map* (:aliases bindings)]
+                     (tools.reader/read {:eof eof
+                                         :read-cond :allow
+                                         :features #{:clj}}
+                                        source-reader))]
+          (if (identical? eof form)
+            declarations
+            (let [[next-namespace next-bindings found]
+                  (independently-scan-form
+                   file namespace-name bindings form)]
+              (recur next-namespace next-bindings
+                     (into declarations found))))))
+      (finally
+        (doseq [namespace-name @created]
+          (remove-ns namespace-name))))))
 
 (deftest every-declaration-in-the-tree-becomes-one-family-row
   ;; The independent census counts function, schema, and test occurrences
@@ -259,7 +287,9 @@
 
                               (:seon.schema/key row)
                               {:file canonical-file
-                               :family :seon.schema/key}
+                               :family :seon.schema/key
+                               :identity [(:seon.schema/key row)
+                                          (:seon.schema/form row)]}
 
                               (:seon.test/sym row)
                               {:file canonical-file
@@ -302,7 +332,13 @@
                       {}
                       actual)}))
     (is (= expected-identities actual-identities)
-        "function and test identities match the independent source census")
+        (str "function, schema, and test identities match the independent census: "
+             {:missing (into {} (filter (fn [[k n]]
+                                          (> n (get actual-identities k 0))))
+                             expected-identities)
+              :extra (into {} (filter (fn [[k n]]
+                                        (> n (get expected-identities k 0))))
+                           actual-identities)}))
     (testing "private helpers are rows, marked private rather than dropped"
       (let [private (filter :seon.fn/private? rows)]
         (is (< 100 (count private)))
@@ -311,7 +347,7 @@
                          (not (contains? row :seon.fn/spec))))
                   private))))))
 
-(deftest unplaceable-declaration-is-refused-loudly
+(deftest evaluation-dependent-resolver-state-is-refused-loudly
   ;; A file that contributes no rows must say so with the reason, never
   ;; vanish. Silence read as health is this project's recurring failure.
   (let [root (str "tmp/fn-test/" (random-uuid))
@@ -328,11 +364,10 @@
       (is (instance? clojure.lang.ExceptionInfo failure))
       (is (= :seon.fn/index-refused (:seon.error/kind data)))
       (is (str/ends-with? (:seon.fn/file data) "opaque.clj"))
-      (is (= [{:seon.fn/line 3
-               :seon.fn/source "(defn f [n] n)"
-               :seon.fn/family :seon.fn/sym
-               :seon.fn/reason :seon.fn/namespace-unproven}]
-             (:seon.fn/unadmitted data))))))
+      (is (= 2 (:seon.fn/line data)))
+      (is (= "(do (in-ns 'elsewhere))" (:seon.fn/source data)))
+      (is (= 'clojure.core/in-ns
+             (:seon.fn/resolver-mutation data))))))
 
 (deftest unplaceable-test-declaration-is-refused-loudly
   (let [root (str "tmp/fn-test/" (random-uuid))
@@ -349,11 +384,53 @@
       (is (instance? clojure.lang.ExceptionInfo failure))
       (is (= :seon.fn/index-refused (:seon.error/kind data)))
       (is (str/ends-with? (:seon.fn/file data) "opaque_test.clj"))
-      (is (= [{:seon.fn/line 3
-               :seon.fn/source "(clojure.test/deftest survives-indexing)"
-               :seon.fn/family :seon.test/sym
-               :seon.fn/reason :seon.fn/namespace-unproven}]
-             (:seon.fn/unadmitted data))))))
+      (is (= 2 (:seon.fn/line data)))
+      (is (= 'clojure.core/in-ns
+             (:seon.fn/resolver-mutation data))))))
+
+(deftest build-admission-never-guesses-evaluated-bindings-or-schema-values
+  (doseq [[file-name source expected-line expected-operation]
+          [["alias.clj"
+            (str "(ns audit.alias)\n"
+                 "(alias 'schema 'seon.schema)\n"
+                 "(schema/register! ::x :int)\n")
+            2 'clojure.core/alias]
+           ["require_test.clj"
+            (str "(ns audit.require)\n"
+                 "(require (if true '[clojure.test :refer [deftest]] "
+                 "'[clojure.set]))\n"
+                 "(deftest lost)\n")
+            2 'clojure.core/require]
+           ["computed.clj"
+            (str "(ns audit.computed (:require [seon.schema :as schema]))\n"
+                 "(schema/register! ::x (vector :int))\n")
+            2 nil]]]
+    (let [root (str "tmp/fn-test/" (random-uuid))
+          file (io/file root file-name)]
+      (.mkdirs (.getParentFile file))
+      (spit file source)
+      (let [failure (try
+                      (seon.fn/rows {:seon.fn/roots [root]})
+                      (catch clojure.lang.ExceptionInfo error error))
+            data (ex-data failure)]
+        (is (= :seon.fn/index-refused (:seon.error/kind data)))
+        (is (= expected-line (:seon.fn/line data)))
+        (is (str/ends-with? (:seon.fn/file data) file-name))
+        (if expected-operation
+          (is (= expected-operation (:seon.fn/resolver-mutation data)))
+          (is (= :audit.computed/x (:seon.schema/key data))))))))
+
+(deftest literal-schema-source-is-stored-as-its-evaluated-canonical-value
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        file (io/file root "literal.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit file
+          (str "(ns audit.literal (:require [seon.schema :as schema]))\n"
+               "(schema/register! ::predicate 'clojure.core/string?)\n"))
+    (let [row (some #(when (:seon.schema/key %) %)
+                    (seon.fn/rows {:seon.fn/roots [root]}))]
+      (is (= :audit.literal/predicate (:seon.schema/key row)))
+      (is (= "clojure.core/string?" (:seon.schema/form row))))))
 
 (deftest executable-nested-declaration-is-refused-loudly
   (let [root (str "tmp/fn-test/" (random-uuid))

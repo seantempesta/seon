@@ -27,6 +27,72 @@
   ;; private and uncontracted helpers, as input to the future call graph.
   (program/declaration-row event :all))
 
+(def ^:private not-literal ::not-literal)
+
+(defn- literal-value
+  "The value of syntax requiring no evaluation, or `::not-literal`."
+  [form]
+  (cond
+    (and (seq? form) (= 'quote (first form)) (= 2 (count form)))
+    (second form)
+
+    (seq? form)
+    not-literal
+
+    (vector? form)
+    (let [values (mapv literal-value form)]
+      (if (some #{not-literal} values) not-literal values))
+
+    (map? form)
+    (reduce-kv
+     (fn [result key value]
+       (let [key (literal-value key)
+             value (literal-value value)]
+         (if (or (= not-literal key) (= not-literal value))
+           (reduced not-literal)
+           (assoc result key value))))
+     (empty form)
+     form)
+
+    (set? form)
+    (let [values (into #{} (map literal-value) form)]
+      (if (contains? values not-literal) not-literal values))
+
+    (symbol? form)
+    not-literal
+
+    :else
+    form))
+
+(defn- build-admit-event
+  [file event]
+  (when-let [operation
+             (:seon.sci.reader/evaluated-resolver-dependency event)]
+    (throw
+     (ex-info
+      "Build indexing refuses evaluation-dependent namespace mutation."
+      {:seon.error/kind ::index-refused
+       :seon.fn/file (.getCanonicalPath ^java.io.File file)
+       ::line (:seon.sci.reader/line event)
+       ::source (:seon.sci.reader/source event)
+       ::resolver-mutation operation})))
+  (if-let [schema-key (:seon.schema/key event)]
+    (let [value (literal-value
+                 (nth (:seon.sci.reader/form event) 2 not-literal))]
+      (when (= not-literal value)
+        (throw
+         (ex-info
+          "Build indexing requires schema declarations to be literal data."
+          {:seon.error/kind ::index-refused
+           :seon.fn/file (.getCanonicalPath ^java.io.File file)
+           ::line (:seon.sci.reader/line event)
+           ::source (:seon.sci.reader/source event)
+           :seon.schema/key schema-key})))
+      ;; Build and runtime now serialize the same evaluated value. In
+      ;; particular, quoted predicate symbols lose their reader `quote` form.
+      (assoc event :seon.schema/form (pr-str value)))
+    event))
+
 (defn- unadmitted-declarations
   "The declarations this file produced no durable identity for.
 
@@ -153,14 +219,15 @@
       (mapcat
        (fn [{:keys [file source]}]
          (let [events (read-source-events file source publics)]
-           (when-let [unadmitted (seq (unadmitted-declarations events))]
-             (throw
-              (ex-info
-               "Source indexing could not place a declaration."
-               {:seon.error/kind ::index-refused
-                :seon.fn/file (.getCanonicalPath ^java.io.File file)
-                ::unadmitted (vec unadmitted)})))
-           events)))
+           (let [events (mapv #(build-admit-event file %) events)]
+             (when-let [unadmitted (seq (unadmitted-declarations events))]
+               (throw
+                (ex-info
+                 "Source indexing could not place a declaration."
+                 {:seon.error/kind ::index-refused
+                  :seon.fn/file (.getCanonicalPath ^java.io.File file)
+                  ::unadmitted (vec unadmitted)})))
+             events))))
       (keep durable-row))
      source-units)))
 

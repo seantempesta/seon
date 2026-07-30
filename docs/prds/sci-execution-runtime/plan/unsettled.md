@@ -208,6 +208,20 @@ owner suite is 39 tests / 159 assertions / 0 failures / 0 errors on Clojure
 1.10.3 and 1.11.1. The other two re-audit blockers remain in their owning
 lanes; integrated adversarial review remains the wave boundary.
 
+The build-index lane closes the other two re-audit findings with an explicit
+shared admission domain. `seon.sci.reader` now owns the one fact that a
+standalone resolver mutation requires evaluated state; `seon.fn` consumes that
+fact and refuses the form instead of maintaining another resolver-operation
+list or guessing its result. Build schemas admit literal data only and persist
+the literal's canonical value, so quoted values match runtime and computed
+forms refuse loudly. The independent census compares exact schema key + form,
+not family counts alone. Archaeology rejected the old static scanner family
+(`0c22f8363` / `d7cd70bdd`) and retained the old lesson that analyzer state and
+evaluated registry values are the authorities (`87ac3f9c6`, `d33b29cf9`,
+`56ed96dd9`). Focused build/reader/program proof: 32 tests / 263 assertions /
+0 failures / 0 errors. Integrated adversarial review remains the wave
+boundary.
+
 ## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under

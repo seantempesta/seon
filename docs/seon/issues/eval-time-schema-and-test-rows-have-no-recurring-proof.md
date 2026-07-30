@@ -112,6 +112,28 @@ tests / 159 assertions / 0 failures / 0 errors on both Clojure 1.10.3 and
 1.11.1, and its state round-trip also covers an own intern, alias, refer,
 require, and the nil import mask in one snapshot.
 
+The same re-audit's build blockers are closed by making producer admission
+explicit instead of adding another static evaluator. The reader is the one
+owner that marks a standalone namespace-resolver mutation as requiring
+sequential evaluation. Runtime evaluates it in the real REPL fold; build
+indexing refuses it with file, line, exact source, and resolved operation.
+Build schema declarations likewise admit only literal data and serialize the
+literal's value, so quoted predicate symbols have the same canonical form as
+runtime while executable forms such as `(vector :int)` refuse rather than
+persisting syntax as schema data. The independent tools.reader census now
+compares exact schema key plus canonical form as well as exact function/test
+identities. Alias, computed require, computed `in-ns`, and computed-schema
+falsifiers all recur as loud build refusals; the focused build/reader/program
+gate is 32 tests / 263 assertions / 0 failures / 0 errors.
+
+This carries forward the mechanisms that survived earlier platforms:
+`87ac3f9c6` made analyzer state authoritative, `d33b29cf9` indexed evaluated
+registry values, and `56ed96dd9` repaired computed cold-boot schema parity.
+The discarded static scanner family is `0c22f8363` / `d7cd70bdd`. The current
+JVM build has no isolated full-source compiler owner, so it does not imitate
+one; evaluation-dependent source belongs to runtime until such an owner
+exists.
+
 ## Owner
 
 `seon.sci.reader` / `seon.sci.eval` / the maintained SCI fork's namespace
