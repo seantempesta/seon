@@ -73,7 +73,7 @@
           [?run :seon.cluster.run/agent ?agent]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/ordinal 0]
-          [?receipt :seon.cluster.eval/result-edn "42"]]
+          [?receipt :seon.cluster.eval/result-edn "\"OK\""]]
         db)))
 
 (deftest an-agent-definition-survives-restart-and-another-agent-calls-it
@@ -98,9 +98,10 @@
                 (if (str/includes? prompt "You are agent restart-a")
                   (str
                    "(require '[seon.schema :as schema])\n"
+                   "(require '[clojure.string :as s])\n"
                    "(require '[clojure.test :refer [deftest]])\n"
-                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                   "persisted [x] (inc x))\n"
+                   "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
+                   "persisted [x] (s/upper-case x))\n"
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
                    "(deftest persisted-test :reopened)\n"
@@ -144,9 +145,9 @@
             (is (true? (validate-nonnegative 4)))
             (is (false? (validate-nonnegative -1))
                 "the reopened schema is active in the fresh projection")
-            (is (= 42
+            (is (= "OK"
                    (sci/eval-string*
-                    ctx "(my.agents.restart-a/persisted 41)"))
+                    ctx "(my.agents.restart-a/persisted \"ok\")"))
                 "the reopened function is installed in the fresh ctx")
             (is (= :reopened
                    (sci/eval-string*
@@ -165,7 +166,7 @@
                {:seon.ai/text
                 (if (str/includes? prompt "You are agent restart-b")
                   (str
-                   "(my.agents.restart-a/persisted 41)\n"
+                   "(my.agents.restart-a/persisted \"ok\")\n"
                    "(my.run/complete \"restarted definition called\")")
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
