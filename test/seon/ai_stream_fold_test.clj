@@ -22,7 +22,7 @@
   repeatedly and from different directions: can presentation change the
   answer? A throwing sink, a slow sink, no sink at all — same
   completion."
-  (:require [cheshire.core :as json]
+  (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -191,7 +191,7 @@
         server
         (http/run-server
          (fn [request]
-           (deliver received (json/parse-string (slurp (:body request))))
+           (deliver received (json/read-str (slurp (:body request))))
            {:status 200
             :headers {"content-type" "application/json"}
             :body
