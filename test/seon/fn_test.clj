@@ -1,12 +1,12 @@
 (ns seon.fn-test
   (:require [clojure.java.io :as io]
-            [clojure.set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.tools.reader :as tools.reader]
+            [clojure.tools.reader.reader-types :as reader-types]
             [datahike.api :as d]
             [seon.cluster.ancestor :as ancestor]
             [seon.fn :as seon.fn]
-            [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -89,28 +89,80 @@
                         (or (str/ends-with? file-name ".clj")
                             (str/ends-with? file-name ".cljc"))))))))
 
-(defn- read-events
+(defn- core-operation?
+  [form operation]
+  (and (seq? form)
+       (contains? #{operation (symbol "clojure.core" (name operation))}
+                  (first form))))
+
+(defn- namespace-aliases
+  [form]
+  (into {}
+        (comp
+         (filter #(and (seq? %) (= :require (first %))))
+         (mapcat rest)
+         (keep (fn [spec]
+                 (when (and (vector? spec) (symbol? (first spec)))
+                   (let [options (apply hash-map (rest spec))
+                         alias (or (:as options) (:as-alias options))]
+                     (when (symbol? alias)
+                       [alias (first spec)]))))))
+        (drop 2 form)))
+
+(defn- independently-scan-form
+  [file namespace-name aliases form]
+  (cond
+    (core-operation? form 'ns)
+    [(second form) (namespace-aliases form) []]
+
+    (core-operation? form 'in-ns)
+    [(when (and (seq? (second form))
+                (= 'quote (first (second form))))
+       (second (second form)))
+     aliases
+     []]
+
+    (or (core-operation? form 'defn)
+        (core-operation? form 'defn-))
+    [namespace-name
+     aliases
+     [{:file (.getCanonicalPath ^java.io.File file)
+       :line (:line (meta form))
+       :sym (str (symbol (str namespace-name) (str (second form))))}]]
+
+    (and (seq? form) (= 'do (first form)))
+    (reduce
+     (fn [[current current-aliases declarations] child]
+       (let [[next-current next-aliases found]
+             (independently-scan-form
+              file current current-aliases child)]
+         [next-current next-aliases (into declarations found)]))
+     [namespace-name aliases []]
+     (rest form))
+
+    :else
+    [namespace-name aliases []]))
+
+(defn- independent-declarations
   [file]
-  (reader/read {:seon.sci.reader/text (slurp file)
-                :seon.sci.reader/features #{:clj}
-                :seon.sci.reader/tags {'inst identity 'uuid identity}}))
-
-(defn- declared-functions
-  "Top-level `defn`/`defn-` names in `events`, counted from the forms.
-
-  Read from the form itself rather than from the reader's lifted facts, so
-  this count cannot agree with the rows by sharing their bug."
-  [events]
-  (into #{}
-        (keep (fn [event]
-                (let [form (:seon.sci.reader/form event)]
-                  (when (and (seq? form)
-                             (symbol? (first form))
-                             (contains? #{"defn" "defn-"}
-                                        (name (first form)))
-                             (symbol? (second form)))
-                    (second form)))))
-        events))
+  (let [source-reader
+        (reader-types/indexing-push-back-reader (slurp file))
+        eof (Object.)]
+    (loop [namespace-name nil
+           aliases {}
+           declarations []]
+      (let [form (binding [tools.reader/*alias-map* aliases]
+                   (tools.reader/read {:eof eof
+                                       :read-cond :allow
+                                       :features #{:clj}}
+                                      source-reader))]
+        (if (identical? eof form)
+          declarations
+          (let [[next-namespace next-aliases found]
+                (independently-scan-form
+                 file namespace-name aliases form)]
+            (recur next-namespace next-aliases
+                   (into declarations found))))))))
 
 (deftest every-declared-function-in-the-tree-becomes-one-row
   ;; The invariant, per source file: one `:seon.fn` row for every top-level
@@ -120,35 +172,25 @@
   ;; erased every declaration below the first ordinary top-level call.
   (let [files (source-files seon.fn/source-roots)
         rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
-        rows-by-namespace
-        (reduce
-         (fn [index row]
-           (if-some [sym (:seon.fn/sym row)]
-             (update index
-                     (symbol (namespace (symbol sym)))
-                     (fnil conj #{})
-                     (symbol (name (symbol sym))))
-             index))
-         {}
-         rows)]
+        declared (into [] (mapcat independent-declarations) files)
+        expected (frequencies (map :sym declared))
+        actual (frequencies (keep :seon.fn/sym rows))]
     (is (seq files))
-    (doseq [file files
-            :let [events (read-events file)]]
-      (is (vector? events)
-          (str "reader refused " (.getPath ^java.io.File file)))
-      (when (vector? events)
-        (let [declared (declared-functions events)
-              namespace-name (some :seon.ns/name events)]
-          (when (seq declared)
-            (is (some? namespace-name)
-                (str "no namespace declaration in "
-                     (.getPath ^java.io.File file)))
-            (is (= declared
-                   (clojure.set/intersection
-                    declared
-                    (get rows-by-namespace namespace-name #{})))
-                (str "unadmitted declarations in "
-                     (.getPath ^java.io.File file)))))))
+    (is (every? (comp some? :line) declared))
+    (is (= expected actual)
+        (str "independent declaration mismatch: "
+             {:missing (reduce-kv
+                        (fn [m sym n]
+                          (let [missing (- n (get actual sym 0))]
+                            (cond-> m (pos? missing) (assoc sym missing))))
+                        {}
+                        expected)
+              :extra (reduce-kv
+                      (fn [m sym n]
+                        (let [extra (- n (get expected sym 0))]
+                          (cond-> m (pos? extra) (assoc sym extra))))
+                      {}
+                      actual)}))
     (testing "private helpers are rows, marked private rather than dropped"
       (let [private (filter :seon.fn/private? rows)]
         (is (< 100 (count private)))
@@ -177,6 +219,24 @@
       (is (= [{:seon.fn/line 3
                :seon.fn/source "(defn f [n] n)"
                :seon.fn/reason :seon.fn/namespace-unproven}]
+             (:seon.fn/unadmitted data))))))
+
+(deftest executable-nested-declaration-is-refused-loudly
+  (let [root (str "tmp/fn-test/" (random-uuid))
+        file (io/file root "nested.clj")]
+    (.mkdirs (.getParentFile file))
+    (spit file "(ns nested)\n(do (defn hidden [n] n))\n")
+    (let [failure (try
+                    (seon.fn/rows {:seon.fn/roots [root]})
+                    (catch clojure.lang.ExceptionInfo error error))
+          data (ex-data failure)]
+      (is (instance? clojure.lang.ExceptionInfo failure))
+      (is (= :seon.fn/index-refused (:seon.error/kind data)))
+      (is (str/ends-with? (:seon.fn/file data) "nested.clj"))
+      (is (= [{:seon.fn/line 2
+               :seon.fn/source "(do (defn hidden [n] n))"
+               :seon.fn/reason :seon.fn/nested-executable-declaration
+               :seon.fn/declarations 1}]
              (:seon.fn/unadmitted data))))))
 
 (deftest fresh-indexing-fills-canonical-namespace-stubs

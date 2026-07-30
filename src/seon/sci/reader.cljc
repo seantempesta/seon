@@ -195,13 +195,15 @@
              (symbol? (second value)))
     (second value)))
 
+(declare resolved-operation)
+
 (defn- function-declaration
-  [form namespace-name]
+  [form namespace-name context]
   (when (seq? form)
     (let [operation (first form)
           function-name (second form)]
-      (when (and (symbol? operation)
-                 (#{"defn" "defn-"} (name operation))
+      (when (and (contains? #{'clojure.core/defn 'clojure.core/defn-}
+                            (resolved-operation operation context))
                  (symbol? function-name))
         (let [after-name (drop 2 form)
               doc (when (string? (first after-name)) (first after-name))
@@ -234,7 +236,8 @@
           (cond->
            {:seon.fn/arglists (pr-str arglists)
             :seon.fn/private?
-            (boolean (or (= "defn-" (name operation))
+            (boolean (or (= 'clojure.core/defn-
+                            (resolved-operation operation context))
                          (:private metadata)))}
             qualified (assoc :seon.fn/sym (str qualified))
             namespace-name
@@ -243,8 +246,6 @@
             schema (assoc :seon.fn/spec (pr-str schema))
             (contains? #{:io :compute} workload)
             (assoc :seon.fn/workload workload)))))))
-
-(declare resolved-operation)
 
 (defn- test-declaration
   [form namespace-name context]
@@ -257,23 +258,18 @@
        :seon.test/ns [:seon.ns/name namespace-name]})))
 
 (defn- resolved-operation
-  "The operation symbol as the reading namespace's aliases resolve it.
+  "Resolve an operator through explicit aliases/refers and Clojure core.
 
-  An UNQUALIFIED operator is deliberately not resolved through refers or
-  the current namespace yet, so `seon.schema`'s own
-  `(register! ::compiled-validator 'fn?)` does not become a schema row.
-  Recognizing it exposed a real blocker: its static form is
-  `(quote fn?)`, which is not a Malli form, and unlike
-  `seon.sci.eval/program-row` the build indexer has no `malli-form?`
-  admission gate. See
-  `docs/seon/issues/eval-time-schema-and-test-rows-have-no-recurring-proof.md`."
+  Qualification is semantic: `foo/defn` remains `foo/defn`, while an
+  unqualified core operation resolves to `clojure.core/*`."
   [operation {::keys [aliases refers]}]
   (when (symbol? operation)
     (if-let [operation-namespace (namespace operation)]
       (if-let [target (get aliases (symbol operation-namespace))]
         (symbol (str target) (name operation))
         operation)
-      (get refers operation operation))))
+      (or (get refers operation)
+          (symbol "clojure.core" (name operation))))))
 
 (defn- schema-declaration
   [form context]
@@ -291,44 +287,56 @@
 (defn- declaration-facts
   [form namespace-name context source]
   (if (and (seq? form)
-           (symbol? (first form))
-           (= "ns" (name (first form))))
+           (= 'clojure.core/ns
+              (resolved-operation (first form) context)))
     (assoc
      (select-keys
       (namespace-info form)
       [:seon.ns/name :seon.ns/doc :seon.ns/require-edges])
      :seon.ns/source source)
     (or
-     (when-let [function (function-declaration form namespace-name)]
+     (when-let [function (function-declaration form namespace-name context)]
        (assoc function :seon.fn/source source))
      (when-let [test (test-declaration form namespace-name context)]
        (assoc test :seon.test/source source))
      (schema-declaration form context))))
 
-(defn- namespace-changing-mention?
-  "True when `form` mentions a namespace-changing call in operator position.
+(defn- nested-executable-declarations
+  "Declaration facts nested directly under an executable top-level `do`.
 
-  Only `ns` and `in-ns` change the current namespace. A form that mentions
-  either one below its own head — `(do (in-ns 'other))` — may move the
-  namespace in a way static reading cannot prove, so attribution becomes
-  absent. This is a property derived from the form itself, never a list of
-  operations believed safe: such a list dropped attribution at the first
-  ordinary top-level call, so a `set!` or a predicate registration silently
-  erased every declaration below it in the same file."
-  [form]
-  (and (coll? form)
-       (boolean
-        (or (and (seq? form)
-                 (symbol? (first form))
-                 (contains? #{"ns" "in-ns"} (name (first form))))
-            (some namespace-changing-mention? form)))))
+  The publication contract is one top-level form to at most one row, so these
+  are refused loudly rather than silently omitted. Quote, function bodies, and
+  other inert data are not traversed."
+  [form namespace-name context]
+  (when (and (seq? form) (= 'do (first form)))
+    (into []
+          (mapcat
+           (fn [child]
+             (if (and (seq? child) (= 'do (first child)))
+               (nested-executable-declarations child namespace-name context)
+               (when-let [facts
+                          (declaration-facts child namespace-name context
+                                             (pr-str child))]
+                 [facts]))))
+          (rest form))))
+
+(defn- namespace-changing-mention?
+  "True when executing this top-level form can change the reading namespace."
+  [form context]
+  (when (seq? form)
+    (let [operation (resolved-operation (first form) context)]
+      (or (contains? #{'clojure.core/ns 'clojure.core/in-ns} operation)
+          (and (= 'do (first form))
+               (boolean
+                (some #(namespace-changing-mention? % context)
+                      (rest form))))))))
 
 (defn- next-reading-context
   [{::keys [contexts] :as state} form]
-  (let [operation (when (and (seq? form) (symbol? (first form)))
-                    (name (first form)))]
+  (let [operation (when (seq? form)
+                    (resolved-operation (first form) state))]
     (cond
-      (= "ns" operation)
+      (= 'clojure.core/ns operation)
       (if-let [info (namespace-info form)]
         (let [context (select-keys info [::ns ::aliases ::refers])]
           (assoc context
@@ -336,7 +344,7 @@
                  ::contexts (assoc contexts (::ns context) context)))
         (assoc state ::attribution? false))
 
-      (= "in-ns" operation)
+      (= 'clojure.core/in-ns operation)
       (if-let [namespace-name (quoted-symbol (second form))]
         (merge {::ns namespace-name ::aliases {} ::refers {}}
                (get contexts namespace-name)
@@ -347,7 +355,7 @@
       ;; Attribution otherwise follows the last explicit valid namespace.
       ;; Evaluator namespace receipts remain the runtime truth for a change
       ;; only evaluation can see.
-      (namespace-changing-mention? form)
+      (namespace-changing-mention? form state)
       (assoc state ::attribution? false)
 
       :else
@@ -413,7 +421,14 @@
                   form
                   (when (::attribution? state) (::ns state))
                   (select-keys state [::ns ::aliases ::refers])
-                  source))]
+                  source)
+                 (when-let [nested
+                            (seq
+                             (nested-executable-declarations
+                              form
+                              (when (::attribution? state) (::ns state))
+                              (select-keys state [::ns ::aliases ::refers])))]
+                   {::nested-declarations nested}))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
 

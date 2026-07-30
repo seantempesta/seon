@@ -37,12 +37,21 @@
   is how the graph came to hold 121 rows for 1242 declared functions."
   [events]
   (into []
-        (keep (fn [event]
-                (when (and (contains? event :seon.fn/arglists)
-                           (not (:seon.fn/sym event)))
-                  {::line (:seon.sci.reader/line event)
-                   ::source (:seon.sci.reader/source event)
-                   ::reason ::namespace-unproven})))
+        (mapcat
+         (fn [event]
+           (cond-> []
+             (and (contains? event :seon.fn/arglists)
+                  (not (:seon.fn/sym event)))
+             (conj {::line (:seon.sci.reader/line event)
+                    ::source (:seon.sci.reader/source event)
+                    ::reason ::namespace-unproven})
+
+             (seq (:seon.sci.reader/nested-declarations event))
+             (conj {::line (:seon.sci.reader/line event)
+                    ::source (:seon.sci.reader/source event)
+                    ::reason ::nested-executable-declaration
+                    ::declarations
+                    (count (:seon.sci.reader/nested-declarations event))}))))
         events))
 
 (defn rows
@@ -96,6 +105,7 @@
       [identity-attr
        (or
         (when (symbol? value) value)
+        (when (map? value) (get value identity-attr))
         (d/q '[:find ?identity .
                :in $ ?entity ?identity-attr
                :where [?entity ?identity-attr ?identity]]

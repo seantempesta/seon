@@ -358,6 +358,7 @@
         (events
          (str "(ns sample \"Sample namespace.\" "
               "(:require [clojure.string :as str] "
+              "[clojure.test :refer [deftest]] "
               "[seon.schema :as schema])) "
               "(defn- ^{:seon.workload :io} hidden [x] x) "
               "(schema/register! ::amount [:int {:min 0}]) "
@@ -366,11 +367,14 @@
             :seon.ns/source
             (str "(ns sample \"Sample namespace.\" "
                  "(:require [clojure.string :as str] "
+                 "[clojure.test :refer [deftest]] "
                  "[seon.schema :as schema]))")
             :seon.ns/doc "Sample namespace."
             :seon.ns/require-edges
             #{{:seon.ns.require/target 'clojure.string
                :seon.ns.require/alias 'str}
+              {:seon.ns.require/target 'clojure.test
+               :seon.ns.require/refers #{'deftest}}
               {:seon.ns.require/target 'seon.schema
                :seon.ns.require/alias 'schema}}}
            (select-keys
@@ -400,6 +404,31 @@
            (select-keys
             (nth read-events 3)
             [:seon.test/sym :seon.test/ns :seon.test/source])))))
+
+(deftest declaration-and-namespace-semantics-use-resolved-operator-identity
+  (let [read-events
+        (events
+         (str "(ns audit.a (:require [clojure.test :refer [deftest]]))\n"
+              "(foo/ns audit.phantom)\n"
+              "(foo/in-ns 'audit.wrong)\n"
+              "(foo/defn ghost [] 1)\n"
+              "(foo/deftest ghost-test)\n"
+              "'(in-ns 'audit.quoted)\n"
+              "(defn real [] :ok)\n"
+              "(deftest real-test)"))]
+    (is (= #{'audit.a}
+           (into #{} (keep :seon.ns/name) read-events)))
+    (is (= #{"audit.a/real"}
+           (into #{} (keep :seon.fn/sym) read-events)))
+    (is (= #{"audit.a/real-test"}
+           (into #{} (keep :seon.test/sym) read-events))))
+  (let [nested (events "(ns audit.a)\n(do (defn hidden [x] x))")]
+    (is (= [{:seon.fn/sym "audit.a/hidden"
+             :seon.fn/ns [:seon.ns/name 'audit.a]
+             :seon.fn/source "(defn hidden [x] x)"
+             :seon.fn/arglists "([x])"
+             :seon.fn/private? false}]
+           (:seon.sci.reader/nested-declarations (second nested))))))
 
 (def ^:private surface-exemptions
   {"src/seon/schema/edn.clj"
