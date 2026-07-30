@@ -374,11 +374,12 @@
   admission.  The table is SCI's existing per-ctx state, not a second registry
   (`reference-code/sci/src/sci/impl/namespaces.cljc:488-554`)."
   [ctx namespace-name]
-  (let [{:keys [aliases refers requires]}
+  (let [{:keys [aliases imports refers requires]}
         (sci/namespace-bindings ctx namespace-name)]
     {:seon.sci.reader/ns namespace-name
      :seon.sci.reader/aliases aliases
      :seon.sci.reader/refers refers
+     ::imports imports
      ::requires requires}))
 
 (defn- one-event
@@ -401,6 +402,7 @@
 (defn- binding-rows
   "Project SCI's effective resolver inputs into namespace components."
   [{aliases :seon.sci.reader/aliases
+    imports ::imports
     refers :seon.sci.reader/refers
     requires ::requires}]
   {:seon.ns/requires
@@ -411,6 +413,13 @@
                 {:seon.ns.alias/local local
                  :seon.ns.alias/target-ns target-ns}))
          aliases)
+   :seon.ns/imports
+   (into #{}
+         (map (fn [[local target-class]]
+                (cond-> {:seon.ns.import/local local}
+                  target-class
+                  (assoc :seon.ns.import/target-class target-class))))
+         imports)
    :seon.ns/refers
    (into #{}
          (keep (fn [[local target]]
@@ -426,6 +435,11 @@
    (into {}
          (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
          (:seon.ns/aliases row))
+   :imports
+   (into {}
+         (map (juxt :seon.ns.import/local
+                    :seon.ns.import/target-class))
+         (:seon.ns/imports row))
    :refers
    (into {}
          (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
@@ -437,9 +451,11 @@
   [namespace-name source before after changed?]
   (when (or changed?
             (not= (select-keys before [:seon.sci.reader/aliases
-                                      :seon.sci.reader/refers ::requires])
+                                      :seon.sci.reader/refers
+                                      ::imports ::requires])
                   (select-keys after [:seon.sci.reader/aliases
-                                     :seon.sci.reader/refers ::requires])))
+                                     :seon.sci.reader/refers
+                                     ::imports ::requires])))
     (program/declaration-row
      (merge
       {:seon.ns/name namespace-name
@@ -468,6 +484,7 @@
                             (if (= identity :seon.ns/name)
                               '[* :seon.ns/requires
                                   {:seon.ns/aliases [*]}
+                                  {:seon.ns/imports [*]}
                                   {:seon.ns/refers [*]}]
                               '[*])
                             [identity value]))]
@@ -568,6 +585,7 @@
                  (d/pull db
                          '[* :seon.ns/requires
                              {:seon.ns/aliases [*]}
+                             {:seon.ns/imports [*]}
                              {:seon.ns/refers [*]}]
                          [:seon.ns/name namespace-name]))))
          (d/q '[:find ?namespace-name ?source ?source-tx

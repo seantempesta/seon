@@ -120,6 +120,7 @@
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
                    "(deftest persisted-test :reopened)\n"
+                   "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
                    "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "removed-before-restart [x] (inc x))\n"
                    "(clojure.core/ns-unmap "
@@ -202,7 +203,14 @@
                  (sci/eval-string*
                   ctx
                   "(resolve 'my.agents.restart-a/removed-before-restart)"))
-                "a computed qualified ns-unmap survives process restart"))
+                "a computed qualified ns-unmap survives process restart")
+            (is (nil?
+                 (:val
+                  (sci/eval-string+
+                   ctx
+                   "(resolve 'String)"
+                   {:ns (sci/create-ns 'my.agents.restart-a)})))
+                "an import-only ns-unmap survives cluster reopen"))
           (d/transact
            connection
            (agent/creation-tx

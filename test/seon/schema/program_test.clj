@@ -26,4 +26,5 @@
         :seon.ns/source "(ns sample)"
         :seon.ns/requires #{}
         :seon.ns/aliases #{}
+        :seon.ns/imports #{}
         :seon.ns/refers #{}})))

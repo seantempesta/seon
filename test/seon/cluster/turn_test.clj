@@ -626,7 +626,28 @@
                  @evaluated-ctx
                  "(resolve 'String)"
                  {:ns (sci.core/create-ns 'my.agents.agent-a)})))
-              "the supplied run ctx receives the exact isolated state"))))))
+              "the supplied run ctx receives the exact isolated state")
+          (let [namespace-row
+                (d/pull @connection
+                        '[* {:seon.ns/imports [*]}]
+                        [:seon.ns/name 'my.agents.agent-a])
+                import-mask
+                (some #(when (= 'String (:seon.ns.import/local %)) %)
+                      (:seon.ns/imports namespace-row))
+                fresh (sci.core/fork (sci.eval/base))]
+            (is (= {:seon.ns.import/local 'String}
+                   (dissoc import-mask :db/id))
+                "the database stores the import mask as ordinary data")
+            (sci.eval/acquire!
+             {:seon.sci.eval/ctx fresh
+              :seon.db/db @connection})
+            (is (nil?
+                 (:val
+                  (sci.core/eval-string+
+                   fresh
+                   "(resolve 'String)"
+                   {:ns (sci.core/create-ns 'my.agents.agent-a)})))
+                "fresh acquisition reinstalls the persisted mask")))))))
 
 (deftest refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
   (with-cluster
@@ -667,6 +688,17 @@
                   :seon.error/data {:error :transact/namespace}}
                  (transact! target transaction))))]
           (drive! cluster 10)
+          (is (nil?
+               (d/q '[:find ?import .
+                      :in $ ?namespace ?local
+                      :where
+                      [?namespace-entity :seon.ns/name ?namespace]
+                      [?namespace-entity :seon.ns/imports ?import]
+                      [?import :seon.ns.import/local ?local]]
+                    @(:seon.store/branch-connection cluster)
+                    'my.agents.agent-a
+                    'String))
+              "a refused mask never reaches the database")
           (is (some?
                (:val
                 (sci.core/eval-string+
@@ -674,6 +706,39 @@
                  "(resolve 'String)"
                  {:ns (sci.core/create-ns 'my.agents.agent-a)})))
               "the isolated import mask is discarded on refusal"))))))
+
+(deftest import-addition-is-ordinary-data-and-reacquires-exactly
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              "(import java.lang.String)"})]
+          (drive! cluster 10)
+          (let [namespace-row
+                (d/pull @connection
+                        '[* {:seon.ns/imports [*]}]
+                        [:seon.ns/name 'my.agents.agent-a])
+                import-row
+                (some #(when (= 'String (:seon.ns.import/local %)) %)
+                      (:seon.ns/imports namespace-row))
+                fresh (sci.core/fork (sci.eval/base))]
+            (is (= {:seon.ns.import/local 'String
+                    :seon.ns.import/target-class 'java.lang.String}
+                   (dissoc import-row :db/id))
+                "the database stores only symbols, never a Class object")
+            (sci.eval/acquire!
+             {:seon.sci.eval/ctx fresh
+              :seon.db/db @connection})
+            (is (= 'java.lang.String
+                   (get-in (sci.core/namespace-bindings
+                            fresh 'my.agents.agent-a)
+                           [:imports 'String]))
+                "fresh acquisition restores the exact local import")))))))
 
 (deftest refused-terminal-program-transactions-settle-and-do-not-refire
   ;; Checkpoint-audit blocker B1, through the real SCI boundary with the

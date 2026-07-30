@@ -44,6 +44,8 @@
  :seon.ns/requires [:set :symbol]
  :seon.ns/aliases
  [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/imports
+ [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/refers
  [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/ns
@@ -55,6 +57,7 @@
   [:seon.ns/doc {:optional true} :seon.ns/doc]
   [:seon.ns/requires {:optional true} :seon.ns/requires]
   [:seon.ns/aliases {:optional true} :seon.ns/aliases]
+  [:seon.ns/imports {:optional true} :seon.ns/imports]
   [:seon.ns/refers {:optional true} :seon.ns/refers]]
 
  ; Effective bindings are namespace-owned components. They preserve SCI's
@@ -64,7 +67,18 @@
  :seon.ns.alias/binding
  [:map {:seon.db/entity true}
   [:seon.ns.alias/local :seon.ns.alias/local]
-  [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]]
+ [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]]
+
+ ; A missing target-class is SCI's exact nil mask for a removed default
+ ; import. Class objects never cross the database boundary.
+ :seon.ns.import/local :symbol
+ :seon.ns.import/target-class :symbol
+ :seon.ns.import/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.import/local :seon.ns.import/local]
+  [:seon.ns.import/target-class
+   {:optional true}
+   :seon.ns.import/target-class]]
 
  :seon.ns.refer/local :symbol
  :seon.ns.refer/target-ns :symbol

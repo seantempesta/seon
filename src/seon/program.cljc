@@ -12,7 +12,7 @@
     :seon.program/source-attribute :seon.ns/source
     :seon.program/owned-attributes
     [:seon.ns/name :seon.ns/source :seon.ns/doc
-     :seon.ns/requires :seon.ns/aliases :seon.ns/refers]}
+     :seon.ns/requires :seon.ns/aliases :seon.ns/imports :seon.ns/refers]}
    :seon.fn/sym
    {:seon.program/identity-attribute :seon.fn/sym
     :seon.program/source-attribute :seon.fn/source
@@ -79,6 +79,7 @@
                       (or (nil? value)
                           (and (contains? #{:seon.ns/requires
                                             :seon.ns/aliases
+                                            :seon.ns/imports
                                             :seon.ns/refers}
                                           attribute)
                                (empty? value)))))
