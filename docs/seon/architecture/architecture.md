@@ -532,8 +532,9 @@ of one program graph. Agent-defining forms are `:seon.fn`, `:seon.ns`,
 attributes.
 The DB IS the running system (query → install exact namespace bindings →
 topo-sort by `:seon.ns/requires` plus refer targets → load; redefine = upsert).
-Aliases, exact renamed refers, and actual loaded namespaces are separate facts;
-runtime never compresses them back into require syntax. Agent birth
+Aliases, imports (including nil masks for removed defaults), exact renamed
+refers, and actual loaded namespaces are separate facts; runtime never
+compresses them back into require syntax or stores JVM Class objects. Agent birth
 commits its context components, home namespace/require rows, and safe declaration
 facts atomically. After commit, the runtime loads those declarations without
 manufacturing quiet eval/transcript rows. The agent sees the resulting facts and

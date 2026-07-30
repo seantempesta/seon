@@ -208,6 +208,19 @@ owner suite is 39 tests / 159 assertions / 0 failures / 0 errors on Clojure
 1.10.3 and 1.11.1. The other two re-audit blockers remain in their owning
 lanes; integrated adversarial review remains the wave boundary.
 
+The final audit (`b12924856`) found that the exact import mask above was still
+only an in-process namespace snapshot: fresh acquisition reconstructed the
+default `String` import because namespace facts represented requires, aliases,
+and refers but not imports. Root `7713bb0bf` plus maintained SCI `1305a90`
+extend the same exact binding representation with namespace-owned import
+components. Each stores a local symbol and optional fully qualified class
+symbol; an absent target is SCI's nil mask over a default import. SCI checks
+the target against its installed class table at the install boundary, so no
+Class object enters the database. Current-run commit/refusal, fresh
+acquisition, explicit import addition, and a real cluster stop/reopen now recur
+through the one binding-fact mechanism. Maintained SCI passes 40 tests / 160
+assertions / 0 failures / 0 errors on both supported Clojure versions.
+
 The build-index lane closes the other two re-audit findings with an explicit
 shared admission domain. `seon.sci.reader` now owns the one fact that a
 standalone resolver mutation requires evaluated state; `seon.fn` consumes that

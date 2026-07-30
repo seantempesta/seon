@@ -42,6 +42,13 @@ resolver structure together. Runtime `ns-unmap` carries that isolated state on
 the ordinary durable deletion/context request and installs it only from the
 successful terminal transaction result. Source is no longer re-evaluated
 after commit, and a refused transaction leaves the supplied run ctx unchanged.
+The final audit then found that the exact import state was still transient:
+fresh acquisition restored inherited `String`. Root `7713bb0bf` and maintained
+SCI `1305a90` close that representation gap. Namespace facts now persist import
+local symbols with an optional fully qualified target-class symbol; omission is
+SCI's exact nil mask for a removed default import. Class objects never enter the
+database, and SCI validates/resolves target availability only while installing
+the binding facts.
 
 ## Evidence
 
@@ -112,6 +119,16 @@ tests / 159 assertions / 0 failures / 0 errors on both Clojure 1.10.3 and
 1.11.1, and its state round-trip also covers an own intern, alias, refer,
 require, and the nil import mask in one snapshot.
 
+The final audit's fresh-acquisition falsifier is also recurring. The terminal
+namespace row contains a component with `:seon.ns.import/local 'String` and no
+target attribute, a fresh `acquire!` keeps `String` unresolved, and the live
+cluster stop/reopen test proves the same mask survives a new process instance.
+An explicit import addition persists only its local and fully qualified class
+symbols and reacquires through the same SCI operation. The focused root
+program/eval/turn/restart gate passed 57 tests / 330 assertions before the
+addition-specific regression; the maintained SCI suite passes 40 tests / 160
+assertions / 0 failures / 0 errors on Clojure 1.10.3 and 1.11.1.
+
 The same re-audit's build blockers are closed by making producer admission
 explicit instead of adding another static evaluator. The reader is the one
 owner that marks a standalone namespace-resolver mutation as requiring
@@ -172,11 +189,11 @@ The recurring proof matrix establishes:
   before installing referring functions/tests.
 
 The unifying repair is namespace-owned effective binding facts: aliases carry
-local + target namespace, refers carry local + target namespace + target name,
-and bare dependency targets remain only where loading/order needs them. A
-single narrow public operation in Seon's maintained SCI fork installs those
-facts into a context. Do not add accumulated require-source replay or a second
-registry.
+local + target namespace, imports carry local + optional fully qualified class
+symbol, refers carry local + target namespace + target name, and bare
+dependency targets remain only where loading/order needs them. A single narrow
+public operation in Seon's maintained SCI fork installs those facts into a
+context. Do not add accumulated require-source replay or a second registry.
 
 Sequential reading does not add a second parser or persist resolved future
 forms. The plan retains exact source spans; its evaluator is the semantic
