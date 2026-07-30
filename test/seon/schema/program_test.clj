@@ -1,5 +1,5 @@
 (ns seon.schema.program-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -28,3 +28,21 @@
         :seon.ns/aliases #{}
         :seon.ns/imports #{}
         :seon.ns/refers #{}})))
+
+(deftest catalog-render-declarations-resolve
+  (let [catalog (schema/entity-catalog)
+        program-keys #{:seon.fn/fn :seon.ns/ns :seon.schema/schema}]
+    (testing "unbuilt program specialists are absent"
+      (doseq [row (filter (comp program-keys :seon.schema.catalog/key)
+                          catalog)]
+        (is (not (contains? row :seon.schema.catalog/render-ai)))
+        (is (not (contains? row :seon.schema.catalog/render-html)))))
+    (testing "every projection the catalog still advertises is loadable"
+      (doseq [row catalog
+              projection-key [:seon.schema.catalog/render-ai
+                              :seon.schema.catalog/render-html]
+              :let [projection (get row projection-key)]
+              :when projection]
+        (is (var? (requiring-resolve projection))
+            (str (:seon.schema.catalog/key row)
+                 " advertises missing " projection-key " " projection))))))

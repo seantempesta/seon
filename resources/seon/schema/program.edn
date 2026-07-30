@@ -13,9 +13,7 @@
  ; derived by reachability over the program graph.
  :seon.fn/workload [:enum :io :compute]
  :seon.fn/fn
- [:map {:seon.db/entity true
-        :seon.render/ai seon.render.handlers.fn/render-ai
-        :seon.render/html seon.render.handlers.fn/render-html}
+ [:map {:seon.db/entity true}
   [:seon.fn/sym :seon.fn/sym]
   [:seon.fn/ns :seon.fn/ns]
   [:seon.fn/source :seon.fn/source]
@@ -27,9 +25,7 @@
  [:seon.fn/workload {:optional true} :seon.fn/workload]]
 
  :seon.schema/schema
- [:map {:seon.db/entity true
-        :seon.render/ai seon.render.handlers.schema/render-ai
-        :seon.render/html seon.render.handlers.schema/render-html}
+ [:map {:seon.db/entity true}
   [:seon.schema/key :seon.schema/key]
   [:seon.schema/form :seon.schema/form]
   [:seon.schema/created-at {:optional true} :seon.schema/created-at]
@@ -51,9 +47,7 @@
  :seon.ns/refers
  [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/ns
- [:map {:seon.db/entity true
-        :seon.render/ai seon.render.handlers.ns/render-ai
-        :seon.render/html seon.render.handlers.ns/render-html}
+ [:map {:seon.db/entity true}
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/source :seon.ns/source]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
