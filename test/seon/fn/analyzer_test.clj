@@ -146,15 +146,18 @@
               :seon.ns.refer/target-name 'read-string}}}
           ::analyzer/available-functions
           [{:seon.fn/sym "my.run/complete"
-            :seon.fn/private? false}
+            :seon.fn/private? false
+            :seon.fn/arglists "([message])"}
            {:seon.fn/sym "other/private-helper"
-            :seon.fn/private? true}]
+            :seon.fn/private? true
+            :seon.fn/arglists "([value])"}]
           ::analyzer/sources
           ["(defn broken [value]\n  (missing value))"
            "(str/join [\"kept\"])"
            "(read \"{:also :kept}\")"
            "(my.run/complete \"done\")"
            "(other/private-helper 1)"
+           "(my.run/complete)"
            "(broken)"]})]
     (testing "the synthetic namespace prelude resolves persisted aliases"
       (is (empty? (::analyzer/findings (nth analysis 1))))
@@ -165,6 +168,10 @@
       (is (= :private-call
              (::analyzer/type
               (first (::analyzer/findings (nth analysis 4)))))))
+    (testing "program rows preserve cross-namespace arities"
+      (is (= :invalid-arity
+             (::analyzer/type
+              (first (::analyzer/findings (nth analysis 5)))))))
     (testing "prelude rows are removed from exact per-form locations"
       (is (= [{::analyzer/row 2
                ::analyzer/level :error
@@ -176,4 +183,4 @@
     (testing "a later dependent form receives its own reported error"
       (is (= :invalid-arity
              (::analyzer/type
-              (first (::analyzer/findings (nth analysis 5)))))))))
+              (first (::analyzer/findings (nth analysis 6)))))))))

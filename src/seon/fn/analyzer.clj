@@ -2,6 +2,7 @@
   "Static Clojure source analysis for program-graph indexing."
   (:require [clj-kondo.core :as clj-kondo]
             [clj-kondo.impl.utils :as kondo.utils]
+            [clojure.edn :as edn]
             [clojure.string :as str]))
 
 (def ^:private config-directory ".clj-kondo")
@@ -206,12 +207,30 @@
               (seq requires) (conj (apply list :require requires))
               (seq imports) (conj (apply list :import imports)))))))
 
+(defn- stored-arglists
+  [serialized]
+  (when (string? serialized)
+    (try
+      (let [arglists (edn/read-string serialized)]
+        (when (and (seq arglists) (every? vector? arglists))
+          arglists))
+      (catch Throwable _
+        nil))))
+
 (defn- function-stub
-  [{:seon.fn/keys [sym private?]}]
+  [{:seon.fn/keys [sym private? arglists]}]
   (let [qualified (symbol sym)
-        function-name (symbol (name qualified))]
-    (list (if private? 'defn- 'defn)
-          function-name '[& arguments] nil)))
+        function-name (symbol (name qualified))
+        operation (if private? 'defn- 'defn)]
+    (if-let [arglists (stored-arglists arglists)]
+      (if (= 1 (count arglists))
+        (list operation function-name (first arglists) nil)
+        (list* operation function-name
+               (map #(list % nil) arglists)))
+      ;; Historical rows can honestly lack analyzer arities. Keep those names
+      ;; resolvable without claiming a fixed contract the database does not
+      ;; contain.
+      (list operation function-name '[& arguments] nil))))
 
 (defn- program-prelude
   [available-functions]

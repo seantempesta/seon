@@ -115,25 +115,32 @@
   [db ctx]
   (let [namespace-state (sci/namespace-state ctx)]
     (->> (concat
-          (map (fn [[sym private?]]
-                 {:seon.fn/sym sym
-                  :seon.fn/private? private?})
-               (d/q '[:find ?sym ?private
+          (map (fn [[sym private? arglists]]
+                 (cond-> {:seon.fn/sym sym
+                          :seon.fn/private? private?}
+                   (seq arglists)
+                   (assoc :seon.fn/arglists arglists)))
+               (d/q '[:find ?sym ?private ?arglists
                       :where
                       [?function :seon.fn/sym ?sym]
                       [(get-else $ ?function :seon.fn/private? false)
-                       ?private]]
+                       ?private]
+                      [(get-else $ ?function :seon.fn/arglists "")
+                       ?arglists]]
                     db))
           (mapcat
            (fn [[namespace-name intern-names]]
              (map (fn [intern-name]
-                    {:seon.fn/sym
-                     (str (symbol (str namespace-name) (str intern-name)))
-                     :seon.fn/private?
-                     (boolean
-                      (:private
-                       (meta (get-in namespace-state
-                                     [namespace-name intern-name]))))})
+                    (let [intern-meta
+                          (meta (get-in namespace-state
+                                        [namespace-name intern-name]))]
+                      (cond->
+                       {:seon.fn/sym
+                        (str (symbol (str namespace-name) (str intern-name)))
+                        :seon.fn/private? (boolean (:private intern-meta))}
+                        (seq (:arglists intern-meta))
+                        (assoc :seon.fn/arglists
+                               (pr-str (:arglists intern-meta))))))
                   intern-names))
            (sci/namespace-interns ctx)))
          (reduce (fn [by-symbol row]
