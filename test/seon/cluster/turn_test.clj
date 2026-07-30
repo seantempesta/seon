@@ -508,6 +508,37 @@
                        [:seon.fn/sym "my.agents.agent-a/obsolete"]))
               "the explicit delete retracts the durable identity"))))))
 
+(deftest absent-foreign-ns-unmap-refuses-without-mutating-sci
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            original-evaluate sci.eval/evaluate
+            evaluated-ctx (atom nil)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              "(ns-unmap 'clojure.string 'upper-case)"})
+           sci.eval/evaluate
+           (fn [request]
+             (reset! evaluated-ctx (:seon.sci.eval/ctx request))
+             (original-evaluate request))]
+          (drive! cluster 10)
+          (is (= :seon.cluster.run/refused
+                 (d/q '[:find ?kind .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 0]
+                        [?receipt :seon.error/kind ?kind]]
+                      @connection))
+              "an absent foreign identity still crosses the ownership fence")
+          (is (some?
+               (sci.core/eval-string*
+                @evaluated-ctx
+                "(resolve 'clojure.string/upper-case)"))
+              "a refused terminal transaction never installs foreign ns-unmap"))))))
+
 (deftest refused-terminal-program-transactions-settle-and-do-not-refire
   ;; Checkpoint-audit blocker B1, through the real SCI boundary. ONE
   ;; refused event is the regression: it settles and closes atomically,

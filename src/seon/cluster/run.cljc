@@ -582,8 +582,8 @@
                 declarations)
           requested-namespace (second (:seon.program/ns row))
           evaluated-namespace (second (:seon.cluster.eval/ns request))]
-      (when (and (seq declarations)
-                 (or (not= evaluated-namespace requested-namespace)
+      (when (or (not= evaluated-namespace requested-namespace)
+                (and (seq declarations)
                      (not= #{requested-namespace}
                            declaration-namespaces)))
         (refuse! `receipt-settle-call ::program-delete-not-owned request))
