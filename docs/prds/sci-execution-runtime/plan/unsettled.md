@@ -193,6 +193,21 @@ The sequential/deletion focus is 78 tests / 506 assertions / 0 failures / 0
 errors, with the maintained SCI namespace suite at 38 tests / 153 assertions /
 0 failures / 0 errors.
 
+The second registration re-audit (`df346713a`) found one further runtime
+namespace blocker: import-only `ns-unmap` changed SCI's isolated `:imports`
+mask but produced neither an intern deletion nor a binding-row delta, so the
+successful operation was discarded. The repair replaces Seon's partial
+inference with maintained SCI `namespace-state` / `install-namespace-state!`
+operations over SCI's complete namespace map. The evaluator still derives
+typed function/test deletion from removed interns, but carries the exact
+isolated namespace state through that deletion or the ordinary namespace
+context request and materializes it only after terminal commit. Dynamic source
+is not replayed. The recurring runtime pair proves success changes the next
+form's supplied ctx and transaction refusal leaves that ctx unchanged; the SCI
+owner suite is 39 tests / 159 assertions / 0 failures / 0 errors on Clojure
+1.10.3 and 1.11.1. The other two re-audit blockers remain in their owning
+lanes; integrated adversarial review remains the wave boundary.
+
 ## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under

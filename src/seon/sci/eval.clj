@@ -434,11 +434,12 @@
    :requires (or (:seon.ns/requires row) #{})})
 
 (defn- namespace-context-row
-  [namespace-name source before after]
-  (when (not= (select-keys before [:seon.sci.reader/aliases
-                                   :seon.sci.reader/refers ::requires])
-              (select-keys after [:seon.sci.reader/aliases
-                                  :seon.sci.reader/refers ::requires]))
+  [namespace-name source before after changed?]
+  (when (or changed?
+            (not= (select-keys before [:seon.sci.reader/aliases
+                                      :seon.sci.reader/refers ::requires])
+                  (select-keys after [:seon.sci.reader/aliases
+                                     :seon.sci.reader/refers ::requires])))
     (program/declaration-row
      (merge
       {:seon.ns/name namespace-name
@@ -479,7 +480,8 @@
       (throw (ex-info "Committed declaration source does not match install request."
                       {:seon.error/kind ::install-source-mismatch
                        :seon.program/identity [identity value]})))
-    (case identity
+    (let [installed
+          (case identity
       :seon.ns/name
       (let [namespace-name (:seon.ns/name committed)]
         (sci/install-namespace-bindings!
@@ -521,7 +523,8 @@
           (throw (ex-info "Deleted declaration is still present after commit."
                           {:seon.error/kind ::install-delete-mismatch
                            :seon.program/identity remaining})))
-        (when-not schema-deletion?
+        (when (and (not schema-deletion?)
+                   (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
                                  namespace-name ctx)]
             (sci/binding [sci/ns (sci/create-ns namespace-name)]
@@ -530,7 +533,16 @@
          (schema/projection-from-database db projection)
          :seon.sci.eval/installed 1})
       {:seon.schema/projection projection
-       :seon.sci.eval/installed 0})))
+       :seon.sci.eval/installed 0})]
+      ;; Namespace mutations execute in an isolated fork. The exact SCI state
+      ;; becomes visible only here, after the terminal transaction has proved
+      ;; that every durable declaration/context change committed. Replaying
+      ;; source would re-run dynamic target expressions against later state
+      ;; and cannot preserve import masks, which are resolver state rather
+      ;; than program identities.
+      (when-let [namespace-state (::namespace-state row)]
+        (sci/install-namespace-state! ctx namespace-state))
+      installed)))
 
 (defn acquire!
   "Install current agent-authored functions into a ctx at one database value.
@@ -747,6 +759,9 @@
             execution-ctx (if namespace-unmap?
                             (sci/fork evaluation-ctx)
                             evaluation-ctx)
+            before-namespace-state
+            (when namespace-unmap?
+              (sci/namespace-state execution-ctx))
             before-interns (when namespace-unmap?
                              (sci/namespace-interns execution-ctx))
             eval-form!
@@ -820,6 +835,12 @@
             (when namespace-unmap?
               (removed-program-identities
                before-interns (sci/namespace-interns execution-ctx)))
+            after-namespace-state
+            (when namespace-unmap?
+              (sci/namespace-state execution-ctx))
+            namespace-changed?
+            (and namespace-unmap?
+                 (not= before-namespace-state after-namespace-state))
             deletion-row
             (when (seq removed-identities)
               (program/deletion-row
@@ -834,8 +855,11 @@
             (when-not declared-row
               (namespace-context-row
                namespace-name source before-reader-context
-               (reader-context execution-ctx namespace-name)))
-            row (or declared-row context-row)
+               (reader-context execution-ctx namespace-name)
+               namespace-changed?))
+            row (cond-> (or declared-row context-row)
+                  (and namespace-changed? (or declared-row context-row))
+                  (assoc ::namespace-state after-namespace-state))
             ;; Durable declarations are installed only after the row commits.
             value (if context-row (:seon.ns/name context-row) evaluated-value)
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy

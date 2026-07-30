@@ -33,6 +33,16 @@ reader now emits an occurrence fact for every recognized function, schema, or
 test declaration independently of durable row construction, and indexing
 refuses any occurrence without a canonical identity.
 
+The second independent review (`df346713a`) found that the commit-first
+`ns-unmap` repair still projected only removed intern names. SCI also removes
+refers and import mappings; an import-only removal therefore returned success
+while its isolated fork was discarded. The maintained SCI fork now exposes
+one exact namespace-state snapshot/install seam covering interned values and
+resolver structure together. Runtime `ns-unmap` carries that isolated state on
+the ordinary durable deletion/context request and installs it only from the
+successful terminal transaction result. Source is no longer re-evaluated
+after commit, and a refused transaction leaves the supplied run ctx unchanged.
+
 ## Evidence
 
 Current recurring proofs establish:
@@ -94,6 +104,14 @@ exact function and test identities. `seon.fn-test` plus
 `seon.sci.reader-test` passes 24 tests / 212 assertions / 0 failures / 0
 errors.
 
+The re-audit's import-only falsifier is now recurring on both rails. Removing
+the inherited `String` import is visible to the next form only after the
+namespace context transaction commits; an injected refusal retains `String`
+in the original run ctx. The maintained SCI namespace suite now passes 39
+tests / 159 assertions / 0 failures / 0 errors on both Clojure 1.10.3 and
+1.11.1, and its state round-trip also covers an own intern, alias, refer,
+require, and the nil import mask in one snapshot.
+
 ## Owner
 
 `seon.sci.reader` / `seon.sci.eval` / the maintained SCI fork's namespace
@@ -116,7 +134,8 @@ The recurring proof matrix establishes:
   Datahike attribute declaration;
 - exact function/schema/test replacement and stale source reconciliation;
 - `ns-unmap` retracting matching function and test facts with ordinary SCI
-  REPL semantics, including a cross-namespace target;
+  REPL semantics, including a cross-namespace target and an import-only
+  mutation, with a refused commit leaving the original ctx unchanged;
 - exact resolved test operation identity, so unrelated `foo/deftest` never
   becomes a `:seon.test` row;
 - installation from the successful terminal transaction report's exact

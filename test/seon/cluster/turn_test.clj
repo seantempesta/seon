@@ -594,6 +594,87 @@
                 "(resolve 'clojure.string/upper-case)"))
               "the committed deletion installs against the run-local ctx"))))))
 
+(deftest import-only-ns-unmap-installs-exactly-after-its-context-commit
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            original-evaluate sci.eval/evaluate
+            evaluated-ctx (atom nil)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
+                   "(resolve 'String)")})
+           sci.eval/evaluate
+           (fn [request]
+             (reset! evaluated-ctx (:seon.sci.eval/ctx request))
+             (original-evaluate request))]
+          (drive! cluster 10)
+          (is (= "nil"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 1]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection))
+              "the next form sees the committed import removal")
+          (is (nil?
+               (:val
+                (sci.core/eval-string+
+                 @evaluated-ctx
+                 "(resolve 'String)"
+                 {:ns (sci.core/create-ns 'my.agents.agent-a)})))
+              "the supplied run ctx receives the exact isolated state"))))))
+
+(deftest refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            original-evaluate sci.eval/evaluate
+            evaluated-ctx (atom nil)
+            transact! store/transact!]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              "(clojure.core/ns-unmap *ns* (symbol \"String\"))"})
+           sci.eval/evaluate
+           (fn [request]
+             (reset! evaluated-ctx (:seon.sci.eval/ctx request))
+             (original-evaluate request))
+           store/transact!
+           (fn [target transaction]
+             (let [tx-data (if (map? transaction)
+                             (:tx-data transaction)
+                             transaction)
+                   namespace-mutation?
+                   (some
+                    (fn [operation]
+                      (and (vector? operation)
+                           (= :db.fn/call (first operation))
+                           (= #'run/receipt-settle-call (second operation))
+                           (some-> (get-in operation
+                                         [2 :seon.sci.eval/program-row
+                                          :seon.ns/source])
+                                   (str/includes? "ns-unmap"))))
+                    tx-data)]
+               (if namespace-mutation?
+                 {:seon.error/kind :seon.db/rejected
+                  :seon.error/message "injected namespace refusal"
+                  :seon.error/data {:error :transact/namespace}}
+                 (transact! target transaction))))]
+          (drive! cluster 10)
+          (is (some?
+               (:val
+                (sci.core/eval-string+
+                 @evaluated-ctx
+                 "(resolve 'String)"
+                 {:ns (sci.core/create-ns 'my.agents.agent-a)})))
+              "the isolated import mask is discarded on refusal"))))))
+
 (deftest refused-terminal-program-transactions-settle-and-do-not-refire
   ;; Checkpoint-audit blocker B1, through the real SCI boundary with the
   ;; terminal database outcome injected at its one transaction seam. ONE
