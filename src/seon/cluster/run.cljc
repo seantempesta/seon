@@ -568,21 +568,24 @@
                         (when-let [declaration
                                    (d/pull db
                                            [:db/id
-                                            {:seon.fn/ns [:db/id]}
-                                            {:seon.test/ns [:db/id]}]
+                                            {:seon.fn/ns
+                                             [:db/id :seon.ns/name]}
+                                            {:seon.test/ns
+                                             [:db/id :seon.ns/name]}]
                                            [identity-attribute identity-value])]
                           declaration)))
                 deleted-identities)
-          namespace-eid (some #(or (get-in % [:seon.fn/ns :db/id])
-                                   (get-in % [:seon.test/ns :db/id]))
-                              declarations)
-          owner (when namespace-eid
-                  (d/q '[:find ?agent .
-                         :in $ ?namespace
-                         :where
-                         [?agent :seon.cluster.agent/namespace ?namespace]]
-                       db namespace-eid))]
-      (when (and (seq declarations) (nil? owner))
+          declaration-namespaces
+          (into #{}
+                (keep #(or (get-in % [:seon.fn/ns :seon.ns/name])
+                           (get-in % [:seon.test/ns :seon.ns/name])))
+                declarations)
+          requested-namespace (second (:seon.program/ns row))
+          evaluated-namespace (second (:seon.cluster.eval/ns request))]
+      (when (and (seq declarations)
+                 (or (not= evaluated-namespace requested-namespace)
+                     (not= #{requested-namespace}
+                           declaration-namespaces)))
         (refuse! `receipt-settle-call ::program-delete-not-owned request))
       (mapv (fn [declaration] [:db/retractEntity (:db/id declaration)])
             declarations))
@@ -626,7 +629,7 @@
                     required
                     (into []
                           (comp
-                           (remove current-attributes)
+                           (remove (set current-attributes))
                            (remove #(contains? (:schema db) %)))
                           (sort candidate-attributes))]
                 (schema.datahike/malli->datahike-schema-in

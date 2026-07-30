@@ -338,10 +338,33 @@
 
        :else nil))))
 
+(defn- reader-context
+  "Project SCI's namespace-in-effect into the one reader's own context.
+
+  A run is a REPL reduce: executing `require` mutates SCI's namespace table,
+  and the following form must be read with those exact aliases and refers.
+  Re-reading with only the namespace name loses declaration identity before
+  admission.  The table is SCI's existing per-ctx state, not a second registry
+  (`reference-code/sci/src/sci/impl/namespaces.cljc:488-554`)."
+  [ctx namespace-name]
+  (let [namespace-state
+        (get-in @(:env ctx) [:namespaces namespace-name])]
+    {:seon.sci.reader/ns namespace-name
+     :seon.sci.reader/aliases (or (:aliases namespace-state) {})
+     :seon.sci.reader/refers
+     (into {}
+           (keep
+            (fn [[local-name referred-var]]
+              (let [{target-ns :ns target-name :name} (meta referred-var)]
+                (when (and target-ns target-name)
+                  [local-name (symbol (str target-ns) (str target-name))]))))
+           (:refers namespace-state))}))
+
 (defn- one-event
-  [source namespace-name]
-  (let [events (reader/read {:seon.sci.reader/text source
-                             :seon.sci.reader/ns namespace-name})]
+  [source namespace-name ctx]
+  (let [events (reader/read
+                (assoc (reader-context ctx namespace-name)
+                       :seon.sci.reader/text source))]
     (cond
       (map? events)
       (throw (ex-info (:seon.error/message events) events))
@@ -354,10 +377,64 @@
                       {:seon.error/kind ::reader-event-count
                        :seon.sci.reader/event-count (count events)})))))
 
+(defn- require-edges
+  "Derive the complete namespace dependency set from SCI's reader context."
+  [{aliases :seon.sci.reader/aliases
+    refers :seon.sci.reader/refers}]
+  (let [by-target
+        (reduce-kv
+         (fn [edges alias target]
+           (assoc-in edges [target :seon.ns.require/alias] alias))
+         {}
+         aliases)]
+    (->> refers
+         (reduce-kv
+          (fn [edges local-name referred]
+            (let [target (some-> referred namespace symbol)]
+              (if target
+                (update-in edges [target :seon.ns.require/refers]
+                           (fnil conj #{}) local-name)
+                edges)))
+          by-target)
+         (map (fn [[target edge]]
+                (assoc edge :seon.ns.require/target target)))
+         set)))
+
+(defn- namespace-context-row
+  [namespace-name source before after]
+  (when (not= (select-keys before [:seon.sci.reader/aliases
+                                   :seon.sci.reader/refers])
+              (select-keys after [:seon.sci.reader/aliases
+                                  :seon.sci.reader/refers]))
+    (program/declaration-row
+     {:seon.ns/name namespace-name
+      :seon.ns/source source
+      :seon.ns/require-edges (require-edges after)}
+     :contracted)))
+
+(defn- require-form
+  [edges]
+  (list*
+   'require
+   (map
+    (fn [{target :seon.ns.require/target
+          alias :seon.ns.require/alias
+          refers :seon.ns.require/refers
+          refer-all? :seon.ns.require/refer-all?
+          as-alias? :seon.ns.require/as-alias?}]
+      (list
+       'quote
+       (cond-> [target]
+         alias (conj (if as-alias? :as-alias :as) alias)
+         (seq refers) (conj :refer (vec (sort refers)))
+         refer-all? (conj :refer :all))))
+    (sort-by (comp str :seon.ns.require/target) edges))))
+
 (defn install-program-row!
-  "Install one declaration only after resolving its exact committed row from
-  the terminal transaction's db-after. Receipts are never consulted."
-  {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :boolean]}
+  "Install one declaration from the terminal transaction's db-after.
+  The exact committed row is resolved by identity. Receipts are never
+  consulted."
+  {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     row :seon.sci.eval/program-row}]
@@ -370,7 +447,11 @@
               (conj program/identity-attributes
                     :seon.program/delete-identities))
         committed (when-not (= identity :seon.program/delete-identities)
-                    (d/pull db '[*] [identity value]))]
+                    (d/pull db
+                            (if (= identity :seon.ns/name)
+                              '[* {:seon.ns/require-edges [*]}]
+                              '[*])
+                            [identity value]))]
     (when (and (#{:seon.fn/sym :seon.test/sym} identity)
                (let [source-attribute
                      (:seon.program/source-attribute
@@ -381,9 +462,17 @@
                       {:seon.error/kind ::install-source-mismatch
                        :seon.program/identity [identity value]})))
     (case identity
+      :seon.ns/name
+      (let [namespace-name (:seon.ns/name committed)]
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx
+                         (require-form (:seon.ns/require-edges committed))))
+        {:seon.schema/projection projection
+         :seon.sci.eval/installed 1})
+
       :seon.fn/sym
       (let [namespace-name (second (:seon.fn/ns row))
-            event (one-event (:seon.fn/source committed) namespace-name)]
+            event (one-event (:seon.fn/source committed) namespace-name ctx)]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         {:seon.schema/projection
@@ -397,7 +486,7 @@
 
       :seon.test/sym
       (let [namespace-name (second (:seon.test/ns row))
-            event (one-event (:seon.test/source committed) namespace-name)]
+            event (one-event (:seon.test/source committed) namespace-name ctx)]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         {:seon.schema/projection projection
@@ -405,7 +494,7 @@
 
       :seon.program/delete-identities
       (let [namespace-name (second (:seon.program/ns row))
-            event (one-event (:seon.program/source row) namespace-name)]
+            event (one-event (:seon.program/source row) namespace-name ctx)]
         (when-let [remaining
                    (some (fn [[identity-attribute identity-value]]
                            (when (d/pull db [:db/id]
@@ -438,6 +527,20 @@
           (= :agent
              (:seon.schema.admission/source
               (schema/admission-from-asserting-transaction db source-tx))))
+        namespace-rows
+        (into
+         []
+         (comp
+          (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
+          (map (fn [[namespace-name _ _]]
+                 (d/pull db
+                         '[* {:seon.ns/require-edges [*]}]
+                         [:seon.ns/name namespace-name]))))
+         (d/q '[:find ?namespace-name ?source ?source-tx
+                :where
+                [?namespace :seon.ns/name ?namespace-name]
+                [?namespace :seon.ns/source ?source ?source-tx]]
+              db))
         function-rows
         (into
          []
@@ -464,6 +567,7 @@
               db))
         rows
         (concat
+         (sort-by :seon.ns/name namespace-rows)
          (map (fn [[sym source namespace-name _]]
                 {:seon.fn/sym sym
                  :seon.fn/source source
@@ -536,7 +640,9 @@
                            'user)
         namespace-object (sci/create-ns namespace-name)]
     (try
-      (let [event (one-event source namespace-name)
+      (let [before-reader-context
+            (reader-context evaluation-ctx namespace-name)
+            event (one-event source namespace-name evaluation-ctx)
             form (:seon.sci.reader/form event)
             projection
             (or (:seon.schema/projection evaluation-ctx)
@@ -554,7 +660,7 @@
                               sci/out printed
                               sci/err printed]
                   (sci/eval-form evaluation-ctx form))))
-            row
+            declared-row
             (if schema-delta
               (let [schema-key (:seon.schema/key raw-row)
                     definition
@@ -573,15 +679,28 @@
                  {:seon.schema.admission/source :agent})
                 (assoc raw-row :seon.schema/form (pr-str definition)))
               raw-row)
+            evaluated-value
+            (if declared-row
+              (or (:seon.ns/name declared-row)
+                  (:seon.fn/sym declared-row)
+                  (:seon.schema/key declared-row)
+                  (:seon.test/sym declared-row))
+              (sci/binding [sci/ns namespace-object
+                            sci/out printed
+                            sci/err printed]
+                (sci/eval-form evaluation-ctx form)))
+            ;; Standalone REPL `require` is namespace registration too. Its
+            ;; committed row carries the complete dependency set derived from
+            ;; SCI's namespace table, so fresh acquisition reconstructs the
+            ;; same reader/evaluator context before installing declarations.
+            context-row
+            (when-not declared-row
+              (namespace-context-row
+               namespace-name source before-reader-context
+               (reader-context evaluation-ctx namespace-name)))
+            row (or declared-row context-row)
             ;; Durable declarations are installed only after the row commits.
-            value (if row
-                    (or (:seon.fn/sym row)
-                        (:seon.schema/key row)
-                        (:seon.test/sym row))
-                    (sci/binding [sci/ns namespace-object
-                                  sci/out printed
-                                  sci/err printed]
-                      (sci/eval-form evaluation-ctx form)))
+            value (if context-row (:seon.ns/name context-row) evaluated-value)
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
