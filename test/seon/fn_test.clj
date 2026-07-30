@@ -514,6 +514,7 @@
             (is (pos? (:seon.reconcile/operations result)))
             (is (= #{'sample 'exact.bindings 'audit.evaluated
                      'audit.changed 'audit.third 'audit.existing
+                     'audit.schema-register 'audit.schema-unregister
                      'my.agents.owner}
                    (set
                     (d/q '[:find [?name ...]
