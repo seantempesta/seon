@@ -156,6 +156,15 @@ the same rows in 114 ms. The cache-invalidation regression independently
 changes a requested source, schema resource, vendored/local classpath source,
 and dependency manifest, and gets a different key after each change.
 
+The recurring index proof no longer pays one fresh JVM for each immutable
+fixture. Its canonical-row, exact-binding, evaluated-REPL, and database
+reconciliation assertions share one isolated source population and one exact
+row result. The V1→V2→V3 lifecycle remains a real file mutation followed by a
+real isolated inspection at every version, so cache invalidation, replacement,
+and removal are still end-to-end claims. Changed-test generation 1524 passed 8
+tests / 62 assertions / 0 failures / 0 errors in 71 seconds, down from the
+observed 4m29 development loop.
+
 Evaluated Var metadata exposed one final serialization defect: Clojure resolves
 raw Malli predicate symbols to callable roots, whose default printer emits
 unreadable `#object` tags. `seon.schema/canonical-definition` is now the total

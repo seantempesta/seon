@@ -231,9 +231,12 @@ namespace bindings, and Vars is the program state; there is no per-form delta
 registry to reconcile. Computed schemas, indirect function/test definitions,
 aliases, imports, refers, unmaps, unregisters, and `in-ns` attribution therefore
 use the same final state that compilation produced. Process isolation contains
-top-level namespace/schema/test effects; a content-keyed process-local cache
-makes repeated identical populations ordinary map reads without risking stale
-results across JVMs. The child launches in the existing `:test` dependency
+the inspector's process-local namespace/schema/test mutations; it does not
+contain external file, subprocess, socket, or database effects, so this remains
+trusted first-party source evaluation rather than a security boundary. A
+content-keyed process-local cache makes repeated identical populations ordinary
+map reads without risking stale results across JVMs. The child launches in the
+existing `:test` dependency
 environment because `test/` is one indexed root. Its exact input key derives
 requested sources, schema resources, all repo-local files on the resolved
 classpath (including vendored sources), repo-local dependency manifests, and
@@ -260,6 +263,13 @@ registration, evaluated test registration, an existing third namespace that
 returns to its caller, durable predicate canonicalization, and the explicit JVM
 default-import nil mask. It passes with one child inspector; production
 `src`+`test` census and cold/cached timing remain the integrated wave boundary.
+The focused recurring suite now shares that immutable adversarial population
+across its row-shape, binding, exact-REPL, and `index!` assertions while the
+V1→V2→V3 source mutation test still launches a fresh inspector for every
+changed file state. This preserves end-to-end cache-invalidation and deletion
+proof but removes redundant process starts: `seon.fn-test` fell from the
+observed 4m29 loop to 71 seconds, with 8 tests / 62 assertions / 0 failures /
+0 errors (changed-test generation 1524).
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 

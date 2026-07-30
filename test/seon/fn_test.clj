@@ -40,6 +40,12 @@
            "(deftest contracted-test)"))
     root))
 
+(defn- write-source!
+  [root relative-path source]
+  (let [file (io/file root relative-path)]
+    (.mkdirs (.getParentFile file))
+    (spit file source)))
+
 (defn- write-program-version!
   [root version]
   (let [file (io/file root "versioned.clj")]
@@ -69,33 +75,73 @@
             "(defn anchor [] :v3)")))
     root))
 
+(def ^:private isolated-program
+  (delay
+    (let [root (str "tmp/fn-test/isolated-" (random-uuid))]
+      (write-program! root)
+      (write-source!
+       root
+       "exact_bindings.clj"
+       (str "(ns exact.bindings "
+            "(:require [clojure.test :refer [deftest] "
+            ":rename {deftest dt}] "
+            "[clojure.set :refer :all]))\n"
+            "(dt renamed-test :ok)\n"
+            "(defn united [a b] (union a b))"))
+      (write-source!
+       root
+       "evaluated_test.clj"
+       (str "(ns audit.evaluated)\n"
+            "(eval '(alias 'schema 'seon.schema))\n"
+            "(schema/register! ::computed (vector :int))\n"
+            "(apply alias ['test 'clojure.test])\n"
+            "(ns-unmap *ns* 'String)\n"
+            "(eval '(in-ns 'audit.changed))\n"
+            "(clojure.core/refer 'clojure.core)\n"
+            "(seon.schema/register! ::changed :string)\n"
+            "(defn ^{:malli/schema [:=> [:cat] fn?]} direct [] :direct)\n"
+            "(eval '(defn ^{:malli/schema [:=> [:cat] string?]} "
+            "indirect [] :indirect))\n"
+            "(eval '(clojure.test/deftest indirect-test "
+            "(clojure.test/is true)))\n"
+            "(create-ns 'audit.existing)\n"
+            "(do (in-ns 'audit.third) "
+            "(clojure.core/refer 'clojure.core) "
+            "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
+            "nested [] 1)) "
+            "(in-ns 'audit.changed))\n"
+            "(do (in-ns 'audit.existing) "
+            "(clojure.core/refer 'clojure.core) "
+            "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
+            "from-existing [] 2)) "
+            "(in-ns 'audit.changed))\n"))
+      {:root root
+       :rows (seon.fn/rows {:seon.fn/roots [root]})})))
+
 (deftest index-rows-admit-only-the-canonical-program
-  (let [root (write-program! (str "tmp/fn-test/" (random-uuid)))]
-    (let [rows (seon.fn/rows {:seon.fn/roots [root]})]
+  (let [rows (:rows @isolated-program)]
       (is (= #{"sample/contracted"}
-             (into #{} (keep :seon.fn/sym) rows)))
+             (into #{}
+                   (comp (keep :seon.fn/sym)
+                         (filter #(str/starts-with? % "sample/")))
+                   rows)))
       (is (= #{"sample/contracted-test"}
-             (into #{} (keep :seon.test/sym) rows)))
+             (into #{}
+                   (comp (keep :seon.test/sym)
+                         (filter #(str/starts-with? % "sample/")))
+                   rows)))
       (is (contains? (into #{} (keep :seon.schema/key) rows)
                      :sample/amount))
-      (is (= #{'sample}
-             (into #{} (keep :seon.ns/name) rows))))))
+      (is (contains? (into #{} (keep :seon.ns/name) rows) 'sample))))
 
 (deftest index-expands-refer-all-and-preserves-renamed-test-identity
-  (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "exact_bindings.clj")]
-    (.mkdirs (.getParentFile file))
-    (spit file
-          (str "(ns exact.bindings "
-               "(:require [clojure.test :refer [deftest] "
-               ":rename {deftest dt}] "
-               "[clojure.set :refer :all]))\n"
-               "(dt renamed-test :ok)\n"
-               "(defn united [a b] (union a b))"))
-    (let [rows (seon.fn/rows {:seon.fn/roots [root]})
-          namespace-row (some #(when (:seon.ns/name %) %) rows)]
+  (let [rows (:rows @isolated-program)
+        namespace-row (some #(when (= 'exact.bindings (:seon.ns/name %)) %) rows)]
       (is (= #{"exact.bindings/renamed-test"}
-             (into #{} (keep :seon.test/sym) rows)))
+             (into #{}
+                   (comp (keep :seon.test/sym)
+                         (filter #(str/starts-with? % "exact.bindings/")))
+                   rows)))
       (is (contains? (:seon.ns/requires namespace-row) 'clojure.set))
       (is (contains? (:seon.ns/refers namespace-row)
                      {:seon.ns.refer/local 'dt
@@ -104,7 +150,7 @@
       (is (contains? (:seon.ns/refers namespace-row)
                      {:seon.ns.refer/local 'union
                       :seon.ns.refer/target-ns 'clojure.set
-                      :seon.ns.refer/target-name 'union})))))
+                      :seon.ns.refer/target-name 'union}))))
 
 (defn- source-files
   [roots]
@@ -311,35 +357,7 @@
                   private))))))
 
 (deftest isolated-build-evaluation-is-an-exact-repl
-  (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "evaluated_test.clj")]
-    (.mkdirs (.getParentFile file))
-    (spit file
-          (str "(ns audit.evaluated)\n"
-               "(eval '(alias 'schema 'seon.schema))\n"
-               "(schema/register! ::computed (vector :int))\n"
-               "(apply alias ['test 'clojure.test])\n"
-               "(ns-unmap *ns* 'String)\n"
-               "(eval '(in-ns 'audit.changed))\n"
-               "(clojure.core/refer 'clojure.core)\n"
-               "(seon.schema/register! ::changed :string)\n"
-               "(defn ^{:malli/schema [:=> [:cat] fn?]} direct [] :direct)\n"
-               "(eval '(defn ^{:malli/schema [:=> [:cat] string?]} "
-               "indirect [] :indirect))\n"
-               "(eval '(clojure.test/deftest indirect-test "
-               "(clojure.test/is true)))\n"
-               "(create-ns 'audit.existing)\n"
-               "(do (in-ns 'audit.third) "
-               "(clojure.core/refer 'clojure.core) "
-               "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
-               "nested [] 1)) "
-               "(in-ns 'audit.changed))\n"
-               "(do (in-ns 'audit.existing) "
-               "(clojure.core/refer 'clojure.core) "
-               "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
-               "from-existing [] 2)) "
-               "(in-ns 'audit.changed))\n"))
-    (let [rows (seon.fn/rows {:seon.fn/roots [root]})
+  (let [rows (:rows @isolated-program)
           by-identity (into {} (map (juxt seon.program/row-identity identity)) rows)
           original-ns (get by-identity [:seon.ns/name 'audit.evaluated])]
       (is (= "[:int]"
@@ -375,7 +393,7 @@
               (get by-identity [:seon.ns/name 'audit.changed]))))
       (is (= 'audit.third
              (:seon.ns/name
-              (get by-identity [:seon.ns/name 'audit.third])))))))
+              (get by-identity [:seon.ns/name 'audit.third]))))))
 
 (deftest inspection-cache-key-includes-every-local-classpath-input
   (let [root (.getCanonicalFile
@@ -433,7 +451,7 @@
         (is (= desired current))))))
 
 (deftest indexing-exactly-reconciles-source-and-preserves-cluster-facts
-  (let [root (write-program! (str "tmp/fn-test/" (random-uuid)))
+  (let [root (:root @isolated-program)
         digest (ancestor/digest {:seon.ancestor/roots [root]})
         now (java.util.Date.)]
     (test-support/with-database
@@ -474,19 +492,26 @@
               db @connection]
           (testing "the source-owned namespace, function, and test are current"
             (is (pos? (:seon.reconcile/operations result)))
-            (is (= #{'sample 'my.agents.owner}
+            (is (= #{'sample 'exact.bindings 'audit.evaluated
+                     'audit.changed 'audit.third 'audit.existing
+                     'my.agents.owner}
                    (set
                     (d/q '[:find [?name ...]
                            :where
                            [?namespace :seon.ns/name ?name]
                            [?namespace :seon.ns/source]]
                          db))))
-            (is (= #{"sample/contracted" "my.agents.owner/survives"}
+            (is (= #{"sample/contracted" "exact.bindings/united"
+                     "audit.changed/direct" "audit.changed/indirect"
+                     "audit.third/nested" "audit.existing/from-existing"
+                     "my.agents.owner/survives"}
                    (set
                     (d/q '[:find [?sym ...]
                            :where [_ :seon.fn/sym ?sym]]
                          db))))
-            (is (= #{"sample/contracted-test"}
+            (is (= #{"sample/contracted-test"
+                     "exact.bindings/renamed-test"
+                     "audit.changed/indirect-test"}
                    (set
                     (d/q '[:find [?sym ...]
                            :where [_ :seon.test/sym ?sym]]
