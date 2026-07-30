@@ -730,22 +730,29 @@
   [content]
   (let [had-trailing-newline (str/ends-with? content "\n")
         lines (str/split-lines content)
-        result (atom [])]
-    (doseq [[idx line] (map-indexed vector lines)]
-      (let [trimmed (str/trim line)
-            is-fence (or (str/starts-with? trimmed "```")
-                         (str/starts-with? trimmed "~~~"))
-            prev-line (when (pos? idx) (nth lines (dec idx)))]
-        ;; Add blank line before fence if needed
-        (when (and is-fence
-                   prev-line
-                   (not (str/blank? prev-line)))
-          (swap! result conj ""))
-        (swap! result conj line)))
-    (let [joined (str/join "\n" @result)]
+        result
+        (loop [idx 0, inside? false, output []]
+          (if (= idx (count lines))
+            output
+            (let [line (nth lines idx)
+                  trimmed (str/trim line)
+                  fence? (or (str/starts-with? trimmed "```")
+                             (str/starts-with? trimmed "~~~"))
+                  opening? (and fence? (not inside?))
+                  closing? (and fence? inside?)
+                  missing-before? (and opening? (seq output)
+                                       (not (str/blank? (peek output))))
+                  missing-after? (and closing? (< (inc idx) (count lines))
+                                      (not (str/blank? (nth lines (inc idx)))))
+                  output (cond-> output missing-before? (conj ""))
+                  output (cond-> (conj output line) missing-after? (conj ""))]
+              (recur (inc idx)
+                     (if fence? (not inside?) inside?)
+                     output))))
+        joined (str/join "\n" result)]
       (if had-trailing-newline
         (str joined "\n")
-        joined))))
+        joined)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API

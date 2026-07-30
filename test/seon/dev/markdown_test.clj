@@ -196,6 +196,16 @@
       (is (= ["Missing blank line after code fence"]
              (mapv ::md/message (::md/violations after)))))))
 
+(deftest fix-blanks-around-fences-test
+  (let [fixed (::md/content
+               (md/fix {::md/content
+                        "before\n```clj\n(+ 1 2)\n```\nafter\n"}))
+        validation (md/validate
+                    {::md/content fixed
+                     ::md/rules #{:blanks-around-fences}})]
+    (is (= "before\n\n```clj\n(+ 1 2)\n```\n\nafter\n" fixed))
+    (is (true? (::md/valid? validation)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Format Tests
 ;;; ---------------------------------------------------------------------------
