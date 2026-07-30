@@ -126,6 +126,65 @@
       (finally
         (delete-files! [source config fake-kondo fake-bin directory])))))
 
+(deftest post-edit-coalesces-one-optional-review-worker-and-drops-failure
+  (let [directory (fixture-directory)
+        fake-bin (doto (io/file directory "bin") .mkdirs)
+        fake-agy (io/file fake-bin "agy")
+        config (io/file directory "hook.edn")
+        source (io/file directory "review.md")
+        calls (io/file directory "agy-calls")
+        state (io/file directory "state")
+        event
+        (json/generate-string
+         {:hook_event_name "PostToolUse"
+          :tool_name "Edit"
+          :tool_input {:file_path (str source)}})
+        environment
+        {"SEON_HOOK_CONFIG" (str config)
+         "SEON_HOOK_STATE_DIR" (str state)
+         "SEON_REVIEW_TEST_COUNT" (str calls)
+         "PATH" (str fake-bin java.io.File/pathSeparator
+                     (System/getenv "PATH"))}
+        invoke
+        #(run-process
+          {::command [(str (io/file repo-root "bin/seon-hook"))]
+           ::directory repo-root
+           ::environment environment
+           ::input event})]
+    (try
+      (spit fake-agy
+            "#!/bin/sh\nprintf x >> \"$SEON_REVIEW_TEST_COUNT\"\nexit 1\n")
+      (.setExecutable fake-agy true)
+      (spit config
+            (str "{:seon.config/on-core-error :log\n"
+                 " :lint {:enabled false}\n"
+                 " :markdown-lint {:enabled false}\n"
+                 " :docstring-lint {:enabled false}\n"
+                 " :current-source {:enabled false}\n"
+                 " :review {:enabled true :interval-seconds 1}}\n"))
+      (spit source "# Review me\n")
+      (let [first-result (invoke)
+            worker-file (io/file state ".review-worker.edn")
+            first-worker (edn/read-string (slurp worker-file))
+            second-result (invoke)
+            second-worker (edn/read-string (slurp worker-file))
+            pid (:seon.review.worker/pid first-worker)
+            handle (.get (java.lang.ProcessHandle/of (long pid)))]
+        (is (zero? (::exit first-result)) (::stderr first-result))
+        (is (zero? (::exit second-result)) (::stderr second-result))
+        (is (= pid (:seon.review.worker/pid second-worker)))
+        (is (= 1 (count (str/split-lines
+                         (slurp (io/file state ".pending-review"))))))
+        (.get (.onExit handle) 5 java.util.concurrent.TimeUnit/SECONDS)
+        (is (= "x" (slurp calls)))
+        (is (str/blank? (slurp (io/file state ".pending-review"))))
+        (is (not (.exists worker-file))))
+      (finally
+        (delete-files!
+         [(io/file state ".pending-review")
+          (io/file state ".pending-review.lock")
+          state calls source config fake-agy fake-bin directory])))))
+
 (deftest changed-test-analysis-keeps-the-valid-namespace-graph
   (let [directory (fixture-directory)
         source-directory (doto (io/file directory "src") .mkdirs)

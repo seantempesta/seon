@@ -2,9 +2,10 @@
 ;;
 ;; bin/seon-hook runs entirely in Babashka. It does not require a running
 ;; Seon process: syntax validation happens before an edit; the canonical
-;; Markdown and docstring linters run after it; the live-pod core-fault gate
-;; reports failures. Gemini reviews synchronously cover the accumulated edit
-;; batch at most once per configured interval.
+;; Markdown and docstring linters run after it; current source publication
+;; uses the live operator JVM when one exists. The hook never queues tests.
+;; Gemini review is one asynchronous, coalesced batch per two-minute window;
+;; it never delays edit feedback or creates parallel review workers.
 
 {:lint
  {:enabled true}
@@ -13,9 +14,6 @@
  {:enabled true}
 
  :docstring-lint
- {:enabled true}
-
- :changed-tests
  {:enabled true}
 
  :current-source

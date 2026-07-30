@@ -285,8 +285,9 @@ carried stale evidence within a day. Re-verify before starting.
   argument, no effect vocabulary; target zero constructs beyond
   `:malli/schema`. What the pilot does not need, the architecture never
   gets.
-- **Gate cadence**: the edit hook's affected selection per commit; full
-  suites at frozen-tree checkpoints only. **Test selection's target** is
+- **Gate cadence**: explicitly run the affected selection at each coherent
+  commit; the edit hook never runs or queues tests. Full suites run at
+  frozen-tree checkpoints only. **Test selection's target** is
   function-level derivation over the program graph (changed functions →
   reverse call-graph closure → test roots; unknown widens) — spec now,
   build once the indexer's emitted rows are current facts; it replaces
@@ -978,7 +979,7 @@ may reintroduce a shadow build into the dev feedback path.
   A stale advertisement is not an error to report, it is drift to
   repair. This is one mechanism instead of four patches, and it makes
   the whole class unrepresentable rather than individually handled.
-  (26) THE OPERATOR IS MULTICLUSTER WITH SMART DEFAULTS (owner, 
+  (26) THE OPERATOR IS MULTICLUSTER WITH SMART DEFAULTS (owner,
   2026-07-29): "make sure it's multicluster and has good defaults so
   you don't have to do obvious things, and we have a good default
   config." The governing rule is the one already used at the eval
@@ -1132,7 +1133,7 @@ may reintroduce a shadow build into the dev feedback path.
   measurements.
   (18) HTTP-KIT FORK APPROVED + PULL-BASED DELIVERY EXPLORATION
   (owner): the minimal ADDITIVE fork lands (per-channel pending bytes
-  + atomic drain-or-close completion; httpkit-write-path-2026-07-29.md
+  and atomic drain-or-close completion; httpkit-write-path-2026-07-29.md
   is the spec) and is shaped as an upstream PR against #180/#474 so
   the fork may retire; the deeper per-send-completion integration
   waits for render-pipeline measurements. ALSO EXPLORE PULL-BASED:

@@ -7,7 +7,8 @@
 ;; 2. Loads configuration from .claude/seon-hook.edn
 ;; 3. Runs clj-kondo before and after Clojure edits
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
-;; 5. Runs the bounded, rate-limited Gemini review and live core-fault gate
+;; 5. Publishes current source, checks core faults, and schedules one bounded
+;;    asynchronous Gemini review batch
 ;;
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.
@@ -40,10 +41,13 @@
 
 (def conventions-path (root-file "docs/conventions.md"))
 (def skills-path (root-file ".agents/skills"))
-(def last-review-path (root-file "tmp/.last-review"))
-(def pending-review-path (root-file "tmp/.pending-review"))
-(def pending-review-lock-path (root-file "tmp/.pending-review.lock"))
-(def reviews-path (root-file "tmp/reviews"))
+(def review-state-root
+  (io/file (or (System/getenv "SEON_HOOK_STATE_DIR")
+               (str (root-file "tmp")))))
+(def pending-review-path (io/file review-state-root ".pending-review"))
+(def pending-review-lock-path (io/file review-state-root ".pending-review.lock"))
+(def review-worker-path (io/file review-state-root ".review-worker.edn"))
+(def reviews-path (io/file review-state-root "reviews"))
 (def max-pending-files 50)
 
 ;;; ---------------------------------------------------------------------------
@@ -380,23 +384,6 @@
       (or (clojure-file? file-path)
           (str/ends-with? lower ".md")))))
 
-(defn- review-rate-limited?
-  "True when the last Gemini review is newer than `interval-seconds`."
-  [interval-seconds]
-  (let [file (io/file last-review-path)]
-    (and (.exists file)
-         (try
-           (let [last-ms (Long/parseLong (str/trim (slurp file)))
-                 elapsed-ms (- (System/currentTimeMillis) last-ms)]
-             (< elapsed-ms (* 1000 interval-seconds)))
-           (catch Exception _ false)))))
-
-(defn- touch-last-review! []
-  (try
-    (io/make-parents last-review-path)
-    (spit last-review-path (str (System/currentTimeMillis)))
-    (catch Exception _ nil)))
-
 (defn- with-pending-lock
   "Run one pending-review state transition under an exclusive file lock."
   [transition]
@@ -448,31 +435,26 @@
            entries))
          (when (seq entries) "\n"))))
 
-(defn- accumulate-pending!
-  "Append a path with newest-kept deduplication and a fixed file cap."
-  [file-path]
-  (try
-    (when (seq file-path)
-      (with-pending-lock
-        (fn []
-          (let [current
-                (vec
-                 (remove
-                  #(= file-path (:seon.review.pending/path %))
-                  (read-pending-unlocked)))
-                appended
-                (conj current
-                      {:seon.review.pending/id
-                       (str (java.util.UUID/randomUUID))
-                       :seon.review.pending/path file-path})
-                dropped (max 0 (- (count appended) max-pending-files))
-                capped (vec (drop dropped appended))]
-            (when (pos? dropped)
-              (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped)))
-            (write-pending-unlocked! capped)))))
-    (catch Exception error
-      (log! "REVIEW_PENDING_ERROR" (.getMessage error))
-      nil)))
+(defn- accumulate-pending-unlocked!
+  "Append paths with newest-kept deduplication and a fixed file cap."
+  [file-paths]
+  (let [entries
+        (reduce
+         (fn [current file-path]
+           (conj
+            (vec
+             (remove
+              #(= file-path (:seon.review.pending/path %))
+              current))
+            {:seon.review.pending/id (str (java.util.UUID/randomUUID))
+             :seon.review.pending/path file-path}))
+         (read-pending-unlocked)
+         file-paths)
+        dropped (max 0 (- (count entries) max-pending-files))
+        capped (vec (drop dropped entries))]
+    (when (pos? dropped)
+      (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped)))
+    (write-pending-unlocked! capped)))
 
 (defn- clear-reviewed-pending!
   "Remove only drained entries, preserving edits appended during review."
@@ -671,22 +653,54 @@
       (log! "REVIEW_WRITE_ERROR" (.getMessage error))
       nil)))
 
-(defn- clip-review-feedback
-  "Conservatively cap review feedback below the configured token budget.
+(defn- process-alive?
+  [pid]
+  (try
+    (let [process (java.lang.ProcessHandle/of (long pid))]
+      (and (.isPresent process) (.isAlive (.get process))))
+    (catch Exception _ false)))
 
-   One retained character per configured token is deliberately stricter than
-   Seon's token estimator. The full response is preserved in `tmp/reviews/`."
-  [config message]
-  (let [limit (max 0 (get-in config [:feedback :max-tokens] 300))
-        marker "\n[truncated]"]
-    (if (<= (count message) limit)
-      message
-      (if (<= limit (count marker))
-        (subs message 0 limit)
-        (str (subs message 0 (- limit (count marker))) marker)))))
+(defn- read-review-worker-unlocked []
+  (try
+    (let [file (io/file review-worker-path)]
+      (when (.exists file) (edn/read-string (slurp file))))
+    (catch Exception _ nil)))
 
-(defn- gemini-review-feedback
-  "Accumulate reviewable edits and synchronously review one due batch."
+(defn- launch-review-worker-unlocked!
+  "Launch and record one detached worker. Caller owns the pending lock."
+  [interval-seconds]
+  (try
+    (let [builder
+          (doto
+           (ProcessBuilder.
+            ^java.util.List
+            [(str (root-file "bin/seon-hook"))
+             "--review-worker"
+             (str interval-seconds)])
+            (.directory (io/file repo-root))
+            (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+            (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))
+          child (.start builder)
+          state {:seon.review.worker/pid (.pid child)
+                 :seon.review.worker/window-start-ms
+                 (System/currentTimeMillis)
+                 :seon.review.worker/interval-seconds interval-seconds}]
+      (spit review-worker-path (pr-str state))
+      (log! "REVIEW_WORKER_STARTED"
+            (str "pid=" (.pid child))
+            (str "interval=" interval-seconds "s"))
+      true)
+    (catch Exception error
+      (log! "REVIEW_WORKER_START_FAILED" (.getMessage error))
+      false)))
+
+(defn- ensure-review-worker-unlocked! [interval-seconds]
+  (let [worker (read-review-worker-unlocked)]
+    (when-not (process-alive? (:seon.review.worker/pid worker))
+      (launch-review-worker-unlocked! interval-seconds))))
+
+(defn- schedule-gemini-review!
+  "Coalesce paths and ensure one asynchronous review window exists."
   [event config]
   (try
     (let [review-config (:review config)
@@ -698,104 +712,71 @@
       (when (and (= (:hook_event_name event) "PostToolUse")
                  (get review-config :enabled false)
                  (seq review-paths))
-        (doseq [path review-paths]
-          (accumulate-pending! path))
-        (let [interval-seconds
-              (get review-config :interval-seconds 120)]
-          (if (review-rate-limited? interval-seconds)
-            (do
-              (log! "REVIEW_RATE_LIMITED"
-                    (str "interval=" interval-seconds "s")
-                    (str "pending=" (count (read-pending))))
-              nil)
-            (let [pending (read-pending)
-                  files
-                  (->> pending
-                       (keep
-                        (fn [{:seon.review.pending/keys [path] :as entry}]
-                          (when-let [content
-                                     (try
-                                       (slurp path)
-                                       (catch Exception _ nil))]
-                            (when (seq content)
-                              (assoc entry :path path :content content)))))
-                       vec)]
-              (when (seq files)
-                (let [prompt
-                      (build-review-prompt
-                       files
-                       {:skills (get review-config :skills [])
-                        :max-code-length
-                        (get review-config :max-code-length 40000)
-                        :max-batch-length
-                        (get review-config :max-batch-length 200000)
-                        :max-rubric-length
-                        (get review-config :max-rubric-length 60000)})
-                      _ (log! "REVIEW_BATCH"
-                              (str "count=" (count files))
-                              (str "files="
-                                   (str/join
-                                    ","
-                                    (map #(-> % :path io/file .getName)
-                                         files))))
-                      review (call-agy prompt 60000)]
-                  (touch-last-review!)
-                  (when (seq review)
-                    (let [artifact (write-full-review! review)
-                          names (str/join
-                                 ", "
-                                 (map #(-> % :path io/file .getName) files))]
-                      (when artifact
-                        (clear-reviewed-pending! files))
-                      (clip-review-feedback
-                       config
-                       (str "Gemini review (" names ")"
-                            (when artifact (str " — " artifact))
-                            ":\n"
-                            review)))))))))))
+        (with-pending-lock
+          (fn []
+            (accumulate-pending-unlocked! review-paths)
+            (ensure-review-worker-unlocked!
+             (get review-config :interval-seconds 120))))))
     (catch Exception error
-      (log! "REVIEW_ERROR" (.getMessage error))
-      nil)))
+      (log! "REVIEW_SCHEDULE_ERROR" (.getMessage error))))
+  nil)
 
-(def ^:private changed-test-build-inputs
-  #{"deps.edn" "shadow-cljs.edn" "package.json" "bun.lock" "bb.edn"})
+(defn- pending-files [pending]
+  (->> pending
+       (keep
+        (fn [{:seon.review.pending/keys [path] :as entry}]
+          (when-let [content
+                     (try (slurp path) (catch Exception _ nil))]
+            (when (seq content)
+              (assoc entry :path path :content content)))))
+       vec))
 
-(defn- changed-test-path? [file-path]
-  (when file-path
-    (let [lower (str/lower-case file-path)
-          name (.getName (io/file lower))]
-      (or (str/ends-with? lower ".clj")
-          (str/ends-with? lower ".cljs")
-          (str/ends-with? lower ".cljc")
-          (contains? changed-test-build-inputs name)))))
+(defn- run-review-worker!
+  "Wait for one window, review its snapshot once, then exit or hand off.
 
-(defn- changed-test-feedback [event config]
-  (let [paths (->> (event-file-paths event)
-                   (filter changed-test-path?)
-                   vec)]
-    (when (and (= (:hook_event_name event) "PostToolUse")
-               (get-in config [:changed-tests :enabled] true)
-               (seq paths))
-      (try
-        (require 'seon.dev.changed-test)
-        (let [configuration
-              ((requiring-resolve 'seon.dev.changed-test/configuration)
-               repo-root)
-              request
-              ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
-               configuration paths)
-              message
-              (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
-                   "Changed tests queued as generation "
-                   (:seon.dev.changed-test/generation request)
-                   " for " (count (:seon.dev.changed-test/paths request))
-                   " coalesced path(s). The result will be published to "
-                   (root-file "tmp/test-changed/latest.report.edn")
-                   "; that path is mutable and may later describe another generation.")]
-          message)
-        (catch Exception error
-          (str "ADVISORY — changed-test feedback could not run: "
-               (.getMessage error)))))))
+   Provider failures drop this snapshot. Edits arriving during the call are
+   preserved and get one new worker window; reviews never retry themselves."
+  [interval-seconds]
+  (try
+    (Thread/sleep (* 1000 (max 0 interval-seconds)))
+    (let [config (load-config)
+          review-config (:review config)
+          pending (read-pending)
+          files (pending-files pending)]
+      (when (and (get review-config :enabled false) (seq files))
+        (let [prompt
+              (build-review-prompt
+               files
+               {:skills (get review-config :skills [])
+                :max-code-length
+                (get review-config :max-code-length 40000)
+                :max-batch-length
+                (get review-config :max-batch-length 200000)
+                :max-rubric-length
+                (get review-config :max-rubric-length 60000)})
+              _ (log! "REVIEW_BATCH"
+                      (str "count=" (count files))
+                      (str "files="
+                           (str/join "," (map #(-> % :path io/file .getName)
+                                               files))))
+              review (call-agy prompt 60000)]
+          (when (seq review)
+            (write-full-review! review))))
+      ;; This batch is consumed even if Gemini is unavailable. Entries added
+      ;; during the call have different ids and survive `clear-reviewed`.
+      (clear-reviewed-pending! pending)
+      (with-pending-lock
+        (fn []
+          (let [current (read-pending-unlocked)]
+            (if (seq current)
+              (launch-review-worker-unlocked! interval-seconds)
+              (.delete (io/file review-worker-path)))))))
+    (catch Exception error
+      ;; Advisory means silent to the editor. Remove this worker admission so
+      ;; a later edit can open a fresh window; never self-retry a failed batch.
+      (log! "REVIEW_WORKER_ERROR" (.getMessage error))
+      (try (.delete (io/file review-worker-path)) (catch Exception _ nil))))
+  nil)
 
 (defn- beneath?
   [parent child]
@@ -978,10 +959,9 @@
                                 (docstring-feedback path-event config)])
                              path-events)
                   feedback (into [(clj-kondo-feedback event config)] feedback)
+                  _ (schedule-gemini-review! event config)
                   feedback (conj (vec feedback)
-                                 (changed-test-feedback event config)
-                                 (current-source-feedback event config)
-                                 (gemini-review-feedback event config))
+                                 (current-source-feedback event config))
                   clojure-event (some #(when (clojure-file? (get-file-path %)) %)
                                       path-events)
                   gate (when clojure-event (core-fault-gate! clojure-event))]
@@ -992,4 +972,7 @@
             (println "HOOK ERROR:" (.getMessage e)))
           (output! {:continue true})))))))
 
-(-main)
+(if (= "--review-worker" (first *command-line-args*))
+  (run-review-worker!
+   (or (some-> (second *command-line-args*) parse-long) 120))
+  (-main))

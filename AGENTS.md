@@ -349,8 +349,8 @@ contains unconditional platform code.
   graph (capability edges, package prefixes, purity), and a contract
   predicate is admissible exactly when its call graph is pure and
   capability-free.
-- **Every sci invocation passes the one guarded door** (fuel + deadline
-  + output caps, all config facts); durable defns REQUIRE a complete
+- **Every sci invocation passes the one guarded door** (fuel, deadline,
+  and output caps, all config facts); durable defns REQUIRE a complete
   `:malli/schema` (no `:any` — use named predicate schemas for genuine
   polymorphism); registrations are committed `:seon.schema` facts that
   tiers ACQUIRE at a basis — loading a namespace never publishes
@@ -926,12 +926,21 @@ restart the Codex or Claude task: already-running clients do not reload stdio
 server definitions or tool schemas.
 
 The edit hook runs clj-kondo over prospective and resulting Clojure files,
-returns file/row/column findings, publishes admitted `src/` and `test/` changes
-to `current-src`, and requests conservative affected tests from the same
-full-corpus namespace analysis through one public operation:
+returns file/row/column findings, and publishes admitted `src/` and `test/`
+changes to `current-src`. It NEVER runs or queues tests. It also accumulates
+reviewable paths into one asynchronous Gemini Flash review at most once per
+two-minute window; one PID-owned worker coalesces the window, provider failure
+silently drops that batch, and neither review nor tests delay edit feedback.
+
+Run affected tests explicitly at a coherent checkpoint through the retained
+changed-test selector:
 
 ```bash
-bin/seon test changed --path src/seon/cluster/run.cljc
+bb --config bb.edn --deps-root . -e \
+  "(require 'seon.dev.changed-test) \
+   (prn (seon.dev.changed-test/run-changed! \
+         (seon.dev.changed-test/configuration \".\") \
+         [\"src/seon/cluster/run.cljc\"]))"
 ```
 
 Do not discard type-checker output. clj-kondo `:type-mismatch` findings remain

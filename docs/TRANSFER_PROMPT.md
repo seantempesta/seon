@@ -1,7 +1,7 @@
 ---
 type: reference
 status: active
-tags: [reference, orchestration, onboarding]
+tags: [reference, orchestration]
 ---
 
 # Working on Seon
@@ -227,7 +227,11 @@ to a complete scratch build for structural changes. Bare `bin/seon init`
 requests that complete publication explicitly. Existing clusters are
 sovereign; only `bin/seon init CLUSTER --force` destroys and reforks one. The
 current evidence and any still-open integration edge live at the top of
-`plan/unsettled.md`.
+`plan/unsettled.md`. The edit hook never runs tests: it returns static feedback
+and publication promptly. Gemini review is optional and asynchronous, with all
+reviewable edits coalesced into at most one batch per two-minute window;
+provider failure silently drops the batch. A coherent checkpoint explicitly
+invokes the changed-test selector, and full suites remain frozen-tree gates.
 
 ## The mentality
 

@@ -20,7 +20,7 @@ See `README.md` for the convention.
 | [Priming indexes with the live JVM's loaded code and records a digest that lies](priming-indexes-with-the-live-jvms-loaded-code.md) | blocker | general |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (8)
+## Friction (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -30,6 +30,7 @@ See `README.md` for the convention.
 | [Partial hot reload leaves a live JVM running mixed old and new code](partial-hot-reload-produces-mixed-code-with-no-warning.md) | friction | general |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Remove deleted CLJS tools from the development MCP](development-mcp-advertises-deleted-cljs-tools.md) | friction | general |
+| [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
 | [The issues-index checker disagrees with the schedule convention](issues-index-checker-disagrees-with-the-schedule-convention.md) | friction | general |
 | [`seon.cluster/reset!` shadows `clojure.core/reset!`](cluster-reset-shadows-clojure-core-reset.md) | friction | general |
 
