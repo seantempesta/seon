@@ -115,8 +115,9 @@ The re-audit's import-only falsifier is now recurring on both rails. Removing
 the inherited `String` import is visible to the next form only after the
 namespace context transaction commits; an injected refusal retains `String`
 in the original run ctx. The maintained SCI namespace suite now passes 39
-tests / 159 assertions / 0 failures / 0 errors on both Clojure 1.10.3 and
-1.11.1, and its state round-trip also covers an own intern, alias, refer,
+tests / 159 assertions / 0 failures / 0 errors on both Clojure 1.10.3 and the
+vendored `:clojure-1.11.0` alias's exact Clojure 1.11.0-alpha1 dependency, and
+its state round-trip also covers an own intern, alias, refer,
 require, and the nil import mask in one snapshot.
 
 The final audit's fresh-acquisition falsifier is also recurring. The terminal
@@ -127,7 +128,8 @@ An explicit import addition persists only its local and fully qualified class
 symbols and reacquires through the same SCI operation. The focused root
 program/eval/turn/restart gate passed 57 tests / 330 assertions before the
 addition-specific regression; the maintained SCI suite passes 40 tests / 160
-assertions / 0 failures / 0 errors on Clojure 1.10.3 and 1.11.1.
+assertions / 0 failures / 0 errors on Clojure 1.10.3 and the vendored
+`:clojure-1.11.0` alias's exact Clojure 1.11.0-alpha1 dependency.
 
 The final audit proved the temporary finite resolver-operation refusal was
 still a silent hand list: `eval` and `apply` routed around it. The JVM build now
@@ -137,9 +139,12 @@ span, then takes one final snapshot of actual namespace bindings, Vars, and the
 evaluated global schema registry. Final absence therefore handles unmap and
 unregister without a second delta mechanism, and definitions created through
 `eval` are attributed through their compiler metadata even when they enter a
-third namespace and return. All side effects die with that process. A
-content-keyed process-local cache reuses only an identical source population
-in the same JVM. The inspector launches through the existing `:test` alias
+third namespace and return. Process-local namespace/schema/test mutations die
+with that process. External file, subprocess, socket, and database effects do
+not; the inspector evaluates trusted first-party source and is not a security
+or effect-containment boundary. A content-keyed process-local cache reuses only
+an identical source population in the same JVM. The inspector launches through
+the existing `:test` alias
 because `test/` is a declared source root and its namespaces require the
 test-only flow monitor. Its cache key covers the resolved classpath, every
 requested source, every repo-local classpath file (including schema resources
@@ -155,6 +160,20 @@ The production/default-parent proof indexes the complete source roots from
 the same rows in 114 ms. The cache-invalidation regression independently
 changes a requested source, schema resource, vendored/local classpath source,
 and dependency manifest, and gets a different key after each change.
+
+The independent post-fix audit added the missing build-time unregister
+falsifier and found one final asymmetry: the inspector had no registration
+delta, so register mutated only the disposable child while `unregister!`
+correctly refused. `aaac37105` closes that class with one population-wide
+delta. Build explicitly selects `:core` admission; runtime keeps `:agent`
+admission; both use the same delta owner. `5525f4f0d` fixes the complete exact
+row expectation. On the frozen tree, computed registration remains while a
+register-then-unregister schema and unmapped function/test Vars are absent.
+`seon.fn-test` passes 8 tests / 65 assertions / 0 failures / 0 errors. The final
+default-parent census is 116 namespace / 1,331 function / 552 schema / 608 test
+rows, including 867 private functions; all 953 serialized contracts/forms
+EDN-read with zero object tags. Cold/cached calls measured 16,812.94 ms /
+111.68 ms and returned identical rows.
 
 The recurring index proof no longer pays one fresh JVM for each immutable
 fixture. Its canonical-row, exact-binding, evaluated-REPL, and database

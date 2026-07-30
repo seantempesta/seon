@@ -205,7 +205,8 @@ context request and materializes it only after terminal commit. Dynamic source
 is not replayed. The recurring runtime pair proves success changes the next
 form's supplied ctx and transaction refusal leaves that ctx unchanged; the SCI
 owner suite is 39 tests / 159 assertions / 0 failures / 0 errors on Clojure
-1.10.3 and 1.11.1. The other two re-audit blockers remain in their owning
+1.10.3 and the vendored `:clojure-1.11.0` alias's exact Clojure
+1.11.0-alpha1 dependency. The other two re-audit blockers remain in their owning
 lanes; integrated adversarial review remains the wave boundary.
 
 The final audit (`b12924856`) found that the exact import mask above was still
@@ -243,6 +244,20 @@ classpath (including vendored sources), repo-local dependency manifests, and
 resolved external paths. A default `-M:dev` parent produced 116 namespace /
 1,330 function / 552 schema / 608 test rows in 16,181 ms; an identical cached
 call returned the same rows in 114 ms.
+
+The post-fix audit then found that build evaluation had not entered a schema
+registration delta: registration worked only by mutating the disposable child,
+while a real `schema/unregister!` correctly refused the missing delta.
+`aaac37105` now wraps the complete sequential population and its final snapshot
+in the same delta mechanism runtime uses, with build retaining `:core` admission
+and runtime retaining `:agent` admission. `5525f4f0d` completes exact
+reconciliation expectations. The frozen-tree build falsifier retains a
+computed schema and removes a register-then-unregister schema plus unmapped
+function/test Vars. `seon.fn-test` passes 8 tests / 65 assertions / 0 failures /
+0 errors. The final default-parent census is 116 namespace / 1,331 function /
+552 schema / 608 test rows, including 867 private functions; all 953 serialized
+contracts/forms EDN-read with zero object tags. Cold/cached calls measured
+16,812.94 ms / 111.68 ms with identical rows.
 
 The evaluated snapshot also revealed that Clojure Var metadata contains live
 predicate roots, not their source symbols. The one schema owner now performs
