@@ -879,10 +879,11 @@
             ctx (sci/fork (sci.eval/base))
             ;; First use of this run-local ctx materializes current program
             ;; facts. Boot and cluster creation never index or replay.
-            _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx
-                                  :seon.db/db @connection})]
+            acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
+                                         :seon.db/db @connection})]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
-               ran 0]
+               ran 0
+               projection (:seon.schema/projection acquired)]
           (let [receipt-id (pr-str [run-id ordinal])
                 problem-id (work/problem-id run-id ordinal)
                 started
@@ -909,7 +910,8 @@
                       {
                       :seon.sci.admit/caps
                       (:seon.sci.admit/caps cluster)
-                      :seon.sci.eval/ctx ctx
+                      :seon.sci.eval/ctx
+                      (assoc ctx :seon.schema/projection projection)
                       :seon.cluster.agent/id agent-id
                       :seon.sci.eval/time-limit-ms
                       (:seon.config.eval/time-limit-ms cluster)
@@ -1031,13 +1033,17 @@
                        (assoc :tx-meta
                               {:seon.db/trigger
                                [:seon.cluster.message/id trigger]})))
-                    _ (when (and (:seon.sci.eval/program-row evaluation)
-                                 (not (:seon.error/kind outcome)))
-                        (sci.eval/install-program-row!
-                         {:seon.sci.eval/ctx ctx
-                          :seon.db/db (:db-after outcome)
-                          :seon.sci.eval/program-row
-                          (:seon.sci.eval/program-row evaluation)}))
+                    program-state
+                    (if (and (:seon.sci.eval/program-row evaluation)
+                             (not (:seon.error/kind outcome)))
+                      (sci.eval/install-program-row!
+                       {:seon.sci.eval/ctx
+                        (assoc ctx :seon.schema/projection projection)
+                        :seon.db/db (:db-after outcome)
+                        :seon.sci.eval/program-row
+                        (:seon.sci.eval/program-row evaluation)})
+                      {:seon.schema/projection projection
+                       :seon.sci.eval/installed 0})
                     ran (inc ran)
                     ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
                     ;; §5.2): asking the GLOBAL derivation here was the
@@ -1064,7 +1070,9 @@
                   ;; transaction now, so a settled fold always reports
                   ;; the run closed
                   settled (report :closed ran)
-                  next-ordinal (recur next-ordinal ran)
+                  next-ordinal
+                  (recur next-ordinal ran
+                         (:seon.schema/projection program-state))
                   :else (report :released ran)))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the

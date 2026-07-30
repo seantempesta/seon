@@ -57,7 +57,9 @@
             [datahike.api :as d]
             [seon.program :as program]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
@@ -584,35 +586,51 @@
         (refuse! `receipt-settle-call ::program-delete-not-owned request))
       (mapv (fn [declaration] [:db/retractEntity (:db/id declaration)])
             declarations))
-    (let [[identity identity-value] (program/row-identity row)
+    (let [row (or (program/declaration-row row :contracted)
+                  (refuse! `receipt-settle-call
+                           ::program-row-not-admitted request))
+          [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
-                            (:seon.schema/ns row)
                             (:seon.test/ns row))
           existing (when identity (d/pull db '[*] [identity identity-value]))
-          changed (when existing (program/changed-attributes existing row))
-          required? (case identity
-                      :seon.fn/sym
-                      (and (:seon.fn/source row) (:seon.fn/spec row))
-                      :seon.schema/key
-                      (and (:seon.schema/form row)
-                           (schema/malli-form?
-                            (edn/read-string (:seon.schema/form row))))
-                      :seon.test/sym
-                      (some? (:seon.test/source row))
-                      false)]
-      (when-not (and identity required?)
-        (refuse! `receipt-settle-call ::program-row-not-admitted request))
-      (when-not (:db/id (d/pull db [:db/id] namespace-ref))
+          changed (when existing (program/changed-attributes existing row))]
+      (when (and namespace-ref
+                 (not (:db/id (d/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
-      (into
-       (if existing
-         (mapv (fn [attribute]
-                 [:db/retract (:db/id existing) attribute])
-               (filter #(contains? existing %) changed))
-         [])
-       [(assoc row :db/id
-               (or (:db/id existing)
-                   (str (name identity) ":" identity-value)))]))))
+      (let [schema-declarations
+            (if (= identity :seon.schema/key)
+              (let [current (schema/projection-from-database db)
+                    definition (edn/read-string (:seon.schema/form row))
+                    candidate
+                    (schema/projection-with-schema
+                     current identity-value definition
+                     {:seon.schema.admission/source :agent})
+                    current-attributes
+                    (schema.form/database-attributes
+                     (:seon.schema.projection/forms current))
+                    candidate-attributes
+                    (schema.form/database-attributes
+                     (:seon.schema.projection/forms candidate))
+                    required
+                    (into []
+                          (comp
+                           (remove current-attributes)
+                           (remove #(contains? (:schema db) %)))
+                          (sort candidate-attributes))]
+                (schema.datahike/malli->datahike-schema-in
+                 candidate required))
+              [])]
+        (into
+         schema-declarations
+         (concat
+          (if existing
+            (mapv (fn [attribute]
+                    [:db/retract (:db/id existing) attribute])
+                  (filter #(contains? existing %) changed))
+            [])
+          [(assoc row :db/id
+                  (or (:db/id existing)
+                      (str (name identity) ":" identity-value)))]))))))
 
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn

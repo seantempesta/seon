@@ -592,7 +592,6 @@
   (update-candidate-forms!
    merge
    {:seon.schema/key [:keyword {:seon.db/identity true}]
-    :seon.schema/ns :seon.db/ref
     :seon.schema/form :string
     :seon.schema/created-at :inst}))
 
@@ -1699,6 +1698,72 @@
           :seon.schema/pure-predicate-symbols pure-predicate-symbols
           :seon.schema/predicate-functions (core-predicate-functions)}))))))
 
+(defn projection-from-database
+  "Build the immutable program projection at exactly `db`.
+
+   The optional reusable projection avoids recompilation only when its
+   canonical fingerprint equals the queried rows."
+  {:malli/schema
+   [:function
+    [:=> [:catn [:seon.schema/database-value :map]] ::projection]
+    [:=> [:catn [:seon.schema/database-value :map]
+                 [::projection ::projection]]
+     ::projection]]}
+  ([db]
+   (projection-from-database db {}))
+  ([db reusable-projection]
+   (projection-from-rows
+    {:seon.schema/database-value db
+     :seon.schema/schema-rows
+     (d/q '[:find ?key ?form ?tx
+            :where
+            [?schema :seon.schema/key ?key ?tx]
+            [?schema :seon.schema/form ?form]]
+          db)
+     :seon.schema/function-contract-rows
+     (d/q '[:find ?sym ?spec ?tx
+            :where
+            [?function :seon.fn/sym ?sym]
+            [?function :seon.fn/spec ?spec ?tx]]
+          db)
+     :seon.schema/function-source-rows
+     (d/q '[:find ?sym ?source ?tx
+            :where
+            [?function :seon.fn/sym ?sym]
+            [?function :seon.fn/source ?source ?tx]]
+          db)
+     :seon.schema/artifact-exports #{}
+     :seon.schema/pure-predicate-symbols #{}}
+    reusable-projection)))
+
+(defn projection-with-schema
+  "Validate the projection produced by exactly one schema replacement."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection]
+                [::registry-key ::registry-key]
+                [::definition ::definition]
+                [:seon.schema/admission :map]]
+    ::projection]}
+  [projection schema-key definition admission]
+  (let [forms (assoc (:seon.schema.projection/forms projection)
+                     schema-key definition)]
+    (build-projection
+     forms
+     (:seon.schema.projection/function-contracts projection)
+     {:seon.schema/schema-admissions
+      (assoc (:seon.schema.projection/schema-admissions projection)
+             schema-key admission)
+      :seon.schema/function-admissions
+      (:seon.schema.projection/function-admissions projection)
+      :seon.schema/function-source-admissions
+      (:seon.schema.projection/function-source-admissions projection)
+      :seon.schema/artifact-exports
+      (:seon.schema.projection/artifact-exports projection)
+      :seon.schema/pure-predicate-symbols
+      (:seon.schema.projection/pure-predicate-symbols projection)
+      :seon.schema/predicate-functions
+      (:seon.schema.projection/predicate-functions projection)})))
+
 (defn activate-projection!
   "Atomically publish an already validated projection.
 
@@ -1766,12 +1831,22 @@
   (candidate-forms))
 
 (defn begin-registration-delta
-  "Create an isolated schema delta for one synchronous eval."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  (let [before (:seon.schema.state/candidate-forms @!schema-state)]
+  "Create an isolated schema delta for one synchronous eval.
+
+   With a projection, the overlay starts from exactly that database value's
+   forms. The zero-arity compatibility path remains the canonical JVM
+   declaration population; neither path publishes the overlay."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :map]
+    [:=> [:catn [::projection ::projection]] :map]]}
+  ([]
+   (begin-registration-delta nil))
+  ([projection]
+   (let [before (or (:seon.schema.projection/forms projection)
+                    (:seon.schema.state/candidate-forms @!schema-state))]
     {:seon.schema.delta/before before
-     :seon.schema.delta/candidate-forms (atom before)}))
+     :seon.schema.delta/candidate-forms (atom before)})))
 
 (defn call-with-registration-delta
   "Call `f` with registrations staged in `delta`."
@@ -1799,6 +1874,15 @@
   (if-let [candidate (:seon.schema.delta/candidate-forms before)]
     (changed-candidate-keys (:seon.schema.delta/before before) @candidate)
     (changed-candidate-keys before (candidate-forms))))
+
+(defn registration-delta-form
+  "The evaluated canonical form registered for `schema-key`, or nil."
+  {:malli/schema
+   [:=> [:catn [:seon.schema/registration-delta :map]
+                [::registry-key ::registry-key]]
+    [:maybe ::definition]]}
+  [delta schema-key]
+  (get @(:seon.schema.delta/candidate-forms delta) schema-key))
 
 (defn commit-registration-delta!
   "Atomically merge one successful eval's schema delta."
@@ -1902,11 +1986,8 @@
                    :seon.schema/created-at created-at}
             (contains? properties :seon.db.id/generator)
             (assoc :seon.db.id/generator
-                   (:seon.db.id/generator properties))
-            (namespace schema-key)
-            (assoc :seon.schema/ns
-                   {:seon.ns/name (symbol (namespace schema-key))}))))))
-   (registered-schemas)))
+                   (:seon.db.id/generator properties))))))
+   (registered-schemas))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.

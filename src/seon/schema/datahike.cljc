@@ -19,19 +19,29 @@
     (into [] (remove map?) (rest form))
     []))
 
+(defn resolve-malli-form-in
+  "Resolve registered aliases against exactly one immutable projection."
+  {:malli/schema
+   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
+  [projection form]
+  (cond
+    (= :seon.db/ref form) form
+    (and (keyword? form)
+         (contains? (:seon.schema.projection/forms projection) form))
+    (let [definition (get (:seon.schema.projection/forms projection) form)]
+      (if (or (keyword? definition) (vector? definition))
+        (resolve-malli-form-in projection definition)
+        form))
+    :else form))
+
 (defn resolve-malli-form
-  "Resolve registered Malli aliases without crossing into compiled schemas."
+  "Resolve aliases against the canonical JVM declaration population."
   {:malli/schema
    [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
-  (cond
-    (= :seon.db/ref form) form
-    (and (keyword? form) (schema/registered? form))
-    (let [definition (schema/schema-definition form)]
-      (if (or (keyword? definition) (vector? definition))
-        (resolve-malli-form definition)
-        form))
-    :else form))
+  (resolve-malli-form-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   form))
 
 (def malli-type->datahike-type
   {:string :db.type/string
@@ -54,21 +64,30 @@
   [form]
   (if (vector? form) (first form) form))
 
+(defn resolve-datahike-form-in
+  "Resolve aliases and wrappers in one projection to the stored form."
+  {:malli/schema
+   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
+  [projection form]
+  (let [resolved (resolve-malli-form-in projection form)]
+    (if (= :and (form-head resolved))
+      (resolve-datahike-form-in projection (first (form-children resolved)))
+      resolved)))
+
 (defn resolve-datahike-form
-  "Resolve aliases and wrappers to the form stored by Datahike."
+  "Resolve aliases and wrappers against canonical JVM declarations."
   {:malli/schema
    [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
-  (let [resolved (resolve-malli-form form)]
-    (if (= :and (form-head resolved))
-      (resolve-datahike-form (first (form-children resolved)))
-      resolved)))
+  (resolve-datahike-form-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   form))
 
 (defn- registration-form
   [attr schema-form]
   (pr-str (list 'schema/register! attr schema-form)))
 
-(declare form->datahike-value-type)
+(declare form->datahike-value-type-in)
 
 (defn- literal->datahike-value-type
   [literal]
@@ -90,11 +109,11 @@
     :db.type/float
     :else nil))
 
-(defn form->datahike-value-type
-  "The Datahike value-type keyword represented by a Malli form."
-  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
-  [form]
-  (let [resolved (resolve-datahike-form form)
+(defn form->datahike-value-type-in
+  "The Datahike value type represented by a form in one projection."
+  {:malli/schema [:=> [:cat :map :seon.schema/definition] :keyword]}
+  [projection form]
+  (let [resolved (resolve-datahike-form-in projection form)
         head (form-head resolved)]
     (cond
       (= :seon.db/ref head) :db.type/ref
@@ -121,7 +140,7 @@
       (let [explicit (:seon.db/value-type
                       (schema.form/attr-form-properties resolved))
             types (into #{} (map #(try
-                                    (form->datahike-value-type %)
+                                    (form->datahike-value-type-in projection %)
                                     (catch #?(:clj Throwable :cljs :default) _
                                       ::unmappable)))
                         (form-children resolved))]
@@ -146,11 +165,27 @@
                        (registration-form :my.domain/value :string) ".")
                   {::form resolved :seon.error/kind :user-input}))))))
 
+(defn form->datahike-value-type
+  "The Datahike value type represented by a canonical JVM Malli form."
+  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
+  [form]
+  (form->datahike-value-type-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   form))
+
 (defn form->cardinality
   "The Datahike cardinality represented by one Malli form."
   {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
   [form]
   (let [resolved (resolve-datahike-form form)]
+    (if (and (vector? resolved)
+             (#{:vector :set :sequential} (form-head resolved)))
+      :db.cardinality/many
+      :db.cardinality/one)))
+
+(defn- form->cardinality-in
+  [projection form]
+  (let [resolved (resolve-datahike-form-in projection form)]
     (if (and (vector? resolved)
              (#{:vector :set :sequential} (form-head resolved)))
       :db.cardinality/many
@@ -167,21 +202,29 @@
       (first (form-children resolved))
       resolved)))
 
-(defn malli->datahike-attr
-  "Derive one ordinary Datahike attribute declaration."
-  {:malli/schema [:=> [:cat :keyword] :map]}
-  [attr]
-  (let [raw (or (schema/schema-definition attr)
+(defn- form->child-form-in
+  [projection form]
+  (let [resolved (resolve-datahike-form-in projection form)]
+    (if (and (vector? resolved)
+             (#{:vector :set :sequential} (form-head resolved)))
+      (first (form-children resolved))
+      resolved)))
+
+(defn malli->datahike-attr-in
+  "Derive one Datahike attribute declaration from one projection."
+  {:malli/schema [:=> [:cat :map :keyword] :map]}
+  [projection attr]
+  (let [raw (or (get (:seon.schema.projection/forms projection) attr)
                 (throw (ex-info
                         (str "The attribute has no registered schema. Run "
                              (registration-form attr :string)
                              " with the intended concrete type before "
                              "transacting it.")
                         {::attr attr :seon.error/kind :user-input})))
-        resolved (resolve-malli-form raw)
+        resolved (resolve-malli-form-in projection raw)
         props (schema.form/attr-form-properties resolved)
-        value-form (form->child-form resolved)
-        value-type (form->datahike-value-type value-form)
+        value-form (form->child-form-in projection resolved)
+        value-type (form->datahike-value-type-in projection value-form)
         secondary? (boolean (:db.secondary/only props))]
     (when (and secondary?
                (not (contains? #{:db.type/float :db.type/double} value-type)))
@@ -196,7 +239,7 @@
                              value-type)
              :db/cardinality (if secondary?
                                :db.cardinality/one
-                               (form->cardinality resolved))}
+                               (form->cardinality-in projection resolved))}
       secondary? (assoc :db.secondary/only true)
       (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
       (:seon.db/unique props) (assoc :db/unique :db.unique/value)
@@ -204,26 +247,44 @@
       (:seon.db/component props) (assoc :db/isComponent true)
       (:seon.db/no-history? props) (assoc :db/noHistory true))))
 
+(defn malli->datahike-attr
+  "Derive one Datahike attribute from canonical JVM declarations."
+  {:malli/schema [:=> [:cat :keyword] :map]}
+  [attr]
+  (malli->datahike-attr-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   attr))
+
+(defn malli->datahike-schema-in
+  "Derive ordered Datahike declarations from one projection."
+  {:malli/schema [:=> [:cat :map [:sequential :keyword]] [:vector :map]]}
+  [projection attrs]
+  (mapv #(malli->datahike-attr-in projection %) attrs))
+
 (defn malli->datahike-schema
   "Derive ordered Datahike attribute declarations."
   {:malli/schema [:=> [:cat [:sequential :keyword]] [:vector :map]]}
   [attrs]
-  (mapv malli->datahike-attr attrs))
+  (malli->datahike-schema-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   attrs))
 
-(defn edn-encoded-attr?
-  "True when a heterogeneous Malli union uses the EDN string fallback."
-  {:malli/schema [:=> [:cat :keyword] :boolean]}
-  [attr]
+(defn edn-encoded-attr-in?
+  "True when an attribute in `projection` uses the EDN string fallback."
+  {:malli/schema [:=> [:cat :map :keyword] :boolean]}
+  [projection attr]
   (boolean
-   (when (schema/registered? attr)
-     (let [form (resolve-malli-form (schema/schema-definition attr))
+   (when (contains? (:seon.schema.projection/forms projection) attr)
+     (let [form (resolve-malli-form-in
+                 projection
+                 (get (:seon.schema.projection/forms projection) attr))
            explicit
            (:seon.db/value-type (schema.form/attr-form-properties form))
            types
            (when (= :or (form-head form))
              (into #{}
                    (map #(try
-                           (form->datahike-value-type %)
+                           (form->datahike-value-type-in projection %)
                            (catch #?(:clj Throwable :cljs :default) _
                              ::unmappable)))
                    (form-children form)))]
@@ -231,6 +292,14 @@
             (nil? explicit)
             (or (> (count types) 1)
                 (contains? types ::unmappable)))))))
+
+(defn edn-encoded-attr?
+  "True when a canonical JVM attribute uses the EDN string fallback."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
+  [attr]
+  (edn-encoded-attr-in?
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   attr))
 
 (defn- refuse-slot!
   [rule attr value]
@@ -247,6 +316,70 @@
   (when-not (schema/valid-candidate-value? attr value)
     (refuse-slot! ::schema-invalid attr value))
   value)
+
+(defn- validate-logical-slot-in!
+  [projection attr value]
+  (when-not ((schema/projection-validator projection attr) value)
+    (refuse-slot! ::schema-invalid attr value))
+  value)
+
+(declare encode-entity-in)
+
+(defn- encode-value-in
+  [projection attr value]
+  (cond
+    (edn-encoded-attr-in? projection attr)
+    (pr-str (validate-logical-slot-in! projection attr value))
+
+    (map? value)
+    (encode-entity-in projection value)
+
+    (and (vector? value) (some map? value))
+    (mapv #(if (map? %) (encode-entity-in projection %) %) value)
+
+    (and (set? value) (some map? value))
+    (into #{} (map #(if (map? %) (encode-entity-in projection %) %)) value)
+
+    (and (sequential? value) (some map? value))
+    (mapv #(if (map? %) (encode-entity-in projection %) %) value)
+
+    :else value))
+
+(defn- encode-entity-in
+  [projection entity]
+  (reduce-kv
+   (fn [encoded attr value]
+     (assoc encoded attr (encode-value-in projection attr value)))
+   (empty entity)
+   entity))
+
+(defn- encode-transaction-data-in
+  [projection transaction-data]
+  (mapv
+   (fn [operation]
+     (cond
+       (map? operation)
+       (encode-entity-in projection operation)
+
+       (and (vector? operation)
+            (= :db/add (first operation))
+            (edn-encoded-attr-in? projection (nth operation 2 nil)))
+       (update operation 3
+               #(pr-str
+                 (validate-logical-slot-in!
+                  projection (nth operation 2) %)))
+
+       :else operation))
+   transaction-data))
+
+(defn encode-transaction-in
+  "Encode heterogeneous union slots against exactly one projection."
+  {:malli/schema [:=> [:cat :map :seon.store/transaction]
+                  :seon.store/transaction]}
+  [projection transaction]
+  (if (map? transaction)
+    (update transaction :tx-data #(encode-transaction-data-in projection %))
+    (encode-transaction-data-in projection transaction)))
 
 (defn- encode-entity
   [entity]
@@ -318,3 +451,22 @@
         (when-not (= value (pr-str decoded))
           (refuse-slot! ::noncanonical-edn attr value))
         (validate-logical-slot! attr decoded)))))
+
+(defn decode-attribute-value-in
+  "Decode one attribute value against exactly one projection."
+  {:malli/schema [:=> [:cat :map :keyword :seon.schema/value]
+                  :seon.schema/value]}
+  [projection attr value]
+  (if-not (edn-encoded-attr-in? projection attr)
+    value
+    (do
+      (when-not (string? value)
+        (refuse-slot! ::storage-not-string attr value))
+      (let [decoded
+            (try
+              (edn/read-string value)
+              (catch #?(:clj Throwable :cljs :default) _
+                (refuse-slot! ::malformed-edn attr value)))]
+        (when-not (= value (pr-str decoded))
+          (refuse-slot! ::noncanonical-edn attr value))
+        (validate-logical-slot-in! projection attr decoded)))))

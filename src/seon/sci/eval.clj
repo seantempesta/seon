@@ -96,6 +96,7 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require [clojure.edn :as edn]
+            [clojure.test]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [my.message]
@@ -141,7 +142,9 @@
 (defonce ^:private base-ctx
   (delay
     (let [run-ns (sci/create-ns 'my.run)
-          message-ns (sci/create-ns 'my.message)]
+          message-ns (sci/create-ns 'my.message)
+          schema-ns (sci/create-ns 'seon.schema)
+          test-ns (sci/create-ns 'clojure.test)]
       (sci/init
        {;; the interrupt-aware core: a lazy sequence built by NATIVE
         ;; clojure.core enters no interpreted body, so `(range)` inside
@@ -151,6 +154,17 @@
         :namespaces
         {'clojure.core sci.interrupt/clojure-core
          'clojure.string sci.interrupt/clojure-string
+         ;; The schema surface is exactly the one declaration function. Its
+         ;; dynamic registration overlay is bound per evaluation below.
+         'seon.schema
+         {'register! (sci/copy-var schema/register! schema-ns)}
+         ;; A deftest must have clojure.test's actual macro and Var semantics.
+         ;; Derive the complete public namespace instead of maintaining a
+         ;; second hand list that silently omits a runnable test operation.
+         'clojure.test
+         (into {}
+               (map (fn [[sym v]] [sym (sci/copy-var* v test-ns)]))
+               (ns-publics 'clojure.test))
          'my.run {'wait (sci/copy-var my.run/wait run-ns)
                   'complete (sci/copy-var my.run/complete run-ns)}
          ;; the second agent-facing value family, bound the same way and
@@ -315,12 +329,9 @@
                          {:seon.error/kind ::contract-refused
                           :seon.fn/sym (:seon.fn/sym row)})))
 
-       (:seon.schema/key row)
-       (if (schema/malli-form? (edn/read-string (:seon.schema/form row)))
-         row
-         (throw (ex-info "Schema registration is not a registered Malli form."
-                         {:seon.error/kind ::schema-refused
-                          :seon.schema/key (:seon.schema/key row)})))
+       ;; The reader owns identity and exact source; the evaluated declaration
+       ;; supplies the canonical value below. Raw syntax is not schema data.
+       (:seon.schema/key row) row
 
        (:seon.test/sym row) row
 
@@ -342,8 +353,6 @@
                       {:seon.error/kind ::reader-event-count
                        :seon.sci.reader/event-count (count events)})))))
 
-(declare activate-program-schemas!)
-
 (defn install-program-row!
   "Install one declaration only after resolving its exact committed row from
   the terminal transaction's db-after. Receipts are never consulted."
@@ -351,7 +360,9 @@
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     row :seon.sci.eval/program-row}]
-  (let [[identity value]
+  (let [projection (or (:seon.schema/projection ctx)
+                       (schema/projection-from-database db))
+        [identity value]
         (some (fn [attribute]
                 (when-some [value (get row attribute)]
                   [attribute value]))
@@ -359,23 +370,37 @@
                     :seon.program/delete-identities))
         committed (when-not (= identity :seon.program/delete-identities)
                     (d/pull db '[*] [identity value]))]
-    (when-not (= (:seon.fn/source row) (:seon.fn/source committed))
-      (when (= identity :seon.fn/sym)
-        (throw (ex-info "Committed function source does not match install request."
-                        {:seon.error/kind ::install-source-mismatch
-                         :seon.fn/sym value}))))
+    (when (and (#{:seon.fn/sym :seon.test/sym} identity)
+               (let [source-attribute
+                     (:seon.program/source-attribute
+                      (program/shape identity))]
+                 (not= (get row source-attribute)
+                       (get committed source-attribute))))
+      (throw (ex-info "Committed declaration source does not match install request."
+                      {:seon.error/kind ::install-source-mismatch
+                       :seon.program/identity [identity value]})))
     (case identity
       :seon.fn/sym
       (let [namespace-name (second (:seon.fn/ns row))
             event (one-event (:seon.fn/source committed) namespace-name)]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
-        true)
+        {:seon.schema/projection projection
+         :seon.sci.eval/installed 1})
 
-      ;; Schema activation and test discovery derive from their committed
-      ;; rows. They are deliberately not executed as arbitrary eval effects.
-      :seon.schema/key (activate-program-schemas! db)
-      :seon.test/sym true
+      :seon.schema/key
+      {:seon.schema/projection
+       (schema/projection-from-database db projection)
+       :seon.sci.eval/installed 1}
+
+      :seon.test/sym
+      (let [namespace-name (second (:seon.test/ns row))
+            event (one-event (:seon.test/source committed) namespace-name)]
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event)))
+        {:seon.schema/projection projection
+         :seon.sci.eval/installed 1})
+
       :seon.program/delete-identities
       (let [namespace-name (second (:seon.program/ns row))
             event (one-event (:seon.program/source row) namespace-name)]
@@ -390,38 +415,11 @@
                            :seon.program/identity remaining})))
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
-        true)
-      false)))
-
-(defn- activate-program-schemas!
-  [db]
-  (let [schema-rows
-        (d/q '[:find ?key ?form ?tx
-               :where
-               [?schema :seon.schema/key ?key ?tx]
-               [?schema :seon.schema/form ?form]]
-             db)]
-    (when (seq schema-rows)
-      (schema/activate-projection!
-       (schema/projection-from-rows
-        {:seon.schema/database-value db
-         :seon.schema/schema-rows schema-rows
-         :seon.schema/function-contract-rows
-         (d/q '[:find ?sym ?spec ?tx
-                :where
-                [?function :seon.fn/sym ?sym]
-                [?function :seon.fn/spec ?spec ?tx]]
-              db)
-         :seon.schema/function-source-rows
-         (d/q '[:find ?sym ?source ?tx
-                :where
-                [?function :seon.fn/sym ?sym]
-                [?function :seon.fn/source ?source ?tx]]
-              db)
-         :seon.schema/artifact-exports #{}
-         :seon.schema/pure-predicate-symbols #{}}
-        (or (schema/current-projection) {}))))
-    (boolean (seq schema-rows))))
+        {:seon.schema/projection
+         (schema/projection-from-database db projection)
+         :seon.sci.eval/installed 1})
+      {:seon.schema/projection projection
+       :seon.sci.eval/installed 0})))
 
 (defn acquire!
   "Install current agent-authored functions into a ctx at one database value.
@@ -429,18 +427,20 @@
   in schema projection; they are not replayed as interpreted source. This
   reads program rows only—receipts and eval results are outside the query by
   construction."
-  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :int]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
-  (activate-program-schemas! db)
-  (let [rows
+  (let [projection (schema/projection-from-database db)
+        ctx (assoc ctx :seon.schema/projection projection)
+        agent-authored?
+        (fn [source-tx]
+          (= :agent
+             (:seon.schema.admission/source
+              (schema/admission-from-asserting-transaction db source-tx))))
+        function-rows
         (into
          []
          (filter
-          (fn [[_ _ _ source-tx]]
-            (= :agent
-               (:seon.schema.admission/source
-                (schema/admission-from-asserting-transaction
-                 db source-tx)))))
+          (fn [[_ _ _ source-tx]] (agent-authored? source-tx)))
          (d/q '[:find ?sym ?source ?namespace-name ?source-tx
                 :where
                 [?function :seon.fn/sym ?sym]
@@ -448,16 +448,46 @@
                 [?function :seon.fn/spec _]
                 [?function :seon.fn/ns ?namespace]
                 [?namespace :seon.ns/name ?namespace-name]]
-              db))]
-    (doseq [[sym source namespace-name _] (sort-by first rows)]
-      (install-program-row!
-       {:seon.sci.eval/ctx ctx
-        :seon.db/db db
-        :seon.sci.eval/program-row
-        {:seon.fn/sym sym
-         :seon.fn/source source
-         :seon.fn/ns [:seon.ns/name namespace-name]}}))
-    (count rows)))
+              db))
+        test-rows
+        (into
+         []
+         (filter (fn [[_ _ _ source-tx]] (agent-authored? source-tx)))
+         (d/q '[:find ?sym ?source ?namespace-name ?source-tx
+                :where
+                [?test :seon.test/sym ?sym]
+                [?test :seon.test/source ?source ?source-tx]
+                [?test :seon.test/ns ?namespace]
+                [?namespace :seon.ns/name ?namespace-name]]
+              db))
+        rows
+        (concat
+         (map (fn [[sym source namespace-name _]]
+                {:seon.fn/sym sym
+                 :seon.fn/source source
+                 :seon.fn/ns [:seon.ns/name namespace-name]})
+              (sort-by first function-rows))
+         (map (fn [[sym source namespace-name _]]
+                {:seon.test/sym sym
+                 :seon.test/source source
+                 :seon.test/ns [:seon.ns/name namespace-name]})
+              (sort-by first test-rows)))]
+    (reduce
+     (fn [state row]
+       (let [installed
+             (install-program-row!
+              {:seon.sci.eval/ctx
+               (assoc ctx :seon.schema/projection
+                      (:seon.schema/projection state))
+               :seon.db/db db
+               :seon.sci.eval/program-row row})]
+         {:seon.schema/projection (:seon.schema/projection installed)
+          :seon.sci.eval/installed
+          (+ (:seon.sci.eval/installed state)
+             (:seon.sci.eval/installed installed))}))
+     {:seon.schema/projection projection
+      :seon.sci.eval/installed 0}
+     rows)))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
@@ -505,8 +535,42 @@
         namespace-object (sci/create-ns namespace-name)]
     (try
       (let [event (one-event source namespace-name)
-            row (program-row event)
+            raw-row (program-row event)
             form (:seon.sci.reader/form event)
+            projection
+            (or (:seon.schema/projection evaluation-ctx)
+                (schema/current-projection)
+                (schema/build-projection (schema/registered-schemas)))
+            schema-delta
+            (when (:seon.schema/key raw-row)
+              (schema/begin-registration-delta projection))
+            schema-value
+            (when schema-delta
+              (schema/call-with-registration-delta
+               schema-delta
+               #(sci/binding [sci/ns namespace-object
+                              sci/out printed
+                              sci/err printed]
+                  (sci/eval-form evaluation-ctx form))))
+            row
+            (if schema-delta
+              (let [schema-key (:seon.schema/key raw-row)
+                    definition
+                    (schema/registration-delta-form schema-delta schema-key)]
+                (when-not (and (= schema-key schema-value) definition)
+                  (throw
+                   (ex-info "Schema declaration did not register its reader identity."
+                            {:seon.error/kind ::schema-refused
+                             :seon.schema/key schema-key
+                             :seon.sci.eval/value schema-value})))
+                ;; Validate the actual evaluated value while the overlay is
+                ;; isolated. The terminal transaction repeats this pure
+                ;; candidate validation against its mid-transaction db value.
+                (schema/projection-with-schema
+                 projection schema-key definition
+                 {:seon.schema.admission/source :agent})
+                (assoc raw-row :seon.schema/form (pr-str definition)))
+              raw-row)
             ;; Durable declarations are installed only after the row commits.
             value (if row
                     (or (:seon.fn/sym row)
