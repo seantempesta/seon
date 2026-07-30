@@ -250,6 +250,19 @@ Topology changes (procs, conns, buffers) rebuild the graph — stop →
 channel contents are losable by construction; all durable work
 re-derives from database facts.
 
+**Hot reload is not program-graph indexing.** Re-evaluating a Var changes the
+behavior of code already loaded in that JVM, but file edits do not mutate the
+database's `:seon.fn`, `:seon.ns`, `:seon.schema`, or `:seon.test` facts.
+After source or schema-resource edits, `bin/seon index` explicitly refreshes
+the rolling baseline inherited by FUTURE clusters. It deliberately does not
+select or update `default` or any other existing cluster. Run
+`bin/seon index CLUSTER` to exact-reconcile one EXISTING cluster while
+preserving its history, domain facts, and agent-authored declarations. Use
+`bin/seon reset CLUSTER` only when destroying that cluster's history and
+reforking it from the current baseline is intended. A live proof after file
+edits must name which of these database populations it exercised; observing a
+hot-reloaded Var alone is not proof that agents can discover the change.
+
 **Transport law (owner ruling 2026-07-28, revising "disposable values
 only"):** anything recovery or another process could ever need is a
 DATABASE FACT — identities, receipts, messages, errors, the settled
@@ -985,18 +998,23 @@ drill it is.
 `bin/seon` is the one development operator:
 
 ```bash
-bin/seon up
+bin/seon start [CLUSTER]
 bin/seon status
-bin/seon logs pod --follow
-bin/seon restart
+bin/seon index                 # refresh baseline for future clusters
+bin/seon index default         # preserve history; reconcile this cluster
+bin/seon reset default         # destructive: refork from current baseline
+bin/seon logs default
+bin/seon stop default
 bin/seon down
-bin/seon cluster reset default  # destructive: wipes that test database
 ```
 
-The supervisor owns watcher → database-server → pod ordering, locking,
-readiness, logs, and shutdown. Do not launch its internal processes separately
-or kill them blindly. `up` rebuilds current code and starts incremental
-watching; only `--open` launches a browser.
+An absent cluster argument means `default` for `start` and `config apply`.
+For `stop`, `down`, and `reset`, omission is accepted only when exactly one
+cluster exists. `index` is the deliberate exception: without a cluster it
+always means the rolling baseline, never `default`. Existing clusters receive
+no baseline refresh implicitly. The operator owns process identity, locking,
+readiness, logs, and shutdown; do not launch its internals separately or kill
+children blindly.
 
 NEVER USE A SESSION SCRATCHPAD OR SYSTEM TEMP DIRECTORY (owner ruling
 2026-07-25). Some harnesses hand an agent a private scratchpad under
