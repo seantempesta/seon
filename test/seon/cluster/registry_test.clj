@@ -337,20 +337,17 @@
                                 (registry/cluster-branch "alice")})))))
             (finally
               (d/release connection)))))
-      (testing "a source branch a cluster still descends from refuses retirement"
-        (is (= :seon.cluster.registry/cannot-retire-live-ancestor
-               (:seon.cluster.registry/rule
-                (refusal #(registry/retire-branch!
-                           {:seon.store/store opened
-                            :seon.store/branch source-branch})))))
-        (testing "and retires once its last descendant is gone"
-          (registry/retire-branch! {:seon.store/store opened
-                                    :seon.store/branch
-                                    (registry/cluster-branch "alice")})
-          (is (nil? (registry/retire-branch! {:seon.store/store opened
-                                              :seon.store/branch
-                                              source-branch})))
-          (is (not (contains? (registry/roster opened) source-branch)))))
+      (testing "retiring a source name preserves its descendant through GC"
+        (is (nil? (registry/retire-branch! {:seon.store/store opened
+                                            :seon.store/branch source-branch})))
+        (is (not (contains? (registry/roster opened) source-branch)))
+        (is (pos? (registry/collect! opened)))
+        (let [connection (store/open-branch!
+                          opened (registry/cluster-branch "alice"))]
+          (try
+            (is (= #{"ancestral" "alice-wrote"} (markers connection)))
+            (finally
+              (d/release connection)))))
       (testing "a source that names nothing refuses"
         (is (= :seon.cluster.registry/source-absent
                (:seon.cluster.registry/rule

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, operator, database]
 ---
@@ -60,3 +60,15 @@ during the operator reconciliation lane and was not edited.
 - A focused lifecycle test adds and stops two clusters whose bootstrap
   requests use equivalent path spellings, proving one store open, one flock,
   and complete release after the last stop.
+
+## Resolution
+
+Resolved in the current-source operational repair. `seon.cluster` now derives
+one canonical path before both holder lookup and physical store open. The
+regression acquires one store through relative and absolute spellings, proves
+object identity and reference counting, then reopens the physical store after
+the final release to prove that the flock was released.
+
+Live proof used the formerly failing shape: the operator held the relative
+bootstrap root while the edit hook refreshed through its absolute repository
+root. The hook advanced `current-src` without a second store open.

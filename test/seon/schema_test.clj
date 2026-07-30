@@ -13,6 +13,13 @@
     (catch clojure.lang.ExceptionInfo failure
       failure)))
 
+(deftest canonical-definition-keeps-resolvable-predicate-symbols
+  (let [definition
+        [:=> [:cat :qualified-symbol [:fn 'clojure.core/ifn?]]
+         :qualified-symbol]]
+    (is (= definition (schema/canonical-definition definition {})))
+    (is (schema/malli-form? definition))))
+
 (deftest canonical-self-references-refuse-at-registration
   (let [state (schema/snapshot-state)
         schema-key :seon.schema-test/self]

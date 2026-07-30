@@ -73,6 +73,30 @@
   []
   (var-get (ns-resolve 'clojure.core.server 'servers)))
 
+(deftest process-root-store-identity-is-canonical
+  (let [root (bare-root)
+        relative-store (str (io/file root "store"))
+        absolute-store (.getCanonicalPath (io/file relative-store))
+        acquire! (var-get (ns-resolve 'seon.cluster 'acquire-root-store!))
+        release! (var-get (ns-resolve 'seon.cluster 'release-root-store!))]
+    (try
+      (let [relative (acquire! relative-store)
+            absolute (acquire! absolute-store)]
+        (try
+          (is (identical? relative absolute)
+              "relative and absolute paths share one process-root store")
+          (finally
+            (release! relative-store)
+            (release! absolute-store))))
+      (let [reopened (store/open-store! {:seon.store/dir absolute-store})]
+        (try
+          (is (store/connection? (:seon.store/connection reopened))
+              "the final canonical holder releases the physical flock")
+          (finally
+            (store/release-store! reopened))))
+      (finally
+        (delete-recursively! root)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap resolution — generative over the whole override domain
 ;;; ---------------------------------------------------------------------------

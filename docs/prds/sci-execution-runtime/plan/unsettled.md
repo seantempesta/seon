@@ -45,14 +45,30 @@ commit (measured branch-off approximately 17 ms). Existing clusters remain
 sovereign and are never updated from files; explicit `init NAME --force`
 destroys and reforks one named cluster.
 
-**Earliest unsettled contract:** finish the operator/edit-hook integration and
-its recurring proof. `:seon.fn/calls`, the deterministic per-file artifact,
-manifest reuse, exact-commit incremental upsert, complete fallback, and guarded
-`current-src` publication now exist. The remaining decisive proof is: the hook
-advances the published commit after an ordinary one-file edit; a deletion
-selects the complete fallback; a failed analysis preserves the prior commit;
-and a subsequent named cluster forks that exact commit while an existing
-cluster remains unchanged.
+**Earliest unsettled contract:** finish the destructive-fallback and failed-
+analysis halves of the edit-hook proof. The ordinary edit path is now live:
+an actual `apply_patch` ran clj-kondo, retained its advisory findings, and
+advanced `current-src`. The proof exposed and removed four false restrictions
+instead of working around them: process-root store identity now canonicalizes
+the path; complete graph construction stays inside its instrumented sequence
+and predicate contracts; complete refresh represents no changed paths as
+`[]`; and branch retirement no longer refuses merely because a surviving
+branch descends from the retired name. Datahike source and a live GC regression
+prove that every remaining branch head independently retains its parent
+commits.
+
+The live operator was then destroyed, `current-src` republished, and `default`
+reforked with `init default --force`. The fresh cluster contains 1,367 function
+rows, 559 global schema rows, 622 test rows, and zero messages; one JVM is live
+and no orphan JVM remains. Focused boot/registry/schema/function proof passed
+43 tests / 235 assertions. The isolated fresh-operator suite still has one
+unrelated readiness-test defect: its child eventually publishes readiness but
+crosses the test's hard 30-second socket timeout and survives cleanup. That
+exact child was terminated; the existing readiness issue remains open and no
+green claim is made for that suite. The remaining decisive edit-hook proof is:
+a deletion selects complete fallback, and failed analysis preserves the prior
+published commit. Existing-cluster sovereignty and exact refork from the
+published source commit are now observed live.
 
 Two measurements bound the work on this machine: rich first-party analysis of
 123 files / 2,061 rows took 3.28 seconds initially and 1.76–1.99 seconds warm

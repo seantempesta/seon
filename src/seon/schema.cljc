@@ -139,8 +139,11 @@
        (and (vector? value) (= :fn (first value)))
        (let [predicate-index (if (map? (second value)) 2 1)
              predicate (get value predicate-index)
-             bound (and (qualified-symbol? predicate)
-                        (get predicate-functions predicate))]
+             bound
+             (when (qualified-symbol? predicate)
+               (or (get predicate-functions predicate)
+                   #?(:clj (some-> predicate requiring-resolve deref)
+                      :cljs nil)))]
          (cond
            (and (ifn? predicate)
                 (not (or (symbol? predicate)

@@ -234,33 +234,40 @@
 ;;; releases the store, and the flock with it.
 (defonce ^:private root-store-holder (atom {}))
 
+(defn- root-store-key
+  "The canonical key for one physical process-root store."
+  [store-dir]
+  (.getCanonicalPath (io/file store-dir)))
+
 (defn- acquire-root-store!
   "The ONE store at `store-dir`, opened on first use and shared after."
   [store-dir]
-  (locking root-store-holder
-    (if-let [held (get @root-store-holder store-dir)]
-      (do
-        (swap! root-store-holder update-in [store-dir ::holders] inc)
-        (:seon.store/store held))
-      ; open OUTSIDE the map first: a failed open must leave no entry
-      (let [store (store/open-store! {:seon.store/dir store-dir})]
-        (swap! root-store-holder assoc store-dir
-               {:seon.store/store store ::holders 1})
-        store))))
+  (let [store-key (root-store-key store-dir)]
+    (locking root-store-holder
+      (if-let [held (get @root-store-holder store-key)]
+        (do
+          (swap! root-store-holder update-in [store-key ::holders] inc)
+          (:seon.store/store held))
+        ; open OUTSIDE the map first: a failed open must leave no entry
+        (let [store (store/open-store! {:seon.store/dir store-key})]
+          (swap! root-store-holder assoc store-key
+                 {:seon.store/store store ::holders 1})
+          store)))))
 
 (defn- release-root-store!
   "Drop one holder; the LAST one releases the store and its flock."
   [store-dir]
-  (locking root-store-holder
-    (when-let [held (get @root-store-holder store-dir)]
-      (let [remaining (dec (long (::holders held)))]
-        (if (pos? remaining)
-          (swap! root-store-holder assoc-in [store-dir ::holders] remaining)
-          (do
-            ; release FIRST: a failure leaves this exact flock-held store
-            ; addressable here for the stop retry
-            (store/release-store! (:seon.store/store held))
-            (swap! root-store-holder dissoc store-dir))))))
+  (let [store-key (root-store-key store-dir)]
+    (locking root-store-holder
+      (when-let [held (get @root-store-holder store-key)]
+        (let [remaining (dec (long (::holders held)))]
+          (if (pos? remaining)
+            (swap! root-store-holder assoc-in [store-key ::holders] remaining)
+            (do
+              ; release FIRST: a failure leaves this exact flock-held store
+              ; addressable here for the stop retry
+              (store/release-store! (:seon.store/store held))
+              (swap! root-store-holder dissoc store-key)))))))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -659,7 +666,7 @@
     [:=> [:cat :seon.boot/root] :seon.source/published]
     [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/published]]}
   ([root]
-   (refresh-source! root nil))
+   (refresh-source! root []))
   ([root changed-paths]
    (locking source-refresh-monitor
      (let [config (resolve-bootstrap {:seon.boot/root root})

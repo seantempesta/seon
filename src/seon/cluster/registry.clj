@@ -150,44 +150,6 @@
     (contains? @connections/*connections*
                (datahike.store/connection-id configuration))))
 
-(defn- descends-strictly?
-  "True when `head` has `commit` STRICTLY above it in the commit graph.
-  Walks `[:meta :datahike/parents]` from the head's PARENTS — never the
-  head itself, which is what makes the relation asymmetric for two
-  branches sharing one head. `:max-tx` is monotone along the parent
-  chain, so a record older than the target cannot lead to it and its
-  parents are not expanded: the walk costs the history since `commit`,
-  not the whole graph."
-  [konserve head commit floor]
-  (loop [pending (vec (get-in head [:meta :datahike/parents]))
-         seen #{}]
-    (if-let [cid (first pending)]
-      (let [rest-pending (subvec pending 1)]
-        (cond
-          (= cid commit) true
-          (seen cid) (recur rest-pending seen)
-          :else
-          (let [record (head-record konserve cid)]
-            (recur (if (and record (>= (long (or (:max-tx record) 0)) floor))
-                     (into rest-pending (get-in record [:meta :datahike/parents]))
-                     rest-pending)
-                   (conj seen cid)))))
-      false)))
-
-(defn- strict-descendant
-  "The first other roster branch that strictly descends from `branch`."
-  [store branch]
-  (let [konserve (konserve-store store)
-        target (head-record konserve branch)
-        commit (get-in target [:meta :datahike/commit-id])
-        floor (long (or (:max-tx target) 0))]
-    (when commit
-      (some (fn [other]
-              (when-let [head (head-record konserve other)]
-                (when (descends-strictly? konserve head commit floor)
-                  other)))
-            (disj (roster store) branch)))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Branch lifecycle — the one owner
 ;;; ---------------------------------------------------------------------------
@@ -293,26 +255,12 @@
   `:branch-does-not-exist` is the success path for a re-run, not an
   error (the mid-delete crash row).
   Refuses `::cluster-connected` (a live connection to that branch in
-  this process); `::cannot-retire-main` (`:db` — the genesis branch is
-  the store, and Datahike refuses it too); and
-  `::cannot-retire-live-ancestor`: another roster branch STRICTLY
-  descends from this one.
-  Descent is read from the commit graph, never from a naming
-  convention (L17): branch `o` strictly descends from `b` when `b`'s
-  head commit id appears in `o`'s head's PARENT ancestry — the
-  `[:meta :datahike/parents]` walk `versioning.cljc/branch-history`
-  performs — excluding `o`'s own head commit id.
-  STRICTLY is load-bearing and was found by probe. A freshly branched
-  cluster SHARES its source's head commit id
-  (`tmp/b2-draft-probe/head_config_probe.clj`: `:cluster-a` and
-  `:ancestor-x` reported one commit id), so a non-strict test is
-  SYMMETRIC and would refuse to retire an unwritten cluster whose
-  unwritten sibling shares that head — breaking `reset-cluster!` for
-  every never-used cluster. The boundary case it admits is deliberate
-  and costs nothing: retiring an ancestor whose only descendant has
-  written nothing is allowed, because that descendant's own roster
-  entry seeds its head unconditionally in the GC mark
-  (`gc.cljc:26,60-70`) and the two branches are byte-identical anyway."
+  this process) and `::cannot-retire-main` (`:db` — the genesis branch
+  is the store, and Datahike refuses it too). Descendant branches do
+  not prevent retirement: each remaining roster branch independently
+  roots its head and parent commits during collection
+  (`gc.cljc:22-81`), so deleting an ancestor's roster name cannot make
+  a descendant lose data."
   {:malli/schema [:=> [:cat :seon.cluster.registry/retire-request] :nil]}
   [{:keys [:seon.store/store :seon.store/branch]}]
   (when (= :db branch)
@@ -324,12 +272,6 @@
       (refuse! ::cluster-connected
                (str "branch " branch " still has a connection in this process")
                {::dir (:seon.store/dir store) :seon.store/branch branch}))
-    (when-let [descendant (strict-descendant store branch)]
-      (refuse! ::cannot-retire-live-ancestor
-               (str "branch " descendant " still descends from " branch)
-               {::dir (:seon.store/dir store)
-                :seon.store/branch branch
-                ::descendant descendant}))
     (try
       (d/delete-branch! (:seon.store/connection store) branch)
       (catch clojure.lang.ExceptionInfo failure

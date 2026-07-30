@@ -70,7 +70,7 @@
         (keep (fn [{:db/keys [ident cardinality isComponent]}]
                 (when (or (= :db.cardinality/many cardinality) isComponent)
                   ident)))
-        (schema.datahike/malli->datahike-schema attributes)))
+        (schema.datahike/malli->datahike-schema (sort attributes))))
 
 (defn- sha-256
   [source-bytes]
