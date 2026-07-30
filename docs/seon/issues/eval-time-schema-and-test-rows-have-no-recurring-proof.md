@@ -129,27 +129,21 @@ program/eval/turn/restart gate passed 57 tests / 330 assertions before the
 addition-specific regression; the maintained SCI suite passes 40 tests / 160
 assertions / 0 failures / 0 errors on Clojure 1.10.3 and 1.11.1.
 
-The same re-audit's build blockers are closed by making producer admission
-explicit instead of adding another static evaluator. The reader is the one
-owner that marks a standalone namespace-resolver mutation as requiring
-sequential evaluation. Runtime evaluates it in the real REPL fold; build
-indexing refuses it with file, line, exact source, and resolved operation.
-Build schema declarations likewise admit only literal data and serialize the
-literal's value, so quoted predicate symbols have the same canonical form as
-runtime while executable forms such as `(vector :int)` refuse rather than
-persisting syntax as schema data. The independent tools.reader census now
-compares exact schema key plus canonical form as well as exact function/test
-identities. Alias, computed require, computed `in-ns`, and computed-schema
-falsifiers all recur as loud build refusals; the focused build/reader/program
-gate is 32 tests / 263 assertions / 0 failures / 0 errors.
+The final audit proved the temporary finite resolver-operation refusal was
+still a silent hand list: `eval` and `apply` routed around it. The JVM build now
+has the missing isolated full-source compiler owner. A child JVM reads and
+evaluates each top-level form sequentially, diffs actual namespace Vars and
+the evaluated global schema registry, and returns ordinary canonical rows;
+all side effects die with that process. A content-keyed process-local cache
+reuses only an identical source population in the same JVM. The cache key
+includes the classpath, requested source, and loaded `src/` dependencies.
+Namespace rows preserve exact empty alias/refer sets and explicit nil-mask
+components when code unmaps a default JVM import.
 
-This carries forward the mechanisms that survived earlier platforms:
+This directly carries forward the mechanisms that survived earlier platforms:
 `87ac3f9c6` made analyzer state authoritative, `d33b29cf9` indexed evaluated
 registry values, and `56ed96dd9` repaired computed cold-boot schema parity.
-The discarded static scanner family is `0c22f8363` / `d7cd70bdd`. The current
-JVM build has no isolated full-source compiler owner, so it does not imitate
-one; evaluation-dependent source belongs to runtime until such an owner
-exists.
+The discarded static scanner family is `0c22f8363` / `d7cd70bdd`.
 
 ## Owner
 

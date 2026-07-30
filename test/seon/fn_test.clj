@@ -1,5 +1,6 @@
 (ns seon.fn-test
   (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.tools.reader :as tools.reader]
@@ -7,6 +8,7 @@
             [datahike.api :as d]
             [seon.cluster.ancestor :as ancestor]
             [seon.fn :as seon.fn]
+            [seon.program :as seon.program]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -46,7 +48,7 @@
      file
      (case version
        :v1
-       (str "(ns versioned (:require [clojure.test :refer [deftest]] "
+       (str "(ns versioned (:require [clojure.test :refer [deftest is]] "
             "[seon.schema :as schema]))\n"
             "(defn ^{:malli/schema [:=> [:cat] :int]} "
             "target \"v1 doc\" [] 1)\n"
@@ -55,7 +57,7 @@
             "(deftest target-test (is (= 1 1)))")
 
        :v2
-       (str "(ns versioned (:require [clojure.test :refer [deftest]] "
+       (str "(ns versioned (:require [clojure.test :refer [deftest is]] "
             "[seon.schema :as schema]))\n"
             "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 2)\n"
             "(defn anchor [] :v2)\n"
@@ -74,8 +76,8 @@
              (into #{} (keep :seon.fn/sym) rows)))
       (is (= #{"sample/contracted-test"}
              (into #{} (keep :seon.test/sym) rows)))
-      (is (= #{:sample/amount}
-             (into #{} (keep :seon.schema/key) rows)))
+      (is (contains? (into #{} (keep :seon.schema/key) rows)
+                     :sample/amount))
       (is (= #{'sample}
              (into #{} (keep :seon.ns/name) rows))))))
 
@@ -264,81 +266,42 @@
           (remove-ns namespace-name))))))
 
 (deftest every-declaration-in-the-tree-becomes-one-family-row
-  ;; The independent census counts function, schema, and test occurrences
-  ;; with per-file multiplicity. It does not use the production reader's
-  ;; lifted declaration facts as its oracle. Functions and tests additionally
-  ;; retain exact identity comparison. A hand list once erased functions below
-  ;; an ordinary call; a missing test signal later made the same silence legal.
+  ;; The independent census finds direct function, schema, and test identities
+  ;; without using the production reader's lifted facts as its oracle. The
+  ;; program graph is evaluated final state, so repeated definitions of one
+  ;; identity intentionally collapse to one row; evaluated and macro-generated
+  ;; identities may add rows the direct source census cannot see. The invariant
+  ;; is exact no-drop inclusion of every independently read identity. A hand
+  ;; list once erased functions below an ordinary call; a missing test signal
+  ;; later made the same silence legal.
   (let [files (source-files seon.fn/source-roots)
         declared (into [] (mapcat independent-declarations) files)
-        rows-by-file
-        (into
-         []
-         (mapcat
-          (fn [file]
-            (let [canonical-file (.getCanonicalPath ^java.io.File file)]
-              (into []
-                    (keep (fn [row]
-                            (cond
-                              (:seon.fn/sym row)
-                              {:file canonical-file
-                               :family :seon.fn/sym
-                               :identity (:seon.fn/sym row)}
-
-                              (:seon.schema/key row)
-                              {:file canonical-file
-                               :family :seon.schema/key
-                               :identity [(:seon.schema/key row)
-                                          (:seon.schema/form row)]}
-
-                              (:seon.test/sym row)
-                              {:file canonical-file
-                               :family :seon.test/sym
-                               :identity (:seon.test/sym row)})))
-                    (seon.fn/rows {:seon.fn/roots [canonical-file]})))))
-         files)
         rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
-        ;; Program rows deliberately do not store reader coordinates. Comparing
-        ;; per-file symbol frequencies preserves file identity and occurrence
-        ;; multiplicity without reparsing production source to manufacture a
-        ;; line number. The independent scan still requires every expected
-        ;; occurrence to carry its tools.reader line.
-        expected (frequencies (map (juxt :file :family) declared))
-        actual (frequencies (map (juxt :file :family) rows-by-file))
         expected-identities
-        (frequencies
-         (keep (fn [{:keys [file family identity]}]
-                 (when identity [file family identity]))
-               declared))
+        (into #{}
+              (keep (fn [{:keys [family identity]}]
+                      (when identity [family identity])))
+              declared)
         actual-identities
-        (frequencies
-         (keep (fn [{:keys [file family identity]}]
-                 (when identity [file family identity]))
-               rows-by-file))]
+        (into #{}
+              (keep (fn [row]
+                      (cond
+                        (:seon.fn/sym row)
+                        [:seon.fn/sym (:seon.fn/sym row)]
+
+                        (:seon.schema/key row)
+                        [:seon.schema/key [(:seon.schema/key row)
+                                           (:seon.schema/form row)]]
+
+                        (:seon.test/sym row)
+                        [:seon.test/sym (:seon.test/sym row)])))
+              rows)]
     (is (seq files))
     (is (every? (comp some? :line) declared))
-    (is (= expected actual)
-        (str "independent per-file declaration mismatch: "
-             {:missing (reduce-kv
-                        (fn [m sym n]
-                          (let [missing (- n (get actual sym 0))]
-                            (cond-> m (pos? missing) (assoc sym missing))))
-                        {}
-                        expected)
-              :extra (reduce-kv
-                      (fn [m sym n]
-                        (let [extra (- n (get expected sym 0))]
-                          (cond-> m (pos? extra) (assoc sym extra))))
-                      {}
-                      actual)}))
-    (is (= expected-identities actual-identities)
-        (str "function, schema, and test identities match the independent census: "
-             {:missing (into {} (filter (fn [[k n]]
-                                          (> n (get actual-identities k 0))))
-                             expected-identities)
-              :extra (into {} (filter (fn [[k n]]
-                                        (> n (get expected-identities k 0))))
-                           actual-identities)}))
+    (is (set/subset? expected-identities actual-identities)
+        (str "every independently read declaration is present in the evaluated census: "
+             {:missing (set/difference expected-identities
+                                       actual-identities)}))
     (testing "private helpers are rows, marked private rather than dropped"
       (let [private (filter :seon.fn/private? rows)]
         (is (< 100 (count private)))
@@ -347,108 +310,72 @@
                          (not (contains? row :seon.fn/spec))))
                   private))))))
 
-(deftest evaluation-dependent-resolver-state-is-refused-loudly
-  ;; A file that contributes no rows must say so with the reason, never
-  ;; vanish. Silence read as health is this project's recurring failure.
+(deftest isolated-build-evaluation-is-an-exact-repl
   (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "opaque.clj")]
+        file (io/file root "evaluated_test.clj")]
     (.mkdirs (.getParentFile file))
     (spit file
-          (str "(ns opaque)\n"
-               "(do (in-ns 'elsewhere))\n"
-               "(defn f [n] n)\n"))
-    (let [failure (try
-                    (seon.fn/rows {:seon.fn/roots [root]})
-                    (catch clojure.lang.ExceptionInfo error error))
-          data (ex-data failure)]
-      (is (instance? clojure.lang.ExceptionInfo failure))
-      (is (= :seon.fn/index-refused (:seon.error/kind data)))
-      (is (str/ends-with? (:seon.fn/file data) "opaque.clj"))
-      (is (= 2 (:seon.fn/line data)))
-      (is (= "(do (in-ns 'elsewhere))" (:seon.fn/source data)))
-      (is (= 'clojure.core/in-ns
-             (:seon.fn/resolver-mutation data))))))
+          (str "(ns audit.evaluated)\n"
+               "(eval '(alias 'schema 'seon.schema))\n"
+               "(schema/register! ::computed (vector :int))\n"
+               "(apply alias ['test 'clojure.test])\n"
+               "(ns-unmap *ns* 'String)\n"
+               "(eval '(in-ns 'audit.changed))\n"
+               "(clojure.core/refer 'clojure.core)\n"
+               "(seon.schema/register! ::changed :string)\n"
+               "(defn direct [] :direct)\n"
+               "(eval '(defn indirect [] :indirect))\n"
+               "(eval '(clojure.test/deftest indirect-test "
+               "(clojure.test/is true)))\n"))
+    (let [rows (seon.fn/rows {:seon.fn/roots [root]})
+          by-identity (into {} (map (juxt seon.program/row-identity identity)) rows)
+          original-ns (get by-identity [:seon.ns/name 'audit.evaluated])]
+      (is (= "[:int]"
+             (:seon.schema/form
+              (get by-identity [:seon.schema/key :audit.evaluated/computed]))))
+      (is (= ":string"
+             (:seon.schema/form
+              (get by-identity [:seon.schema/key :audit.changed/changed]))))
+      (is (contains? by-identity [:seon.fn/sym "audit.changed/direct"]))
+      (is (contains? by-identity [:seon.fn/sym "audit.changed/indirect"]))
+      (is (contains? by-identity
+                     [:seon.test/sym "audit.changed/indirect-test"]))
+      (is (= #{'clojure.test 'seon.schema}
+             (:seon.ns/requires original-ns)))
+      (is (= #{{:seon.ns.alias/local 'schema
+                :seon.ns.alias/target-ns 'seon.schema}
+               {:seon.ns.alias/local 'test
+                :seon.ns.alias/target-ns 'clojure.test}}
+             (:seon.ns/aliases original-ns)))
+      (is (contains? (:seon.ns/imports original-ns)
+                     {:seon.ns.import/local 'String}))
+      (is (= 'audit.changed
+             (:seon.ns/name
+              (get by-identity [:seon.ns/name 'audit.changed])))))))
 
-(deftest unplaceable-test-declaration-is-refused-loudly
+(deftest inspection-cache-key-includes-source-and-loaded-dependencies
   (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "opaque_test.clj")]
-    (.mkdirs (.getParentFile file))
-    (spit file
-          (str "(ns opaque.test (:require [clojure.test]))\n"
-               "(in-ns (symbol \"opaque.test\"))\n"
-               "(clojure.test/deftest survives-indexing)\n"))
-    (let [failure (try
-                    (seon.fn/rows {:seon.fn/roots [root]})
-                    (catch clojure.lang.ExceptionInfo error error))
-          data (ex-data failure)]
-      (is (instance? clojure.lang.ExceptionInfo failure))
-      (is (= :seon.fn/index-refused (:seon.error/kind data)))
-      (is (str/ends-with? (:seon.fn/file data) "opaque_test.clj"))
-      (is (= 2 (:seon.fn/line data)))
-      (is (= 'clojure.core/in-ns
-             (:seon.fn/resolver-mutation data))))))
-
-(deftest build-admission-never-guesses-evaluated-bindings-or-schema-values
-  (doseq [[file-name source expected-line expected-operation]
-          [["alias.clj"
-            (str "(ns audit.alias)\n"
-                 "(alias 'schema 'seon.schema)\n"
-                 "(schema/register! ::x :int)\n")
-            2 'clojure.core/alias]
-           ["require_test.clj"
-            (str "(ns audit.require)\n"
-                 "(require (if true '[clojure.test :refer [deftest]] "
-                 "'[clojure.set]))\n"
-                 "(deftest lost)\n")
-            2 'clojure.core/require]
-           ["computed.clj"
-            (str "(ns audit.computed (:require [seon.schema :as schema]))\n"
-                 "(schema/register! ::x (vector :int))\n")
-            2 nil]]]
-    (let [root (str "tmp/fn-test/" (random-uuid))
-          file (io/file root file-name)]
-      (.mkdirs (.getParentFile file))
-      (spit file source)
-      (let [failure (try
-                      (seon.fn/rows {:seon.fn/roots [root]})
-                      (catch clojure.lang.ExceptionInfo error error))
-            data (ex-data failure)]
-        (is (= :seon.fn/index-refused (:seon.error/kind data)))
-        (is (= expected-line (:seon.fn/line data)))
-        (is (str/ends-with? (:seon.fn/file data) file-name))
-        (if expected-operation
-          (is (= expected-operation (:seon.fn/resolver-mutation data)))
-          (is (= :audit.computed/x (:seon.schema/key data))))))))
-
-(deftest literal-schema-source-is-stored-as-its-evaluated-canonical-value
-  (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "literal.clj")]
-    (.mkdirs (.getParentFile file))
-    (spit file
-          (str "(ns audit.literal (:require [seon.schema :as schema]))\n"
-               "(schema/register! ::predicate 'clojure.core/string?)\n"))
-    (let [row (some #(when (:seon.schema/key %) %)
-                    (seon.fn/rows {:seon.fn/roots [root]}))]
-      (is (= :audit.literal/predicate (:seon.schema/key row)))
-      (is (= "clojure.core/string?" (:seon.schema/form row))))))
-
-(deftest executable-nested-declaration-is-refused-loudly
-  (let [root (str "tmp/fn-test/" (random-uuid))
-        file (io/file root "nested.clj")]
-    (.mkdirs (.getParentFile file))
-    (spit file "(ns nested)\n(do (defn hidden [n] n))\n")
-    (let [failure (try
-                    (seon.fn/rows {:seon.fn/roots [root]})
-                    (catch clojure.lang.ExceptionInfo error error))
-          data (ex-data failure)]
-      (is (instance? clojure.lang.ExceptionInfo failure))
-      (is (= :seon.fn/index-refused (:seon.error/kind data)))
-      (is (str/ends-with? (:seon.fn/file data) "nested.clj"))
-      (is (= [{:seon.fn/line 2
-               :seon.fn/source "(do (defn hidden [n] n))"
-               :seon.fn/reason :seon.fn/nested-executable-declaration
-               :seon.fn/declarations 1}]
-             (:seon.fn/unadmitted data))))))
+        source (io/file root "source.clj")
+        dependency (io/file root "dependency.clj")
+        request {:seon.fn/roots [root]}
+        digest (fn [] (#'seon.fn/content-digest request))]
+    (.mkdirs (.getParentFile source))
+    (spit source "(ns cache.source)\n(defn value [] 1)\n")
+    (spit dependency "(ns cache.dependency)\n(defn value [] 1)\n")
+    (with-redefs-fn
+      {#'seon.fn/source-files
+       (fn [roots]
+         (if (some #{"src"} roots)
+           [source dependency]
+           [source]))}
+      (fn []
+        (let [initial (digest)]
+          (spit source "(ns cache.source)\n(defn value [] 2)\n")
+          (let [source-changed (digest)]
+            (is (not= initial source-changed))
+            (spit dependency
+                  "(ns cache.dependency)\n(defn value [] 2)\n")
+            (is (not= source-changed (digest)))))))))
 
 (deftest fresh-indexing-fills-canonical-namespace-stubs
   (test-support/with-database

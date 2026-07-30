@@ -439,24 +439,6 @@
                 (some #(namespace-changing-mention? % context)
                       (rest form))))))))
 
-(def ^:private evaluated-resolver-operations
-  ;; The finite resolver-mutating surface belongs here beside
-  ;; `next-reading-context`, not in each consumer. An `ns` declaration is the
-  ;; build grammar's one closed resolver form; standalone mutations require
-  ;; sequential evaluation and are marked for build admission to refuse.
-  '#{clojure.core/alias clojure.core/import clojure.core/in-ns
-     clojure.core/ns-unalias clojure.core/ns-unmap clojure.core/refer
-     clojure.core/require clojure.core/use})
-
-(defn- evaluated-resolver-dependency
-  [form context]
-  (when (seq? form)
-    (if (= 'do (first form))
-      (some #(evaluated-resolver-dependency % context) (rest form))
-      (let [operation (resolved-operation (first form) context)]
-        (when (contains? evaluated-resolver-operations operation)
-          operation)))))
-
 (defn- next-reading-context
   [{::keys [contexts] :as state} form]
   (let [operation (when (seq? form)
@@ -572,12 +554,6 @@
                   (when (::attribution? state) (::ns state))
                   (select-keys state [::ns ::aliases ::refers ::publics])
                   source)
-                 (when-let [operation
-                            (evaluated-resolver-dependency
-                             form
-                             (select-keys state
-                                          [::ns ::aliases ::refers]))]
-                   {::evaluated-resolver-dependency operation})
                  (when-let [nested
                             (seq
                              (nested-executable-declarations

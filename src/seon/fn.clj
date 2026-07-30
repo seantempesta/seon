@@ -2,6 +2,7 @@
   "Build-time indexing of the Clojure program graph through the one reader."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.program :as program]
@@ -27,176 +28,8 @@
   ;; private and uncontracted helpers, as input to the future call graph.
   (program/declaration-row event :all))
 
-(def ^:private not-literal (Object.))
-
-(defn- literal-value
-  "The value of syntax requiring no evaluation, or the private sentinel."
-  [form]
-  (cond
-    (and (seq? form) (= 'quote (first form)) (= 2 (count form)))
-    (second form)
-
-    (seq? form)
-    not-literal
-
-    (vector? form)
-    (let [values (mapv literal-value form)]
-      (if (some #(identical? not-literal %) values) not-literal values))
-
-    (map? form)
-    (reduce-kv
-     (fn [result key value]
-       (let [key (literal-value key)
-             value (literal-value value)]
-         (if (or (identical? not-literal key)
-                 (identical? not-literal value))
-           (reduced not-literal)
-           (assoc result key value))))
-     (empty form)
-     form)
-
-    (set? form)
-    (let [values (into #{} (map literal-value) form)]
-      (if (some #(identical? not-literal %) values) not-literal values))
-
-    (symbol? form)
-    not-literal
-
-    :else
-    form))
-
-(defn- build-admit-event
-  [file event]
-  (when-let [operation
-             (:seon.sci.reader/evaluated-resolver-dependency event)]
-    (throw
-     (ex-info
-      "Build indexing refuses evaluation-dependent namespace mutation."
-      {:seon.error/kind ::index-refused
-       :seon.fn/file (.getCanonicalPath ^java.io.File file)
-       ::line (:seon.sci.reader/line event)
-       ::source (:seon.sci.reader/source event)
-       ::resolver-mutation operation})))
-  (if-let [schema-key (:seon.schema/key event)]
-    (let [value (literal-value
-                 (nth (:seon.sci.reader/form event) 2 not-literal))]
-      (when (identical? not-literal value)
-        (throw
-         (ex-info
-          "Build indexing requires schema declarations to be literal data."
-          {:seon.error/kind ::index-refused
-           :seon.fn/file (.getCanonicalPath ^java.io.File file)
-           ::line (:seon.sci.reader/line event)
-           ::source (:seon.sci.reader/source event)
-           :seon.schema/key schema-key})))
-      ;; Build and runtime now serialize the same evaluated value. In
-      ;; particular, quoted predicate symbols lose their reader `quote` form.
-      (assoc event :seon.schema/form (pr-str value)))
-    event))
-
-(defn- unadmitted-declarations
-  "The declarations this file produced no durable identity for.
-
-  The reader records every recognized function, schema, and test occurrence
-  independently of row construction. An occurrence without an identity is a
-  declaration the index cannot place. Dropping it in silence is the defect —
-  a check reading absence of a row as health — and has previously erased both
-  functions and tests from the program graph."
-  [events]
-  (into []
-        (mapcat
-         (fn [event]
-           (cond-> []
-             (and (:seon.sci.reader/declaration-family event)
-                  (not (:seon.sci.reader/declaration-identity event)))
-             (conj {::line (:seon.sci.reader/line event)
-                    ::source (:seon.sci.reader/source event)
-                    ::family (:seon.sci.reader/declaration-family event)
-                    ::reason
-                    (case (:seon.sci.reader/declaration-refusal event)
-                      :seon.sci.reader/namespace-unproven
-                      ::namespace-unproven
-
-                      ::malformed-declaration)})
-
-             (seq (:seon.sci.reader/nested-declarations event))
-             (conj {::line (:seon.sci.reader/line event)
-                    ::source (:seon.sci.reader/source event)
-                    ::reason ::nested-executable-declaration
-                    ::declarations
-                    (count (:seon.sci.reader/nested-declarations event))}))))
-        events))
-
-(defn- read-source-events
-  [file source publics]
-  (let [events
-        (reader/read
-         {:seon.sci.reader/text source
-          :seon.sci.reader/features #{:clj}
-          :seon.sci.reader/publics publics
-          ;; Standard data literals are source data, not an escape hatch. The
-          ;; index needs their forms, never host objects.
-          :seon.sci.reader/tags {'inst identity
-                                 'uuid identity}})]
-    (when (map? events)
-      (throw (ex-info (:seon.error/message events)
-                      (assoc (:seon.error/data events)
-                             :seon.fn/file
-                             (.getCanonicalPath ^java.io.File file)))))
-    events))
-
-(defn- refer-all-publics
-  [source-units]
-  (let [source-publics
-        (reduce
-         (fn [publics {:keys [events]}]
-           (reduce
-            (fn [publics event]
-              (cond
-                (and (:seon.fn/sym event)
-                     (not (:seon.fn/private? event)))
-                (update publics
-                        (symbol (namespace (symbol (:seon.fn/sym event))))
-                        (fnil conj #{})
-                        (symbol (name (symbol (:seon.fn/sym event)))))
-
-                (:seon.test/sym event)
-                (update publics
-                        (symbol (namespace (symbol (:seon.test/sym event))))
-                        (fnil conj #{})
-                        (symbol (name (symbol (:seon.test/sym event)))))
-
-                :else publics))
-            publics
-            events))
-         {}
-         source-units)
-        targets
-        (into #{}
-              (mapcat (fn [{:keys [events]}]
-                        (mapcat :seon.sci.reader/refer-all-targets events)))
-              source-units)]
-    (reduce
-     (fn [publics target]
-       (if (seq (get publics target))
-         publics
-         (do
-           (require target)
-           (let [target-ns (find-ns target)]
-             (when-not target-ns
-               (throw
-                (ex-info
-                 "Source indexing could not resolve a :refer :all target."
-                 {:seon.error/kind ::index-refused
-                  :seon.ns/target target})))
-             (assoc publics target (set (keys (ns-publics target-ns))))))))
-     source-publics
-     targets)))
-
-(defn rows
-  "Canonical program rows read from the declared source roots."
-  {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :map]]}
-  [{roots :seon.fn/roots}]
+(defn- source-files
+  [roots]
   (let [files
         (into []
               (mapcat (fn [root]
@@ -205,32 +38,310 @@
                              (sort-by (fn [file]
                                         (.getCanonicalPath
                                          ^java.io.File file))))))
-              roots)
-        source-units
-        (mapv (fn [file]
-                (let [source (slurp file)]
-                  {:file file
-                   :source source
-                   :events (read-source-events file source {})}))
-              files)
-        publics (refer-all-publics source-units)]
-    (into
-     []
-     (comp
-      (mapcat
-       (fn [{:keys [file source]}]
-         (let [events (read-source-events file source publics)]
-           (let [events (mapv #(build-admit-event file %) events)]
-             (when-let [unadmitted (seq (unadmitted-declarations events))]
-               (throw
-                (ex-info
-                 "Source indexing could not place a declaration."
-                 {:seon.error/kind ::index-refused
-                  :seon.fn/file (.getCanonicalPath ^java.io.File file)
-                  ::unadmitted (vec unadmitted)})))
-             events))))
-      (keep durable-row))
-     source-units)))
+              roots)]
+    files))
+
+(defn- actual-reader-context
+  [namespace-object]
+  {:seon.sci.reader/ns (ns-name namespace-object)
+   :seon.sci.reader/aliases
+   (into {}
+         (map (fn [[local target]] [local (ns-name target)]))
+         (ns-aliases namespace-object))
+   :seon.sci.reader/refers
+   (into {}
+         (keep (fn [[local target]]
+                 (let [{target-ns :ns target-name :name} (meta target)]
+                   (when (and target-ns
+                              (not= 'clojure.core (ns-name target-ns)))
+                     [local (symbol (str (ns-name target-ns))
+                                    (str target-name))]))))
+         (ns-refers namespace-object))})
+
+(defonce ^:private inspected-rows (atom {}))
+
+(def ^:private default-jvm-imports
+  (let [name (symbol (str "seon.fn.jvm-defaults." (random-uuid)))
+        namespace-object (create-ns name)]
+    (try
+      (ns-imports namespace-object)
+      (finally
+        (remove-ns name)))))
+
+(defn- namespace-row
+  [namespace-object source]
+  (let [{namespace-name :seon.sci.reader/ns
+         aliases :seon.sci.reader/aliases
+         refers :seon.sci.reader/refers}
+        (actual-reader-context namespace-object)
+        imports
+        (let [current (ns-imports namespace-object)]
+          (into {}
+                (concat
+                 (keep (fn [[local target]]
+                         (when-not (= target (get default-jvm-imports local))
+                           [local (symbol (.getName ^Class target))]))
+                       current)
+                 (keep (fn [[local _target]]
+                         (when-not (contains? current local)
+                           [local nil]))
+                       default-jvm-imports))))
+        target-namespaces (into #{} (concat (vals aliases)
+                                             (keep (comp symbol namespace)
+                                                   (vals refers))))]
+    (cond-> {:seon.ns/name namespace-name
+             :seon.ns/source source
+             :seon.ns/aliases
+             (into #{}
+                   (map (fn [[local target]]
+                          {:seon.ns.alias/local local
+                           :seon.ns.alias/target-ns target}))
+                   aliases)
+             :seon.ns/imports
+             (into #{}
+                   (map (fn [[local target-class]]
+                          (cond-> {:seon.ns.import/local local}
+                            target-class
+                            (assoc :seon.ns.import/target-class
+                                   target-class))))
+                   imports)
+             :seon.ns/refers
+             (into #{}
+                   (map (fn [[local target]]
+                          {:seon.ns.refer/local local
+                           :seon.ns.refer/target-ns
+                           (symbol (namespace target))
+                           :seon.ns.refer/target-name
+                           (symbol (name target))}))
+                   refers)}
+      (seq target-namespaces)
+      (assoc :seon.ns/requires target-namespaces))))
+
+(defn- var-state
+  [namespace-objects]
+  (into {}
+        (mapcat
+         (fn [namespace-object]
+           (map
+            (fn [[local var]]
+              (let [metadata (meta var)
+                    root (when (bound? var) @var)
+                    qualified (symbol (str (ns-name namespace-object))
+                                      (str local))]
+                [qualified
+                 {:var var
+                  :metadata metadata
+                  :root-identity (when root
+                                   (System/identityHashCode root))}]))
+            (ns-interns namespace-object))))
+        (distinct namespace-objects)))
+
+(defn- var-row
+  [qualified {:keys [var metadata]} source]
+  (let [namespace-name (some-> metadata :ns ns-name)
+        declaration-name (:name metadata)
+        qualified (if (and namespace-name declaration-name)
+                    (symbol (str namespace-name) (str declaration-name))
+                    qualified)]
+    (cond
+      (:test metadata)
+      {:seon.test/sym (str qualified)
+       :seon.test/ns [:seon.ns/name namespace-name]
+       :seon.test/source source}
+
+      (and (:arglists metadata)
+           (not (:macro metadata))
+           (bound? var)
+           (fn? @var))
+      (cond->
+       {:seon.fn/sym (str qualified)
+        :seon.fn/ns [:seon.ns/name namespace-name]
+        :seon.fn/source source
+        :seon.fn/arglists (pr-str (:arglists metadata))
+        :seon.fn/private? (boolean (:private metadata))}
+        (:doc metadata) (assoc :seon.fn/doc (:doc metadata))
+        (:malli/schema metadata)
+        (assoc :seon.fn/spec (pr-str (:malli/schema metadata)))
+        (contains? #{:io :compute} (:seon.workload metadata))
+        (assoc :seon.fn/workload (:seon.workload metadata)))
+
+      :else nil)))
+
+(defn- inspect-source-file
+  [file rows]
+  (let [eof (Object.)
+        canonical-path (.getCanonicalPath ^java.io.File file)]
+    (with-open [input (clojure.lang.LineNumberingPushbackReader.
+                       (io/reader file))]
+      (binding [*file* canonical-path
+                *ns* (the-ns 'user)
+                *read-eval* false]
+        (loop [schemas (schema/registered-schemas)]
+          (let [starting-ns *ns*
+                vars (var-state [starting-ns])
+                context (actual-reader-context starting-ns)
+                [form source]
+                (read+string {:eof eof
+                              :read-cond :allow
+                              :features #{:clj}}
+                             input)]
+            (when-not (identical? eof form)
+              (let [events
+                    (reader/read
+                     (merge context
+                            {:seon.sci.reader/text source
+                             :seon.sci.reader/features #{:clj}
+                             :seon.sci.reader/tags {'inst identity
+                                                    'uuid identity}}))]
+                (when (map? events)
+                  (throw
+                   (ex-info (:seon.error/message events)
+                            (assoc (:seon.error/data events)
+                                   :seon.fn/file canonical-path))))
+                (let [event (first events)]
+                  (eval form)
+                  (let [next-schemas (schema/registered-schemas)
+                        next-vars (var-state [starting-ns *ns*])
+                        changed-schemas
+                        (into []
+                              (keep (fn [[schema-key definition]]
+                                      (when (not= definition
+                                                  (get schemas schema-key))
+                                        {:seon.schema/key schema-key
+                                         :seon.schema/form
+                                         (pr-str definition)})))
+                              next-schemas)]
+                    (when-let [row (some-> event durable-row)]
+                      (when (:seon.ns/name row)
+                        (swap! rows assoc (program/row-identity row) row)))
+                    (doseq [namespace-object (distinct [starting-ns *ns*])
+                            :when (not= 'user (ns-name namespace-object))]
+                      (let [identity [:seon.ns/name
+                                      (ns-name namespace-object)]
+                            observed (namespace-row namespace-object source)
+                            existing (get @rows identity)]
+                        (swap! rows assoc identity
+                               (merge existing observed
+                                      (when existing
+                                        {:seon.ns/source
+                                         (:seon.ns/source existing)
+                                         :seon.ns/requires
+                                         (into (or (:seon.ns/requires existing)
+                                                   #{})
+                                               (:seon.ns/requires observed))})))))
+                    (doseq [[qualified state] next-vars
+                            :when (and (not= state (get vars qualified))
+                                       (= canonical-path
+                                          (:file (:metadata state))))]
+                      (when-let [row (var-row qualified state source)]
+                        (swap! rows assoc (program/row-identity row) row)))
+                    (doseq [[qualified state] vars
+                            :when (and (not (contains? next-vars qualified))
+                                       (= canonical-path
+                                          (:file (:metadata state))))]
+                      (swap! rows dissoc [:seon.fn/sym (str qualified)])
+                      (swap! rows dissoc [:seon.test/sym (str qualified)]))
+                    (doseq [row changed-schemas]
+                      (swap! rows assoc (program/row-identity row) row))
+                    (doseq [schema-key
+                            (set/difference (set (keys schemas))
+                                            (set (keys next-schemas)))]
+                      (swap! rows dissoc [:seon.schema/key schema-key]))
+                    (recur next-schemas)))))))))))
+
+(defn- inspect-rows!
+  [request output-path]
+  (let [rows
+        (atom
+         (into {}
+               (map (fn [[schema-key definition]]
+                      [[:seon.schema/key schema-key]
+                       {:seon.schema/key schema-key
+                        :seon.schema/form (pr-str definition)}]))
+               (schema/registered-schemas)))]
+    (try
+      (doseq [file (source-files (:seon.fn/roots request))]
+        (inspect-source-file file rows))
+      (spit output-path (pr-str {:seon.fn/rows (vec (vals @rows))}))
+      (catch Throwable error
+        (spit output-path
+              (pr-str {:seon.error/message (or (ex-message error)
+                                               (str error))
+                       :seon.error/data
+                       (merge {:seon.error/kind ::index-refused}
+                              (ex-data error))}))
+        (throw error)))))
+
+(defn- content-digest
+  [request]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")
+        files (source-files
+               (distinct (conj (:seon.fn/roots request) "src")))]
+    (doseq [value (concat [(System/getProperty "java.class.path")]
+                          (mapcat (fn [file]
+                                    [(.getCanonicalPath ^java.io.File file)
+                                     (slurp file)])
+                                  files))]
+      (.update digest (.getBytes (str value) java.nio.charset.StandardCharsets/UTF_8))
+      (.update digest (byte-array [(byte 0)])))
+    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+
+(defn- isolated-rows
+  [request]
+  (let [directory (io/file "tmp" "program-index")
+        digest (content-digest request)
+        id (str (random-uuid))
+        request-file (io/file directory (str id ".request.edn"))
+        output-file (io/file directory (str id ".result.edn"))
+        java (io/file (System/getProperty "java.home") "bin" "java")]
+    (.mkdirs directory)
+    (spit request-file
+          (pr-str (select-keys request [:seon.fn/roots])))
+    (try
+      (if-let [cached (get @inspected-rows digest)]
+        cached
+        (let [process
+            (.start
+             (doto
+              (ProcessBuilder.
+               ^java.util.List
+               [(.getCanonicalPath java)
+                "-cp" (System/getProperty "java.class.path")
+                "clojure.main" "-m" "seon.fn"
+                "--inspect" (.getCanonicalPath request-file)
+                (.getCanonicalPath output-file)])
+               (.redirectErrorStream true)))
+            output (slurp (.getInputStream process))
+            exit (.waitFor process)
+            result (when (.isFile output-file)
+                     (edn/read-string (slurp output-file)))]
+        (when (or (not (zero? exit)) (:seon.error/message result))
+          (throw
+           (ex-info
+            (or (:seon.error/message result)
+                "Isolated program inspection failed.")
+            (merge {:seon.error/kind ::index-refused
+                    ::inspector-output output
+                    ::inspector-exit exit}
+                   (:seon.error/data result)))))
+          (let [rows (:seon.fn/rows result)]
+            (swap! inspected-rows assoc digest rows)
+            rows)))
+      (finally
+        (.delete request-file)
+        (.delete output-file)))))
+
+(defn rows
+  "Canonical program rows produced by isolated sequential source evaluation."
+  {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :map]]}
+  [request]
+  (isolated-rows request))
+
+(defn -main
+  [& [operation request-path output-path]]
+  (when-not (= "--inspect" operation)
+    (throw (ex-info "Unknown seon.fn operation." {::operation operation})))
+  (inspect-rows! (edn/read-string (slurp request-path)) output-path))
 
 (defn- row-identity
   [row]
@@ -286,6 +397,10 @@
           (update :seon.ns/aliases
                   #(into #{} (map component-binding) %))
 
+          (contains? row :seon.ns/imports)
+          (update :seon.ns/imports
+                  #(into #{} (map component-binding) %))
+
           (contains? row :seon.ns/refers)
           (update :seon.ns/refers
                   #(into #{} (map component-binding) %))
@@ -299,6 +414,7 @@
         (or (nil? value)
             (and (contains? #{:seon.ns/requires
                               :seon.ns/aliases
+                              :seon.ns/imports
                               :seon.ns/refers}
                             attribute)
                  (empty? value)))))
@@ -338,6 +454,10 @@
                  [:db/id
                   :seon.ns.alias/local
                   :seon.ns.alias/target-ns]}
+                {:seon.ns/imports
+                 [:db/id
+                  :seon.ns.import/local
+                  :seon.ns.import/target-class]}
                 {:seon.ns/refers
                  [:db/id
                   :seon.ns.refer/local
@@ -356,6 +476,7 @@
             ::process-id (get provenance entity)
             ::row (canonical-row db row)
             ::alias-eids (into [] (keep :db/id) (:seon.ns/aliases row))
+            ::import-eids (into [] (keep :db/id) (:seon.ns/imports row))
             ::refer-eids (into [] (keep :db/id) (:seon.ns/refers row))}])))
      (d/q '[:find ?entity ?identity
             :in $ ?identity-attr
@@ -390,7 +511,7 @@
   (let [identity-attr (:seon.program/identity-attribute shape)
         current-row (::row current)
         changed-attrs (program/changed-attributes current-row desired)
-        binding-attrs #{:seon.ns/aliases :seon.ns/refers}]
+        binding-attrs #{:seon.ns/aliases :seon.ns/imports :seon.ns/refers}]
     (when (seq changed-attrs)
       (let [edge-retracts
             (into []
@@ -398,6 +519,8 @@
                   (concat
                    (when (some #{:seon.ns/aliases} changed-attrs)
                      (::alias-eids current))
+                   (when (some #{:seon.ns/imports} changed-attrs)
+                     (::import-eids current))
                    (when (some #{:seon.ns/refers} changed-attrs)
                      (::refer-eids current))))
             retracts

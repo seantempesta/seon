@@ -221,19 +221,27 @@ acquisition, explicit import addition, and a real cluster stop/reopen now recur
 through the one binding-fact mechanism. Maintained SCI passes 40 tests / 160
 assertions / 0 failures / 0 errors on both supported Clojure versions.
 
-The build-index lane closes the other two re-audit findings with an explicit
-shared admission domain. `seon.sci.reader` now owns the one fact that a
-standalone resolver mutation requires evaluated state; `seon.fn` consumes that
-fact and refuses the form instead of maintaining another resolver-operation
-list or guessing its result. Build schemas admit literal data only and persist
-the literal's canonical value, so quoted values match runtime and computed
-forms refuse loudly. The independent census compares exact schema key + form,
-not family counts alone. Archaeology rejected the old static scanner family
-(`0c22f8363` / `d7cd70bdd`) and retained the old lesson that analyzer state and
-evaluated registry values are the authorities (`87ac3f9c6`, `d33b29cf9`,
-`56ed96dd9`). Focused build/reader/program proof: 32 tests / 263 assertions /
-0 failures / 0 errors. Integrated adversarial review remains the wave
-boundary.
+The final audit falsified that build admission: its finite direct-operation set
+was another hand list, and `eval`/`apply` could mutate aliases or the current
+namespace before a silently misattributed declaration. Build indexing now runs
+the source inventory in one isolated JVM, reading and evaluating forms
+sequentially with Clojure's actual namespace state. It diffs evaluated global
+schema forms and actual namespace Vars after each form, so computed schemas,
+indirect function/test definitions, aliases, imports, refers, and `in-ns`
+attribution use the same state that compilation produced. Process isolation
+contains top-level namespace/schema/test effects; a content-keyed process-local
+cache makes repeated identical populations ordinary map reads without risking
+stale results across JVMs.
+
+This is the prior platform's surviving design rather than a new scanner:
+`87ac3f9c6` made analyzer state authoritative, `d33b29cf9` diffed evaluated
+definitions and registry values, and `56ed96dd9` repaired computed cold-boot
+schema parity. The discarded static scanner family remains `0c22f8363` /
+`d7cd70bdd`. The narrow recurring counterexample covers `eval`/`apply` alias
+mutation, computed schemas, evaluated `in-ns`, direct and evaluated function
+registration, evaluated test registration, and the explicit JVM default-import
+nil mask. It passes with one child inspector; production `src`+`test` census
+and cold/cached timing remain the integrated wave boundary.
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 
