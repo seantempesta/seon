@@ -4,9 +4,9 @@
   The model — BRANCH-PER-CLUSTER (b2-plan §0 verdict, owner-adopted):
 
   - One physical store per process root; a cluster is a BRANCH of it.
-    Branch-off is 17 ms and one blob (b2-plan §0.5), so the ancestor's
-    bytes are stored ONCE for every cluster that descends from it, on
-    any backend.
+    Branch-off is 17 ms and one blob (b2-plan §0.5), so the published
+    source bytes are stored ONCE for every cluster that descends from
+    them, on any backend.
   - Two branches share exactly ONE mutable durable key, `:branches`,
     and only on create/delete: a commit writes content-addressed values
     and then the branch's OWN head
@@ -125,6 +125,18 @@
   [konserve key]
   (k/get konserve key nil {:sync? true}))
 
+(defn branch-commit-id
+  "The commit ID currently named by a branch, or nil when absent."
+  {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
+                  [:maybe :seon.source/commit-id]]}
+  [{:keys [:seon.store/store :seon.store/branch]}]
+  (get-in (head-record (konserve-store store) branch)
+          [:meta :datahike/commit-id]))
+
+(defn- commit-present?
+  [store commit-id]
+  (some? (head-record (konserve-store store) commit-id)))
+
 (defn- branch-connected?
   "True when THIS process already holds a connection to `branch`.
   The same `[store-id branch]` connection-id lookup `open-branch!` uses
@@ -221,53 +233,54 @@
           (throw failure))))))
 
 (defn ensure-cluster!
-  "Ensure `:cluster-<name>` exists, branching from the ancestor if absent.
+  "Ensure `:cluster-<name>` exists at the requested source commit.
   Idempotent by the roster: a second call returns
   `::created? false` and writes nothing. Concurrent calls from N
   threads produce N branches and zero orphans — the fork's serialized
   roster mutation is what makes that true, and it is a standing
   regression, not an assumption.
-  Refuses `::ancestor-absent` (`:seon.ancestor/branch` is not in the
-  roster — a cluster is never silently branched from `:db`)."
+  The source is an exact immutable commit ID, so publication can advance
+  while this operation still forks the database value its caller chose.
+  Refuses `::source-absent` when that commit is unavailable."
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
-    ancestor :seon.ancestor/branch}]
-  (when-not (contains? (roster store) ancestor)
-    (refuse! ::ancestor-absent
-             (str "the ancestor branch " ancestor
-                  " is absent from the store roster")
+    source-commit :seon.source/commit-id}]
+  (when-not (commit-present? store source-commit)
+    (refuse! ::source-absent
+             (str "the source commit " source-commit " is unavailable")
              {::dir (:seon.store/dir store)
-              :seon.ancestor/branch ancestor
+              :seon.source/commit-id source-commit
               :seon.boot/cluster-name cluster-name}))
   (branch! {:seon.store/store store
-            :seon.cluster.registry/from ancestor
+            :seon.cluster.registry/from source-commit
             :seon.store/branch (cluster-branch cluster-name)}))
 
 (defn reset-cluster!
-  "Return a cluster to ancestor state: retire its branch, branch it again.
+  "Return a cluster to an exact source commit.
   This is L18 exactly — reset to current code and pages, never migrate
   — and it is `delete-branch!` + `branch!`, NEVER `delete-database`
   (b2-plan §0.6 condition 2). The old tail becomes unreachable and the
-  next `collect!` reclaims it; siblings and the ancestor are untouched
+  next `collect!` reclaims it; siblings and the source branch are untouched
   by construction (§0.7).
   Always returns `::created? true`: the branch after the call is new.
   Refuses `::cluster-connected` (this process still holds a connection
   to that branch — Datahike refuses too at
   `versioning.cljc:279-288`, but we refuse EARLIER and by name) and
-  `::ancestor-absent`."
+  `::source-absent`."
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
-    ancestor :seon.ancestor/branch
+    source-commit :seon.source/commit-id
     :as request}]
   (let [branch (cluster-branch cluster-name)]
-    (when-not (contains? (roster store) ancestor)
-      (refuse! ::ancestor-absent
-               (str "the ancestor branch " ancestor
-                    " is absent from the store roster")
+    ;; Refuse before retiring the existing cluster. A bad requested commit
+    ;; must never turn a reset attempt into data loss.
+    (when-not (commit-present? store source-commit)
+      (refuse! ::source-absent
+               (str "the source commit " source-commit " is unavailable")
                {::dir (:seon.store/dir store)
-                :seon.ancestor/branch ancestor
+                :seon.source/commit-id source-commit
                 :seon.boot/cluster-name cluster-name}))
     (retire-branch! {:seon.store/store store :seon.store/branch branch})
     (ensure-cluster! request)))

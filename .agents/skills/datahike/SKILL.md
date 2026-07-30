@@ -196,16 +196,44 @@ complete shipped decision document; it is data, not another schema list.
 
 ### Source indexing and runtime publication have explicit admission
 
-Source indexing records every directly read top-level `defn` and `defn-`,
-including private and uncontracted helpers (`src/seon/fn.clj:24-28,57-94`;
-`src/seon/program.cljc:93-125`). An executable top-level `do` containing a
-declaration is refused with source evidence rather than silently omitted
-(`src/seon/sci/reader.cljc:302-319,423-429`; `src/seon/fn.clj:49-54,84-91`).
-Graph reachability is `[TARGET]`. Runtime publication admits only fully
-contracted agent-authored functions, plus admitted schema and test declarations
-(`src/seon/sci/eval.clj:317-339`). Arbitrary evals, scratch defs, and atoms
-remain process-local. Receipts preserve history but never reconstruct code.
-Never turn this producer policy into a stored durability flag.
+Build indexing statically analyzes the JVM projection of first-party `src/`
+and `test/` through clj-kondo and exact source locations. It records every
+function/test definition—including private and uncontracted helpers—without
+evaluating application forms. Classpath caches are resolution context only;
+external definitions never become Seon rows. Global schema rows come from the
+admitted schema EDN population, not namespace ownership
+(`src/seon/fn/analyzer.clj`; `src/seon/fn.clj`). Runtime publication remains
+stricter: it admits only fully contracted agent-authored functions plus
+admitted schema and test declarations, with schema changes isolated until the
+terminal commit (`src/seon/sci/eval.clj:320-345,793-825`). Arbitrary evals,
+scratch defs, and atoms remain process-local. Receipts preserve history but
+never reconstruct code.
+
+### Global schema replacement and removal
+
+Schemas are globally identified by `:seon.schema/key`, never owned by the
+namespace where registration happened. Runtime `schema/unregister!` only
+stages removal inside the current evaluation delta
+(`src/seon/schema.cljc:1089-1108`). Seon's terminal transaction refuses
+replacement or removal while any directly or transitively affected Datahike
+attribute—including an entity schema's child attributes—has current datoms.
+Removal also refuses while another schema or function contract depends on the
+key. After current datoms and dependencies are retracted, the operation may
+commit atomically with the program row and derived Datahike declarations
+(`src/seon/schema.cljc:1907-1935`;
+`src/seon/cluster/run.cljc:562-730`;
+`test/seon/schema_usage_guard_test.clj:80-397`).
+
+The maintained Datahike fork independently refuses indexed schema-attribute
+removal while its current AEVT is nonempty
+(`reference-code/datahike/src/datahike/db/transaction.cljc:195-315`). With
+history enabled, later retraction and schema removal preserve ordinary temporal
+datoms. Historical simulation pairs an `as-of` database value with Seon's
+historical global schema rows at that same basis to rebuild the Malli
+projection; Datahike's physical schema map delegates to the current origin and
+does not time-travel. `:seon.db/no-history? true` intentionally removes old
+values and is the explicit exception
+(`docs/prds/sci-execution-runtime/research/schema-removal-history-probe-2026-07-30.md`).
 
 ### Bridge derivation (live-verified)
 
@@ -406,8 +434,11 @@ entities carry it. Check before inventing an attr.
   int-returning calls must be `(long …)` before they are transacted, or you get
   `Bad entity value … Must be conform to: (= (class %) java.lang.Long)`
   (REPL-verified 2026-07-27).
-- **Schema evolution** — add attrs any time; you cannot change an existing
-  attr's value type, and adding uniqueness fails if duplicates exist.
+- **Schema evolution** — use Seon's global schema lifecycle, never raw
+  Datahike schema surgery. Nonidentical change/removal refuses while affected
+  current datoms or contract dependencies exist; after retraction it may
+  commit. Adding uniqueness still fails if duplicates exist. Ordinary history
+  survives; `no-history` values intentionally do not.
 
 ## Transaction metadata — two durable provenance refs
 
@@ -473,7 +504,7 @@ sanctioned alternative to polling or a tuned timeout.
 | `src/seon/schema/datahike.cljc` | the Malli→Datahike bridge (extend it here) |
 | `src/seon/cluster/run.cljc` | EXEMPLAR: identity, refs, in-transaction transitions |
 | `test/seon/cluster/run_test.clj` | the fixture + how to assert commit and refusal |
-| `src/seon/fn.clj` | direct top-level source inventory: functions, schemas, tests |
+| `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |

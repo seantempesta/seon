@@ -38,3 +38,20 @@
   {:malli/schema [:=> [:cat :string] [:int {:min 0}]]}
   [text]
   (quot (count text) chars-per-token))
+
+(defn estimate-chars
+  "Estimate the character capacity of a token budget."
+  {:malli/schema [:=> [:cat [:int {:min 0}]] [:int {:min 0}]]}
+  [token-budget]
+  (* token-budget chars-per-token))
+
+(defn clip-str
+  "Clip `text` to a token budget and mark a cut with `…`."
+  {:malli/schema
+   [:=> [:cat [:or :nil :string] [:int {:min 0}]] :string]}
+  [text token-budget]
+  (let [text (str text)
+        character-limit (estimate-chars token-budget)]
+    (if (> (count text) character-limit)
+      (str (subs text 0 character-limit) "…")
+      text)))

@@ -14,6 +14,11 @@
  ;; maintained forks are vendored in reference-code/ and read, not guessed.
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
         metosin/malli {:mvn/version "0.20.0"}
+        clj-kondo/clj-kondo
+        {:local/root "reference-code/clj-kondo"
+         ;; Both coordinates publish the same parser namespaces. Datahike's
+         ;; maintained org.replikativ coordinate is the application owner.
+         :exclusions [io.replikativ/datalog-parser]}
         ;; Flow is published from core.async's dev-flow-alpha branch under
         ;; the same artifact as core.async; alpha3 adds :ping-map-fn.
         org.clojure/core.async {:mvn/version "1.10.874-alpha3"}

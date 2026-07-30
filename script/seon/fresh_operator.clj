@@ -1,9 +1,9 @@
 (ns seon.fresh-operator
   "The thin advertisement-derived operator for the fresh JVM system."
-  (:refer-clojure :exclude [reset!])
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.dev.clj-kondo :as dev.kondo])
   (:import [java.io PushbackReader]
            [java.net InetSocketAddress ServerSocket Socket]
            [java.time Instant]
@@ -15,7 +15,7 @@
 (def ^:private prepl-connect-ms 3000)
 (def ^:private prepl-eval-ms 30000)
 (def ^:private log-name "seon.log")
-(def ^:private source-result-prefix "SEON-SOURCE-RESULT ")
+(def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private detach-python
   (str "import subprocess,sys\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
@@ -175,6 +175,38 @@
                  (assoc selected
                         :seon.fresh-operator/name
                         (valid-name! argument))))))))
+
+(defn- parse-init-arguments
+  [arguments]
+  (if (= "--changed" (first arguments))
+    (let [paths (vec (rest arguments))]
+      (when (or (empty? paths) (some str/blank? paths))
+        (fail! "Use `init --changed PATH...`."
+               {:seon.fresh-operator/arguments arguments}))
+      {:seon.fresh-operator/changed-paths paths
+       :seon.fresh-operator/force? false})
+    (case (count arguments)
+      0
+      {:seon.fresh-operator/force? false}
+
+      1
+      (let [name (first arguments)]
+        (when (= "--force" name)
+          (fail! "Use `init [NAME [--force]]`."
+                 {:seon.fresh-operator/arguments arguments}))
+        {:seon.fresh-operator/name (valid-name! name)
+         :seon.fresh-operator/force? false})
+
+      2
+      (let [[name option] arguments]
+        (when-not (= "--force" option)
+          (fail! "Use `init [NAME [--force]]`."
+                 {:seon.fresh-operator/arguments arguments}))
+        {:seon.fresh-operator/name (valid-name! name)
+         :seon.fresh-operator/force? true})
+
+      (fail! "Use `init`, `init --changed PATH...`, or `init NAME [--force]`."
+             {:seon.fresh-operator/arguments arguments}))))
 
 (defn- sparse-manifest
   [root path]
@@ -1161,45 +1193,93 @@
                              (config-apply-form name manifest)))]
     (println (str "● " name " config applied " result))))
 
-(defn- instance-form
-  [name operation]
-  (pr-str
-   `(do
-      (require 'seon.cluster)
-      (let [instances# @@(ns-resolve 'seon.cluster
-                                     (symbol "running-instances"))
-            instance# (get instances# ~name)]
-        (when-not (map? instance#)
-          (throw
-           (ex-info
-            (str "Cluster `" ~name
-                 "` has no addressable instance in this JVM.")
-            {:seon.boot/cluster-name ~name})))
-        (~operation instance#)))))
+(defn- named-init-form
+  [name force?]
+  (let [store (gensym "store")
+        source (gensym "source")
+        instance (gensym "instance")
+        branch (gensym "branch")
+        request (gensym "request")
+        operation
+        (if force?
+          `(if (map? ~instance)
+             (seon.cluster/reset! ~instance)
+             (seon.cluster.registry/reset-cluster! ~request))
+          `(seon.cluster.registry/ensure-cluster! ~request))]
+    `(fn [~store ~source ~instance]
+       (let [~branch (seon.cluster.registry/cluster-branch ~name)
+             ~request {:seon.store/store ~store
+                       :seon.boot/cluster-name ~name
+                       :seon.source/commit-id
+                       (:seon.source/commit-id ~source)}]
+         (when (and (not ~force?)
+                    (contains? (seon.cluster.registry/roster ~store) ~branch))
+           (throw
+            (ex-info
+             (str "Cluster `" ~name
+                  "` already exists; use `init " ~name
+                  " --force` to destroy and refork it.")
+             {:seon.fresh-operator/name ~name
+              :seon.store/branch ~branch})))
+         (assoc ~source
+                :seon.fresh-operator/cluster
+                ~operation)))))
 
-(defn- program-command-row!
-  [root arguments]
-  (let [name (valid-name! (first arguments))
-        truth (reconciled-truth! root)
-        row (require-live-row! truth name)
-        advertisement
-        (or (:seon.fresh-operator/transport-advertisement row)
-            (fail!
-             (str "Cluster " name
-                  " has no reachable REPL for explicit source indexing.")
-             {:seon.fresh-operator/name name}))]
-    [name advertisement]))
+(defn- init-form
+  [root name force? changed-paths source-process?]
+  (let [cluster-root (str (cluster-root root))
+        changed-paths (mapv #(str (if (fs/absolute? (fs/path %))
+                                    (fs/path %)
+                                    (fs/path root %)))
+                            changed-paths)
+        operation
+        (cond
+          (seq changed-paths)
+          `(seon.cluster/refresh-source! ~cluster-root ~changed-paths)
 
-(defn- baseline-form
-  [root emit-process-result?]
-  (let [operation
-        `(seon.cluster/refresh-baseline!
-          ~(str (cluster-root root)))]
+          (not name)
+          `(seon.cluster/refresh-source! ~cluster-root)
+
+          source-process?
+          `(let [source# (seon.cluster/refresh-source! ~cluster-root)
+                 store#
+                 (seon.cluster.store/open-store!
+                  {:seon.store/dir ~(str (fs/path cluster-root "store"))})]
+             (try
+               (~(named-init-form name force?) store# source# nil)
+               (finally
+                 (seon.cluster.store/release-store! store#))))
+
+          :else
+          `(let [source# (seon.cluster/refresh-source! ~cluster-root)
+                 instances#
+                 @@(ns-resolve 'seon.cluster (symbol "running-instances"))
+                 store# (some :seon.store/store (vals instances#))]
+             (when-not store#
+               (throw
+                (ex-info "The live JVM has no process-root store." {})))
+             (~(named-init-form name force?)
+              store# source# (get instances# ~name))))]
     (pr-str
      `(do
-        (require 'seon.cluster)
-        ~(if emit-process-result?
-           `(println ~source-result-prefix (pr-str ~operation))
+        ;; The live JVM owns the process-root store lock. Reload only the
+        ;; source-analysis owner before asking that JVM to publish `current-src`;
+        ;; the running clusters and their program facts remain untouched.
+        (require 'seon.fn.analyzer :reload)
+        (require 'seon.fn :reload)
+        (require 'seon.cluster.source :reload)
+        (require 'seon.cluster
+                 'seon.cluster.registry
+                 'seon.cluster.store)
+        ~(if source-process?
+           `(println
+             ~init-result-prefix
+             (pr-str
+              (try
+                {:seon.fresh-operator/value ~operation}
+                (catch Throwable failure#
+                  {:seon.fresh-operator/message (ex-message failure#)
+                   :seon.fresh-operator/data (ex-data failure#)}))))
            operation)))))
 
 (defn- source-process-value!
@@ -1216,69 +1296,78 @@
         output (slurp (.getInputStream process))
         exit (.waitFor process)]
     (when-not (zero? exit)
-      (fail! "The source indexing JVM exited unsuccessfully."
+      (fail! "The initialization JVM exited unsuccessfully."
              {:seon.fresh-operator/exit exit
               :seon.fresh-operator/output output}))
     (or
      (some
       (fn [line]
-        (when (str/starts-with? line source-result-prefix)
-          (edn/read-string (subs line (count source-result-prefix)))))
+        (when (str/starts-with? line init-result-prefix)
+          (edn/read-string (subs line (count init-result-prefix)))))
       (str/split-lines output))
-     (fail! "The source indexing JVM returned no result."
+     (fail! "The initialization JVM returned no result."
             {:seon.fresh-operator/output output}))))
-
-(defn- refresh-baseline!
-  [root]
-  (let [truth (reconciled-truth! root)
-        result
-        (if-let [anchor (select-anchor truth)]
-          (terminal-value
-           (prepl-eval!
-            (:seon.fresh-operator/transport-advertisement anchor)
-            (baseline-form root false)))
-          (source-process-value! root (baseline-form root true)))]
-    (println (str "● baseline source index " result))))
-
-(defn- index!
-  [root arguments]
-  (case (count arguments)
-    0
-    (refresh-baseline! root)
-
-    1
-    (let [[name advertisement] (program-command-row! root arguments)
-          result
-          (terminal-value
-           (prepl-eval! advertisement
-                        (instance-form name 'seon.cluster/index!)))]
-      (println (str "● " name " source index " result)))
-
-    (fail! "Use `index` or `index CLUSTER`."
-           {:seon.fresh-operator/arguments arguments})))
 
 (declare stop-empty-jvm!)
 
-(defn- reset!
+(defn- init!
   [root arguments]
-  (when (> (count arguments) 1)
-    (fail! "Use `reset [CLUSTER]`."
-           {:seon.fresh-operator/arguments arguments}))
-  (let [truth (reconciled-truth! root)
-        name (select-destructive-name truth (first arguments) "reset")
-        row (require-live-row! truth name)
-        advertisement
-        (or (:seon.fresh-operator/transport-advertisement row)
-            (fail!
-             (str "Cluster " name
-                  " has no reachable REPL for destructive reset.")
-             {:seon.fresh-operator/name name}))
+  (let [{:seon.fresh-operator/keys [name force? changed-paths]}
+        (parse-init-arguments arguments)
+        dependency-cache (dev.kondo/ensure-dependency-cache! root)
+        _ (when (= :unavailable
+                   (:seon.dev.clj-kondo/status dependency-cache))
+            (fail! "The clj-kondo dependency cache could not be prepared."
+                   dependency-cache))
+        truth (reconciled-truth! root)
+        anchor (select-anchor truth)
+        live-target
+        (when name
+          (some #(when (and (:seon.fresh-operator/operator-root? %)
+                            (= name (:seon.fresh-operator/name %))
+                            (:seon.fresh-operator/registered? %))
+                   %)
+                truth))
         result
-        (terminal-value
-         (prepl-eval! advertisement
-                      (instance-form name 'seon.cluster/reset!)))]
-    (println (str "● " name " reset destroyed its old branch " result))
-    (stop-empty-jvm! root (:seon.boot/pid advertisement) name)))
+        (cond
+          anchor
+          (edn/read-string
+           (terminal-value
+            (prepl-eval!
+             (:seon.fresh-operator/transport-advertisement anchor)
+             (init-form root name force? changed-paths false))))
+
+          (seq changed-paths)
+          (fail! "Incremental source publication requires a running operator JVM."
+                 {:seon.fresh-operator/changed-paths changed-paths})
+
+          :else
+          (let [outcome
+                (source-process-value!
+                 root (init-form root name force? changed-paths true))]
+            (if-let [message (:seon.fresh-operator/message outcome)]
+              (fail! message (:seon.fresh-operator/data outcome))
+              (:seon.fresh-operator/value outcome))))
+        source-branch (:seon.source/branch result)
+        source-commit (:seon.source/commit-id result)
+        digest (:seon.source/digest result)]
+    (if name
+      (println (str "● " name
+                    (if force? " reforked " " forked ")
+                    (get-in result
+                            [:seon.fresh-operator/cluster
+                             :seon.store/branch])
+                    " from " source-branch
+                    " commit " source-commit
+                    " digest " digest))
+      (println (str "● " source-branch
+                    " commit " source-commit
+                    " digest " digest)))
+    (when (and force? live-target)
+      (stop-empty-jvm!
+       root
+       (get-in live-target [:seon.fresh-operator/process :seon.boot/pid])
+       name))))
 
 (defn- row-state
   [row]
@@ -1519,16 +1608,14 @@
     "                 start one cluster; absent cluster means default\n"
     "  config apply [CLUSTER] PATH\n"
     "                 reconcile one live cluster; absent cluster means default\n"
-    "  index\n"
-    "                 refresh the rolling baseline for future clusters;\n"
-    "                 unlike other single-cluster verbs, absent means baseline,\n"
-    "                 NOT the default cluster; existing clusters stay untouched\n"
-    "  index CLUSTER\n"
-    "                 preserve history and reconcile that cluster's\n"
-    "                 source-owned program facts\n"
-    "  reset [CLUSTER]\n"
-    "                 DESTROY history and refork from the current ancestor;\n"
-    "                 omit CLUSTER only when exactly one cluster exists\n"
+    "  init\n"
+    "                 publish and print the current-src branch + commit ID\n"
+    "  init --changed PATH...\n"
+    "                 incrementally publish safe changed source files;\n"
+    "                 fall back to one complete scratch publication\n"
+    "  init NAME [--force]\n"
+    "                 fork a dormant named cluster from current-src;\n"
+    "                 refuse an existing cluster unless --force destroys it\n"
     "  status         reconcile and list every cluster in this operator root\n"
     "  open [NAME]    open the advertised web URL\n"
     "  stop|down [--force] [NAME]\n"
@@ -1546,8 +1633,7 @@
       (case command
         "start" (start! root command-arguments)
         "config" (config! root command-arguments)
-        "index" (index! root command-arguments)
-        "reset" (reset! root command-arguments)
+        "init" (init! root command-arguments)
         "status" (status! root command-arguments)
         "open" (open! root command-arguments)
         "stop" (stop! root command-arguments)

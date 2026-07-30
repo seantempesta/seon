@@ -18,6 +18,9 @@
  :changed-tests
  {:enabled true}
 
+ :current-source
+ {:enabled true}
+
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every
  ;; review (edit a skill and the next review sees it — nothing is baked in),

@@ -49,6 +49,7 @@
             [seon.cluster.work :as work]
             [seon.error :as error]
             [seon.flow :as seon.flow]
+            [seon.fn.analyzer :as fn.analyzer]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.sci.admit :as admit]
@@ -62,6 +63,48 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+(defn lint-plan
+  "Replace only error-bearing source forms with flat lint refusals."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map {:closed true}
+      [:seon.ns/name :seon.ns/name]
+      [::namespace-row {:optional true} :map]
+      [::available-functions {:optional true} [:vector :map]]
+      [:seon.cluster.reply/sources :seon.cluster.reply/sources]]]
+    :seon.cluster.reply/sources]}
+  [{namespace-name :seon.ns/name
+    namespace-row ::namespace-row
+    available-functions ::available-functions
+    sources :seon.cluster.reply/sources}]
+  (mapv
+   (fn [source analyzed]
+     (let [findings (::fn.analyzer/findings analyzed)
+           errors (filterv #(= :error (::fn.analyzer/level %)) findings)]
+       (if (seq errors)
+         (assoc source
+                :seon.cluster.run.form/source
+                (pr-str
+                 (list
+                  'quote
+                  {:seon.error/kind ::lint-rejected
+                   :seon.error/message
+                   (str "Static analysis rejected this source form with "
+                        (count errors) " error finding(s).")
+                   :seon.error/data
+                   {:seon.cluster.run.form/source
+                    (:seon.cluster.run.form/source source)
+                    ::fn.analyzer/findings findings}})))
+         source)))
+   sources
+   (fn.analyzer/analyze-forms
+    {::fn.analyzer/namespace-name namespace-name
+     ::fn.analyzer/namespace-row namespace-row
+     ::fn.analyzer/available-functions available-functions
+     ::fn.analyzer/sources
+     (mapv :seon.cluster.run.form/source sources)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -695,24 +738,50 @@
                     (report :error 0))
             freeze!
             (fn [completion]
-              ;; the reply became a plan, or it did not: unchanged, and
-              ;; deliberately outside the attempt reduce — WHICH target
-              ;; answered stops mattering the moment one did. The frozen
-              ;; plan FACT is the stream terminal; no lossy channel value
-              ;; carries "done".
-              (let [sources
+              ;; The reply becomes one ordinal-preserving analyzed plan.
+              ;; Error-bearing forms compile to flat lint-refusal values;
+              ;; clean source stays byte-exact. This remains deliberately
+              ;; outside the attempt reduce — WHICH target answered stops
+              ;; mattering the moment one did. The frozen plan FACT is the
+              ;; stream terminal; no lossy channel value carries "done".
+              (let [namespace-name (sci.eval/agent-namespace agent-id)
+                    sources
                     (reply/sources (:seon.ai/text completion)
-                                   (sci.eval/agent-namespace agent-id))]
+                                   namespace-name)]
                 (if (:seon.error/kind sources)
                   (fail! sources)
-                  (let [outcome (store/transact!
+                  (let [namespace-row
+                        (d/pull @connection
+                                '[* {:seon.ns/aliases [*]}
+                                    {:seon.ns/imports [*]}
+                                    {:seon.ns/refers [*]}]
+                                [:seon.ns/name namespace-name])
+                        available-functions
+                        (mapv (fn [[sym private?]]
+                                {:seon.fn/sym sym
+                                 :seon.fn/private? private?})
+                              (d/q '[:find ?sym ?private
+                                     :where
+                                     [?function :seon.fn/sym ?sym]
+                                     [(get-else $ ?function
+                                                :seon.fn/private? false)
+                                      ?private]]
+                                   @connection))
+                        admitted-sources
+                        (lint-plan
+                         {:seon.ns/name namespace-name
+                          ::namespace-row namespace-row
+                          ::available-functions available-functions
+                          :seon.cluster.reply/sources sources})
+                        outcome (store/transact!
                                  connection
                                  (run/plan-tx
                                   {:seon.cluster.run/id run-id
                                    :seon.cluster.run/process process
                                    :seon.cluster.run/plan-digest
-                                   (digest sources)
-                                   :seon.cluster.run/sources sources}))]
+                                   (digest admitted-sources)
+                                   :seon.cluster.run/sources
+                                   admitted-sources}))]
                     (report (if (refused! cluster outcome now
                                           {:seon.cluster.agent/id agent-id
                                            :seon.cluster.run/id run-id})

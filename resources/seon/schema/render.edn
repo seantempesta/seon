@@ -19,7 +19,7 @@
  :seon.render/namespace :symbol
  ; The declaration. USUALLY a fully qualified symbol naming the
  ; projection fn, resolved LATE on every render so a re-`defn` takes
- ; effect with no re-registration — the proven `:seon.ancestor/populate`
+ ; effect with no re-registration — the proven `:seon.source/populate`
  ; / `:seon.cluster.loop/evaluate` / predicate-owner idiom.
  ;
  ; A SYMBOL, and only a symbol — because this schema is what the two

@@ -859,6 +859,23 @@ may reintroduce a shadow build into the dev feedback path.
   the shared reverse candidate index (identical queries collapse to
   identical attribute entries; only the tiny per-agent reference rows
   multiply) with plan→attribute derivation memoized by query form.
+  (30) ONE PUBLISHED `current-src` BRANCH + COMMIT ID (owner ruling
+  2026-07-30). The digest-named ancestor collection is unnecessary
+  machinery. There is one database branch containing the latest
+  successfully indexed first-party `src/` + `test/` program and global
+  schema rows. Normal edits analyze only changed files against
+  clj-kondo's dependency cache and advance that branch. Any removal,
+  incompatible schema transition, missing artifact, or uncertain
+  projection builds a complete scratch database value instead. The
+  maintained Datahike `force-branch!` atomically publishes the
+  completed value onto `current-src` with an expected-current-commit
+  guard; a failed or stale build leaves the previous head visible.
+  New clusters fork the published commit in approximately 17 ms.
+  Existing clusters are sovereign and never receive file edits.
+  `init NAME --force` remains the explicit destructive refork. The
+  word ancestor survives only as the ordinary database relationship
+  between a fork and its parent commit, not as an operator subsystem,
+  branch-naming scheme, or synchronization promise.
   (29) ONE REAL SKILLS DIRECTORY, LINKED — NOT THREE COPIES WITH A
   CHECKER (owner-prompted, 2026-07-29 evening: "okay so we copy them?
   what's the problem?"). The copying was never the problem; the
@@ -886,7 +903,8 @@ may reintroduce a shadow build into the dev feedback path.
   skills for capabilities the agent already has natively — the browser
   skill duplicated built-in browser instructions and was noise at
   best; it is DELETED.
-  (28) A CLUSTER MUST BE PRIMED WITH THE CODE GRAPH; A STALE ONE IS
+  (28) **SUPERSEDED IN ITS BASELINE/PRIMING MECHANICS BY RULING 30.** A
+  CLUSTER MUST BE PRIMED WITH THE CODE GRAPH; A STALE ONE IS
   DENIED AT START (owner ruling 2026-07-29 evening: "the cluster needs
   to be primed with the code graph… detect and deny start and indicate
   the right procedure"). MEASURED on the owner's live cluster after

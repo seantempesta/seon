@@ -5,7 +5,7 @@
 ;; This script:
 ;; 1. Receives hook events from Codex or Claude Code (JSON on stdin)
 ;; 2. Loads configuration from .claude/seon-hook.edn
-;; 3. Validates prospective Clojure syntax before an edit
+;; 3. Runs clj-kondo before and after Clojure edits
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
 ;; 5. Runs the bounded, rate-limited Gemini review and live core-fault gate
 ;;
@@ -17,9 +17,7 @@
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
-         '[clojure.string :as str]
-
-         '[edamame.core :as edamame])
+         '[clojure.string :as str])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Paths
@@ -146,23 +144,68 @@
       (or (= path repo-root) (str/starts-with? path prefix)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Syntax Validation
+;;; Static Analysis
 ;;; ---------------------------------------------------------------------------
 
-(defn- validate-clojure-syntax [code-string]
-  ;; Use edamame with permissive options to validate syntax without requiring
-  ;; runtime context (namespace aliases, reader tags like #env, #profile, etc.)
+(def ^:private clj-kondo-output-config
+  "{:output {:format :edn}}")
+
+(defn- display-path [file-path]
   (try
-    (edamame/parse-string-all
-     code-string
-     {:all true                              ; Parse all forms
-      :read-cond :allow                      ; Allow reader conditionals
-      :features #{:clj :cljs}                ; Support both Clojure and ClojureScript
-      :auto-resolve (fn [alias] (if alias (symbol (str "ns." alias)) 'user))  ; Unique ns per alias
-      :readers (fn [_tag] identity)})        ; Accept any reader tag
-    {:valid true}
-    (catch Exception e
-      {:valid false :error (.getMessage e)})))
+    (let [root (.toPath (.getCanonicalFile (io/file repo-root)))
+          file (.toPath (.getCanonicalFile (io/file file-path)))]
+      (if (.startsWith file root)
+        (str (.relativize root file))
+        (str file)))
+    (catch Exception _ (str file-path))))
+
+(defn- run-clj-kondo
+  "Analyze files, or one prospective source string, with project config."
+  [{:seon.hook/keys [file-paths prospective-content]}]
+  (try
+    (let [absolute-paths (mapv absolute-file-path file-paths)
+          argv (if prospective-content
+                 ["clj-kondo" "--lint" "-"
+                  "--filename" (first absolute-paths)
+                  "--config" clj-kondo-output-config]
+                 (into ["clj-kondo" "--lint"]
+                       (concat absolute-paths
+                               ["--config" clj-kondo-output-config])))
+          result (process/sh {:cmd argv
+                              :dir repo-root
+                              :in (or prospective-content "")
+                              :out :string
+                              :err :string
+                              :continue true})
+          parsed (try (edn/read-string (:out result))
+                      (catch Exception _ nil))]
+      (if (and (map? parsed) (vector? (:findings parsed)))
+        {:seon.hook.analysis/status :available
+         :seon.hook.analysis/findings (:findings parsed)}
+        {:seon.hook.analysis/status :unavailable
+         :seon.hook.analysis/reason
+         (str "clj-kondo returned no findings result"
+              (when-not (str/blank? (:err result))
+                (str ": " (str/trim (:err result)))))}))
+    (catch Exception error
+      {:seon.hook.analysis/status :unavailable
+       :seon.hook.analysis/reason (.getMessage error)})))
+
+(defn- format-clj-kondo-findings [findings]
+  (str/join
+   "\n"
+   (map (fn [{:keys [filename row col level type message]}]
+          (str (display-path filename) ":" (or row "?") ":" (or col "?")
+               " [" (name (or level :unknown)) "/"
+               (name (or type :unknown)) "] " message))
+        findings)))
+
+(defn- analysis-error [analysis]
+  (when (= :unavailable (:seon.hook.analysis/status analysis))
+    (str "clj-kondo analysis failed: "
+         (:seon.hook.analysis/reason analysis))))
+
+(declare clip-feedback)
 
 (defn- reconstruct-file-content [event]
   (let [tool-name (:tool_name event)
@@ -190,39 +233,51 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- validate-clojure-edit
-  "Validate syntax for ANY Clojure file edit. Returns block response or nil."
+  "Block a reconstructed edit when clj-kondo reports errors or cannot run."
   [event]
   (let [file-path (get-file-path event)]
     (when (and (= (:hook_event_name event) "PreToolUse")
                (clojure-file? file-path))
       (when-let [new-content (reconstruct-file-content event)]
-        (let [validation (validate-clojure-syntax new-content)]
-          (when-not (:valid validation)
+        (let [analysis (run-clj-kondo
+                        {:seon.hook/file-paths [file-path]
+                         :seon.hook/prospective-content new-content})
+              errors (filterv #(= :error (:level %))
+                              (:seon.hook.analysis/findings analysis))]
+          (cond
+            (analysis-error analysis)
             {:decision "block"
-             :reason (str "BLOCKED: Invalid Clojure syntax.\n\n"
-                          "Error: " (:error validation) "\n\n"
-                          "Your edit would create broken code. Check:\n"
-                          "1. Balanced delimiters (parens, brackets, braces)\n"
-                          "2. old_string matches file content exactly\n"
-                          "3. new_string is complete, valid Clojure\n\n"
-                          "TIP: If struggling, try Write to replace the entire function.")}))))))
+             :reason (str "BLOCKED: " (analysis-error analysis))}
 
-(defn- clojure-syntax-feedback
-  "Report invalid syntax in an edited file after the tool has written it."
-  [event]
-  (let [file-path (get-file-path event)
-        absolute-path (absolute-file-path file-path)]
-    (when (and (= (:hook_event_name event) "PostToolUse")
-               (clojure-file? file-path)
-               absolute-path
-               (.isFile (io/file absolute-path)))
-      (try
-        (let [validation (validate-clojure-syntax (slurp absolute-path))]
-          (when-not (:valid validation)
-            (str "Invalid Clojure syntax after editing " file-path ": "
-                 (:error validation))))
-        (catch Exception e
-          (str "Could not validate " file-path ": " (.getMessage e)))))))
+            (seq errors)
+            {:decision "block"
+             :reason (str "BLOCKED: clj-kondo found error-level issues in the "
+                          "prospective Clojure edit:\n"
+                          (format-clj-kondo-findings errors))}
+
+            :else nil))))))
+
+(defn- clj-kondo-feedback
+  "Return one advisory clj-kondo result for all resulting edited files."
+  [event config]
+  (let [paths (->> (event-file-paths event)
+                   (filter clojure-file?)
+                   (filter #(some-> % absolute-file-path io/file .isFile))
+                   vec)]
+    (when (and (= (:hook_event_name event) "PostToolUse") (seq paths))
+      (let [analysis (run-clj-kondo {:seon.hook/file-paths paths})
+            findings (:seon.hook.analysis/findings analysis)]
+        (cond
+          (analysis-error analysis)
+          (str "ADVISORY — " (analysis-error analysis))
+
+          (seq findings)
+          (clip-feedback
+           config
+           (str "clj-kondo findings:\n"
+                (format-clj-kondo-findings findings)))
+
+          :else nil)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Markdown File Detection
@@ -243,10 +298,15 @@
       (some #(str/ends-with? lower %) [".clj" ".cljs" ".cljc"]))))
 
 (defn- load-direct-check! [namespace]
-  ;; The hook itself stays a fast, dependency-free bb script. Malli is needed
-  ;; only because the canonical pure linters carry their public schemas.
+  ;; Resolve from this script's checkout even when a global hook fires from
+  ;; another cwd. Babashka already supplies clj-kondo's SCI dependency; the
+  ;; root's JVM analyzer coordinate would otherwise conflict with it.
   (deps/add-deps
-   {:deps {'seon/hook-source {:local/root repo-root}}})
+   {:deps {'seon/hook-source
+           {:local/root repo-root
+            :exclusions ['clj-kondo/clj-kondo
+                         'dev.data-star.clojure/sdk
+                         'dev.data-star.clojure/http-kit]}}})
   (require namespace))
 
 (defn- clip-feedback [config message]
@@ -712,47 +772,81 @@
 (defn- changed-test-feedback [event config]
   (let [paths (->> (event-file-paths event)
                    (filter changed-test-path?)
-                   vec)
-        invalid-source-paths
-        (->> paths
-             (filter clojure-source-file?)
-             (keep (fn [path]
-                     (let [absolute (absolute-file-path path)]
-                       (when (and absolute (.isFile (io/file absolute)))
-                         (try
-                           (when-not (:valid
-                                      (validate-clojure-syntax
-                                       (slurp absolute)))
-                             path)
-                           (catch Exception _ path))))))
-             vec)]
+                   vec)]
     (when (and (= (:hook_event_name event) "PostToolUse")
                (get-in config [:changed-tests :enabled] true)
                (seq paths))
-      (if (seq invalid-source-paths)
-        (str "ADVISORY — the edit was accepted, but changed tests were not "
-             "queued because these resulting Clojure files do not parse:\n"
-             (str/join "\n" (map #(str "- " %) invalid-source-paths)))
-        (try
-          (require 'seon.dev.changed-test)
-          (let [configuration
-                ((requiring-resolve 'seon.dev.changed-test/configuration)
-                 repo-root)
-                request
-                ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
-                 configuration paths)
-                message
-                (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
-                     "Changed tests queued as generation "
-                     (:seon.dev.changed-test/generation request)
-                     " for " (count (:seon.dev.changed-test/paths request))
-                     " coalesced path(s). The result will be published to "
-                     (root-file "tmp/test-changed/latest.report.edn")
-                     "; that path is mutable and may later describe another generation.")]
-            message)
-          (catch Exception error
-            (str "ADVISORY — changed-test feedback could not run: "
-                 (.getMessage error))))))))
+      (try
+        (require 'seon.dev.changed-test)
+        (let [configuration
+              ((requiring-resolve 'seon.dev.changed-test/configuration)
+               repo-root)
+              request
+              ((requiring-resolve 'seon.dev.changed-test/enqueue-hook!)
+               configuration paths)
+              message
+              (str "ADVISORY — the edit was accepted; tests never gate refactoring.\n"
+                   "Changed tests queued as generation "
+                   (:seon.dev.changed-test/generation request)
+                   " for " (count (:seon.dev.changed-test/paths request))
+                   " coalesced path(s). The result will be published to "
+                   (root-file "tmp/test-changed/latest.report.edn")
+                   "; that path is mutable and may later describe another generation.")]
+          message)
+        (catch Exception error
+          (str "ADVISORY — changed-test feedback could not run: "
+               (.getMessage error)))))))
+
+(defn- beneath?
+  [parent child]
+  (let [parent (str (.getCanonicalPath (io/file parent)) java.io.File/separator)
+        child (absolute-file-path child)]
+    (and child (str/starts-with? child parent))))
+
+(defn- source-index-path?
+  "True for first-party files admitted to the current-src publication."
+  [file-path]
+  (let [lower (some-> file-path str/lower-case)]
+    (or (and (or (str/ends-with? lower ".clj")
+                 (str/ends-with? lower ".cljc"))
+             (or (beneath? (root-file "src") file-path)
+                 (beneath? (root-file "test") file-path)))
+        (and (str/ends-with? lower ".edn")
+             (beneath? (root-file "resources/seon/schema") file-path)))))
+
+(defn- current-source-feedback
+  "Publish edited first-party source through the live operator when possible."
+  [event config]
+  (let [paths (->> (event-file-paths event)
+                   (filter source-index-path?)
+                   (map absolute-file-path)
+                   distinct
+                   vec)]
+    (when (and (= (:hook_event_name event) "PostToolUse")
+               (get-in config [:current-source :enabled] true)
+               (seq paths))
+      (try
+        (let [result
+              (process/sh
+               {:cmd (into [(str (root-file "bin/seon"))
+                            "init" "--changed"]
+                           paths)
+                :dir repo-root
+                :out :string
+                :err :string
+                :continue true})]
+          (if (zero? (:exit result))
+            (str/trim (:out result))
+            (clip-feedback
+             config
+             (str "ADVISORY — current-src publication failed; inspect the "
+                  "published head before relying on it. "
+                  (str/trim (str (:out result) "\n" (:err result)))))))
+        (catch Exception error
+          (clip-feedback
+           config
+           (str "ADVISORY — current-src publication could not run; inspect the "
+                "published head before relying on it. " (.getMessage error))))))))
 
 
 ;;; ---------------------------------------------------------------------------
@@ -880,12 +974,13 @@
                                    file-paths)
                   feedback (mapcat
                              (fn [path-event]
-                               [(clojure-syntax-feedback path-event)
-                                (markdown-feedback path-event config)
+                               [(markdown-feedback path-event config)
                                 (docstring-feedback path-event config)])
                              path-events)
+                  feedback (into [(clj-kondo-feedback event config)] feedback)
                   feedback (conj (vec feedback)
                                  (changed-test-feedback event config)
+                                 (current-source-feedback event config)
                                  (gemini-review-feedback event config))
                   clojure-event (some #(when (clojure-file? (get-file-path %)) %)
                                       path-events)

@@ -9,7 +9,8 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.config :as config]
-            [seon.flow :as flow]))
+            [seon.flow :as flow]
+            [seon.render.web :as web]))
 
 (def ^:private application-ledger
   {:seon.config.flow.compute/queue-depth
@@ -107,6 +108,7 @@
 (defn- fresh-root []
   (let [root (str "tmp/config-application-test/" (random-uuid))]
     (.mkdirs (io/file root))
+    (cluster/refresh-source! root)
     root))
 
 (defn- delete-recursively! [path]
@@ -180,7 +182,7 @@
                               [:seon.render.web/served
                                :seon.render.web/url])
                   bound-port (.getPort (java.net.URI. url))]
-              (is (not= (seon.render.web/derived-port name) bound-port)
+              (is (not= (web/derived-port name) bound-port)
                   "explicit port 0 reaches bind; the derived named port does not")))
           (testing "hot entries re-read the applied database value"
             (config/apply!

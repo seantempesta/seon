@@ -913,24 +913,22 @@ the same basis and rebuilds an immutable Malli projection. Ordinary attributes
 retain those temporal values; `:seon.db/no-history? true` explicitly opts out
 and therefore cannot support old-value simulation after retraction.
 
-**Index source declarations explicitly; tee authored declarations.** The source
-snapshot exact-reconciles source-owned namespaces, contracted functions,
-schemas, and tests during ancestor population or an operator-invoked cluster
-prime. Bare `bin/seon index` creates or reuses the current
-content-addressed ancestor and does not select the default cluster; future
-clusters fork it while existing branches and older ancestors remain intact.
-The ancestor digest covers `src/`, `test/`, and the schema EDN under
-`resources/`.
+**Publish source declarations; tee authored declarations.** clj-kondo analyzes
+source-owned namespaces, contracted functions, global schemas, and tests from
+`src/` and `test/` without evaluating application forms. Safe same-identity
+file changes update one `:current-src` branch through scalar upserts;
+structural changes build a complete scratch database value and publish it with
+an expected-head guard. Bare `bin/seon init` requests that complete publication
+explicitly and does not select the default cluster. Future clusters fork the
+published commit ID while existing branches remain intact. The source digest
+covers `src/`, `test/`, and schema EDN under `resources/`.
 
 Startup never indexes. It requires exactly one recorded digest and populated
 namespace and function rows, refusing empty, ambiguous, or partial program
 graphs. A complete graph from an older digest is a legitimate sovereign
-world: startup reports its age and continues without modifying program
-definition transactions. Priming preserves messages, runs, agents, and
-agent-authored rows; reset is the destructive refork. After priming, the
-cluster's `:seon.ancestor/digest` means the source digest whose source-owned
-program facts were last synchronized while independent facts were preserved,
-not necessarily the ancestor branch from which the cluster was born.
+world: startup continues without modifying program definition transactions.
+There is no cluster synchronization operation. `init NAME --force` is the
+explicit destructive refork from the current published commit.
 Agent-authored namespace, function, schema, and test forms enter through the
 eval analyzer tee. The whole live program graph is therefore queryable
 without a second test registry. Agent context renders only `my.*` members in

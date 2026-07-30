@@ -1,11 +1,26 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, program-graph]
 ---
 
 # Priming indexes with the live JVM's loaded code and records a digest that lies
+
+## Resolution
+
+Resolved by the 2026-07-30 static `current-src` publication replacement.
+Repository indexing no longer evaluates or loads application source to inspect
+it. clj-kondo analyzes exact files, a complete or incremental scratch database
+value publishes through an expected-head guard, and existing clusters are
+never synchronized. The edit path reloads only the analyzer/index/publication
+owners; a dependency change that the running JVM cannot load refuses while the
+previous `current-src` commit remains published. Evidence and exact dependency
+source locations are in
+`docs/prds/sci-execution-runtime/research/current-src-publication-2026-07-30.md`.
+
+The acceptance wording below is retained as historical evidence and names the
+deleted `index`/digest-ancestor mechanism. It is not current guidance.
 
 ## Problem
 

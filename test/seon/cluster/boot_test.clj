@@ -20,17 +20,17 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
-            [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
-            [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -38,9 +38,14 @@
 ;;; Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(defn- fresh-root []
+(defn- bare-root []
   (let [root (str "tmp/boot-test/" (random-uuid))]
     (.mkdirs (io/file root))
+    root))
+
+(defn- fresh-root []
+  (let [root (bare-root)]
+    (cluster/refresh-source! root)
     root))
 
 (defn- delete-recursively! [path]
@@ -434,7 +439,7 @@
         (delete-recursively! root)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The composed tower — store, ancestor, fork, config, one start!
+;;; The composed tower — store, source commit, fork, config, one start!
 ;;; ---------------------------------------------------------------------------
 
 (defn- start-refusal
@@ -459,14 +464,14 @@
       (let [program-transactions-before
             (let [instance (cluster/start! request)
                   connection (:seon.boot/cluster-connection instance)
-                  ancestor-eid
-                  (d/q '[:find ?ancestor .
-                         :where [?ancestor :seon.ancestor/digest _]]
+                  source-eid
+                  (d/q '[:find ?source .
+                         :where [?source :seon.source/digest _]]
                        @connection)]
               (d/transact
                connection
-               [[:db.fn/retractAttribute ancestor-eid :seon.ancestor/digest]
-                {:db/id ancestor-eid :seon.ancestor/digest stale-digest}])
+               [[:db.fn/retractAttribute source-eid :seon.source/digest]
+                {:db/id source-eid :seon.source/digest stale-digest}])
               (let [program-transactions
                     (d/q '[:find ?symbol ?tx
                            :where
@@ -481,7 +486,7 @@
             (is (some? (:seon.cluster.agent/routing restarted)))
             (is (= stale-digest
                    (d/q '[:find ?digest .
-                          :where [_ :seon.ancestor/digest ?digest]]
+                          :where [_ :seon.source/digest ?digest]]
                         @(:seon.boot/cluster-connection restarted)))))
           (testing "reopen never indexes or advances the recorded digest"
             (is (= program-transactions-before
@@ -495,20 +500,20 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest explicit-index-repairs-a-partial-cluster-and-fresh-clusters-are-current
+(deftest partial-clusters-refuse-and-fresh-clusters-are-current
   (let [root (fresh-root)
         cluster-name "partial-program"
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
         current-digest
-        (ancestor/digest {:seon.ancestor/roots cluster/ancestor-roots})]
+        (source/digest {:seon.source/roots cluster/source-roots})]
     (try
       (let [instance (cluster/start! request)
             connection (:seon.boot/cluster-connection instance)]
         (testing "a fresh fork is born at the current source digest"
           (is (= current-digest
                  (d/q '[:find ?digest .
-                        :where [_ :seon.ancestor/digest ?digest]]
+                        :where [_ :seon.source/digest ?digest]]
                       @connection)))
           (is (pos? (d/q '[:find (count ?function) .
                            :where [?function :seon.fn/sym]]
@@ -527,7 +532,7 @@
           (testing "namespaces without functions are denied despite a current digest"
             (is (str/includes? (ex-message failure) "partial"))
             (is (str/includes? (ex-message failure)
-                               (str "bin/seon index " cluster-name)))
+                               (str "bin/seon init " cluster-name " --force")))
             (is (pos? (d/q '[:find (count ?namespace) .
                              :where [?namespace :seon.ns/name]]
                            @connection)))
@@ -536,81 +541,56 @@
                                :where [?function :seon.fn/sym]]
                              @connection)
                         0))))
-          (testing "the explicit index procedure repairs the refused branch"
-            (is (pos?
-                 (:seon.reconcile/operations
-                  (seon.fn/index!
-                   {:seon.store/branch-connection connection
-                    :seon.db/process
-                    [:seon.db.process/id cluster/boot-process-identity]
-                    :seon.fn/roots seon.fn/source-roots
-                    :seon.ancestor/digest current-digest}))))
-            (is (pos? (d/q '[:find (count ?function) .
-                             :where [?function :seon.fn/sym]]
-                           @connection))))
           (finally
             (stop-refused-instance! failure))))
-      (let [restarted (cluster/start! request)]
-        (try
-          (is (some? (:seon.cluster.agent/routing restarted))
-              "a primed cluster passes the gate and completes boot")
-          (finally
-            (cluster/stop! restarted))))
       (finally
         (delete-recursively! root)))))
 
-(deftest baseline-refresh-rolls-without-touching-existing-clusters
+(deftest incremental-source-refresh-publishes-without-touching-existing-clusters
   (let [root (fresh-root)
-        store-dir (str (io/file root "store"))
-        old-digest (apply str (repeat 64 "a"))
         current-digest
-        (ancestor/digest {:seon.ancestor/roots cluster/ancestor-roots})
-        opened (store/open-store! {:seon.store/dir store-dir})
-        old-ancestor
-        (try
-          (ancestor/ensure!
-           {:seon.store/store opened
-            :seon.ancestor/digest old-digest
-            :seon.ancestor/populate `cluster/populate-ancestor!})
-          (finally
-            (store/release-store! opened)))
+        (source/digest {:seon.source/roots cluster/source-roots})
         old-world
         (cluster/start!
          {:seon.boot/cluster-name "old-world"
-          :seon.boot/root root
-          :seon.boot/ancestor-branch
-          (:seon.ancestor/branch old-ancestor)})]
+          :seon.boot/root root})]
     (try
       (let [old-connection (:seon.boot/cluster-connection old-world)
             old-basis (:max-tx @old-connection)
-            refreshed (cluster/refresh-baseline! root)
+            refreshed (cluster/refresh-source!
+                       root ["src/seon/ai/tokens.cljc"])
+            artifact
+            (edn/read-string (slurp (cluster/source-artifact-file root)))
             roster
             (registry/roster (:seon.store/store old-world))]
-        (testing "a new content-addressed baseline joins the roster"
-          (is (not= old-digest current-digest))
-          (is (true? (:seon.ancestor/built? refreshed)))
-          (is (= (ancestor/ancestor-branch current-digest)
-                 (:seon.ancestor/branch refreshed)))
-          (is (contains? roster (:seon.ancestor/branch old-ancestor)))
-          (is (contains? roster (:seon.ancestor/branch refreshed))))
-        (testing "the existing cluster remains on its independent corpus"
+        (testing "the one published source branch advances from its artifact"
+          (is (= source/current-branch (:seon.source/branch refreshed)))
+          (is (= current-digest (:seon.source/digest refreshed)))
+          (is (true? (:seon.source/built? refreshed)))
+          (is (uuid? (:seon.source/commit-id refreshed)))
+          (is (= (:seon.source/commit-id refreshed)
+                 (:seon.source/commit-id artifact)))
+          (is (seq (:seon.source/file-digests artifact)))
+          (is (= current-digest (:seon.source/digest artifact)))
+          (is (seq (get-in artifact
+                           [:seon.fn/manifest
+                            :seon.fn.manifest/artifacts])))
+          (is (contains? roster source/current-branch))
+          (is (= 1 (count (filter #{source/current-branch} roster)))))
+        (testing "the existing cluster remains on its independent commit"
           (is (= old-basis (:max-tx @old-connection)))
-          (is (= old-digest
+          (is (= current-digest
                  (d/q '[:find ?digest .
-                        :where [_ :seon.ancestor/digest ?digest]]
+                        :where [_ :seon.source/digest ?digest]]
                       @old-connection))))
-        (testing "refresh is convergent and future clusters fork the newest"
-          (is (= {:seon.ancestor/branch
-                  (ancestor/ancestor-branch current-digest)
-                  :seon.ancestor/built? false}
-                 (cluster/refresh-baseline! root)))
+        (testing "future clusters fork the published commit"
           (let [future (cluster/start!
                         {:seon.boot/cluster-name "future-world"
                          :seon.boot/root root})]
             (try
               (is (= current-digest
                      (d/q '[:find ?digest .
-                            :where [_ :seon.ancestor/digest ?digest]]
+                            :where [_ :seon.source/digest ?digest]]
                           @(:seon.boot/cluster-connection future))))
               (finally
                 (cluster/stop! future))))))
@@ -618,52 +598,20 @@
         (cluster/stop! old-world)
         (delete-recursively! root)))))
 
-(deftest reopen-accretes-a-new-config-attribute-before-config-applies
+(deftest packaged-source-does-not-capture-an-ambient-schema-registration
   (let [root (fresh-root)
-        cluster-name "schema-reopen"
         dial :seon.config.boot-test/reopen-dial
         schema-state (schema/snapshot-state)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
-                                      :seon.boot/root root})]
-        (cluster/stop! instance))
-
-      ;; This is the source-accretion boundary in miniature: the store is
-      ;; closed before today's population gains one persisted config attribute.
-      ;; Its one registration derives every composite and its boot default.
+      ;; Process-global registration is a REPL/runtime concern. It is not a
+      ;; packaged source edit and therefore cannot silently mutate current-src.
       (schema/register!
        dial
        [:int {:seon.db/index true :seon.config/default 7}])
-
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
-                                      :seon.boot/root root})
-            connection (:seon.boot/cluster-connection instance)]
-        (try
-          (testing "reopen installs the new declaration before config writes"
-            (is (contains? (:schema @connection) dial)))
-          (testing "the current canonical schema row also accretes"
-            (is (= (schema/form-string dial)
-                   (d/q '[:find ?form .
-                          :in $ ?dial
-                          :where
-                          [?schema :seon.schema/key ?dial]
-                          [?schema :seon.schema/form ?form]]
-                        @connection
-                        dial))))
-          (testing "zero-overlay boot applies the newly admitted default"
-            (is (= 7 (get (config/effective @connection cluster-name)
-                          dial))))
-          (testing "config/apply! can override the newly admitted dial"
-            (let [result
-                  (config/apply!
-                   {:seon.config/connection connection
-                    :seon.config/manifest {dial 8}
-                    :seon.boot/cluster-name cluster-name})]
-              (is (pos? (:seon.reconcile/operations result)))
-              (is (= 8 (get (config/effective @connection cluster-name)
-                            dial)))))
-          (finally
-            (cluster/stop! instance))))
+      (is (= [:int {:seon.db/index true :seon.config/default 7}]
+             (get-in (schema/snapshot-state)
+                     [:seon.schema.state/candidate-forms dial])))
+      (is (not (contains? (schema.edn/packaged-forms) dial)))
       (finally
         (schema/restore-state! schema-state)
         (delete-recursively! root)))))
@@ -712,6 +660,24 @@
                (cluster/stop! instance)))))
       (finally
         (delete-recursively! root)))))
+
+(deftest incremental-source-refresh-requires-every-unreported-file-to-match
+  (let [current? (deref #'cluster/unreported-source-current?)
+        published {"/repo/src/a.clj" "a1"
+                   "/repo/src/b.clj" "b1"
+                   "/repo/resources/schema.edn" "s1"}]
+    (is (current? published
+                  (assoc published "/repo/src/a.clj" "a2")
+                  ["/repo/src/a.clj"]))
+    (is (false? (current? published
+                          (assoc published "/repo/src/b.clj" "b2")
+                          ["/repo/src/a.clj"])))
+    (is (false? (current? published
+                          (dissoc published "/repo/resources/schema.edn")
+                          ["/repo/src/a.clj"])))
+    (is (false? (current? published
+                          (assoc published "/repo/src/new.clj" "n1")
+                          ["/repo/src/a.clj"])))))
 
 (deftest the-tower-stands-in-one-start
   (let [root (fresh-root)]
@@ -769,7 +735,7 @@
 (deftest a-failed-tower-never-takes-the-repl
   ;; owner ruling: the REPL is always useful for debugging — a corrupt
   ;; store fails the boot LOUDLY while the socket stays up
-  (let [root (fresh-root)]
+  (let [root (bare-root)]
     (try
       ;; a FILE where the store directory belongs corrupts layer 1
       (spit (io/file root "store") "not a store")
@@ -813,7 +779,7 @@
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
         (try
-          (testing "the old branch was replaced from the current ancestor"
+          (testing "the old branch was replaced from current-src"
             (is (:seon.cluster/created? result))
             (is (nil?
                  (d/q '[:find ?message .

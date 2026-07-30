@@ -3,7 +3,7 @@
 
   `start!` resolves the closed bootstrap configuration, opens and
   advertises an io-prepl, then builds the remaining instance from the
-  process-root store and executors, a source-digest ancestor, the
+  process-root store and executors, the published source commit, the
   cluster's database branch and configuration, recovered run facts,
   the root agent, agent and render flows, and the web server. The
   io-prepl and the partially built instance remain available when a
@@ -29,9 +29,8 @@
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
-            [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
-            [seon.cluster.run]
             [seon.cluster.store :as store]
             [clojure.string :as str]
             [seon.config :as config]
@@ -44,7 +43,9 @@
             [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn])
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file CopyOption Files StandardCopyOption]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap configuration — the CLOSED pre-store key set.
@@ -103,7 +104,7 @@
   prepl-host \"127.0.0.1\", prepl-port 0 (ephemeral — the advertisement
   carries the real port), log-dir derived as <root>/<name>/logs,
   store-dir derived as <root>/store — the PROCESS-root store every
-  cluster branches from (ancestor-branch stays absent unless supplied).
+  cluster branches from.
   Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) on
   any unknown key or invalid value — the closed schema is the gate, not
   a convention."
@@ -263,7 +264,7 @@
   nil)
 
 ;;; ---------------------------------------------------------------------------
-;;; The default ancestor population
+;;; The default source population
 ;;; ---------------------------------------------------------------------------
 
 (def boot-process-identity
@@ -278,7 +279,7 @@
 
 (defn- declaration-changes
   "Missing declarations, refusing non-accretive storage changes."
-  [db]
+  [db forms]
   (into
    []
    (keep
@@ -293,8 +294,9 @@
             :seon.boot/installed installed
             :seon.boot/current declaration}))
         declaration)))
-   (schema.datahike/malli->datahike-schema
-    (schema/canonical-database-attributes))))
+   (schema.datahike/malli->datahike-schema-in
+    {:seon.schema.projection/forms forms}
+    (schema/canonical-database-attributes forms))))
 
 (defn- missing-process-rows
   [db]
@@ -312,7 +314,7 @@
      [boot-process-identity config/managing-process-identity])))
 
 (defn- schema-row-changes
-  [db now]
+  [db forms now]
   (into
    []
    (keep
@@ -329,7 +331,7 @@
                      current-created-at))]
         (when-not (= desired (select-keys current (keys desired)))
           desired))))
-   (schema/canonical-schema-rows now)))
+   (schema/canonical-schema-rows forms now)))
 
 (defn- accrete-schema-population!
   "Install the current additive schema population on one branch.
@@ -340,77 +342,93 @@
   canonical rows accrete; an incompatible declaration refuses loudly and
   names reset as the remedy. A converged reopen issues no transaction."
   [connection]
-  (let [declarations (declaration-changes @connection)]
+  (let [forms (schema.edn/packaged-forms)
+        declarations (declaration-changes @connection forms)]
     (when (seq declarations)
-      (d/transact connection {:tx-data declarations})))
-  (let [process-rows (missing-process-rows @connection)]
-    (when (seq process-rows)
-      (d/transact connection {:tx-data process-rows})))
-  (let [schema-rows (schema-row-changes @connection (java.util.Date.))]
-    (when (seq schema-rows)
-      (d/transact connection
-                  {:tx-data schema-rows
-                   :tx-meta
-                   {:seon.db/process
-                    [:seon.db.process/id boot-process-identity]}})))
+      (d/transact connection {:tx-data declarations}))
+    (let [process-rows (missing-process-rows @connection)]
+      (when (seq process-rows)
+        (d/transact connection {:tx-data process-rows})))
+    (let [schema-rows (schema-row-changes @connection forms (java.util.Date.))]
+      (when (seq schema-rows)
+        (d/transact connection
+                    {:tx-data schema-rows
+                     :tx-meta
+                     {:seon.db/process
+                      [:seon.db.process/id boot-process-identity]}}))))
   nil)
 
-(defn populate-ancestor!
-  "The default ancestor content: this code's own schema population.
-  Named by symbol in `ancestor/ensure!`'s request, so the producer is
+(defn populate-source!
+  "The default `current-src` content: this code's schema and program rows.
+  Named by symbol in `source/publish!`'s request, so the producer is
   data and N5's program-graph indexer replaces it without touching the
   boot path. The convergent population transactions are DERIVED, never
   hand-written:
   the Datahike declarations of every registered database attribute, the
   core process entities the provenance refs resolve to (genesis data —
-  bootstrap content lives in the ancestor), and the canonical schema rows
+  bootstrap content lives in the source branch), and the canonical schema rows
   asserted with that process provenance."
   {:malli/schema
    [:=> [:cat [:map [:seon.store/branch-connection
                      :seon.store/branch-connection]]]
     :nil]}
-  [{connection :seon.store/branch-connection}]
+  [{connection :seon.store/branch-connection
+    manifest :seon.fn/manifest}]
   (accrete-schema-population! connection)
-  (seon.fn/index! {:seon.store/branch-connection connection
-                   :seon.db/process
-                   [:seon.db.process/id boot-process-identity]
-                   :seon.fn/roots seon.fn/source-roots})
+  (seon.fn/index!
+   (cond-> {:seon.store/branch-connection connection
+            :seon.db/process
+            [:seon.db.process/id boot-process-identity]}
+     manifest (assoc :seon.fn/manifest manifest)
+     (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots)))
   nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The tower above the REPL
 ;;; ---------------------------------------------------------------------------
 
-;;; The roots the ancestor's identity is computed over. Today the
+;;; The roots the published source digest is computed over. Today the
 ;;; population above is derived from the Clojure program plus the
 ;;; classpath schema population. The indexer reads only Clojure files,
-;;; while the ancestor digest also covers the EDN declarations whose
-;;; Datahike schema and canonical rows are installed into the ancestor.
-(def ancestor-roots
-  "The complete file roots whose content identifies an ancestor."
+;;; while the source digest also covers the EDN declarations whose
+;;; Datahike schema and canonical rows are installed into `current-src`.
+(def source-roots
+  "The complete file roots whose content identifies `current-src`."
   (conj seon.fn/source-roots "resources"))
 
-(defn- current-source-digest
+(defonce ^:private source-refresh-monitor
+  ;; One JVM may receive overlapping editor events. Serialize analysis,
+  ;; publication, and artifact replacement as one operation; the Datahike
+  ;; expected-head guard remains the cross-plan correctness fence.
+  (Object.))
+
+(defonce ^:private source-analysis-cache
+  ;; A source snapshot determines the complete static projection. Scratch
+  ;; stores differ, but their program rows do not; repeated test/experiment
+  ;; roots should not re-run clj-kondo for identical bytes.
+  (atom nil))
+
+(defn- current-source-snapshot
   []
-  (ancestor/digest {:seon.ancestor/roots ancestor-roots}))
+  (source/snapshot {:seon.source/roots source-roots}))
 
-(defn- ensure-current-ancestor!
-  [store]
-  (ancestor/ensure!
+(defn- publish-current-source!
+  [store source-digest manifest]
+  (source/publish!
    {:seon.store/store store
-    :seon.ancestor/digest (current-source-digest)
-    :seon.ancestor/populate `populate-ancestor!}))
+    :seon.source/digest source-digest
+    :seon.source/populate `populate-source!
+    :seon.source/population-data {:seon.fn/manifest manifest}}))
 
-(defn- ancestor-branch!
-  "The ancestor branch this cluster forks from.
-  A supplied `:seon.boot/ancestor-branch` is used AS GIVEN — the caller
-  named an existing ancestor and `ensure-cluster!` refuses if it is not
-  in the roster. Absent, the ancestor of this source tree is ensured
-  (idempotent; the roster is the whole cache)."
-  [store config]
-  (or (:seon.boot/ancestor-branch config)
-      (:seon.ancestor/branch
-       (ensure-current-ancestor! store))))
+(defn- current-source!
+  "The exact published source commit new clusters fork.
+  Boot never indexes files: absent publication tells the operator to run
+  `bin/seon init`."
+  [store]
+  (or (source/current store)
+      (refused!
+       "No `current-src` branch is published; run `bin/seon init` first."
+       {:seon.source/branch source/current-branch})))
 
 (defn- count-installed
   [db attribute]
@@ -425,13 +443,13 @@
     0))
 
 (defn- program-currentness
-  [db current-digest]
+  [db]
   (let [recorded-digests
-        (if (contains? (:schema db) :seon.ancestor/digest)
+        (if (contains? (:schema db) :seon.source/digest)
           (into
            #{}
            (d/q '[:find [?digest ...]
-                  :where [_ :seon.ancestor/digest ?digest]]
+                  :where [_ :seon.source/digest ?digest]]
                 db))
           #{})
         namespace-count (count-installed db :seon.ns/name)
@@ -440,38 +458,32 @@
         function-populated? (pos? function-count)
         partial? (not= namespace-populated? function-populated?)
         populated? (and namespace-populated? function-populated?)
-        one-digest? (= 1 (count recorded-digests))
-        digest-current? (= #{current-digest} recorded-digests)]
-    {:seon.ancestor/coherent? (and one-digest? populated?)
-     :seon.ancestor/current? (and digest-current? populated?)
-     :seon.ancestor/stale? (and one-digest?
-                                populated?
-                                (not digest-current?))
-     :seon.ancestor/partial? partial?
-     :seon.ancestor/recorded-digests recorded-digests
-     :seon.ancestor/current-digest current-digest
-     :seon.ancestor/namespace-count namespace-count
-     :seon.ancestor/function-count function-count}))
+        one-digest? (= 1 (count recorded-digests))]
+    {:seon.source/coherent? (and one-digest? populated?)
+     :seon.source/partial? partial?
+     :seon.source/recorded-digests recorded-digests
+     :seon.source/namespace-count namespace-count
+     :seon.source/function-count function-count}))
 
 (defn- require-coherent-program!
-  [connection cluster-name current-digest]
-  (let [currentness (program-currentness @connection current-digest)]
-    (when-not (:seon.ancestor/coherent? currentness)
+  [connection cluster-name]
+  (let [currentness (program-currentness @connection)]
+    (when-not (:seon.source/coherent? currentness)
       (let [condition
             (cond
-              (:seon.ancestor/partial? currentness)
+              (:seon.source/partial? currentness)
               (str "partial ("
-                   (:seon.ancestor/namespace-count currentness)
+                   (:seon.source/namespace-count currentness)
                    " namespace rows and "
-                   (:seon.ancestor/function-count currentness)
+                   (:seon.source/function-count currentness)
                    " function rows)")
 
-              (empty? (:seon.ancestor/recorded-digests currentness))
+              (empty? (:seon.source/recorded-digests currentness))
               "unprimed (no recorded source digest)"
 
-              (> (count (:seon.ancestor/recorded-digests currentness)) 1)
+              (> (count (:seon.source/recorded-digests currentness)) 1)
               (str "incoherent (multiple recorded source digests "
-                   (pr-str (:seon.ancestor/recorded-digests currentness))
+                   (pr-str (:seon.source/recorded-digests currentness))
                    ")")
 
               :else
@@ -480,62 +492,185 @@
          (str
           "Cluster `" cluster-name "` was not started because its program "
           "graph is " condition ". "
-          "`bin/seon index " cluster-name "` preserves history: it refreshes "
-          "source-owned namespace, function, schema, and test facts while "
-          "leaving messages, runs, agents, and agent-authored facts intact. "
-          "`bin/seon reset " cluster-name "` destroys history and reforks a "
-          "clean cluster from the current ancestor.")
+          "`bin/seon init " cluster-name " --force` destroys that branch and "
+          "reforks a complete cluster from `current-src`.")
          currentness)))
-    (when (:seon.ancestor/stale? currentness)
-      (log/info
-       (str "seon " cluster-name " source: independent older corpus "
-            (first (:seon.ancestor/recorded-digests currentness))
-            " (current baseline " current-digest
-            "); start allowed, `bin/seon index " cluster-name
-            "` explicitly synchronizes it")))
     currentness))
 
-(defn refresh-baseline!
-  "Create or reuse the current content-addressed ancestor."
-  {:malli/schema [:=> [:cat :seon.boot/root] :seon.ancestor/ensured]}
+(defn source-artifact-file
+  "The per-store artifact that describes the published source commit."
+  {:malli/schema [:=> [:cat :seon.boot/root] :string]}
   [root]
-  (let [config (resolve-bootstrap {:seon.boot/root root})
-        store-dir (:seon.boot/store-dir config)
-        held-store (acquire-root-store! store-dir)]
-    (try
-      (ensure-current-ancestor! held-store)
-      (finally
-        (release-root-store! store-dir)))))
+  (str (io/file root "build" "current-src.edn")))
 
-(defn index!
-  "Prime one cluster from source while preserving independent facts.
+(defn- read-source-artifact
+  [root]
+  (try
+    (let [value (edn/read-string (slurp (source-artifact-file root)))]
+      (when (map? value) value))
+    (catch Throwable _ nil)))
 
-  The current additive schema population is installed first, then the
-  ONE `seon.fn/index!` exact-reconciles only rows whose defining datoms
-  carry the boot process identity. Messages, agents, runs, and
-  agent-authored declarations remain outside that owned slice.
+(defn- write-source-artifact!
+  [root artifact]
+  (let [target (.toPath (io/file (source-artifact-file root)))
+        directory (.getParent target)]
+    (Files/createDirectories directory
+                             (make-array java.nio.file.attribute.FileAttribute 0))
+    (let [temporary (Files/createTempFile
+                     directory "current-src-" ".edn"
+                     (make-array java.nio.file.attribute.FileAttribute 0))]
+      (try
+        (Files/writeString temporary (str (pr-str artifact) "\n")
+                           StandardCharsets/UTF_8
+                           (make-array java.nio.file.OpenOption 0))
+        (Files/move temporary target
+                    (into-array CopyOption
+                                [StandardCopyOption/ATOMIC_MOVE
+                                 StandardCopyOption/REPLACE_EXISTING]))
+        (finally
+          (Files/deleteIfExists temporary))))
+    artifact))
 
-  The recorded `:seon.ancestor/digest` advances in the index
-  transaction. On a primed cluster it means the source digest whose
-  source-owned program facts were last synchronized while independent
-  facts were preserved; it no longer means the ancestor branch from
-  which this cluster was originally forked. A converged call writes
-  nothing."
-  {:malli/schema [:=> [:cat :seon.boot/instance] :seon.reconcile/result]}
-  [instance]
-  (let [connection
-        (or
-         (:seon.boot/cluster-connection instance)
-         (refused!
-          "Source indexing requires an addressable cluster connection."
-          {:seon.boot/cluster-name
-           (get-in instance [:seon.boot/config :seon.boot/cluster-name])}))]
-    (accrete-schema-population! connection)
-    (seon.fn/index!
-     {:seon.store/branch-connection connection
-      :seon.db/process [:seon.db.process/id boot-process-identity]
-      :seon.fn/roots seon.fn/source-roots
-      :seon.ancestor/digest (current-source-digest)})))
+(defn- source-artifact
+  [published manifest snapshot]
+  {:seon.source/digest (:seon.source/digest published)
+   :seon.source/commit-id (:seon.source/commit-id published)
+   :seon.source/file-digests (:seon.source/file-digests snapshot)
+   :seon.fn/manifest manifest})
+
+(defn- stable-manifest
+  []
+  (let [snapshot-before (current-source-snapshot)
+        cached @source-analysis-cache
+        cached? (= snapshot-before (:seon.source/snapshot cached))
+        manifest (if cached?
+                   (:seon.fn/manifest cached)
+                   (seon.fn/build-manifest
+                    {:seon.fn/roots seon.fn/source-roots}))
+        snapshot-after (current-source-snapshot)]
+    (when-not (= snapshot-before snapshot-after)
+      (refused! "Source changed while current-src was being analyzed; retry."
+                {:seon.source/digest-before
+                 (:seon.source/digest snapshot-before)
+                 :seon.source/digest-after
+                 (:seon.source/digest snapshot-after)}))
+    (let [result {:seon.source/snapshot snapshot-after
+                  :seon.source/digest (:seon.source/digest snapshot-after)
+                  :seon.fn/manifest manifest}]
+      (when-not cached?
+        (clojure.core/reset! source-analysis-cache result))
+      result)))
+
+(defn- full-source-refresh!
+  [root store]
+  (let [{source-digest :seon.source/digest
+         snapshot :seon.source/snapshot
+         manifest :seon.fn/manifest} (stable-manifest)
+        published (publish-current-source! store source-digest manifest)]
+    (write-source-artifact! root (source-artifact published manifest snapshot))
+    published))
+
+(defn- canonical-path
+  [path]
+  (.getCanonicalPath (io/file path)))
+
+(defn- unreported-source-current?
+  [published-file-digests current-file-digests reported-paths]
+  (= (apply dissoc published-file-digests reported-paths)
+     (apply dissoc current-file-digests reported-paths)))
+
+(defn- incremental-source-refresh!
+  [root store changed-paths]
+  (let [cached (read-source-artifact root)
+        published (source/current store)
+        manifest (:seon.fn/manifest cached)
+        expected-commit (:seon.source/commit-id published)]
+    (if-not (and manifest
+                 expected-commit
+                 (= expected-commit (:seon.source/commit-id cached))
+                 (map? (:seon.source/file-digests cached)))
+      (full-source-refresh! root store)
+      (let [paths (->> changed-paths (map canonical-path) distinct sort vec)
+            snapshot-before (current-source-snapshot)
+            known-functions (seon.fn/manifest-function-symbols manifest)
+            changes
+            (mapv
+             (fn [path]
+               (let [file (io/file path)
+                     current (seon.fn/artifact-by-path manifest path)
+                     clojure-source? (and (.isFile file)
+                                          (or (str/ends-with? path ".clj")
+                                              (str/ends-with? path ".cljc")))
+                     desired (when clojure-source?
+                               (seon.fn/build-artifact
+                                {:seon.fn.file/path path
+                                 :seon.fn.file/first-party-functions
+                                 known-functions}))]
+                 (seon.fn/plan-file-change
+                  {:seon.fn.change/status
+                   (cond
+                     (not (.exists file)) :deleted
+                     (not clojure-source?) :schema-resource
+                     current :modified
+                     :else :added)
+                   :seon.fn.change/current-artifact current
+                   :seon.fn.change/desired-artifact desired})))
+             paths)
+            snapshot-after (current-source-snapshot)
+            digest-after (:seon.source/digest snapshot-after)
+            unreported-current?
+            (unreported-source-current?
+             (:seon.source/file-digests cached)
+             (:seon.source/file-digests snapshot-after)
+             paths)]
+        (if (or (empty? paths)
+                (not= snapshot-before snapshot-after)
+                (not unreported-current?)
+                (some #(= :full-rebuild (:seon.fn.change/action %)) changes))
+          (full-source-refresh! root store)
+          (let [desired-artifacts
+                ;; Persist complete file analysis for the next edit. Only
+                ;; `:seon.fn.change/rows` is the safe database delta.
+                (mapv :seon.fn.change/artifact changes)
+                next-manifest
+                (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
+                rows (into [] (mapcat :seon.fn.change/rows) changes)
+                result
+                (source/upsert!
+                 {:seon.store/store store
+                  :seon.source/expected-commit-id expected-commit
+                  :seon.source/digest digest-after
+                  :seon.source/rows rows
+                  :seon.db/process
+                  [:seon.db.process/id boot-process-identity]})]
+            (write-source-artifact! root
+                                    (source-artifact result next-manifest
+                                                     snapshot-after))
+            result))))))
+
+(defn refresh-source!
+  "Publish the current source tree onto the one `current-src` branch.
+
+  With changed paths, reuse the published manifest for safe same-identity
+  upserts. Any deletion, new identity, schema resource, missing/stale artifact,
+  or uncertain projection falls back to one complete scratch publication."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.boot/root] :seon.source/published]
+    [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/published]]}
+  ([root]
+   (refresh-source! root nil))
+  ([root changed-paths]
+   (locking source-refresh-monitor
+     (let [config (resolve-bootstrap {:seon.boot/root root})
+           store-dir (:seon.boot/store-dir config)
+           held-store (acquire-root-store! store-dir)]
+       (try
+         (if (seq changed-paths)
+           (incremental-source-refresh! root held-store changed-paths)
+           (full-source-refresh! root held-store))
+         (finally
+           (release-root-store! store-dir)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
@@ -984,33 +1119,36 @@
   nil)
 
 (defn- stack-tower!
-  "Stack store → ancestor → fork → connection → config onto `instance`.
+  "Stack store → source commit → fork → connection → config onto `instance`.
   Each layer is assoc'd as it stands, and the whole value is republished
   to the registry at every step, so the instance a failure carries is
   exactly what stands: absence marks where boot stopped."
   [instance publish! config-request]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
-        current-digest (current-source-digest)
         store (acquire-root-store! (:seon.boot/store-dir config))
         instance (publish! (assoc instance :seon.store/store store))
-        forked (registry/ensure-cluster!
-                {:seon.store/store store
-                 :seon.boot/cluster-name cluster-name
-                 :seon.ancestor/branch
-                 (ancestor-branch! store config)})
+        cluster-branch (registry/cluster-branch cluster-name)
+        forked
+        (if (contains? (registry/roster store) cluster-branch)
+          {:seon.store/branch cluster-branch
+           :seon.cluster/created? false}
+          (registry/ensure-cluster!
+           {:seon.store/store store
+            :seon.boot/cluster-name cluster-name
+            :seon.source/commit-id
+            (:seon.source/commit-id (current-source! store))}))
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance :seon.boot/cluster-connection connection))
-        ;; The source tree is consulted only for its digest. Indexing remains
-        ;; an explicit fork/index operation and never runs on this reopen path.
-        ;; This gate precedes schema accretion, recovery, config, and arming:
+        ;; Boot never reads or indexes the file tree. This gate precedes schema
+        ;; accretion, recovery, config, and arming:
         ;; an incoherent program graph gets no runtime semantics. A complete
         ;; older corpus remains a legitimate sovereign world.
-        _ (require-coherent-program! connection cluster-name current-digest)
+        _ (require-coherent-program! connection cluster-name)
         ;; A branch may predate this process's additive schema population.
         ;; Install it before recovery or config can transact a newly added
-        ;; attribute. This is the same population that creates an ancestor;
+        ;; attribute. This is the same population that creates `current-src`;
         ;; converged reopens issue zero transactions.
         _ (accrete-schema-population! connection)
         ;; BEFORE anything resumes: a previous process's wreckage is
@@ -1044,10 +1182,10 @@
         _ (flow/install-work-launcher!
            {::flow/configuration
             (select-keys (config/effective @connection cluster-name)
-                         flow/flow-workload-attributes)})]
-    (let [instance (publish!
-                    (merge instance
-                           (arm-agents! instance connection cluster-name)))
+                         flow/flow-workload-attributes)})
+        instance (publish!
+                  (merge instance
+                         (arm-agents! instance connection cluster-name)))
           ;; LAST, and after the loop, because the view renders what the
           ;; loop produces and must never be able to cost it
           ;; a database VALUE, not the connection: `effective` reads
@@ -1068,9 +1206,9 @@
       (write-advertisement!
        (cluster-paths (:seon.boot/root config) cluster-name)
        advertisement)
-      (publish! (assoc instance
-                       :seon.render.web/served served
-                       :seon.boot/advertisement advertisement)))))
+    (publish! (assoc instance
+                     :seon.render.web/served served
+                     :seon.boot/advertisement advertisement))))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.
@@ -1078,9 +1216,9 @@
   socket server and write the advertisement (real bound port, pid,
   start-instant — the REPL is live from here NO MATTER WHAT) → open the
   process-root store (first instance; siblings reuse the held store) →
-  ancestor/ensure! (population from :seon.boot/ancestor-branch when
-  supplied, else the default schema population) → registry/
-  ensure-cluster! → store/open-branch! → require one recorded source
+  snapshot the already-published `current-src` commit when the cluster branch
+  is absent → registry/ensure-cluster! → store/open-branch! → require
+  one recorded source
   digest and a coherent program graph (a complete older corpus is
   sovereign and allowed) → accrete the current schema
   population → config/apply! with the shipped defaults → return the complete
@@ -1102,7 +1240,7 @@
          (apply dissoc request (keys config-request)))
         cluster-name (:seon.boot/cluster-name config)
         paths (cluster-paths (:seon.boot/root config) cluster-name)
-        name (server-name cluster-name)]
+        server-symbol (server-name cluster-name)]
     (create-directories! config paths)
     (reserve-cluster! cluster-name)
     (let [server (volatile! nil)
@@ -1115,7 +1253,7 @@
                   (clojure.core.server/start-server
                    {:accept 'clojure.core.server/io-prepl
                     :port (:seon.boot/prepl-port config)
-                    :name name
+                    :name server-symbol
                     :address (:seon.boot/prepl-host config)})
                   _ (vreset! server prepl-server)
                   advertisement
@@ -1139,7 +1277,7 @@
               instance)
             (catch Throwable throwable
               (when @server
-                (clojure.core.server/stop-server name))
+                (clojure.core.server/stop-server server-symbol))
               (release-reservation! cluster-name)
               (throw throwable)))
           ;; the registry always holds the instance AS IT STANDS, so a
@@ -1346,13 +1484,12 @@
   nil)
 
 (defn reset!
-  "Destroy one cluster branch and refork the current ancestor.
+  "Destroy one cluster branch and refork the published source commit.
 
   An extra hold keeps the process-root store and its flock alive while
   `stop!` releases the addressed instance and its branch connection.
   The registry's existing `reset-cluster!` remains the sole
-  delete/refork owner. The current content-addressed ancestor is ensured
-  explicitly here; neither indexing nor reset enters the boot path."
+  delete/refork owner. Neither indexing nor source publication enters boot."
   {:malli/schema
    [:=> [:cat :seon.boot/instance]
     :seon.cluster.registry/branch-result]}
@@ -1366,9 +1503,8 @@
       (registry/reset-cluster!
        {:seon.store/store held-store
         :seon.boot/cluster-name cluster-name
-        :seon.ancestor/branch
-        (:seon.ancestor/branch
-         (ensure-current-ancestor! held-store))})
+        :seon.source/commit-id
+        (:seon.source/commit-id (current-source! held-store))})
       (finally
         (release-root-store! store-dir)))))
 

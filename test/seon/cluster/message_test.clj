@@ -13,6 +13,7 @@
   infinite conversation is the failure mode this rung introduces, and
   the one thing that must be proven dead."
   (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.set :as set]
             [clojure.test.check :as tc]
@@ -569,7 +570,7 @@
       (let [ids (d/q '[:find [?id ...]
                        :where [?message :seon.cluster.message/id ?id]]
                      @connection)
-            inbound-ids (filter #(clojure.string/starts-with?
+            inbound-ids (filter #(str/starts-with?
                                   % "inbound-")
                                 ids)]
         (is (= 64 (count inbound-ids)))

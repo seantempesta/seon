@@ -3,7 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.cluster]
-            [seon.cluster.ancestor :as ancestor]
+            [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -16,8 +16,8 @@
 (def ^:private repl-process-identity "seon.db.process/repl")
 (def ^:private seal-digest (apply str (repeat 64 "a")))
 (def ^:private second-seal-digest (apply str (repeat 64 "b")))
-(def ^:private ancestor-attributes
-  [:seon.ancestor/digest :seon.ancestor/built-at])
+(def ^:private source-attributes
+  [:seon.source/digest :seon.source/built-at])
 
 (defn- with-temporal-database [body]
   (let [configuration
@@ -31,7 +31,7 @@
        connection
        (schema.datahike/malli->datahike-schema
         (into (schema/canonical-database-attributes)
-              ancestor-attributes)))
+              source-attributes)))
       (body connection)
       (finally
         (d/release connection)
@@ -48,8 +48,8 @@
   (transaction-id
    (d/transact
     connection
-    [{:seon.ancestor/digest digest
-      :seon.ancestor/built-at (java.util.Date.)}])))
+    [{:seon.source/digest digest
+      :seon.source/built-at (java.util.Date.)}])))
 
 (defn- transact-row!
   ([connection row-key]
@@ -68,21 +68,21 @@
 (defn- source [connection tx]
   (:seon.schema.admission/source (admission connection tx)))
 
-(defn- with-built-ancestor [body]
+(defn- with-published-source [body]
   (let [root (str "tmp/schema-admission-test/" (random-uuid))
         dir (str root "/store")]
     (.mkdirs (io/file root))
     (let [opened (store/open-store! {:seon.store/dir dir})]
       (try
-        (let [ensured
-              (ancestor/ensure!
+        (let [published
+              (source/publish!
                {:seon.store/store opened
-                :seon.ancestor/digest seal-digest
-                :seon.ancestor/populate 'seon.cluster/populate-ancestor!})
+                :seon.source/digest seal-digest
+                :seon.source/populate 'seon.cluster/populate-source!})
               connection
               (store/open-branch!
                opened
-               (:seon.ancestor/branch ensured))]
+               (:seon.source/branch published))]
           (try
             (body connection)
             (finally
@@ -155,19 +155,19 @@
                    (:seon.schema.admission/process-id
                     (admission connection tx))))))))))
 
-(deftest advancing-one-clusters-current-digest-preserves-its-genesis-seal
+(deftest advancing-the-published-source-digest-preserves-its-genesis-seal
   (with-temporal-database
     (fn [connection]
       (seed-process! connection boot-process-identity)
       (let [seal-tx (seal! connection seal-digest)
-            ancestor
-            (d/q '[:find ?ancestor .
-                   :where [?ancestor :seon.ancestor/digest _]]
+            source-entity
+            (d/q '[:find ?source .
+                   :where [?source :seon.source/digest _]]
                  @connection)]
         (d/transact
          connection
-         [[:db.fn/retractAttribute ancestor :seon.ancestor/digest]
-          {:db/id ancestor :seon.ancestor/digest second-seal-digest}])
+         [[:db.fn/retractAttribute source-entity :seon.source/digest]
+          {:db/id source-entity :seon.source/digest second-seal-digest}])
         (let [tx
               (transact-row!
                connection
@@ -176,11 +176,11 @@
           (is (= :core (source connection tx)))
           (is (= seal-tx
                  (d/q '[:find (min ?tx) .
-                        :in $ ?ancestor
+                        :in $ ?source
                         :where
-                        [?ancestor :seon.ancestor/digest _ ?tx true]]
+                        [?source :seon.source/digest _ ?tx true]]
                       (d/history @connection)
-                      ancestor))))))))
+                      source-entity))))))))
 
 (deftest missing-and-malformed-genesis-provenance-fails-closed
   (testing "a transaction without process provenance"
@@ -206,7 +206,7 @@
                  :test.schema.admission/dangling-process
                  [:seon.schema/key
                   :test.schema.admission/process-without-identity])))))))
-  (testing "a database with no ancestor seal"
+  (testing "a database with no source seal"
     (with-temporal-database
       (fn [connection]
         (seed-process! connection config/managing-process-identity)
@@ -218,7 +218,7 @@
                  :test.schema.admission/no-seal
                  [:seon.db.process/id
                   config/managing-process-identity])))))))
-  (testing "a database with multiple ancestor seals"
+  (testing "a database with multiple source seals"
     (with-temporal-database
       (fn [connection]
         (seed-process! connection config/managing-process-identity)
@@ -238,8 +238,8 @@
         (d/transact
          connection
          [{:seon.db.process/id runtime-core-process-identity}
-          {:seon.ancestor/digest seal-digest
-           :seon.ancestor/built-at (java.util.Date.)}])
+          {:seon.source/digest seal-digest
+           :seon.source/built-at (java.util.Date.)}])
         (is (= :agent
                (source
                 connection
@@ -249,8 +249,8 @@
                  [:seon.db.process/id
                   runtime-core-process-identity]))))))))
 
-(deftest production-ancestor-order-makes-config-core
-  (with-built-ancestor
+(deftest production-source-order-makes-config-core
+  (with-published-source
     (fn [connection]
       (testing "canonical schema rows carry genesis config provenance"
         (let [schema-tx

@@ -1,5 +1,6 @@
 (ns seon.test-support-test
   (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -11,7 +12,7 @@
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
-(deftest a-canonical-database-is-the-production-ancestor-population
+(deftest a-canonical-database-is-the-production-source-population
   (test-support/with-database
     (fn [connection]
       (let [database @connection
@@ -103,11 +104,11 @@
   ;; leave the sandbox, so the sentinel below must survive its own link's
   ;; deletion.
   (let [scratch (java.nio.file.Files/createTempDirectory
-                 (.toPath (clojure.java.io/file "tmp"))
+                 (.toPath (io/file "tmp"))
                  "cleanup-symlink-proof"
                  (make-array java.nio.file.attribute.FileAttribute 0))
         outside (java.nio.file.Files/createTempDirectory
-                 (.toPath (clojure.java.io/file "tmp"))
+                 (.toPath (io/file "tmp"))
                  "cleanup-sentinel"
                  (make-array java.nio.file.attribute.FileAttribute 0))
         sentinel (.resolve outside "must-survive.txt")

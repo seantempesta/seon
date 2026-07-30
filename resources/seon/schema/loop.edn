@@ -1,6 +1,6 @@
 {; The cluster handle one proc carries: everything a turn needs and
  ; nothing it does not. The EVALUATOR IS INJECTED as a qualified symbol
- ; (the same symbols-as-data idiom as :seon.ancestor/populate), so the
+ ; (the same symbols-as-data idiom as :seon.source/populate), so the
  ; loop's mechanics do not wait on the seon.sci.eval adoption and a
  ; suite can drive a turn with a fake evaluator.
  ; `:seon.cluster.loop/stream-channel` is the cluster's ONE stream conn

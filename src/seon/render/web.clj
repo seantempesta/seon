@@ -738,7 +738,8 @@
   middleware make a tree pay for itself. Method and whole-path
   discrimination here make the one state-changing route exact without
   introducing a second dispatcher."
-  {:malli/schema [:=> [:cat :seon.render.web/service] fn?]}
+  {:malli/schema [:=> [:cat :seon.render.web/service]
+                  [:fn clojure.core/fn?]]}
   [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps
     process :seon.cluster.run/process

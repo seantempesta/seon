@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
+            [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
             [seon.dev.test-roots :as test-roots])
   (:import [java.io File]
@@ -223,7 +224,7 @@
      (set (test-roots/writer-test-namespaces root))}))
 
 (defn analyze-host
-  "Return current CLJ namespace facts or an explicit unavailable reason."
+  "Return source-analysis facts and findings without publishing program rows."
   [root]
   (if-not (fs/which "clj-kondo")
     {:seon.dev.changed-test/host-status :unavailable
@@ -232,8 +233,7 @@
       (let [files (host-corpus root)
             result (process/sh {:cmd (into ["clj-kondo" "--lint"]
                                            (concat files
-                                                   ["--skip-lint"
-                                                    "--config"
+                                                   ["--config"
                                                     host-analysis-config]))
                                 :dir root
                                 :out :string
@@ -243,10 +243,14 @@
         (if (map? (:analysis parsed))
           {:seon.dev.changed-test/host-status :available
            :seon.dev.changed-test/host-graph
-           (analysis->host-graph root parsed)}
+           (analysis->host-graph root parsed)
+           :seon.dev.changed-test/findings
+           (vec (:findings parsed))}
           {:seon.dev.changed-test/host-status :unavailable
            :seon.dev.changed-test/reason
-           "clj-kondo returned no namespace analysis"}))
+           (str "clj-kondo returned no namespace analysis"
+                (when-not (str/blank? (:err result))
+                  (str ": " (str/trim (:err result)))))}))
       (catch Exception error
         {:seon.dev.changed-test/host-status :unavailable
          :seon.dev.changed-test/reason (.getMessage error)}))))
@@ -293,27 +297,20 @@
                                     (not (writer-path? %)))
                               unknown)
         unavailable? (nil? graph)
-        shared-input? (some #(and (str/starts-with? % "src/")
-                                  (str/ends-with? % ".cljc"))
-                            paths)
         dependency-input? (some #{"deps.edn"} paths)
         force-operator? (some #{"bb.edn"} paths)
         force-writer? (some #{"bin/test"} paths)
-        relevant-operator? (or shared-input? dependency-input?
-                               (some operator-path? paths))
-        relevant-writer? (or shared-input? dependency-input?
-                             (some writer-path? paths))
         operator-tests (cond
+                         (and unavailable? (seq paths)) :all
                          (or dependency-input? force-operator?)
-                         (if unavailable? :all all-operator)
-                         (and unavailable? relevant-operator?) :all
+                         all-operator
                          (or unknown-operator? unknown-shared?) all-operator
                          graph (set/intersection affected all-operator)
                          :else #{})
         writer-tests (cond
+                       (and unavailable? (seq paths)) :all
                        (or dependency-input? force-writer?)
-                       (if unavailable? :all all-writer)
-                       (and unavailable? relevant-writer?) :all
+                       all-writer
                        (or unknown-writer? unknown-shared?) all-writer
                        graph (set/intersection affected all-writer)
                        :else #{})]
@@ -516,6 +513,7 @@
         paths (filterv root-runtime-path? requested-paths)
         dependency-source-paths
         (filterv (complement root-runtime-path?) requested-paths)
+        dependency-cache (dev.kondo/ensure-dependency-cache! root)
         host-result (analyze-host root)
         host-selection (assoc (host-impact host-result paths)
                               :seon.dev.changed-test/host-graph
@@ -538,6 +536,13 @@
      (if (= :all writer-tests) [] (vec writer-tests))
      :seon.dev.changed-test/host-status
      (:seon.dev.changed-test/host-status host-result)
+     :seon.dev.changed-test/findings
+     (vec (:seon.dev.changed-test/findings host-result))
+     :seon.dev.changed-test/dependency-cache
+     {:seon.dev.changed-test/dependency-cache-status
+      (:seon.dev.clj-kondo/status dependency-cache)
+      :seon.dev.changed-test/reason
+      (:seon.dev.clj-kondo/reason dependency-cache)}
      :seon.dev.changed-test/widening
      (vec
       (concat
@@ -609,6 +614,10 @@
              :seon.dev.changed-test/boundaries []
              :seon.dev.changed-test/test-namespaces []
              :seon.dev.changed-test/host-status :unavailable
+             :seon.dev.changed-test/findings []
+             :seon.dev.changed-test/dependency-cache
+             {:seon.dev.changed-test/dependency-cache-status :unavailable
+              :seon.dev.changed-test/reason (.getMessage error)}
              :seon.dev.changed-test/widening
              [{:seon.dev.changed-test/reason :worker-failure
                :seon.dev.changed-test/detail (.getMessage error)}]}))]
@@ -645,7 +654,9 @@
   "Format one bounded advisory result for a human or edit hook."
   [result]
   (let [status (:seon.dev.changed-test/status result)
-        boundaries (:seon.dev.changed-test/boundaries result)]
+        boundaries (:seon.dev.changed-test/boundaries result)
+        findings (:seon.dev.changed-test/findings result)
+        dependency-cache (:seon.dev.changed-test/dependency-cache result)]
     (str "changed tests " (name status)
          (apply str
                 (for [boundary boundaries
@@ -673,6 +684,23 @@
                          (str "\n" (str/join "\n" failures))))))
          (when-let [report (:seon.dev.changed-test/report result)]
            (str "\nreport: " report))
+         (when (= :unavailable
+                  (:seon.dev.changed-test/dependency-cache-status
+                   dependency-cache))
+           (str "\ndependency analysis unavailable: "
+                (:seon.dev.changed-test/reason dependency-cache)))
+         (when (seq findings)
+           (str "\nclj-kondo findings:"
+                (apply str
+                       (for [finding (take 20 findings)]
+                         (str "\n  "
+                              (:filename finding) ":"
+                              (:row finding) ":"
+                              (:col finding) " ["
+                              (name (:level finding)) "/"
+                              (name (:type finding)) "] "
+                              (:message finding))))
+                (when (< 20 (count findings)) "\n  …")))
          (when-let [widening (seq (:seon.dev.changed-test/widening result))]
            (str "\nwidening: "
                 (str/join ", "

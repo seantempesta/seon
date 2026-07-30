@@ -44,14 +44,16 @@
           (throw (ex-info "The scratch cluster did not commit the expected fact."
                           {:seon.error/kind ::commit-timeout
                            ::receipts
-                           (d/q '[:find ?ordinal ?result ?error
-                                  :where
-                                  [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                                  [?receipt :seon.cluster.eval/result-edn ?result]
-                                  [(get-else $ ?receipt
-                                             :seon.cluster.eval/error nil)
-                                   ?error]]
-                                @connection)})))
+                           (mapv #(d/pull @connection
+                                          [:seon.cluster.eval/ordinal
+                                           :seon.cluster.eval/result-edn
+                                           {:seon.cluster.eval/error
+                                            [:seon.error/message]}]
+                                          %)
+                                 (d/q '[:find [?receipt ...]
+                                        :where
+                                        [?receipt :seon.cluster.eval/ordinal _]]
+                                      @connection))})))
         observed)
       (finally
         (datahike/unlisten! connection listener-key)))))
@@ -90,6 +92,7 @@
         cluster-name (str "program-restart-" (random-uuid))]
     (.mkdirs (io/file root))
     (try
+      (cluster/refresh-source! root)
       (let [first-instance
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})

@@ -8,6 +8,7 @@
  :seon.fn/doc :string
  :seon.fn/private? :boolean
  :seon.fn/spec :string
+ :seon.fn/calls [:set :seon.db/ref]
  ; Explicit only on capability leaves. All other workload classification is
  ; derived by reachability over the program graph.
  :seon.fn/workload [:enum :io :compute]
@@ -22,6 +23,7 @@
   [:seon.fn/doc {:optional true} :seon.fn/doc]
   [:seon.fn/private? {:optional true} :seon.fn/private?]
   [:seon.fn/spec {:optional true} :seon.fn/spec]
+  [:seon.fn/calls {:optional true} :seon.fn/calls]
  [:seon.fn/workload {:optional true} :seon.fn/workload]]
 
  :seon.schema/schema
@@ -96,5 +98,5 @@
    {:optional true}
    :seon.store/branch-connection]
   [:seon.db/process {:optional true} :seon.db/ref]
-  [:seon.ancestor/digest {:optional true} :seon.ancestor/digest]
-  [:seon.fn/roots :seon.fn/roots]]}
+  [:seon.fn/roots {:optional true} :seon.fn/roots]
+  [:seon.fn/manifest {:optional true} :map]]}

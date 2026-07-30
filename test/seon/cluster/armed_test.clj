@@ -22,6 +22,7 @@
   throw, so a call would both fail the count and fail loudly."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -46,6 +47,7 @@
   (let [root (str "tmp/armed-test/" name)]
     (doseq [file (reverse (file-seq (io/file root)))]
       (.delete ^java.io.File file))
+    (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
@@ -204,6 +206,7 @@
         arm! agent/arm!]
     (doseq [file (reverse (file-seq (io/file root)))]
       (.delete ^java.io.File file))
+    (cluster/refresh-source! root)
     (with-redefs
       [work/next-agent-work
        (fn [& arguments]
@@ -254,6 +257,7 @@
         run-id (atom nil)]
     (doseq [file (reverse (file-seq (io/file root)))]
       (.delete ^java.io.File file))
+    (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
@@ -448,7 +452,7 @@
             (testing "whose data-edn READS BACK — which is what proves the
             one codec ran and the proc's live state did not escape"
               (is (some? (:seon.error/data-edn fact)))
-              (is (map? (clojure.edn/read-string (:seon.error/data-edn fact)))))
+              (is (map? (edn/read-string (:seon.error/data-edn fact)))))
             (testing "and root was told, because nobody else could be"
               ;; WAIT FOR THE MESSAGE THAT NAMES THIS FACT, never for a
               ;; COUNT. Counting here was the one-in-three flake: the

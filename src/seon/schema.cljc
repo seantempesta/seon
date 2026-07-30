@@ -345,9 +345,15 @@
                      :seon.schema/value value
                      :seon.error/kind :core-bug}))))
 
+(defn byte-array?
+  "True when `value` is a platform byte array."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (bytes? value))
+
 (defn sha-256
   "Lowercase SHA-256 hex digest of ordered byte arrays."
-  {:malli/schema [:=> [:cat [:sequential bytes?]]
+  {:malli/schema [:=> [:cat [:sequential [:fn seon.schema/byte-array?]]]
                   [:string {:min 64 :max 64}]]}
   [byte-arrays]
   (let [digester (MessageDigest/getInstance "SHA-256")]
@@ -533,25 +539,25 @@
     (catch #?(:clj Throwable :cljs :default) _
       nil)))
 
-(defn- ancestor-seal-tx [db history]
+(defn- source-seal-tx [db history]
   (when (and history
-             (installed-attribute? db :seon.ancestor/digest))
-    (let [current-ancestors
-          (d/q '[:find [?ancestor ...]
-                 :where [?ancestor :seon.ancestor/digest _]]
+             (installed-attribute? db :seon.source/digest))
+    (let [current-sources
+          (d/q '[:find [?source ...]
+                 :where [?source :seon.source/digest _]]
                db)]
-      (when (= 1 (count current-ancestors))
-        ;; Priming advances the ONE ancestor entity's current digest. The
+      (when (= 1 (count current-sources))
+        ;; Publication advances the ONE source entity's current digest. The
         ;; original positive assertion remains the genesis boundary: later
-        ;; digest values describe explicit source synchronization, not a new
-        ;; ancestor or a new trust boundary. Multiple current ancestor
+        ;; digest values describe explicit source publication, not a new
+        ;; trust boundary. Multiple current source
         ;; entities still fail closed.
         (d/q '[:find (min ?tx) .
-               :in $ ?ancestor
+               :in $ ?source
                :where
-               [?ancestor :seon.ancestor/digest _ ?tx true]]
+               [?source :seon.source/digest _ ?tx true]]
              history
-             (first current-ancestors))))))
+             (first current-sources))))))
 
 (defn- first-process-id-tx [history process-ref process-id]
   (when (and history process-ref process-id)
@@ -577,7 +583,7 @@
         process-id (current-process-id db process-ref)
         user (current-user db asserting-tx-eid)
         history (history-value db)
-        seal-tx (ancestor-seal-tx db history)
+        seal-tx (source-seal-tx db history)
         first-process-tx
         (first-process-id-tx history process-ref process-id)
         core? (and seal-tx
@@ -591,7 +597,7 @@
       (not core?)
       (assoc :seon.schema.admission/note
              (str "The asserting transaction has no process identity whose "
-                  "first assertion precedes the ancestor seal, so this row "
+                  "first assertion precedes the source seal, so this row "
                   "is admitted as agent-authored.")))))
 
 (defn- candidate-forms []
@@ -624,6 +630,9 @@
   {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
   [predicate]
   (ifn? (get (core-predicate-functions) predicate)))
+
+(defonce ^:private _byte-array-predicate
+  (register-core-predicate! 'seon.schema/byte-array? byte-array?))
 
 (defn- active-forms []
   (or (:seon.schema.projection/forms (active-projection))
@@ -2200,30 +2209,40 @@
 (defn canonical-schema-rows
   "Build the complete canonical schema-row population at one instant."
   {:malli/schema
-   [:=> [:catn [:seon.schema/created-at :inst]] [:vector :map]]}
-  [created-at]
-  (into
-   []
-   (keep
-    (fn [[schema-key definition]]
-      (when (keyword? schema-key)
-        (let [properties (form/attr-form-properties definition)]
-          (cond-> {:seon.schema/key schema-key
-                   :seon.schema/form (form-string schema-key)
-                   :seon.schema/created-at created-at}
-            (contains? properties :seon.db.id/generator)
-            (assoc :seon.db.id/generator
-                   (:seon.db.id/generator properties))))))
-   (registered-schemas))))
+   [:function
+    [:=> [:catn [:seon.schema/created-at :inst]] [:vector :map]]
+    [:=> [:catn [::forms :map] [:seon.schema/created-at :inst]]
+     [:vector :map]]]}
+  ([created-at]
+   (canonical-schema-rows (registered-schemas) created-at))
+  ([forms created-at]
+   (into
+    []
+    (keep
+     (fn [[schema-key definition]]
+       (when (keyword? schema-key)
+         (let [properties (form/attr-form-properties definition)]
+           (cond-> {:seon.schema/key schema-key
+                    :seon.schema/form (pr-str definition)
+                    :seon.schema/created-at created-at}
+             (contains? properties :seon.db.id/generator)
+             (assoc :seon.db.id/generator
+                    (:seon.db.id/generator properties))))))
+    forms))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.
 
    Entity-map entries are attributes by construction. Standalone registered
    forms join that population only when they carry a persistence facet."
-  {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
-  []
-  (form/database-attributes (registered-schemas)))
+  {:malli/schema
+   [:function
+    [:=> [:cat] [:vector :qualified-keyword]]
+    [:=> [:catn [::forms :map]] [:vector :qualified-keyword]]]}
+  ([]
+   (canonical-database-attributes (registered-schemas)))
+  ([forms]
+   (form/database-attributes forms)))
 
 (defn registered?
   "Check if a schema keyword is registered."

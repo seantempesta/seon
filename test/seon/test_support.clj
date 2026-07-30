@@ -183,7 +183,7 @@
 (defn with-database
   "Run `body` with a fresh canonical in-memory database.
 
-   The production ancestor population owns schema installation. Optional
+   The production source population owns schema installation. Optional
    `:seon.test-support/extra-schema` rows are synthetic declarations whose
    installation is itself part of a test."
   ([body]
@@ -195,17 +195,17 @@
          _ (d/create-database configuration)
          connection (d/connect configuration)]
      (try
-       (cluster/populate-ancestor!
+       (cluster/populate-source!
         {:seon.store/branch-connection connection})
-       ;; `populate-ancestor!` is the contents step used by production
-       ;; `ancestor/ensure!`; production seals that completed population in
+       ;; `populate-source!` is the contents step used by production
+       ;; `source/publish!`; production seals that completed population in
        ;; the following transaction. Keep this canonical fixture on the same
        ;; side of that provenance boundary so indexed core contracts are not
        ;; misclassified as agent-authored rows.
        (d/transact
         connection
         {:tx-data
-         [{:seon.ancestor/digest
+         [{:seon.source/digest
            (apply str (repeat 64 "0"))}]})
        (when (seq extra-schema)
          (d/transact connection {:tx-data extra-schema}))

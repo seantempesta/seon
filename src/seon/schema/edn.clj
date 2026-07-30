@@ -42,6 +42,12 @@
   [::files ::files]
   [::keys ::keys]])
 
+(defonce ^:private packaged-base-forms
+  ;; Captured before any consumer namespace can register process-local test or
+  ;; REPL schemas. Packaged publication later merges only schema EDN into this
+  ;; bootstrap population; the ambient registry is never a build input.
+  (schema/registered-schemas))
+
 (def default-resource-dir
   "Classpath directory backed by `resources/seon/schema/` in a source checkout."
   "seon/schema")
@@ -217,6 +223,21 @@
    {::forms {} ::files-by-key {}}
    resources))
 
+(defn- resource-population
+  [resource-dir]
+  (let [resources (resource-files resource-dir)
+        {::keys [forms files-by-key]} (merge-schema-files resources)]
+    {::resources resources
+     ::forms (derive-config-forms forms)
+     ::files-by-key files-by-key}))
+
+(defn packaged-forms
+  "Canonical schema forms declared by Seon's bootstrap and schema resources."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (merge packaged-base-forms
+         (::forms (resource-population default-resource-dir))))
+
 (defn load!
   "Merge every `<resource-dir>/*.edn` on the classpath into candidates.
   The default is `default-resource-dir`, physically
@@ -231,9 +252,8 @@
   {:malli/schema [:=> [:cat ::load-request] ::loaded]}
   [{::keys [resource-dir]}]
   (let [resource-dir (or resource-dir default-resource-dir)
-        resources (resource-files resource-dir)
-        {::keys [forms files-by-key]} (merge-schema-files resources)
-        forms (derive-config-forms forms)]
+        {::keys [resources forms files-by-key]}
+        (resource-population resource-dir)]
     (schema/contribute-candidate-forms! forms)
     (swap! !source-files merge files-by-key)
     {::files (mapv ::file resources)
@@ -288,7 +308,7 @@
   loading its owner namespace first if needed. A qualified symbol
   carries its owner; `requiring-resolve` loads that namespace, whose
   load-time `register-core-predicate!` call registers the predicate —
-  the same symbols-as-data idiom as `:seon.ancestor/populate`. This is
+  the same symbols-as-data idiom as `:seon.source/populate`. This is
   the COMPUTED rule that removes load-order from admission: no
   activation site needs to require every package whose EDN file names
   a predicate. (Dormant cycle risk, stated: a predicate owner that

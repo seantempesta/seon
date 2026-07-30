@@ -62,6 +62,7 @@
         message-id "instrumented-acquire-turn"]
     (test-support/delete-recursively! root)
     (try
+      (cluster/refresh-source! root)
       (let [instance
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]

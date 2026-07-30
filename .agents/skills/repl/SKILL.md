@@ -100,6 +100,16 @@ the `defn` updates the next step without rebuilding topology
 §4). Reloading is evidence only after the re-run; the edit on disk alone does
 not change an already-running JVM.
 
+That live Var update is not database program-graph indexing. File or
+schema-resource edits do not change a cluster's `:seon.fn`, `:seon.ns`,
+`:seon.schema`, or `:seon.test` facts. The edit hook statically publishes safe
+changes to the one `:current-src` branch and selects a complete rebuild for
+structural changes; existing clusters never synchronize. `bin/seon init
+CLUSTER --force` destroys and reforks that branch from the published commit.
+A REPL proof after an edit must say whether it proves only the loaded Var or a
+cluster forked from the newly published commit (`AGENTS.md`, “Hot reload is
+not program-graph indexing”).
+
 ## Fast diagnosis
 
 | Symptom | Surface and next move |

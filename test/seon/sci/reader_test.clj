@@ -524,7 +524,8 @@
     (is (seq sites)
         "non-evaluator tooling still owns its specialized readers")
     (is (not (contains? sites "src/seon/sci/eval.clj")))
-    (is (contains? sites "bin/seon-hook"))
+    (is (contains? sites "src/seon/fn.clj")
+        "the static indexer reads only the namespace form after clj-kondo analysis")
     ;; MIGRATED 2026-07-29 (generate-code v0): the reply splitter reads
     ;; through this reader now, which is where its forms get the
     ;; parse-time namespace-in-effect they freeze with.

@@ -154,6 +154,18 @@ only while those manifests stay byte-identical. Namespace rows preserve exact
 empty alias/refer sets and explicit nil-mask components when code unmaps a
 default JVM import.
 
+The 2026-07-30 per-form clj-kondo admission work found one remaining consumer
+limitation at that exact nil mask. Its synthetic `ns` prelude can represent
+positive imports but clj-kondo does not model a removed JVM default import:
+both `(ns my.agents.mask)\nString` and the same source with
+`(ns-unmap *ns* 'String)` before `String` produce no finding under pinned
+clj-kondo `794a508d53df319bfb2f4db666315de6a3e56fff`. Admission therefore drops
+nil `:seon.ns.import/target-class` components from the prelude and may miss an
+unresolved-class error that SCI will correctly report at evaluation. Do not
+invent a second import registry or hand list. Acceptance is an upstream-backed
+clj-kondo representation for negative imports, followed by a recurring source
+analysis test proving the persisted nil mask makes `String` unresolved.
+
 The production/default-parent proof indexes the complete source roots from
 `clojure -M:dev`: 116 namespace rows, 1,330 function rows, 552 schema rows, and
 608 test rows. Cold evaluation took 16,181 ms; the exact second call returned

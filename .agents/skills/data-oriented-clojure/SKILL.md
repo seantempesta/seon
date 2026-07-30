@@ -55,17 +55,19 @@ effective, and database-entity composites from the leaf registrations.
 a second dial roster (`src/seon/schema/edn.clj:87-111`;
 `src/seon/config.cljc:137-229`).
 
-**Direct source inventory and selective runtime publication are different
-admission domains:** source indexing records every directly read top-level
-`defn` and `defn-`, including private and uncontracted helpers
-(`src/seon/fn.clj:24-28,57-94`; `src/seon/program.cljc:93-125`). An executable
-top-level `do` containing a declaration is refused with source evidence rather
-than silently omitted (`src/seon/sci/reader.cljc:302-319,423-429`;
-`src/seon/fn.clj:49-54,84-91`). Call reachability is `[TARGET]`, not
-implemented. Agent runtime publication admits only fully contracted functions,
-plus schema and test declarations (`src/seon/sci/eval.clj:317-339`). Arbitrary
-evals, scratch defs, and atoms are process-local. Receipts retain history but
-never reconstruct code.
+**Static build indexing and selective runtime publication are different
+admission domains.** Build indexing asks clj-kondo for the JVM projection of
+every first-party file under `src/` and `test/`, slices exact source from its
+locations, and records namespace rows plus every function/test definition,
+including private and uncontracted helpers. It never evaluates application
+forms; dependency caches improve resolution but never become database rows.
+Global schema rows come independently from the admitted
+`resources/seon/schema/` population (`src/seon/fn/analyzer.clj`;
+`src/seon/fn.clj`). Agent runtime publication remains contract-selective and
+commits admitted functions, schemas, and tests through the terminal
+transaction (`src/seon/sci/eval.clj:320-345,793-825`). Arbitrary evals,
+scratch defs, and atoms remain process-local. Receipts retain history but never
+reconstruct code.
 
 ## The reflexes, and what to write instead
 
@@ -121,6 +123,12 @@ argument shapes: map-in/map-out
 (preferred for accreting API surfaces) or fully-spec'd positional via `:catn`;
 the invariant is that every arg is named, specced, validated — a bare/unspecced
 arg is the violation, not a positional one.
+
+Hot reload changes the loaded Var only; it does not change database program
+facts. The edit hook publishes safe source changes to the one `:current-src`
+branch and performs a complete scratch rebuild for structural changes. Existing
+clusters remain sovereign. `bin/seon init CLUSTER --force` is the destructive refork
+(`AGENTS.md`, “Hot reload is not program-graph indexing”).
 
 Use concrete types. The omission ruling is exact: `[:maybe]` is allowed in
 in-memory function RETURN contracts (stored attributes stay nil-free — the

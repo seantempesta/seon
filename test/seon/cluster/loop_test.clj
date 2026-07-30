@@ -18,11 +18,14 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [my.run :as my.run]
+            [seon.config :as config]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.fn.analyzer :as fn.analyzer]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.schema.datahike :as schema.datahike]
+            [seon.sci.eval :as sci.eval])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
@@ -31,6 +34,66 @@
 
 (def ^:private now (Date. 1700000000000))
 (def ^:private process "process/one")
+
+(defn- lint-plan
+  [sources]
+  (cluster.loop/lint-plan
+   {:seon.ns/name 'my.agents.lint-test
+    :seon.cluster.loop/namespace-row
+    {:seon.ns/name 'my.agents.lint-test}
+    :seon.cluster.reply/sources
+    (mapv (fn [source]
+            {:seon.cluster.run.form/source source
+             :seon.ns/name 'my.agents.lint-test})
+          sources)}))
+
+(deftest lint-rejection-is-per-form-data-before-freeze
+  (let [originals (mapv #(str "(+ " % " " % ")") (range 10))
+        originals (assoc originals 4 "(missing 4)")
+        admitted (lint-plan originals)
+        admitted-sources (mapv :seon.cluster.run.form/source admitted)
+        rejected-value (second (read-string (nth admitted-sources 4)))]
+    (testing "nine independent forms retain their exact bytes and execute"
+      (is (= (vec (concat (subvec originals 0 4)
+                          (subvec originals 5)))
+             (vec (concat (subvec admitted-sources 0 4)
+                          (subvec admitted-sources 5)))))
+      (is (= [0 2 4 6 10 12 14 16 18]
+             (mapv (comp eval read-string)
+                   (concat (subvec admitted-sources 0 4)
+                           (subvec admitted-sources 5))))))
+    (testing "the rejected ordinal is a literal flat error, not executable source"
+      (is (= ::cluster.loop/lint-rejected (:seon.error/kind rejected-value)))
+      (is (= "(missing 4)"
+             (get-in rejected-value
+                     [:seon.error/data :seon.cluster.run.form/source])))
+      (is (= :unresolved-symbol
+             (get-in rejected-value
+                     [:seon.error/data ::fn.analyzer/findings 0
+                      ::fn.analyzer/type])))
+      (let [evaluation
+            (sci.eval/evaluate
+             {:seon.cluster.run.form/source (nth admitted-sources 4)
+              :seon.sci.admit/caps
+              (config/result-caps (config/defaults))
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic})]
+        (is (= rejected-value (:seon.sci.admit/value evaluation)))
+        (is (string? (:seon.cluster.eval/result-edn evaluation))))))
+  (testing "warnings never reject"
+    (let [warning-source "(let [unused 1] 2)"]
+      (is (= warning-source
+             (:seon.cluster.run.form/source
+              (first (lint-plan [warning-source])))))))
+  (testing "a dependent form is separately rejected when kondo flags it"
+    (let [admitted (lint-plan ["(defn broken [] (missing))"
+                               "(broken 1)"])]
+      (is (every?
+           #(= ::cluster.loop/lint-rejected
+               (:seon.error/kind
+                (second
+                 (read-string (:seon.cluster.run.form/source %)))))
+           admitted)))))
 
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]

@@ -32,7 +32,7 @@
   namespace INVOKES the var rather than a fn it dereferenced earlier:
   re-evaluating the projection's `defn` against the running system
   changes the next render with no re-registration, which is the same
-  hot-reload property `:seon.ancestor/populate`,
+  hot-reload property `:seon.source/populate`,
   `:seon.cluster.loop/evaluate` and the schema gate's predicate-owner
   rule already rely on. A cached fn value would silently serve the old
   projection after a reload — the failure would look like a stale UI, so
@@ -180,7 +180,7 @@
   Flat `:seon.error` values, never throws — this router runs on the
   error path and may not fault into it:
   - `::unresolvable` — the declared symbol does not resolve, naming the
-    symbol. This is the same failure `:seon.ancestor/populate` refuses
+    symbol. This is the same failure `:seon.source/populate` refuses
     on, and it is a bug in the producer, not in the caller;
   - `::projection-failed` — the projection itself threw, naming the
     symbol and the throwable's class. The projection is named because

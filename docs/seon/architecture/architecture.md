@@ -27,26 +27,31 @@ prompt is a render of data; the UI is a reactive projection of data. The context
 unit is the **block** (`:seon.render.block/block`); the prompt, an agent’s **view**,
 and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
-Seon is a supervised set of isolated clusters.
-Each cluster is one store: its own `data/clusters/<name>/`, process directory,
-ports, and mutable state. Datahike's `:self` writer requires exactly one writer
-process per store, so one **cluster JVM** owns transactions, the per-agent
-flow graphs, guarded evals, the program graph, the render pipeline, and the web
-UI for that cluster. Agent evals and rendering are co-located with the database: a read is
-a pointer into an immutable database value and a write is a function call.
+Seon is one supervised JVM process root hosting isolated named clusters. The
+process root opens one physical Datahike store at `data/clusters/store` under a
+lifetime `flock`; each cluster is a branch with its own connection, REPL,
+advertisement, graphs, web endpoint, and database facts. The process root owns
+the shared `:self` writer resource and executors. Each **cluster instance** owns
+transactions on its branch, per-agent flow graphs, guarded evals, the program
+graph, render pipeline, and web UI. Agent evals and rendering are co-located
+with the selected branch: a read is a pointer into an immutable database value
+and a write is a function call.
 Disposable **leaf runtimes** contain package and worker effects. The browser
 receives static assets and morphed HTML.
 
-**A cluster is the isolation and scaling boundary.** Clusters share no mutable
-state, so one crashing or being reset cannot touch another. Scale by adding
-clusters, never by adding another process to one store. Store open takes one
-`flock` assertion before Datahike is opened; a second cluster JVM for the same
-store refuses loudly. This is the one fenced exception where coordination
-precedes the database, because it prevents two database writers from existing.
-Within the cluster JVM, a request resolves the complete
+**A cluster branch is the data and lifecycle isolation boundary.** Resetting or
+stopping one instance does not mutate another branch. Hosted instances share
+the process-root store holder and executors, so process death stops every
+instance in that JVM and the operator reconstructs each from its branch facts.
+Scale durable worlds by adding branches and compute capacity by adding process
+roots over different physical stores; never open one physical store from two
+JVMs. Store open takes one `flock` assertion before Datahike is opened. This is
+the one fenced exception where coordination precedes the database, because it
+prevents two writer processes from existing. Within a selected cluster
+instance, a request resolves the complete
 `{:db-name :t :as-of :since :history :datahike/commit-id}` value before
 executing. No renderer, leaf runtime, or browser can commit around the cluster
-JVM or invent a second feed.
+instance or invent a second feed.
 
 Portability is a source law, not a deployment compromise. A capability family
 has one `.cljc` core and one small platform leaf per active tier. The core owns
@@ -236,24 +241,24 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **run / claim / turn / phase** — the bounded work entity a trigger opens,
   its `:seon.agent.run/process` presence custody, one prompt/model/eval record, and that
   record's persisted recovery cursor. See [[agent-runtime]].
-- **cluster JVM / leaf runtime / database interest** — the transaction,
-  agent-graph, guarded-eval, program-graph, render-pipeline, and HTTP/SSE JVM
-  for one store; a disposable native-effect process; and one session-owned
-  selective wakeup.
+- **process root / cluster instance / leaf runtime / database interest** — the
+  JVM holding one fenced physical store and shared executors; one branch-local
+  transaction/agent/render/web runtime inside it; a disposable native-effect
+  process; and one session-owned selective wakeup.
 
 ## Deployment topology
 
-One operator supervises two process kinds per active cluster:
+One operator supervises two process kinds:
 
-- **Cluster JVM** — owns Datahike transactions, durable mutation receipts, the
-  committed-transaction feed, the per-agent flow graphs, model I/O, SCI agent
-  evals, the program graph, the render pipeline, http-kit, and Datastar SSE. It runs SCI
-  on `:compute` platform threads under the one `:interrupt-fn`; database reads
-  dereference the current immutable database value and writes call the
-  co-located transaction owner directly. Render evaluation uses the same
-  `seon.sci.eval/evaluate` path as every guarded invocation. Supervision,
-  bounded evals, and cheap flow-graph rebuilds protect the process; a
-  process wall is not the isolation mechanism.
+- **Process-root JVM** — opens the one fenced physical store and may host many
+  cluster instances. Each instance owns its branch's transactions, durable
+  mutation receipts, committed-transaction feed, per-agent flow graphs, model
+  I/O, SCI evals, program graph, render pipeline, http-kit endpoint, and
+  Datastar SSE. Instances share the root `:compute` and `:io` executors. SCI
+  runs on `:compute` platform threads under the one `:interrupt-fn`; database
+  reads dereference the selected branch's immutable database value and writes
+  call its co-located transaction owner directly. Render evaluation uses the
+  same `seon.sci.eval/evaluate` path as every guarded invocation.
 - **Leaf runtimes** — run packages and selected platform workers on demand.
   They have no durable authority and are reaped freely. A lost in-flight call
   becomes the flat capability error from which receipt and effect policy
@@ -264,11 +269,12 @@ and JavaScript, opens the SSE feed, submits namespaced actions, and applies
 Datastar's ID-aware morph. It contains no ClojureScript application or database
 logic.
 
-Every process may die. The operator restarts the cluster JVM for its store, and
-the run's `:seon.agent.run/process`, phase, and receipts let replacement
-compute resume from database facts. The render graph and leaf runtimes are
-reconstructed from database, artifact, and configuration facts. On cluster-JVM
-restart, every pinned canvas renders once from current database truth. Remote
+Every process may die. The operator restarts the process root and its selected
+cluster instances; each run's `:seon.agent.run/process`, phase, and receipts
+let replacement compute derive recovery from that branch's facts. Render graphs
+and leaf runtimes are reconstructed from database, artifact, and configuration
+facts. On process restart, every pinned canvas renders once from current
+database truth. Remote
 servers, thin clients, mobile packaging, and stronger isolation consume the
 same protocols and may implement only the leaves their platform supports.
 
@@ -277,12 +283,14 @@ same protocols and may implement only the leaves their platform supports.
 ```mermaid
 flowchart TB
   Supervisor["Babashka supervisor\nstart · observe · stop · restart"]
-  Cluster["cluster JVM\ntransactions · agent graphs · guarded evals\nprogram graph · renders · HTTP/SSE"]
+  Process["process-root JVM\nfenced store · shared executors"]
+  Cluster["cluster instances\nbranch transactions · agent graphs · guarded evals\nprogram graph · renders · HTTP/SSE"]
   Leaf["disposable leaf runtimes\npackages · workers"]
   Browser["static browser\nDatastar morph"]
   Models["model providers"]
 
-  Supervisor -->|"supervise"| Cluster
+  Supervisor -->|"supervise"| Process
+  Process -->|"host"| Cluster
   Supervisor -->|"supervise"| Leaf
 
   Browser <-->|"HTTP · SSE"| Cluster
@@ -290,8 +298,9 @@ flowchart TB
   Cluster <-->|"typed capability calls"| Leaf
 ```
 
-The cluster name selects one store and its cluster JVM. A database value
-selects the exact basis transaction and temporal view. Inside the cluster JVM,
+The cluster name selects one branch and its in-process cluster instance. A
+database value selects the exact basis transaction and temporal view. Inside
+that instance,
 a no-argument `seon.db/db` returns the current immutable database value; an
 explicit database value remains a frozen read fence. Reads that combine
 databases pass the required database values as ordinary Datalog sources. This
@@ -313,13 +322,13 @@ and receipt recovery. A disconnected session
 stops new work; after reacquisition, consumers derive current truth rather than
 replaying process-local events.
 
-Model calls execute on `:io` virtual threads in the cluster JVM, so a slow
+Model calls execute on `:io` virtual threads in the process root, so a slow
 provider does not occupy `:compute` capacity or block render `step-fn`s.
 Their admitted attempts and terminal outcomes are receipts connected to the
 turn. Embedding and package work is downstream of committed facts and follows
 the same claim or capability-effect rules; leaf-runtime death leaves
-database-visible work or a flat boundary error rather than wedging the cluster
-JVM.
+database-visible work or a flat boundary error rather than wedging its cluster
+instance.
 
 Each render unit sends a stable-ID element patch. Datastar's morph engine
 applies the minimal DOM change while the server retains no DOM mirror.
@@ -540,22 +549,23 @@ facts atomically. After commit, the runtime loads those declarations without
 manufacturing quiet eval/transcript rows. The agent sees the resulting facts and
 code through ordinary context projections. See [[agent-runtime]].
 
-Source indexing is explicit and never part of startup. Ancestor population
-indexes the source-owned base before a cluster forks; an operator-invoked
-`index` exact-reconciles that same source-owned slice into an existing cluster
-while preserving every other fact and agent-authored declaration. Bare
-`bin/seon index` is the deliberate exception to the operator's ordinary
-no-name-means-default rule: it creates or reuses the content-addressed
-ancestor for current source, leaves every existing cluster untouched, and
-makes that ancestor the baseline future clusters fork. Several baselines
-coexist in the roster by digest.
+Source indexing is publication, never startup. clj-kondo statically analyzes
+first-party `src/` and `test/`; global schemas come from admitted EDN, not
+application-source evaluation. One non-executing `:current-src` branch and its
+commit ID are the baseline future clusters fork. The edit hook reuses cached
+per-file artifacts for safe same-identity upserts; structural changes fall
+back to a complete scratch build before one guarded branch-head move. Bare
+`bin/seon init` requests the complete form explicitly and leaves every existing
+cluster untouched. Dependency analysis may resolve external code but never
+publishes it into the database program graph.
 
 Startup verifies coherence, never age. One recorded digest plus populated
 namespace and function rows is a coherent sovereign world even when its
 digest predates the current baseline; startup reports that age and proceeds
 without indexing. An empty, digest-ambiguous, or partial graph is denied with
-both explicit remedies: `index CLUSTER` preserves history, whereas `reset`
-destroys it and reforks from the current ancestor.
+one explicit remedy: `init CLUSTER --force` destroys it and reforks from the
+published `current-src` commit. Seon does not synchronize program facts into an existing
+cluster.
 
 ## The domains
 

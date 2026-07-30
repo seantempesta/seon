@@ -16,6 +16,9 @@ data/seon-pod/
 .nrepl-port
 .lsp/.cache/
 .clj-kondo/.cache/
+.clj-kondo/clj_kondo/
+.clj-kondo/inline-configs/
+.clj-kondo/imports/
 .calva/output-window/
 .claude/settings.local.json
 

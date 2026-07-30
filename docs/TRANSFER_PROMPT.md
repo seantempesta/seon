@@ -20,8 +20,9 @@ can restart and another agent can call what the first one defined. What any
 agent sees is a *rendered view* of that same graph, produced by ordinary
 functions.
 
-One JVM per cluster. CLJ only. REPL-first. No central loop anywhere, by
-ruling: that shape is rejected as "a JavaScript event loop inside Clojure."
+One JVM process may host many sovereign clusters, each on its own Datahike
+branch. CLJ only. REPL-first. No central loop anywhere, by ruling: that shape
+is rejected as "a JavaScript event loop inside Clojure."
 
 ## The one thing to internalize
 
@@ -66,10 +67,10 @@ design while it is still a decision.**
 
 ## Read these, in this order
 
-1. **`CLAUDE.md`** — a symlink to `AGENTS.md`, so every toolchain reads the
+1. **This file** — the stable orientation and project mentality.
+2. **`CLAUDE.md`** — a symlink to `AGENTS.md`, so every toolchain reads the
    same bytes. The standing law: architecture, vocabulary, data-oriented rules,
    git safety, the resiliency law, the skills law.
-2. **This file** — orientation.
 3. **`docs/prds/sci-execution-runtime/plan/unsettled.md`** — the WORKING EDGE
    block at the top is current state and supersedes every dated block beneath
    it.
@@ -84,6 +85,21 @@ design while it is still a decision.**
 
 Then the closest localized `AGENTS.md` to whatever subtree you are about to
 change. Those are the runbooks: durable ownership, invariants, and links.
+
+The document roles are deliberately different:
+
+- `TRANSFER_PROMPT.md` tells you how to think and where truth lives.
+- `AGENTS.md` is binding repository law and the operating runbook.
+- `plan/unsettled.md` owns the current working edge and evidence.
+- `plan/README.md` owns ordering and numbered owner rulings; its older sections
+  are archaeology, not current status.
+- `issues/index.md` owns the ranked open queue.
+- `architecture/` owns the intended system, never the migration diary.
+
+Do not make a new session reconstruct status from the full historical tail of
+the roadmap. Read the current WORKING EDGE first, then use symbols, commit
+history, and the linked research to open only the history relevant to the
+chosen boundary.
 
 ## Load the skills. They are honed, verified, and load-bearing.
 
@@ -149,6 +165,9 @@ bin/test                      # the gate; bare = full suite, or pass namespaces
 clojure -M:dev                # plain source-classpath REPL for load-only probes
 bin/seon status               # every live cluster
 bin/seon start <your-name>    # your own cluster; a fork is ~17ms
+bin/seon init                 # completely publish current-src
+bin/seon init --changed PATH  # incremental when safe; complete fallback
+bin/seon init <name> --force  # destructive refork of an existing branch
 ```
 
 For live work: `mcp__seon_cljs__runtime_status`, then
@@ -170,8 +189,8 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
   <name>` *adds* a cluster to an already-running JVM, so correct code can fail
   in a stale one. This cost a lane an entire work chunk chasing a phantom. Boot
   your own operator root when you need current source.
-- **The code graph can be partial on an older cluster.** Indexing happens when
-  a cluster's ancestor is populated, so one forked before the indexer landed
+- **The code graph can be partial on an older cluster.** A cluster forked
+  before the current indexer landed can have
   has namespaces without functions — a corpus that *looks* populated.
 - **Docs, skills, and instructions can be stale.** Six skills were once
   teaching a subsystem that had been deleted for weeks. Verify before you trust
@@ -179,83 +198,36 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
 - **Long-running work dies sometimes** (upstream API errors, machine load).
   Commit in small coherent slices so churn costs minutes, not hours.
 
-## What is actually broken right now
+## How to establish what is broken right now
 
-Nothing here is hidden and nothing is a surprise waiting for you. All of it is
-filed with evidence and acceptance criteria in `docs/seon/issues/`; this is the
-honest shape of the debt as of 2026-07-29 night.
+Do not preserve a second issue list in this orientation. It went stale within
+one day and taught a repaired registration failure as current fact. The current
+queue is exactly `docs/seon/issues/index.md`; each note carries evidence,
+acceptance, and an owner. The current implementation edge and latest frozen
+gate live at the top of `plan/unsettled.md`. Verify both against `git status`,
+`git log`, `bin/seon status`, and the smallest relevant test before scheduling.
 
-**Blockers (5).**
-- `resolve-namespace-changes-by-executable-operator-identity`, with
-  `account-for-declarations-inside-executable-top-level-forms` and
-  `make-function-coverage-independent-and-cardinality-preserving` — the code
-  graph's reader recognizes declarations by matching an operator's LOCAL NAME,
-  so `(foo/defn ghost [] 1)` mints a phantom function row, `(other/in-ns 'x)`
-  misattributes every declaration below it, a `defn` inside a top-level `do`
-  vanishes with no row and no refusal, and `'(in-ns 'x)` in inert quoted data
-  makes an entire real source file unindexable. The recurring coverage test
-  shares the reader's own event stream and set-collapses declarations, so it
-  agrees with all of it. This is the single most important open item, because
-  everything in Seon queries the program graph. A fix lane is dispatched;
-  `research/indexer-review-2026-07-29.md` is the evidence. Read the lesson at
-  the end of the code-graph block in `plan/unsettled.md` before touching that
-  reader — the day produced a hand-maintained allowlist, its replacement by
-  hand-maintained name matching, and a coverage test blind to both, and all
-  three passed a green gate.
-- `priming-indexes-with-the-live-jvms-loaded-code` — `bin/seon index` reads
-  source files from disk but interprets them with the reader the target JVM
-  loaded at BOOT, then records the ancestor digest from the disk files. So the
-  recorded digest lies about which code produced the corpus, and priming a
-  long-lived cluster silently writes a stale corpus and reports success. This
-  cost the orchestrator an hour and two wrong diagnoses in one evening.
-- `program-graph-render-declarations-name-absent-functions` — the render
-  catalog advertises projection functions that do not exist, so an advertised
-  family can return unresolvable.
-- `fresh-operator-instrumentation-cannot-resolve-render-value-schema` — a
-  boot-ordering hazard between instrumentation and the schema registry; the
-  choke-point fix landed, this is the residue.
-- `finish-deleting-the-old-operator-classpath-from-retained-tooling` — the hook
-  linters and one test runner still need the mixed quarry classpath, which is
-  the last thing keeping the dead operator's classpath alive.
+The 2026-07-30 replacement removed evaluated build inspection and live source
+synchronization. clj-kondo now statically analyzes first-party `src/` and
+`test/`; exact locations become namespace/function/test rows, while global
+schema rows come from admitted EDN. Dependency caches are resolution context,
+never database authorship. One malformed file still yields findings and
+analysis for its valid siblings, but publication never seals a partial branch.
+Type-mismatch findings remain visible warnings—the type checker is useful
+context, not a sound database admission authority—while syntax, resolution,
+privacy, and arity errors block the affected source. Runtime analysis queries
+the program graph and materializes only namespaces referenced by the candidate
+forms, preserving cross-namespace knowledge without paying to inject the whole
+graph into every reply.
 
-**The two that tell you most about the system's real state.**
-- `eval-time-schema-and-test-rows-have-no-recurring-proof` — writing that test
-  exposed why it was missing: schema activation rebuilds the WHOLE projection
-  from one database's rows through a PROCESS-GLOBAL call, so a fixture holding
-  one agent-authored schema collapses the registry and kills unrelated tests in
-  the same JVM. That contradicts "clusters share no mutable state," which is a
-  design law, not a test inconvenience.
-- `observable-graph-transitions-are-polled-in-tests` — tests still sleep where
-  an event exists. Standing doctrine says interfaces publish their own
-  readiness; this is where they do not yet.
-
-**Sharp edges you will personally hit.**
-- `partial-hot-reload-produces-mixed-code-with-no-warning` — `:reload` reloads
-  one namespace, not its dependencies, so a live JVM happily runs a NEW caller
-  against an OLD callee. Armed instrumentation catches it; nothing else does,
-  and the error names a schema rather than the actual problem.
-- `root-store-holder-does-not-canonicalize-store-dir` — equivalent relative and
-  absolute store paths produce different holder keys, so path identity is
-  treated casually in a place where it decides cluster identity.
-- `cluster-reset-shadows-clojure-core-reset` — a new `reset!` shadows
-  `clojure.core/reset!` inside a namespace full of atoms.
-- `development-mcp-advertises-deleted-cljs-tools`,
-  `fresh-cluster-docstrings-teach-deleted-bin-repl`,
-  `loadable-skills-component-describes-deleted-pod-importer` — tooling and docs
-  still pointing at the deleted pod era. Assume anything you read may be stale
-  and verify it.
-
-**Contract quality.** `database-and-transaction-boundaries-use-anonymous-any-contracts`
-and `flow-config-dials-have-two-registration-owners` are real; `:any` at a
-database boundary is a boundary nobody has proven.
-
-**Known incomplete, by choice.** The UI is deliberately tabled until the
-context rendering system is proven — do not build UI. Context is still
-hand-assembled blocks; the walk-rendered replacement is designed, falsified,
-and measured but unbuilt. `:seon.fn/calls` reachability does not exist yet, so
-the 808 private function rows are groundwork rather than a working call graph.
-The checkpoint has failed graduation six times and every failure found
-something real; that loop is the most valuable machinery here.
+Hot reload and source publication remain distinct. A re-evaluated Var changes
+behavior in its JVM; it does not update database program facts. The edit hook
+publishes safe first-party changes to one `:current-src` branch and falls back
+to a complete scratch build for structural changes. Bare `bin/seon init`
+requests that complete publication explicitly. Existing clusters are
+sovereign; only `bin/seon init CLUSTER --force` destroys and reforks one. The
+current evidence and any still-open integration edge live at the top of
+`plan/unsettled.md`.
 
 ## The mentality
 
@@ -309,13 +281,14 @@ disagreement.
 
 ## If you are coordinating work
 
-Implementation goes to `bin/codex-agent` lanes: background-tracked, chunked
-under five minutes, a commit per chunk. Use higher-reasoning agents for
-REPL-heavy falsification. Every lane spec names owned paths, protected paths,
-the grounding documents to read, and one exact deliverable. Check `status`
-before any `resume`. A finished task with no summary means the turn ended
-mid-work, not that the work is done. Never sandbox a lane — it makes the lane's
-own output unrecordable.
+Codex orchestrators use the native collaboration/subagent tools; they do not
+launch `bin/codex-agent`. Claude orchestrators use the repository's
+`bin/codex-agent` harness. In either case, every lane names owned paths,
+protected paths, grounding documents, and one exact deliverable. A spawned
+subagent executes its assignment directly and does not delegate again. Use
+higher reasoning for REPL-heavy falsification, review every returned claim
+against source, and never sandbox a lane — it makes the lane's own output
+unrecordable.
 
 Keep one ordered spine and fill every other slot with independent work. Review
 and integrate each return before building on it. Two lanes must never edit one

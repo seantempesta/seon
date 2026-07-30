@@ -7,6 +7,15 @@ tags: [issue, tooling, repl]
 
 # Partial hot reload leaves a live JVM running mixed old and new code
 
+## Current scope
+
+The 2026-07-30 source-publication replacement removed this risk from database
+program indexing: clj-kondo analyzes files without evaluating application
+source, and `current-src` publication refuses if the running JVM lacks a newly
+added analyzer dependency. This issue remains open only for deliberate REPL
+hot reload of running behavior, where reloading one caller still does not
+reload its callees or reapply instrumentation automatically.
+
 ## Problem
 
 `(require 'ns :reload)` reloads ONE namespace, not its dependencies. A live

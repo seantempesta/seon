@@ -10,8 +10,65 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
-**WORKING EDGE — 2026-07-29, the owner-present design + restoration day.
-This block supersedes every dated block below it.** README rulings 7–24
+**WORKING EDGE — 2026-07-30, `current-src` publication. This block supersedes
+every dated block below it.** Repository indexing is static: the pinned
+clj-kondo analyzes the complete dependency classpath as resolution context,
+but only first-party Clojure beneath `src/` and `test/` becomes namespace,
+function, and test rows. Global schemas come from the registered schema EDN.
+Repository source is never evaluated. A fresh projection compiled all 559
+packaged schema forms; boot/current-source proof passed 23 tests / 109
+assertions, and analyzer/runtime/restart proof passed 22 tests / 159
+assertions, including a second agent calling a first agent's database-restored
+function. A full gate advanced through the early cluster suites without a
+failure, then was stopped in the long high-CPU message-test phase; it is not
+claimed as complete and remains pending.
+
+Runtime admission is per form. One ordered candidate is analyzed before plan
+freeze; each error-bearing form becomes a flat lint-refusal value carrying its
+exact source and local findings, while independent clean forms remain
+byte-exact and execute at their original ordinals. Known cross-namespace
+functions and privacy come from the database program graph, never an allowlist.
+clj-kondo type-mismatch findings remain advisory because its local inference is
+not a sound database admission proof; its syntax, resolution, privacy, and
+arity errors remain blocking. Whole-build publication is still atomic:
+malformed repository source cannot publish a partial base.
+
+**Owner ruling: one published `current-src` branch and commit ID.** Delete the
+digest-named ancestor collection and expose no source-synchronization
+operation. The edit path incrementally analyzes changed files and advances the
+one `current-src` branch. A removal, incompatible schema transition, missing
+artifact, or uncertain projection falls back to a complete scratch build. The
+maintained Datahike `force-branch!` publishes that completed scratch database
+value onto `current-src` with `:expected-current-commit`; failed or stale builds
+leave the prior head visible. New experiment clusters fork the published
+commit (measured branch-off approximately 17 ms). Existing clusters remain
+sovereign and are never updated from files; explicit `init NAME --force`
+destroys and reforks one named cluster.
+
+**Earliest unsettled contract:** finish the operator/edit-hook integration and
+its recurring proof. `:seon.fn/calls`, the deterministic per-file artifact,
+manifest reuse, exact-commit incremental upsert, complete fallback, and guarded
+`current-src` publication now exist. The remaining decisive proof is: the hook
+advances the published commit after an ordinary one-file edit; a deletion
+selects the complete fallback; a failed analysis preserves the prior commit;
+and a subsequent named cluster forks that exact commit while an existing
+cluster remains unchanged.
+
+Two measurements bound the work on this machine: rich first-party analysis of
+123 files / 2,061 rows took 3.28 seconds initially and 1.76–1.99 seconds warm
+inside one JVM; a separate JVM made the operation 16.58 seconds and is
+therefore forbidden on the edit path. Warm individual source analysis measured
+5–32 ms. The integrated file-store proof measured 9,337.9 ms for the complete
+operation and 609.3 ms for warm one-file analysis plus database publication,
+scratch retirement, and atomic artifact replacement. These are development
+measurements, not service-level guarantees.
+
+Everything below this paragraph is chronological evidence and may contain
+superseded gates, lane state, and diagnoses. It is not current scheduling
+authority.
+
+**HISTORICAL WORKING EDGE — 2026-07-29, the owner-present design + restoration
+day.** README rulings 7–24
 (the 2026-07-29 midday/afternoon/evening batches) are the charter; read
 them before designing anything. `docs/seon/issues/index.md` is THE
 SCHEDULE (every open note carries a running lane, a named future wave,

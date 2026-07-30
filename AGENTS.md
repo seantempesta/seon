@@ -212,23 +212,26 @@ system; `src-old/`/`test-old/` are the quarry, disabled by default.
 Boot is a tower; each layer reads only the one below it and publishes
 its own readiness:
 
-1. **Process.** Start reads a closed, tiny bootstrap config (store
-   path, prepl bind, log dir — nothing the database could own) and
-   opens its REPL at second zero. Identity is (cluster-name, pid,
-   start-instant); every path derives from the cluster name.
-2. **Store.** Each cluster is one Datahike store
-   (`data/clusters/<name>/`), opened in-process (`:self` writer) under
-   a lifetime `flock`. Datahike's writer is its own serial loop per
-   connection — we never build writers, we call `transact` and it
-   serializes. Exactly one live write connection per store (two JVMs on
-   one store once destroyed 40/40 commits silently); one JVM may host
-   many clusters, and nothing may assume "the" cluster. Clusters share
-   no mutable state — reset one, the others never notice.
+1. **Process.** Start reads a closed, tiny bootstrap config (process-root
+   store path, prepl bind, log dir — nothing the database could own) and
+   opens the selected cluster's REPL at second zero. Process identity is
+   (pid, start-instant); a cluster advertisement adds the cluster name and
+   its own REPL coordinate. Per-cluster paths derive from the cluster name.
+2. **Store.** One process root owns one Datahike store
+   (`data/clusters/store`) under a lifetime `flock`; each cluster is one
+   named branch with one live connection. Datahike's writer is its own serial
+   loop per connection — we never build writers, we call `transact` and it
+   serializes. Two JVMs on one physical store once destroyed 40/40 commits
+   silently, so the store fence is process-root-wide. One JVM may host many
+   cluster instances; they share only the process-root store holder and root
+   executors, while branch facts, connections, graphs, and lifecycle remain
+   cluster-specific. Nothing may assume "the" cluster.
 3. **Facts.** A config manifest reconciles into database facts;
-   runtime reads the database, never files or env vars. A new cluster
-   forks the shared bootstrap ancestor (indexed code + initialization
-   pages) — near-instant, never a re-index. Clusters always RESET to
-   current code and pages; there is no data migration.
+   runtime reads the database, never files or env vars. One non-executing
+   `:current-src` branch holds indexed code plus initialization pages; a new
+   cluster forks its exact published commit ID — near-instant, never a
+   re-index. An existing cluster remains a sovereign older program until the
+   operator destructively reforks it; startup never migrates code facts.
 4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH (owner ruling
    2026-07-28), created with the agent from one blueprint, parked
    between episodes (two procs, ~8.5 KB per parked proc — measured in
@@ -253,15 +256,16 @@ re-derives from database facts.
 **Hot reload is not program-graph indexing.** Re-evaluating a Var changes the
 behavior of code already loaded in that JVM, but file edits do not mutate the
 database's `:seon.fn`, `:seon.ns`, `:seon.schema`, or `:seon.test` facts.
-After source or schema-resource edits, `bin/seon index` explicitly refreshes
-the rolling baseline inherited by FUTURE clusters. It deliberately does not
-select or update `default` or any other existing cluster. Run
-`bin/seon index CLUSTER` to exact-reconcile one EXISTING cluster while
-preserving its history, domain facts, and agent-authored declarations. Use
-`bin/seon reset CLUSTER` only when destroying that cluster's history and
-reforking it from the current baseline is intended. A live proof after file
-edits must name which of these database populations it exercised; observing a
-hot-reloaded Var alone is not proof that agents can discover the change.
+The edit hook statically analyzes changed first-party files and publishes safe
+same-identity upserts to the one `:current-src` branch without evaluating
+application forms. Deletions, new identities, schema-resource changes, missing
+artifacts, and uncertain projections fall back to a complete scratch build and
+one guarded branch-head publication. `bin/seon init` performs that complete
+publication explicitly; `bin/seon init --changed PATH...` is the incremental
+surface. Existing clusters are sovereign and are never synchronized.
+`bin/seon init CLUSTER --force` destroys that branch and reforks it from the
+published commit. A live proof after file edits must name whether it exercised
+only a hot-reloaded Var or a cluster forked from the newly published commit.
 
 **Transport law (owner ruling 2026-07-28, revising "disposable values
 only"):** anything recovery or another process could ever need is a
@@ -530,6 +534,20 @@ is still broken honestly.
 
 ## One mechanism, no hacks
 
+### Owner design gate — stop before hairy semantics
+
+When a decision would create hours of cross-owner implementation, has unclear
+or overlapping semantics, or is likely to produce bugs because the guarantees
+cannot be stated simply, STOP before production edits. Pause affected lanes
+and bring the owner exactly three concrete options. Put the simplest viable
+constraint first and mark the recommendation; for each option state the
+guarantee, implementation cost/risk, operational trade-off, and capability we
+give up. Ask for a ruling. Do not convert uncertainty into a migration layer,
+compatibility path, or generalized Clojure subset merely because it is
+implementable. Seon optimizes for a stable accretion environment where agents
+write high-quality, high-performance code; a clear non-onerous constraint is a
+feature. Resume implementation only after the ruling is explicit and recorded.
+
 Do not create `foo-v2`, `foo-new`, a compatibility namespace, or a second
 registry/renderer/feed/retry/config/test path to avoid fixing the existing
 owner. Fix cycles, callers, and schemas in place; delete the superseded path in
@@ -656,7 +674,7 @@ The compact invariants are:
 - immutable data and pure transformations first;
 - derive projections instead of storing them;
 - fully namespaced map keys and database attributes, without exceptions;
-- schemas colocated in the real code namespace that owns the data;
+- globally identified schemas declared once under `resources/seon/schema/`;
 - errors as values at agent/runtime boundaries;
 - one namespaced map in/out for API-like functions, or fully named/spec'd
   positional arguments for ordinary functions;
@@ -715,10 +733,13 @@ Ephemeral display state belongs on channels; durable truth belongs in the
 database. The transport law above is the one fence — do not add a second
 durable path and do not commit in-flight partials as facts.
 
-Core source, eval history, and analyzer state are views of one code corpus.
-`:seon.fn`, `:seon.ns`, and `:seon.schema` facts come from the analyzer plus
-source strings. Do not reparse source with another graph builder, replay every
-eval to resume, or introduce a generated bootstrap authority.
+Core source, eval history, and analyzer state are views of one program graph.
+Build-time `:seon.fn`, `:seon.ns`, and `:seon.test` facts come from the one
+clj-kondo analysis of first-party `src/` and `test/` plus exact source spans;
+global `:seon.schema` facts come from the admitted schema EDN population.
+Dependency/classpath caches improve resolution but never publish external code
+as Seon facts. Do not add another graph builder, replay every eval to resume,
+or introduce a generated bootstrap authority.
 
 Comment grammar is agent-facing: `;` is prose/inline explanation, `;;` is a
 code-block comment above a form, and `;;;` is runtime-structure demarcation.
@@ -904,12 +925,22 @@ must fail as ambiguous. After changing MCP code or client registration,
 restart the Codex or Claude task: already-running clients do not reload stdio
 server definitions or tool schemas.
 
-The edit hook parses changed Clojure files and requests conservative affected
-tests through one public operation:
+The edit hook runs clj-kondo over prospective and resulting Clojure files,
+returns file/row/column findings, publishes admitted `src/` and `test/` changes
+to `current-src`, and requests conservative affected tests from the same
+full-corpus namespace analysis through one public operation:
 
 ```bash
 bin/seon test changed --path src/seon/cluster/run.cljc
 ```
+
+Do not discard type-checker output. clj-kondo `:type-mismatch` findings remain
+visible warning context in the hook/artifact, but its local inference is not a
+sound database admission proof and therefore does not veto publication.
+Syntax, unresolved name/namespace, privacy, and arity errors do block the
+affected source. Runtime reply analysis derives only the referenced namespace
+slice from the database `:seon.fn` graph; never serialize the entire graph into
+every lint request and never replace that query with an allowlist.
 
 Parse errors may block malformed edits. Test results are advisory and never
 undo a refactor; obsolete tests may need deletion. Read the retained report and
@@ -1000,21 +1031,21 @@ drill it is.
 ```bash
 bin/seon start [CLUSTER]
 bin/seon status
-bin/seon index                 # refresh baseline for future clusters
-bin/seon index default         # preserve history; reconcile this cluster
-bin/seon reset default         # destructive: refork from current baseline
+bin/seon init                  # completely publish current-src
+bin/seon init --changed PATH   # incremental when safe; complete fallback
+bin/seon init default --force  # destructive: refork this branch
 bin/seon logs default
 bin/seon stop default
 bin/seon down
 ```
 
 An absent cluster argument means `default` for `start` and `config apply`.
-For `stop`, `down`, and `reset`, omission is accepted only when exactly one
-cluster exists. `index` is the deliberate exception: without a cluster it
-always means the rolling baseline, never `default`. Existing clusters receive
-no baseline refresh implicitly. The operator owns process identity, locking,
-readiness, logs, and shutdown; do not launch its internals separately or kill
-children blindly.
+For `stop` and `down`, omission is accepted only when exactly one cluster
+exists. Bare `init` always means the published `current-src`, never `default`.
+`init NAME` refuses an existing branch; `--force` explicitly destroys and
+reforks it. Existing clusters receive no source synchronization. The operator
+owns process identity, locking, readiness, logs, and shutdown; do not launch
+its internals separately or kill children blindly.
 
 NEVER USE A SESSION SCRATCHPAD OR SYSTEM TEMP DIRECTORY (owner ruling
 2026-07-25). Some harnesses hand an agent a private scratchpad under

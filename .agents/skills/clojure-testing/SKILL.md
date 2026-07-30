@@ -82,7 +82,7 @@ separate invocations are separate JVMs.
 ## Fresh in-memory Datahike per test
 
 Use the production population owner through `seon.test-support/with-database`.
-It opens a fresh `:memory` store, calls `cluster/populate-ancestor!` to install
+It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
 the current `resources/seon/schema/*.edn` population and program rows, and
 releases and deletes it in a `finally`. There is no ambient connection
 (`test/seon/test_support.clj:151-183`).
@@ -171,6 +171,20 @@ chain and select the deepest non-empty `ex-data`, as above (probe and output:
 the specific refusal rule from that value and independently assert that the
 database was unchanged. A chain with no classifiable data is an unknown test
 failure, never an expected refusal; do not fall back to message matching.
+
+### Schema lifecycle tests assert current and historical rails
+
+For global schema replacement/removal, exercise the production terminal
+transaction rather than mutating Malli or Datahike registries directly. Assert
+refusal and unchanged basis while direct, transitive, or entity-child data is
+current; retract that data and assert the operation succeeds. For removal,
+also assert schema/function dependents refuse. With history enabled, query the
+old value and historical `:seon.schema/form` at the same `as-of` basis and
+rebuild its validator; independently assert Datahike's physical schema map is
+current-only. Keep one explicit `:seon.db/no-history? true` trial proving its
+old value is intentionally unavailable
+(`test/seon/schema_usage_guard_test.clj:80-397`;
+`docs/prds/sci-execution-runtime/research/schema-removal-history-probe-2026-07-30.md`).
 
 ## Common failure patterns
 

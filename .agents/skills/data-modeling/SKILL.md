@@ -233,17 +233,40 @@ than relying only on runtime checks.
 
 ### Source-graph completeness and runtime admission
 
-Source indexing records every directly read top-level `defn` and `defn-`,
-including private and uncontracted helpers (`src/seon/fn.clj:24-28,57-94`;
-`src/seon/program.cljc:93-125`). An executable top-level `do` containing a
-declaration is refused with source evidence rather than silently omitted
-(`src/seon/sci/reader.cljc:302-319,423-429`; `src/seon/fn.clj:49-54,84-91`).
-Call reachability remains `[TARGET]`. Runtime publication is deliberately
-stricter: an agent-authored function needs a complete Malli contract, while
-schema and test declarations use their own admitted row shapes
-(`src/seon/sci/eval.clj:317-339`). Arbitrary evals, scratch defs, and atoms
-remain context-local; receipts preserve history but never reconstruct code.
-This distinction is producer admission, never a stored durability flag.
+Build indexing statically analyzes first-party `src/` and `test/` through
+clj-kondo and exact source spans. It records every function/test definition,
+including private and uncontracted helpers, without evaluating application
+forms. Global schemas remain the separately admitted
+`resources/seon/schema/` population; classpath analysis improves resolution but
+never publishes dependency code (`src/seon/fn/analyzer.clj`;
+`src/seon/fn.clj`). Runtime publication is deliberately stricter: an
+agent-authored function needs a complete Malli contract, while schema and test
+declarations use their own admitted row shapes and schema changes stage in an
+isolated registration delta (`src/seon/sci/eval.clj:320-345,793-825`).
+Arbitrary evals, scratch defs, and atoms remain context-local; receipts preserve
+history but never reconstruct code.
+
+### Global schema lifecycle
+
+Schema identity is global: one `:seon.schema/key` row, never namespace-owned.
+A function contract references schema keys; namespace context may reverse-find
+those keys, but that is a query, not ownership. Runtime
+`schema/unregister!` stages removal inside the current evaluation delta and
+refuses outside it (`src/seon/schema.cljc:1089-1108`). Removal refuses while a
+schema or function contract depends on the affected key. Replacement and
+removal also refuse atomically while any directly or transitively affected
+Datahike attribute—including entity-child attributes—carries current data.
+After current data and contract dependencies are retracted, the operation may
+commit (`src/seon/schema.cljc:1907-1935`;
+`src/seon/cluster/run.cljc:562-730`;
+`test/seon/schema_usage_guard_test.clj:80-397`).
+
+Ordinary history retains the old datoms and historical global schema row, so a
+simulation can rebuild the Malli projection from the same `as-of` database
+value. Datahike's physical schema map itself remains current rather than
+time-travelling. `:seon.db/no-history? true` deliberately discards the old
+values and therefore cannot promise historical simulation
+(`docs/prds/sci-execution-runtime/research/schema-removal-history-probe-2026-07-30.md`).
 
 ## The schema IS the generator — generative testing
 

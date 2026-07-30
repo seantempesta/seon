@@ -21,6 +21,7 @@
   (let [root (str "tmp/oversight-test/" name)]
     (doseq [file (reverse (file-seq (io/file root)))]
       (.delete ^java.io.File file))
+    (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try

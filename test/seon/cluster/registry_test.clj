@@ -24,7 +24,8 @@
             [datahike.api :as d]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
-            [seon.schema])
+            [seon.schema]
+            [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch]))
 
 ;;; ---------------------------------------------------------------------------
@@ -37,14 +38,10 @@
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}])
 
-(def ^:private ancestor-branch
-  :ancestor-0000000000000000000000000000000000000000000000000000000000000000)
+(def ^:private source-branch :current-src)
 
 (defn- delete-recursively! [path]
-  (let [file (.getCanonicalFile (io/file path))]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
+  (test-support/delete-recursively! path))
 
 (defn- markers
   "Every marker visible through one connection."
@@ -65,9 +62,9 @@
     (catch Exception failure
       (ex-data failure))))
 
-(defn- with-ancestor-store
-  "Call `body` with an open store carrying one populated ancestor branch.
-  The ancestor holds the schema plus the marker \"ancestral\", so every
+(defn- with-source-store
+  "Call `body` with an open store carrying one published source branch.
+  The source branch holds the schema plus the marker \"ancestral\", so every
   descendant inherits real rows and a sibling's invisibility is a fact
   about data, not about an empty branch."
   [body]
@@ -79,7 +76,7 @@
         (write-marker! (:seon.store/connection opened) "ancestral")
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
-                           :seon.store/branch ancestor-branch})
+                           :seon.store/branch source-branch})
         (body opened)
         (finally
           (store/release-store! opened)
@@ -88,7 +85,9 @@
 (defn- cluster-request [store cluster-name]
   {:seon.store/store store
    :seon.boot/cluster-name cluster-name
-   :seon.ancestor/branch ancestor-branch})
+   :seon.source/commit-id
+   (registry/branch-commit-id {:seon.store/store store
+                               :seon.store/branch source-branch})})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivation
@@ -116,8 +115,8 @@
 ;;; Creation
 ;;; ---------------------------------------------------------------------------
 
-(deftest ensure-cluster-branches-from-the-ancestor-and-is-idempotent
-  (with-ancestor-store
+(deftest ensure-cluster-branches-from-the-source-commit-and-is-idempotent
+  (with-source-store
     (fn [opened]
       (let [created (registry/ensure-cluster! (cluster-request opened "alice"))
             branch (registry/cluster-branch "alice")]
@@ -125,7 +124,7 @@
         (is (true? (:seon.cluster/created? created)))
         (is (contains? (registry/roster opened) branch)
             "the roster is the fact")
-        (testing "the cluster inherits every ancestor row"
+        (testing "the cluster inherits every source row"
           (let [connection (store/open-branch! opened branch)]
             (try
               (is (= #{"ancestral"} (markers connection)))
@@ -140,7 +139,7 @@
             (is (= before (registry/roster opened)))))))))
 
 (deftest two-clusters-write-independently
-  (with-ancestor-store
+  (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "alice"))
       (registry/ensure-cluster! (cluster-request opened "bob"))
@@ -155,8 +154,8 @@
           (finally
             (d/release alice)
             (d/release bob))))
-      (testing "the ancestor branch itself is never written to"
-        (let [connection (store/open-branch! opened ancestor-branch)]
+      (testing "the source branch itself is never written to"
+        (let [connection (store/open-branch! opened source-branch)]
           (try
             (is (= #{"ancestral"} (markers connection)))
             (finally
@@ -167,7 +166,7 @@
   ;; `:branches` unsynchronized, so a caller told :ok could find its cluster
   ;; gone (b2-plan §0.3). The fork serializes roster mutation per store
   ;; (submodule 357ffc87); this is that fix's standing regression.
-  (with-ancestor-store
+  (with-source-store
     (fn [opened]
       (let [names (mapv #(str "wave-" %) (range 8))
             latch (CountDownLatch. 1)
@@ -197,8 +196,8 @@
 ;;; Reset
 ;;; ---------------------------------------------------------------------------
 
-(deftest reset-returns-a-cluster-to-ancestor-state
-  (with-ancestor-store
+(deftest reset-returns-a-cluster-to-source-state
+  (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "alice"))
       (let [branch (registry/cluster-branch "alice")
@@ -218,17 +217,17 @@
                           opened (registry/cluster-branch "alice"))]
           (try
             (is (= #{"ancestral"} (markers connection))
-                "reset to the ancestor: the drift is gone, the ancestor is not")
+                "reset to the source commit: the drift is gone")
             (finally
               (d/release connection))))))))
 
 (deftest an-unwritten-cluster-retires-beside-its-unwritten-sibling
   ;; Branch-off copies the source's head commit id verbatim, so two
-  ;; never-written clusters and their ancestor all name ONE commit. A
+  ;; never-written clusters and their source all name ONE commit. A
   ;; descent test that is not STRICT reads that as mutual descent and
   ;; refuses to retire — which would break reset for every cluster that
   ;; has not written yet. This is that rule's falsifier.
-  (with-ancestor-store
+  (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "quiet-a"))
       (registry/ensure-cluster! (cluster-request opened "quiet-b"))
@@ -253,7 +252,7 @@
                            (file-seq (io/file dir))))))
 
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
-  (with-ancestor-store
+  (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "keep"))
       (registry/ensure-cluster! (cluster-request opened "doomed"))
@@ -282,7 +281,7 @@
         (let [swept (registry/collect! opened)]
           (is (pos? swept) "the doomed tail was reclaimed")
           (is (< (store-bytes dir) grown) "and the bytes actually shrank"))
-        (testing "the survivor and the ancestor are whole"
+        (testing "the survivor and the source branch are whole"
           (let [connection (store/open-branch!
                             opened (registry/cluster-branch "keep"))]
             (try
@@ -291,7 +290,7 @@
                                          (markers connection)))))
               (finally
                 (d/release connection))))
-          (let [connection (store/open-branch! opened ancestor-branch)]
+          (let [connection (store/open-branch! opened source-branch)]
             (try
               (is (= #{"ancestral"} (markers connection)))
               (finally
@@ -307,15 +306,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest refusals-name-their-rule
-  (with-ancestor-store
+  (with-source-store
     (fn [opened]
-      (testing "a cluster is never silently branched from :db"
-        (is (= :seon.cluster.registry/ancestor-absent
+      (testing "a cluster refuses an unavailable source commit"
+        (is (= :seon.cluster.registry/source-absent
                (:seon.cluster.registry/rule
                 (refusal #(registry/ensure-cluster!
                            {:seon.store/store opened
                             :seon.boot/cluster-name "orphan"
-                            :seon.ancestor/branch :ancestor-nowhere}))))))
+                            :seon.source/commit-id (random-uuid)}))))))
       (testing "the main branch is the store; it is never retired"
         (is (= :seon.cluster.registry/cannot-retire-main
                (:seon.cluster.registry/rule
@@ -338,20 +337,20 @@
                                 (registry/cluster-branch "alice")})))))
             (finally
               (d/release connection)))))
-      (testing "an ancestor a cluster still descends from refuses retirement"
+      (testing "a source branch a cluster still descends from refuses retirement"
         (is (= :seon.cluster.registry/cannot-retire-live-ancestor
                (:seon.cluster.registry/rule
                 (refusal #(registry/retire-branch!
                            {:seon.store/store opened
-                            :seon.store/branch ancestor-branch})))))
+                            :seon.store/branch source-branch})))))
         (testing "and retires once its last descendant is gone"
           (registry/retire-branch! {:seon.store/store opened
                                     :seon.store/branch
                                     (registry/cluster-branch "alice")})
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch
-                                              ancestor-branch})))
-          (is (not (contains? (registry/roster opened) ancestor-branch)))))
+                                              source-branch})))
+          (is (not (contains? (registry/roster opened) source-branch)))))
       (testing "a source that names nothing refuses"
         (is (= :seon.cluster.registry/source-absent
                (:seon.cluster.registry/rule
