@@ -64,8 +64,12 @@
 
 (schema.edn/load! {})
 
-(defn lint-plan
-  "Replace only error-bearing source forms with flat lint refusals."
+(defn lint-form
+  "Replace one error-bearing source form with a flat lint refusal.
+
+  The namespace row and program functions come from the current database
+  value so an earlier REPL form's committed resolver changes govern this
+  form."
   {:malli/schema
    [:=>
     [:cat
@@ -73,39 +77,50 @@
       [:seon.ns/name :seon.ns/name]
       [::namespace-row {:optional true} :map]
       [::available-functions {:optional true} [:vector :map]]
-      [:seon.cluster.reply/sources :seon.cluster.reply/sources]]]
-    :seon.cluster.reply/sources]}
+      [::source :seon.cluster.reply/form]]]
+    :seon.cluster.reply/form]}
   [{namespace-name :seon.ns/name
     namespace-row ::namespace-row
     available-functions ::available-functions
-    sources :seon.cluster.reply/sources}]
-  (mapv
-   (fn [source analyzed]
-     (let [findings (::fn.analyzer/findings analyzed)
-           errors (filterv #(= :error (::fn.analyzer/level %)) findings)]
-       (if (seq errors)
-         (assoc source
-                :seon.cluster.run.form/source
-                (pr-str
-                 (list
-                  'quote
-                  {:seon.error/kind ::lint-rejected
-                   :seon.error/message
-                   (str "Static analysis rejected this source form with "
-                        (count errors) " error finding(s).")
-                   :seon.error/data
-                   {:seon.cluster.run.form/source
-                    (:seon.cluster.run.form/source source)
-                    ::fn.analyzer/findings findings}})))
-         source)))
-   sources
-   (fn.analyzer/analyze-forms
-    (cond->
-     {::fn.analyzer/namespace-name namespace-name
-      ::fn.analyzer/available-functions available-functions
-      ::fn.analyzer/sources
-      (mapv :seon.cluster.run.form/source sources)}
-      namespace-row (assoc ::fn.analyzer/namespace-row namespace-row)))))
+    source ::source}]
+  (let [analyzed
+        (first
+         (fn.analyzer/analyze-forms
+          (cond->
+           {::fn.analyzer/namespace-name namespace-name
+            ::fn.analyzer/available-functions available-functions
+            ::fn.analyzer/sources
+            [(:seon.cluster.run.form/source source)]}
+            namespace-row
+            (assoc ::fn.analyzer/namespace-row namespace-row))))
+        findings (::fn.analyzer/findings analyzed)
+        errors (filterv #(= :error (::fn.analyzer/level %)) findings)]
+    (if (seq errors)
+      (assoc source
+             :seon.cluster.run.form/source
+             (pr-str
+              (list
+               'quote
+               {:seon.error/kind ::lint-rejected
+                :seon.error/message
+                (str "Static analysis rejected this source form with "
+                     (count errors) " error finding(s).")
+                :seon.error/data
+                {:seon.cluster.run.form/source
+                 (:seon.cluster.run.form/source source)
+                 ::fn.analyzer/findings findings}})))
+      source)))
+
+(defn- available-functions
+  [db]
+  (mapv (fn [[sym private?]]
+          {:seon.fn/sym sym
+           :seon.fn/private? private?})
+        (d/q '[:find ?sym ?private
+               :where
+               [?function :seon.fn/sym ?sym]
+               [(get-else $ ?function :seon.fn/private? false) ?private]]
+             db)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -739,50 +754,26 @@
                     (report :error 0))
             freeze!
             (fn [completion]
-              ;; The reply becomes one ordinal-preserving analyzed plan.
-              ;; Error-bearing forms compile to flat lint-refusal values;
-              ;; clean source stays byte-exact. This remains deliberately
-              ;; outside the attempt reduce — WHICH target answered stops
-              ;; mattering the moment one did. The frozen plan FACT is the
-              ;; stream terminal; no lossy channel value carries "done".
+              ;; Freeze the reply's exact ordered source. Static admission is
+              ;; part of the REPL reduce below because an earlier form may
+              ;; change the resolver state that makes the next form valid.
+              ;; The frozen plan FACT is the stream terminal; no lossy channel
+              ;; value carries "done".
               (let [namespace-name (sci.eval/agent-namespace agent-id)
                     sources
                     (reply/sources (:seon.ai/text completion)
                                    namespace-name)]
                 (if (:seon.error/kind sources)
                   (fail! sources)
-                  (let [namespace-row
-                        (d/pull @connection
-                                '[* {:seon.ns/aliases [*]}
-                                    {:seon.ns/imports [*]}
-                                    {:seon.ns/refers [*]}]
-                                [:seon.ns/name namespace-name])
-                        available-functions
-                        (mapv (fn [[sym private?]]
-                                {:seon.fn/sym sym
-                                 :seon.fn/private? private?})
-                              (d/q '[:find ?sym ?private
-                                     :where
-                                     [?function :seon.fn/sym ?sym]
-                                     [(get-else $ ?function
-                                                :seon.fn/private? false)
-                                      ?private]]
-                                   @connection))
-                        admitted-sources
-                        (lint-plan
-                         {:seon.ns/name namespace-name
-                          ::namespace-row namespace-row
-                          ::available-functions available-functions
-                          :seon.cluster.reply/sources sources})
-                        outcome (store/transact!
+                  (let [outcome (store/transact!
                                  connection
                                  (run/plan-tx
                                   {:seon.cluster.run/id run-id
                                    :seon.cluster.run/process process
                                    :seon.cluster.run/plan-digest
-                                   (digest admitted-sources)
+                                   (digest sources)
                                    :seon.cluster.run/sources
-                                   admitted-sources}))]
+                                   sources}))]
                     (report (if (refused! cluster outcome now
                                           {:seon.cluster.agent/id agent-id
                                            :seon.cluster.run/id run-id})
@@ -976,12 +967,34 @@
                     (or namespace-name
                         (second (:seon.cluster.run.form/ns form))
                         (sci.eval/agent-namespace agent-id))
+                    db-before-evaluation @connection
+                    namespace-row
+                    (d/pull db-before-evaluation
+                            '[* {:seon.ns/aliases [*]}
+                                {:seon.ns/imports [*]}
+                                {:seon.ns/refers [*]}]
+                            [:seon.ns/name evaluation-namespace])
+                    admitted-source
+                    (lint-form
+                     (cond->
+                      {:seon.ns/name evaluation-namespace
+                       ::available-functions
+                       (available-functions db-before-evaluation)
+                       ::source
+                       {:seon.cluster.run.form/source
+                        (:seon.cluster.run.form/source form)
+                        :seon.ns/name evaluation-namespace}}
+                       namespace-row
+                       (assoc ::namespace-row namespace-row)))
+                    admitted-form
+                    (assoc form :seon.cluster.run.form/source
+                           (:seon.cluster.run.form/source admitted-source))
                     evaluation
                     (submit-evaluation!!
                      evaluate
                      receipt-id
                     (merge
-                      form
+                      admitted-form
                       {:seon.cluster.run.form/ns
                        [:seon.ns/name evaluation-namespace]
                       :seon.sci.admit/caps

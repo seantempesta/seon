@@ -37,17 +37,18 @@
 
 (defn- lint-plan
   [sources]
-  (cluster.loop/lint-plan
-   {:seon.ns/name 'my.agents.lint-test
-    :seon.cluster.loop/namespace-row
-    {:seon.ns/name 'my.agents.lint-test}
-    :seon.cluster.reply/sources
-    (mapv (fn [source]
-            {:seon.cluster.run.form/source source
-             :seon.ns/name 'my.agents.lint-test})
-          sources)}))
+  (mapv
+   (fn [source]
+     (cluster.loop/lint-form
+      {:seon.ns/name 'my.agents.lint-test
+       :seon.cluster.loop/namespace-row
+       {:seon.ns/name 'my.agents.lint-test}
+       :seon.cluster.loop/source
+       {:seon.cluster.run.form/source source
+        :seon.ns/name 'my.agents.lint-test}}))
+   sources))
 
-(deftest lint-rejection-is-per-form-data-before-freeze
+(deftest lint-rejection-is-per-form-data-at-execution
   (let [originals (mapv #(str "(+ " % " " % ")") (range 10))
         originals (assoc originals 4 "(missing 4)")
         admitted (lint-plan originals)
@@ -98,14 +99,14 @@
 (deftest linting-a-new-agent-namespace-uses-the-database-program-graph
   (let [source "(my.run/complete \"done\")"
         admitted
-        (cluster.loop/lint-plan
+        (cluster.loop/lint-form
          {:seon.ns/name 'my.agents.new-agent
           :seon.cluster.loop/available-functions
           [{:seon.fn/sym "my.run/complete" :seon.fn/private? false}]
-          :seon.cluster.reply/sources
-          [{:seon.cluster.run.form/source source
-            :seon.ns/name 'my.agents.new-agent}]})]
-    (is (= source (:seon.cluster.run.form/source (first admitted)))
+          :seon.cluster.loop/source
+          {:seon.cluster.run.form/source source
+           :seon.ns/name 'my.agents.new-agent}})]
+    (is (= source (:seon.cluster.run.form/source admitted))
         "an absent namespace row is valid for a newly created agent")))
 
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes

@@ -165,18 +165,30 @@
        (let [target-aliases
              (sort-by (comp str :seon.ns.alias/local)
                       (get aliases-by-target target))
+             refer-rows
+             (sort-by (juxt (comp str :seon.ns.refer/target-name)
+                            (comp str :seon.ns.refer/local))
+                      (get refers-by-target target))
              referred
-             (mapv :seon.ns.refer/target-name
-                   (sort-by (comp str :seon.ns.refer/target-name)
-                            (get refers-by-target target)))
+             (into [] (comp (map :seon.ns.refer/target-name) (distinct))
+                   refer-rows)
+             renames
+             (into (sorted-map-by #(compare (str %1) (str %2)))
+                   (keep (fn [{:seon.ns.refer/keys [local target-name]}]
+                           (when (not= local target-name)
+                             [target-name local])))
+                   refer-rows)
              base (cond-> [target]
-                    (seq referred) (into [:refer referred]))]
+                    (seq referred) (into [:refer referred])
+                    (seq renames) (into [:rename renames]))]
          (if (seq target-aliases)
            (map-indexed
             (fn [index alias-row]
               (cond-> [target :as (:seon.ns.alias/local alias-row)]
                 (and (zero? index) (seq referred))
-                (into [:refer referred])))
+                (into [:refer referred])
+                (and (zero? index) (seq renames))
+                (into [:rename renames])))
             target-aliases)
            [base])))
      targets)))

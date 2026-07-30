@@ -80,7 +80,7 @@
   "The complete first-agent plan committed, including its final disposition."
   [db]
   (and (program-present? db)
-       (= 15 (receipt-count db))
+       (= 17 (receipt-count db))
        (some? (d/q '[:find ?closed .
                      :where
                      [?agent :seon.cluster.agent/id "restart-a"]
@@ -135,6 +135,9 @@
                    "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
+                   "(require (if true '[clojure.set :as dynamic] "
+                   "'[clojure.string :as dynamic]))\n"
+                   "{:resolved ::dynamic/after-require}\n"
                    "(missing-independent-form 4)\n"
                    "(deftest persisted-test :reopened)\n"
                    "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
@@ -151,14 +154,21 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
-          (is (= 15 (receipt-count @connection))
-              "fourteen valid forms settle despite one independent refusal")
+          (is (= 17 (receipt-count @connection))
+              "sixteen valid forms settle despite one independent refusal")
+          (is (= "{:resolved :clojure.set/after-require}"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 10]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection))
+              "a computed require changes lint and eval state for the next form")
           (is (= :seon.cluster.loop/lint-rejected
                  (:seon.error/kind
                   (edn/read-string
                    (d/q '[:find ?result .
                           :where
-                          [?receipt :seon.cluster.eval/ordinal 9]
+                          [?receipt :seon.cluster.eval/ordinal 11]
                           [?receipt :seon.cluster.eval/result-edn ?result]]
                         @connection))))
               "the invalid ordinal is one flat value, not a plan-wide abort")
@@ -216,6 +226,8 @@
                   "multiple aliases to one target survive acquisition")
               (is (= 'missing.restart.namespace (get aliases 'ghost))
                   ":as-alias survives without loading its target")
+              (is (= 'clojure.set (get aliases 'dynamic))
+                  "a computed require's alias survives acquisition")
               (is (= 'clojure.string/upper-case (get refers 'up))
                   "a renamed refer retains its target Var identity")
               (is (some #{'clojure.set} (:requires bindings)))

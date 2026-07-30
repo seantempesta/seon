@@ -140,8 +140,8 @@
       ;; The source-populated restart test owns the integrated lint/eval proof;
       ;; these turn tests keep their narrower transaction and REPL semantics.
       (with-redefs
-        [cluster.loop/lint-plan
-         (fn [{sources :seon.cluster.reply/sources}] sources)]
+        [cluster.loop/lint-form
+         (fn [{source :seon.cluster.loop/source}] source)]
         (body {:seon.store/branch-connection connection
                :seon.cluster.run/process process
                :seon.cluster.wake/channel

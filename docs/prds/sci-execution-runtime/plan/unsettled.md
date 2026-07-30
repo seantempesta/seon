@@ -23,11 +23,15 @@ function. A full gate advanced through the early cluster suites without a
 failure, then was stopped in the long high-CPU message-test phase; it is not
 claimed as complete and remains pending.
 
-Runtime admission is per form. One ordered candidate is analyzed before plan
-freeze; each error-bearing form becomes a flat lint-refusal value carrying its
+Runtime admission is per form inside the ordered REPL reduce. The exact source
+plan freezes first; immediately before each execution, its candidate is
+analyzed against the current committed namespace row and database program
+graph. Each error-bearing form becomes a flat lint-refusal value carrying its
 exact source and local findings, while independent clean forms remain
-byte-exact and execute at their original ordinals. Known cross-namespace
-functions and privacy come from the database program graph, never an allowlist.
+byte-exact and execute at their original ordinals. A computed `require` or
+alias therefore changes both SCI and clj-kondo resolution for the next form.
+Known cross-namespace functions and privacy come from the database program
+graph, never an allowlist.
 clj-kondo type-mismatch findings remain advisory because its local inference is
 not a sound database admission proof; its syntax, resolution, privacy, and
 arity errors remain blocking. Whole-build publication is still atomic:

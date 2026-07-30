@@ -139,7 +139,11 @@
           {:seon.ns/name 'my.agents.alpha
            :seon.ns/aliases
            #{{:seon.ns.alias/local 'str
-              :seon.ns.alias/target-ns 'clojure.string}}}
+              :seon.ns.alias/target-ns 'clojure.string}}
+           :seon.ns/refers
+           #{{:seon.ns.refer/local 'read
+              :seon.ns.refer/target-ns 'clojure.edn
+              :seon.ns.refer/target-name 'read-string}}}
           ::analyzer/available-functions
           [{:seon.fn/sym "my.run/complete"
             :seon.fn/private? false}
@@ -148,16 +152,19 @@
           ::analyzer/sources
           ["(defn broken [value]\n  (missing value))"
            "(str/join [\"kept\"])"
+           "(read \"{:also :kept}\")"
            "(my.run/complete \"done\")"
            "(other/private-helper 1)"
            "(broken)"]})]
     (testing "the synthetic namespace prelude resolves persisted aliases"
       (is (empty? (::analyzer/findings (nth analysis 1))))
-      (is (empty? (::analyzer/findings (nth analysis 2)))))
+      (is (empty? (::analyzer/findings (nth analysis 2)))
+          "a persisted renamed refer is reconstructed with :rename")
+      (is (empty? (::analyzer/findings (nth analysis 3)))))
     (testing "program rows preserve cross-namespace privacy checks"
       (is (= :private-call
              (::analyzer/type
-              (first (::analyzer/findings (nth analysis 3)))))))
+              (first (::analyzer/findings (nth analysis 4)))))))
     (testing "prelude rows are removed from exact per-form locations"
       (is (= [{::analyzer/row 2
                ::analyzer/level :error
@@ -169,4 +176,4 @@
     (testing "a later dependent form receives its own reported error"
       (is (= :invalid-arity
              (::analyzer/type
-              (first (::analyzer/findings (nth analysis 4)))))))))
+              (first (::analyzer/findings (nth analysis 5)))))))))
