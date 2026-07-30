@@ -448,6 +448,15 @@
            (nth (:seon.sci.reader/form (nth read-events 2)) 2))
         "a prior literal :as-alias governs later keyword auto-resolution")))
 
+(deftest schema-unregister-resolves-through-the-effective-alias
+  (let [read-events
+        (events
+         (str "(require '[seon.schema :as schema])\n"
+              "(schema/unregister! :shared.schema/value)"))]
+    (is (= :shared.schema/value
+           (:seon.sci.reader/schema-unregister-key
+            (second read-events))))))
+
 (deftest declaration-and-namespace-semantics-use-resolved-operator-identity
   (let [read-events
         (events

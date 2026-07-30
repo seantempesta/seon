@@ -181,3 +181,14 @@
                           [:seon.fn/sym function-sym])))
         (is (nil? (d/pull @connection [:db/id]
                           [:seon.test/sym function-sym])))))))
+
+(deftest schema-unregister-is-one-global-typed-deletion
+  (let [event (one-event
+               "(seon.schema/unregister! :shared.schema/amount)")]
+    (is (= :shared.schema/amount
+           (:seon.sci.reader/schema-unregister-key event)))
+    (is (= {:seon.program/delete-identities
+            [[:seon.schema/key :shared.schema/amount]]
+            :seon.program/source
+            "(seon.schema/unregister! :shared.schema/amount)"}
+           (program/deletion-row event)))))

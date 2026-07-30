@@ -142,10 +142,14 @@
     []))
 
 (defn deletion-row
-  "Typed function and test identities removed by one `ns-unmap` event."
+  "Typed identities removed by one explicit REPL deletion event.
+
+  `ns-unmap` removes the matching function and test identities. A reader-
+  resolved `seon.schema/unregister!` removes one global schema identity."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [event]
   (let [form (:seon.sci.reader/form event)
+        schema-key (:seon.sci.reader/schema-unregister-key event)
         quoted-symbol
         (fn [value]
           (when (and (seq? value)
@@ -153,15 +157,18 @@
                      (= 2 (count value))
                      (symbol? (second value)))
             (second value)))]
-    (when (and (seq? form)
-               (= 'ns-unmap (first form))
-               (= 3 (count form)))
-      (when-let [namespace-name (quoted-symbol (second form))]
-        (when-let [declaration-name (quoted-symbol (nth form 2))]
-          (let [qualified (str (symbol (str namespace-name)
-                                       (str declaration-name)))]
-            {:seon.program/delete-identities
-             [[:seon.fn/sym qualified]
-              [:seon.test/sym qualified]]
-             :seon.program/source (:seon.sci.reader/source event)
-             :seon.program/ns [:seon.ns/name namespace-name]}))))))
+    (if schema-key
+      {:seon.program/delete-identities [[:seon.schema/key schema-key]]
+       :seon.program/source (:seon.sci.reader/source event)}
+      (when (and (seq? form)
+                 (= 'ns-unmap (first form))
+                 (= 3 (count form)))
+        (when-let [namespace-name (quoted-symbol (second form))]
+          (when-let [declaration-name (quoted-symbol (nth form 2))]
+            (let [qualified (str (symbol (str namespace-name)
+                                         (str declaration-name)))]
+              {:seon.program/delete-identities
+               [[:seon.fn/sym qualified]
+                [:seon.test/sym qualified]]
+               :seon.program/source (:seon.sci.reader/source event)
+               :seon.program/ns [:seon.ns/name namespace-name]})))))))

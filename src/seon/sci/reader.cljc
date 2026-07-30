@@ -316,6 +316,15 @@
       {:seon.schema/key schema-key
        :seon.schema/form (pr-str (nth form 2))})))
 
+(defn- schema-unregister
+  [form context]
+  (when (and (seq? form)
+             (= 2 (count form))
+             (= 'seon.schema/unregister!
+                (resolved-operation (first form) context))
+             (qualified-keyword? (second form)))
+    {::schema-unregister-key (second form)}))
+
 (defn- declaration-facts
   [form namespace-name context source]
   (if (and (seq? form)
@@ -332,7 +341,8 @@
        (assoc function :seon.fn/source source))
      (when-let [test (test-declaration form namespace-name context)]
        (assoc test :seon.test/source source))
-     (schema-declaration form context))))
+     (schema-declaration form context)
+     (schema-unregister form context))))
 
 (defn- nested-executable-declarations
   "Declaration facts nested directly under an executable top-level `do`.

@@ -989,6 +989,43 @@
                           @connection persistent-key))
                   "the committed attribute accepts a fact immediately"))))))))
 
+(deftest runtime-schema-unregister-removes-one-unused-global-schema
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            schema-key :shared.runtime/unregister-me]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! :shared.runtime/unregister-me "
+               "(vector :int {:seon.db/index true}))\n"
+               "(schema/unregister! :shared.runtime/unregister-me)\n"
+               "(my.run/complete \"schema removed\")")})]
+          (drive! cluster 10)
+          (let [db @connection
+                results
+                (into {}
+                      (d/q '[:find ?ordinal ?result
+                             :where
+                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                             [?receipt :seon.cluster.eval/result-edn ?result]]
+                           db))]
+            (is (= (pr-str schema-key) (get results 2))
+                "unregister has ordinary REPL return semantics")
+            (is (nil? (d/pull db [:db/id]
+                              [:seon.schema/key schema-key])))
+            (is (not (contains? (:schema db) schema-key)))
+            (is (not (contains?
+                      (:seon.schema.projection/forms
+                       (schema/projection-from-database db))
+                      schema-key))
+                "the run-local projection derives absence from db-after")))))))
+
 (deftest refused-runtime-schema-registration-mutates-neither-row-nor-projection
   (with-cluster
     (fn [cluster]

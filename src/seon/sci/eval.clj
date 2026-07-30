@@ -154,10 +154,11 @@
         :namespaces
         {'clojure.core sci.interrupt/clojure-core
          'clojure.string sci.interrupt/clojure-string
-         ;; The schema surface is exactly the one declaration function. Its
+         ;; The schema surface is exactly its two lifecycle functions. Their
          ;; dynamic registration overlay is bound per evaluation below.
          'seon.schema
-         {'register! (sci/copy-var schema/register! schema-ns)}
+         {'register! (sci/copy-var schema/register! schema-ns)
+          'unregister! (sci/copy-var schema/unregister! schema-ns)}
          ;; A deftest must have clojure.test's actual macro and Var semantics.
          ;; Derive the complete public namespace instead of maintaining a
          ;; second hand list that silently omits a runnable test operation.
@@ -338,6 +339,13 @@
 
        :else nil))))
 
+(defn- deleted-schema-key
+  [row]
+  (some (fn [[identity-attribute identity-value]]
+          (when (= :seon.schema/key identity-attribute)
+            identity-value))
+        (:seon.program/delete-identities row)))
+
 (defn- reader-context
   "Project SCI's namespace-in-effect into the one reader's own context.
 
@@ -483,8 +491,8 @@
          :seon.sci.eval/installed 1})
 
       :seon.program/delete-identities
-      (let [namespace-name (second (:seon.program/ns row))
-            event (one-event (:seon.program/source row) namespace-name ctx)]
+      (let [schema-deletion? (boolean (deleted-schema-key row))
+            namespace-name (second (:seon.program/ns row))]
         (when-let [remaining
                    (some (fn [[identity-attribute identity-value]]
                            (when (d/pull db [:db/id]
@@ -494,8 +502,11 @@
           (throw (ex-info "Deleted declaration is still present after commit."
                           {:seon.error/kind ::install-delete-mismatch
                            :seon.program/identity remaining})))
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-          (sci/eval-form ctx (:seon.sci.reader/form event)))
+        (when-not schema-deletion?
+          (let [event (one-event (:seon.program/source row)
+                                 namespace-name ctx)]
+            (sci/binding [sci/ns (sci/create-ns namespace-name)]
+              (sci/eval-form ctx (:seon.sci.reader/form event)))))
         {:seon.schema/projection
          (schema/projection-from-database db projection)
          :seon.sci.eval/installed 1})
@@ -717,8 +728,9 @@
                 (schema/current-projection)
                 (schema/build-projection (schema/registered-schemas)))
             raw-row (program-row event projection)
+            unregister-key (deleted-schema-key raw-row)
             schema-delta
-            (when (:seon.schema/key raw-row)
+            (when (or (:seon.schema/key raw-row) unregister-key)
               (schema/begin-registration-delta projection))
             schema-value
             (when schema-delta
@@ -730,29 +742,45 @@
                   (sci/eval-form evaluation-ctx form))))
             declared-row
             (if schema-delta
-              (let [schema-key (:seon.schema/key raw-row)
-                    definition
-                    (schema/registration-delta-form schema-delta schema-key)]
-                (when-not (and (= schema-key schema-value) definition)
-                  (throw
-                   (ex-info "Schema declaration did not register its reader identity."
-                            {:seon.error/kind ::schema-refused
-                             :seon.schema/key schema-key
-                             :seon.sci.eval/value schema-value})))
-                ;; Validate the actual evaluated value while the overlay is
-                ;; isolated. The terminal transaction repeats this pure
-                ;; candidate validation against its mid-transaction db value.
-                (schema/projection-with-schema
-                 projection schema-key definition
-                 {:seon.schema.admission/source :agent})
-                (assoc raw-row :seon.schema/form (pr-str definition)))
+              (if unregister-key
+                (do
+                  (when-not (and (= unregister-key schema-value)
+                                 (nil? (schema/registration-delta-form
+                                        schema-delta unregister-key)))
+                    (throw
+                     (ex-info
+                      "Schema deletion did not unregister its reader identity."
+                      {:seon.error/kind ::schema-refused
+                       :seon.schema/key unregister-key
+                       :seon.sci.eval/value schema-value})))
+                  ;; Dependency validation is pure here. Current database data
+                  ;; is fenced by the terminal transaction against db-before.
+                  (schema/projection-without-schema projection unregister-key)
+                  raw-row)
+                (let [schema-key (:seon.schema/key raw-row)
+                      definition
+                      (schema/registration-delta-form schema-delta schema-key)]
+                  (when-not (and (= schema-key schema-value) definition)
+                    (throw
+                     (ex-info "Schema declaration did not register its reader identity."
+                              {:seon.error/kind ::schema-refused
+                               :seon.schema/key schema-key
+                               :seon.sci.eval/value schema-value})))
+                  ;; Validate the actual evaluated value while the overlay is
+                  ;; isolated. The terminal transaction repeats this pure
+                  ;; candidate validation against its mid-transaction db value.
+                  (schema/projection-with-schema
+                   projection schema-key definition
+                   {:seon.schema.admission/source :agent})
+                  (assoc raw-row :seon.schema/form (pr-str definition))))
               raw-row)
             evaluated-value
             (if declared-row
               (or (:seon.ns/name declared-row)
                   (:seon.fn/sym declared-row)
                   (:seon.schema/key declared-row)
-                  (:seon.test/sym declared-row))
+                  (:seon.test/sym declared-row)
+                  (when unregister-key schema-value))
               (sci/binding [sci/ns namespace-object
                             sci/out printed
                             sci/err printed]

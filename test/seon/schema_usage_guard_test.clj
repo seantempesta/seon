@@ -2,6 +2,7 @@
   "Schema replacement/removal safety at the terminal transaction boundary."
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [seon.cluster.run :as run]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -287,3 +288,66 @@
         (is (nil? (d/pull @connection [:db/id]
                           [:seon.schema/key base-key])))
         (is (not (contains? (:schema @connection) base-key)))))))
+
+(deftest retracted-data-allows-removal-and-historical-rows-restore-validation
+  (test-support/with-database
+    (fn [connection]
+      (install-forms! connection {base-key (get forms base-key)})
+      (d/transact connection [{base-key 7}])
+      (let [data-t (:max-tx @connection)
+            entity
+            (d/q '[:find ?entity .
+                   :in $ ?attribute
+                   :where [?entity ?attribute _]]
+                 @connection base-key)]
+        (d/transact connection [[:db/retract entity base-key]])
+        (let [result
+              (transact-result
+               connection
+               (program-row-tx
+                {:seon.program/delete-identities
+                 [[:seon.schema/key base-key]]}))
+              past (d/as-of @connection data-t)
+              past-projection (schema/projection-from-database past)]
+          (is (nil? (:error result)))
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.schema/key base-key])))
+          (is (not (contains? (:schema @connection) base-key)))
+          (is (= 7
+                 (d/q '[:find ?value .
+                        :in $ ?attribute
+                        :where [_ ?attribute ?value]]
+                      past base-key))
+              "as-of Datalog retains the pre-retraction value")
+          (is (= (pr-str (get forms base-key))
+                 (:seon.schema/form
+                  (d/pull past [:seon.schema/form]
+                          [:seon.schema/key base-key])))
+              "the historical program row retains the validator source")
+          (is (true?
+               ((schema/projection-validator past-projection base-key) 7))
+              "the historical row rebuilds Malli validation at that basis")
+          (is (nil? (get (dbi/-schema past) base-key))
+              "Datahike as-of delegates to the current schema map"))))))
+
+(deftest no-history-data-is-not-promised-to-simulations
+  (test-support/with-database
+    (fn [connection]
+      (let [schema-key :seon.schema-usage-guard/no-history
+            definition
+            [:int {:seon.db/index true :seon.db/no-history? true}]]
+        (install-forms! connection {schema-key definition})
+        (d/transact connection [{schema-key 7}])
+        (let [data-t (:max-tx @connection)
+              entity
+              (d/q '[:find ?entity .
+                     :in $ ?attribute
+                     :where [?entity ?attribute _]]
+                   @connection schema-key)]
+          (d/transact connection [[:db/retract entity schema-key]])
+          (is (nil?
+               (d/q '[:find ?value .
+                      :in $ ?attribute
+                      :where [_ ?attribute ?value]]
+                    (d/as-of @connection data-t) schema-key))
+              ":seon.db/no-history? intentionally removes the past value"))))))

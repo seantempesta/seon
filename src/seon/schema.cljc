@@ -22,6 +22,7 @@
             [clojure.set :as set]
             [clojure.walk :as walk]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             #?(:clj [clojure.edn :as edn]
@@ -384,7 +385,10 @@
     (first values)))
 
 (defn- installed-attribute? [db attribute]
-  (contains? (:schema db) attribute))
+  ;; Historical database values do not expose `:schema` as a map entry.
+  ;; Datahike's IDB operation is the one schema interface for current and
+  ;; filtered values (AsOfDB deliberately delegates it to its origin).
+  (contains? (dbi/-schema db) attribute))
 
 (defn- asserting-process-ref [db asserting-tx-eid]
   (when (installed-attribute? db :seon.db/process)
