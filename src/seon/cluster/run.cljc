@@ -591,28 +591,37 @@
          :seon.error/kind :user-input})))))
 
 (defn- schema-attribute-change-tx
-  "Deterministic Datahike retractions/declarations for affected schemas."
-  [db current-projection candidate-projection schema-keys]
-  (let [affected
-        (schema/dependent-schema-keys current-projection schema-keys)
-        current-attributes
-        (affected-schema-attributes current-projection affected)
-        installed
-        (set (filter #(contains? (:schema db) %) current-attributes))
-        candidate-attributes
-        (if candidate-projection
-          (affected-schema-attributes candidate-projection affected)
-          #{})
-        declarations
-        (if candidate-projection
-          (schema.datahike/malli->datahike-schema-in
-           candidate-projection
-           (sort candidate-attributes))
-          [])]
-    (into
-     (mapv (fn [attribute] [:db.fn/retractEntity attribute])
-           (sort installed))
-     declarations)))
+  "Deterministic Datahike diff between complete schema projections."
+  [db current-projection candidate-projection]
+  (let [declarations-in
+        (fn [projection]
+          (if projection
+            (into {}
+                  (map (juxt :db/ident identity))
+                  (schema.datahike/malli->datahike-schema-in
+                   projection
+                   (schema.form/database-attributes
+                    (:seon.schema.projection/forms projection))))
+            {}))
+        current-declarations (declarations-in current-projection)
+        candidate-declarations (declarations-in candidate-projection)
+        changed-attributes
+        (into #{}
+              (filter #(not= (get current-declarations %)
+                             (get candidate-declarations %)))
+              (into (set (keys current-declarations))
+                    (keys candidate-declarations)))
+        retracted
+        (into []
+              (comp
+               (filter #(contains? current-declarations %))
+               (filter #(contains? (:schema db) %))
+               (map (fn [attribute]
+                      [:db.fn/retractEntity attribute])))
+              (sort changed-attributes))]
+    (into retracted
+          (keep candidate-declarations)
+          (sort changed-attributes))))
 
 (defn- program-row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
@@ -636,7 +645,7 @@
           schema-tx
           (if (seq schema-keys)
             (schema-attribute-change-tx
-             db current-projection candidate-projection schema-keys)
+             db current-projection candidate-projection)
             [])
           declarations
           (into []
@@ -691,7 +700,7 @@
             (if (= identity :seon.schema/key)
               (if schema-replacement?
                 (schema-attribute-change-tx
-                 db current-projection candidate-projection #{identity-value})
+                 db current-projection candidate-projection)
                 (let [current-attributes
                       (schema.form/database-attributes
                        (:seon.schema.projection/forms current-projection))

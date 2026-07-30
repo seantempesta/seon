@@ -16,11 +16,15 @@ reacquire after a real cluster reopen. `1135d8f39` replaces lossy require-edge
 reconstruction with separate exact facts for actual requires, aliases, and
 refers, installed through maintained SCI APIs (`2217449`, `98457e8`).
 
-The schema lifecycle is also complete through `913f8177c`: schemas are global;
+The schema lifecycle surface landed through `913f8177c`: schemas are global;
 `schema/unregister!` stages one typed deletion in the isolated registration
 delta; dependency/current-data checks run at the terminal transaction; and the
-active projection derives from `db-after`. This issue remains open only until
-the independent landing-wave audit is reviewed and any findings are resolved.
+active projection derives from `db-after`. The independent landing-wave audit
+found four remaining blockers. Its shared-attribute blocker is fixed: physical
+Datahike changes now derive from a diff of the complete current and candidate
+global projections, so replacing or removing an entity schema cannot retract a
+leaf attribute whose global schema row survives. The real read-eval loop,
+dynamic `ns-unmap`, and independent build test census remain open.
 
 ## Evidence
 
@@ -59,6 +63,12 @@ Schema removal/history evidence is in
 after current data is retracted, old temporal datoms and the historical schema
 row rebuild validation at one `as-of` basis; Datahike's schema map itself does
 not time-travel, and `:seon.db/no-history? true` explicitly discards old values.
+
+The adversarial audit's composite-schema falsifier is now a recurring class
+test: it replaces an entity schema with a smaller map, removes the entity
+schema, proves both global leaf rows and both Datahike attributes survive, and
+writes through them. `seon.schema-usage-guard-test` passes 11 tests / 62
+assertions / 0 failures / 0 errors.
 
 ## Owner
 

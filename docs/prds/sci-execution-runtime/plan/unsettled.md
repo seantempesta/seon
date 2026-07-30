@@ -170,6 +170,15 @@ schema map itself does not time-travel, and `:seon.db/no-history? true` is the
 explicit old-value exception. An independent adversarial audit is the remaining
 acceptance boundary before this blocker closes.
 
+That audit (`8f17c0ec9`) found four blockers, so this contract is not yet
+closed. Its shared-physical-attribute finding is repaired: schema lifecycle
+transactions diff complete current and candidate global projections by
+Datahike `:db/ident`, rather than treating one changed composite form as the
+owner of every leaf it references. The recurring replacement-then-removal
+test proves surviving global leaf rows retain installed attributes and accept
+new data. Remaining blockers are the sequential read-eval loop, dynamic
+`ns-unmap` persistence, and an independent build test-declaration census.
+
 ## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under

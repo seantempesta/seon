@@ -274,6 +274,50 @@
             (is (not (contains? (:schema @connection) unrelated-key))
                 "entity replacement leaves unrelated attributes absent")))))))
 
+(deftest entity-lifecycle-preserves-surviving-global-leaf-attributes
+  (test-support/with-database
+    (fn [connection]
+      (let [entity-form
+            [:map {:seon.db/entity true}
+             [entity-id-key entity-id-key]
+             [entity-child-key entity-child-key]]
+            reduced-entity-form
+            [:map {:seon.db/entity true}
+             [entity-id-key entity-id-key]]
+            selected-forms
+            {entity-id-key [:string {:seon.db/identity true}]
+             entity-child-key [:int {:seon.db/index true}]
+             entity-key entity-form}]
+        (install-forms! connection selected-forms)
+        (is (nil?
+             (:error
+              (transact-result
+               connection
+               (program-row-tx
+                (schema-row entity-key reduced-entity-form))))))
+        (is (nil?
+             (:error
+              (transact-result
+               connection
+               (program-row-tx
+                {:seon.program/delete-identities
+                 [[:seon.schema/key entity-key]]})))))
+        (is (nil? (d/pull @connection [:db/id]
+                          [:seon.schema/key entity-key])))
+        (doseq [leaf-key [entity-id-key entity-child-key]]
+          (is (some? (d/pull @connection [:db/id]
+                             [:seon.schema/key leaf-key])))
+          (is (contains? (:schema @connection) leaf-key)))
+        (d/transact connection [{entity-id-key "survivor"
+                                 entity-child-key 7}])
+        (is (= ["survivor" 7]
+               (d/q '[:find [?id ?child]
+                      :in $ ?id-attribute ?child-attribute
+                      :where
+                      [?entity ?id-attribute ?id]
+                      [?entity ?child-attribute ?child]]
+                    @connection entity-id-key entity-child-key)))))))
+
 (deftest generic-schema-deletion-removes-unused-row-and-attribute
   (test-support/with-database
     (fn [connection]
