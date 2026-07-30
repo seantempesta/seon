@@ -404,18 +404,19 @@ stops, and runs serial integration gates; implementation goes to capable code
 agents. Haiku is only for quick reads. Never haiku for coding. Codex uses its
 configured coding model—Claude aliases are not portable model names.
 
-**Delegation follows the orchestrator's native agent system.** A Codex
-orchestrator launches and manages its own lanes with Codex's collaboration
-tools (`spawn_agent`, `send_message`, `followup_task`, `interrupt_agent`, and
-`wait_agent`). It MUST NOT launch its own agents through `bin/codex-agent`.
-The native task tree is the ownership and supervision surface; give every
-agent the same bounded paths, protected paths, grounding, and exact deliverable
-required of any lane.
+**The orchestrator determines how code agents are launched; a code agent never
+chooses or changes that mechanism.** A Codex orchestrator launches and manages
+its own code-agent lanes with Codex's collaboration tools (`spawn_agent`,
+`send_message`, `followup_task`, `interrupt_agent`, and `wait_agent`). It MUST
+NOT launch new agents through `bin/codex-agent`. The native task tree is the
+ownership and supervision surface; give every agent the same bounded paths,
+protected paths, grounding, and exact deliverable required of any lane.
 
-A Claude orchestrator has no Codex-native collaboration tree, so it launches
-Codex code agents through `bin/codex-agent` as harness-tracked background
-commands (Bash `run_in_background: true`, description naming the lane — never
-`nohup`/`&`, never hand-rolled shell):
+A Claude orchestrator has no Codex-native collaboration tree. **Claude agents
+therefore launch and manage Codex code agents through the repository's
+`bin/codex-agent` file**, as harness-tracked background commands (Bash
+`run_in_background: true`, description naming the lane — never `nohup`/`&`,
+never hand-rolled shell):
 
 ```bash
 bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
@@ -423,8 +424,9 @@ bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
 
 A Codex orchestrator inheriting a Claude-started `bin/codex-agent` lane may
 inspect, stop, or collect that existing lane for a safe handoff, but launches
-all NEW work through its native collaboration tools. A Claude orchestrator
-uses the harness lifecycle below for every lane it owns.
+all NEW work through its native collaboration tools. It does not run
+`bin/codex-agent` to create a substitute task tree. A Claude orchestrator uses
+the harness lifecycle below for every code-agent lane it owns.
 
 **NEVER SANDBOX A LANE** (owner ruling 2026-07-26). There is no sandbox
 dial and there must not be one: a read-only audit finished a 63-file
