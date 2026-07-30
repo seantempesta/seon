@@ -530,8 +530,10 @@ The core's source, the agent's eval log, and the analyzer state are three views
 of one program graph. Agent-defining forms are `:seon.fn`, `:seon.ns`,
 `:seon.schema`, and `:seon.test` entities; those top-level namespaces own their
 attributes.
-The DB IS the running system (query → reconstitute →
-topo-sort by `:seon.ns/require-edges` → load; redefine = upsert). Agent birth
+The DB IS the running system (query → install exact namespace bindings →
+topo-sort by `:seon.ns/requires` plus refer targets → load; redefine = upsert).
+Aliases, exact renamed refers, and actual loaded namespaces are separate facts;
+runtime never compresses them back into require syntax. Agent birth
 commits its context components, home namespace/require rows, and safe declaration
 facts atomically. After commit, the runtime loads those declarations without
 manufacturing quiet eval/transcript rows. The agent sees the resulting facts and

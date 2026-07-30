@@ -148,6 +148,28 @@ will be collected under the revised delegation law. Root
 `AGENTS.md` now says Codex orchestrators use native collaboration tools while
 Claude orchestrators use `bin/codex-agent` (`6e5b0a925`).
 
+**Registration contract landed through schema lifecycle (2026-07-30).** The
+shared row owner, independent per-file index census, runtime isolated schema
+delta, commit-first materialization, exact test lifecycle, and cluster-scoped
+projection are now joined by exact namespace state (`1135d8f39`): actual
+requires, local→target aliases, and local→qualified-target refers persist as
+separate facts and install through maintained SCI APIs (`2217449`, `98457e8`).
+Renames, multiple aliases, `:as-alias`, plain require, refer-all, authored
+dependency ordering, and alias-only cycles have recurring proofs.
+
+Global schema change/removal now refuses current data across transitive schema
+dependencies and derived entity attributes (`ef1cfa5c1`, `fcb50f7b4`), while
+the maintained Datahike fork permits indexed attribute removal only after its
+current AEVT is empty (`5cdbc88a`, `c0a74e12`). `schema/unregister!` is the SCI
+surface for one global typed deletion (`913f8177c`): it stages only inside the
+evaluation delta, refuses schema/function dependencies, commits the row and
+Datahike schema change atomically, and rebuilds the run projection from
+`db-after`. Historical proof `fe54f59ca` establishes that old datoms plus the
+old `:seon.schema` row rebuild validation at the same `as-of` basis; Datahike's
+schema map itself does not time-travel, and `:seon.db/no-history? true` is the
+explicit old-value exception. An independent adversarial audit is the remaining
+acceptance boundary before this blocker closes.
+
 ## The checkpoint — both blockers cleared, attempt 6 running
 
 Attempt 5 (Opus, `80b12d8f3`) judged the refusal seam **green under

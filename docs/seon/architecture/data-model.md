@@ -865,11 +865,14 @@ namespaces are `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test`.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:symbol {:seon.db/identity true}]` | symbol | `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :symbol, alias :symbol, refers [:set :symbol]}` — the sole reified `:as`/`:refer` facts used to compile the reachable authored source closure and synthesize boot replay's `(ns …)` head; committed with the home namespace at agent birth, updated by the analyzer tee, and indexed from full source during explicit ancestor population or cluster priming), `:seon.ns/source :string` |
+| `:seon.ns` | `:seon.ns/name` `[:symbol {:seon.db/identity true}]` | symbol | `:seon.ns/requires [:set :symbol]` is the exact set actually loaded; `:seon.ns/aliases` components preserve local → target namespace; `:seon.ns/refers` components preserve local → target namespace + target name. These are SCI's effective resolver inputs, not reconstructed require syntax. `:as-alias` contributes an alias but no load dependency. `:seon.ns/source :string` retains the last namespace-changing form. |
 
 Render-time consumers never reparse `:seon.ns/source` to recover aliases or
-refers. Namespace source and require-edge facts are committed together; the
-database edge rows are the one runtime authority.
+refers. Namespace source and effective binding facts are committed together;
+the database rows are the one runtime authority. Acquisition installs aliases
+without loading their targets, orders authored namespaces by actual requires
+and refer targets, installs exact refers after their target Vars exist, then
+installs tests after all functions.
 | `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, plus source/spec/arglists/doc strings; renderer reads are runtime observations, not stored keyword literals |
 | `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | full canonical untruncated EDN form; globally identified, never namespace-owned |
 | `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`; each run references this stable declaration row |
@@ -892,6 +895,23 @@ The entity identity/required/render catalog is derived once per validated Malli
 registry generation from those canonical forms. It is process-local projection
 data consumed directly by the renderer, not a second append-only schema
 decomposition in Datahike.
+
+Schema registration and removal are global lifecycle operations over that one
+identity. An identical registration is idempotent. A nonidentical change or
+removal refuses while the schema, a transitive dependent schema, or a function
+contract still depends on it, or while any affected derived Datahike attribute
+carries current data. After current data and contract dependencies are removed,
+change or removal commits atomically with the program row and derived Datahike
+schema declarations. Runtime evaluation stages the operation in an isolated
+Malli delta; only the terminal transaction's `db-after` supplies the active
+cluster projection.
+
+Removal does not promise that Datahike's schema map time-travels: an `as-of`
+database value delegates that map to its current origin. Historical simulation
+instead pairs the old temporal datoms with the historical `:seon.schema` row at
+the same basis and rebuilds an immutable Malli projection. Ordinary attributes
+retain those temporal values; `:seon.db/no-history? true` explicitly opts out
+and therefore cannot support old-value simulation after retraction.
 
 **Index source declarations explicitly; tee authored declarations.** The source
 snapshot exact-reconciles source-owned namespaces, contracted functions,

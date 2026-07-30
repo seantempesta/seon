@@ -9,23 +9,18 @@ tags: [issue, sci, program-graph, testing]
 
 ## Problem
 
-The original missing proof is fixed: runtime schema, function, and test
-declarations now commit canonical rows, materialize only from the successful
-terminal transaction report, and reacquire after a real cluster reopen.
+The original missing runtime proof and the later exact-namespace blocker are
+implemented. Runtime schema, function, and test declarations commit canonical
+rows, materialize only from the successful terminal transaction report, and
+reacquire after a real cluster reopen. `1135d8f39` replaces lossy require-edge
+reconstruction with separate exact facts for actual requires, aliases, and
+refers, installed through maintained SCI APIs (`2217449`, `98457e8`).
 
-The issue remains open because the namespace state needed to read and install
-those declarations is not represented exactly. `a117f4603` observes aliases
-and refers from SCI's real per-context namespace table, then compresses them
-into require-edge facts that cannot represent:
-
-- a renamed refer's different local and target names;
-- two local aliases for one target namespace; or
-- the effective result of `:as-alias` without replaying it as `:as`.
-
-The build reader has the same renamed-refer loss, so a legal renamed
-`deftest` can disappear from the index without refusal. The recurring restart
-test proves one ordinary alias and one unrenamed refer, not exact namespace
-registration.
+The schema lifecycle is also complete through `913f8177c`: schemas are global;
+`schema/unregister!` stages one typed deletion in the isolated registration
+delta; dependency/current-data checks run at the terminal transaction; and the
+active projection derives from `db-after`. This issue remains open only until
+the independent landing-wave audit is reviewed and any findings are resolved.
 
 ## Evidence
 
@@ -44,18 +39,11 @@ The final combined independent focused gate after the owner's superseding
 cross-namespace `ns-unmap` ruling was 59 tests / 462 assertions / 0 failures /
 0 errors.
 
-Two shortest falsifiers keep the issue open:
-
-1. Runtime `(require '[clojure.string :refer [upper-case] :rename
-   {upper-case up}])` creates a namespace row whose terminal installer
-   reconstructs `:refer [up]` and fails in vendored SCI with `up does not
-   exist`.
-2. Build source that renames `clojure.test/deftest` to `dt` produces no
-   `:seon.test/sym` for `(dt renamed-test ...)`.
-
-Multiple aliases are narrower: build indexing currently retains both
-component edges and resolves both aliases, while runtime `require-edges` keys
-its accumulator only by target and collapses them.
+The two former shortest falsifiers are now recurring successes: runtime renamed
+refers retain their target Var identity through restart, and a build source
+that renames `clojure.test/deftest` to `dt` produces the exact test row.
+Multiple aliases to one target remain distinct, `:as-alias` does not become a
+load dependency, and a plain require remains visible for acquisition ordering.
 
 Git archaeology found the already-implemented exact representation in
 `57761ddb4` (`feat(program): persist canonical direct edges`). Its JVM SCI
@@ -66,6 +54,11 @@ the information loss.
 
 The full source audit, vendored SCI anchors, probes, and recommendation are in
 `docs/prds/sci-execution-runtime/research/runtime-registration-adversarial-audit-2026-07-30.md`.
+Schema removal/history evidence is in
+`docs/prds/sci-execution-runtime/research/schema-removal-history-probe-2026-07-30.md`:
+after current data is retracted, old temporal datoms and the historical schema
+row rebuild validation at one `as-of` basis; Datahike's schema map itself does
+not time-travel, and `:seon.db/no-history? true` explicitly discards old values.
 
 ## Owner
 
