@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, source, indexing, clj-kondo]
 ---
@@ -38,3 +38,13 @@ runtime analysis.
 - An error-bearing packaged base is never published.
 - Unresolved-symbol, invalid-arity, and namespace-mismatch regressions exercise
   real clj-kondo output.
+
+## Resolution
+
+This issue described a tree older than commit `995ccec92`. Current
+`seon.fn/blocking-findings` selects every finding whose normalized level is
+`:error`; both complete and file-artifact builders call the same
+`assert-clean-analysis!`. `publication-refuses-every-error-level-analyzer-
+finding` drives real clj-kondo over an unresolved symbol and asserts the
+`:seon.fn/index-refused` envelope. Runtime admission uses the same error-level
+rule.

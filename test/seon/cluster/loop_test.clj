@@ -95,6 +95,19 @@
                  (read-string (:seon.cluster.run.form/source %)))))
            admitted)))))
 
+(deftest linting-a-new-agent-namespace-uses-the-database-program-graph
+  (let [source "(my.run/complete \"done\")"
+        admitted
+        (cluster.loop/lint-plan
+         {:seon.ns/name 'my.agents.new-agent
+          :seon.cluster.loop/available-functions
+          [{:seon.fn/sym "my.run/complete" :seon.fn/private? false}]
+          :seon.cluster.reply/sources
+          [{:seon.cluster.run.form/source source
+            :seon.ns/name 'my.agents.new-agent}]})]
+    (is (= source (:seon.cluster.run.form/source (first admitted)))
+        "an absent namespace row is valid for a newly created agent")))
+
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]
     (is (set? committed))

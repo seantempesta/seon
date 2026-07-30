@@ -61,13 +61,12 @@ commits.
 The independent adversarial review found two blockers ahead of the remaining
 proof. An unreported edit to X followed by a reported edit to Y can publish the
 current whole-tree digest while retaining X's stale rows; complete publication
-can then trust digest equality and preserve the lie. Separately, repository
-indexing blocks two finding types rather than every error-level clj-kondo
-finding, so unresolved symbols and similar errors can enter the packaged base
-even though runtime admission refuses them. The durable reproductions and
+can then trust digest equality and preserve the lie. The report's separate
+error-level-admission claim was stale: `git log -S` and the current regression
+show commit `995ccec92` already made complete and file-artifact indexing reject
+every error-level clj-kondo finding. The remaining durable reproduction and
 additional ranked friction are in
-`research/current-src-adversarial-review-2026-07-30.md`; both blockers now have
-scheduled issue notes.
+`research/current-src-adversarial-review-2026-07-30.md`.
 
 The live operator was then destroyed, `current-src` republished, and `default`
 reforked with `init default --force`. The fresh cluster contains 1,367 function

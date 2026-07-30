@@ -100,11 +100,12 @@
          source)))
    sources
    (fn.analyzer/analyze-forms
-    {::fn.analyzer/namespace-name namespace-name
-     ::fn.analyzer/namespace-row namespace-row
-     ::fn.analyzer/available-functions available-functions
-     ::fn.analyzer/sources
-     (mapv :seon.cluster.run.form/source sources)})))
+    (cond->
+     {::fn.analyzer/namespace-name namespace-name
+      ::fn.analyzer/available-functions available-functions
+      ::fn.analyzer/sources
+      (mapv :seon.cluster.run.form/source sources)}
+      namespace-row (assoc ::fn.analyzer/namespace-row namespace-row)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
