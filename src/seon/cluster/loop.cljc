@@ -883,7 +883,8 @@
                                          :seon.db/db @connection})]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0
-               projection (:seon.schema/projection acquired)]
+               projection (:seon.schema/projection acquired)
+               namespace-name nil]
           (let [receipt-id (pr-str [run-id ordinal])
                 problem-id (work/problem-id run-id ordinal)
                 started
@@ -901,13 +902,18 @@
                            :seon.cluster.run/id run-id})
               (report :error ran)
               (let [form (form-data @connection run-id ordinal)
+                    evaluation-namespace
+                    (or namespace-name
+                        (second (:seon.cluster.run.form/ns form))
+                        (sci.eval/agent-namespace agent-id))
                     evaluation
                     (submit-evaluation!!
                      evaluate
                      receipt-id
-                     (merge
+                    (merge
                       form
-                      {
+                      {:seon.cluster.run.form/ns
+                       [:seon.ns/name evaluation-namespace]
                       :seon.sci.admit/caps
                       (:seon.sci.admit/caps cluster)
                       :seon.sci.eval/ctx
@@ -1072,7 +1078,9 @@
                   settled (report :closed ran)
                   next-ordinal
                   (recur next-ordinal ran
-                         (:seon.schema/projection program-state))
+                         (:seon.schema/projection program-state)
+                         (or (:seon.sci.eval/ending-ns evaluation)
+                             evaluation-namespace))
                   :else (report :released ran)))))))
 
       ;; the fold is done and nothing said otherwise: close it, so the

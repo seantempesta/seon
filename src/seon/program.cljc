@@ -150,6 +150,7 @@
   [event]
   (let [form (:seon.sci.reader/form event)
         schema-key (:seon.sci.reader/schema-unregister-key event)
+        removed-identities (:seon.sci.reader/ns-unmap-identities event)
         quoted-symbol
         (fn [value]
           (when (and (seq? value)
@@ -157,11 +158,20 @@
                      (= 2 (count value))
                      (symbol? (second value)))
             (second value)))]
-    (if schema-key
+    (cond
+      schema-key
       {:seon.program/delete-identities [[:seon.schema/key schema-key]]
        :seon.program/source (:seon.sci.reader/source event)}
+
+      (seq removed-identities)
+      (cond-> {:seon.program/delete-identities (vec removed-identities)
+               :seon.program/source (:seon.sci.reader/source event)}
+        (:seon.sci.reader/ns event)
+        (assoc :seon.program/ns
+               [:seon.ns/name (:seon.sci.reader/ns event)]))
+
+      (:seon.sci.reader/ns-unmap? event)
       (when (and (seq? form)
-                 (= 'ns-unmap (first form))
                  (= 3 (count form)))
         (when-let [namespace-name (quoted-symbol (second form))]
           (when-let [declaration-name (quoted-symbol (nth form 2))]
@@ -171,4 +181,6 @@
                [[:seon.fn/sym qualified]
                 [:seon.test/sym qualified]]
                :seon.program/source (:seon.sci.reader/source event)
-               :seon.program/ns [:seon.ns/name namespace-name]})))))))
+               :seon.program/ns [:seon.ns/name namespace-name]}))))
+
+      :else nil)))

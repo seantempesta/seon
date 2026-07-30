@@ -508,6 +508,61 @@
                        [:seon.fn/sym "my.agents.agent-a/obsolete"]))
               "the explicit delete retracts the durable identity"))))))
 
+(deftest reply-reading-follows-evaluated-alias-and-dynamic-require-state
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(alias 'str 'clojure.string)\n"
+               "{:x ::str/after-alias}\n"
+               "(require (if true '[clojure.set :as sets] "
+               "'[clojure.string :as sets]))\n"
+               "{:x ::sets/after-dynamic-require}")})]
+          (drive! cluster 10)
+          (let [results
+                (into {}
+                      (d/q '[:find ?ordinal ?result
+                             :where
+                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                             [?receipt :seon.cluster.eval/result-edn ?result]]
+                           @connection))]
+            (is (= "{:x :clojure.string/after-alias}" (get results 1)))
+            (is (= "{:x :clojure.set/after-dynamic-require}" (get results 3))
+                "later sources are read only after prior namespace effects")))))))
+
+(deftest qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            function-sym "my.agents.agent-a/dynamic-obsolete"]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+               "dynamic-obsolete [x] (inc x))\n"
+               "(clojure.core/ns-unmap "
+               "(find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))")})]
+          (drive! cluster 10)
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.fn/sym function-sym])))
+          (let [fresh (sci.core/fork (sci.eval/base))]
+            (sci.eval/acquire! {:seon.sci.eval/ctx fresh
+                                :seon.db/db @connection})
+            (is (nil? (sci.core/eval-string*
+                       fresh
+                       "(resolve 'my.agents.agent-a/dynamic-obsolete)"))
+                "acquisition cannot resurrect the deleted function")))))))
+
 (deftest absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
   (with-cluster
     (fn [cluster]

@@ -120,6 +120,11 @@
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
                    "(deftest persisted-test :reopened)\n"
+                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                   "removed-before-restart [x] (inc x))\n"
+                   "(clojure.core/ns-unmap "
+                   "(find-ns 'my.agents.restart-a) "
+                   "(symbol \"removed-before-restart\"))\n"
                    "(my.run/complete \"program committed\")")
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
@@ -128,6 +133,9 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.fn/sym
+                             "my.agents.restart-a/removed-before-restart"])))
           (is (pos? (receipt-count @connection)))
           (let [namespace-row
                 (d/pull @connection [:seon.ns/requires]
@@ -189,7 +197,12 @@
                     ctx
                     (str "((:test (meta (resolve "
                          "'my.agents.restart-a/persisted-test))))")))
-                "the reopened test Var's :test function executes"))
+                "the reopened test Var's :test function executes")
+            (is (nil?
+                 (sci/eval-string*
+                  ctx
+                  "(resolve 'my.agents.restart-a/removed-before-restart)"))
+                "a computed qualified ns-unmap survives process restart"))
           (d/transact
            connection
            (agent/creation-tx

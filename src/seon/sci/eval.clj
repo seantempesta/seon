@@ -315,12 +315,15 @@
                       (ex-data throwable)
                       (assoc :seon.sci.eval/data (ex-data throwable)))})
 
+(declare deleted-schema-key)
+
 (defn- program-row
   "Return the one reader declaration eligible for durable publication.
   A function without its complete contract is deliberately absent."
   [event projection]
   (or
-   (program/deletion-row event)
+   (let [deletion (program/deletion-row event)]
+     (when (deleted-schema-key deletion) deletion))
    (let [row (program/declaration-row event :contracted)]
      (cond
        (:seon.fn/sym row)
@@ -338,6 +341,22 @@
        (:seon.test/sym row) row
 
        :else nil))))
+
+(defn- removed-program-identities
+  "Function and test identities removed from SCI's own intern tables."
+  [before after]
+  (into []
+        (mapcat
+         (fn [[namespace-name intern-names]]
+           (mapcat (fn [intern-name]
+                     (let [qualified (str (symbol (str namespace-name)
+                                                  (str intern-name)))]
+                       [[:seon.fn/sym qualified]
+                        [:seon.test/sym qualified]]))
+                   (sort-by str
+                            (remove (get after namespace-name #{})
+                                    intern-names)))))
+        before))
 
 (defn- deleted-schema-key
   [row]
@@ -717,12 +736,27 @@
         namespace-name (or (second namespace-ref)
                            (when agent-id (agent-namespace agent-id))
                            'user)
-        namespace-object (sci/create-ns namespace-name)]
+        namespace-object (sci/create-ns namespace-name)
+        ending-namespace (volatile! namespace-name)]
     (try
       (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (one-event source namespace-name evaluation-ctx)
             form (:seon.sci.reader/form event)
+            namespace-unmap? (:seon.sci.reader/ns-unmap? event)
+            execution-ctx (if namespace-unmap?
+                            (sci/fork evaluation-ctx)
+                            evaluation-ctx)
+            before-interns (when namespace-unmap?
+                             (sci/namespace-interns execution-ctx))
+            eval-form!
+            (fn []
+              (sci/binding [sci/ns namespace-object
+                            sci/out printed
+                            sci/err printed]
+                (let [value (sci/eval-form execution-ctx form)]
+                  (vreset! ending-namespace (sci/ns-name @sci/ns))
+                  value)))
             projection
             (or (:seon.schema/projection evaluation-ctx)
                 (schema/current-projection)
@@ -736,11 +770,8 @@
             (when schema-delta
               (schema/call-with-registration-delta
                schema-delta
-               #(sci/binding [sci/ns namespace-object
-                              sci/out printed
-                              sci/err printed]
-                  (sci/eval-form evaluation-ctx form))))
-            declared-row
+               eval-form!))
+            base-declared-row
             (if schema-delta
               (if unregister-key
                 (do
@@ -775,16 +806,26 @@
                   (assoc raw-row :seon.schema/form (pr-str definition))))
               raw-row)
             evaluated-value
-            (if declared-row
-              (or (:seon.ns/name declared-row)
-                  (:seon.fn/sym declared-row)
-                  (:seon.schema/key declared-row)
-                  (:seon.test/sym declared-row)
-                  (when unregister-key schema-value))
-              (sci/binding [sci/ns namespace-object
-                            sci/out printed
-                            sci/err printed]
-                (sci/eval-form evaluation-ctx form)))
+            (if base-declared-row
+              (do
+                (when-let [declared-ns (:seon.ns/name base-declared-row)]
+                  (vreset! ending-namespace declared-ns))
+                (or (:seon.ns/name base-declared-row)
+                    (:seon.fn/sym base-declared-row)
+                    (:seon.schema/key base-declared-row)
+                    (:seon.test/sym base-declared-row)
+                    (when unregister-key schema-value)))
+              (eval-form!))
+            removed-identities
+            (when namespace-unmap?
+              (removed-program-identities
+               before-interns (sci/namespace-interns execution-ctx)))
+            deletion-row
+            (when (seq removed-identities)
+              (program/deletion-row
+               (assoc event :seon.sci.reader/ns-unmap-identities
+                      removed-identities)))
+            declared-row (or deletion-row base-declared-row)
             ;; Standalone REPL `require` is namespace registration too. Its
             ;; committed row carries the complete dependency set derived from
             ;; SCI's namespace table, so fresh acquisition reconstructs the
@@ -793,7 +834,7 @@
             (when-not declared-row
               (namespace-context-row
                namespace-name source before-reader-context
-               (reader-context evaluation-ctx namespace-name)))
+               (reader-context execution-ctx namespace-name)))
             row (or declared-row context-row)
             ;; Durable declarations are installed only after the row commits.
             value (if context-row (:seon.ns/name context-row) evaluated-value)
@@ -813,6 +854,7 @@
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn admitted)
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                   :seon.sci.eval/ending-ns @ending-namespace
                    :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
                    :seon.sci.admit/record (:seon.sci.admit/record admitted)}
             row (assoc :seon.sci.eval/program-row row)
@@ -833,6 +875,7 @@
                      :seon.cluster.eval/result-edn
                      (:seon.cluster.eval/result-edn admitted)
                      :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                     :seon.sci.eval/ending-ns namespace-name
                      :seon.cluster.eval/error (:seon.error/message value)
                      :seon.sci.admit/capped?
                      (:seon.sci.admit/capped? admitted)

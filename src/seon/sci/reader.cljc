@@ -98,16 +98,18 @@
         value))))
 
 (defn- parse-options
-  [{::keys [ns aliases refers features tags]}]
+  [{::keys [ns aliases refers features tags defer-auto-resolve?]}]
   {:eof eof
    :features features
    :auto-resolve
    (fn [alias]
      (if (= :current alias)
        ns
-       (get aliases (if (keyword? alias)
-                      (symbol (name alias))
-                      alias))))
+       (let [alias-name (if (keyword? alias)
+                          (symbol (name alias))
+                          alias)]
+         (or (get aliases alias-name)
+             (when defer-auto-resolve? alias-name)))))
    :syntax-quote
    {:resolve-symbol (syntax-quote-resolver ns aliases refers)}
    ;; A function, not a map: Edamame consults it for built-ins too.
@@ -370,6 +372,18 @@
              (qualified-keyword? (second form)))
     {::schema-unregister-key (second form)}))
 
+(defn- namespace-unmap
+  "Mark one semantically resolved top-level `ns-unmap` operation.
+
+  Arguments stay unevaluated here. The evaluator derives removed intern
+  identities from SCI's isolated before/after namespace state."
+  [form context]
+  (when (and (seq? form)
+             (= 3 (count form))
+             (= 'clojure.core/ns-unmap
+                (resolved-operation (first form) context)))
+    {::ns-unmap? true}))
+
 (defn- declaration-facts
   [form namespace-name context source]
   (if (and (seq? form)
@@ -389,7 +403,8 @@
       (when-let [test (test-declaration form namespace-name context)]
         (assoc test :seon.test/source source))
       (schema-declaration form context)
-      (schema-unregister form context)))))
+      (schema-unregister form context)
+      (namespace-unmap form context)))))
 
 (defn- nested-executable-declarations
   "Declaration facts nested directly under an executable top-level `do`.
@@ -566,6 +581,7 @@
     publics ::publics
     features ::features
     tags ::tags
+    defer-auto-resolve? ::defer-auto-resolve?
     max-chars ::max-chars}]
   (let [reading-context
         {::ns (or namespace-name 'user)
@@ -574,6 +590,7 @@
          ::publics (or publics {})
          ::features (or features #{:clj})
          ::tags (or tags {})
+         ::defer-auto-resolve? (boolean defer-auto-resolve?)
          ::max-chars (or max-chars default-max-chars)}]
     (cond
       (not (string? text))

@@ -122,7 +122,11 @@
   ([source] (parsed-events source nil))
   ([source namespace-name]
    (let [events (reader/read
-                 (cond-> {:seon.sci.reader/text source}
+                 (cond-> {:seon.sci.reader/text source
+                          ;; This pass freezes exact source spans. Reader
+                          ;; aliases created by earlier forms are resolved by
+                          ;; the evaluator's later sequential read, not here.
+                          :seon.sci.reader/defer-auto-resolve? true}
                    namespace-name
                    (assoc :seon.sci.reader/ns namespace-name)))]
      (if (map? events)

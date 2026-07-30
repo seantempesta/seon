@@ -23,8 +23,12 @@ active projection derives from `db-after`. The independent landing-wave audit
 found four remaining blockers. Its shared-attribute blocker is fixed: physical
 Datahike changes now derive from a diff of the complete current and candidate
 global projections, so replacing or removing an entity schema cannot retract a
-leaf attribute whose global schema row survives. The real read-eval loop,
-and dynamic `ns-unmap` remain open. The build test census is repaired: the
+leaf attribute whose global schema row survives. The real read-eval loop and
+dynamic `ns-unmap` are repaired: reply splitting freezes exact source without
+resolving future aliases, evaluation reads each source against the SCI state
+left by the preceding settled form, and a resolved `ns-unmap` derives its
+typed deletion from SCI's actual intern delta in an isolated fork. The build
+test census is repaired: the
 reader now emits an occurrence fact for every recognized function, schema, or
 test declaration independently of durable row construction, and indexing
 refuses any occurrence without a canonical identity.
@@ -41,6 +45,15 @@ Current recurring proofs establish:
 - exact live test execution, replacement, and deletion;
 - incompatible A-B-A database projections without global registry bleed; and
 - schema/function/test materialization after stopping and reopening a cluster.
+
+The sequential REPL and deletion regressions cover both `(alias ...)` and a
+computed `require` making reader aliases available to later sources, plus a
+qualified `clojure.core/ns-unmap` with computed namespace and name arguments.
+The deletion commits before the exact source mutates the run context, is absent
+from a freshly acquired context, and remains absent after a real process
+restart. The combined reply/reader/program/eval/turn/restart focus passes 78
+tests / 506 assertions / 0 failures / 0 errors; the maintained SCI namespace
+suite passes 38 tests / 153 assertions / 0 failures / 0 errors.
 
 The final combined independent focused gate after the owner's superseding
 cross-namespace `ns-unmap` ruling was 59 tests / 462 assertions / 0 failures /
@@ -123,3 +136,10 @@ and bare dependency targets remain only where loading/order needs them. A
 single narrow public operation in Seon's maintained SCI fork installs those
 facts into a context. Do not add accumulated require-source replay or a second
 registry.
+
+Sequential reading does not add a second parser or persist resolved future
+forms. The plan retains exact source spans; its evaluator is the semantic
+reader, and `:seon.sci.eval/ending-ns` is a transient fold value distinct from
+the durable receipt's starting `:seon.cluster.eval/ns`. This preserves direct
+parse/eval divergence queries while giving the next form the real REPL
+namespace.

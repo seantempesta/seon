@@ -176,14 +176,22 @@ transactions diff complete current and candidate global projections by
 Datahike `:db/ident`, rather than treating one changed composite form as the
 owner of every leaf it references. The recurring replacement-then-removal
 test proves surviving global leaf rows retain installed attributes and accept
-new data. Remaining blockers are the sequential read-eval loop, dynamic
-`ns-unmap` persistence, and an independent build test-declaration census.
-The census blocker is now implemented pending integration review: declaration
-occurrences are a reader signal independent of durable identities, the build
+new data. The other three findings are implemented pending integrated
+adversarial review. Sequential execution freezes unresolved exact source spans
+and reads each form after its predecessor settles. Qualified `ns-unmap` with
+computed arguments evaluates in an isolated SCI fork, derives typed deletion
+from the actual intern delta, and mutates the run context only after the
+terminal commit; fresh acquisition and a real process restart prove no
+resurrection. The census repair makes declaration occurrences a reader signal
+independent of durable identities; the build
 refuses an unplaceable occurrence for every declaration family, and an
 independent tools.reader census compares per-file function/schema/test
 multiplicity plus exact function/test identities. Its focused gate is 24
 tests / 212 assertions / 0 failures / 0 errors.
+
+The sequential/deletion focus is 78 tests / 506 assertions / 0 failures / 0
+errors, with the maintained SCI namespace suite at 38 tests / 153 assertions /
+0 failures / 0 errors.
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 
