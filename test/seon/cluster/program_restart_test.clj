@@ -80,7 +80,7 @@
   "The complete first-agent plan committed, including its final disposition."
   [db]
   (and (program-present? db)
-       (= 17 (receipt-count db))
+       (= 21 (receipt-count db))
        (some? (d/q '[:find ?closed .
                      :where
                      [?agent :seon.cluster.agent/id "restart-a"]
@@ -135,6 +135,10 @@
                    "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
                    "(schema/register! ::nonnegative "
                    "(vector :int {:min 0}))\n"
+                   "(defn scratch [x] (inc x))\n"
+                   "(scratch 3)\n"
+                   "(defn- scratch-private [x] (inc x))\n"
+                   "(scratch-private 4)\n"
                    "(require (if true '[clojure.set :as dynamic] "
                    "'[clojure.string :as dynamic]))\n"
                    "{:resolved ::dynamic/after-require}\n"
@@ -154,12 +158,30 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
-          (is (= 17 (receipt-count @connection))
-              "sixteen valid forms settle despite one independent refusal")
-          (is (= "{:resolved :clojure.set/after-require}"
+          (is (= 21 (receipt-count @connection))
+              "twenty valid forms settle despite one independent refusal")
+          (is (= "4"
                  (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 10]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection))
+              "a process-local scratch def is lintable by the next form")
+          (is (= "5"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 12]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      @connection))
+              "a private scratch def remains callable inside its namespace")
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.fn/sym
+                             "my.agents.restart-a/scratch"]))
+              "an uncontracted scratch def remains outside the program graph")
+          (is (= "{:resolved :clojure.set/after-require}"
+                 (d/q '[:find ?result .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 14]
                         [?receipt :seon.cluster.eval/result-edn ?result]]
                       @connection))
               "a computed require changes lint and eval state for the next form")
@@ -168,7 +190,7 @@
                   (edn/read-string
                    (d/q '[:find ?result .
                           :where
-                          [?receipt :seon.cluster.eval/ordinal 11]
+                          [?receipt :seon.cluster.eval/ordinal 15]
                           [?receipt :seon.cluster.eval/result-edn ?result]]
                         @connection))))
               "the invalid ordinal is one flat value, not a plan-wide abort")

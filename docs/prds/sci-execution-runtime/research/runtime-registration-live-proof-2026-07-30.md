@@ -114,23 +114,28 @@ example with lint enabled and assert both exact source receipts.
 The runtime now freezes the reply's exact sources and invokes the one
 clj-kondo analyzer on each form immediately before SCI evaluation. The
 analyzer prelude is rebuilt from the namespace row and function rows at the
-current database value, after every prior form's terminal transaction and
-namespace installation. There is no batch-lint API left to accidentally
-predict future REPL state (`src/seon/cluster/loop.cljc`, `lint-form` and the
-`:resume` reduce).
+current database value plus SCI's existing namespace snapshot, after every
+prior form's terminal transaction and namespace installation. The snapshot
+keeps public and private process-local scratch defs lintable without making
+them durable or introducing a second registry. There is no batch-lint API left
+to accidentally predict future REPL state (`src/seon/cluster/loop.cljc`,
+`lint-form` and the `:resume` reduce;
+`reference-code/sci/src/sci/core.cljc:704-733`).
 
 The computed-`require` example is now part of the source-populated
 stop/reopen proof. It resolves `::dynamic/after-require`, an independent
-invalid middle form becomes one flat refusal, the other sixteen forms settle,
-and the dynamic alias survives fresh acquisition
+invalid middle form becomes one flat refusal, the other twenty forms settle,
+public and private scratch defs remain callable only in the live run, and the
+dynamic alias survives fresh acquisition
 (`test/seon/cluster/program_restart_test.clj`). This proof also exposed a
 smaller projection defect: persisted renamed refers need both `:refer` and
 `:rename` in clj-kondo's synthetic `ns` form. `seon.fn.analyzer` now derives
 both from the same `:seon.ns/refers` rows, following clj-kondo's maintained
 namespace analyzer (`reference-code/clj-kondo/src/clj_kondo/impl/analyzer/namespace.clj:273-280`).
 
-Focused proof on 2026-07-30: 54 tests / 340 assertions / 0 failures / 0
-errors across analyzer, loop, source-populated restart, and turn semantics. A
+Focused proof on 2026-07-30: 14 tests / 104 assertions / 0 failures / 0 errors
+across analyzer, loop, and source-populated restart, following the earlier
+54-test / 340-assertion turn-semantics gate. A
 live default-cluster Var reload admitted the dynamic require and then its
 alias-dependent form in 48 ms; that probe changed loaded Vars only, not the
 cluster's sovereign database program graph.

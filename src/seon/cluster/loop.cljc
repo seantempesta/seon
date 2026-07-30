@@ -112,15 +112,35 @@
       source)))
 
 (defn- available-functions
-  [db]
-  (mapv (fn [[sym private?]]
-          {:seon.fn/sym sym
-           :seon.fn/private? private?})
-        (d/q '[:find ?sym ?private
-               :where
-               [?function :seon.fn/sym ?sym]
-               [(get-else $ ?function :seon.fn/private? false) ?private]]
-             db)))
+  [db ctx]
+  (let [namespace-state (sci/namespace-state ctx)]
+    (->> (concat
+          (map (fn [[sym private?]]
+                 {:seon.fn/sym sym
+                  :seon.fn/private? private?})
+               (d/q '[:find ?sym ?private
+                      :where
+                      [?function :seon.fn/sym ?sym]
+                      [(get-else $ ?function :seon.fn/private? false)
+                       ?private]]
+                    db))
+          (mapcat
+           (fn [[namespace-name intern-names]]
+             (map (fn [intern-name]
+                    {:seon.fn/sym
+                     (str (symbol (str namespace-name) (str intern-name)))
+                     :seon.fn/private?
+                     (boolean
+                      (:private
+                       (meta (get-in namespace-state
+                                     [namespace-name intern-name]))))})
+                  intern-names))
+           (sci/namespace-interns ctx)))
+         (reduce (fn [by-symbol row]
+                   (assoc by-symbol (:seon.fn/sym row) row)) {})
+         vals
+         (sort-by :seon.fn/sym)
+         vec)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -977,9 +997,9 @@
                     admitted-source
                     (lint-form
                      (cond->
-                      {:seon.ns/name evaluation-namespace
+                       {:seon.ns/name evaluation-namespace
                        ::available-functions
-                       (available-functions db-before-evaluation)
+                       (available-functions db-before-evaluation ctx)
                        ::source
                        {:seon.cluster.run.form/source
                         (:seon.cluster.run.form/source form)
