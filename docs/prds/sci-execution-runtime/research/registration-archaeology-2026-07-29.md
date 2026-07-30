@@ -159,7 +159,8 @@ The commits establish the intended seams and recurring tests, not graduation.
 These failures remain the working edge.
 
 Commit `16afa2a10` removed the schema-family stale-removal exemption. The later
-global-schema cleanup supersedes `eb4ac8167`'s temporary namespace-stub repair:
+global-schema cleanup in `639497197` supersedes `eb4ac8167`'s temporary
+namespace-stub repair:
 the desired population now combines canonical resource rows with source-only
 declarations under one global key identity, and schemas do not acquire
 namespace ownership from keyword spelling. Provenance preserves
