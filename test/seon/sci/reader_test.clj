@@ -393,11 +393,10 @@
             [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
              :seon.fn/private? :seon.fn/workload])))
     (is (= {:seon.schema/key :sample/amount
-            :seon.schema/form "[:int {:min 0}]"
-            :seon.schema/ns [:seon.ns/name 'sample]}
+            :seon.schema/form "[:int {:min 0}]"}
            (select-keys
             (nth read-events 2)
-            [:seon.schema/key :seon.schema/form :seon.schema/ns])))
+            [:seon.schema/key :seon.schema/form])))
     (is (= {:seon.test/sym "sample/hidden-test"
             :seon.test/ns [:seon.ns/name 'sample]
             :seon.test/source "(deftest hidden-test (is true))"}

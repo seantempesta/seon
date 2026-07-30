@@ -30,7 +30,6 @@
         :seon.render/html seon.render.handlers.schema/render-html}
   [:seon.schema/key :seon.schema/key]
   [:seon.schema/form :seon.schema/form]
-  [:seon.schema/ns {:optional true} :seon.schema/ns]
   [:seon.schema/created-at {:optional true} :seon.schema/created-at]
   [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
 

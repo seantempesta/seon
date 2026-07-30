@@ -23,7 +23,7 @@
    {:seon.program/identity-attribute :seon.schema/key
     :seon.program/source-attribute :seon.schema/form
     :seon.program/owned-attributes
-    [:seon.schema/key :seon.schema/ns :seon.schema/form]}
+    [:seon.schema/key :seon.schema/form]}
    :seon.test/sym
    {:seon.program/identity-attribute :seon.test/sym
     :seon.program/source-attribute :seon.test/source

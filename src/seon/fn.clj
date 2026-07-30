@@ -142,9 +142,6 @@
           (:seon.fn/ns row)
           (update :seon.fn/ns #(ref-value db :seon.ns/name %))
 
-          (:seon.schema/ns row)
-          (update :seon.schema/ns #(ref-value db :seon.ns/name %))
-
           (:seon.test/ns row)
           (update :seon.test/ns #(ref-value db :seon.ns/name %))
 
@@ -202,7 +199,6 @@
                 :seon.fn/private?
                 :seon.fn/spec
                 :seon.fn/workload
-                {:seon.schema/ns [:db/id :seon.ns/name]}
                 {:seon.test/ns [:db/id :seon.ns/name]}]
                entity)]
           [[identity-attr identity]
@@ -306,17 +302,6 @@
   (let [source-rows (rows request)
         canonical-schemas (schema/canonical-schema-rows (java.util.Date. 0))
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
-        source-namespaces (into #{} (keep :seon.ns/name) source-rows)
-        canonical-namespace-stubs
-        (into
-         []
-         (comp
-          (keep (comp :seon.ns/name :seon.schema/ns))
-          (remove source-namespaces)
-          (distinct)
-          (map (fn [namespace-name]
-                 {:seon.ns/name namespace-name})))
-         canonical-schemas)
         source-only
         (remove (fn [row]
                   (contains? canonical-keys (:seon.schema/key row)))
@@ -330,8 +315,7 @@
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key}))))
-    (into (into (vec source-only) canonical-namespace-stubs)
-          canonical-schemas)))
+    (into (vec source-only) canonical-schemas)))
 
 (defn- digest-plan
   [db desired-digest]

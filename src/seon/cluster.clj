@@ -274,8 +274,7 @@
   [:seon.schema/key
    :seon.schema/form
    :seon.schema/created-at
-   :seon.db.id/generator
-   {:seon.schema/ns [:seon.ns/name]}])
+   :seon.db.id/generator])
 
 (defn- declaration-changes
   "Missing declarations, refusing non-accretive storage changes."

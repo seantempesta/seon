@@ -71,7 +71,7 @@ A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
 `:seon.agent/run`, `:seon.agent/parent`, `:seon.cluster.agent/namespace`,
 `:seon.agent.run/agent`,
 `:seon.agent.run/cause`, `:seon.agent.turn/run`,
-`:seon.agent.turn/cause-message`, `:seon.fn/ns`, `:seon.schema/ns`,
+`:seon.agent.turn/cause-message`, `:seon.fn/ns`,
 `:seon.test/ns`, `:seon.agent.message/from`, `:seon.route/owner`,
 `:my.plan/agent`, `:my.plan/parent`. Use a plain ref when the entity does NOT own
 the referent's lifecycle — a fn does not own its ns; a turn does not own its run;
@@ -871,7 +871,7 @@ Render-time consumers never reparse `:seon.ns/source` to recover aliases or
 refers. Namespace source and require-edge facts are committed together; the
 database edge rows are the one runtime authority.
 | `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, plus source/spec/arglists/doc strings; renderer reads are runtime observations, not stored keyword literals |
-| `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.schema/ns :seon.db/ref`, full canonical untruncated EDN form |
+| `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | full canonical untruncated EDN form; globally identified, never namespace-owned |
 | `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`; each run references this stable declaration row |
 
 Test outcomes are append-only observations, never last-passed/last-failed

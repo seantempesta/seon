@@ -280,9 +280,7 @@
              (qualified-keyword? (second form)))
     (let [schema-key (second form)]
       {:seon.schema/key schema-key
-       :seon.schema/form (pr-str (nth form 2))
-       :seon.schema/ns
-       [:seon.ns/name (symbol (namespace schema-key))]})))
+       :seon.schema/form (pr-str (nth form 2))})))
 
 (defn- declaration-facts
   [form namespace-name context source]

@@ -48,7 +48,6 @@
           :source "(seon.schema/register! ::amount [:int {:min 0}])"
           :expected
           {:seon.schema/key :sample/amount
-           :seon.schema/ns [:seon.ns/name 'sample]
            :seon.schema/form "[:int {:min 0}]"}}
          {:label "test"
           :source "(clojure.test/deftest smoke (clojure.test/is true))"
@@ -86,8 +85,7 @@
               [:seon.test/sym "sample/f"]]
              (:seon.program/identities data)))))
   (testing "a recognized family without its reader-required data is loud"
-    (doseq [event [{:seon.schema/key :sample/missing-form
-                    :seon.schema/ns [:seon.ns/name 'sample]}
+    (doseq [event [{:seon.schema/key :sample/missing-form}
                    {:seon.test/sym "sample/missing-source"
                     :seon.test/ns [:seon.ns/name 'sample]}]]
       (let [data (refusal-data #(program/declaration-row event :all))]
