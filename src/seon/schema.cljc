@@ -166,6 +166,98 @@
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(bind-predicates % predicate-functions)))
 
+(declare ^:private core-predicate-functions)
+
+(defn canonical-definition
+  "Return one Malli definition as durable EDN.
+
+   Evaluating Clojure metadata resolves predicate symbols to callable roots.
+   This is the inverse of `bind-predicates`: registered core predicates win,
+   then the supplied qualified Var roots are considered. Anonymous or
+   otherwise unresolvable callables are refused instead of being printed as
+   unreadable `#object` values."
+  {:malli/schema
+   [:=> [:cat :seon.schema/value
+         :map]
+    ::definition]}
+  [definition predicate-functions]
+  (let [bindings (concat (sort-by (comp str key) (core-predicate-functions))
+                         (sort-by (comp str key) predicate-functions))
+        callable-symbol
+        (fn [value]
+          (or (some (fn [[predicate f]]
+                      (when (identical? value f) predicate))
+                    bindings)
+              (throw
+               (ex-info
+                "A durable Malli definition contains an unnamed callable."
+                {:seon.schema/error :seon.schema/noncanonical-definition
+                 :seon.schema/value value
+                 :seon.error/kind :core-bug}))))
+        callable?
+        (fn [value]
+          (and (ifn? value)
+               (not (or (map? value)
+                        (set? value)
+                        (keyword? value)
+                        (symbol? value)
+                        (vector? value)))))
+        canonical
+        (letfn [(canonicalize [value predicate-reference?]
+                  (cond
+                    (callable? value)
+                    (let [predicate (callable-symbol value)]
+                      (if predicate-reference?
+                        predicate
+                        [:fn predicate]))
+
+                    (vector? value)
+                    (let [predicate-index
+                          (when (= :fn (first value))
+                            (if (map? (second value)) 2 1))]
+                      (mapv (fn [index child]
+                              (canonicalize child
+                                            (= predicate-index index)))
+                            (range)
+                            value))
+
+                    (map? value)
+                    (into (empty value)
+                          (map (fn [[k v]]
+                                 (when (and (callable? v)
+                                            (not= :gen/gen k))
+                                   (throw
+                                    (ex-info
+                                     (str "A durable Malli property contains "
+                                          "a callable outside :gen/gen.")
+                                     {:seon.schema/error
+                                      :seon.schema/noncanonical-definition
+                                      :seon.schema/property k
+                                      :seon.schema/value v
+                                      :seon.error/kind :core-bug})))
+                                 [(canonicalize k false)
+                                  (canonicalize v (= :gen/gen k))]))
+                          value)
+
+                    (set? value)
+                    (into #{} (map #(canonicalize % false)) value)
+
+                    (sequential? value)
+                    (doall (map #(canonicalize % false) value))
+
+                    :else value))]
+          (canonicalize definition false))
+        encoded (pr-str canonical)
+        decoded (#?(:clj edn/read-string :cljs reader/read-string) encoded)]
+    (when-not (= canonical decoded)
+      (throw
+       (ex-info
+        "A durable Malli definition contains non-EDN data."
+        {:seon.schema/error :seon.schema/noncanonical-definition
+         :seon.schema/value canonical
+         :seon.error/kind :core-bug})))
+    decoded))
+
 (defn- canonical-reference-graph
   "Direct canonical references without eagerly expanding canonical forms."
   [forms predicate-functions]

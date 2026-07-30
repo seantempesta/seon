@@ -22,12 +22,6 @@
        (or (str/ends-with? (.getName ^java.io.File file) ".clj")
            (str/ends-with? (.getName ^java.io.File file) ".cljc"))))
 
-(defn- durable-row
-  [event]
-  ;; Build indexing keeps every directly read top-level function, including
-  ;; private and uncontracted helpers, as input to the future call graph.
-  (program/declaration-row event :all))
-
 (defn- source-files
   [roots]
   (let [files
@@ -131,13 +125,19 @@
                 [qualified
                  {:var var
                   :metadata metadata
-                  :root-identity (when root
-                                   (System/identityHashCode root))}]))
+                  :root root}]))
             (ns-interns namespace-object))))
         (distinct namespace-objects)))
 
+(defn- qualified-var-roots
+  [states]
+  (into {}
+        (keep (fn [[qualified {:keys [root]}]]
+                (when (ifn? root) [qualified root])))
+        states))
+
 (defn- var-row
-  [qualified {:keys [var metadata]} source]
+  [qualified {:keys [var metadata]} source predicate-functions]
   (let [namespace-name (some-> metadata :ns ns-name)
         declaration-name (:name metadata)
         qualified (if (and namespace-name declaration-name)
@@ -161,24 +161,28 @@
         :seon.fn/private? (boolean (:private metadata))}
         (:doc metadata) (assoc :seon.fn/doc (:doc metadata))
         (:malli/schema metadata)
-        (assoc :seon.fn/spec (pr-str (:malli/schema metadata)))
+        (assoc :seon.fn/spec
+               (pr-str
+                (schema/canonical-definition
+                 (:malli/schema metadata)
+                 predicate-functions)))
         (contains? #{:io :compute} (:seon.workload metadata))
         (assoc :seon.fn/workload (:seon.workload metadata)))
 
       :else nil)))
 
 (defn- inspect-source-file
-  [file rows]
+  [file observation]
   (let [eof (Object.)
         canonical-path (.getCanonicalPath ^java.io.File file)]
+    (swap! observation update :files (fnil conj #{}) canonical-path)
     (with-open [input (clojure.lang.LineNumberingPushbackReader.
                        (io/reader file))]
       (binding [*file* canonical-path
                 *ns* (the-ns 'user)
                 *read-eval* false]
-        (loop [schemas (schema/registered-schemas)]
+        (loop []
           (let [starting-ns *ns*
-                vars (var-state [starting-ns])
                 context (actual-reader-context starting-ns)
                 [form source]
                 (read+string {:eof eof
@@ -198,71 +202,113 @@
                    (ex-info (:seon.error/message events)
                             (assoc (:seon.error/data events)
                                    :seon.fn/file canonical-path))))
-                (let [event (first events)]
+                (let [event (first events)
+                      start-line (or (:line (meta form))
+                                     (:seon.sci.reader/line event))
+                      end-line (+ start-line
+                                  (count (re-seq #"\n" source)))
+                      before-names (into #{} (map ns-name) (all-ns))]
+                  (swap! observation update-in [:spans canonical-path]
+                         (fnil conj [])
+                         {:start start-line :end end-line :source source})
+                  (when-let [namespace-name (:seon.ns/name event)]
+                    (swap! observation assoc-in
+                           [:namespace-sources namespace-name] source))
                   (eval form)
-                  (let [next-schemas (schema/registered-schemas)
-                        next-vars (var-state [starting-ns *ns*])
-                        changed-schemas
-                        (into []
-                              (keep (fn [[schema-key definition]]
-                                      (when (not= definition
-                                                  (get schemas schema-key))
-                                        {:seon.schema/key schema-key
-                                         :seon.schema/form
-                                         (pr-str definition)})))
-                              next-schemas)]
-                    (when-let [row (some-> event durable-row)]
-                      (when (:seon.ns/name row)
-                        (swap! rows assoc (program/row-identity row) row)))
-                    (doseq [namespace-object (distinct [starting-ns *ns*])
-                            :when (not= 'user (ns-name namespace-object))]
-                      (let [identity [:seon.ns/name
-                                      (ns-name namespace-object)]
-                            observed (namespace-row namespace-object source)
-                            existing (get @rows identity)]
-                        (swap! rows assoc identity
-                               (merge existing observed
-                                      (when existing
-                                        {:seon.ns/source
-                                         (:seon.ns/source existing)
-                                         :seon.ns/requires
-                                         (into (or (:seon.ns/requires existing)
-                                                   #{})
-                                               (:seon.ns/requires observed))})))))
-                    (doseq [[qualified state] next-vars
-                            :when (and (not= state (get vars qualified))
-                                       (= canonical-path
-                                          (:file (:metadata state))))]
-                      (when-let [row (var-row qualified state source)]
-                        (swap! rows assoc (program/row-identity row) row)))
-                    (doseq [[qualified state] vars
-                            :when (and (not (contains? next-vars qualified))
-                                       (= canonical-path
-                                          (:file (:metadata state))))]
-                      (swap! rows dissoc [:seon.fn/sym (str qualified)])
-                      (swap! rows dissoc [:seon.test/sym (str qualified)]))
-                    (doseq [row changed-schemas]
-                      (swap! rows assoc (program/row-identity row) row))
-                    (doseq [schema-key
-                            (set/difference (set (keys schemas))
-                                            (set (keys next-schemas)))]
-                      (swap! rows dissoc [:seon.schema/key schema-key]))
-                    (recur next-schemas)))))))))))
+                  (doseq [namespace-name
+                          (set/difference
+                           (into #{} (map ns-name) (all-ns))
+                           before-names)]
+                    (swap! observation update :namespace-sources
+                           #(if (contains? % namespace-name)
+                              %
+                              (assoc % namespace-name source))))
+                  (recur))))))))))
+
+(defn- source-at
+  [observation metadata]
+  (let [file (:file metadata)
+        line (:line metadata)]
+    (when line
+      (some (fn [{:keys [start end source]}]
+              (when (<= start line end) source))
+            (get-in observation [:spans file])))))
+
+(defn- observed-rows
+  [observation]
+  (let [namespace-objects (all-ns)
+        vars (var-state namespace-objects)
+        predicate-functions (qualified-var-roots vars)
+        indexed-vars
+        (into {}
+              (filter (fn [[_ {:keys [metadata]}]]
+                        (contains? (:files observation) (:file metadata))))
+              vars)
+        var-rows
+        (into []
+              (keep (fn [[qualified state]]
+                      (let [source (source-at observation (:metadata state))]
+                        (when-not source
+                          (throw
+                           (ex-info
+                            "An evaluated declaration has no source span."
+                            {:seon.error/kind ::index-refused
+                             :seon.fn/sym qualified
+                             :seon.fn/file (:file (:metadata state))
+                             :seon.fn/line (:line (:metadata state))})))
+                        (var-row qualified state source
+                                 predicate-functions))))
+              indexed-vars)
+        namespace-names
+        (into (set (keys (:namespace-sources observation)))
+              (keep (fn [qualified]
+                      (some-> qualified namespace symbol)))
+              (keys indexed-vars))
+        namespace-rows
+        (into []
+              (keep (fn [namespace-name]
+                      (when-let [namespace-object (find-ns namespace-name)]
+                        (let [source
+                              (or
+                               (get-in observation
+                                       [:namespace-sources namespace-name])
+                               (some
+                                (fn [row]
+                                  (when (= [:seon.ns/name namespace-name]
+                                           (or (:seon.fn/ns row)
+                                               (:seon.test/ns row)))
+                                    (or (:seon.fn/source row)
+                                        (:seon.test/source row))))
+                                var-rows))]
+                          (when-not source
+                            (throw
+                             (ex-info
+                              "An evaluated namespace has no source span."
+                              {:seon.error/kind ::index-refused
+                               :seon.ns/name namespace-name})))
+                          (namespace-row namespace-object source)))))
+              namespace-names)
+        schema-rows
+        (into []
+              (map (fn [[schema-key definition]]
+                     {:seon.schema/key schema-key
+                      :seon.schema/form
+                      (pr-str
+                       (schema/canonical-definition
+                        definition predicate-functions))}))
+              (schema/registered-schemas))]
+    (into [] cat [namespace-rows var-rows schema-rows])))
 
 (defn- inspect-rows!
   [request output-path]
-  (let [rows
-        (atom
-         (into {}
-               (map (fn [[schema-key definition]]
-                      [[:seon.schema/key schema-key]
-                       {:seon.schema/key schema-key
-                        :seon.schema/form (pr-str definition)}]))
-               (schema/registered-schemas)))]
+  (let [observation (atom {:files #{}
+                           :spans {}
+                           :namespace-sources {}})]
     (try
       (doseq [file (source-files (:seon.fn/roots request))]
-        (inspect-source-file file rows))
-      (spit output-path (pr-str {:seon.fn/rows (vec (vals @rows))}))
+        (inspect-source-file file observation))
+      (spit output-path
+            (pr-str {:seon.fn/rows (observed-rows @observation)}))
       (catch Throwable error
         (spit output-path
               (pr-str {:seon.error/message (or (ex-message error)

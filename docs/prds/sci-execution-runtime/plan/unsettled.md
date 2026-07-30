@@ -225,13 +225,24 @@ The final audit falsified that build admission: its finite direct-operation set
 was another hand list, and `eval`/`apply` could mutate aliases or the current
 namespace before a silently misattributed declaration. Build indexing now runs
 the source inventory in one isolated JVM, reading and evaluating forms
-sequentially with Clojure's actual namespace state. It diffs evaluated global
-schema forms and actual namespace Vars after each form, so computed schemas,
-indirect function/test definitions, aliases, imports, refers, and `in-ns`
-attribution use the same state that compilation produced. Process isolation
-contains top-level namespace/schema/test effects; a content-keyed process-local
-cache makes repeated identical populations ordinary map reads without risking
-stale results across JVMs.
+sequentially with Clojure's actual namespace state and retaining exact
+file/line source spans. One final snapshot of evaluated global schema forms,
+namespace bindings, and Vars is the program state; there is no per-form delta
+registry to reconcile. Computed schemas, indirect function/test definitions,
+aliases, imports, refers, unmaps, unregisters, and `in-ns` attribution therefore
+use the same final state that compilation produced. Process isolation contains
+top-level namespace/schema/test effects; a content-keyed process-local cache
+makes repeated identical populations ordinary map reads without risking stale
+results across JVMs.
+
+The evaluated snapshot also revealed that Clojure Var metadata contains live
+predicate roots, not their source symbols. The one schema owner now performs
+the inverse of predicate binding before any contract becomes database EDN:
+named roots become qualified symbols, raw predicates become explicit `[:fn
+qualified-symbol]` schemas, already explicit `[:fn]` forms remain exact, and
+anonymous roots refuse. The direct/indirect/third-namespace regression passes
+in 21.46 s wall; the acquisition test that formerly failed on an unreadable
+`#object` and then on bare `clojure.core/bytes?` passes in 24.64 s wall.
 
 This is the prior platform's surviving design rather than a new scanner:
 `87ac3f9c6` made analyzer state authoritative, `d33b29cf9` diffed evaluated
@@ -239,9 +250,10 @@ definitions and registry values, and `56ed96dd9` repaired computed cold-boot
 schema parity. The discarded static scanner family remains `0c22f8363` /
 `d7cd70bdd`. The narrow recurring counterexample covers `eval`/`apply` alias
 mutation, computed schemas, evaluated `in-ns`, direct and evaluated function
-registration, evaluated test registration, and the explicit JVM default-import
-nil mask. It passes with one child inspector; production `src`+`test` census
-and cold/cached timing remain the integrated wave boundary.
+registration, evaluated test registration, an existing third namespace that
+returns to its caller, durable predicate canonicalization, and the explicit JVM
+default-import nil mask. It passes with one child inspector; production
+`src`+`test` census and cold/cached timing remain the integrated wave boundary.
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 

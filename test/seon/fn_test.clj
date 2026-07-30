@@ -323,10 +323,22 @@
                "(eval '(in-ns 'audit.changed))\n"
                "(clojure.core/refer 'clojure.core)\n"
                "(seon.schema/register! ::changed :string)\n"
-               "(defn direct [] :direct)\n"
-               "(eval '(defn indirect [] :indirect))\n"
+               "(defn ^{:malli/schema [:=> [:cat] fn?]} direct [] :direct)\n"
+               "(eval '(defn ^{:malli/schema [:=> [:cat] string?]} "
+               "indirect [] :indirect))\n"
                "(eval '(clojure.test/deftest indirect-test "
-               "(clojure.test/is true)))\n"))
+               "(clojure.test/is true)))\n"
+               "(create-ns 'audit.existing)\n"
+               "(do (in-ns 'audit.third) "
+               "(clojure.core/refer 'clojure.core) "
+               "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
+               "nested [] 1)) "
+               "(in-ns 'audit.changed))\n"
+               "(do (in-ns 'audit.existing) "
+               "(clojure.core/refer 'clojure.core) "
+               "(eval '(defn ^{:malli/schema [:=> [:cat] int?]} "
+               "from-existing [] 2)) "
+               "(in-ns 'audit.changed))\n"))
     (let [rows (seon.fn/rows {:seon.fn/roots [root]})
           by-identity (into {} (map (juxt seon.program/row-identity identity)) rows)
           original-ns (get by-identity [:seon.ns/name 'audit.evaluated])]
@@ -338,8 +350,17 @@
               (get by-identity [:seon.schema/key :audit.changed/changed]))))
       (is (contains? by-identity [:seon.fn/sym "audit.changed/direct"]))
       (is (contains? by-identity [:seon.fn/sym "audit.changed/indirect"]))
+      (is (contains? by-identity [:seon.fn/sym "audit.third/nested"]))
+      (is (contains? by-identity
+                     [:seon.fn/sym "audit.existing/from-existing"]))
       (is (contains? by-identity
                      [:seon.test/sym "audit.changed/indirect-test"]))
+      (is (= "[:=> [:cat] [:fn clojure.core/fn?]]"
+             (:seon.fn/spec
+              (get by-identity [:seon.fn/sym "audit.changed/direct"]))))
+      (is (= "[:=> [:cat] [:fn clojure.core/string?]]"
+             (:seon.fn/spec
+              (get by-identity [:seon.fn/sym "audit.changed/indirect"]))))
       (is (= #{'clojure.test 'seon.schema}
              (:seon.ns/requires original-ns)))
       (is (= #{{:seon.ns.alias/local 'schema
@@ -351,7 +372,10 @@
                      {:seon.ns.import/local 'String}))
       (is (= 'audit.changed
              (:seon.ns/name
-              (get by-identity [:seon.ns/name 'audit.changed])))))))
+              (get by-identity [:seon.ns/name 'audit.changed]))))
+      (is (= 'audit.third
+             (:seon.ns/name
+              (get by-identity [:seon.ns/name 'audit.third])))))))
 
 (deftest inspection-cache-key-includes-source-and-loaded-dependencies
   (let [root (str "tmp/fn-test/" (random-uuid))

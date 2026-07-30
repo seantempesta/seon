@@ -132,13 +132,27 @@ assertions / 0 failures / 0 errors on Clojure 1.10.3 and 1.11.1.
 The final audit proved the temporary finite resolver-operation refusal was
 still a silent hand list: `eval` and `apply` routed around it. The JVM build now
 has the missing isolated full-source compiler owner. A child JVM reads and
-evaluates each top-level form sequentially, diffs actual namespace Vars and
-the evaluated global schema registry, and returns ordinary canonical rows;
-all side effects die with that process. A content-keyed process-local cache
+evaluates each top-level form sequentially, records its exact file/line source
+span, then takes one final snapshot of actual namespace bindings, Vars, and the
+evaluated global schema registry. Final absence therefore handles unmap and
+unregister without a second delta mechanism, and definitions created through
+`eval` are attributed through their compiler metadata even when they enter a
+third namespace and return. All side effects die with that process. A
+content-keyed process-local cache
 reuses only an identical source population in the same JVM. The cache key
 includes the classpath, requested source, and loaded `src/` dependencies.
 Namespace rows preserve exact empty alias/refer sets and explicit nil-mask
 components when code unmaps a default JVM import.
+
+Evaluated Var metadata exposed one final serialization defect: Clojure resolves
+raw Malli predicate symbols to callable roots, whose default printer emits
+unreadable `#object` tags. `seon.schema/canonical-definition` is now the total
+inverse of the existing predicate binder. It maps named roots back to qualified
+symbols, wraps raw predicate schemas as `[:fn qualified-symbol]`, preserves an
+already explicit `[:fn ...]`, and refuses anonymous roots. The direct and
+indirect contracted-defn regression (including an already-existing third
+namespace) and the former acquisition `#object` falsifier pass independently
+in 21.46 s and 24.64 s wall time respectively.
 
 This directly carries forward the mechanisms that survived earlier platforms:
 `87ac3f9c6` made analyzer state authoritative, `d33b29cf9` indexed evaluated
