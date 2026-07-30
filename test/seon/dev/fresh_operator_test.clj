@@ -14,7 +14,9 @@
   (:import [java.net ServerSocket]
            [java.nio.file Files]
            [java.util Date]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent CompletableFuture ExecutionException
+            TimeUnit TimeoutException]
+           [java.util.function Function Supplier]))
 
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
@@ -49,6 +51,21 @@
      (str "import signal,sys\n"
           "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
           "signal.pause()\n")])))
+
+(defn- start-disposable-process-tree!
+  []
+  (.start
+   (doto
+    (ProcessBuilder.
+     ^java.util.List
+     ["/usr/bin/python3" "-c"
+      (str "import signal,subprocess,sys\n"
+           "child=subprocess.Popen([sys.executable,'-c',"
+           "'import signal; signal.pause()'])\n"
+           "print(child.pid,flush=True)\n"
+           "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+           "signal.pause()\n")])
+    (.redirectErrorStream true))))
 
 (defn- process-start-date
   [^Process process]
@@ -179,6 +196,42 @@
         (str "The child output stream closed after termination: "
              (ex-message error))))))
 
+(defn- process-tree
+  [^Process process]
+  (let [root (.toHandle process)]
+    (with-open [stream (.descendants root)]
+      (conj (vec (iterator-seq (.iterator stream))) root))))
+
+(defn- terminate-process-tree!
+  [^Process process]
+  (let [handles (process-tree process)]
+    (doseq [handle handles
+            :when (.isAlive ^java.lang.ProcessHandle handle)]
+      (.destroyForcibly ^java.lang.ProcessHandle handle))
+    (.get
+     (CompletableFuture/allOf
+      (into-array
+       CompletableFuture
+       (map #(.onExit ^java.lang.ProcessHandle %) handles)))
+     10 TimeUnit/SECONDS)))
+
+(defn- await-process!
+  [^Process process output-future context]
+  (try
+    (.get (.onExit (.toHandle process)) 90 TimeUnit/SECONDS)
+    {:seon.dev.fresh-operator-test/completed? true
+     :seon.dev.fresh-operator-test/exit (.exitValue process)
+     :seon.dev.fresh-operator-test/output
+     (deref output-future 10000
+            "The operator output reader did not finish.")}
+    (catch TimeoutException _
+      (terminate-process-tree! process)
+      (throw
+       (ex-info (str context " exceeded its last-resort backstop.")
+                {:seon.dev.fresh-operator-test/output
+                 (deref output-future 10000
+                        "The terminated output reader did not finish.")})))))
+
 (deftest legacy-operator-jvm-roles-remain-visible-to-orphan-detection
   (doseq [arguments
           [["clojure.main" "-m" "seon.web.server" "{}"]
@@ -207,6 +260,24 @@
         (operator-private-outcome 'parse-init-arguments ["--changed"]))
        "init --changed PATH")))
 
+(deftest failed-launch-cleanup-terminates-the-whole-process-tree
+  (let [parent (start-disposable-process-tree!)
+        child-pid (parse-long (.readLine (io/reader (.getInputStream parent))))]
+    (try
+      (is (some? child-pid))
+      (is (nil?
+           (operator-private-value 'terminate-process-tree! (.pid parent))))
+      (is (true? (.waitFor parent 10 TimeUnit/SECONDS)))
+      (is (not
+           (true?
+            (some-> (java.lang.ProcessHandle/of child-pid)
+                    (.orElse nil)
+                    .isAlive)))
+          "failed readiness cleanup left no descendant alive")
+      (finally
+        (when (.isAlive parent)
+          (terminate-process-tree! parent))))))
+
 (defn- run-operator
   [root & arguments]
   (let [process
@@ -216,15 +287,51 @@
                 (apply operator-command root arguments))
            (.directory project-root)
            (.redirectErrorStream true)))
-        output-future (process-output process)
-        completed? (.waitFor process 30 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))]
-    {:seon.dev.fresh-operator-test/completed? completed?
-     :seon.dev.fresh-operator-test/exit
-     (when completed? (.exitValue process))
-     :seon.dev.fresh-operator-test/output
-     (deref output-future 10000
-            "The operator output reader did not finish.")}))
+        output-future (process-output process)]
+    (await-process! process output-future "The fresh operator")))
+
+(defn- await-child-readiness!
+  [^ServerSocket ready-server ^Process child child-output]
+  (let [readiness
+        (CompletableFuture/supplyAsync
+         (reify Supplier
+           (get [_]
+             (with-open [ready-socket (.accept ready-server)
+                         ready-reader (io/reader ready-socket)]
+               {:seon.dev.fresh-operator-test/event :ready
+                :seon.dev.fresh-operator-test/value
+                (.readLine ^java.io.BufferedReader ready-reader)}))))
+        exited
+        (.thenApply
+         (.onExit (.toHandle child))
+         (reify Function
+           (apply [_ _]
+             {:seon.dev.fresh-operator-test/event :exit})))
+        winner
+        (try
+          (.get
+           (CompletableFuture/anyOf
+            (into-array CompletableFuture [readiness exited]))
+           90 TimeUnit/SECONDS)
+          (catch ExecutionException error
+            (throw (.getCause error)))
+          (catch TimeoutException _
+            (terminate-process-tree! child)
+            (throw
+             (ex-info "The anchor readiness exceeded its last-resort backstop."
+                      {:seon.dev.fresh-operator-test/output
+                       (deref child-output 10000
+                              "The anchor output reader did not finish.")}))))]
+    (when (= :exit (:seon.dev.fresh-operator-test/event winner))
+      (throw
+       (ex-info "The anchor exited before readiness."
+                {:seon.dev.fresh-operator-test/output
+                 (deref child-output 10000
+                        "The anchor output reader did not finish.")})))
+    (when-not (= "ready" (:seon.dev.fresh-operator-test/value winner))
+      (throw (ex-info "The anchor returned malformed readiness."
+                      {:seon.dev.fresh-operator-test/value winner})))
+    true))
 
 (defn- prepl-eval
   [advertisement form]
@@ -273,7 +380,6 @@
   (with-open [ready-server
               (ServerSocket.
                0 1 (java.net.InetAddress/getLoopbackAddress))]
-    (.setSoTimeout ready-server 30000)
     (let [launch-form
           (operator-private-value
            'launch-form "anchor" {} (.getLocalPort ready-server))
@@ -310,11 +416,7 @@
              (.redirectErrorStream true)))
           child-output (process-output child)]
       (try
-        (with-open [ready-socket (.accept ready-server)
-                    ready-reader (io/reader ready-socket)]
-          (when-not (= "ready"
-                       (.readLine ^java.io.BufferedReader ready-reader))
-            (throw (ex-info "The anchor returned malformed readiness." {}))))
+        (await-child-readiness! ready-server child child-output)
         (let [anchor-advertisement
               (edn/read-string
                (slurp (io/file root "data" "clusters"
@@ -338,8 +440,7 @@
             (run-operator root "stop" "scratch")
             (run-operator root "stop" "anchor"))
           (when (.isAlive child)
-            (.destroyForcibly child))
-          (.waitFor child 10 TimeUnit/SECONDS)
+            (terminate-process-tree! child))
           (deref child-output 10000
                  "The anchor output reader did not finish."))))))
 
@@ -489,17 +590,19 @@
         (reset! (var-get instances-var) instances-before)))))
 
 (deftest fresh-process-loads-schema-before-every-operator-instrumentation
-  (let [root (fresh-root)]
+  (let [root (runnable-root! (fresh-root))]
     (try
-      (let [{::keys [anchor-ready? add-completed? add-exit add-output
-                     scratch-ready?]}
-            (fresh-process-operator-paths root)]
-        (is anchor-ready?
-            "the generated launch form instrumented before publishing ready")
-        (is add-completed? "the generated add form exceeded thirty seconds")
-        (is (= 0 add-exit) add-output)
-        (is scratch-ready?
-            "the added scratch cluster published its web URL"))
+      (let [initialized (run-operator root "init")]
+        (is (= 0 (::exit initialized)) (::output initialized))
+        (let [{::keys [anchor-ready? add-completed? add-exit add-output
+                       scratch-ready?]}
+              (fresh-process-operator-paths root)]
+          (is anchor-ready?
+              "the generated launch form instrumented before publishing ready")
+          (is add-completed? "the generated add form completed")
+          (is (= 0 add-exit) add-output)
+          (is scratch-ready?
+              "the added scratch cluster published its web URL")))
       (finally
         (delete-recursively! root)))))
 

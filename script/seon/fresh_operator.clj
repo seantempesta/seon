@@ -7,7 +7,9 @@
   (:import [java.io PushbackReader]
            [java.net InetSocketAddress ServerSocket Socket]
            [java.time Instant]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent CompletableFuture ExecutionException
+            TimeUnit TimeoutException]
+           [java.util.function Function Supplier]))
 
 (def ^:private cluster-name-pattern
   #"\A[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})\z")
@@ -1066,22 +1068,97 @@
     {:seon.fresh-operator/pid (parse-long output)
      :seon.fresh-operator/log (str log)}))
 
+(defn- process-descendants
+  [^java.lang.ProcessHandle handle]
+  (with-open [stream (.descendants handle)]
+    (vec (iterator-seq (.iterator stream)))))
+
+(defn- await-process-tree-exit!
+  [handles]
+  (let [completions
+        (into-array
+         CompletableFuture
+         (map #(.onExit ^java.lang.ProcessHandle %) handles))]
+    (.get (CompletableFuture/allOf completions)
+          5 TimeUnit/SECONDS)))
+
+(defn- signal-process-tree!
+  [^java.lang.ProcessHandle root descendants force?]
+  (doseq [candidate (conj (vec descendants) root)
+          :when (.isAlive ^java.lang.ProcessHandle candidate)]
+    (if force?
+      (.destroyForcibly ^java.lang.ProcessHandle candidate)
+      (.destroy ^java.lang.ProcessHandle candidate))))
+
+(defn- terminate-process-tree!
+  "Terminate one launched JVM tree and await observed process exits."
+  [pid]
+  (when-let [handle (live-process-handle pid)]
+    (let [descendants (process-descendants handle)
+          handles (conj descendants handle)]
+      (signal-process-tree! handle descendants false)
+      (try
+        (await-process-tree-exit! handles)
+        (catch TimeoutException _
+          (let [remaining-descendants
+                (into []
+                      (filter #(.isAlive ^java.lang.ProcessHandle %))
+                      (process-descendants handle))
+                remaining
+                (cond-> remaining-descendants
+                  (.isAlive handle) (conj handle))]
+            (signal-process-tree! handle remaining-descendants true)
+            (try
+              (await-process-tree-exit! remaining)
+              (catch TimeoutException _
+                (fail! "The failed cluster JVM tree survived termination."
+                       {:seon.boot/pid pid})))))))))
+
 (defn- await-advertisement!
-  [root name ^ServerSocket ready-server]
-  (.setSoTimeout ready-server advertisement-wait-ms)
-  (try
-    (with-open [socket (.accept ready-server)
-                reader (java.io.BufferedReader.
-                        (java.io.InputStreamReader.
-                         (.getInputStream socket)
-                         java.nio.charset.StandardCharsets/UTF_8))]
-      (when-not (= "ready" (.readLine reader))
-        (fail! "The cluster JVM sent malformed readiness."
-               {:seon.fresh-operator/name name})))
-    (catch java.net.SocketTimeoutException _
-      (fail! "Timed out waiting for the cluster advertisement URL."
+  [root name pid ^ServerSocket ready-server]
+  (let [handle
+        (or (live-process-handle pid)
+            (fail! "The cluster JVM exited before readiness."
+                   {:seon.fresh-operator/name name
+                    :seon.boot/pid pid}))
+        readiness
+        (CompletableFuture/supplyAsync
+         (reify Supplier
+           (get [_]
+             (with-open [socket (.accept ready-server)
+                         reader (java.io.BufferedReader.
+                                 (java.io.InputStreamReader.
+                                  (.getInputStream socket)
+                                  java.nio.charset.StandardCharsets/UTF_8))]
+               {:seon.fresh-operator/event :ready
+                :seon.fresh-operator/value (.readLine reader)}))))
+        exited
+        (.thenApply
+         (.onExit handle)
+         (reify Function
+           (apply [_ _]
+             {:seon.fresh-operator/event :exit})))
+        winner
+        (try
+          (.get (CompletableFuture/anyOf
+                 (into-array CompletableFuture [readiness exited]))
+                advertisement-wait-ms TimeUnit/MILLISECONDS)
+          (catch ExecutionException error
+            (throw (.getCause error)))
+          (catch TimeoutException _
+            (fail! "Timed out waiting for cluster readiness or process exit."
+                   {:seon.fresh-operator/name name
+                    :seon.boot/pid pid
+                    :seon.fresh-operator/timeout-ms
+                    advertisement-wait-ms})))]
+    (when (= :exit (:seon.fresh-operator/event winner))
+      (fail! "The cluster JVM exited before readiness."
              {:seon.fresh-operator/name name
-              :seon.fresh-operator/timeout-ms advertisement-wait-ms})))
+              :seon.boot/pid pid}))
+    (when-not (= "ready" (:seon.fresh-operator/value winner))
+      (fail! "The cluster JVM sent malformed readiness."
+             {:seon.fresh-operator/name name
+              :seon.boot/pid pid})))
   (let [value (advertisement root name)]
     (when-not (and value (alive? value) (:seon.render.web/url value))
       (fail! "The ready JVM did not publish a complete advertisement."
@@ -1155,9 +1232,15 @@
       (with-open [ready-server
                   (ServerSocket.
                    0 1 (java.net.InetAddress/getLoopbackAddress))]
-        (launch! root name manifest (.getLocalPort ready-server))
-        (print-started! root name
-                        (await-advertisement! root name ready-server))))))
+        (let [{pid :seon.fresh-operator/pid}
+              (launch! root name manifest (.getLocalPort ready-server))
+              value
+              (try
+                (await-advertisement! root name pid ready-server)
+                (catch Throwable failure
+                  (terminate-process-tree! pid)
+                  (throw failure)))]
+          (print-started! root name value))))))
 
 (defn- config-apply-form
   [name manifest]
