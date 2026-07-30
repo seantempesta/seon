@@ -226,8 +226,15 @@ lifted declaration facts as its oracle.
 
 ## Important follow-up — the Datahike fork only fences indexed attributes
 
-The maintained fork's new AEVT check is real and its focused test is green, but
-it runs only when the schema has `:db/index`
+**Resolved after this audit:** maintained Datahike commit `b73550bf` now runs
+the AEVT current-data fence for every attribute when `:db/ident` is removed,
+not only attributes carrying `:db/index`. The focused `clj-hht`, `specs`, and
+`clj-pss` schema suites prove indexed and non-indexed removal refusal, removal
+after current retraction, and retained history: **51 tests / 372 assertions / 0
+failures**. Root commit `6119cd036` advances the vendored pointer.
+
+At audit time, the maintained fork's AEVT check was real and its focused test
+was green, but it ran only when the schema had `:db/index`
 (`reference-code/datahike/src/datahike/db/transaction.cljc:288-305`). Direct
 `retractEntity` of a nonindexed schema with current data retains Datahike's old
 unsafe behavior. Seon's terminal semantic guard covers every derived Malli
