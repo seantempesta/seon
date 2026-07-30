@@ -183,6 +183,11 @@ its exact three-string-to-nil contract; `seon.public-contract-test` plus
 contract invariant was strengthened at the new owner rather than weakened for
 process entry points.
 
+The final frozen full gate passes 606 tests / 2,680 assertions / 0 failures /
+0 errors. Its isolated lifecycle clusters exercise reset, schema reopen,
+registered restart, and whole-process program restart on current source. The
+independent post-fix audit reports no remaining registration-lifecycle blocker.
+
 The recurring index proof no longer pays one fresh JVM for each immutable
 fixture. Its canonical-row, exact-binding, evaluated-REPL, and database
 reconciliation assertions share one isolated source population and one exact

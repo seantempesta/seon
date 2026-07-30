@@ -114,7 +114,7 @@ wakes/0 false vs 60/40; two-agent dedupe proven),
 `context-walk/s0-baseline` + `s1-shadow` (six verbatim side-by-sides —
 **await owner read**).
 
-## Active blocker — one registration contract
+## Resolved blocker — one registration contract
 
 Six-generation git archaeology (`research/registration-archaeology-2026-07-29.md`)
 confirmed the owner's report that function, schema, and test registration has
@@ -285,6 +285,15 @@ changed file state. This preserves end-to-end cache-invalidation and deletion
 proof but removes redundant process starts: `seon.fn-test` fell from the
 observed 4m29 loop to 71 seconds, with 8 tests / 62 assertions / 0 failures /
 0 errors (changed-test generation 1524).
+
+The final complete-suite checkpoint found one last public-surface omission:
+the isolated inspector's `seon.fn/-main` had no Malli contract. `a9974918d`
+adds its exact three-string-to-nil contract; the focused public-contract plus
+index gate passes 11 tests / 75 assertions / 0 failures / 0 errors. The frozen
+full gate then passes 606 tests / 2,680 assertions / 0 failures / 0 errors,
+including reset, schema reopen, registered restart, program restart, schema
+history/no-history, runtime deletion, and exact build reconciliation. The
+independent post-fix audit reports no remaining registration-lifecycle blocker.
 
 ## The checkpoint — both blockers cleared, attempt 6 running
 
