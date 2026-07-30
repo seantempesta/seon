@@ -153,11 +153,29 @@
                 :seon.source/commit-id (:seon.source/commit-id b)}
                (source/current opened)))
         (testing "a complete publication never trusts digest equality alone"
-          (let [again (publish opened digest-b)]
+          (let [connection (store/open-branch! opened source/current-branch)]
+            (try
+              (d/transact connection
+                          [[:db/retract
+                            [:seon.source.test/marker digest-b]
+                            :seon.source.test/marker
+                            digest-b]
+                           {:seon.source.test/marker "stale-row"}])
+              (finally
+                (d/release connection))))
+          (let [again (publish opened digest-b)
+                current-db (d/branch-as-db
+                            (:seon.store/connection opened)
+                            source/current-branch)]
             (is (true? (:seon.source/built? again)))
             (is (= digest-b (:seon.source/digest again)))
             (is (not= (:seon.source/commit-id b)
-                      (:seon.source/commit-id again)))))))))
+                      (:seon.source/commit-id again)))
+            (is (= #{digest-b}
+                   (set (d/q '[:find [?marker ...]
+                               :where [_ :seon.source.test/marker ?marker]]
+                             current-db)))
+                "complete population repairs stale rows under an equal digest")))))))
 
 (deftest incremental-upsert-is-one-transaction-on-the-expected-commit
   (with-store
@@ -204,7 +222,20 @@
         (is (= [:seon.source.test/tags]
                (:seon.source/unsafe-attributes data)))
         (is (= (:seon.source/commit-id published)
-               (:seon.source/commit-id (source/current opened))))))))
+               (:seon.source/commit-id (source/current opened))))
+        (let [unknown
+              (refusal
+               #(upsert opened
+                        (:seon.source/commit-id published)
+                        digest-b
+                        [{:seon.source.test/marker digest-a
+                          :seon.source.test/not-installed "unsafe"}]))]
+          (is (= :seon.cluster.source/unsafe-incremental-rows
+                 (:seon.cluster.source/rule unknown)))
+          (is (= [:seon.source.test/not-installed]
+                 (:seon.source/unsafe-attributes unknown)))
+          (is (= (:seon.source/commit-id published)
+                 (:seon.source/commit-id (source/current opened)))))))))
 
 (deftest stale-incremental-upsert-preserves-the-newer-publication
   (with-store

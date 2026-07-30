@@ -198,10 +198,11 @@
         unsafe
         (into []
               (filter (fn [attribute]
-                        (let [{:db/keys [cardinality isComponent]}
-                              (get (:schema db) attribute)]
-                          (or (= :db.cardinality/many cardinality)
-                              isComponent))))
+                        (let [definition (get (:schema db) attribute)]
+                          (or (nil? definition)
+                              (not= :db.cardinality/one
+                                    (:db/cardinality definition))
+                              (:db/isComponent definition)))))
               attributes)]
     (when (seq unsafe)
       (refuse! ::unsafe-incremental-rows

@@ -26,7 +26,9 @@
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
+            [seon.program :as program]
             [seon.render.block :as block]
             [seon.render.root :as root-render]
             [seon.schema :as schema]
@@ -50,6 +52,13 @@
 
 (defn- delete-recursively! [path]
   (test-support/delete-recursively! path))
+
+(defn- write-source!
+  [root relative-path source]
+  (let [file (io/file root relative-path)]
+    (.mkdirs (.getParentFile file))
+    (spit file source)
+    (.getCanonicalPath file)))
 
 (defn- prepl-eval
   "Open a real socket to `host:port`, evaluate `form-string` through
@@ -707,6 +716,74 @@
     (is (false? (current? published
                           (assoc published "/repo/src/new.clj" "n1")
                           ["/repo/src/a.clj"])))))
+
+(deftest incremental-source-refresh-preserves-agreement-across-real-edits
+  (let [root (bare-root)
+        project (io/file root "project")
+        source-root (io/file project "src")
+        test-root (io/file project "test")
+        resource-root (io/file project "resources")
+        a-path (write-source! source-root "sample/a.clj"
+                              "(ns sample.a)\n(defn value [] 1)\n")
+        b-path (write-source! source-root "sample/b.clj"
+                              "(ns sample.b)\n(defn value [] 10)\n")
+        roots (mapv #(.getCanonicalPath ^java.io.File %)
+                    [source-root test-root])
+        all-roots (conj roots (.getCanonicalPath resource-root))]
+    (.mkdirs test-root)
+    (.mkdirs resource-root)
+    (try
+      (with-redefs [seon.fn/source-roots roots
+                    cluster/source-roots all-roots]
+        (cluster/refresh-source! root)
+
+        (testing "two consecutive scalar edits retain complete artifacts"
+          (write-source! source-root "sample/a.clj"
+                         "(ns sample.a)\n(defn value [] 2)\n")
+          (cluster/refresh-source! root [a-path])
+          (write-source! source-root "sample/a.clj"
+                         "(ns sample.a)\n(defn value [] 3)\n")
+          (cluster/refresh-source! root [a-path])
+          (let [artifact
+                (edn/read-string (slurp (cluster/source-artifact-file root)))
+                file-artifact
+                (seon.fn/artifact-by-path (:seon.fn/manifest artifact) a-path)]
+            (is (= (:seon.fn.file/identities file-artifact)
+                   (->> (:seon.fn.file/rows file-artifact)
+                        (keep program/row-identity)
+                        (sort-by pr-str)
+                        vec))
+                "the artifact remains a complete file projection")))
+
+        (testing "a missed X followed by reported Y forces complete repair"
+          (write-source! source-root "sample/a.clj"
+                         "(ns sample.a)\n(defn value [] 4)\n")
+          (write-source! source-root "sample/b.clj"
+                         "(ns sample.b)\n(defn value [] 20)\n")
+          (cluster/refresh-source! root [b-path])
+          (let [opened (store/open-store!
+                        {:seon.store/dir (str (io/file root "store"))})]
+            (try
+              (let [db (d/branch-as-db (:seon.store/connection opened)
+                                       source/current-branch)]
+                (is (str/includes?
+                     (d/q '[:find ?source .
+                            :where
+                            [?function :seon.fn/sym "sample.a/value"]
+                            [?function :seon.fn/source ?source]]
+                          db)
+                     "[] 4"))
+                (is (str/includes?
+                     (d/q '[:find ?source .
+                            :where
+                            [?function :seon.fn/sym "sample.b/value"]
+                            [?function :seon.fn/source ?source]]
+                          db)
+                     "[] 20")))
+              (finally
+                (store/release-store! opened))))))
+      (finally
+        (delete-recursively! root)))))
 
 (deftest the-tower-stands-in-one-start
   (let [root (fresh-root)]
