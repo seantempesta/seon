@@ -317,17 +317,18 @@
 (defn- program-row
   "Return the one reader declaration eligible for durable publication.
   A function without its complete contract is deliberately absent."
-  [event]
+  [event projection]
   (or
    (program/deletion-row event)
    (let [row (program/declaration-row event :contracted)]
      (cond
        (:seon.fn/sym row)
-       (if (schema/malli-form? (edn/read-string (:seon.fn/spec row)))
-         row
-         (throw (ex-info "Function contract is not a registered Malli form."
-                         {:seon.error/kind ::contract-refused
-                          :seon.fn/sym (:seon.fn/sym row)})))
+       (let [function-symbol (symbol (:seon.fn/sym row))
+             definition (edn/read-string (:seon.fn/spec row))]
+         (schema/projection-with-function-contract
+          projection function-symbol definition
+          {:seon.schema.admission/source :agent})
+         row)
 
        ;; The reader owns identity and exact source; the evaluated declaration
        ;; supplies the canonical value below. Raw syntax is not schema data.
@@ -385,7 +386,8 @@
             event (one-event (:seon.fn/source committed) namespace-name)]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
-        {:seon.schema/projection projection
+        {:seon.schema/projection
+         (schema/projection-from-database db projection)
          :seon.sci.eval/installed 1})
 
       :seon.schema/key
@@ -535,12 +537,12 @@
         namespace-object (sci/create-ns namespace-name)]
     (try
       (let [event (one-event source namespace-name)
-            raw-row (program-row event)
             form (:seon.sci.reader/form event)
             projection
             (or (:seon.schema/projection evaluation-ctx)
                 (schema/current-projection)
                 (schema/build-projection (schema/registered-schemas)))
+            raw-row (program-row event projection)
             schema-delta
             (when (:seon.schema/key raw-row)
               (schema/begin-registration-delta projection))

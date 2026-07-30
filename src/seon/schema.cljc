@@ -1764,6 +1764,34 @@
       :seon.schema/predicate-functions
       (:seon.schema.projection/predicate-functions projection)})))
 
+(defn projection-with-function-contract
+  "Validate the projection produced by one function-contract replacement."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection]
+                [:seon.schema/function-symbol :qualified-symbol]
+                [::definition ::definition]
+                [:seon.schema/admission :map]]
+    ::projection]}
+  [projection function-symbol definition admission]
+  (build-projection
+   (:seon.schema.projection/forms projection)
+   (assoc (:seon.schema.projection/function-contracts projection)
+          function-symbol definition)
+   {:seon.schema/schema-admissions
+    (:seon.schema.projection/schema-admissions projection)
+    :seon.schema/function-admissions
+    (assoc (:seon.schema.projection/function-admissions projection)
+           function-symbol admission)
+    :seon.schema/function-source-admissions
+    (assoc (:seon.schema.projection/function-source-admissions projection)
+           function-symbol admission)
+    :seon.schema/artifact-exports
+    (:seon.schema.projection/artifact-exports projection)
+    :seon.schema/pure-predicate-symbols
+    (:seon.schema.projection/pure-predicate-symbols projection)
+    :seon.schema/predicate-functions
+    (:seon.schema.projection/predicate-functions projection)}))
+
 (defn activate-projection!
   "Atomically publish an already validated projection.
 

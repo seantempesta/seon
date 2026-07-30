@@ -597,20 +597,32 @@
       (when (and namespace-ref
                  (not (:db/id (d/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
-      (let [schema-declarations
+      (let [current-projection
+            (when (#{:seon.fn/sym :seon.schema/key} identity)
+              (schema/projection-from-database db))
+            candidate-projection
+            (case identity
+              :seon.schema/key
+              (schema/projection-with-schema
+               current-projection identity-value
+               (edn/read-string (:seon.schema/form row))
+               {:seon.schema.admission/source :agent})
+
+              :seon.fn/sym
+              (schema/projection-with-function-contract
+               current-projection (symbol identity-value)
+               (edn/read-string (:seon.fn/spec row))
+               {:seon.schema.admission/source :agent})
+
+              nil)
+            schema-declarations
             (if (= identity :seon.schema/key)
-              (let [current (schema/projection-from-database db)
-                    definition (edn/read-string (:seon.schema/form row))
-                    candidate
-                    (schema/projection-with-schema
-                     current identity-value definition
-                     {:seon.schema.admission/source :agent})
-                    current-attributes
+              (let [current-attributes
                     (schema.form/database-attributes
-                     (:seon.schema.projection/forms current))
+                     (:seon.schema.projection/forms current-projection))
                     candidate-attributes
                     (schema.form/database-attributes
-                     (:seon.schema.projection/forms candidate))
+                     (:seon.schema.projection/forms candidate-projection))
                     required
                     (into []
                           (comp
@@ -618,7 +630,7 @@
                            (remove #(contains? (:schema db) %)))
                           (sort candidate-attributes))]
                 (schema.datahike/malli->datahike-schema-in
-                 candidate required))
+                 candidate-projection required))
               [])]
         (into
          schema-declarations
