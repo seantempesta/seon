@@ -244,26 +244,39 @@ cannot be removed.” Since Datahike is maintained as part of Seon, either widen
 the fork's `:db/ident` removal check to every attribute or document and enforce
 that all schema removal enters the single Seon transaction owner.
 
-## Important out-of-wave finding — changed-test timeout left its JVM alive
+## Corrected out-of-wave finding — the live JVM belonged to the next generation
 
-The automatic changed-test run at generation 1430 timed out at its fresh-JVM
-boundary: the retained report at observation time recorded writer exit 124,
-but JVM PID 6259 remained alive for approximately four minutes with PPID
-94425. A normal termination request then stopped it successfully. The mutable
-`latest.report.edn` has since advanced, so these are the exact observed
-generation and process coordinates rather than a claim about its present
-contents.
+The earlier audit diagnosis that generation 1430 left JVM PID 6259 orphaned
+was not supported. It compared the mutable `latest.report.edn` with a live JVM
+without also reading `hook/running.edn`, the worker identity, and the JVM start
+instant. The coalescing worker publishes one completed generation and then
+immediately claims the pending generation. A completed exit-124 report can
+therefore coexist for minutes with the next generation's live, owned JVM.
 
-This is outside the registration wave, but it appears to recur the process
-lifecycle class documented in
-`docs/seon/issues/archive/changed-test-interruption-orphans-test-runner.md`:
-timeout/interruption returned control without the owning process path
-terminating and awaiting its descendant JVM. The old issue is framed around
-the deleted CLJS pipeline, so the evidence should be re-triaged against the
-current writer/fresh-JVM owner rather than reopening its obsolete mechanism.
-Acceptance evidence is event-driven descendant completion after writer
-timeout or interruption, plus a regression proving no JVM with the recorded
-parent/process identity remains alive when the changed-test operation returns.
+A source-frozen observation of that exact boundary falsified the orphan claim:
+
+- worker PID 10281 started at `2026-07-30T02:09:43.031Z` and remained alive;
+- `latest.report.edn` recorded completed generation 1443 at
+  `2026-07-30T02:17:30Z`;
+- `hook/running.edn` recorded generation 1451 at the same second, and its JVM
+  PID 12750 started one second later at `2026-07-30T02:17:31Z` as PID 10281's
+  direct child;
+- at generation 1451's exact 300-second boundary,
+  `2026-07-30T02:22:31Z`, PID 12750 exited and `latest.report.edn` advanced to
+  generation 1451; and
+- the same worker then claimed pending generation 1455 and launched its owned
+  JVM PID 14408 at `2026-07-30T02:22:32Z`, again one second after the prior
+  report.
+
+The current timeout path therefore terminated its JVM before publishing and
+the live JVM after publication belonged to the next request. PIDs 6259 and
+11796 cannot support the earlier diagnosis because their process start
+identity was never compared with the reported and running generations. PID
+11796 was mistakenly terminated while a valid later generation was running.
+There is no demonstrated orphan defect, no lifecycle change is justified, and
+the resolved CLJS-era issue
+`docs/seon/issues/archive/changed-test-interruption-orphans-test-runner.md`
+must not be reopened from this evidence.
 
 ## Calibration and acceptance boundary
 
