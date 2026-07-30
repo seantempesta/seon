@@ -544,6 +544,8 @@
   (isolated-rows request))
 
 (defn -main
+  "Run one isolated program-graph inspection request."
+  {:malli/schema [:=> [:cat :string :string :string] :nil]}
   [& [operation request-path output-path]]
   (when-not (= "--inspect" operation)
     (throw (ex-info "Unknown seon.fn operation." {::operation operation})))

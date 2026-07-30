@@ -175,6 +175,14 @@ rows, including 867 private functions; all 953 serialized contracts/forms
 EDN-read with zero object tags. Cold/cached calls measured 16,812.94 ms /
 111.68 ms and returned identical rows.
 
+The first complete-suite checkpoint then caught one admission omission outside
+the focused matrix: the new public `seon.fn/-main` inspector entry point had no
+Malli contract. The public-contract gate refused it. The entry point now owns
+its exact three-string-to-nil contract; `seon.public-contract-test` plus
+`seon.fn-test` passes 11 tests / 75 assertions / 0 failures / 0 errors. The
+contract invariant was strengthened at the new owner rather than weakened for
+process entry points.
+
 The recurring index proof no longer pays one fresh JVM for each immutable
 fixture. Its canonical-row, exact-binding, evaluated-REPL, and database
 reconciliation assertions share one isolated source population and one exact
