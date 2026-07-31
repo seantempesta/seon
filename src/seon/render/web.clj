@@ -422,54 +422,22 @@
       (and reverse? (seq reverse-groups))
       (assoc :seon.render.debug/reverse-refs reverse-groups))))
 
-(defn- entity-handle?
-  [value]
-  (and (map? value) (= #{:db/id} (set (keys value)))
-       (integer? (:db/id value))))
-
-(defn- debug-value
-  [db agent-id cursor caps]
-  (if-let [agent-eid (some-> (d/pull db [:db/id]
-                                     [:seon.cluster.agent/id agent-id])
-                             :db/id)]
-    (letfn [(open [current]
-              (if (entity-handle? current)
-                (generic-entity db (:db/id current) caps true)
-                current))
-            (descend [current step]
-              (let [opened (open current)
-                    missing (Object.)
-                    index-step? (and (sequential? opened) (int? step) (< -1 step))
-                    indexed (when index-step?
-                              (nth opened step missing))]
-                (cond
-                  (and (map? opened) (contains? opened step)) (get opened step)
-                  (and index-step? (not (identical? missing indexed))) indexed
-                  (and (set? opened) (contains? opened step)) step
-                  :else
-                  (reduced
-                   {:seon.error/kind ::no-such-debug-path
-                    :seon.error/message
-                    (str "There is nothing at " (pr-str step)
-                         " in agent " agent-id ".")}))))]
-      (open
-       (reduce descend
-               {:db/id agent-eid}
-               (:seon.render.data/path cursor))))
-    nil))
+(declare ai-walk)
 
 (defn- debug-page-of
-  [db agent-id cursor caps]
-  (let [path (:seon.render.data/path cursor)
-        unit {:seon.cluster.agent/id agent-id
-              :seon.render.value/root [:seon.cluster.agent/id agent-id]
-              :seon.render.value/route-base
-              (route/path ::route/agent-debug {:id agent-id})
-              :seon.render.data/cursor cursor
-              :seon.sci.admit/caps caps
-              :seon.render/value (debug-value db agent-id cursor caps)}
-        id (value/node-id unit path)]
-    {id (hiccup/->string (block/data-panel unit))}))
+  [db agent-id caps]
+  (let [page (dissoc
+              (page-of {:seon.db/db db
+                        :seon.cluster.agent/id agent-id
+                        :seon.sci.admit/caps caps
+                        :seon.cluster.run/live-processes #{}})
+              stream-strip-id)
+        ai-id (str "debug-ai-" agent-id)]
+    (assoc page ai-id
+           (hiccup/->string
+            [:section {:id ai-id
+                       :class "seon-debug-body seon-debug-body-ai"}
+             [:pre (ai-walk db caps agent-id)]]))))
 
 (defn changed
   "The patches whose bytes differ between `delivered` and `page`.
@@ -777,10 +745,9 @@
             render-channel :seon.render.web/render-channel}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
-        cursor (data/parse-cursor (get query "path") (get query "offset"))
         registration-key (if debug? [::debug-tab id] id)
         paint (if debug?
-                (fn [] (debug-page-of @connection id cursor caps))
+                (fn [] (debug-page-of @connection id caps))
                 (fn []
                   (page-of {:seon.db/db @connection
                             :seon.cluster.agent/id id
@@ -1032,38 +999,6 @@
       viewer-namespace
       (assoc :seon.render/namespace viewer-namespace))))
 
-(defn- walk-node-html
-  [node path]
-  (let [failure (:seon.error/value node)
-        output (:seon.render/output node)]
-    [:article {:class "seon-data-panel"
-               :data-walk-path (pr-str path)}
-     [:div {:class "seon-data-row"}
-      [:span {:class "seon-data-key"} (pr-str path)]
-      [:span {:class "seon-data-scalar"}
-       (pr-str (:seon.render.walk/lookup node))]]
-     (cond
-       failure
-       [:div {:class "seon-error-card"
-              :data-error-kind (str (:seon.error/kind failure))}
-        [:span {:class "seon-error-card-message"}
-         (:seon.error/message failure)]]
-
-       (some? output)
-       output)
-     (map-indexed
-      (fn [index child]
-        (walk-node-html child
-                        (conj path :seon.render.walk/neighbours index)))
-      (:seon.render.walk/neighbours node))]))
-
-(defn- html-walk
-  [db caps agent-id]
-  (walk-node-html
-   (render.walk/neighborhood
-    (walk-request db caps agent-id :seon.render/html))
-   []))
-
 (defn- ai-walk
   [db caps agent-id]
   (render/call-with-walk-context
@@ -1074,13 +1009,14 @@
 
 (defn- page-response
   [{:keys [:seon.store/connection]
-    caps :seon.sci.admit/caps}
+    caps :seon.sci.admit/caps
+    process :seon.cluster.run/process}
    agent-id]
   (let [db @connection
         page (page-of {:seon.db/db db
                        :seon.cluster.agent/id agent-id
                        :seon.sci.admit/caps caps
-                       :seon.cluster.run/live-processes #{}})
+                       :seon.cluster.run/live-processes #{process}})
         stream-html (get page stream-strip-id)
         unit-html (vals (dissoc page stream-strip-id))]
     {:status 200
@@ -1106,28 +1042,33 @@
     caps :seon.sci.admit/caps}
    agent-id]
   (let [db @connection
-        ai (ai-walk db caps agent-id)
-        html (html-walk db caps agent-id)]
+        page (debug-page-of db agent-id caps)
+        ai-id (str "debug-ai-" agent-id)
+        ai (get page ai-id)
+        html (vals (dissoc page ai-id))]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body
      (shell
       {:seon.cluster.agent/id agent-id
        :seon.render/page
-       [[:section {:class "seon-debug-walk"
-                   :style "display:grid;grid-template-columns:1fr 1fr;min-height:0"}
-         [:section {:id (str "debug-ai-" agent-id)
-                    :style "min-width:0;overflow:auto"}
-          [:h2 ":seon.render/ai"]
-          [:pre ai]]
-         [:section {:id (str "debug-html-" agent-id)
-                    :style "min-width:0;overflow:auto"}
-          [:h2 ":seon.render/html"]
-          html]]]
+       [[:section {:class "seon-debug"
+                   :data-signals__ifmissing
+                   "{showEverything:true,selectedUnit:''}"}
+         [:div {:class "seon-debug-grid"}
+          [:section {:class "seon-debug-pane seon-debug-pane-ai"}
+           [:h2 {:class "seon-debug-caption"} ":seon.render/ai"]
+           (hiccup/raw ai)]
+          [:section {:class "seon-debug-pane seon-debug-pane-html"}
+           [:h2 {:class "seon-debug-caption"} ":seon.render/html"]
+           (into [:div {:id (str "debug-html-" agent-id)
+                        :class "seon-debug-body seon-debug-body-html"}]
+                 (map hiccup/raw)
+                 html)]]]]
        :seon.render.web/feed-url
        (route/path ::route/feed
                    {:id agent-id}
-                   {:debug "true" :path "[]" :offset "0"})})}))
+                   {:debug "true"})})}))
 
 (defn- canonical-namespace-response
   [{:keys [:seon.store/connection] :as service} debug? request]
