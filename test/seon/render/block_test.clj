@@ -904,50 +904,6 @@
         (is (not (str/includes? html "(+ 1 2)"))
             "the configured depth stopped the walk, not the distance")))))
 
-(defn shouted-html
-  "A different lens on the same neighbor — the redirect's target."
-  [unit]
-  [:div {:class "shouted"}
-   [:span (str "RUN " (:seon.cluster.run/id unit))]])
-
-(defn redirecting-html
-  "A renderer that steers ONE hop at its own slot."
-  [unit]
-  [:div {:class "error"}
-   [:span (:seon.error/message unit)]
-   (block/entity-slot (:db/id (:seon.error/run unit)) `shouted-html)])
-
-(deftest a-slot-may-steer-its-hop-to-another-projection
-  ;; Every hop is normally rendered by its owner's lens; the override
-  ;; point is the slot, and it routes through the ONE router like any
-  ;; other declaration.
-  (with-ref-database
-    (fn [connection]
-      (d/transact connection
-                  [{:seon.error/id "err-7f21" :seon.render/html `redirecting-html}
-                   {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
-      (let [db (d/db connection)
-            html (neighborhood db 2)]
-        (is (str/includes? html "RUN run-7f21")
-            "the hole's own projection won over the entity's declaration")
-        (is (not (str/includes? html "<span>run run-7f21"))
-            "the neighbor's own lens was not used")))))
-
-(deftest a-redirected-hop-needs-no-declaration-on-the-neighbor
-  ;; The override reaches an entity nobody wrote a renderer for, which is
-  ;; what makes "redirectable at any point" true rather than conditional:
-  ;; the run declares nothing and would have fallen to the generic panel.
-  (with-ref-database
-    (fn [connection]
-      (d/transact connection
-                  [{:seon.error/id "err-7f21"
-                    :seon.render/html `redirecting-html}])
-      (let [html (neighborhood (d/db connection) 1)]
-        (is (str/includes? html "RUN run-7f21")
-            "the steered projection ran")
-        (is (not (str/includes? html "seon-data-panel"))
-            "so the generic default was never reached")))))
-
 (deftest a-ref-cycle-is-refused-at-the-hole-that-closes-it
   ;; THE REASON THE VISITED SET IS LOAD-BEARING HERE and merely helpful
   ;; for blocks: a value tree cannot cycle, and an entity graph

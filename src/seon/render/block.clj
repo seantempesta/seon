@@ -146,24 +146,12 @@
   emits no ref hole reaches nothing, whatever distance it was called
   with, and that is correct rather than a bug.
 
-  The two-argument arity is THE OVERRIDE POINT: `projection` is a
-  qualified symbol the neighbour is rendered through INSTEAD of its own
-  declaration. Every hop is normally rendered by its owner's lens; a
-  caller that wants a different lens for one hop says so at the hole,
-  and the choice is recorded where every projection choice is recorded —
-  in the emitting renderer's own output."
+  Each neighbour renders through its own declaration, family default, or
+  the floor selected by the one render chain."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.render.walk/lookup] :seon.render/hiccup]
-    [:=> [:cat :seon.render.walk/lookup :seon.render/projection]
-     :seon.render/hiccup]]}
-  ([lookup]
-   [:div {:data-ref (pr-str lookup)} ""])
-  ([lookup projection]
-   ;; the symbol is PRINTED, like the lookup beside it, because a hole
-   ;; is hiccup and hiccup attributes are strings on the way to a
-   ;; browser. `follow` reads it back with the same reader.
-   [:div {:data-ref (pr-str lookup) :data-projection (pr-str projection)} ""]))
+   [:=> [:cat :seon.render.walk/lookup] :seon.render/hiccup]}
+  [lookup]
+  [:div {:data-ref (pr-str lookup)} ""])
 
 (defn distance
   "The hops of neighborhood `request` asks for. THE ONE DEFAULT SITE.
@@ -663,8 +651,7 @@
               ;; a renderer's delegation to a NEIGHBOUR, so the neighbour
               ;; is called at distance-1 and whatever it delegates in
               ;; turn is one cheaper again.
-              (let [encoded (:data-ref (nth hole 1))
-                    redirect (:data-projection (nth hole 1))]
+              (let [encoded (:data-ref (nth hole 1))]
                 (cond
                   (contains? visited encoded)
                   (note hole (str "cycle: " encoded
@@ -690,15 +677,6 @@
                                 :seon.error/message
                                 (str "This ref is not readable: " encoded)}
                                (entity-unit db lookup))
-                        ;; the hole's OWN projection, when it carries
-                        ;; one: every hop is normally rendered by its
-                        ;; owner's lens, and this is the override point
-                        ;; — one more declaration through the one
-                        ;; router, never a second dispatch
-                        steered (when redirect
-                                  (let [read (try (edn/read-string redirect)
-                                                  (catch Throwable _ nil))]
-                                    (when (qualified-symbol? read) read)))
                         ;; the neighbour is CALLED with what it may
                         ;; spend. Absent stays absent, so an expansion
                         ;; with no budget hands the neighbour no key.
@@ -710,15 +688,12 @@
                       ;; ref to something nobody wrote a renderer for is
                       ;; still legible, which is what makes /data work
                       ;; with zero authoring
-                      (let [declared (or (some? steered)
-                                         (render/declaration?
-                                          (get unit :seon.render/html)))
+                      (let [declared (render/declaration?
+                                      (get unit :seon.render/html))
                             neighbour (cond-> unit
                                         remaining-hops
                                         (assoc :seon.render/distance
-                                               remaining-hops)
-                                        steered
-                                        (assoc :seon.render/html steered))
+                                               remaining-hops))
                             rendered
                             (render/render
                              {:seon.render/unit

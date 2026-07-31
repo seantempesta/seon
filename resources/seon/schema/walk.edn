@@ -34,18 +34,14 @@
  ; "why did it render that way?" is answered by reading one map.
  ; ---------------------------------------------------------------------------
 
- ; step 1 — the delegating renderer steered THIS hop to another lens.
- ; The prose-side twin of `entity-slot`'s second arity.
- :seon.render/redirect :seon.render/projection
-
- ; step 2 — the VIEWER's local override for a data type, keyed by the
+ ; step 1 — the VIEWER's local override for a data type, keyed by the
  ; registered schema key the value matches. It rides the REQUEST rather
  ; than the unit precisely because the viewer is constant through the
- ; whole walk: hop 3 renders through the original agent's overrides, and
+ ; whole walk: every hop renders through the original agent's overrides, and
  ; perspective never silently shifts to an intermediate namespace.
  :seon.render/overrides [:map-of :qualified-keyword :seon.render/projection]
 
- ; step 4 — the kind's floor. Required, because a kind whose floor could
+ ; step 3 — the kind's floor. Required, because a kind whose floor could
  ; be absent would make some value unrenderable, and the floor exists
  ; precisely so none is: "code is a good fallback as it's the truth of
  ; the system."
@@ -55,7 +51,6 @@
  [:map {:closed true}
   [:seon.render/kind :seon.render/kind]
   [:seon.render/floor :seon.render/floor]
-  [:seon.render/redirect {:optional true} :seon.render/redirect]
   [:seon.render/overrides {:optional true} :seon.render/overrides]]
 
  ; ---------------------------------------------------------------------------

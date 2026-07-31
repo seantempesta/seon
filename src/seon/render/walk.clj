@@ -22,22 +22,19 @@
   THE RESOLUTION CHAIN IS THE DESIGN (owner ruling, 2026-07-28
   post-midnight #3), most specific first, in `projection`:
 
-  1. an explicit REDIRECT from the delegating renderer — one hop steered
-     to another lens, the override point `entity-slot`'s second arity
-     already owns on the html side;
-  2. the VIEWER's local override for the data type — and the viewer is
-     CONSTANT through the whole walk. Hop 3 renders through the original
+  1. the VIEWER's local override for the data type — and the viewer is
+     CONSTANT through the whole walk. Every hop renders through the original
      agent's overrides; perspective never silently shifts to whichever
      namespace happens to own the intermediate node. That constancy is
      why `overrides` rides the request rather than the unit;
-  3. the OWNING NAMESPACE's default — the entity's own stored
+  2. the OWNING NAMESPACE's default — the entity's own stored
      declaration if it carries one, then its FAMILY's, declared as a
      `:seon.render/ai`/`:seon.render/html` property on the registered
      entity map (`seon.schema`'s own idiom: `:seon.fn`, `:seon.ns` and
      `:seon.schema` already declare theirs that way, and `shape-rows`
      lifts them). Declaring a family default is therefore a schema EDN
      line plus a plain function — no registry, no table here;
-  4. the FLOOR: the code/data panels, \"a good fallback as it's the truth
+  3. the FLOOR: the code/data panels, \"a good fallback as it's the truth
      of the system.\" Nothing is ever unrenderable.
 
   DISTANCE IS SPENT ON CONNECTIONS, one hop each, exactly as `expand`
@@ -154,10 +151,10 @@
 (defn projection
   "The projection symbol for `unit` in `kind`. THE RESOLUTION CHAIN.
 
-  Most specific first — redirect, viewer override, the entity's own
-  declaration, its family's default, the kind's floor — and each step is
-  data the caller already has, so \"why did it render that way?\" is
-  answered by reading one map rather than by tracing a dispatch.
+  Most specific first — viewer override, the entity's own declaration,
+  its family's default, the kind's floor — and each step is data the caller
+  already has, so \"why did it render that way?\" is answered by reading one
+  map rather than by tracing a dispatch.
 
   `overrides` is the VIEWER's, keyed by registered schema key, and it is
   passed unchanged to every hop: the viewer is constant through the whole
@@ -169,9 +166,8 @@
   everything this can produce."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render.walk/resolution]
                   :seon.render/projection]}
-  [unit {:seon.render/keys [kind redirect overrides floor]}]
-  (or redirect
-      (some (fn [{shape-key :seon.schema/key}] (get overrides shape-key))
+  [unit {:seon.render/keys [kind overrides floor]}]
+  (or (some (fn [{shape-key :seon.schema/key}] (get overrides shape-key))
             (family unit))
       (let [declared (get unit kind)]
         (when (qualified-symbol? declared) declared))
