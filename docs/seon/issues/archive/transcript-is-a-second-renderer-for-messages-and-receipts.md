@@ -49,7 +49,8 @@ and marked in the transcript's output.
 
 ## Resolution
 
-Resolved by `618175e83`. The transcript's independent message/receipt prose,
+Resolved by `618175e83` with the integrated receipt-floor correction in
+`f844b018c`. The transcript's independent message/receipt prose,
 preview clipping, result summaries, and interrupted-state wording were
 deleted. Message and receipt sentences now come from their schema-family
 projection selected by `seon.render.walk/projection` and invoked through

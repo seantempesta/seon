@@ -53,7 +53,8 @@ reason-bearing message with no `from` is not attributed to this agent.
 
 ## Resolution
 
-Resolved by `618175e83`. The transcript now asks the walk's family resolver
+Resolved by `618175e83` with the integrated receipt-floor correction in
+`f844b018c`. The transcript now asks the walk's family resolver
 for the message projection and invokes it through `seon.render/render`, then
 renders distinct `:my.message/reason` metadata through the shared floor.
 `populated-history-restores-the-repl-fidelity-checklist` proves that decline
