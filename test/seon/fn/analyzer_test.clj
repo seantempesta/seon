@@ -184,3 +184,49 @@
       (is (= :invalid-arity
              (::analyzer/type
               (first (::analyzer/findings (nth analysis 6)))))))))
+
+(deftest reply-analysis-does-not-contaminate-build-analysis
+  (let [cache-root (io/file "tmp" "analyzer-test" (str (random-uuid)) "cache")
+        source-directory (fixture-directory (str (random-uuid)))
+        source-file
+        (write-fixture!
+         source-directory
+         "cache_clean.clj"
+         (str "(ns cache-clean)\n"
+              "(defn update-value []\n"
+              "  (let [value (volatile! 0)]\n"
+              "    (vswap! value inc)\n"
+              "    (vswap! value + 2)\n"
+              "    @value))\n"))
+        cache-directory-var
+        (ns-resolve 'seon.fn.analyzer 'cache-directory)]
+    (with-redefs-fn
+      {cache-directory-var (.getPath cache-root)}
+      (fn []
+        (let [before (analyzer/analyze {::analyzer/paths [source-file]})
+              reply
+              (analyzer/analyze-forms
+               {::analyzer/namespace-name 'my.agents.cache-test
+                ::analyzer/available-functions
+                [{:seon.fn/sym "clojure.core/volatile!"
+                  :seon.fn/arglists "([x])"}
+                 {:seon.fn/sym "clojure.core/vswap!"
+                  :seon.fn/arglists "([_ _ vol f & args])"}
+                 {:seon.fn/sym "runtime.example/one"
+                  :seon.fn/arglists "([x])"}]
+                ::analyzer/sources
+                ["(let [value (clojure.core/volatile! 0)]\n   (clojure.core/vswap! value inc)\n   @value)"
+                 "(runtime.example/one)"]})
+              after (analyzer/analyze {::analyzer/paths [source-file]})
+              builtin-defect?
+              #(contains? #{:invalid-arity :type-mismatch}
+                          (::analyzer/type %))]
+          (testing "build analysis begins with intact builtin definitions"
+            (is (empty? (filter builtin-defect? (::analyzer/findings before)))))
+          (testing "reply lint retains synthesized program findings"
+            (is (= :invalid-arity
+                   (::analyzer/type
+                    (first (::analyzer/findings (second reply)))))))
+          (testing "reply synthesis leaves builtin build analysis intact"
+            (is (empty? (filter builtin-defect?
+                                (::analyzer/findings after))))))))))

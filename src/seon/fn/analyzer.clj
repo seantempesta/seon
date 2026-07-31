@@ -325,7 +325,8 @@
         spans (source-spans first-row sources)
         filename (str (str/replace (str namespace-name) "." "/") ".clj")
         result (with-in-str (str prelude "\n" (str/join "\n" sources))
-                 (invoke-kondo {:lint ["-"]
+                 (invoke-kondo {:cache false
+                                :lint ["-"]
                                 :filename filename}))
         findings (->> (:findings result)
                       (map finding)
