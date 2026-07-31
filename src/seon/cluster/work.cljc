@@ -15,11 +15,14 @@
     ordinary live fold, never a cold continuation after recovery;
   - `:call` — an open run this process holds, WITHOUT a plan digest.
     Derive the prompt, make the ONE paid model call, freeze the plan;
-  - `:open` — an unanswered trigger and an agent with no open run.
-    Open and claim FIRST, model second: the busy fence must exist
-    before the expensive part, so a second trigger during a model call
-    cannot start a second turn (the claim-early half of n3-plan §9.1,
-    which the night ruling kept);
+  - `:open` — an agent with no open run and either a lint-refused latest
+    closed turn below the episode cap or an unanswered trigger. A lint
+    refusal reuses that turn's trigger identity so its committed findings
+    appear in the corrective turn without a new message. Open and claim
+    FIRST, model second: the busy fence must exist before the expensive
+    part, so a second trigger during a model call cannot start a second
+    turn (the claim-early half of n3-plan §9.1, which the night ruling
+    kept);
   - `:close` — an open run whose every form already has a terminal
     receipt. The fold is done. This is its own situation rather than a
     `:resume` carrying no ordinal, because fold-vs-close is a different
@@ -157,6 +160,14 @@
       (edn/read-string printed)
       (catch #?(:clj Throwable :cljs :default) _
         nil))))
+
+(def ^:private lint-rejected-kind
+  :seon.cluster.loop/lint-rejected)
+
+(defn- lint-refusal-receipt?
+  [receipt]
+  (= lint-rejected-kind
+     (:seon.error/kind (receipt-value receipt))))
 
 (defn red-receipt?
   "True when a terminal receipt is red: error, interruption, or unbound."
@@ -374,21 +385,22 @@
 
   Inclusive of that run, and derived purely from committed facts: every
   run's opening transaction names its trigger as `:seon.db/trigger`
-  tx-meta, and a trigger is outside exactly when it carries neither
-  `from` nor `about` (R3 — the error recorder never resets the
-  episode). Zero new facts, no stored counter — an outside trigger's
-  own run IS the reset, so no reset code exists. An agent that has
-  NEVER answered an outside trigger counts EVERY run: all of them are
-  autonomous continuation, and a zero here would void the cap for
-  exactly the agent-spawned agents it most concerns (review-caught,
-  2026-07-28). The delivered conservation-audit derivation (§6),
-  measured ~34 µs on a 64-run history."
+  tx-meta. Refusal correction reuses that trigger, so the episode anchor
+  is the FIRST answering transaction for each outside trigger, then the
+  latest of those first answers; later corrective runs cannot reset their
+  own bound. A trigger is outside exactly when it carries neither `from`
+  nor `about` (R3 — the error recorder never resets the episode). Zero
+  new facts, no stored counter — an outside trigger's first run IS the
+  reset, so no reset code exists. An agent that has NEVER answered an
+  outside trigger counts EVERY run: all of them are autonomous
+  continuation, and a zero here would void the cap for exactly the
+  agent-spawned agents it most concerns (review-caught, 2026-07-28)."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   :seon.cluster.work/episode-runs]}
   [db agent-id]
-  (let [outside-tx
-        (d/q '[:find (max ?tx) .
+  (let [first-outside-txs
+        (d/q '[:find ?message (min ?tx)
                :in $ ?agent-id
                :where
                [?agent :seon.cluster.agent/id ?agent-id]
@@ -397,7 +409,8 @@
                [?tx :seon.db/trigger ?message]
                (not [?message :seon.cluster.message/from _])
                (not [?message :seon.cluster.message/about _])]
-             db agent-id)]
+             db agent-id)
+        outside-tx (reduce max 0 (map second first-outside-txs))]
     (or (d/q '[:find (count ?run) .
                :in $ ?agent-id ?outside-tx
                :where
@@ -405,7 +418,7 @@
                [?run :seon.cluster.run/agent ?agent]
                [?run :seon.cluster.run/id _ ?tx]
                [(>= ?tx ?outside-tx)]]
-             db agent-id (or outside-tx 0))
+             db agent-id outside-tx)
         0)))
 
 (defn- max-episode-runs
@@ -426,6 +439,47 @@
   (let [limit (max-episode-runs db)]
     (or (nil? limit)
         (>= (episode-runs db agent-id) limit))))
+
+(defn- latest-closed-run
+  "The latest run this agent closed, ordered by its closing transaction."
+  [db agent-id]
+  (->> (d/q '[:find ?run ?run-id ?opened-tx ?closed-tx
+              :in $ ?agent-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?run :seon.cluster.run/agent ?agent]
+              [?run :seon.cluster.run/id ?run-id ?opened-tx]
+              [?run :seon.cluster.run/closed-at _ ?closed-tx]]
+            db agent-id)
+       (sort-by (fn [[_ run-id opened-tx closed-tx]]
+                  [closed-tx opened-tx run-id]))
+       last))
+
+(defn- lint-refusal-continuation-trigger
+  "The latest closed run's trigger when any receipt was lint-refused.
+
+  Presence derives the continuation below the existing episode cap. The
+  trigger identity is reused; no message, timer, cursor, or retry fact is
+  created. Selecting the latest closed run before examining its receipts
+  prevents an older refusal from resurfacing after a later successful turn."
+  [db agent-id]
+  (when-not (episode-capped? db agent-id)
+    (when-let [[run _run-id opened-tx _closed-tx]
+               (latest-closed-run db agent-id)]
+      (when (some lint-refusal-receipt?
+                  (d/q '[:find [(pull ?receipt
+                                  [:seon.cluster.eval/result-edn]) ...]
+                         :in $ ?run
+                         :where
+                         [?receipt :seon.cluster.eval/run ?run]
+                         [?receipt :seon.cluster.eval/result-edn _]]
+                       db run))
+        (d/q '[:find ?trigger-id .
+               :in $ ?opened-tx
+               :where
+               [?opened-tx :seon.db/trigger ?trigger]
+               [?trigger :seon.cluster.message/id ?trigger-id]]
+             db opened-tx)))))
 
 (defn- openable-trigger
   "The trigger `agent-id`'s next run answers, under the episode gate.
@@ -485,10 +539,11 @@
   started is what makes the busy fence mean anything.
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
-  when no such ordinal remains the situation is `:close`. The episode
-  gate lives in the `:open` arm's trigger selection, so a deferred
-  trigger simply derives no work — no consumer ever sees a decision to
-  refuse."
+  when no such ordinal remains the situation is `:close`. With no open
+  run, a lint refusal on the latest closed run derives corrective `:open`
+  first below the episode cap; otherwise the `:open` arm selects an
+  unanswered trigger under that same gate. A deferred trigger simply
+  derives no work — no consumer ever sees a decision to refuse."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.work/agent-request]
                   [:maybe :seon.cluster.work/next]]}
@@ -512,15 +567,18 @@
       (some? run) nil
 
       :else
-      (when-let [trigger (openable-trigger db agent-id)]
+      (when-let [trigger-id
+                 (or (lint-refusal-continuation-trigger db agent-id)
+                     (:seon.cluster.message/id
+                      (openable-trigger db agent-id)))]
         {:seon.cluster.work/situation :open
          :seon.cluster.agent/id agent-id
-         :seon.cluster.message/id
-         (:seon.cluster.message/id trigger)}))))
+         :seon.cluster.message/id trigger-id}))))
 
 (defn more-agent-work?
-  "True when another pass would find work for this agent. The turn
-  proc's self-rewake predicate — exactly
+  "True when another pass would find work for this agent.
+
+  The turn proc's self-rewake predicate — exactly
   `(some? (next-agent-work db request))`, stated as its own contract
   because the rewake must never drift from the derivation it rewakes
   for."

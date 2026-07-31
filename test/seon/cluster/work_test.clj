@@ -23,7 +23,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
-            [seon.cluster.run :as run]
             [seon.cluster.work :as work]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike])
@@ -58,6 +57,8 @@
    :seon.cluster.message/to
    :seon.cluster.message/content
    :seon.cluster.message/at
+   :seon.config/cluster
+   :seon.config.run/max-episode-runs
    :seon.db/trigger])
 
 (def ^:private process "process/one")
@@ -67,6 +68,11 @@
 (def ^:private message-id "message-1")
 (def ^:private now (Date. 1700000000000))
 (def ^:private digest (apply str (repeat 64 "a")))
+(def ^:private lint-refusal
+  {:seon.error/kind :seon.cluster.loop/lint-rejected
+   :seon.error/message "Static analysis rejected this source form."
+   :seon.error/data {:seon.fn.analyzer/findings
+                     [{:seon.fn.analyzer/level :error}]}})
 
 (defn- with-database [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -121,14 +127,16 @@
             {:seon.db/trigger [:seon.cluster.message/id message-id]}))))
 
 (defn- terminal-receipt!
-  [connection ordinal]
-  (d/transact connection
-              [{:seon.cluster.eval/id (str run-id "-" ordinal)
-                :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-                :seon.cluster.eval/ordinal ordinal
-                :seon.cluster.eval/at now
-                ;; the result's presence IS the terminal state
-                :seon.cluster.eval/result-edn "1"}]))
+  ([connection ordinal]
+   (terminal-receipt! connection ordinal "1"))
+  ([connection ordinal result-edn]
+   (d/transact connection
+               [{:seon.cluster.eval/id (str run-id "-" ordinal)
+                 :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+                 :seon.cluster.eval/ordinal ordinal
+                 :seon.cluster.eval/at now
+                 ;; the result's presence IS the terminal state
+                 :seon.cluster.eval/result-edn result-edn}])))
 
 (defn- close-run! [connection]
   (d/transact connection
@@ -136,6 +144,58 @@
                 :seon.cluster.run/closed-at now]
                [:db/retract [:seon.cluster.agent/id agent-id]
                 :seon.cluster.agent/run [:seon.cluster.run/id run-id]]]))
+
+(defn- configure-cap!
+  [connection limit]
+  (d/transact connection
+              [{:seon.config/cluster "work-test"
+                :seon.config.run/max-episode-runs limit}]))
+
+(defn- add-outside-trigger!
+  [connection id at]
+  (d/transact connection
+              [{:seon.cluster.message/id id
+                :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                :seon.cluster.message/content id
+                :seon.cluster.message/at at}]))
+
+(defn- closed-run!
+  "Commit one complete turn, with each supplied value as a receipt result."
+  [connection id trigger-id result-values at]
+  (d/transact
+   connection
+   {:tx-data
+    (into [{:seon.cluster.run/id id
+            :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+            :seon.cluster.run/opened-at at
+            :seon.cluster.run/process process
+            :seon.cluster.run/plan-digest digest}
+           {:seon.cluster.agent/id agent-id
+            :seon.cluster.agent/run [:seon.cluster.run/id id]}]
+          (map-indexed
+           (fn [ordinal _]
+             {:seon.cluster.run.form/id (str id "-form-" ordinal)
+              :seon.cluster.run.form/run [:seon.cluster.run/id id]
+              :seon.cluster.run.form/ordinal ordinal
+              :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
+           result-values))
+    :tx-meta {:seon.db/trigger
+              [:seon.cluster.message/id trigger-id]}})
+  (d/transact
+   connection
+   (map-indexed
+    (fn [ordinal value]
+      {:seon.cluster.eval/id (str id "-receipt-" ordinal)
+       :seon.cluster.eval/run [:seon.cluster.run/id id]
+       :seon.cluster.eval/ordinal ordinal
+       :seon.cluster.eval/at at
+       :seon.cluster.eval/result-edn (pr-str value)})
+    result-values))
+  (d/transact connection
+              [[:db/add [:seon.cluster.run/id id]
+                :seon.cluster.run/closed-at at]
+               [:db/retract [:seon.cluster.agent/id agent-id]
+                :seon.cluster.agent/run [:seon.cluster.run/id id]]]))
 
 (def ^:private request
   "The AGENT-SCOPED request (F2 §3.2). The global one died with the
@@ -278,6 +338,78 @@
                 (is (seon.schema/valid-candidate-value?
                      :seon.cluster.work/next derived))))))))))
 
+(deftest a-lint-refusal-derives-an-immediate-corrective-turn
+  (doseq [[label results]
+          [["all forms were refused" [lint-refusal lint-refusal]]
+           ["one form succeeded and one was refused" [1 lint-refusal]]]]
+    (testing label
+      (with-database
+        (fn [connection]
+          (configure-cap! connection 3)
+          (add-outside-trigger! connection message-id now)
+          (closed-run! connection "refused-run" message-id results now)
+          (let [db @connection
+                derived (work/next-agent-work db request)]
+            (is (empty? (work/unanswered-triggers db agent-id))
+                "no external message manufactures the corrective turn")
+            (is (= {:seon.cluster.work/situation :open
+                    :seon.cluster.agent/id agent-id
+                    :seon.cluster.message/id message-id}
+                   derived)
+                "the existing open situation reuses the original trigger")
+            (add-outside-trigger! connection "concurrent-message"
+                                  (Date. 1700000000001))
+            (is (= message-id
+                   (:seon.cluster.message/id
+                    (work/next-agent-work @connection request)))
+                "immediate correction precedes a concurrent outside trigger")
+            (is (true? (work/more-agent-work? db request)))
+            (is (seon.schema/valid-candidate-value?
+                 :seon.cluster.work/next derived))))))))
+
+(deftest a-clean-correction-retires-the-previous-lint-refusal
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 3)
+      (add-outside-trigger! connection message-id now)
+      (closed-run! connection "refused-run" message-id [lint-refusal] now)
+      (is (= message-id
+             (:seon.cluster.message/id
+              (work/next-agent-work @connection request))))
+      (closed-run! connection "clean-correction" message-id [1]
+                   (Date. 1700000000001))
+      (is (= 2 (work/episode-runs @connection agent-id)))
+      (is (nil? (work/next-agent-work @connection request))
+          "only the latest closed turn can derive continuation"))))
+
+(deftest lint-refusal-continuation-stops-at-the-existing-episode-cap
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 3)
+      (add-outside-trigger! connection message-id now)
+      (doseq [ordinal (range 3)]
+        (closed-run! connection
+                     (str "refused-run-" ordinal)
+                     message-id
+                     [lint-refusal]
+                     (Date. (+ (.getTime now) ordinal)))
+        (is (= (inc ordinal) (work/episode-runs @connection agent-id))
+            "reusing an outside trigger does not reset its episode"))
+      (is (nil? (work/next-agent-work @connection request))
+          "a refusal at the cap does not continue")
+      (is (false? (work/more-agent-work? @connection request)))
+      (testing "a genuinely new outside trigger still resets the episode"
+        (add-outside-trigger! connection "message-2" (Date. 1700000000100))
+        (is (= {:seon.cluster.work/situation :open
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.message/id "message-2"}
+               (work/next-agent-work @connection request)))
+        (closed-run! connection "outside-reset" "message-2" [1]
+                     (Date. 1700000000100))
+        (is (= 1 (work/episode-runs @connection agent-id)))
+        (is (nil? (work/next-agent-work @connection request))
+            "the older refusal cannot resurface after a clean latest turn")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The two derivations that are NOT work
 ;;; ---------------------------------------------------------------------------
@@ -308,9 +440,11 @@
            closed? gen/boolean
            triggered? gen/boolean
            trigger-first? gen/boolean
+           lint-ordinal (gen/elements [nil 0 1])
            receipts (gen/vector-distinct (gen/elements [0 1]) {:max-elements 2})]
           (with-database
             (fn [connection]
+              (configure-cap! connection 3)
               (when trigger-first? (add-trigger! connection))
               (open-run! connection {:holder holder
                                      :planned? planned?
@@ -318,11 +452,18 @@
                                                       trigger-first?)})
               (when (and triggered? (not trigger-first?))
                 (add-trigger! connection))
-              (doseq [ordinal receipts] (terminal-receipt! connection ordinal))
+              (doseq [ordinal receipts]
+                (terminal-receipt!
+                 connection ordinal
+                 (if (= ordinal lint-ordinal)
+                   (pr-str lint-refusal)
+                   "1")))
               (when closed? (close-run! connection))
               (let [db (d/db connection)
                     derived (work/next-agent-work db request)
-                    situation (:seon.cluster.work/situation derived)]
+                    situation (:seon.cluster.work/situation derived)
+                    answered-closed? (and closed? triggered? trigger-first?)
+                    refused? (contains? (set receipts) lint-ordinal)]
                 (and
                  ;; TOTAL: only the four situations, or idle
                  (contains? #{:resume :call :open :close nil} situation)
@@ -332,6 +473,11 @@
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value?
                       :seon.cluster.work/next derived))
+                 ;; An answered closed turn is idle unless a committed
+                 ;; receipt contains a lint refusal; that presence derives
+                 ;; the existing corrective :open situation.
+                 (or (not answered-closed?)
+                     (= (if refused? :open nil) situation))
                  ;; :resume carries the FIRST ordinal with no terminal
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation
