@@ -82,7 +82,7 @@ proved those commits had no remote ref.
 | `datahike` | [seantempesta/datahike](https://github.com/seantempesta/datahike) | `main` | `9b3be9d59cb07d9c895af280e60eb074bb57a400` | yes |
 | `konserve` | [seantempesta/konserve](https://github.com/seantempesta/konserve) | `seon-0.9.359-legacy-header` | `b5c99bc02a7175652a610324215288b78551801f` | yes |
 | `proximum` | [seantempesta/proximum](https://github.com/seantempesta/proximum) | `seon-guarded-force-v126` | `9846d3e79e1aee48474bc876d3d563d7137209c6` | yes |
-| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4` | yes |
+| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` | yes |
 | `clj-kondo` | [seantempesta/clj-kondo](https://github.com/seantempesta/clj-kondo) | `seon` | `57252e07975710aa579b24f0d1b2b1e04195caa2` | yes |
 | `core.async.flow-monitor` | [seantempesta/core.async.flow-monitor](https://github.com/seantempesta/core.async.flow-monitor) | `seon` | `fbff8424696c7080ee7dc27b55cde1659ec18d8f` | yes |
 | `superv.async` | [seantempesta/superv.async](https://github.com/seantempesta/superv.async) | `wasm/lazy-watchdog` | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | yes |
@@ -115,3 +115,13 @@ GitHub reports `seantempesta/sci` as `fork: false`, not as a network fork of
 second `seantempesta/sci` with `gh repo fork`. No alternate repository was
 invented. The already-established owner remote remains the publication owner,
 and its `seon` tip is API-verified above.
+
+## Follow-up publication
+
+The `sci-substrate-prep` lane subsequently added eleven modern core functions
+on `sci/seon`. A plain fast-forward push advanced the owner branch, and a
+fresh GitHub API read exactly matched the local tip.
+
+| Submodule | Owner repository | Branch | Previous tip | Verified remote tip |
+|---|---|---|---|---|
+| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` |
