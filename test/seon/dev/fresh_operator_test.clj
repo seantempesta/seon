@@ -74,6 +74,31 @@
       (throw (ex-info "The test child has no start instant." {})))
     (Date/from (.get optional))))
 
+(defn- advertisement-process-identity
+  [root name]
+  (select-keys
+   (edn/read-string
+    (slurp (io/file root "data" "clusters" name "prepl.edn")))
+   [:seon.boot/pid :seon.boot/start-instant]))
+
+(defn- reap-process-identity!
+  [{:seon.boot/keys [pid start-instant]}]
+  (when-let [^java.lang.ProcessHandle handle
+             (some-> (java.lang.ProcessHandle/of (long pid))
+                     (.orElse nil))]
+    (let [current-start (.startInstant (.info handle))]
+      (when (and (.isAlive handle)
+                 (.isPresent current-start)
+                 (= (.toEpochMilli (.get current-start))
+                    (.getTime ^Date start-instant)))
+        (.destroy handle)
+        (try
+          (.get (.onExit handle) 10 TimeUnit/SECONDS)
+          (catch TimeoutException _
+            (.destroyForcibly handle)
+            (.get (.onExit handle) 10 TimeUnit/SECONDS))))))
+  nil)
+
 (defn- operator-command
   [root & arguments]
   (into
@@ -651,7 +676,8 @@
 (deftest populated-stopped-cluster-reopens-after-full-operator-restart
   (let [root (runnable-root! (fresh-root))
         name "restart-populated"
-        marker "restart-populated-marker"]
+        marker "restart-populated-marker"
+        launched-identities (atom [])]
     (try
       (let [published (run-operator root "init")
             forked (run-operator root "init" name)]
@@ -660,6 +686,8 @@
       (let [started (run-operator root "start" name)]
         (is (= 0 (::exit started)) (::output started))
         (is (str/includes? (::output started) name) (::output started)))
+      (swap! launched-identities conj
+             (advertisement-process-identity root name))
       (is (= :populated (populate-live-cluster! root name marker)))
       (let [before (live-cluster-counts root name marker)
             live-status (run-operator root "status")]
@@ -680,6 +708,12 @@
       (let [started (run-operator root "start" name)]
         (is (= 0 (::exit started)) (::output started))
         (is (str/includes? (::output started) name) (::output started)))
+      (swap! launched-identities conj
+             (advertisement-process-identity root name))
+      (is (= 2 (count @launched-identities)))
+      (is (not= (first @launched-identities)
+                (second @launched-identities))
+          "the reopen crossed a new `(pid, start-instant)` JVM identity")
       (let [after (live-cluster-counts root name marker)
             live-status (run-operator root "status")]
         (is (= before after)
@@ -690,14 +724,18 @@
       (let [stopped (run-operator root "stop" name)]
         (is (= 0 (::exit stopped)) (::output stopped)))
       (finally
-        (let [status (run-operator root "status")]
-          (when (and (zero? (::exit status))
-                     (not (str/includes? (::output status)
-                                         "0/0 clusters alive")))
-            (let [stopped (run-operator root "down")]
-              (when-not (zero? (::exit stopped))
-                (binding [*out* *err*]
-                  (println (::output stopped)))))))
+        (try
+          (when (.isFile (io/file root "data" "clusters" name "prepl.edn"))
+            (swap! launched-identities conj
+                   (advertisement-process-identity root name)))
+          (catch Throwable _))
+        (try
+          (run-operator root "down")
+          (catch Throwable failure
+            (binding [*out* *err*]
+              (println "operator down cleanup failed:" (ex-message failure)))))
+        (doseq [process-identity (distinct @launched-identities)]
+          (reap-process-identity! process-identity))
         (delete-recursively! root)))))
 
 (deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
