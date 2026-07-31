@@ -12,7 +12,16 @@
        "see more. Your reply is read as forms and evaluated in your "
        "namespace. A `defn` with `:malli/schema` becomes permanent; "
        "anything else is scratch. Talk to other agents with "
-       "`(my.message/send! …)`. Prose lines are kept as `;;` comments."))
+       "`(my.message/send! …)`. Prose lines are kept as `;;` comments.\n\n"
+       "```clojure\n"
+       ";; unqualified name — it lands in YOUR namespace\n"
+       ";; the :malli/schema attr-map is what makes it permanent; without it this is scratch\n"
+       "(defn greet\n"
+       "  \"Say hello.\"\n"
+       "  {:malli/schema [:=> [:cat :string] :string]}\n"
+       "  [name]\n"
+       "  (str \"Hello, \" name))\n"
+       "```"))
 
 (defn- cluster-toolkit
   [db cluster-name]
@@ -27,6 +36,7 @@
 
 (deftest source-has-one-owner-editable-getting-started-row
   (is (re-find #"seon\.render/walk" instruction/getting-started-text))
+  (is (= 1 (count (re-seq #"```clojure" instruction/getting-started-text))))
   (is (= [{:seon.cluster.instruction/id :getting-started
            :seon.cluster.instruction/text getting-started-text}]
          (instruction/seed-rows)))
