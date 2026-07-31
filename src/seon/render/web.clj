@@ -49,19 +49,23 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [clojure.walk :as cwalk]
             [datahike.api :as d]
             [org.httpkit.server :as http]
+            [reitit.ring :as ring]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.render.block :as block]
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
+            [seon.render.route :as route]
             [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar])
-  (:import [java.net URI URLDecoder URLEncoder]
+  (:import [java.net URI URLDecoder]
            [java.util Date]
            [java.util.concurrent CompletableFuture Executors]))
 
@@ -112,11 +116,6 @@
 ;;; The shell
 ;;; ---------------------------------------------------------------------------
 
-(defn- path-segment
-  [value]
-  (-> (URLEncoder/encode (str value) "UTF-8")
-      (str/replace "+" "%20")))
-
 (defn- query-params
   [request]
   (into {}
@@ -142,8 +141,9 @@
             :class "seon-bar"
             :data-signals "{text:'',refusal:''}"
             (keyword "data-on:submit")
-            (str "$refusal=''; @post('/agent/" (path-segment agent-id)
-                 "/message', {contentType:'form'}); $text=''")
+            (str "$refusal=''; @post('"
+                 (route/path ::route/agent-message {:id agent-id})
+                 "', {contentType:'form'}); $text=''")
             (keyword "data-on:datastar-fetch")
             (str "evt.detail.el===el && ("
                  "evt.detail.type==='started' ? $refusal='' : "
@@ -187,8 +187,10 @@
       [:meta {:name "viewport"
               :content "width=device-width, initial-scale=1.0"}]
       [:title (str "seon · " id)]
-      [:link {:rel "stylesheet" :href "/css/output.css"}]
-      [:script {:type "module" :src "/js/datastar.js"}]]
+      [:link {:rel "stylesheet"
+              :href (route/path ::route/css {:path "output.css"})}]
+      [:script {:type "module"
+                :src (route/path ::route/js {:path "datastar.js"})}]]
      ;; SEMANTIC CLASSES, not utility strings, for the same reason the
      ;; render surfaces already use them (the note above `.seon-problems`
      ;; in `input.css`): the document frame is one thing, it is styled in
@@ -200,8 +202,8 @@
       ;; until this said `seq`. A seq is a fragment and splices.
       [:main {:class "seon-main"}
        [:nav {:class "seon-agent-routes"}
-        [:a {:href (str "/agent/" (path-segment id))} "agent"]
-        [:a {:href (str "/agent/" (path-segment id) "/debug")} "debug"]]
+        [:a {:href (route/path ::route/agent {:id id})} "agent"]
+        [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]]
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -389,7 +391,7 @@
         unit {:seon.cluster.agent/id agent-id
               :seon.render.value/root [:seon.cluster.agent/id agent-id]
               :seon.render.value/route-base
-              (str "/agent/" (path-segment agent-id) "/debug")
+              (route/path ::route/agent-debug {:id agent-id})
               :seon.render.data/cursor cursor
               :seon.sci.admit/caps caps
               :seon.render/value (debug-value db agent-id cursor caps)}
@@ -402,13 +404,14 @@
         unit {:seon.cluster.agent/id agent-id
               :seon.render.value/root [:seon.cluster.agent/id agent-id]}
         id (value/node-id unit path)
-        query (str "debug=true&path="
-                   (URLEncoder/encode (pr-str path) "UTF-8")
-                   "&offset=" (:seon.render.data/offset cursor))]
+        feed-url (route/path ::route/feed
+                             {:id agent-id}
+                             {:debug "true"
+                              :path (pr-str path)
+                              :offset (str (:seon.render.data/offset cursor))})]
     (shell {:seon.cluster.agent/id agent-id
             :seon.render/page [[:div {:id id :class "seon-data-panel"}]]
-            :seon.render.web/feed-url
-            (str "/feed/" (path-segment agent-id) "?" query)})))
+            :seon.render.web/feed-url feed-url})))
 
 (defn changed
   "The patches whose bytes differ between `delivered` and `page`.
@@ -883,11 +886,6 @@
        :headers {"content-type" "text/plain; charset=utf-8"}
        :body (:seon.error/message decision)})))
 
-(defn- exact-agent-id
-  [pattern uri]
-  (some-> (re-matches pattern uri) second
-          (URLDecoder/decode "UTF-8")))
-
 (defn- query-entity
   [encoded]
   (try
@@ -898,140 +896,231 @@
         value))
     (catch Throwable _ nil)))
 
-(defn handler
-  "The one Ring dispatcher, including the exact inbound POST route.
+(defn- not-found
+  [_request]
+  {:status 404
+   :headers {"content-type" "text/plain; charset=utf-8"}
+   :body "not found"})
 
-  Reitit remains deferred until nested route data and capability
-  middleware make a tree pay for itself. Method and whole-path
-  discrimination here make the one state-changing route exact without
-  introducing a second dispatcher."
+(defn- route-namespace
+  "Read one route segment as a round-tripping simple Clojure symbol."
+  [segment]
+  (try
+    (binding [*read-eval* false]
+      (let [value (read-string segment)]
+        (when (and (simple-symbol? value)
+                   (= segment (str value)))
+          value)))
+    (catch Throwable _ nil)))
+
+(defn- namespace-exists?
+  [db namespace-name]
+  (some?
+   (d/q '[:find ?namespace .
+          :in $ ?namespace-name
+          :where [?namespace :seon.ns/name ?namespace-name]]
+        db namespace-name)))
+
+(defn- agent-namespace
+  [db agent-id]
+  (d/q '[:find ?namespace-name .
+         :in $ ?agent-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.cluster.agent/namespace ?namespace]
+         [?namespace :seon.ns/name ?namespace-name]]
+       db agent-id))
+
+(defn- current-cluster-name
+  [db]
+  (d/q '[:find ?cluster-name .
+         :where [?cluster :seon.cluster/name ?cluster-name]]
+       db))
+
+(defn- ensure-namespace-owner!
+  [{:keys [:seon.store/connection]
+    process :seon.cluster.run/process}
+   namespace-name]
+  (or (cluster.agent/owner-of @connection namespace-name)
+      (let [ensure! (requiring-resolve 'seon.cluster/ensure-entity!)
+            result (ensure!
+                    connection process
+                    {:seon.cluster.agent/id (str namespace-name)
+                     :seon.cluster/name (current-cluster-name @connection)
+                     :seon.ns/name namespace-name})]
+        (if (:seon.error/kind result)
+          result
+          (or (cluster.agent/owner-of @connection namespace-name)
+              {:seon.error/kind ::owner-not-ensured
+               :seon.error/message
+               (str "The namespace owner for " namespace-name
+                    " was not created.")})))))
+
+(defn- page-request
+  [{caps :seon.sci.admit/caps process :seon.cluster.run/process} agent-id]
+  {:seon.cluster.agent/id agent-id
+   :seon.sci.admit/caps caps
+   :seon.cluster.run/live-processes #{process}})
+
+(defn- page-response
+  [{:keys [:seon.store/connection] :as service} agent-id]
+  {:status 200
+   :headers {"content-type" "text/html; charset=utf-8"}
+   :body (shell {:seon.cluster.agent/id agent-id
+                 :seon.render/page
+                 (block/page @connection (page-request service agent-id))
+                 :seon.render.web/feed-url
+                 (route/path ::route/feed {:id agent-id})})})
+
+(defn- debug-response
+  [agent-id request]
+  (let [query (query-params request)
+        cursor (data/parse-cursor (get query "path") (get query "offset"))]
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8"}
+     :body (debug-shell agent-id cursor)}))
+
+(defn- canonical-namespace-response
+  [{:keys [:seon.store/connection] :as service} debug? request]
+  (let [namespace-name (some-> (get-in request [:path-params :namespace])
+                               route-namespace)]
+    (if-not (and namespace-name (namespace-exists? @connection namespace-name))
+      (not-found request)
+      (let [owner (ensure-namespace-owner! service namespace-name)]
+        (if (string? owner)
+          (if debug?
+            (debug-response owner request)
+            (page-response service owner))
+          {:status 500
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body (:seon.error/message owner)})))))
+
+(defn- agent-alias-response
+  [{:keys [:seon.store/connection] :as service} debug? request]
+  (let [agent-id (get-in request [:path-params :id])]
+    (if (agent-namespace @connection agent-id)
+      (if debug?
+        (debug-response agent-id request)
+        (page-response service agent-id))
+      (not-found request))))
+
+(defn- root-alias-response
+  [service request]
+  (agent-alias-response service false
+                        (assoc-in request [:path-params :id]
+                                  (:seon.cluster.agent/id service))))
+
+(defn- inbound-response
+  [service request]
+  (let [agent-id (get-in request [:path-params :id])
+        params (decode-form request)]
+    (inbound service
+             (cond-> {:seon.cluster.agent/id agent-id}
+               (contains? params "content")
+               (assoc :seon.cluster.message/inbound-content
+                      (get params "content"))))))
+
+(defn- feed-response
+  [service request]
+  (feed request
+        (merge {:seon.cluster.agent/id (get-in request [:path-params :id])}
+               (select-keys service
+                            [:seon.store/connection
+                             :seon.sci.admit/caps
+                             :seon.cluster.run/process
+                             :seon.render.web/pages-mult
+                             :seon.render.web/registration
+                             :seon.render.web/render-channel]))))
+
+(defn- data-response
+  [{:keys [:seon.store/connection :seon.cluster.agent/id]
+    caps :seon.sci.admit/caps}
+   request]
+  (let [query (query-params request)
+        entity? (contains? query "entity")
+        entity (query-entity (get query "entity"))
+        root-value (if entity?
+                     (when-let [eid (some-> (when entity
+                                             (d/pull @connection [:db/id]
+                                                     entity))
+                                           :db/id)]
+                       (generic-entity @connection eid caps false))
+                     (schema/canonical-database-attributes))
+        cursor (data/parse-cursor (get query "path") (get query "offset"))
+        found (data/at root-value cursor)
+        opened-value (if (contains? found :seon.render.data/value)
+                       (:seon.render.data/value found)
+                       found)
+        route-base (route/path ::route/data
+                               {}
+                               (cond-> {}
+                                 entity? (assoc :entity (get query "entity"))))
+        unit {:seon.cluster.agent/id id
+              :seon.render.value/root
+              (if entity?
+                (or entity [:seon.render.data/entity (get query "entity")])
+                :seon.render.data/schema)
+              :seon.render.value/route-base route-base
+              :seon.render.data/cursor cursor
+              :seon.sci.admit/caps caps
+              :seon.render/value opened-value}]
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8"}
+     :body (shell {:seon.cluster.agent/id id
+                   :seon.render/page [(block/data-panel unit)]
+                   :seon.render.web/feed-url
+                   (route/path ::route/feed {:id id})})}))
+
+(defn- static-response
+  [directory request]
+  (or (resource (str directory "/" (get-in request [:path-params :path])))
+      (not-found request)))
+
+(defn- bind-handlers
+  [handlers]
+  (cwalk/postwalk
+   (fn [node]
+     (if-let [handler-name (and (map? node) (:handler node))]
+       (assoc node :handler
+              (or (get handlers handler-name)
+                  (throw
+                   (ex-info "Route handler is not bound."
+                            {:seon.render.route/name handler-name}))))
+       node))
+   route/routes))
+
+(defn- same-origin-middleware
+  [next-handler]
+  (fn [request]
+    (if (same-origin? request)
+      (next-handler request)
+      {:status 403
+       :headers {"content-type" "text/plain; charset=utf-8"}
+       :body "cross-origin POST refused"})))
+
+(defn handler
+  "Build the one Reitit Ring handler from the route table and service."
   {:malli/schema [:=> [:cat :seon.render.web/service]
                   [:fn clojure.core/fn?]]}
-  [{:keys [:seon.store/connection :seon.cluster.agent/id]
-    caps :seon.sci.admit/caps
-    process :seon.cluster.run/process
-    :as service}]
-  (fn [request]
-    (let [uri (:uri request)
-          method (:request-method request)
-          inbound-agent (when (= :post method)
-                          (exact-agent-id #"/agent/([^/]+)/message" uri))
-          page-agent (when (= :get method)
-                       (exact-agent-id #"/agent/([^/]+)" uri))
-          debug-agent (when (= :get method)
-                        (exact-agent-id #"/agent/([^/]+)/debug" uri))
-          feed-agent (when (= :get method)
-                       (exact-agent-id #"/feed/([^/]+)" uri))
-          ;; ONE page request builder for both html routes, so `/` and
-          ;; `/agent/{id}` cannot drift into two answers about who is
-          ;; alive. Root IS an agent: the only difference between these
-          ;; routes is which id they name.
-          page-request (fn [agent-id]
-                         {:seon.cluster.agent/id agent-id
-                          :seon.sci.admit/caps caps
-                          :seon.cluster.run/live-processes #{process}})]
-      (cond
-        inbound-agent
-        (if (same-origin? request)
-          (let [params (decode-form request)]
-            (inbound service
-                     (cond-> {:seon.cluster.agent/id inbound-agent}
-                       (contains? params "content")
-                       (assoc :seon.cluster.message/inbound-content
-                              (get params "content")))))
-          {:status 403
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body "cross-origin POST refused"})
-
-        (and (= :get method) (= "/" uri))
-        {:status 200
-         :headers {"content-type" "text/html; charset=utf-8"}
-         :body (shell {:seon.cluster.agent/id id
-                       :seon.render/page (block/page @connection
-                                                     (page-request id))
-                       :seon.render.web/feed-url (str "/feed/" id)})}
-
-        debug-agent
-        (if (agent-exists? @connection debug-agent)
-          (let [query (query-params request)
-                cursor (data/parse-cursor (get query "path")
-                                          (get query "offset"))]
-            {:status 200
-             :headers {"content-type" "text/html; charset=utf-8"}
-             :body (debug-shell debug-agent cursor)})
-          {:status 404
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body "agent not found"})
-
-        page-agent
-        (let [agent-id page-agent]
-          {:status 200
-           :headers {"content-type" "text/html; charset=utf-8"}
-           :body (shell {:seon.cluster.agent/id agent-id
-                         :seon.render/page
-                         (block/page @connection (page-request agent-id))
-                         :seon.render.web/feed-url (str "/feed/" agent-id)})})
-
-        feed-agent
-        (feed request
-              (merge {:seon.cluster.agent/id feed-agent}
-                     (select-keys service
-                                  [:seon.store/connection
-                                   :seon.sci.admit/caps
-                                   :seon.cluster.run/process
-                                   :seon.render.web/pages-mult
-                                   :seon.render.web/registration
-                                   :seon.render.web/render-channel])))
-
-        (and (= :get method) (= "/data" uri))
-        (let [query (query-params request)
-              entity? (contains? query "entity")
-              entity (query-entity (get query "entity"))
-              root-value (if entity?
-                           (when-let [eid (some-> (when entity
-                                                   (d/pull @connection [:db/id]
-                                                           entity))
-                                                 :db/id)]
-                             (generic-entity @connection eid caps false))
-                           (schema/canonical-database-attributes))
-              cursor (data/parse-cursor (get query "path")
-                                        (get query "offset"))
-              found (data/at root-value cursor)
-              opened-value (if (contains? found :seon.render.data/value)
-                             (:seon.render.data/value found)
-                             found)
-              route-base (if entity?
-                           (str "/data?entity="
-                                (URLEncoder/encode (get query "entity") "UTF-8"))
-                           "/data")
-              unit {:seon.cluster.agent/id id
-                    :seon.render.value/root
-                    (if entity?
-                      (or entity [:seon.render.data/entity (get query "entity")])
-                      :seon.render.data/schema)
-                    :seon.render.value/route-base route-base
-                    :seon.render.data/cursor cursor
-                    :seon.sci.admit/caps caps
-                    :seon.render/value opened-value}]
-          {:status 200
-           :headers {"content-type" "text/html; charset=utf-8"}
-           :body (shell {:seon.cluster.agent/id id
-                         :seon.render/page
-                         [(block/data-panel unit)]
-                         ;; `/data` has no dedicated repaint derivation: the
-                         ;; shared shell retains its ordinary agent feed, while
-                         ;; reload plus the URL remains the data position.
-                         :seon.render.web/feed-url (str "/feed/" id)})})
-
-        (and (= :get method) (str/starts-with? uri "/css/"))
-        (or (resource (subs uri 1)) {:status 404 :body "not found"})
-
-        (and (= :get method) (str/starts-with? uri "/js/"))
-        (or (resource (subs uri 1)) {:status 404 :body "not found"})
-
-        :else {:status 404
-               :headers {"content-type" "text/plain"}
-               :body "not found"}))))
+  [service]
+  (let [handlers {::route/root #(root-alias-response service %)
+                  ::route/namespace #(canonical-namespace-response
+                                      service false %)
+                  ::route/namespace-debug #(canonical-namespace-response
+                                            service true %)
+                  ::route/agent #(agent-alias-response service false %)
+                  ::route/agent-debug #(agent-alias-response service true %)
+                  ::route/agent-message #(inbound-response service %)
+                  ::route/feed #(feed-response service %)
+                  ::route/data #(data-response service %)
+                  ::route/css #(static-response "css" %)
+                  ::route/js #(static-response "js" %)}
+        router (ring/router
+                (bind-handlers handlers)
+                {:reitit.middleware/registry
+                 {::route/same-origin {:name ::route/same-origin
+                                       :wrap same-origin-middleware}}})]
+    (ring/ring-handler router not-found)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle

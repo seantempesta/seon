@@ -53,6 +53,7 @@
   that re-derives."
   (:require [datahike.api :as d]
             [seon.render.block :as block]
+            [seon.render.route :as route]
             [seon.render.walk :as walk]))
 
 ;;; ---------------------------------------------------------------------------
@@ -113,7 +114,8 @@
               :class "seon-agent-header"
               :data-agent-state (name state)}
      [:div {:class "seon-agent-heading"}
-      [:a {:class "seon-agent-back" :href "/"} "← agents"]
+      [:a {:class "seon-agent-back" :href (route/path ::route/root)}
+       "← agents"]
       [:span {:class "seon-agent-name"} (or agent-id "unknown agent")]
       (when namespace
         [:span {:class "seon-agent-namespace"} (str namespace)])]

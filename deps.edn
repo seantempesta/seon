@@ -61,6 +61,7 @@
         ;; Retire this override when the http-kit #180/#474 fix merges upstream.
         http-kit/http-kit
         {:local/root "reference-code/http-kit"}
+        metosin/reitit-ring {:mvn/version "0.10.1"}
         dev.data-star.clojure/http-kit
         {:local/root
          "reference-code/datastar-clojure/libraries/sdk-http-kit"}

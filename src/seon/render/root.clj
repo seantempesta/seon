@@ -26,7 +26,8 @@
   that re-derives."
   (:require [datahike.api :as d]
             [seon.problems :as problems]
-            [seon.render.block :as block]))
+            [seon.render.block :as block]
+            [seon.render.route :as route]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The renders
@@ -112,14 +113,16 @@
        [:ul {:class "seon-root-list"}
         (for [id agents]
           [:li {:class "seon-root-agent"}
-           [:a {:class "seon-root-link" :href (str "/agent/" id)} id]
+           [:a {:class "seon-root-link"
+                :href (route/path ::route/agent {:id id})}
+            id]
            [:a {:class "seon-root-drill"
-                :href (str "/data?entity="
-                           (java.net.URLEncoder/encode
-                            (pr-str [:seon.cluster.agent/id id]) "UTF-8")
-                           "&path="
-                           (java.net.URLEncoder/encode (pr-str []) "UTF-8")
-                           "&offset=0")}
+                :href (route/path ::route/data
+                                  {}
+                                  {:entity (pr-str
+                                            [:seon.cluster.agent/id id])
+                                   :path (pr-str [])
+                                   :offset "0"})}
             "facts"]])])]))
 
 (defn messages-html

@@ -33,6 +33,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [org.httpkit.server :as http]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.flow :as flow]
@@ -144,6 +145,12 @@
         (async/go-loop [] (when (async/<! report-chan) (recur)))
         (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
+          (support/seed-cluster! connection "web-test")
+          (d/transact connection
+                      (cluster.agent/creation-tx
+                       {:seon.cluster.agent/id agent-id
+                        :seon.cluster/name "web-test"
+                        :seon.ns/name 'my.agents.root}))
           (d/transact connection [{:seon.cluster.agent/id agent-id
                                    :seon.cluster.agent/blocks blocks}])
           (flow.core/resume graph)
@@ -381,8 +388,14 @@
   (with-server two-blocks
     (fn [connection server _context]
       (d/transact connection
+                  (cluster.agent/creation-tx
+                   {:seon.cluster.agent/id "agent-b"
+                    :seon.cluster/name "web-test"
+                    :seon.ns/name 'my.agents.agent-b}))
+      (d/transact connection
                   [{:seon.cluster.agent/id "agent-b"
-                    :seon.cluster.agent/blocks [(block-map :banner 0 `banner-html)]}])
+                    :seon.cluster.agent/blocks
+                    [(block-map :banner 0 `banner-html)]}])
       (let [root (.body (fetch server "/"))
             other (.body (fetch server "/agent/agent-b"))]
         (is (str/includes? root "surface-counter"))
@@ -401,6 +414,37 @@
   (with-server two-blocks
     (fn [_connection server _context]
       (is (= 404 (.statusCode (fetch server "/nope")))))))
+
+(deftest namespace-routes-admit-by-reader-and-existing-corpus-row
+  (with-server two-blocks
+    (fn [connection server _context]
+      (is (nil? (cluster.agent/owner-of @connection 'seon.flow)))
+      (let [known (fetch server "/ns/seon.flow")
+            owner (cluster.agent/owner-of @connection 'seon.flow)
+            basis-after-known (:max-tx @connection)]
+        (is (= 200 (.statusCode known)))
+        (is (= "seon.flow" owner))
+        (is (= [process]
+               (d/q '[:find [?process-id ...]
+                      :in $ ?agent-id
+                      :where
+                      [?agent :seon.cluster.agent/id ?agent-id ?tx]
+                      [?tx :seon.db/process ?process]
+                      [?process :seon.db.process/id ?process-id]]
+                    @connection owner))
+            "first-touch ensure carries the existing creation provenance")
+        (is (= 200 (.statusCode (fetch server "/ns/seon.flow/debug"))))
+        (is (= basis-after-known (:max-tx @connection))
+            "debug and repeat visits resume the existing owner untouched"))
+      (doseq [path ["/ns/nonexistent.thing" "/ns/123bad"]]
+        (let [datoms-before (count (d/datoms @connection :eavt))
+              basis-before (:max-tx @connection)
+              response (fetch server path)]
+          (is (= 404 (.statusCode response)) path)
+          (is (= datoms-before (count (d/datoms @connection :eavt)))
+              (str path " wrote no datoms"))
+          (is (= basis-before (:max-tx @connection))
+              (str path " committed no transaction")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The wire — the rung's claim
@@ -986,7 +1030,11 @@
 (deftest each-agent-has-an-isolated-debug-route
   (with-server two-blocks
     (fn [connection server _context]
-      (d/transact connection [{:seon.cluster.agent/id "alice"}])
+      (d/transact connection
+                  (cluster.agent/creation-tx
+                   {:seon.cluster.agent/id "alice"
+                    :seon.cluster/name "web-test"
+                    :seon.ns/name 'my.agents.alice}))
       (let [agent-page (.body (fetch server "/agent/root"))
             root (.body (fetch server "/agent/root/debug"))
             alice (.body (fetch server "/agent/alice/debug"))]
