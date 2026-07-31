@@ -1,16 +1,15 @@
 (ns seon.render.walk-test
   "Seeded properties for schema-derived neighbourhood membership and caps."
   (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
-            [malli.core :as m]
-            [malli.generator :as mg]
             [seon.cluster.agent :as agent]
+            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
-            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (def ^:private property-seed 2026073101)
@@ -20,6 +19,34 @@
    :seon.config.eval.result/max-collection 64
    :seon.config.eval.result/max-string 4096
    :seon.config.eval.result/max-nodes 4096})
+
+(def ^:private audit-scalar-attributes
+  [:audit/scalar-a :audit/scalar-b :audit/scalar-c])
+
+(def ^:private audit-ref-attributes
+  [:audit/points-at-a :audit/points-at-b])
+
+(def ^:private audit-schema
+  (into
+   [{:db/ident :audit/id
+     :db/valueType :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/unique :db.unique/identity}
+    {:db/ident :audit/target-id
+     :db/valueType :db.type/string
+     :db/cardinality :db.cardinality/one
+     :db/unique :db.unique/identity}]
+   (concat
+    (map (fn [attribute]
+           {:db/ident attribute
+            :db/valueType :db.type/string
+            :db/cardinality :db.cardinality/one})
+         audit-scalar-attributes)
+    (map (fn [attribute]
+           {:db/ident attribute
+            :db/valueType :db.type/ref
+            :db/cardinality :db.cardinality/one})
+         audit-ref-attributes))))
 
 (defn- nodes
   [node]
@@ -68,38 +95,103 @@
                         (get-in % [:seon.error/value :seon.error/message] "")))
          (nodes node))))
 
-(deftest p1-membership-is-complete-or-loudly-elided
-  (let [registry (:seon.schema.projection/registry
-                  (schema/current-projection))
-        count-generator
-        (mg/generator (m/schema [:int {:min 2 :max 10}]
-                                {:registry registry}))
+(deftest p1-out-of-family-attributes-reach-the-floor
+  (let [attribute-generator
+        (gen/vector-distinct (gen/elements audit-scalar-attributes)
+                             {:min-elements 1
+                              :max-elements (count audit-scalar-attributes)})
         property
         (prop/for-all
-         [agent-count count-generator
-          width (gen/choose 1 10)]
+         [attributes attribute-generator]
          (support/with-database
+           {:seon.test-support/extra-schema audit-schema}
            (fn [connection]
-             (let [agent-ids (mapv #(str "p1-" %) (range agent-count))
-                   _ (seed-agents! connection "p1" agent-ids)
+             (let [values (into {}
+                                (map-indexed
+                                 (fn [index attribute]
+                                   [attribute (str (name attribute) "-" index)]))
+                                attributes)
+                   _ (d/transact connection
+                                 [(assoc values :audit/id "outside-family")])
                    db @connection
-                   caps (assoc base-caps
-                               :seon.config.eval.result/max-collection width)
-                   result (walk-agent db (first agent-ids) caps)
-                   expected
-                   (into #{}
-                         (map (fn [agent-id]
-                                (:db/id
-                                 (d/pull db [:db/id]
-                                         [:seon.cluster.agent/id agent-id]))))
-                         agent-ids)
-                   present (into #{} (keep :seon.render.walk/lookup)
-                                 (nodes result))
-                   missing (remove present expected)]
-               (or (empty? missing) (elision? result))))))]
+                   result
+                   (walk/neighborhood
+                    {:seon.db/db db
+                     :seon.render.walk/lookup
+                     [:audit/id "outside-family"]
+                     :seon.render/kind :seon.render/ai
+                     :seon.render/floor 'seon.render.block/data-prose
+                     :seon.sci.admit/caps base-caps
+                     :seon.render/distance 0})
+                   output (:seon.render/output result)]
+               (and (string? output)
+                    (every? (fn [[attribute value]]
+                              (and (str/includes? output (pr-str attribute))
+                                   (str/includes? output (pr-str value))))
+                            values))))))]
     (support/assert-check!
      (tc/quick-check 20 property :seed property-seed)
-     "P1: every reachable agent must appear or be covered by an elision.")))
+     "P1: every out-of-family attribute must reach the render floor.")))
+
+(deftest p2-out-of-family-inbound-refs-are-complete-or-named
+  (let [property
+        (prop/for-all
+         [source-count (gen/choose 1 12)
+          width (gen/choose 1 12)]
+         (support/with-database
+           {:seon.test-support/extra-schema audit-schema}
+           (fn [connection]
+             (d/transact
+              connection
+              (into [{:audit/target-id "target"}]
+                    (map (fn [index]
+                           {:audit/id (str "source-" index)
+                            :audit/points-at-a [:audit/target-id "target"]
+                            :audit/points-at-b [:audit/target-id "target"]}))
+                    (range source-count)))
+             (let [db @connection
+                   target-eid (:db/id
+                               (d/pull db [:db/id]
+                                       [:audit/target-id "target"]))
+                   expected (into #{}
+                                  (map (fn [index]
+                                         (:db/id
+                                          (d/pull db [:db/id]
+                                                  [:audit/id
+                                                   (str "source-" index)]))))
+                                  (range source-count))
+                   connections
+                   (walk/refs
+                    db target-eid
+                    (assoc base-caps
+                           :seon.config.eval.result/max-collection width))]
+               (every?
+                (fn [attribute]
+                  (let [matching (filter #(= attribute
+                                             (:seon.render.walk/attribute %))
+                                         connections)
+                        present (into #{}
+                                      (keep :seon.render.walk/target)
+                                      matching)
+                        missing (set/difference expected present)
+                        markers (keep :seon.error/value matching)]
+                    (and (set/subset? present expected)
+                         (= (min width source-count) (count present))
+                         (= (if (seq missing) 1 0) (count markers))
+                         (= (count missing)
+                            (or (get-in (first markers)
+                                        [:seon.error/data
+                                         :seon.render.walk/elided-count])
+                                0))
+                         (every? #(= attribute
+                                     (get-in % [:seon.error/data
+                                                :seon.render.walk/attribute]))
+                                 markers))))
+                audit-ref-attributes)))))]
+    (support/assert-check!
+     (tc/quick-check 20 property :seed (inc property-seed))
+     (str "P2: every out-of-family inbound ref must render or be "
+          "accounted for by its attribute's marker."))))
 
 (deftest p5-shared-instruction-leaves-are-byte-identical
   (support/with-database
@@ -162,6 +254,66 @@
                   :seon.render/distance 0})]
             (is (elision? result))
             (is (re-find #"distance cap" (walk/prose db result)))))))))
+
+(deftest asked-for-run-edges-use-the-collection-cap
+  (support/with-database
+    (fn [connection]
+      (seed-agents! connection "asked-cap" ["asker" "answerer"])
+      (doseq [index (range 5)]
+        (let [message-id (str "asked-message-" index)]
+          (d/transact connection
+                      [{:seon.cluster.message/id message-id
+                        :seon.cluster.message/from
+                        [:seon.cluster.agent/id "asker"]
+                        :seon.cluster.message/to
+                        [:seon.cluster.agent/id "answerer"]
+                        :seon.cluster.message/content (str "request " index)
+                        :seon.cluster.message/at
+                        (java.util.Date. (long index))}])
+          (d/transact connection
+                      {:tx-data
+                       [{:seon.cluster.run/id (str "asked-run-" index)
+                         :seon.cluster.run/agent
+                         [:seon.cluster.agent/id "answerer"]
+                         :seon.cluster.run/opened-at
+                         (java.util.Date. (long index))}]
+                       :tx-meta
+                       {:seon.db/trigger
+                        [:seon.cluster.message/id message-id]}})))
+      (let [db @connection
+            asker-eid (:db/id
+                        (d/pull db [:db/id]
+                                [:seon.cluster.agent/id "asker"]))
+            matching
+            (filter #(= :seon.render.walk/asked-for-run
+                        (:seon.render.walk/attribute %))
+                    (walk/refs
+                     db asker-eid
+                     (assoc base-caps
+                            :seon.config.eval.result/max-collection 2)))
+            targets (keep :seon.render.walk/target matching)
+            markers (keep :seon.error/value matching)]
+        (is (= 2 (count targets)))
+        (is (= 1 (count markers)))
+        (is (= 3 (get-in (first markers)
+                         [:seon.error/data
+                          :seon.render.walk/elided-count])))
+        (is (= :seon.render.walk/asked-for-run
+               (get-in (first markers)
+                       [:seon.error/data
+                        :seon.render.walk/attribute])))))))
+
+(deftest transcript-node-receives-the-walk-caps
+  (support/with-database
+    (fn [connection]
+      (seed-agents! connection "transcript-caps" ["caps-agent"])
+      (let [observed (atom nil)]
+        (with-redefs [transcript/render-ai
+                      (fn [unit]
+                        (reset! observed (:seon.sci.admit/caps unit))
+                        "transcript")]
+          (walk-agent @connection "caps-agent" base-caps 1))
+        (is (= base-caps @observed))))))
 
 (deftest reverse-reads-never-match-equal-non-ref-longs
   (support/with-database
