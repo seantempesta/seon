@@ -1393,6 +1393,16 @@ may reintroduce a shadow build into the dev feedback path.
   unowned namespace, an agent is spun up and assigned on demand.
   Agents build the system up in a DISTRIBUTED way; context is
   distributed with them.
+  **Ruling 2026-07-31 #8 (owner): THE HTML FLOOR IS OPT-IN.** The
+  generic value→HTML fallback (the data browser) is a power surface,
+  not default UX: in the HTML projection, a unit whose render would
+  fall to the generic floor is HIDDEN by default, revealed by a
+  user-facing "show everything" checkbox (transient per-tab display
+  state, not a durable fact). "If there is no html render function it
+  probably isn't going to be a good experience for the average user."
+  The AI projection is unaffected — agents always see everything.
+  This does not change floor totality: the floor still renders
+  anything when asked; only its default page visibility changes.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the

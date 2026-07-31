@@ -270,7 +270,10 @@ on-demand creation is a new creation trigger, modeled in W1). Override
 resolution = one corpus query (functions + input/output schemas are
 facts) through the same query cache — nothing special. HTML floor = the
 data-panel/admission side, the value renderer's presentation ported into
-it (orchestrator pick, owner offered veto). Render cache = per function
+it (orchestrator pick, owner offered veto) — and the floor is OPT-IN in
+the HTML projection (ruling #8): units that would fall to the generic
+data browser hide by default behind a "show everything" checkbox
+(transient per-tab state); the AI projection always renders everything. Render cache = per function
 call; ordering = dumb last-changed with branch tie-clustering (§3).
 
 STILL OPEN:
