@@ -22,7 +22,7 @@ work in progress, not service-level guarantees and not a tuned benchmark.**
 | Isolation | Its own process root, own Datahike store under its own `flock`, own JVM. No other lane's cluster was touched. |
 | Store | Datahike file backend (konserve), `:keep-history? true`, self-writer |
 | Model | The sanctioned local Ollama server, `qwen3.5:35b-a3b-coding-nvfp4`, real calls — no stub |
-| Probes | `tmp/bench/` (committed): `support.clj`, `db*.clj`, `web*.clj`, `agents.clj`, `threads*.clj`, `clusters*.clj`, `cache.clj`, `active.clj` |
+| Probes | committed at `scripts/perf-benchmark-2026-07-31/` with a reproduction runbook in its `README.md` |
 
 ## Summary — every row measured, none guaranteed
 
@@ -34,7 +34,7 @@ work in progress, not service-level guarantees and not a tuned benchmark.**
 | 4 | Cross-cluster interference (5 active) | delivery **3.7 ms → 3.2 ms** (none) | one tenant's churn does not slow another's UI |
 | 5 | Arm one agent | **0.47 ms** median at a 1,000-agent fleet | agents are created, not provisioned |
 | 6 | 1,000 parked agents | **+79 MiB RSS**, 30 MiB heap, in a 512 MiB heap | ~12,600 parked agents/GiB *today* (see #7) |
-| 7 | Platform threads per parked agent | **1** — a defect, not the design | fixing it should reach ~35,000/GiB; do not quote that yet |
+| 7 | Platform threads per parked agent | **1** — a defect, not the design | fixing it should reach ~33,000/GiB; do not quote that yet |
 | 8 | Live UI delta, commit-settled → bytes on the wire | **3.7 ms** median (small page) / **105 ms** (185 KiB page) | the page derivation is the cost, not the delivery |
 | 9 | Same delta at 1, 10, 50 browser connections | **flat**, and byte-identical per connection | serialize once, mult to every tab |
 | 10 | Full page GET | **4.1 ms** median, 6.4 ms p95 | a cold tab paints immediately |
@@ -58,7 +58,7 @@ schema and its facts are present) opened with `seon.cluster.store/open-branch!`
 and written through Seon's one write door `seon.cluster.store/transact!`.
 Nothing listens on that branch, so this is Datahike's serial writer over the
 file store with no wake or render work attached. 50–100 untimed warm-ups, then
-the stated sample count. Probe: `tmp/bench/db.clj`, `tmp/bench/db4.clj`.
+the stated sample count. Probes: `db.clj`, `db4.clj`.
 
 | Shape | datoms/tx | median | p95 | sustained |
 |---|---|---|---|---|
@@ -71,7 +71,7 @@ resolved and written like any other.
 
 **Batching amortizes the commit, and that is where the throughput is.** The
 per-commit cost barely moves until the batch is large, so rows/second scales
-almost linearly (n=20 each, `tmp/bench/db4.clj`):
+almost linearly (n=20 each, `db4.clj`):
 
 | rows/transaction | median | rows/s |
 |---|---|---|
@@ -81,7 +81,7 @@ almost linearly (n=20 each, `tmp/bench/db4.clj`):
 | 1,000 | 560.0 ms | 2,000 |
 
 **Where the 123 ms goes.** Decomposed against the same shape and the same
-171-attribute schema (`tmp/bench/db2.clj`, `db3.clj`):
+171-attribute schema (`db2.clj`, `db3.clj`):
 
 | Layer | median | rate |
 |---|---|---|
@@ -108,8 +108,8 @@ the commit outside the timed window). n=200 cached / n=25 uncached.
 |---|---|---|---|---|
 | Agent by identity | 1 | 0.007 ms | 101,757/s | 0.213 ms |
 | Pull agent + namespace | 1 entity | 0.041 ms | 10,765/s | 0.197 ms |
-| Functions in one namespace | 43 | 0.005 ms | 188,767/s | 0.254 ms |
-| Whole-corpus census | 1,478 fns | 0.006 ms | 118,595/s | 0.190 ms |
+| Functions in one namespace | 21 | 0.005 ms | 188,767/s | 0.254 ms |
+| Whole-corpus census | 1,503 fns | 0.006 ms | 118,595/s | 0.190 ms |
 | Messages for one agent (fan-out scan) | ~25,000 | 16.96 ms | 57/s | 21.30 ms |
 
 The first four are the shapes a render or a prompt actually issues; the fifth
@@ -122,7 +122,7 @@ hidden.
 A cluster is one Datahike **branch** forked from the published `current-src`
 commit, plus its own connection, flow graphs and web view. Siblings in one JVM
 share only the process-root store holder and the root executors. Probes:
-`tmp/bench/clusters.clj`, `clusters2.clj`, `clusters6.clj`, `cache.clj`.
+`clusters.clj`, `clusters2.clj`, `clusters6.clj`, `cache.clj`.
 
 **The fork alone** (n=50, on a roster that already held 79 branches over a
 2.0 GB store): **16.97 ms median, 18.9 ms p95, 20.1 ms max.** Fifty forks grew
@@ -142,13 +142,14 @@ confirms the previously claimed ~17 ms at scale.
 The first boot pays a one-off warm-up; the median of the remaining 24 is
 **518 ms**. Marginal cost per additional cluster: **1.24 MiB RSS**, **1.4 MiB
 on disk**, **~4.7 platform threads**. A cold JVM start (`clojure -M:dev`,
-classpath and namespace load included) to a serving cluster was **13.1 s**;
+classpath and namespace load included) to a serving cluster was **13.1 s** wall,
+of which the cluster's own tower reported **1,223 ms**;
 after that, clusters cost half a second each.
 
 **Cross-cluster interference.** Five clusters prepared identically; one is
 measured while the other four commit continuously in the same JVM against the
 same process-root store. Alternated three times, warm, discarding a warm-up
-round (`tmp/bench/clusters6.clj`):
+round (`clusters6.clj`):
 
 | round | delivery alone (median / p95) | delivery with 4 neighbours | commit alone | commit with neighbours |
 |---|---|---|---|---|
@@ -188,7 +189,7 @@ process root), not multiple clusters in one JVM.
 
 ## 4. Agent density
 
-Probes: `tmp/bench/agents.clj`, `threads3.clj`, `threads4.clj`, `threads5.clj`.
+Probes: `agents.clj`, `threads3.clj`, `threads4.clj`, `threads5.clj`.
 Each agent is created as facts and then **armed** — its own two-proc flow
 graph, started and resumed. A parked agent is `:running` and blocked on a
 channel read; it is never flow-`paused`.
@@ -207,7 +208,7 @@ channel read; it is never flow-`paused`.
 - **Arm time does not degrade with fleet size** — it improves, from 0.60 ms at
   100 agents to 0.47 ms at 1,000, as the JIT warms. p95 stays under 1 ms.
 - **Marginal memory per parked agent: ~81 KiB RSS, 27–41 KiB heap.** In a
-  512 MiB heap the 1,000-agent fleet used 30 MiB of heap — about **34,000
+  512 MiB heap the 1,000-agent fleet used 30 MiB of heap — about **33,000
   parked agents per GiB of heap**, which matches the 2 procs × ~8.5 KB figure
   `flow-mechanics-2026-07-28.md` measured. RSS tells a worse story, and the
   reason is the next point.
@@ -242,8 +243,12 @@ RSS**. Do not quote the ~35,000/GiB heap figure as a system capability yet.
 
 ## 5. Web rendering — the architecture, then the numbers
 
-The old system re-rendered a whole page per tab on every change; the investor
-saw that and was right to. The current path is:
+The predecessor's cost model was per-tab: every change re-rendered and
+re-serialized the page once for each open tab. That is not an anecdote — the
+two shapes were measured head to head on 2026-07-29 at 50 tabs:
+**31.8–42.5 ms p50 for per-tab serialization against 0.87–1.17 ms p95 for
+serialize-once-and-mult** (`render-pipeline-design-2026-07-29.md`). The
+current path is:
 
 > one commit → one unconditional render wake → **one** derivation of each
 > watched agent's page → per-block byte equality suppression → **one**
@@ -260,7 +265,7 @@ fresh walk") deleted the block declarations from agent creation. The html
 render functions all still exist, but a freshly booted cluster's agent page
 declares **zero blocks and renders empty**. The benchmark therefore reinstated
 exactly the html half of the deleted `seon.render.agent/blocks` vector
-(`tmp/bench/blocks.clj`), giving a 4-block page. The pipeline measured is the
+(`blocks.clj`), giving a 4-block page. The pipeline measured is the
 real one; the block set is a reconstruction, and the shipped default is
 currently nothing.
 
@@ -301,7 +306,7 @@ unconditional per transaction report and is unaffected.
 retracted between configurations, the order is repeated, and the page's
 derived byte size is printed every round so drift is visible: it was
 123,150 B before each round and 185,7xx B after, every time
-(`tmp/bench/web4.clj`, 25 probes each).
+(`web4.clj`, 25 probes each).
 
 | connections | commit (median) | settled → wire median | settled → wire p95 | delta bytes per connection |
 |---|---|---|---|---|
@@ -314,7 +319,7 @@ derived byte size is printed every round so drift is visible: it was
 
 **Small page (3 blocks, short transcript)**, measured on a fresh cluster with
 5 connections: **settled → wire 3.68 / 3.70 / 3.82 ms median, 5.2–6.1 ms p95**
-across three rounds (`tmp/bench/clusters6.clj`).
+across three rounds (`clusters6.clj`).
 
 Three things follow, and they are the whole architectural claim:
 
@@ -340,7 +345,7 @@ transcript into per-entry blocks.
 
 10 tabs, 60 s, committing as fast as the store allows. The churn shape upserts
 **one** row's content so the page's byte size stays constant and a growing
-transcript cannot masquerade as degradation (`tmp/bench/web5.clj`).
+transcript cannot masquerade as degradation (`web5.clj`).
 
 | | |
 |---|---|
@@ -362,7 +367,7 @@ One connection stops reading without closing — its reader parks, its socket
 receive window fills, and http-kit's pending-byte state on that channel rises
 so the server's connection-owned `:io` writer parks on its exact drain
 completion (our fork's `write-state`, `reference-code/http-kit/src/org/httpkit/server.clj:321-326`).
-Five healthy tabs keep going (`tmp/bench/web6.clj`).
+Five healthy tabs keep going (`web6.clj`).
 
 | | at stall | after 30 s / 410 commits |
 |---|---|---|
