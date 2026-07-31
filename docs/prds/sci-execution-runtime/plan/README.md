@@ -1573,6 +1573,18 @@ may reintroduce a shadow build into the dev feedback path.
   dispatches as ONE atomic cross-cutting unit AFTER the context-mvp
   lane lands (it owns the affected files in flight); schema EDN,
   code, tests, and docs move in the same wave.
+  **Ruling 2026-07-31 #16 (owner): THE DEBUG VIEW IS TWO PANES —
+  exactly-what-the-agent-sees beside everything-walked.** Per agent,
+  on the website: LEFT = EXACTLY the agent's AI context, byte-exact
+  (the same walk projection assembly produces — one mechanism makes
+  byte-exactness constructional; turn capture is the historical
+  record); RIGHT = ALL walked units rendered as HTML, including
+  default/floor data renders that are not part of the AI context. A
+  unit may be ai-only, html-only, or both — decided by RELEVANCE,
+  i.e. by what its renderers emit per projection (nil-punning
+  omission), NEVER by lists. The right pane is the total walked
+  universe; the left pane is the curated agent seat; comparing them
+  is the point.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
