@@ -268,22 +268,35 @@
     (stamp "SEND one-sentence task: " one-sentence-task)
     (with-redefs [ai/complete (capturing-complete ai/complete captures)]
       (send-message! connection nursery-agent-id one-sentence-task)
-      ;; A self-message keeps unanswered triggers non-empty between turns. If a
-      ;; first turn closes with none, the model has already missed the exit and
-      ;; waiting on a clock would hide the experiment's actual terminal fact.
+      ;; A self-message keeps unanswered triggers non-empty between ordinary
+      ;; turns. A lint-refused turn instead continues from its committed
+      ;; receipt with no message, so one closed run plus no unanswered trigger
+      ;; is terminal only when the work derivation also says there is no next
+      ;; pass. This preserves the harness's fail-fast observation without
+      ;; mistaking the ruled refusal continuation for an early stop.
       (let [terminal
             (await-fact!
              connection
              "nursery MVP terminal condition"
              (fn [db]
                (let [closed (- (closed-run-count db nursery-agent-id) before)
-                     unanswered (work/unanswered-triggers db nursery-agent-id)]
+                     unanswered (work/unanswered-triggers db nursery-agent-id)
+                     continuation?
+                     (work/more-agent-work?
+                      db
+                      {:seon.cluster.agent/id nursery-agent-id
+                       :seon.cluster.run/process process
+                       :seon.cluster.work/now (Date.)})]
                  (cond
-                   (and (>= closed 2) (empty? unanswered))
+                   (and (>= closed 2)
+                        (empty? unanswered)
+                        (not continuation?))
                    {:context-mvp-drive/outcome :complete
                     :context-mvp-drive/closed-turns closed}
 
-                   (and (= closed 1) (empty? unanswered))
+                   (and (= closed 1)
+                        (empty? unanswered)
+                        (not continuation?))
                    {:context-mvp-drive/outcome :stopped-after-first-turn
                     :context-mvp-drive/closed-turns closed}
 
