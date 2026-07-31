@@ -1603,6 +1603,22 @@ may reintroduce a shadow build into the dev feedback path.
   message-to-unowned-namespace (ruling #7(5)); an existing agent
   always resumes. Three triggers, one mechanism: create, message,
   visit.
+  ADDENDUM (owner, same conversation): A BAD URL 404s AND NEVER MINTS
+  A GARBAGE AGENT. The visit trigger ensures an owner only for a
+  namespace that ALREADY EXISTS as a `:seon.ns` row — existence in
+  the corpus is the computed admission, never a name pattern or
+  prefix list. A route naming no known namespace is a plain 404
+  (crawlers and typos write nothing). Creating a genuinely NEW
+  namespace stays an explicit act through the trusted triggers
+  (creation request, an agent's own declarations, message routing) —
+  an anonymous GET is not one of them. First-touch ensure writes
+  carry the same provenance tx-meta as every creation path. The
+  syntactic pre-filter is CLOJURE'S OWN READER, never a transcribed
+  grammar: the segment must read as a simple symbol and round-trip
+  (the reader rules — non-numeric first char, the permitted
+  punctuation, mid-only `.`, no `::`, no `/` — are enforced by the
+  reader itself; a regex copying them would be a hand-maintained
+  grammar). The corpus-existence check remains the real admission.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
