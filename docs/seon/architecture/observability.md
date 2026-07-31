@@ -235,15 +235,18 @@ queries over facts, never mutable counters.
 
 There are two error classes, separated by construction:
 
-- An agent or eval mistake is a flat value returned by guarded evaluation. Its
-  terminal eval receipt records it. It never throws into the run loop and never
-  rides Flow's error channel.
+- An agent-code mistake is wrapped and caught by the SCI execution boundary.
+  The boundary returns a flat value, records any owning eval receipt, and
+  submits the same normalized report to the cluster's fault-committer channel.
+  It never throws across the proc boundary. The committer persists a fact
+  routed to the agent that ran the code; that agent's next context reaches it
+  and the problem-routing graph escalates it to root.
 - A core fault is a `Throwable` that escaped a proc onto Flow's error channel.
-  The fault-committer consumes that channel, normalizes the report, and commits
-  the error fact together with one explanation **message** to the responsible
-  agent in a single transaction. Responsibility derives from the fact's
-  provenance and namespace ownership; there is no router or subscription
-  registry. The message is ordinary delivery, so its commit is also the wake.
+  The same fault committer normalizes the report and commits the error fact
+  together with one explanation **message** to the responsible agent in a
+  single transaction. Responsibility derives from the fact's provenance and
+  namespace ownership; there is no router or subscription registry. The
+  message is ordinary delivery, so its commit is also the wake.
 
 The explanation is an AI projection selected through the one render contract
 and frozen as message content because it records what the agent was told. Log
