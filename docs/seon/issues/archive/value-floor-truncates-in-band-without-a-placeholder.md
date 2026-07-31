@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, architecture]
 ---
@@ -85,3 +85,46 @@ capped must contain none.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## Resolution
+
+Resolved by `fe4e23f2d`. `seon.sci.admit` now reserves the last affordable
+collection node or map entry for its in-band elision marker instead of
+returning a silently shortened shape. A string clip becomes admit-owned
+marker data containing the retained prefix, so both the AI and HTML twins
+show the cut at that string. When even the containing structure cannot fit,
+the structure becomes the scalar elision marker rather than a lying empty
+collection.
+
+`seon.render.value` now resolves raw children across every sequential value,
+applies cursor windowing only to the HTML projection, inserts an in-band
+window marker, and treats either a positive offset or fewer shown entries
+than the known total as truncation.
+
+Recurring fixed-seed properties cover depth, collection width, string length,
+and node budget for both twins. Each property also supplies an uncapped
+counterexample and asserts that its admitted tree contains no marker. The
+audit's exact falsifiers now project as:
+
+```clojure
+;; max-nodes 8
+[[:x :x :x :x :x] :seon.sci.admit/elided]
+
+;; max-nodes 4
+#:seon.sci.admit{:elided true}
+
+;; max-string 3 inside a list
+[#:seon.sci.admit{:truncated-string "abc", :elided true}]
+```
+
+Focused recurring proof after the commit:
+
+```text
+bin/test seon.sci.admit-test seon.render.value-test seon.render.block-test
+Ran 46 tests containing 126 assertions.
+0 failures, 0 errors.
+```
+
+The load-only cursor falsifier now renders the complete 40-key map to the AI
+twin rather than `{}`. Its HTML-only cursor at offset 500 contains
+`:seon.sci.admit/elided`, reports `showing 0 of 40`, and sets truncation loud.
