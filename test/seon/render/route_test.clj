@@ -32,7 +32,11 @@
                      {:entity "[:x/id \"a b\"]" :offset "0"}))))
 
 (deftest route-conflicts-and-unknown-names-fail-loudly
-  (testing "Reitit's default name-conflict check remains enabled"
+  (testing "Reitit's default path- and name-conflict checks remain enabled"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (reitit/router
+                  [["/{left}" {:name ::left}]
+                   ["/{right}" {:name ::right}]])))
     (is (thrown? clojure.lang.ExceptionInfo
                  (reitit/router
                   (conj route/routes
