@@ -24,7 +24,7 @@
 	ignore = dirty
 [submodule "reference-code/claude-agent-sdk-typescript"]
 	path = reference-code/claude-agent-sdk-typescript
-	url = https://github.com/anthropics/claude-agent-sdk-typescript
+	url = https://github.com/seantempesta/claude-agent-sdk-typescript.git
 	ignore = dirty
 [submodule "reference-code/claude-agent-sdk-demos"]
 	path = reference-code/claude-agent-sdk-demos
@@ -116,7 +116,7 @@
 	ignore = dirty
 [submodule "reference-code/shadow-cljs"]
 	path = reference-code/shadow-cljs
-	url = https://github.com/thheller/shadow-cljs.git
+	url = https://github.com/seantempesta/shadow-cljs.git
 	ignore = dirty
 [submodule "reference-code/openai-node"]
 	path = reference-code/openai-node
@@ -283,7 +283,7 @@
 	ignore = dirty
 [submodule "reference-code/bun"]
 	path = reference-code/bun
-	url = https://github.com/oven-sh/bun.git
+	url = https://github.com/seantempesta/bun.git
 	shallow = true
 [submodule "reference-code/superv.async"]
 	path = reference-code/superv.async
