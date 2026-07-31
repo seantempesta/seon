@@ -1413,6 +1413,17 @@ may reintroduce a shadow build into the dev feedback path.
   curated page. This realizes the earlier facts-link ruling ("an
   agent row's facts link opens the /data drill rooted at THAT
   AGENT'S ENTITY").
+  **Ruling 2026-07-31 #9 (owner): ROOT IS ORDINARY — functions in
+  root's namespace, datoms installed for root.** The fleet-oversight
+  exception dissolves: process-local fleet state (flow pings) becomes
+  DATOMS — the oversight proc commits bounded latest-wins summary
+  facts reachable from root's entity by the same walk — and root's
+  NAMESPACE owns the render functions for them, which is nothing more
+  than the standard viewer-override mechanism (root's namespace
+  defines same-schema renderers, so root renders the right context).
+  "No static scaffold" now has ZERO exceptions: every agent,
+  including root, is its entity plus its namespace, walked and
+  rendered by the one system.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the

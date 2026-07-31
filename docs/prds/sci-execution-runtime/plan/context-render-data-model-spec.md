@@ -286,6 +286,14 @@ data browser hide by default behind a "show everything" checkbox
 (transient per-tab state); the AI projection always renders everything. Render cache = per function
 call; ordering = dumb last-changed with branch tie-clustering (§3).
 
+Root is ORDINARY (ruling #9): the oversight proc commits bounded
+latest-wins fleet-summary facts (a small `:seon.oversight` family, W4
+scope — one row per summarized dimension, superseded in place, never a
+history-growing stream) reachable from root's entity; root's namespace
+defines the same-schema renderers for them via the ordinary
+viewer-override mechanism. The spec's earlier first-party fleet
+exception is DELETED; no static scaffold has zero exceptions.
+
 STILL OPEN:
 - Root fleet oversight derives from live flow pings, not facts — it stays
   a first-party renderer (allowed: first-party, not agent-authored), but
