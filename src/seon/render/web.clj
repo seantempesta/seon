@@ -56,6 +56,7 @@
             [seon.render.block :as block]
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
+            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
@@ -115,6 +116,16 @@
   [value]
   (-> (URLEncoder/encode (str value) "UTF-8")
       (str/replace "+" "%20")))
+
+(defn- query-params
+  [request]
+  (into {}
+        (keep (fn [pair]
+                (when-not (str/blank? pair)
+                  (let [[key setting] (str/split pair #"=" 2)]
+                    [(URLDecoder/decode key "UTF-8")
+                     (URLDecoder/decode (or setting "") "UTF-8")]))))
+        (str/split (or (:query-string request) "") #"&")))
 
 (defn message-bar-html
   "`:seon.render/html` — the constant human-to-agent message bar.
@@ -258,6 +269,125 @@
                                    [:seon.cluster.run/live-processes
                                     :seon.ai/partial])))))
 
+;;; ---------------------------------------------------------------------------
+;;; The per-agent debug value
+;;; ---------------------------------------------------------------------------
+
+(defn- ref-attribute?
+  [db attribute]
+  (= :db.type/ref (get-in db [:schema attribute :db/valueType])))
+
+(defn- many-attribute?
+  [db attribute]
+  (= :db.cardinality/many
+     (get-in db [:schema attribute :db/cardinality])))
+
+(defn- debug-entity
+  "Every direct attribute of one entity, with refs left as drill handles.
+
+  Reverse refs are intentionally present as well: blocks and transaction
+  entities are apparatus in the context walk, but the debug view exists to
+  expose that apparatus. This is the one permitted generic read. It runs only
+  for an open debug tab and scans unknown/family-less attributes honestly."
+  [db eid caps]
+  (let [groups (group-by #(nth % 1) (d/datoms db :eavt eid))
+        direct
+        (into {:db/id eid}
+              (map (fn [[attribute datoms]]
+                     (let [values (mapv (fn [datom]
+                                          (let [setting (nth datom 2)]
+                                            (if (ref-attribute? db attribute)
+                                              {:db/id setting}
+                                              setting)))
+                                        datoms)]
+                       [attribute
+                        (if (many-attribute? db attribute)
+                          (vec (sort-by pr-str values))
+                          (first values))])))
+              groups)
+        width (long (:seon.config.eval.result/max-collection caps))
+        reverse-groups
+        (->> (d/q '[:find ?source ?attribute
+                    :in $ ?target
+                    :where [?source ?attribute ?target]]
+                  db eid)
+             (filter (fn [[_source attribute]]
+                       (ref-attribute? db attribute)))
+             (group-by second)
+             (sort-by (comp str key))
+             (into {}
+                   (map (fn [[attribute pairs]]
+                          (let [sources (->> pairs (map first) sort vec)
+                                shown (mapv (fn [source] {:db/id source})
+                                            (take width sources))]
+                            [attribute
+                             (cond-> shown
+                               (> (count sources) width)
+                               (conj :seon.sci.admit/elided))])))))]
+    (cond-> direct
+      (seq reverse-groups)
+      (assoc :seon.render.debug/reverse-refs reverse-groups))))
+
+(defn- entity-handle?
+  [value]
+  (and (map? value) (= #{:db/id} (set (keys value)))
+       (integer? (:db/id value))))
+
+(defn- debug-value
+  [db agent-id cursor caps]
+  (if-let [agent-eid (some-> (d/pull db [:db/id]
+                                     [:seon.cluster.agent/id agent-id])
+                             :db/id)]
+    (letfn [(open [current]
+              (if (entity-handle? current)
+                (debug-entity db (:db/id current) caps)
+                current))
+            (descend [current step]
+              (let [opened (open current)]
+                (cond
+                  (and (map? opened) (contains? opened step)) (get opened step)
+                  (and (sequential? opened) (int? step)
+                       (< -1 step (count opened))) (nth opened step)
+                  (and (set? opened) (contains? opened step)) step
+                  :else
+                  (reduced
+                   {:seon.error/kind ::no-such-debug-path
+                    :seon.error/message
+                    (str "There is nothing at " (pr-str step)
+                         " in agent " agent-id ".")}))))]
+      (open
+       (reduce descend
+               {:db/id agent-eid}
+               (:seon.render.data/path cursor))))
+    nil))
+
+(defn- debug-page-of
+  [db agent-id cursor caps]
+  (let [path (:seon.render.data/path cursor)
+        unit {:seon.cluster.agent/id agent-id
+              :seon.render.value/root [:seon.cluster.agent/id agent-id]
+              :seon.render.value/route-base
+              (str "/agent/" (path-segment agent-id) "/debug")
+              :seon.render.data/cursor cursor
+              :seon.sci.admit/caps caps
+              :seon.render/value (debug-value db agent-id cursor caps)}
+        id (value/node-id unit path)]
+    {id (hiccup/->string (block/data-panel unit))}))
+
+(defn- debug-shell
+  [agent-id cursor]
+  (let [path (:seon.render.data/path cursor)
+        unit {:seon.cluster.agent/id agent-id
+              :seon.render.value/root [:seon.cluster.agent/id agent-id]}
+        id (value/node-id unit path)
+        query (str "debug=true&path="
+                   (URLEncoder/encode (pr-str path) "UTF-8")
+                   "&offset=" (:seon.render.data/offset cursor))]
+    (shell {:seon.cluster.agent/id agent-id
+            :seon.render/page [[:div {:id id :class "seon-data-panel"}]]
+            :seon.render.web/feed-url
+            (str "/feed/" (path-segment agent-id) "?" query)})))
+
 (defn changed
   "The patches whose bytes differ between `delivered` and `page`.
 
@@ -325,8 +455,17 @@
         db @connection
         watched (into (sorted-set)
                       (keep (fn [[agent-id tabs]]
-                              (when (pos? (long tabs)) agent-id)))
+                              (when (and (string? agent-id)
+                                         (pos? (long tabs)))
+                                agent-id)))
                       @registration)
+        debug-watched?
+        (boolean
+         (some (fn [[registration-key tabs]]
+                 (and (vector? registration-key)
+                      (= ::debug-tab (first registration-key))
+                      (pos? (long tabs))))
+               @registration))
         ;; The run id makes each partial self-describing. Keep only
         ;; entries whose run is still unsettled at THIS immutable
         ;; database value; terminal facts supersede and remove them.
@@ -353,7 +492,7 @@
                   (update ::passes inc)
                   (assoc ::watched (count watched)
                          ::streams streams))]
-    (if (= pages (::produced state))
+    (if (and (= pages (::produced state)) (not debug-watched?))
       [state nil]
       [(assoc state ::produced pages) pages])))
 
@@ -484,20 +623,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- register-tab!
-  "Count one open tab on `agent-id` in the watched registration."
-  [registration agent-id]
-  (swap! registration update agent-id (fnil inc 0)))
+  "Count one open tab at its page registration key."
+  [registration registration-key]
+  (swap! registration update registration-key (fnil inc 0)))
 
 (defn- deregister-tab!
-  "Drop one open tab; the last tab out removes the agent entirely, so
-  the render pass stops deriving a page nobody is watching."
-  [registration agent-id]
+  "Drop one open tab; the last tab out removes its page key entirely."
+  [registration registration-key]
   (swap! registration
          (fn [watched]
-           (let [remaining (dec (long (get watched agent-id 1)))]
+           (let [remaining (dec (long (get watched registration-key 1)))]
              (if (pos? remaining)
-               (assoc watched agent-id remaining)
-               (dissoc watched agent-id))))))
+               (assoc watched registration-key remaining)
+               (dissoc watched registration-key))))))
 
 (defn- write-patches!
   "Write one batch, parking after an event enters http-kit's queue.
@@ -554,7 +692,18 @@
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
             render-channel :seon.render.web/render-channel}]
-  (let [channel (:async-channel request)
+  (let [query (query-params request)
+        debug? (= "true" (get query "debug"))
+        cursor (data/parse-cursor (get query "path") (get query "offset"))
+        registration-key (if debug? [::debug-tab id] id)
+        paint (if debug?
+                (fn [] (debug-page-of @connection id cursor caps))
+                (fn []
+                  (page-of {:seon.db/db @connection
+                            :seon.cluster.agent/id id
+                            :seon.sci.admit/caps caps
+                            :seon.cluster.run/live-processes #{process}})))
+        channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
         painting (volatile! true)]
     (datastar.http-kit/->sse-response
@@ -564,24 +713,20 @@
         ;; interest FIRST, so the pass a wake triggers derives this
         ;; agent; the tap BEFORE the paint, so a snapshot racing the
         ;; paint is diffed rather than missed
-        (register-tab! registration id)
+        (register-tab! registration registration-key)
         (async/tap pages-mult tap)
         (.start
          (Thread/ofVirtual)
          (fn []
            (try
-             (let [initial (page-of {:seon.db/db @connection
-                                     :seon.cluster.agent/id id
-                                     :seon.sci.admit/caps caps
-                                     :seon.cluster.run/live-processes
-                                     #{process}})]
+             (let [initial (paint)]
                ;; the initial full paint: every block, at its own id
                (when (write-patches! channel generator (sort-by key initial))
                  (async/offer! render-channel ::wake)
                  (loop [delivered initial]
                    (when @painting
                      (when-let [pages (async/<!! tap)]
-                       (if-let [page (get pages id)]
+                       (if-let [page (if debug? (paint) (get pages id))]
                          (let [{:seon.render.web/keys [patches]}
                                (changed delivered page)]
                            ;; default patch mode is `outer` — a complete
@@ -605,7 +750,7 @@
         (vreset! painting false)
         (async/untap pages-mult tap)
         (async/close! tap)
-        (deregister-tab! registration id))})))
+        (deregister-tab! registration registration-key))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Routes
@@ -751,6 +896,8 @@
                           (exact-agent-id #"/agent/([^/]+)/message" uri))
           page-agent (when (= :get method)
                        (exact-agent-id #"/agent/([^/]+)" uri))
+          debug-agent (when (= :get method)
+                        (exact-agent-id #"/agent/([^/]+)/debug" uri))
           feed-agent (when (= :get method)
                        (exact-agent-id #"/feed/([^/]+)" uri))
           ;; ONE page request builder for both html routes, so `/` and
@@ -782,6 +929,18 @@
                                                      (page-request id))
                        :seon.render.web/feed-url (str "/feed/" id)})}
 
+        debug-agent
+        (if (agent-exists? @connection debug-agent)
+          (let [query (query-params request)
+                cursor (data/parse-cursor (get query "path")
+                                          (get query "offset"))]
+            {:status 200
+             :headers {"content-type" "text/html; charset=utf-8"}
+             :body (debug-shell debug-agent cursor)})
+          {:status 404
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body "agent not found"})
+
         page-agent
         (let [agent-id page-agent]
           {:status 200
@@ -806,11 +965,7 @@
         ;; The entity lookup ref selects the drill root; the cursor
         ;; navigates within that ordinary value. With no entity the
         ;; canonical database attributes remain the front page.
-        (let [query (into {} (map (fn [pair]
-                                    (let [[k v] (str/split pair #"=" 2)]
-                                      [k (some-> v (java.net.URLDecoder/decode
-                                                    "UTF-8"))])))
-                          (str/split (or (:query-string request) "") #"&"))
+        (let [query (query-params request)
               entity? (contains? query "entity")
               entity (query-entity (get query "entity"))
               value (if entity?

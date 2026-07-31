@@ -53,13 +53,12 @@
   and the next render derives the same value from the same facts."
   (:require [clojure.edn :as edn]
             [clojure.set :as set]
-            [clojure.string :as str]
             [datahike.api :as d]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
+            [seon.render.value :as value]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit]))
+            [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/block.edn
@@ -694,15 +693,16 @@
                                         remaining-hops
                                         (assoc :seon.render/distance
                                                remaining-hops))
+                            render-unit
+                            (if declared
+                              neighbour
+                              (assoc neighbour
+                                     :seon.sci.admit/caps caps
+                                     :seon.render/value
+                                     (dissoc unit :seon.db/db)))
                             rendered
                             (render/render
-                             {:seon.render/unit
-                              (if declared
-                                neighbour
-                                (assoc neighbour :seon.render/html
-                                       `data-panel
-                                       :seon.sci.admit/caps caps
-                                       :seon.render/value (dissoc unit :seon.db/db)))
+                             {:seon.render/unit render-unit
                               :seon.render/kind :seon.render/html})]
                         (if (:seon.error/kind rendered)
                           (note hole (:seon.error/message rendered))
@@ -885,6 +885,21 @@
             specialists)
       default))
 
+(defn- floor-unit
+  [unit]
+  (if-some [floor-value (get unit :seon.render/value)]
+    (assoc unit :seon.render/value floor-value)
+    (let [omitted-render-keys
+          (into []
+                (comp
+                 (filter #(= "seon.render" (namespace %)))
+                 (filter #(nil? (get unit %))))
+                (keys unit))]
+      (assoc unit :seon.render/value
+             (apply dissoc unit
+                    :seon.db/db :seon.render/distance
+                    (concat (render/kinds unit) omitted-render-keys))))))
+
 (defn data-panel
   "`:seon.render/html`'s GENERIC default: any value, as a readable panel.
 
@@ -917,68 +932,7 @@
   mistake for a rendered value."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-let [caps (:seon.sci.admit/caps unit)]
-    (let [value (if-some [value (get unit :seon.render/value)]
-                  value
-                  ;; a bare unit is data too — but printing its own
-                  ;; projection symbols or nil-punned render keys back
-                  ;; at the reader is noise
-                  (let [omitted-render-keys
-                        (into []
-                              (comp
-                               (filter #(= "seon.render" (namespace %)))
-                               (filter #(nil? (get unit %))))
-                              (keys unit))]
-                    ;; `:seon.render/distance` is the request parameter
-                    ;; the projection was CALLED with, not data the unit
-                    ;; owns — printing it back would make the accretion
-                    ;; visible in every generic panel.
-                    (apply dissoc unit :seon.db/db :seon.render/distance
-                           (concat (render/kinds unit)
-                                   omitted-render-keys))))
-          ;; ONE bounding owner. `admit` already walks once, elides past
-          ;; the configured depth and width, never dereferences an
-          ;; IDeref and cannot loop on a cycle. Rebuilding any of that
-          ;; here would be a second codec to keep in step with the first.
-          {:seon.sci.admit/keys [value capped?]}
-          (admit/admit {:seon.sci.admit/value value
-                        :seon.sci.admit/caps caps
-                        ;; nothing is armed: this is not an eval, and
-                        ;; admission's bounds are the whole guard here
-                        :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.config/on-core-error :record})]
-      [:div {:class "seon-data-panel"}
-       (letfn [(panel [node]
-                 (cond
-                   (map? node)
-                   [:dl {:class "seon-data-map"}
-                    (doall (mapcat (fn [[key setting]]
-                                     [[:dt {:class "seon-data-key"} (str key)]
-                                      [:dd {:class "seon-data-value"} (panel setting)]])
-                                   (sort-by (comp str first) (seq node))))]
-
-                   (set? node)
-                   [:ul {:class "seon-data-set"}
-                    (doall (map (fn [entry] [:li (panel entry)])
-                                (sort-by str (seq node))))]
-
-                   (sequential? node)
-                   [:ol {:class "seon-data-list"}
-                    (doall (map (fn [entry] [:li (panel entry)]) node))]
-
-                   (string? node) [:span {:class "seon-data-string"} node]
-                   (nil? node) [:span {:class "seon-data-nil"} "nil"]
-                   :else [:span {:class "seon-data-scalar"} (str node)]))]
-         (panel value))
-       (when capped?
-         ;; the honest signal, kept: a reader must never have to guess
-         ;; whether an elision marker was the value's own data
-         [:p {:class "seon-data-capped"}
-          "elided — this value is larger than the configured caps"])])
-    [:div {:class "seon-error-card"}
-     [:span {:class "seon-error-card-message"}
-      (str "This panel needs :seon.sci.admit/caps on the unit; without "
-           "them nothing bounds what it would print.")]]))
+  (value/render-html (floor-unit unit)))
 
 (defn data-prose
   "`:seon.render/ai`'s GENERIC default: any value, as readable EDN.
@@ -1001,31 +955,7 @@
   first."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (if-let [caps (:seon.sci.admit/caps unit)]
-    (let [value (if-some [value (get unit :seon.render/value)]
-                  value
-                  (let [omitted-render-keys
-                        (into []
-                              (comp
-                               (filter #(= "seon.render" (namespace %)))
-                               (filter #(nil? (get unit %))))
-                              (keys unit))]
-                    (apply dissoc unit
-                           :seon.db/db :seon.render/distance
-                           :seon.sci.admit/caps
-                           (concat (render/kinds unit) omitted-render-keys))))
-          {:seon.sci.admit/keys [value capped?]}
-          (admit/admit {:seon.sci.admit/value value
-                        :seon.sci.admit/caps caps
-                        :seon.sci.admit/interrupt-fn (fn [])
-                        :seon.config/on-core-error :record})]
-      (str (pr-str value)
-           ;; the honest signal, kept: a reader must never have to guess
-           ;; whether an elision marker was the value's own data
-           (when capped?
-             " (elided — this value is larger than the configured caps)")))
-    (str "This projection needs :seon.sci.admit/caps on the unit; without "
-         "them nothing bounds what it would say.")))
+  (value/render-ai (floor-unit unit)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writing a block set

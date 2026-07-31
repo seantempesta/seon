@@ -6,7 +6,7 @@
   1. a declaration on the value itself;
   2. the requesting namespace's `render-<kind>` defn;
   3. the most-specific matching schema's attached declaration;
-  4. `seon.render.value`'s structural floor.
+  4. the one admission-backed structural floor.
 
   A unit may wrap arbitrary data under `:seon.render/value`; declarations
   on that raw value outrank declarations on the wrapper. A requesting
@@ -160,15 +160,26 @@
 (defn- floor-declaration
   [kind]
   (if (= :seon.render/html kind)
-    'seon.render.value/render-html
-    'seon.render.value/render-ai))
+    'seon.render.block/data-panel
+    'seon.render.block/data-prose))
 
-(defn- projection-declaration
-  [unit kind]
-  (or (value-declaration unit kind)
-      (namespace-declaration unit kind)
-      (schema-declaration unit kind)
-      (floor-declaration kind)))
+(defn resolve-unit
+  "Resolve one unit and derive whether only the floor can render it.
+
+  The boolean records WHICH resolution branch won. It is deliberately not a
+  symbol comparison: a value may explicitly name the generic floor, and that
+  explicit choice did not fall through to it. The selected declaration is
+  associated under `kind`, so every caller hands the same resolved unit to the
+  projection and W4 can filter HTML without reimplementing precedence."
+  {:malli/schema [:=> [:cat :seon.render/request] :seon.render/unit]}
+  [{:seon.render/keys [unit kind]}]
+  (let [specific (or (value-declaration unit kind)
+                     (namespace-declaration unit kind)
+                     (schema-declaration unit kind))
+        floor? (nil? specific)]
+    (assoc unit
+           kind (or specific (floor-declaration kind))
+           :seon.render/would-fall-to-floor? floor?)))
 
 (defn render
   "Project `:seon.render/unit` into `:seon.render/kind`.
@@ -188,7 +199,9 @@
   {:malli/schema [:=> [:cat :seon.render/request]
                   [:or :seon.render/rendered :seon.error/value]]}
   [{:seon.render/keys [unit kind]}]
-  (let [declaration (projection-declaration unit kind)]
+  (let [resolved-unit (resolve-unit {:seon.render/unit unit
+                                     :seon.render/kind kind})
+        declaration (get resolved-unit kind)]
     (cond
       ;; A LITERAL IS ITS OWN OUTPUT. No resolution, nothing to invoke,
       ;; and therefore nothing that can throw — a fixed string or a
@@ -206,7 +219,7 @@
                             (catch Throwable _ nil))]
         (try
           {:seon.render/kind kind
-           :seon.render/output (projection unit)}
+           :seon.render/output (projection resolved-unit)}
           (catch Throwable failure
             {:seon.error/kind ::projection-failed
              :seon.error/message (str "The " declaration " projection threw: "

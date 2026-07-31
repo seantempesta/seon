@@ -50,6 +50,11 @@
   [_unit]
   (throw (ex-info "the projection itself is broken" {::deliberate true})))
 
+(defn render-html
+  "The requesting namespace's HTML override for provenance tests."
+  [_unit]
+  [:p "namespace floor override"])
+
 (defn- unit
   "A unit declaring `ai` and `log`, plus keys that are NOT declarations."
   []
@@ -140,6 +145,25 @@
     (is (= #{:seon.render/ai :seon.render/log}
            (render/kinds (unit)))
         "the universal floor is capability, not a repeated declaration")))
+
+(deftest resolution-derives-whether-the-floor-branch-won
+  (let [fallback (render/resolve-unit (request (unit) :seon.render/html))
+        explicit (render/resolve-unit
+                  (request (assoc (unit) :seon.render/html
+                                  'seon.render.block/data-panel)
+                           :seon.render/html))
+        namespace-owned
+        (render/resolve-unit
+         (request (assoc (unit) :seon.render/namespace
+                         'seon.render-test)
+                  :seon.render/html))]
+    (is (true? (:seon.render/would-fall-to-floor? fallback)))
+    (is (= 'seon.render.block/data-panel (:seon.render/html fallback)))
+    (is (false? (:seon.render/would-fall-to-floor? explicit))
+        "provenance is the winning branch, not equality with its symbol")
+    (is (false? (:seon.render/would-fall-to-floor? namespace-owned)))
+    (is (= 'seon.render-test/render-html
+           (:seon.render/html namespace-owned)))))
 
 (deftest a-literal-declaration-is-its-own-output
   ;; The accretion this test's predecessor pinned the refusal for, in

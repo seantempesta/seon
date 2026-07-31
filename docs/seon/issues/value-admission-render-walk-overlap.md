@@ -5,39 +5,43 @@ severity: cleanup
 tags: [issue, architecture, render, sci]
 ---
 
-# Unify the nested-data walk shared by admission and rendering
+# Finish the protected-walk integration with the admitted render floor
 
 ## Problem
 
-`seon.sci.admit` and `seon.render.value` both traverse nested Clojure data.
-They have different jobs—eval-boundary safety versus presentation—but their
-collection descent and opaque-marker construction can drift.
+W3 deleted the independent value sampler and made `seon.sci.admit` the one
+nested-data admission walk for both floor projections. Two deliberately
+bounded edges remain to integrate:
+
+- a drilled collection selects its offset window before admitting that finite
+  page; and
+- `seon.render.walk/projection` chooses and associates a declaration before it
+  calls the router, erasing whether the floor branch won.
 
 ## Evidence
 
-`src/seon/sci/admit.clj` bounds total nodes, calls the SCI interrupt function,
-and produces durable printable ordinary data. `src/seon/render/value.cljc`
-preserves navigation identities, semantic field preference, presentation
-elision counts, and the AI/HTML structural twins. Both use the same existing
-admission caps as hard maxima and the same `:seon.eval/opaque` /
-`:seon.eval/datom` marker vocabulary, but collection descent is still
-implemented twice. Ruling 14 in the SCI runtime plan requires one walk
-discipline or a named reason for the split; the reason during this port is that
-admission must interrupt and enforce a total node budget before a value can be
-retained, while rendering selects a smaller navigation-preserving
-presentation after admission. `src/seon/render/walk.clj` is protected during
-this port, so ref-edge unification remains outside this lane.
+`src/seon/render/value.cljc:133-182` admits once and both twins present that
+ordinary value. `src/seon/render/block.clj:903-939` only delegates to those
+twins; its former recursive panel walk is deleted. The drill's raw read is
+bounded to offset + one configured collection page before admission
+(`src/seon/render/value.cljc:71-139`), and realization failures become the
+same admission marker vocabulary rather than escaping.
+
+The remaining provenance defect is exact:
+`src/seon/render/walk.clj:382-390` associates `chosen` under the render kind
+before `seon.render/resolve-unit` sees the unit. An inherited floor therefore
+looks explicit. Comparing symbols is invalid because a producer may explicitly
+choose the same floor symbol. W3's evidence and live proof are recorded in
+`docs/prds/sci-execution-runtime/research/w3-floor-debug-notes-2026-07-31.md`.
 
 ## Owner
 
-The renderer/walk design session should extract one shared data-edge
-discipline without weakening admission's safety boundary or presentation's
-navigability.
+W1 owns `src/seon/render/walk.clj`; integrate branch provenance there without
+weakening admission safety or navigation.
 
 ## Acceptance
 
-Admission and structural rendering share one tested nested-data traversal and
-marker vocabulary; admission still owns interrupts and total safety caps,
-rendering still owns presentation selection and elision, and the entity graph
-walker applies the same discipline to ref edges without a second marker
-vocabulary.
+The walk hands an unresolved unit to the router, or carries an explicit
+source-derived branch fact, so downstream W4 filtering can read
+`:seon.render/would-fall-to-floor?` without comparing projection symbols. The
+offset window remains bounded and every dropped or failed value remains loud.

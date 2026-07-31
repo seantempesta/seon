@@ -41,7 +41,7 @@
             [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
-  (:import [java.net BindException Socket URI]
+  (:import [java.net BindException Socket URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]
            [java.util.concurrent CompletableFuture]))
@@ -951,6 +951,68 @@
             "the drill root is the pulled entity, not the schema vector")
         (is (str/includes? default-body ":seon.ai.attempt/at")
             "without entity the schema vector remains the drill root")))))
+
+(defn- debug-feed-path
+  [agent-id path]
+  (str "/feed/" agent-id "?debug=true&path="
+       (URLEncoder/encode (pr-str path) "UTF-8")
+       "&offset=0"))
+
+(deftest each-agent-has-an-isolated-debug-route
+  (with-server two-blocks
+    (fn [connection server _context]
+      (d/transact connection [{:seon.cluster.agent/id "alice"}])
+      (let [root (.body (fetch server "/agent/root/debug"))
+            alice (.body (fetch server "/agent/alice/debug"))]
+        (is (str/includes? root "debug=true"))
+        (is (str/includes? alice "/feed/alice"))
+        (is (not= root alice) "the stable root address includes the agent"))
+      (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
+
+(deftest debug-drills-three-levels-and-includes-apparatus
+  (with-server two-blocks
+    (fn [connection server _context]
+      (d/transact connection
+                  {:tx-data [{:seon.cluster.agent/id "debug-trigger"}]
+                   :tx-meta {:seon.db/user
+                             [:seon.cluster.agent/id agent-id]}})
+      (doseq [[path needle]
+              [[[:seon.cluster.agent/blocks 0 :seon.render.block/name]
+                "banner"]
+               [[:seon.render.debug/reverse-refs :seon.db/user 0]
+                ":db/txInstant"]]]
+        (let [stream (open-feed server (debug-feed-path agent-id path))]
+          (try
+            (let [paint (read-patches! stream 1)]
+              (is (str/includes? paint needle)
+                  (str "the debug floor exposes " (pr-str path))))
+            (finally (.close stream))))))))
+
+(deftest debug-caps-five-megabytes-and-live-morphs-the-drilled-node
+  (with-server two-blocks
+    (fn [connection server _context]
+      (let [namespace-name 'my.agents.w3-debug
+            huge (apply str (repeat (* 5 1024 1024) "x"))
+            path [:seon.cluster.agent/namespace :seon.ns/source]]
+        (d/transact connection
+                    [{:seon.ns/name namespace-name :seon.ns/source huge}
+                     {:seon.cluster.agent/id agent-id
+                      :seon.cluster.agent/namespace
+                      [:seon.ns/name namespace-name]}])
+        (let [stream (open-feed server (debug-feed-path agent-id path))]
+          (try
+            (let [initial (read-patches! stream 1)]
+              (is (< (count initial) 100000))
+              (is (str/includes? initial "1310720 tokens"))
+              (is (str/includes? initial "inspect"))
+              (is (str/includes? initial "elided")))
+            (d/transact connection
+                        [{:seon.ns/name namespace-name
+                          :seon.ns/source "debug-live-morph"}])
+            (let [repaint (read-patches! stream 1)]
+              (is (= 1 (patches repaint)))
+              (is (str/includes? repaint "debug-live-morph")))
+            (finally (.close stream))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Slice 1 — one POST, the existing route and render chain
