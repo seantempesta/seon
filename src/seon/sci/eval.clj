@@ -467,7 +467,10 @@
     refers :seon.sci.reader/refers
     requires ::requires}]
   {:seon.ns/requires
-   requires
+   (into #{}
+         (map (fn [namespace-name]
+                [:seon.ns/name namespace-name]))
+         requires)
    :seon.ns/aliases
    (into #{}
          (map (fn [[local target-ns]]
@@ -506,7 +509,10 @@
          (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
                 [local (symbol (str target-ns) (str target-name))]))
          (:seon.ns/refers row))
-   :requires (or (:seon.ns/requires row) #{})})
+   :requires
+   (into #{}
+         (map :seon.ns/name)
+         (:seon.ns/requires row))})
 
 (defn- namespace-context-row
   [namespace-name source before after changed?]
@@ -543,7 +549,7 @@
         committed (when-not (= identity :seon.program/delete-identities)
                     (d/pull db
                             (if (= identity :seon.ns/name)
-                              '[* :seon.ns/requires
+                              '[* {:seon.ns/requires [:seon.ns/name]}
                                   {:seon.ns/aliases [*]}
                                   {:seon.ns/imports [*]}
                                   {:seon.ns/refers [*]}]
@@ -644,7 +650,7 @@
           (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
           (map (fn [[namespace-name _ _]]
                  (d/pull db
-                         '[* :seon.ns/requires
+                         '[* {:seon.ns/requires [:seon.ns/name]}
                              {:seon.ns/aliases [*]}
                              {:seon.ns/imports [*]}
                              {:seon.ns/refers [*]}]

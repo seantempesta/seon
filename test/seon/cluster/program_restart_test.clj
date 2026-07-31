@@ -200,12 +200,16 @@
                              "my.agents.restart-a/removed-before-restart"])))
           (is (pos? (receipt-count @connection)))
           (let [namespace-row
-                (d/pull @connection [:seon.ns/requires]
-                        [:seon.ns/name 'my.agents.restart-a])]
-            (is (some #{'clojure.set} (:seon.ns/requires namespace-row))
+                (d/pull @connection
+                        [{:seon.ns/requires [:seon.ns/name]}]
+                        [:seon.ns/name 'my.agents.restart-a])
+                required-names
+                (into #{}
+                      (map :seon.ns/name)
+                      (:seon.ns/requires namespace-row))]
+            (is (contains? required-names 'clojure.set)
                 "a plain require remains an exact load dependency")
-            (is (not (some #{'missing.restart.namespace}
-                           (:seon.ns/requires namespace-row)))
+            (is (not (contains? required-names 'missing.restart.namespace))
                 ":as-alias is not reclassified as a load dependency"))
           (finally
             (cluster/stop! first-instance))))

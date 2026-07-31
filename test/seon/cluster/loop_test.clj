@@ -109,6 +109,24 @@
     (is (= source (:seon.cluster.run.form/source admitted))
         "an absent namespace row is valid for a newly created agent")))
 
+(deftest linting-projects-required-namespace-refs-to-analyzer-symbols
+  (let [source "(authored.target/increment 41)"
+        admitted
+        (cluster.loop/lint-form
+         {:seon.ns/name 'authored.consumer
+          :seon.cluster.loop/namespace-row
+          {:seon.ns/name 'authored.consumer
+           :seon.ns/requires #{{:seon.ns/name 'authored.target}}}
+          :seon.cluster.loop/available-functions
+          [{:seon.fn/sym "authored.target/increment"
+            :seon.fn/private? false
+            :seon.fn/arglists "([x])"}]
+          :seon.cluster.loop/source
+          {:seon.cluster.run.form/source source
+           :seon.ns/name 'authored.consumer}})]
+    (is (= source (:seon.cluster.run.form/source admitted))
+        "a nested ref pull supplies the required namespace name to lint")))
+
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]
     (is (set? committed))

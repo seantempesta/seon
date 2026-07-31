@@ -83,7 +83,14 @@
     namespace-row ::namespace-row
     available-functions ::available-functions
     source ::source}]
-  (let [analyzed
+  (let [namespace-row
+        (some-> namespace-row
+                (update :seon.ns/requires
+                        (fn [required-namespaces]
+                          (into #{}
+                                (map :seon.ns/name)
+                                required-namespaces))))
+        analyzed
         (first
          (fn.analyzer/analyze-forms
           (cond->
@@ -997,7 +1004,8 @@
                     db-before-evaluation @connection
                     namespace-row
                     (d/pull db-before-evaluation
-                            '[* {:seon.ns/aliases [*]}
+                            '[* {:seon.ns/requires [:seon.ns/name]}
+                                {:seon.ns/aliases [*]}
                                 {:seon.ns/imports [*]}
                                 {:seon.ns/refers [*]}]
                             [:seon.ns/name evaluation-namespace])

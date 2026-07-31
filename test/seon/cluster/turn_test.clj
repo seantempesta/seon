@@ -121,7 +121,10 @@
                   (schema.datahike/malli->datahike-schema
                    (schema/canonical-database-attributes)))
       (d/transact connection
-                  [(agent-row "agent-a")
+                  [{:seon.ns/name 'clojure.set}
+                   {:seon.ns/name 'clojure.test}
+                   {:seon.ns/name 'seon.schema}
+                   (agent-row "agent-a")
                    ;; the episode dial, planted the way production
                    ;; ships it (config/default.edn): an ABSENT dial is
                    ;; FAIL-CLOSED for agent-sent triggers, so the
@@ -1478,7 +1481,7 @@
          :seon.ns/source "(ns authored.target)"}
         {:seon.ns/name 'authored.consumer
          :seon.ns/source "(ns authored.consumer)"
-         :seon.ns/requires ['authored.target]
+         :seon.ns/requires [[:seon.ns/name 'authored.target]]
          :seon.ns/aliases
          [{:seon.ns.alias/local 'target
            :seon.ns.alias/target-ns 'authored.target}]

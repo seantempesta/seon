@@ -113,6 +113,15 @@
     (is (= :seon.sci.eval/evaluation-failed
            (:seon.error/kind (:seon.sci.admit/value evaluation))))))
 
+(deftest require-context-rows-persist-namespace-lookup-refs
+  (let [ctx (eval/fork)
+        evaluation (run-in ctx "(require 'clojure.set)" 2000)]
+    (is (ok? evaluation))
+    (is (= #{[:seon.ns/name 'clojure.set]}
+           (get-in evaluation
+                   [:seon.sci.eval/program-row :seon.ns/requires]))
+        "SCI symbols become canonical lookup refs only at persistence")))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))
