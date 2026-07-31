@@ -1,5 +1,5 @@
 (ns seon.render.agent-test
-  "Slice 2: the three-block agent page and its family-owned transcript."
+  "The surviving family-owned agent and transcript renders."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
@@ -10,7 +10,6 @@
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.walk :as walk]
-            [seon.render.web :as web]
             [seon.test-support :as support]))
 
 (def ^:private agent-id "agent-transcript")
@@ -122,10 +121,6 @@
                    (hiccup/->string node)])))
         (nodes rendered)))
 
-(defn- text-nodes
-  [rendered]
-  (into #{} (filter string?) (tree-seq sequential? seq rendered)))
-
 (deftest transcript-orders-by-commit-test
   (support/with-database
     (fn [connection]
@@ -177,71 +172,6 @@
               "only the redefined family's entries change")
           (is (every? #(str/includes? (get after %) "hot-reloaded-message-lens")
                       message-ids)))))))
-
-(deftest rail-and-focus-are-one-renderer-at-two-distances-test
-  ;; seed 2026072907
-  (support/with-database
-    (fn [connection]
-      (let [{:keys [run] :as ids} (seed-history! connection)
-            db @connection
-            pulled (assoc (d/pull db '[*] run)
-                          :seon.db/db db
-                          :seon.sci.admit/caps caps)
-            compact (agent/unit-html
-                     (assoc pulled :seon.render/distance 0))
-            expanded (agent/unit-html
-                      (assoc pulled :seon.render/distance 2))
-            compact-facts (text-nodes compact)
-            expanded-facts (text-nodes expanded)
-            calls (atom [])]
-        (is (every? expanded-facts compact-facts)
-            "the compact facts are a subset of the expanded facts")
-        (with-redefs [agent/unit-html
-                      (fn [unit]
-                        (swap! calls conj
-                               [(:db/id unit) (:seon.render/distance unit)])
-                        [:div "projection"])]
-          (agent/focus-html (render-unit db)))
-        (doseq [entity-id (map ids
-                               [:agent :message-in :run :receipt
-                                :error :message-out])]
-          (is (= #{0 2}
-                 (into #{}
-                       (keep (fn [[called distance]]
-                               (when (= entity-id called) distance)))
-                       @calls))
-              "the same unit renderer supplies rail and focal distance"))))))
-
-(deftest selection-survives-a-morph-test
-  ;; seed 2026072908 — wire bytes use Datastar's if-missing signal modifier.
-  (support/with-database
-    (fn [connection]
-      (seed-history! connection)
-      (let [request {:seon.db/db @connection
-                     :seon.cluster.agent/id agent-id
-                     :seon.sci.admit/caps caps
-                     :seon.cluster.run/live-processes #{"scratch-process"}}
-            initial (web/page-of request)]
-        (transact-one!
-         connection
-         {:seon.cluster.message/id "later-message"
-          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
-          :seon.cluster.message/content "A later transcript repaint."
-          :seon.cluster.message/at (at 9)})
-        (let [repaint
-              (web/changed initial
-                           (web/page-of (assoc request :seon.db/db @connection)))
-              patches (into {} (:seon.render.web/patches repaint))
-              transcript (get patches (block/surface-id :transcript))
-              focus (get patches (block/surface-id :focus))]
-          (is (str/includes? transcript "A later transcript repaint."))
-          (is (str/includes? focus "data-signals__ifmissing")
-              "a focus repaint may initialize, but never overwrite selection")
-          (is (not (re-find #"<section[^>]* data-signals="
-                            focus))
-              "the wire has no unconditional signal assignment")
-          (is (str/includes? focus "$selected ===")
-              "the focal choice remains a tab-local signal"))))))
 
 (deftest an-agent-with-nothing-to-say-renders-an-empty-transcript-test
   ;; seed 2026072909

@@ -38,16 +38,12 @@
   following this agent's connections, and none goes stale, so none is
   something the walk could ever render.
 
-  `:trigger` stayed for a narrower reason, and the derivation corrected
-  the guess that produced it. The walk DOES reach the messages sent to
-  this agent, so at distance 1 the triggering message's text is already
-  in the neighbourhood. What the walk cannot say is WHICH of them this
-  run is answering: the cause is the run's creating transaction's
-  `:seon.db/trigger` meta, and a transaction is apparatus rather than a
-  neighbour (`seon.render.walk/apparatus?`). So the block survives as
-  one sentence of selection over facts the view already shows, which is
-  a real job, and the overlap is recorded in the pilot's research note
-  rather than argued away.
+  `:trigger` is no longer a scaffold block. The universal walk derives
+  the `:seon.db/trigger` connection from the run's creating transaction
+  and follows it directly to the message. The transaction remains
+  provenance rather than becoming a separately rendered unit, while the
+  message a run answers is present through the same walk as every other
+  neighbour.
 
   Crash walk: pure renders over a database value. A kill loses a prompt
   that re-derives."
@@ -250,116 +246,6 @@
         (if agent-entity
           "No conversation yet. Send a message above to begin."
           "This agent does not exist. Return to the agent list.")])]))
-
-(defn unit-html
-  "One database unit through its family lens at the requested distance."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [db (:seon.db/db unit)
-        caps (:seon.sci.admit/caps unit)
-        entity-id (:db/id unit)
-        distance (:seon.render/distance unit 1)
-        node (when (and db caps entity-id)
-               (render-node db caps entity-id distance))]
-    [:div {:class "seon-focus-unit"
-           :data-focus-entity (str entity-id)
-           :data-render-distance (str distance)}
-     (if-let [content (some-> node node-html)]
-       [:ul {:class "seon-neighborhood-list"} content]
-       [:p {:class "seon-agent-empty"}
-        "This unit has nothing to render at this distance."])]))
-
-(defn- selection
-  [entity-id]
-  (str "entity-" entity-id))
-
-(defn- unit-label
-  [unit]
-  (cond
-    (:seon.cluster.agent/id unit)
-    (str "agent " (:seon.cluster.agent/id unit))
-
-    (:seon.cluster.message/id unit)
-    (str "message " (:seon.cluster.message/id unit))
-
-    (:seon.cluster.run/id unit)
-    (str "run " (:seon.cluster.run/id unit))
-
-    (:seon.cluster.eval/id unit)
-    (str "form " (:seon.cluster.eval/ordinal unit))
-
-    (:seon.error/id unit)
-    (str "error " (:seon.error/kind unit))
-
-    :else (str "entity " (:db/id unit))))
-
-(defn- focus-entity-ids
-  [db agent-id limit]
-  (when-let [agent (agent-entity-id db agent-id)]
-    (into [agent] (transcript-entity-ids db agent-id limit))))
-
-(defn- focal-panel
-  [unit distance]
-  (let [entity-id (:db/id unit)
-        selected (selection entity-id)]
-    [:section {:id (str "focus-panel-" selected)
-               :class "seon-focus-panel"
-               :data-focus-panel selected
-               :data-show (str "$selected === '" selected "'")}
-     [:div {:class "seon-focus-panel-label"} (unit-label unit)]
-     (unit-html (assoc unit :seon.render/distance distance))]))
-
-(defn- rail-card
-  [unit]
-  (let [entity-id (:db/id unit)
-        selected (selection entity-id)]
-    [:div {:id (str "focus-rail-" selected)
-           :class "seon-rail-card"
-           :role "button"
-           :tabindex "0"
-           :data-focus-card selected
-           :data-show (str "$selected !== '" selected "'")
-           (keyword "data-on:click") (str "$selected = '" selected "'")
-           (keyword "data-on:keydown")
-           (str "(evt.key === 'Enter' || evt.key === ' ') && "
-                "($selected = '" selected "')")}
-     [:div {:class "seon-rail-label"} (unit-label unit)]
-     [:div {:class "seon-rail-preview" :aria-hidden "true"}
-      (unit-html (assoc unit :seon.render/distance 0))]]))
-
-(defn focus-html
-  "A focal unit and its rail previews through one renderer at two distances."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [db (:seon.db/db unit)
-        agent-id (:seon.cluster.agent/id unit)
-        distance (:seon.render/distance unit 1)
-        entity-ids (when (and db agent-id)
-                     (focus-entity-ids
-                      db agent-id
-                      (:seon.config.eval.result/max-collection
-                       (:seon.sci.admit/caps unit))))
-        units (mapv #(assoc (d/pull db '[*] %)
-                            :seon.db/db db
-                            :seon.sci.admit/caps (:seon.sci.admit/caps unit))
-                    entity-ids)
-        initial (some-> units first :db/id selection)]
-    [:section
-     (cond-> {:id (block/surface-id :focus)
-              :class "seon-focus"}
-       initial (assoc :data-signals__ifmissing
-                      (str "{selected:'" initial "'}")))
-     [:h2 {:class "seon-agent-section-label"} "focus"]
-     (if (seq units)
-       [:div {:class "seon-focus-layout"}
-        (into [:div {:class "seon-focus-primary"}]
-              (map #(focal-panel % distance))
-              units)
-        (into [:aside {:class "seon-rail" :aria-label "Context rail"}]
-              (map rail-card)
-              units)]
-       [:p {:class "seon-agent-empty"}
-        "Nothing is focusable yet. Send a message to create context."])]))
 
 (defn namespace-ai
   "`:seon.render/ai` — THE PILOT: this agent's world, at a distance.
