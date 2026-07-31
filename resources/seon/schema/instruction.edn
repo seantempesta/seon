@@ -11,16 +11,11 @@
   [:seon.cluster.instruction/id :seon.cluster.instruction/id]
   [:seon.cluster.instruction/text :seon.cluster.instruction/text]]
 
- :seon.cluster.instruction/global-text
- :seon.cluster.instruction/text
-
- :seon.cluster.instruction/seed-request
- [:map {:closed true}
-  [:seon.cluster.instruction/global-text
-   :seon.cluster.instruction/global-text]]
-
  :seon.cluster.instruction/seed-rows
  [:vector :seon.cluster.instruction/instruction]
+
+ :seon.cluster/toolkit-namespaces
+ [:vector :seon.ns/name]
 
  ; Per-agent instructions are additive. Absence is the ordinary empty set;
  ; the cluster's authoritative set lives on the separate cluster entity.
@@ -36,8 +31,12 @@
  :seon.cluster/instructions
  [:set :seon.db/ref]
 
+ :seon.cluster/toolkit
+ [:set :seon.db/ref]
+
  :seon.cluster/cluster
  [:map {:seon.db/entity true}
   [:seon.cluster/name :seon.cluster/name]
   [:seon.cluster/config :seon.cluster/config]
-  [:seon.cluster/instructions :seon.cluster/instructions]]}
+  [:seon.cluster/instructions :seon.cluster/instructions]
+  [:seon.cluster/toolkit :seon.cluster/toolkit]]}

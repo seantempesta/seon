@@ -218,15 +218,19 @@
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
   [connection cluster-name]
-  (d/transact
-   connection
-   (into [{:seon.config/cluster cluster-name}
-          {:seon.cluster/name cluster-name
-           :seon.cluster/config [:seon.config/cluster cluster-name]
-           :seon.cluster/instructions
-           (mapv (fn [instruction-id]
-                   [:seon.cluster.instruction/id instruction-id])
-                 instruction/instruction-ids)}]
-         (instruction/seed-rows
-          {:seon.cluster.instruction/global-text "test AGENTS.md"})))
+  (let [toolkit-namespaces (instruction/toolkit-namespaces @connection)]
+    (d/transact
+     connection
+     (into [{:seon.config/cluster cluster-name}
+            {:seon.cluster/name cluster-name
+             :seon.cluster/config [:seon.config/cluster cluster-name]
+             :seon.cluster/instructions
+             (mapv (fn [instruction-id]
+                     [:seon.cluster.instruction/id instruction-id])
+                   instruction/instruction-ids)
+             :seon.cluster/toolkit
+             (mapv (fn [namespace-name]
+                     [:seon.ns/name namespace-name])
+                   toolkit-namespaces)}]
+           (instruction/seed-rows))))
   nil)

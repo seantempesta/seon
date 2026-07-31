@@ -1,52 +1,57 @@
 (ns seon.cluster.instruction
   "Cluster-owned instruction facts and their verbatim family renders."
-  (:require [seon.schema.edn :as schema.edn]))
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
 
 (def instruction-ids
-  "The four cluster-owned instruction identities seeded at initialization."
+  "The cluster-owned instruction identities seeded at initialization."
+  [:getting-started])
+
+(def superseded-instruction-ids
+  "The instruction rows replaced by the context walk's getting-started row."
   [:reply-grammar :messaging :declining :global])
 
-(def ^:private reply-grammar
-  (str "Reply with Clojure forms to run, in order. "
-       "Finish with (my.run/complete \"your reply\") when you are "
-       "done, or (my.run/wait \"why\") to pause this run — pause "
-       "when you are waiting on another agent, and put everything "
-       "you will need to finish into the note, because your next "
-       "run starts fresh and that note is what it reads."))
+(def getting-started-text
+  "The owner-editable starting instruction installed in new source branches."
+  (str "This is a live Clojure REPL. Everything above is the output of "
+       "`(seon.render/walk)` — run it yourself with `:depth`/`:root` to "
+       "see more. Your reply is read as forms and evaluated in your "
+       "namespace. A `defn` with `:malli/schema` becomes permanent; "
+       "anything else is scratch. Talk to other agents with "
+       "`(my.message/send! …)`. Prose lines are kept as `;;` comments."))
 
-(def ^:private messaging
-  (str "To ask another agent for something, return "
-       "(my.message/send \"agent-id\" \"what you want to say\") from a "
-       "form — that delivers it and wakes them. Use the bare agent id; "
-       "it is not a namespace. Their answer comes back to you later as a "
-       "new request, so pause with my.run/wait after asking. Return a "
-       "vector of sends to message several."))
-
-(def ^:private declining
-  (str "Repair an assigned problem in your own namespace and say what you "
-       "did. If you cannot — the code is not yours to change, or nothing "
-       "in your namespace could satisfy it — return "
-       "(my.message/decline \"assigner-agent-id\" \"problem-id\" "
-       "\"why you cannot\"), naming the assigning agent and problem "
-       "identity exactly as rendered. Declining settles the problem as "
-       "answered; saying nothing leaves it open forever."))
+(defn toolkit-namespaces
+  "Public contracted `my.*` namespaces in one database program graph."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value]
+    :seon.cluster/toolkit-namespaces]}
+  [db]
+  (->> (d/q '[:find ?namespace-name ?private
+              :where
+              [?namespace :seon.ns/name ?namespace-name]
+              [?function :seon.fn/ns ?namespace]
+              [?function :seon.fn/spec _]
+              [(get-else $ ?function :seon.fn/private? false) ?private]]
+            db)
+       (keep (fn [[namespace-name private?]]
+               (when (and (not private?)
+                          (str/starts-with? (str namespace-name) "my."))
+                 namespace-name)))
+       distinct
+       sort
+       vec))
 
 (defn seed-rows
-  "Instruction rows seeded into the published source database."
+  "Instruction rows installed only when absent from the source database."
   {:malli/schema
-   [:=> [:cat :seon.cluster.instruction/seed-request]
+   [:=> [:cat]
     :seon.cluster.instruction/seed-rows]}
-  [{global-text :seon.cluster.instruction/global-text}]
-  [{:seon.cluster.instruction/id :reply-grammar
-    :seon.cluster.instruction/text reply-grammar}
-   {:seon.cluster.instruction/id :messaging
-    :seon.cluster.instruction/text messaging}
-   {:seon.cluster.instruction/id :declining
-    :seon.cluster.instruction/text declining}
-   {:seon.cluster.instruction/id :global
-    :seon.cluster.instruction/text global-text}])
+  []
+  [{:seon.cluster.instruction/id :getting-started
+    :seon.cluster.instruction/text getting-started-text}])
 
 (defn instruction-ai
   "The instruction's text, verbatim."
