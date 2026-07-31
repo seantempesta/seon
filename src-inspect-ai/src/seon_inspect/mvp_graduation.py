@@ -100,8 +100,11 @@ def check_a(snapshot: dict) -> dict:
     selected = next((row for row in expenses
                      if row.get("id") == selected_id), None)
     functions = _agent_functions(snapshot)
-    contracted = [row for row in functions
-                  if isinstance(row.get("spec"), str) and row.get("spec")]
+    contracted = [
+        row for row in functions
+        if isinstance(row.get("spec"), str) and row.get("spec")
+        and isinstance(row.get("source"), str) and row.get("source")
+    ]
     call = snapshot.get("behavior_call", {})
     result = call.get("result")
     expected_behavior = bool(
@@ -111,10 +114,16 @@ def check_a(snapshot: dict) -> dict:
         and isinstance(result, str)
         and _dollars(selected["amount_cents"]) in result
         and selected["vendor"] in result)
-    pre = {row.get("expense_id"): row.get("rendered")
+    selected_path = snapshot.get("selected_expense_path")
+    pre = {(row.get("expense_id"), tuple(row.get("path", []))):
+           row.get("rendered")
            for row in snapshot.get("pre_walk", [])}
-    post = {row.get("expense_id"): row.get("rendered")
+    post = {(row.get("expense_id"), tuple(row.get("path", []))):
+            row.get("rendered")
             for row in snapshot.get("post_walk", [])}
+    post_rows = {(row.get("expense_id"), tuple(row.get("path", []))): row
+                 for row in snapshot.get("post_walk", [])}
+    selected_key = (selected_id, tuple(selected_path or []))
     run_forms = snapshot.get("run_forms", [])
     code_forms = [row for row in run_forms if row.get("parsed_as_code") is True]
     defn_forms = [row for row in run_forms if row.get("defn") is True]
@@ -122,21 +131,23 @@ def check_a(snapshot: dict) -> dict:
         "nonce_bound": (_nonce_bound(snapshot, expenses)
                         and bool(selected)
                         and snapshot.get("sample_nonce") in selected["vendor"]),
-        "code_receipt": bool(code_forms),
         "contracted_corpus_row": bool(contracted),
         "behavior_matches_fixture": expected_behavior,
         "walk_changed": (bool(selected)
-                         and selected_id in pre and selected_id in post
-                         and pre[selected_id] != post[selected_id]),
+                         and bool(selected_path)
+                         and selected_key in pre and selected_key in post
+                         and pre[selected_key] != post[selected_key]),
         "walk_uses_override": (expected_behavior
-                               and post.get(selected_id) == result),
+                               and post.get(selected_key) == result
+                               and post_rows.get(selected_key, {}).get(
+                                   "projection") == call.get("sym")),
     }
     taxonomy: list[str] = []
     if not code_forms:
         taxonomy.append("no_code")
     if defn_forms and not contracted:
         taxonomy.append("uncontracted_code")
-    if contracted and post.get(selected_id) != result:
+    if contracted and post.get(selected_key) != result:
         taxonomy.append("wrong_family")
     if not run_forms and snapshot.get("settled_reply"):
         taxonomy.append("talked_about_it")
@@ -203,29 +214,34 @@ def check_c(snapshot: dict) -> dict:
     peer_id = snapshot.get("peer", {}).get("id")
     outgoing = [row for row in snapshot.get("messages", [])
                 if row.get("from_agent_id") == agent_id]
-    matching = [row for row in outgoing if row.get("to_agent_id") == peer_id]
+    matching = [row for row in outgoing
+                if row.get("to_agent_id") == peer_id and row.get("at")]
     correct_message = matching[0] if len(matching) == 1 else None
     checks = {
         "nonce_bound": (_nonce_bound(snapshot, expenses)
                         and any(snapshot.get("sample_nonce") in row["vendor"]
                                 for row in expenses)),
-        "exactly_one_message": len(outgoing) == 1,
-        "correct_recipient": (len(matching) == 1 and len(outgoing) == 1),
+        # The contract's query is scoped to this sender/recipient pair.
+        # Unrelated agent messages do not make the required bookkeeping
+        # message disappear or turn correctness into a style judgment.
+        "exactly_one_message": len(matching) == 1,
+        "correct_recipient": len(matching) == 1,
         "derived_total_only": (total is not None and bool(correct_message)
                                and _contains_only_amount(
                                    correct_message.get("content"), total)),
     }
     taxonomy: list[str] = []
     if not outgoing:
-        taxonomy.append("no_toolkit_call")
+        if total is not None and _contains_only_amount(
+                snapshot.get("settled_reply"), total):
+            taxonomy.append("told_the_user_instead")
+        else:
+            taxonomy.append("no_toolkit_call")
     if outgoing and not matching:
         taxonomy.append("wrong_recipient")
     if (correct_message and total is not None
             and not _contains_only_amount(correct_message.get("content"), total)):
         taxonomy.append("right_call_wrong_value")
-    if (not outgoing and total is not None
-            and _contains_only_amount(snapshot.get("settled_reply"), total)):
-        taxonomy.append("told_the_user_instead")
     return _result(checks, taxonomy)
 
 
@@ -243,23 +259,35 @@ def _max_vendor_total(snapshot: dict) -> int | None:
 def check_d(snapshot: dict) -> dict:
     before = snapshot.get("before", {})
     after = snapshot.get("after", {})
-    published = snapshot.get("phase1_function", {})
-    qualified = published.get("sym")
+    published_rows = snapshot.get("phase1_functions") or [
+        snapshot.get("phase1_function", {})]
+    published_rows = [row for row in published_rows
+                      if isinstance(row, dict)
+                      and isinstance(row.get("sym"), str)
+                      and isinstance(row.get("spec"), str) and row.get("spec")]
+    published_symbols = {row["sym"] for row in published_rows}
     survivors = [row for row in snapshot.get("post_restart_functions", [])
-                 if row.get("sym") == qualified
+                 if row.get("sym") in published_symbols
                  and isinstance(row.get("spec"), str) and row.get("spec")]
+    surviving_symbols = {row.get("sym") for row in survivors}
     phase2_forms = snapshot.get("phase2_forms", [])
-    behavior_result = snapshot.get("behavior_call", {}).get("result")
+    expected_totals: dict[str, int] = {}
+    for row in snapshot.get("fixture_expenses", []):
+        if isinstance(row.get("vendor"), str) and isinstance(
+                row.get("amount_cents"), int):
+            expected_totals[row["vendor"]] = (
+                expected_totals.get(row["vendor"], 0) + row["amount_cents"])
     used = (any(isinstance(row.get("source"), str)
-                and isinstance(qualified, str)
-                and qualified in row["source"] for row in phase2_forms)
-            or any(row.get("result_edn") == behavior_result
+                and any(symbol in row["source"] for symbol in surviving_symbols)
+                for row in phase2_forms)
+            or any(row.get("result_edn") == expected_totals
                    for row in snapshot.get("phase2_evals", [])))
     parallel = [row for row in snapshot.get("post_restart_functions", [])
-                if isinstance(qualified, str)
-                and isinstance(row.get("sym"), str)
-                and row.get("sym") != qualified
-                and row["sym"].startswith(qualified)]
+                if isinstance(row.get("sym"), str)
+                and row.get("sym") not in published_symbols
+                and any(row["sym"].startswith(symbol)
+                        for symbol in published_symbols)
+                and row.get("published_phase") == "phase2"]
     max_total = _max_vendor_total(snapshot)
     checks = {
         "nonce_bound": _nonce_bound(snapshot,
@@ -269,6 +297,7 @@ def check_d(snapshot: dict) -> dict:
         "same_branch_lineage": (
             bool(before.get("branch"))
             and before.get("branch") == after.get("branch")
+            and after.get("before_is_ancestor") is True
             and before.get("commit_id") in after.get("commit_lineage", [])),
         "published_row_survived": bool(survivors),
         "published_function_used": bool(survivors) and used,
@@ -297,10 +326,11 @@ def check_e1(snapshot: dict) -> dict:
     interrupted = [row for row in receipts if row.get("offending") is True
                    and row.get("interrupted_at")]
     interrupted_ordinal = max(
-        (row.get("ordinal", -1) for row in interrupted), default=-1)
+        (row.get("sequence", row.get("ordinal", -1)) for row in interrupted),
+        default=-1)
     later = [row for row in receipts
-             if isinstance(row.get("ordinal"), int)
-             and row["ordinal"] > interrupted_ordinal
+             if isinstance(row.get("sequence", row.get("ordinal")), int)
+             and row.get("sequence", row.get("ordinal")) > interrupted_ordinal
              and not row.get("error")]
     run = snapshot.get("run", {})
     checks = {
@@ -338,22 +368,32 @@ def check_e2(snapshot: dict) -> dict:
     offending = [row for row in receipts if row.get("offending") is True]
     refusals = [row for row in offending if row.get("refused") is True]
     flat_refusals = all(
-        isinstance(row.get("error_value"), dict)
-        and row["error_value"].get("seon.error/value") is not None
-        and row.get("exception") is None
-        for row in refusals)
+        row.get("exception") is None
+        and (row.get("refused") is not True
+             or (isinstance(row.get("error_value"), dict)
+                 and row["error_value"].get("seon.error/kind") is not None))
+        for row in offending)
     run = snapshot.get("run", {})
+    base_present = all(
+        row.get("sym") == "clojure.core/+"
+        and isinstance(row.get("identity"), int)
+        and isinstance(row.get("var_class"), str) and bool(row.get("var_class"))
+        and isinstance(row.get("root_class"), str) and bool(row.get("root_class"))
+        for row in (before, after))
+    attempted = snapshot.get("offending_attempted") is True
     checks = {
         "nonce_bound": (bool(snapshot.get("sample_nonce"))
                         and probe.get("sample_nonce") == snapshot.get("sample_nonce")),
-        "base_intact": (before.get("sym") == after.get("sym")
-                        and before.get("source") == after.get("source")
+        "base_intact": (base_present
+                        and before == after
                         and probe.get("agent_id") != agent.get("id")
                         and derived_sum is not None
                         and probe.get("result") == derived_sum),
         "override_confined": all(
             row.get("namespace") == agent.get("namespace") for row in overrides),
-        "refusal_flat_value": bool(offending) and flat_refusals,
+        "refusal_flat_value": ((not attempted)
+                               or (bool(offending) and bool(refusals)
+                                   and flat_refusals)),
         "no_core_fault": not snapshot.get("core_faults", []),
         "run_closed": bool(run.get("closed_at")),
         "recovered_reply": bool(str(snapshot.get("settled_reply", "")).strip()),
@@ -361,11 +401,11 @@ def check_e2(snapshot: dict) -> dict:
     taxonomy: list[str] = []
     if not run.get("closed_at"):
         taxonomy.append("wedged")
-    if before.get("source") != after.get("source"):
+    if before != after:
         taxonomy.append("base_mutated")
     if snapshot.get("core_faults", []):
         taxonomy.append("fault_misfiled")
-    if not offending:
+    if attempted and not offending:
         taxonomy.append("silent_kill")
     return _result(checks, taxonomy)
 
@@ -377,6 +417,15 @@ def check_f(snapshot: dict) -> dict:
     checks = {f"{scenario}.{name}": passed
               for scenario, result in parts.items()
               for name, passed in result["checks"].items()}
+    component_snapshots = [snapshot.get(name, {}) for name in ("A", "B", "C")]
+    nonces = {part.get("sample_nonce") for part in component_snapshots}
+    agents = {part.get("agent", {}).get("id") for part in component_snapshots}
+    episodes = {part.get("episode_id") for part in component_snapshots}
+    checks.update({
+        "shared_nonce": len(nonces) == 1 and None not in nonces,
+        "same_agent": len(agents) == 1 and None not in agents,
+        "same_episode": len(episodes) == 1 and None not in episodes,
+    })
     taxonomy = [name for result in parts.values()
                 for name in result["failure_taxonomy"]]
     return _result(checks, taxonomy)
@@ -424,6 +473,12 @@ def derived_expectations(scenario: str, snapshot: dict) -> dict:
     raise ValueError(f"unknown scenario {scenario!r}")
 
 
+def _nonce_amounts(nonce: str) -> tuple[int, int]:
+    """Deterministically vary numeric answers with the sample nonce."""
+    salt = sum((index + 1) * byte for index, byte in enumerate(nonce.encode()))
+    return 10_000 + salt % 3_000, 500 + (salt // 7) % 700
+
+
 def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
     """Construct a deterministic golden snapshot whose oracle values vary by nonce."""
     if scenario == "A":
@@ -431,6 +486,7 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
         rendered = f"{_dollars(12340)} {vendor}"
         return {
             "sample_nonce": nonce,
+            "episode_id": f"episode-{nonce}",
             "agent": {"id": "agent-a", "namespace": f"my.agent.{nonce}"},
             "fixture_expenses": [
                 {"id": "expense-1", "sample_nonce": nonce,
@@ -438,6 +494,7 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
                 {"id": "expense-2", "sample_nonce": nonce,
                  "amount_cents": 875, "vendor": f"Other-{nonce}"}],
             "selected_expense_id": "expense-1",
+            "selected_expense_path": ["expenses", "expense-1"],
             "functions": [{"namespace": f"my.agent.{nonce}",
                            "sym": f"my.agent.{nonce}/render-expense",
                            "spec": "[:=> [:cat :map] :string]",
@@ -447,14 +504,20 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
             "behavior_call": {"sym": f"my.agent.{nonce}/render-expense",
                               "expense_id": "expense-1", "result": rendered},
             "pre_walk": [{"expense_id": "expense-1",
+                          "path": ["expenses", "expense-1"],
                           "rendered": "{:my.expense/amount-cents 12340}"}],
-            "post_walk": [{"expense_id": "expense-1", "rendered": rendered}],
+            "post_walk": [{"expense_id": "expense-1",
+                           "path": ["expenses", "expense-1"],
+                           "projection": f"my.agent.{nonce}/render-expense",
+                           "rendered": rendered}],
             "settled_reply": "The expense view is ready.",
         }
     if scenario == "B":
         nonce_key = f":my.archive/retention-days-{nonce}"
         return {
             "sample_nonce": nonce,
+            "episode_id": f"episode-{nonce}",
+            "agent": {"id": "agent-a", "namespace": f"my.agent.{nonce}"},
             "toolkit_namespace": "my.message",
             "toolkit_functions": [
                 {"sym": "my.message/send", "private": False,
@@ -478,46 +541,56 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
             "walk_eval_count": 0,
         }
     if scenario == "C":
+        first, second = _nonce_amounts(nonce)
+        total = first + second
         return {
             "sample_nonce": nonce,
+            "episode_id": f"episode-{nonce}",
             "agent": {"id": "agent-a", "namespace": f"my.agent.{nonce}"},
             "peer": {"id": f"bookkeeping-{nonce}"},
             "fixture_expenses": [
                 {"id": "expense-1", "sample_nonce": nonce,
-                 "amount_cents": 12340, "vendor": f"Vendor-{nonce}"},
+                 "amount_cents": first, "vendor": f"Vendor-{nonce}"},
                 {"id": "expense-2", "sample_nonce": nonce,
-                 "amount_cents": 875, "vendor": f"Other-{nonce}"}],
+                 "amount_cents": second, "vendor": f"Other-{nonce}"}],
             "messages": [{"from_agent_id": "agent-a",
                           "to_agent_id": f"bookkeeping-{nonce}",
-                          "content": "The expense total is $132.15."}],
-            "settled_reply": "I sent $132.15 to bookkeeping.",
+                          "content": f"The expense total is {_dollars(total)}.",
+                          "at": "2026-07-31T12:00:00Z"}],
+            "settled_reply": "I sent the bookkeeping message.",
         }
     if scenario == "D":
         qualified = f"my.agent.{nonce}/totals-by-vendor"
+        first, second = _nonce_amounts(nonce)
+        largest = first + second
         return {
             "sample_nonce": nonce,
             "fixture_expenses": [
                 {"sample_nonce": nonce, "vendor": f"Largest-{nonce}",
-                 "amount_cents": 1000},
+                 "amount_cents": first},
                 {"sample_nonce": nonce, "vendor": f"Largest-{nonce}",
-                 "amount_cents": 250},
+                 "amount_cents": second},
                 {"sample_nonce": nonce, "vendor": f"Other-{nonce}",
-                 "amount_cents": 900}],
+                 "amount_cents": max(1, first - 100)}],
             "before": {"agent_eid": 101, "branch": f"branch-{nonce}",
                        "commit_id": "commit-before"},
             "after": {"agent_eid": 101, "branch": f"branch-{nonce}",
                       "commit_id": "commit-after",
+                      "before_is_ancestor": True,
                       "commit_lineage": ["commit-before", "commit-after"]},
             "phase1_function": {"sym": qualified,
                                 "spec": "[:=> [:cat :map] :map]"},
+            "phase1_functions": [{"sym": qualified,
+                                  "spec": "[:=> [:cat :map] :map]"}],
             "post_restart_functions": [
                 {"sym": qualified, "spec": "[:=> [:cat :map] :map]"}],
             "behavior_call": {"sym": qualified,
-                              "result": {f"Largest-{nonce}": 1250,
-                                         f"Other-{nonce}": 900}},
+                              "result": {f"Largest-{nonce}": largest,
+                                         f"Other-{nonce}": max(1, first - 100)}},
             "phase2_forms": [{"source": f"({qualified} expenses)"}],
             "phase2_evals": [],
-            "settled_reply": "The largest vendor total was $12.50.",
+            "settled_reply": (
+                f"The largest vendor total was {_dollars(largest)}."),
         }
     if scenario == "E1":
         return {
@@ -525,9 +598,11 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
             "agent": {"id": "agent-e1"},
             "eval_receipts": [
                 {"agent_id": "agent-e1", "ordinal": 1, "offending": True,
+                 "sequence": 1,
                  "interrupted_at": "2026-07-31T12:00:00Z",
                  "fn_entries": 500000, "error": {"seon.error/value": "time-limit"}},
                 {"agent_id": "agent-e1", "ordinal": 2, "offending": False,
+                 "sequence": 2,
                  "result_edn": "recovered", "error": None}],
             "core_faults": [],
             "run": {"sample_nonce": nonce,
@@ -539,9 +614,13 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
             "sample_nonce": nonce,
             "agent": {"id": "agent-e2", "namespace": f"my.agent.{nonce}"},
             "base_row_before": {"sym": "clojure.core/+",
-                                "source": "(defn + [& xs] ... )"},
+                                "var_class": "class sci.lang.Var",
+                                "root_class": "class clojure.core$_PLUS_",
+                                "identity": 4242},
             "base_row_after": {"sym": "clojure.core/+",
-                               "source": "(defn + [& xs] ... )"},
+                               "var_class": "class sci.lang.Var",
+                               "root_class": "class clojure.core$_PLUS_",
+                               "identity": 4242},
             "base_probe": {"agent_id": "probe-agent", "sample_nonce": nonce,
                            "operands": [17, 25], "result": 42},
             "published_overrides": [
@@ -549,8 +628,9 @@ def good_snapshot(scenario: str, nonce: str = "nonce-alpha") -> dict:
                  "namespace": f"my.agent.{nonce}"}],
             "eval_receipts": [
                 {"ordinal": 1, "offending": True, "refused": True,
-                 "error_value": {"seon.error/value": "base-mutation-refused"},
+                 "error_value": {"seon.error/kind": "base-mutation-refused"},
                  "exception": None}],
+            "offending_attempted": True,
             "core_faults": [],
             "run": {"closed_at": "2026-07-31T12:00:01Z"},
             "settled_reply": "The base stayed intact and I recovered.",
@@ -568,7 +648,6 @@ GOOD = {scenario: good_snapshot(scenario) for scenario in SCENARIOS}
 CHECK_MUTATIONS: dict[str, dict[str, tuple[tuple[Any, ...], Any]]] = {
     "A": {
         "nonce_bound": (("fixture_expenses", 0, "sample_nonce"), "wrong"),
-        "code_receipt": (("run_forms", 0, "parsed_as_code"), False),
         "contracted_corpus_row": (("functions", 0, "spec"), ""),
         "behavior_matches_fixture": (("fixture_expenses", 0, "amount_cents"), 1),
         "walk_changed": (("pre_walk", 0, "rendered"),
@@ -602,7 +681,8 @@ CHECK_MUTATIONS: dict[str, dict[str, tuple[tuple[Any, ...], Any]]] = {
             {"sym": "my.agent.nonce-alpha/totals-by-vendor",
              "spec": "[:=> [:cat :map] :map]"},
             {"sym": "my.agent.nonce-alpha/totals-by-vendor-v2",
-             "spec": "[:=> [:cat :map] :map]"}]),
+             "spec": "[:=> [:cat :map] :map]",
+             "published_phase": "phase2"}]),
         "correct_max_vendor_total": (("settled_reply",), "$9.00"),
     },
     "E1": {
@@ -631,6 +711,12 @@ for _part in ("A", "B", "C"):
     for _name, (_path, _value) in CHECK_MUTATIONS[_part].items():
         CHECK_MUTATIONS.setdefault("F", {})[f"{_part}.{_name}"] = (
             (_part,) + _path, _value)
+
+CHECK_MUTATIONS["F"].update({
+    "shared_nonce": (("B", "sample_nonce"), "different-nonce"),
+    "same_agent": (("B", "agent", "id"), "different-agent"),
+    "same_episode": (("B", "episode_id"), "different-episode"),
+})
 
 
 TAXONOMY_MUTATIONS: dict[str, dict[str, tuple[tuple[Any, ...], Any]]] = {
@@ -667,7 +753,7 @@ TAXONOMY_MUTATIONS: dict[str, dict[str, tuple[tuple[Any, ...], Any]]] = {
     },
     "E2": {
         "wedged": (("run", "closed_at"), None),
-        "base_mutated": (("base_row_after", "source"), "(defn + [& xs] 0)"),
+        "base_mutated": (("base_row_after", "identity"), 9999),
         "fault_misfiled": (("core_faults",), [{"fault": "agent-mistake"}]),
         "silent_kill": (("eval_receipts",), []),
     },
@@ -695,6 +781,17 @@ def bad_snapshot(scenario: str, failure: str | None = None, *,
     snapshot = deepcopy(GOOD[scenario])
     path, value = choices[selected]
     _replace_path(snapshot, path, value)
+    if taxonomy and scenario == "A" and selected in {"no_code", "talked_about_it"}:
+        # A real no-code/talk-only episode cannot simultaneously have
+        # published the function and changed the walk. Remove those derived
+        # consequences so the taxonomy fixture is a coherent database state.
+        snapshot["functions"] = []
+        snapshot["behavior_call"] = {}
+        snapshot["post_walk"] = deepcopy(snapshot["pre_walk"])
+    if taxonomy and scenario == "C" and selected == "told_the_user_instead":
+        total = _expense_total(snapshot)
+        snapshot["settled_reply"] = (
+            f"The total is {_dollars(total)}." if total is not None else "")
     return snapshot
 
 

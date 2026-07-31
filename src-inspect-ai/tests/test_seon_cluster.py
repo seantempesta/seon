@@ -18,9 +18,9 @@ def _fake_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "checkout"
     repo.mkdir()
     for directory in ("config", "reference-code", "resources", "script",
-                      "src", "test", "bin"):
+                      "src", "test", "bin", ".clj-kondo"):
         (repo / directory).mkdir()
-    for file in ("deps.edn", "bb.edn", "bin/seon"):
+    for file in ("deps.edn", "bb.edn", "bin/seon", ".clj-kondo/config.edn"):
         path = repo / file
         path.write_text("#!/bin/sh\n")
     return repo
@@ -86,13 +86,18 @@ class LifecycleRunner:
         self.calls.append((argv, kwargs))
         assert Path(argv[0]) == self.root / "bin" / "seon"
         assert Path(kwargs["cwd"]) == self.root
-        if argv[1:] == ["start", self.name]:
+        if argv[1:3] == ["start", self.name]:
             path = self.root / "data" / "clusters" / self.name / "prepl.edn"
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(_advertisement(self.name, self.pid))
         elif argv[1:] == ["stop", self.name]:
             (self.root / "data" / "clusters" / self.name /
              "prepl.edn").unlink(missing_ok=True)
+        elif argv[1:] == ["status"]:
+            path = self.root / "data" / "clusters" / self.name / "prepl.edn"
+            if path.exists() and sc.parse_advertisement(
+                    path.read_text())["pid"] != self.pid:
+                path.unlink()
         return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
 
 
@@ -111,7 +116,6 @@ def _start(tmp_path: Path, *, socket_value=None):
     lease = sc.start_scratch_cluster(
         _repo_root=repo, _root=root, _name=name, _runner=runner,
         _socket_factory=socket_factory,
-        _process_alive=lambda _pid, _instant: True,
         _token_factory=lambda: "a" * 32,
     )
     return repo, root, runner, sockets, lease
@@ -169,6 +173,19 @@ def test_eval_form_returns_json_projection_and_requires_terminal_ret(tmp_path):
     lease.release()
 
 
+def test_prepl_wrapper_emits_the_exact_unspaced_sentinel():
+    token = "SEON-PREPL-" + "d" * 32
+    form = sc._prepl_form("{:answer 42}", token)
+    result = subprocess.run(
+        ["bb", "--config", str(sc.REPO_ROOT / "bb.edn"),
+         "--deps-root", str(sc.REPO_ROOT), "-e", form],
+        cwd=sc.REPO_ROOT, capture_output=True, text=True, check=True,
+    )
+    match = sc._PREPL_TOKEN.search(result.stdout.encode())
+    assert match is not None, result.stdout
+    assert json.loads(base64.b64decode(match.group(2))) == {"answer": 42}
+
+
 def test_restart_is_stop_start_on_same_branch(tmp_path):
     _repo, _root, runner, _sockets, lease = _start(tmp_path)
     before = len(runner.calls)
@@ -176,6 +193,16 @@ def test_restart_is_stop_start_on_same_branch(tmp_path):
     assert [call[0][1:] for call in runner.calls[before:]] == [
         ["stop", "eval-fixture"], ["start", "eval-fixture"]]
     lease.release()
+
+
+def test_restart_readiness_failure_still_stops_started_process(tmp_path):
+    _repo, _root, runner, _sockets, lease = _start(tmp_path)
+    lease._socket_factory = lambda *_a, **_kw: SentinelSocket(terminal=False)
+    with pytest.raises(sc.ScratchClusterError, match="terminal :ret"):
+        lease.restart()
+    lease.release()
+    assert [call[0][1:] for call in runner.calls].count(
+        ["stop", "eval-fixture"]) == 2
 
 
 def test_release_never_follows_symlinks(tmp_path):
@@ -199,7 +226,7 @@ def test_stale_advertisement_is_removed_before_private_init(tmp_path):
     lease = sc.ScratchClusterLease(
         root=root, name=name, runner=runner,
         socket_factory=lambda *_a, **_kw: SentinelSocket(),
-        process_alive=lambda pid, _instant: pid == 456, timeout_s=30,
+        timeout_s=30,
         token_factory=lambda: "b" * 32,
     )
     path = lease.advertisement_path
@@ -225,11 +252,56 @@ def test_refuses_shared_root_and_live_advertisement(tmp_path):
     path.write_text(_advertisement("live", os.getpid()))
     lease = sc.ScratchClusterLease(
         root=root, name="live",
-        runner=lambda *_a, **_kw: None,
+        runner=lambda argv, **_kw: subprocess.CompletedProcess(
+            argv, 0, stdout="alive", stderr=""),
         socket_factory=lambda *_a, **_kw: SentinelSocket(),
-        process_alive=lambda _pid, _instant: True, timeout_s=1,
+        timeout_s=1,
         token_factory=lambda: "c" * 32,
     )
     with pytest.raises(sc.ScratchClusterError, match="live"):
         lease._recover_stale_advertisement()
     sc._delete_tree_without_following_links(root)
+
+
+def test_start_writes_private_sparse_config_and_passes_it_to_operator(tmp_path):
+    repo = _fake_repo(tmp_path)
+    root = repo / "tmp" / "configured"
+    name = "configured-fixture"
+    runner = LifecycleRunner(root, name)
+    lease = sc.start_scratch_cluster(
+        _repo_root=repo, _root=root, _name=name, _runner=runner,
+        _socket_factory=lambda *_a, **_kw: SentinelSocket(),
+        config_manifest="{:seon.config.ai/model \"local-model\"}",
+        _token_factory=lambda: "e" * 32,
+    )
+    start = runner.calls[2][0]
+    assert start[1:3] == ["start", name]
+    assert start[3] == "--config"
+    config_path = Path(start[4])
+    assert config_path.parent == root
+    assert config_path.read_text() == \
+        "{:seon.config.ai/model \"local-model\"}"
+    lease.release()
+
+
+def test_release_retries_cleanup_without_re_stopping(tmp_path):
+    _repo, root, runner, _sockets, lease = _start(tmp_path)
+    attempts = 0
+
+    def flaky_delete(path):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("injected cleanup failure")
+        sc._delete_tree_without_following_links(path)
+
+    lease._delete_root = flaky_delete
+    with pytest.raises(OSError, match="cleanup failure"):
+        lease.release()
+    stops_after_failure = sum(
+        call[0][1:] == ["stop", "eval-fixture"] for call in runner.calls)
+    lease.release()
+    assert attempts == 2
+    assert not root.exists()
+    assert sum(call[0][1:] == ["stop", "eval-fixture"]
+               for call in runner.calls) == stops_after_failure

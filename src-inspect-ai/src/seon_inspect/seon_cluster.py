@@ -9,7 +9,6 @@ lease machinery.  Each lease owns a repository-local operator root, whose
 from __future__ import annotations
 
 import base64
-from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -24,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 _SCRATCH_PARENT = Path("tmp/graduation-eval")
 _ROOT_LINKS = (
     "config", "deps.edn", "reference-code", "resources", "script", "src",
-    "test", "bb.edn",
+    "test", "bb.edn", ".clj-kondo/config.edn",
 )
 _CLUSTER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$")
 _PREPL_TOKEN = re.compile(rb"(SEON-PREPL-[A-Fa-f0-9]+)<([A-Za-z0-9+/=]+)>\1")
@@ -90,27 +89,6 @@ def parse_advertisement(text: str) -> dict[str, Any]:
     return result
 
 
-def _default_process_alive(pid: int, start_instant: str | None) -> bool:
-    try:
-        os.kill(pid, 0)
-    except (OSError, ValueError):
-        return False
-    if not start_instant:
-        return False
-    try:
-        observed_text = subprocess.check_output(
-            ["ps", "-p", str(pid), "-o", "lstart="],
-            text=True, stderr=subprocess.DEVNULL, timeout=3).strip()
-        observed = datetime.strptime(
-            observed_text, "%a %b %d %H:%M:%S %Y").astimezone()
-        recorded = datetime.fromisoformat(start_instant.replace("Z", "+00:00"))
-        return abs(observed.timestamp() - recorded.timestamp()) < 1
-    except (OSError, ValueError, subprocess.SubprocessError):
-        # A PID without a verifiable start instant is not the advertised
-        # (pid, start-instant) process identity.
-        return False
-
-
 def _bounded_events(raw: bytes, limit: int = 20) -> list[str]:
     lines = raw.decode(errors="replace").splitlines()[-limit:]
     return [line[:2000] for line in lines]
@@ -125,7 +103,7 @@ def _prepl_form(form: str, token: str) -> str:
         "bytes# (.getBytes ^String json# "
         "java.nio.charset.StandardCharsets/UTF_8) "
         "payload# (.encodeToString (java.util.Base64/getEncoder) bytes#)] "
-        f'(println "{token}<" payload# ">{token}") nil))'
+        f'(println (str "{token}<" payload# ">{token}")) nil))'
     )
 
 
@@ -212,7 +190,9 @@ def _make_runnable_root(root: Path, repo_root: Path) -> None:
             raise ScratchClusterError(
                 "The checkout lacks a scratch-operator input.",
                 path=str(source))
-        (root / relative).symlink_to(source, target_is_directory=source.is_dir())
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.symlink_to(source, target_is_directory=source.is_dir())
     bin_dir = root / "bin"
     bin_dir.mkdir()
     (bin_dir / "seon").symlink_to(repo_root / "bin" / "seon")
@@ -247,17 +227,19 @@ class ScratchClusterLease:
         name: str,
         runner: Callable[..., subprocess.CompletedProcess[str]],
         socket_factory: Callable[..., Any],
-        process_alive: Callable[[int, str | None], bool],
         timeout_s: float,
         token_factory: Callable[[], str],
+        delete_root: Callable[[Path], None] = _delete_tree_without_following_links,
     ):
         self.root = root
         self.name = name
         self._runner = runner
         self._socket_factory = socket_factory
-        self._process_alive = process_alive
         self._timeout_s = timeout_s
+        self._operator_timeout_s = max(60.0, timeout_s + 15.0)
         self._token_factory = token_factory
+        self._delete_root = delete_root
+        self._stopped = True
         self._released = False
 
     @property
@@ -272,13 +254,13 @@ class ScratchClusterLease:
         try:
             result = self._runner(
                 command, cwd=str(self.root), capture_output=True, text=True,
-                timeout=self._timeout_s,
+                timeout=self._operator_timeout_s,
             )
         except subprocess.TimeoutExpired as error:
             raise ScratchClusterError(
                 "The private operator timeout backstop fired.",
                 command=command, cwd=str(self.root),
-                timeout_s=self._timeout_s) from error
+                timeout_s=self._operator_timeout_s) from error
         if result.returncode:
             raise ScratchClusterError(
                 "The private Seon operator command failed.",
@@ -301,13 +283,14 @@ class ScratchClusterLease:
         path = self.advertisement_path
         if not path.exists():
             return
-        advertisement = self._advertisement()
-        if self._process_alive(advertisement["pid"],
-                               advertisement["start_instant"]):
+        # Exact (pid,start-instant) reconciliation belongs to bin/seon's JVM
+        # operator, which uses ProcessHandle rather than a lossy Python/ps
+        # approximation. It removes a stale leaf and preserves a live one.
+        self._operator("status")
+        if path.exists():
             raise ScratchClusterError(
-                "Refusing to replace a live scratch-cluster advertisement.",
-                path=str(path), advertisement=advertisement)
-        path.unlink()
+                "The private operator retained a live advertisement.",
+                path=str(path), advertisement=self._advertisement())
 
     def _wait_ready(self) -> None:
         # `bin/seon start` returns only after its ready socket wins against
@@ -320,13 +303,10 @@ class ScratchClusterLease:
             raise ScratchClusterError(
                 "The completed start event carried no advertisement.",
                 path=str(self.advertisement_path), cause=repr(error)) from error
-        if not self._process_alive(advertisement["pid"],
-                                   advertisement["start_instant"]):
-            self.advertisement_path.unlink(missing_ok=True)
-            raise ScratchClusterError(
-                "The fresh operator published a stale advertisement.",
-                advertisement=advertisement)
-        value = self.eval_form("{:seon.cluster.harness/ready true}")
+        value = self.eval_form(
+            "(do (require 'seon.cluster) "
+            "{:seon.cluster.harness/ready "
+            f"(contains? @@#'seon.cluster/running-instances {json.dumps(self.name)})}})")
         if value != {"seon.cluster.harness/ready": True}:
             raise ScratchClusterError(
                 "The readiness form returned the wrong value.", value=value)
@@ -336,11 +316,6 @@ class ScratchClusterLease:
         if self._released:
             raise ScratchClusterError("The scratch-cluster lease is released.")
         advertisement = self._advertisement()
-        if not self._process_alive(advertisement["pid"],
-                                   advertisement["start_instant"]):
-            raise ScratchClusterError(
-                "The scratch cluster's advertisement is stale.",
-                advertisement=advertisement)
         return _prepl_eval(
             advertisement, form, socket_factory=self._socket_factory,
             timeout_s=self._timeout_s, token_factory=self._token_factory)
@@ -350,28 +325,35 @@ class ScratchClusterLease:
         if self._released:
             raise ScratchClusterError("The scratch-cluster lease is released.")
         self._operator("stop", self.name)
+        self._stopped = True
         self._recover_stale_advertisement()
         self._operator("start", self.name)
+        # A completed start may own a live JVM even if the subsequent prepl
+        # validation fails.  Teardown must therefore stop it, not trust the
+        # last successful readiness state.
+        self._stopped = False
         self._wait_ready()
 
     def release(self) -> None:
         """Stop the cluster, then remove only the private operator root."""
         if self._released:
             return
-        self._operator("stop", self.name)
+        if not self._stopped:
+            self._operator("stop", self.name)
+            self._stopped = True
+        self._delete_root(self.root)
         self._released = True
-        _delete_tree_without_following_links(self.root)
 
 
 def start_scratch_cluster(
     prefix: str = "mvpeval",
     *,
+    config_manifest: str | None = None,
     _repo_root: Path = REPO_ROOT,
     _root: Path | None = None,
     _name: str | None = None,
     _runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     _socket_factory: Callable[..., Any] = socket.create_connection,
-    _process_alive: Callable[[int, str | None], bool] = _default_process_alive,
     _timeout_s: float = 30.0,
     _token_factory: Callable[[], str] = lambda: uuid.uuid4().hex,
 ) -> ScratchClusterLease:
@@ -389,19 +371,33 @@ def start_scratch_cluster(
     _make_runnable_root(root, repo_root)
     lease = ScratchClusterLease(
         root=root, name=name, runner=_runner, socket_factory=_socket_factory,
-        process_alive=_process_alive, timeout_s=_timeout_s,
-        token_factory=_token_factory)
+        timeout_s=_timeout_s, token_factory=_token_factory)
     start_attempted = False
+    started = False
     try:
         lease._recover_stale_advertisement()
         lease._operator("init")
         lease._operator("init", name)
         start_attempted = True
-        lease._operator("start", name)
+        start_arguments = ["start", name]
+        if config_manifest is not None:
+            config_path = root / "mvp-eval-config.edn"
+            config_path.write_text(config_manifest)
+            start_arguments.extend(["--config", str(config_path)])
+        lease._operator(*start_arguments)
+        lease._stopped = False
+        started = True
         lease._wait_ready()
         return lease
-    except BaseException:
+    except BaseException as failure:
         # Never erase coordinates for a process that may still be alive.
         if not start_attempted:
             _delete_tree_without_following_links(root)
+        elif started:
+            try:
+                lease.release()
+            except BaseException as cleanup_failure:
+                failure.add_note(
+                    "scratch-cluster cleanup also failed: "
+                    + repr(cleanup_failure))
         raise

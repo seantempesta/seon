@@ -1,8 +1,10 @@
 import copy
+import subprocess
 
 import pytest
 from inspect_ai import eval as inspect_eval
 
+from seon_inspect import seon_cluster
 from seon_inspect.tasks import mvp_graduation as tasks
 
 
@@ -70,6 +72,42 @@ def test_seed_uses_runtime_declaration_admission_and_returns_derivations():
     assert "(sum ?amount)" in plan.form
     assert "vendor-totals" in plan.form
     assert ":pre-walk" in plan.form
+    assert ":path path" in plan.form
+
+
+def test_generated_wait_and_snapshot_forms_parse_and_scope_episode_evidence():
+    plan = tasks.build_seed_plan("D", 23, "sample-d", "cluster-d")
+    wait = tasks.wait_for_episode_form(plan, runs_before=2, budget=5, phase=1)
+    snapshot = tasks.snapshot_form(
+        "D", plan,
+        phase_one={"commit_id": "00000000-0000-0000-0000-000000000001",
+                   "phase1_function": {"sym": "my.agent/f"},
+                   "function_symbols": ["my.agent/f"]},
+        run_ids=["run-phase2"])
+    for form in (wait, snapshot):
+        parsed = subprocess.run(
+            ["bb", "--config", str(seon_cluster.REPO_ROOT / "bb.edn"),
+             "--deps-root", str(seon_cluster.REPO_ROOT), "-e",
+             "(read-string (slurp *in*))"],
+            input=form, text=True, capture_output=True,
+            cwd=seon_cluster.REPO_ROOT,
+        )
+        assert parsed.returncode == 0, parsed.stderr
+    assert "seon.cluster.work/next-agent-work" in wait
+    assert ":run-ids run-ids" in wait
+    assert 'selected-run-ids ["run-phase2"]' in snapshot
+    assert "datahike.api/commit-as-db" in snapshot
+    assert ":seon.error/proc ?proc" in snapshot
+
+
+def test_e2_snapshot_uses_guarded_peer_probe_and_observed_error_value():
+    plan = tasks.build_seed_plan("E2", 23, "sample-e2", "cluster-e2")
+    form = tasks.snapshot_form("E2", plan, run_ids=["run-e2"])
+    assert ':seon.cluster.agent/id peer-id' in form
+    assert ':seon.cluster.run.form/source "(+ 17 25)"' in form
+    assert ':result (:seon.sci.admit/value probe-evaluation)' in form
+    assert ':error-value (when (and offending? (map? flat-value))' in form
+    assert ':result (+ 17 25)' not in form
 
 
 @pytest.mark.parametrize("scenario", tasks.TASKS)
@@ -134,7 +172,8 @@ class FakeLease:
         if "select-keys effective" in form:
             self.events.append("provider")
             return {"seon.config.ai/endpoint": "http://127.0.0.1:11434/v1/chat/completions",
-                    "seon.config.ai/model": "qwen"}
+                    "seon.config.ai/model": "qwen3.5:35b-a3b-coding-nvfp4",
+                    "seon.config.ai/no-auth": True}
         if "register-one!" in form:
             self.events.append("seed")
             return {"derived-expectations": {}, "baseline": {}}
@@ -158,10 +197,18 @@ class FakeLease:
 
 def test_live_flow_orders_lease_seed_message_wait_snapshot_and_release(monkeypatch):
     lease = FakeLease()
+    lease_arguments = []
+
+    def lease_factory(**kwargs):
+        lease_arguments.append(kwargs)
+        return lease
+
     monkeypatch.setattr(tasks, "_assert_seed_expectations", lambda *args: None)
     result = tasks._drive_live_sample(
-        "B", 1, "sample", "local", lambda **kwargs: lease)
+        "B", 1, "sample", "local", lease_factory)
     assert result["database_snapshot"] == {"sample_nonce": "fake"}
+    assert lease_arguments == [{"prefix": "mvpeval",
+                                "config_manifest": tasks.LOCAL_CONFIG_MANIFEST}]
     assert lease.events == ["provider", "seed", "inbound", "wait",
                             "snapshot", "release"]
 
@@ -192,6 +239,20 @@ def test_provider_mismatch_voids_and_releases():
     with pytest.raises(tasks.VoidedSample, match="does not match"):
         tasks._drive_live_sample("B", 1, "sample", "local", lambda **kwargs: lease)
     assert lease.events == ["release"]
+
+
+def test_deepseek_provider_requires_the_configured_nonempty_key(monkeypatch):
+    provider = {
+        "seon.config.ai/endpoint": "https://api.deepseek.com/chat/completions",
+        "seon.config.ai/model": "deepseek-chat",
+        "seon.config.ai/api-key-variable": "MVP_TEST_DEEPSEEK_KEY",
+    }
+    monkeypatch.delenv("MVP_TEST_DEEPSEEK_KEY", raising=False)
+    assert not tasks._provider_matches("deepseek", provider)
+    monkeypatch.setenv("MVP_TEST_DEEPSEEK_KEY", "present")
+    assert tasks._provider_matches("deepseek", provider)
+    provider["seon.config.ai/no-auth"] = True
+    assert not tasks._provider_matches("deepseek", provider)
 
 
 def test_expectation_mismatch_voids_before_scoring(monkeypatch):

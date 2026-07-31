@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
@@ -80,6 +81,13 @@ PAID_ARMS = frozenset({"deepseek", "paid"})
 DEFAULT_AGENT_ID = "graduation"
 PEER_AGENT_ID = "bookkeeping"
 LOCAL_ENDPOINT = "http://127.0.0.1:11434/v1/chat/completions"
+LOCAL_MODEL = "qwen3.5:35b-a3b-coding-nvfp4"
+LOCAL_CONFIG_MANIFEST = """{:seon.config.ai/endpoint "http://127.0.0.1:11434/v1/chat/completions"
+ :seon.config.ai/model "qwen3.5:35b-a3b-coding-nvfp4"
+ :seon.config.ai/max-tokens 8192
+ :seon.config.ai/api-key-variable :seon.config/absent
+ :seon.config.ai/no-auth true
+ :seon.config.ai/timeout-ms 300000}"""
 
 
 @dataclass(frozen=True)
@@ -379,14 +387,16 @@ def _seed_form(*, cluster_name: str, agent_id: str, peer_agent_id: str,
                                 vendor-totals))
         render-one
         (fn [expense-id]
-          (let [node (seon.render.walk/neighborhood
+          (let [path [id-attr expense-id]
+                node (seon.render.walk/neighborhood
                       {{:seon.db/db db
-                        :seon.render.walk/lookup [id-attr expense-id]
+                        :seon.render.walk/lookup path
                         :seon.render/kind :seon.render/ai
                         :seon.render/floor 'seon.render.block/data-prose
                         :seon.sci.admit/caps caps
                         :seon.render/distance 0}})]
             {{:expense-id expense-id
+              :path path
               :rendered (or (:seon.render/output node)
                             (seon.render.walk/prose db node))}}))
         expense-ids (datahike.api/q
@@ -399,16 +409,18 @@ def _seed_form(*, cluster_name: str, agent_id: str, peer_agent_id: str,
                      :in $ ?agent-id
                      :where [?agent :seon.cluster.agent/id ?agent-id]]
                    db {_clj_string(agent_id)})
-        base-row (datahike.api/pull db
-                                   [:seon.fn/sym :seon.fn/source]
-                                   [:seon.fn/sym "clojure.core/+"])]
+        base-var (sci.core/resolve (seon.sci.eval/fork) 'clojure.core/+)
+        base-state {{:sym "clojure.core/+"
+                    :var-class (str (class base-var))
+                    :root-class (str (class @base-var))
+                    :identity (System/identityHashCode base-var)}}]
     {{:nonce {_clj_string(nonce)}
       :baseline
       {{:pre-walk (mapv render-one expense-ids)
         :agent-eid agent-eid
         :branch (:branch db)
         :commit-id (:datahike/commit-id db)
-        :base-row-before base-row}}
+        :base-row-before base-state}}
       :derived-expectations
       {{:nonce {_clj_string(nonce)}
        :expense-count (count {expense_data})
@@ -473,11 +485,21 @@ def _provider_matches(arm: str, provider: Mapping[str, Any]) -> bool:
                                 provider.get(":seon.config.ai/endpoint", "")))
     model = str(provider.get("seon.config.ai/model",
                              provider.get(":seon.config.ai/model", "")))
+    no_auth = provider.get(
+        "seon.config.ai/no-auth", provider.get(":seon.config.ai/no-auth"))
     if arm == "local":
-        return (endpoint.startswith("http://127.0.0.1:")
-                or endpoint.startswith("http://localhost:")) and bool(model)
+        return (endpoint == LOCAL_ENDPOINT
+                and model == LOCAL_MODEL
+                and no_auth is True)
     if arm == "deepseek":
-        return "deepseek" in endpoint.lower() and "deepseek" in model.lower()
+        key_variable = str(provider.get(
+            "seon.config.ai/api-key-variable",
+            provider.get(":seon.config.ai/api-key-variable", "")))
+        return ("deepseek" in endpoint.lower()
+                and "deepseek" in model.lower()
+                and no_auth is not True
+                and bool(key_variable)
+                and bool(os.environ.get(key_variable)))
     return False
 
 
@@ -513,9 +535,12 @@ def wait_for_episode_form(plan: SeedPlan, *, runs_before: int, budget: int,
                           phase: int) -> str:
     listener = f"mvp-eval-{plan.nonce}-p{phase}"
     return f"""
-(let [instance (get @@#'seon.cluster/running-instances
+(let [_ (require 'seon.cluster.work)
+      instance (get @@#'seon.cluster/running-instances
                     {_clj_string(plan.cluster_name)})
       connection (:seon.boot/cluster-connection instance)
+      process (seon.cluster/process-identity
+               (:seon.boot/advertisement instance))
       agent-id {_clj_string(plan.agent_id)}
       before {int(runs_before)}
       budget {int(budget)}
@@ -523,22 +548,36 @@ def wait_for_episode_form(plan: SeedPlan, *, runs_before: int, budget: int,
       (fn [db]
         (let [rows
               (datahike.api/q
-               '[:find ?run-id ?closed
+               '[:find ?run ?run-id ?opened ?closed
                  :in $ ?agent-id
                  :where
                  [?agent :seon.cluster.agent/id ?agent-id]
                  [?run :seon.cluster.run/agent ?agent]
                  [?run :seon.cluster.run/id ?run-id]
+                 [?run :seon.cluster.run/opened-at ?opened]
                  [(get-else $ ?run :seon.cluster.run/closed-at nil) ?closed]]
                db agent-id)
-              episode (drop before (sort-by first rows))
-              closed (count (filter second episode))]
+              episode (drop before (sort-by (fn [[_ run-id opened _]]
+                                              [opened run-id]) rows))
+              closed (count (filter #(nth % 3) episode))
+              run-ids (mapv second episode)
+              next-work (seon.cluster.work/next-agent-work
+                         db
+                         {{:seon.cluster.agent/id agent-id
+                           :seon.cluster.run/process process}})]
           (cond
             (> (count episode) budget)
-            {{:status :budget-exceeded :runs (count episode) :closed closed}}
+            {{:status :budget-exceeded :runs (count episode) :closed closed
+              :run-ids run-ids}}
 
-            (and (seq episode) (= closed (count episode)))
-            {{:status :closed :runs (count episode) :closed closed}}
+            (and (= (count episode) budget)
+                 (= :open (:seon.cluster.work/situation next-work)))
+            {{:status :budget-exceeded :runs (count episode) :closed closed
+              :run-ids run-ids}}
+
+            (and (seq episode) (= closed (count episode)) (nil? next-work))
+            {{:status :closed :runs (count episode) :closed closed
+              :run-ids run-ids}}
 
             :else nil)))
       immediate (state @connection)]
@@ -559,7 +598,8 @@ def wait_for_episode_form(plan: SeedPlan, *, runs_before: int, budget: int,
 
 def snapshot_form(scenario: str, plan: SeedPlan, *,
                   baseline: Mapping[str, Any] | None = None,
-                  phase_one: Mapping[str, Any] | None = None) -> str:
+                  phase_one: Mapping[str, Any] | None = None,
+                  run_ids: Sequence[str] = ()) -> str:
     """Return the exact ordinary-data projection consumed by ``CHECKS``.
 
     The form reads one immutable database value.  A and F also perform the one
@@ -569,6 +609,7 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
 
     baseline_data = _clj_data(dict(baseline or {}))
     phase_one_data = _clj_data(dict(phase_one or {}))
+    run_ids_data = _clj_data(list(run_ids))
     selected_id = str(plan.expenses[0]["id"])
     return f"""
 (let [instance (get @@#'seon.cluster/running-instances
@@ -583,6 +624,7 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
       vendor-attr {_clj_keyword(plan.expense_attributes['vendor'])}
       effective (seon.config/effective db {_clj_string(plan.cluster_name)})
       caps (seon.config/result-caps effective)
+      selected-run-ids {run_ids_data}
       agent-eid (datahike.api/q
                  '[:find ?agent . :in $ ?id
                    :where [?agent :seon.cluster.agent/id ?id]] db agent-id)
@@ -592,6 +634,12 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
          :where [?agent :seon.cluster.agent/id ?id]
                 [?agent :seon.cluster.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?name]] db agent-id)
+      peer-namespace
+      (datahike.api/q
+       '[:find ?name . :in $ ?id
+         :where [?agent :seon.cluster.agent/id ?id]
+                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?namespace :seon.ns/name ?name]] db peer-id)
       agent {{:id agent-id :namespace (str agent-namespace)}}
       expenses
       (mapv (fn [[id amount vendor]]
@@ -609,18 +657,20 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
       (mapv (fn [[sym spec source namespace]]
               {{:sym sym :spec spec :source source
                 :namespace (str namespace)}})
-            (datahike.api/q
+            (sort-by first (datahike.api/q
              '[:find ?sym ?spec ?source ?namespace-name
                :where [?function :seon.fn/sym ?sym]
                       [?function :seon.fn/spec ?spec]
                       [?function :seon.fn/source ?source]
                       [?function :seon.fn/ns ?namespace]
-                      [?namespace :seon.ns/name ?namespace-name]] db))
+                      [?namespace :seon.ns/name ?namespace-name]] db)))
       own-functions (filterv #(= (str agent-namespace) (:namespace %)) functions)
-      run-eids (datahike.api/q
-                '[:find [?run ...] :in $ ?id
-                  :where [?agent :seon.cluster.agent/id ?id]
-                         [?run :seon.cluster.run/agent ?agent]] db agent-id)
+      run-eids (if (seq selected-run-ids)
+                 (datahike.api/q
+                  '[:find [?run ...] :in $ [?run-id ...]
+                    :where [?run :seon.cluster.run/id ?run-id]]
+                  db selected-run-ids)
+                 [])
       runs (mapv #(datahike.api/pull
                    db [:db/id :seon.cluster.run/id
                        :seon.cluster.run/opened-at
@@ -632,10 +682,14 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
       (mapv (fn [eid]
               (let [row (datahike.api/pull
                          db [:seon.cluster.run.form/source
-                             :seon.cluster.run.form/ordinal] eid)
+                             :seon.cluster.run.form/ordinal
+                             {{:seon.cluster.run.form/run
+                               [:seon.cluster.run/id]}}] eid)
                     source (:seon.cluster.run.form/source row)
                     trimmed (clojure.string/trim source)]
-                {{:source source
+                {{:run-id (get-in row [:seon.cluster.run.form/run
+                                       :seon.cluster.run/id])
+                  :source source
                   :ordinal (:seon.cluster.run.form/ordinal row)
                   :parsed-as-code (not (clojure.string/starts-with? trimmed ";"))
                   :defn (boolean (re-find #"^\\(defn(?:\\s|\\^)" trimmed))}}))
@@ -644,14 +698,19 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
       (datahike.api/q
        '[:find [?receipt ...] :in $ [?run ...]
          :where [?receipt :seon.cluster.eval/run ?run]] db run-eids)
-      receipts
+      receipt-rows
       (mapv (fn [eid]
               (let [row (datahike.api/pull db '[*] eid)
                     result (:seon.cluster.eval/result-edn row)
                     parsed (when result
                              (try (clojure.edn/read-string result)
                                   (catch Throwable _ nil)))]
-                {{:ordinal (:seon.cluster.eval/ordinal row)
+                {{:run-id (datahike.api/q
+                           '[:find ?run-id . :in $ ?receipt
+                             :where [?receipt :seon.cluster.eval/run ?run]
+                                    [?run :seon.cluster.run/id ?run-id]] db eid)
+                  :ordinal (:seon.cluster.eval/ordinal row)
+                  :at (:seon.cluster.eval/at row)
                   :result-edn result
                   :parsed-result parsed
                   :error (:seon.cluster.eval/error row)
@@ -661,19 +720,37 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
                                        :seon.sci.admit/record
                                        :seon.eval/fn-entries])}}))
             receipt-eids)
-      final-value (:parsed-result (last (sort-by :ordinal receipts)))
+      run-order (into {{}}
+                      (map-indexed
+                       (fn [index run]
+                         [(:seon.cluster.run/id run) index])
+                       (sort-by :seon.cluster.run/opened-at runs)))
+      receipts
+      (mapv (fn [sequence receipt] (assoc receipt :sequence sequence))
+            (range)
+            (sort-by (fn [receipt]
+                       [(get run-order (:run-id receipt) Long/MAX_VALUE)
+                        (:ordinal receipt)])
+                     receipt-rows))
+      run-row (last (sort-by :seon.cluster.run/opened-at runs))
+      final-run-id (:seon.cluster.run/id run-row)
+      final-receipts (filterv #(= final-run-id (:run-id %)) receipts)
+      final-value (:parsed-result (last (sort-by :ordinal final-receipts)))
       settled-reply (or (:my.run/result final-value) "")
       reply-refused (= :wait (:my.run/disposition final-value))
       render-one
       (fn [expense-id]
-        (let [node (seon.render.walk/neighborhood
+        (let [path [id-attr expense-id]
+              node (seon.render.walk/neighborhood
                     {{:seon.db/db db
-                      :seon.render.walk/lookup [id-attr expense-id]
+                      :seon.render.walk/lookup path
                       :seon.render/kind :seon.render/ai
                       :seon.render/floor 'seon.render.block/data-prose
                       :seon.sci.admit/caps caps
                       :seon.render/distance 0}})]
           {{:expense-id expense-id
+            :path path
+            :projection (some-> (:seon.render/projection node) str)
             :rendered (or (:seon.render/output node)
                           (seon.render.walk/prose db node))}}))
       post-walk (mapv (comp render-one :id) expenses)
@@ -704,17 +781,24 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
       selected-row (datahike.api/pull
                     db [id-attr amount-attr vendor-attr]
                     [id-attr {_clj_string(selected_id)}])
-      behavior-call (call-one (first own-functions) selected-row)
+      selected-post (first (filter #(= {_clj_string(selected_id)}
+                                         (:expense-id %)) post-walk))
+      selected-projection
+      (first (filter #(= (:sym %) (:projection selected-post)) own-functions))
+      behavior-call
+      (call-one selected-projection selected-row)
       messages
-      (mapv (fn [[from to content]]
-              {{:from-agent-id from :to-agent-id to :content content}})
+      (mapv (fn [[from to content at]]
+              {{:from-agent-id from :to-agent-id to
+                :content content :at at}})
             (datahike.api/q
-             '[:find ?from-id ?to-id ?content
+             '[:find ?from-id ?to-id ?content ?at
                :where [?message :seon.cluster.message/from ?from]
                       [?from :seon.cluster.agent/id ?from-id]
                       [?message :seon.cluster.message/to ?to]
                       [?to :seon.cluster.agent/id ?to-id]
-                      [?message :seon.cluster.message/content ?content]] db))
+                      [?message :seon.cluster.message/content ?content]
+                      [?message :seon.cluster.message/at ?at]] db))
       toolkit-functions
       (fn [namespace-name]
         (mapv (fn [[sym private spec]]
@@ -728,29 +812,32 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
                         [?function :seon.fn/spec ?spec]
                         [(get-else $ ?function :seon.fn/private? false) ?private]]
                db (symbol namespace-name))))
-      faults (mapv (fn [[id]] {{:id id}})
+      faults (mapv (fn [[id proc]] {{:id id :proc proc}})
                    (datahike.api/q
-                    '[:find ?id :in $ ?agent
+                    '[:find ?id ?proc :in $ ?agent
                       :where [?error :seon.error/agent ?agent]
-                             [?error :seon.error/id ?id]] db agent-eid))
-      run-row (last (sort-by :seon.cluster.run/opened-at runs))
+                             [?error :seon.error/id ?id]
+                             [?error :seon.error/proc ?proc]] db agent-eid))
+      episode-id (:seon.cluster.run/id run-row)
       baseline {baseline_data}
       phase-one {phase_one_data}
-      a {{:sample-nonce sample-nonce :agent agent
+      a {{:sample-nonce sample-nonce :episode-id episode-id :agent agent
          :fixture-expenses expenses
          :selected-expense-id {_clj_string(selected_id)}
+         :selected-expense-path [id-attr {_clj_string(selected_id)}]
          :functions functions :run-forms forms
          :behavior-call behavior-call
          :pre-walk (get baseline "pre_walk")
          :post-walk post-walk :settled-reply settled-reply}}
-      b {{:sample-nonce sample-nonce
+      b {{:sample-nonce sample-nonce :episode-id episode-id :agent agent
          :toolkit-namespace {_clj_string(plan.toolkit_namespace)}
          :toolkit-functions (toolkit-functions
                              {_clj_string(plan.toolkit_namespace)})
          :settled-reply settled-reply :reply-refused reply-refused
          :walk-eval-count (count (filter #(re-find #"seon\\.render\\.walk"
                                                     (:source %)) forms))}}
-      c {{:sample-nonce sample-nonce :agent agent :peer {{:id peer-id}}
+      c {{:sample-nonce sample-nonce :episode-id episode-id
+         :agent agent :peer {{:id peer-id}}
          :fixture-expenses expenses :messages messages
          :settled-reply settled-reply}}
       result
@@ -764,20 +851,54 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
                (toolkit-functions {_clj_string(plan.empty_toolkit_namespace)}))
         "C" c
         "D"
-        {{:sample-nonce sample-nonce :fixture-expenses expenses
-          :before {{:agent-eid (get phase-one "agent_eid")
-                   :branch (get phase-one "branch")
-                   :commit-id (get phase-one "commit_id")}}
-          :after {{:agent-eid agent-eid :branch (:branch db)
-                  :commit-id (:datahike/commit-id db)
-                  :commit-lineage [(get phase-one "commit_id")
-                                   (:datahike/commit-id db)]}}
-          :phase1-function (get phase-one "phase1_function")
-          :post-restart-functions own-functions
-          :behavior-call (call-one (first own-functions) nil)
-          :phase2-forms forms
-          :phase2-evals (mapv #(select-keys % [:result-edn]) receipts)
-          :settled-reply settled-reply}}
+        (let [phase1-functions
+              (or (seq (get phase-one "phase1_functions")) own-functions)
+              phase1-function (first phase1-functions)
+              phase1-symbols (set (get phase-one "function_symbols" []))
+              before-text (get phase-one "commit_id")
+              before-id (when before-text
+                          (java.util.UUID/fromString before-text))
+              after-id (datahike.api/commit-id db)
+              parents
+              (fn [commit-id]
+                (let [commit-db (datahike.api/commit-as-db connection commit-id)]
+                  (try
+                    (filterv uuid? (datahike.api/parent-commit-ids commit-db))
+                    (finally
+                      (datahike.api/release-materialized-db commit-db)))))
+              lineage
+              (loop [pending [after-id] seen #{{}} ordered []]
+                (if-let [commit-id (first pending)]
+                  (if (contains? seen commit-id)
+                    (recur (subvec (vec pending) 1) seen ordered)
+                    (recur (into (subvec (vec pending) 1)
+                                 (parents commit-id))
+                           (conj seen commit-id)
+                           (conj ordered commit-id)))
+                  ordered))]
+          {{:sample-nonce sample-nonce :fixture-expenses expenses
+            :before {{:agent-eid (get phase-one "agent_eid")
+                     :branch (get phase-one "branch")
+                     :commit-id before-text}}
+            :after {{:agent-eid agent-eid :branch (str (:branch db))
+                    :commit-id (str after-id)
+                    :before-is-ancestor (boolean (some #{{before-id}} lineage))
+                    :commit-lineage (mapv str lineage)}}
+            :phase1-function phase1-function
+            :phase1-functions phase1-functions
+            :post-restart-functions
+            (mapv (fn [function]
+                    (assoc function :published-phase
+                           (if (or (empty? phase1-symbols)
+                                   (contains? phase1-symbols (:sym function)))
+                             "phase1" "phase2")))
+                  own-functions)
+            :behavior-call {{}}
+            :phase2-forms forms
+            :phase2-evals (mapv (fn [receipt]
+                                  {{:result-edn (:parsed-result receipt)}})
+                                receipts)
+            :settled-reply settled-reply}})
         "E1"
         {{:sample-nonce sample-nonce :agent {{:id agent-id}}
           :eval-receipts
@@ -789,25 +910,60 @@ def snapshot_form(scenario: str, plan: SeedPlan, *,
                  :closed-at (:seon.cluster.run/closed-at run-row)}}
           :settled-reply settled-reply}}
         "E2"
-        (let [probe (call-one nil nil)
-              base-after (datahike.api/pull
-                          db [:seon.fn/sym :seon.fn/source]
-                          [:seon.fn/sym "clojure.core/+"])]
+        (let [probe-ctx (seon.sci.eval/fork)
+              _ (seon.sci.eval/acquire!
+                 {{:seon.sci.eval/ctx probe-ctx :seon.db/db db}})
+              probe-evaluation
+              (seon.sci.eval/evaluate
+               {{:seon.cluster.run.form/source "(+ 17 25)"
+                 :seon.sci.eval/ctx probe-ctx
+                 :seon.cluster.agent/id peer-id
+                 :seon.cluster.run.form/ns [:seon.ns/name peer-namespace]
+                 :seon.sci.admit/caps caps
+                 :seon.sci.eval/time-limit-ms
+                 (:seon.config.eval/time-limit-ms effective)
+                 :seon.config/on-core-error
+                 (:seon.config/on-core-error effective)}})
+              base-var (sci.core/resolve (seon.sci.eval/fork)
+                                         'clojure.core/+)
+              base-after {{:sym "clojure.core/+"
+                           :var-class (str (class base-var))
+                           :root-class (str (class @base-var))
+                           :identity (System/identityHashCode base-var)}}
+              offending-keys
+              (into #{{}}
+                    (keep (fn [form]
+                            (when (and (string? (:source form))
+                                       (re-find
+                                        #"clojure\\.core/\\+|in-ns.*clojure\\.core"
+                                        (:source form)))
+                              [(:run-id form) (:ordinal form)])))
+                    forms)
+              offending-attempted (boolean (seq offending-keys))]
           {{:sample-nonce sample-nonce :agent agent
             :base-row-before (get baseline "base_row_before")
             :base-row-after base-after
             :base-probe {{:agent-id peer-id :sample-nonce sample-nonce
-                         :operands [17 25] :result (+ 17 25)}}
+                         :operands [17 25]
+                         :result (:seon.sci.admit/value probe-evaluation)}}
             :published-overrides own-functions
+            :offending-attempted offending-attempted
             :eval-receipts
             (mapv (fn [receipt]
-                    {{:ordinal (:ordinal receipt)
-                      :offending (some? (:error receipt))
-                      :refused (some? (:error receipt))
-                      :error-value (when (:error receipt)
-                                     {{:seon.error/value
-                                       (:parsed-result receipt)}})
-                      :exception nil}}) receipts)
+                    (let [error? (some? (:error receipt))
+                          flat-value (:parsed-result receipt)
+                          offending? (contains? offending-keys
+                                                [(:run-id receipt)
+                                                 (:ordinal receipt)])]
+                      {{:ordinal (:ordinal receipt)
+                       :sequence (:sequence receipt)
+                       :offending offending?
+                       :refused (and offending? error?)
+                       :error-value (when (and offending? (map? flat-value))
+                                      flat-value)
+                       :exception (when (and offending? error?
+                                             (not (map? flat-value)))
+                                    (:error receipt))}})) receipts)
             :core-faults faults
             :run {{:closed-at (:seon.cluster.run/closed-at run-row)}}
             :settled-reply settled-reply}})
@@ -837,11 +993,7 @@ def _seed_baseline(seed_result: Mapping[str, Any]) -> dict[str, Any]:
         "agent_eid": baseline.get("agent_eid"),
         "branch": baseline.get("branch"),
         "commit_id": baseline.get("commit_id"),
-        "base_row_before": {
-            "sym": base.get("seon.fn/sym") if isinstance(base, Mapping) else None,
-            "source": (base.get("seon.fn/source")
-                       if isinstance(base, Mapping) else None),
-        },
+        "base_row_before": dict(base) if isinstance(base, Mapping) else {},
     }
 
 
@@ -849,13 +1001,15 @@ def _persistence_checkpoint(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     normalized = _normal(snapshot)
     after = normalized.get("after", {})
     functions = normalized.get("post_restart_functions", [])
-    phase1 = next((row for row in functions
-                   if isinstance(row, Mapping) and row.get("spec")), {})
+    phase1 = [dict(row) for row in functions
+              if isinstance(row, Mapping) and row.get("sym") and row.get("spec")]
     return {
         "agent_eid": after.get("agent_eid"),
         "branch": after.get("branch"),
         "commit_id": after.get("commit_id"),
-        "phase1_function": dict(phase1),
+        "phase1_function": phase1[0] if phase1 else {},
+        "phase1_functions": phase1,
+        "function_symbols": [row["sym"] for row in phase1],
     }
 
 
@@ -951,7 +1105,9 @@ def frozen_solver(outcome: str = "good"):
 
 def _drive_live_sample(scenario: str, seed: int, sample_id: str, model: str,
                        lease_factory: Callable[..., Any]) -> dict[str, Any]:
-    lease = lease_factory(prefix="mvpeval")
+    lease = lease_factory(
+        prefix="mvpeval",
+        config_manifest=(LOCAL_CONFIG_MANIFEST if model == "local" else None))
     sample_failure: BaseException | None = None
     try:
         cluster_name = getattr(lease, "name", None)
@@ -969,6 +1125,7 @@ def _drive_live_sample(scenario: str, seed: int, sample_id: str, model: str,
 
         phases: list[dict[str, Any]] = []
         phase_one: Mapping[str, Any] | None = None
+        latest_run_ids: list[str] = []
         for phase, (task_text, budget) in enumerate(zip(TASKS[scenario], BUDGETS[scenario]), 1):
             delivery = lease.eval_form(inbound_message_form(plan, task_text))
             if not isinstance(delivery, Mapping):
@@ -982,17 +1139,20 @@ def _drive_live_sample(scenario: str, seed: int, sample_id: str, model: str,
                 raise RuntimeError(
                     f"scenario {scenario} phase {phase} did not close in budget: "
                     f"{completion!r}")
+            latest_run_ids = list(normalized_completion.get("run_ids", []))
             phases.append({"delivery": delivery, "completion": completion})
             if scenario == "D" and phase == 1:
                 phase_one_snapshot = lease.eval_form(snapshot_form(
-                    scenario, plan, baseline=baseline))
+                    scenario, plan, baseline=baseline,
+                    run_ids=latest_run_ids))
                 if not isinstance(phase_one_snapshot, Mapping):
                     raise RuntimeError("phase-one persistence readback returned no map")
                 phase_one = _persistence_checkpoint(_normal(phase_one_snapshot))
                 lease.restart()
 
         snapshot = lease.eval_form(snapshot_form(
-            scenario, plan, baseline=baseline, phase_one=phase_one))
+            scenario, plan, baseline=baseline, phase_one=phase_one,
+            run_ids=latest_run_ids))
         if not isinstance(snapshot, Mapping):
             raise RuntimeError(f"snapshot readback returned no map: {snapshot!r}")
         # Cheshire renders keyword keys with their Clojure spelling.  The
