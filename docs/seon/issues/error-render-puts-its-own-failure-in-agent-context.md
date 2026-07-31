@@ -67,6 +67,22 @@ The same string reached a real prompt: it is inside the committed capture
   deserves its own look.
 - `docs/prds/sci-execution-runtime/research/turn-loop-preflight-2026-07-31.md`.
 
+Still live 2026-07-31 on `ef8cc6f77`, cluster `visual-qa`, agent `scout` —
+the failure text has changed but is still agent-facing, now a contract
+violation rather than an ISeq error:
+
+```text
+;; path=[:seon.render.walk/neighbours 4 :seon.render.walk/neighbours 9]
+;; depth=2 provenance=seon.error/render-ai
+The seon.error/ai-prose projection threw: seon.error/ai-prose violated its
+contract (invalid-input): [#:seon.render{:would-fall-to-floor? ["disallowed key"]}]
+```
+
+The walk now hands `ai-prose` a unit carrying `:seon.render/would-fall-to-floor?`,
+which its closed input schema rejects. Evidence:
+`tmp/visual-qa/ai-scout.txt:194-195`,
+`docs/prds/sci-execution-runtime/research/visual-qa-2026-07-31.md`.
+
 ## Owner
 
 `src/seon/error.clj` with `src/seon/render/walk.clj`.

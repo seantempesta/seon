@@ -16,20 +16,32 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (5)
+## Blocker (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
+| [Make the agent page's live feed paint the page a GET already renders](agent-page-live-feed-paints-nothing.md) | blocker | visual-QA fix wave |
+| [Name the real messaging function in the getting-started instruction](getting-started-instruction-names-a-nonexistent-function.md) | blocker | visual-QA fix wave |
+| [Render an assigned namespace's functions, not just its `ns` form](assigned-namespace-renders-none-of-its-functions.md) | blocker | visual-QA fix wave |
+| [Derive dormant clusters from the persisted roster](derive-dormant-clusters-from-the-persisted-roster.md) | blocker | live operator reopen regression lane |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (24)
+## Friction (31)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
+| [Stop rendering a walk elision as an error](walk-elisions-render-as-error-cards.md) | friction | visual-QA fix wave |
+| [Order the walk by relevance and say each fact once](walk-output-is-unordered-and-repeats-itself.md) | friction | visual-QA fix wave |
+| [Keep recorded context captures out of the next context](context-captures-re-enter-the-next-prompt.md) | friction | visual-QA fix wave |
+| [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
+| [Restore the message bar to the page the agent route serves](agent-page-has-no-message-form.md) | friction | visual-QA fix wave |
+| [Steer incompatible sovereign schema refusals](steer-incompatible-sovereign-schema-refusals.md) | friction | live operator reopen regression lane |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
 | [Let a live config apply reach an armed agent graph](armed-agent-graphs-freeze-config-dials-at-arm.md) | friction | turn-loop preflight fix lane |
@@ -40,7 +52,6 @@ See `README.md` for the convention.
 | [Return the SCI re-arm refusal as a value and seal the guard's invariants](sci-evaluate-throws-when-a-guarded-context-is-re-armed.md) | friction | Core |
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
-| [Publish the fork commits two pins carry alone](publish-the-fork-commits-two-pins-carry-alone.md) | friction | upstream-delta sweep follow-up |
 | [Merge the 28 upstream Datahike commits our fork is missing](datahike-fork-is-28-commits-behind-upstream.md) | friction | upstream-delta sweep follow-up |
 | [Make the filestore able to execute the batch write Datahike builds](konserve-filestore-cannot-execute-the-batch-write-datahike-builds.md) | friction | store/perf fix lane |
 | [State a position on `:keep-history?` instead of inheriting it](keep-history-is-on-by-default-without-a-decision.md) | friction | store/perf fix lane |
@@ -55,10 +66,11 @@ See `README.md` for the convention.
 | [Continue the episode after an all-refused turn](refused-turns-do-not-continue-the-episode.md) | friction | owner design gate, then loop wave |
 | [Give the work launcher's control read SPI priority or rebuild it as a var-process](work-launcher-control-alts-lacks-priority.md) | friction | flow-protocol wave |
 
-## Cleanup (6)
+## Cleanup (7)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Remove or implement monitor-graph's throwing command proc](monitor-graph-command-proc-throws.md) | cleanup | flow-protocol wave |
