@@ -1497,6 +1497,19 @@ may reintroduce a shadow build into the dev feedback path.
   non-derivable how-to prose. Naming of the agent's walked keys
   (`:my/*` candidate) awaits the owner's explicit ruling — nothing
   renames until then.
+  CLARIFICATIONS (owner, same conversation): (1) `my.agents.<id>` is
+  ONLY the nursery for TEMP/undifferentiated agents — real agents own
+  namespaces anywhere in the tree, including seon core (the
+  distributed-ownership protocol's owner agents ARE assigned those
+  namespaces). The seeded curriculum requires apply to blank nursery
+  namespaces; a namespace-owner agent's curriculum is its real
+  namespace's own requires, no seeding needed — acquaintance falls
+  out of the code graph. Nothing may assume agent namespace =
+  `my.agents.*`. (2) Peer rendering is depth-aware by construction:
+  agent B found in agent A's walk renders through B's family lens at
+  that distance (a summary line), never raw keys — raw keys are the
+  debug drill's deliberate territory. This resolved the recorded
+  `:my/*` peer-view caveat.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
