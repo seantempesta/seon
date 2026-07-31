@@ -384,7 +384,21 @@
                     :seon.render.walk/changed-at 9
                     :seon.render/projection 'example/churn
                     :seon.render/output "churn"}]}
+            flattened (walk/units node)
             text (walk/prose @connection node)]
+        (is (= flattened (walk/units node))
+            "flattening is pure over the rendered node value")
+        (is (= [[]
+                [:seon.render.walk/neighbours 0]
+                [:seon.render.walk/neighbours 0
+                 :seon.render.walk/neighbours 0]
+                [:seon.render.walk/neighbours 1]
+                [:seon.render.walk/neighbours 2]]
+               (mapv :seon.render.walk/path flattened))
+            "path is the total tie-breaker after changed-at and branch")
+        (is (= [0 7 7 7 9]
+               (mapv :seon.render.walk/changed-at flattened))
+            "changed-at is lifted onto every unit")
         (is (= 1 (count (re-seq #";; \(seon\.render/walk" text))))
         (is (re-find #"path=\[:seon\.render\.walk/neighbours 0\].*depth=1.*example/a"
                      text))

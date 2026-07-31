@@ -628,6 +628,50 @@
 ;;; Assembly — the ai kind
 ;;; ---------------------------------------------------------------------------
 
+(defn units
+  "Flatten a rendered neighbourhood into one deterministically ordered vector.
+
+  This is the shared membership and ordering seam for every projection. The
+  node remains present so a consumer can inspect render provenance, while the
+  keys used by page assembly are lifted onto the unit value."
+  {:malli/schema
+   [:=> [:cat :seon.render.walk/node] :seon.render.walk/units]}
+  [node]
+  (letfn [(flatten-units [node path depth branch]
+            (let [failure (:seon.error/value node)
+                  output (:seon.render/output node)
+                  present? (or failure
+                               (and (string? output)
+                                    (not (str/blank? output)))
+                               (and (some? output)
+                                    (not (string? output))))
+                  here (when present?
+                         [(cond->
+                           {:seon.render.walk/node node
+                            :seon.render.walk/path path
+                            :seon.render.walk/found-depth depth
+                            :seon.render.walk/changed-at
+                            (:seon.render.walk/changed-at node)}
+                            branch
+                            (assoc :seon.render.walk/branch branch)
+                            (some? output)
+                            (assoc :seon.render/output output))])]
+              (into (or here [])
+                    (mapcat
+                     (fn [[index child]]
+                       (let [child-path (conj path
+                                              :seon.render.walk/neighbours
+                                              index)]
+                         (flatten-units child child-path (inc depth)
+                                        (or branch child-path))))
+                     (map-indexed vector
+                                  (:seon.render.walk/neighbours node))))))]
+    (->> (flatten-units node [] 0 nil)
+         (sort-by (juxt :seon.render.walk/changed-at
+                        :seon.render.walk/branch
+                        :seon.render.walk/path))
+         vec)))
+
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
 
@@ -658,30 +702,7 @@
   ([db node]
    (prose db node {}))
   ([db node {requested-branch :seon.render.walk/branch}]
-   (letfn [(units [node path depth branch]
-            (let [failure (:seon.error/value node)
-                  output (:seon.render/output node)
-                  text (cond
-                         failure (:seon.error/message failure)
-                         (string? output) (when-not (str/blank? output) output)
-                         (some? output) (pr-str output))
-                  here (when text
-                         [{:seon.render.walk/node node
-                           :seon.render.walk/path path
-                           :seon.render.walk/found-depth depth
-                           :seon.render.walk/branch branch
-                           :seon.render.walk/text text}])]
-              (into (or here [])
-                    (mapcat
-                     (fn [[index child]]
-                       (let [child-path (conj path
-                                              :seon.render.walk/neighbours
-                                              index)]
-                         (units child child-path (inc depth)
-                                (or branch child-path))))
-                     (map-indexed vector
-                                  (:seon.render.walk/neighbours node))))))
-          (provenance [node]
+   (letfn [(provenance [node]
             (or (:seon.render/projection node)
                 (get-in node [:seon.error/value :seon.error/kind])
                 :seon.render.walk/unknown))
@@ -693,11 +714,17 @@
           (unit-lines [unit]
             (let [node (:seon.render.walk/node unit)
                   path (:seon.render.walk/path unit)
-                  depth (:seon.render.walk/found-depth unit)]
+                  depth (:seon.render.walk/found-depth unit)
+                  failure (:seon.error/value node)
+                  output (:seon.render/output unit)
+                  text (cond
+                         failure (:seon.error/message failure)
+                         (string? output) output
+                         (some? output) (pr-str output))]
               [(str ";; path=" (pr-str path)
                     " depth=" depth
                     " provenance=" (pr-str (provenance node)))
-               (:seon.render.walk/text unit)]))]
+               text]))]
      (let [root (:seon.render.walk/lookup node)
            requested-depth (:seon.render/distance node)
            basis (long (:max-tx db))
@@ -710,13 +737,8 @@
                        " depth=" requested-depth
                        (when (some? requested-branch)
                          (str " branch=" (pr-str requested-branch))))
-           ordered (->> (units node [] 0 nil)
+           ordered (->> (units node)
                         (filter (comp within-branch?
-                                      :seon.render.walk/path))
-                        (sort-by
-                         (juxt (comp :seon.render.walk/changed-at
-                                     :seon.render.walk/node)
-                               :seon.render.walk/branch
-                               :seon.render.walk/path)))
+                                      :seon.render.walk/path)))
            text (str/join "\n" (cons header (mapcat unit-lines ordered)))]
        (when-not (str/blank? text) text)))))

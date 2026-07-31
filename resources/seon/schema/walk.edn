@@ -103,4 +103,19 @@
   [:seon.render/output {:optional true} :seon.render/output]
   [:seon.error/value {:optional true} :seon.error/value]
   [:seon.render.walk/neighbours {:optional true}
-   :seon.render.walk/neighbours]]}
+   :seon.render.walk/neighbours]]
+
+ ; A projection-neutral flattened walk unit. `output` remains the raw render
+ ; value; consumers decide whether to serialize it as prose or HTML.
+ :seon.render.walk/path [:vector [:or :keyword :int]]
+ :seon.render.walk/found-depth [:int {:min 0}]
+ :seon.render.walk/branch :seon.render.walk/path
+ :seon.render.walk/unit
+ [:map {:closed true}
+  [:seon.render.walk/node :seon.render.walk/node]
+  [:seon.render.walk/path :seon.render.walk/path]
+  [:seon.render.walk/found-depth :seon.render.walk/found-depth]
+  [:seon.render.walk/branch {:optional true} :seon.render.walk/branch]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
+  [:seon.render/output {:optional true} :seon.render/output]]
+ :seon.render.walk/units [:vector :seon.render.walk/unit]}
