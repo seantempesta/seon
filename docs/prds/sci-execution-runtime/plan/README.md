@@ -1271,6 +1271,36 @@ may reintroduce a shadow build into the dev feedback path.
   mechanism — it is a block whose facts rarely change, so it sorts
   into the stable prefix naturally; pin/priority overrides are
   ordering facts on the entity, never a second assembly path.
+  **Rulings 2026-07-31 #2 (owner, decision batch — the context/render
+  redesign):** (1) INVALIDATION IS ATTRIBUTE REVISIONS, not the old
+  E/A/V index: every render's reads reduce to Datahike's own
+  dependency plan (attribute set), and each render holds that set plus
+  last-seen per-attribute revision counters from the db value,
+  answering "am I stale?" in O(deps) lookups on wake — no writer-side
+  reverse index. Covers absence; conservative-revision is the
+  fail-closed. The src-old E/A/V registration
+  (writer.clj:2756-3205) stays quarry for entity-level narrowing ONLY
+  if a measured hot attribute demands it (this revises ruling 21's
+  accretion (a): using the dependency's built-in mechanism is not
+  "redoing from scratch"). The walk must read via pull with concrete
+  selectors, never d/entity (entity ⇒ :all ⇒ wake on every commit).
+  (2) RESOLUTION SIMPLIFIED (owner, verbatim intent): "The walk is
+  the discovery process. It's finding data that has explicit
+  schemas." Precedence, most→least specific: explicit
+  :seon.render/ai / :seon.render/html keys ON THE VALUE always win →
+  a same-schema render function in a governing namespace (the viewing
+  agent's own namespace, else the data's owning namespace —
+  viewer-constancy retained from the 2026-07-28 ruling) →
+  the schema-attached default renderer → the structural floor. The
+  slot-redirect step is RETIRED from the contract until a concrete
+  need names it; the two implemented chains (render.clj vs walk.clj)
+  collapse to this one, and the two-floors split heals with them.
+  (3) ORDERING V1 IS PURE NAIVE: blocks order by last-change
+  transaction basis (derived, never a stored timestamp), nothing
+  else — no pins, no bands, no hysteresis in v1. Even the system
+  message finds the front naturally because it never changes.
+  Banding/hysteresis waits for a MEASURED oscillation; authored bands
+  retire from context assembly.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
