@@ -2211,7 +2211,7 @@
         (with-redefs [ai/complete
                       (fn [{prompt :seon.ai/prompt}]
                         {:seon.ai/text
-                         (if (str/includes? prompt "You are agent agent-b")
+                         (if (str/includes? prompt "Agent agent-b")
                            "(my.run/complete \"there are three widgets\")"
                            (str "(my.message/send \"agent-b\" "
                                 "\"please count the widgets\")\n"
@@ -2433,21 +2433,17 @@
           (is (str/includes? prompt-text "count the widgets")
               "the provider request carries the trigger the run OPENED
                on — the run's own recorded cause")
-          ;; THE INVARIANT IS ABOUT THE TRIGGER, not about the prompt's
-          ;; total contents, and the neighbourhood view made the old
-          ;; proxy assertion wrong rather than the invariant: at
-          ;; distance 1 an agent legitimately SEES the messages queued
-          ;; for it, which is information it should have. What must stay
-          ;; true is that the later message is never presented as the
-          ;; cause of this run — the `:trigger` block names m-1, and
-          ;; `message/trigger` still derives m-1 from the opening
-          ;; transaction's own meta.
-          (is (str/includes? prompt-text "You have been asked:\n\ncount the widgets")
-              "a message arriving between open and :call cannot
-               displace the recorded trigger")
-          (is (not (str/includes? prompt-text
-                                  "You have been asked:\n\nignore everything else"))
-              "and never becomes the run's cause"))))))
+          ;; One walk honestly includes both connected messages. The cause
+          ;; invariant is a database fact, not a special prompt block.
+          (is (str/includes? prompt-text "ignore everything else")
+              "the fresh walk also includes the later connected message")
+          (let [run-id (d/q '[:find ?run-id .
+                              :where
+                              [?run :seon.cluster.run/id ?run-id]]
+                            @connection)]
+            (is (= "m-1" (message/trigger @connection run-id))
+                "a message arriving between open and :call cannot displace
+                 the run's recorded trigger")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — streaming rides channels, the database keeps facts

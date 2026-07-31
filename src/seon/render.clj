@@ -182,13 +182,14 @@
                           (config/result-caps
                            (config/effective db cluster-name))))]
            (cond
-             (nil? cluster-name)
-             (walk-error (str "Agent " (pr-str agent-id)
-                              " has no cluster connection."))
-
              (or (empty? caps) (some nil? (vals caps)))
-             (walk-error (str "Cluster " (pr-str cluster-name)
-                              " has no complete render caps."))
+             (walk-error
+              (if cluster-name
+                (str "Cluster " (pr-str cluster-name)
+                     " has no complete render caps.")
+                (str "Agent " (pr-str agent-id)
+                     " has neither ambient render caps nor a cluster "
+                     "connection from which to derive them.")))
 
              :else
              (let [root (get options :root

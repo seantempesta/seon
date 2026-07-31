@@ -22,6 +22,7 @@
   (:require [clojure.core.async :as async]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -82,11 +83,13 @@
   (.getBytes ^String text StandardCharsets/UTF_8))
 
 (defn- print-exact!
-  "Print `text` without transforming it, framed by its exact UTF-8 length."
+  "Print `text` without transforming it, framed by its exact token estimate
+  and UTF-8 length."
   [label text]
   (let [payload (utf8-bytes text)]
-    (println (str "\n================ " label " (" (alength payload)
-                  " UTF-8 BYTES) ================"))
+    (println (str "\n================ " label " ("
+                  (tokens/estimate text) " ESTIMATED TOKENS; "
+                  (alength payload) " UTF-8 BYTES) ================"))
     (.write System/out payload 0 (alength payload))
     ;; This newline and the end marker are framing, not part of `payload`.
     (println (str "\n================ END " label " ================"))
