@@ -89,8 +89,8 @@
    :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
                 rewrite-clj/rewrite-clj
                 {:local/root "reference-code/rewrite-clj"}
-                ;; JVM-only testbed dependency; vendored source matches
-                ;; the published v0.1.5@376d6ec coordinate exactly.
+                ;; JVM-only testbed dependency; the Seon fork is published
+                ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
