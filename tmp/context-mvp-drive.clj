@@ -62,6 +62,7 @@
     :seon.config.ai/model
     (or (System/getenv "OLLAMA_MODEL") "qwen3.5:35b-a3b-coding-nvfp4")
     :seon.config.ai/no-auth true
+    :seon.config.ai/max-tokens 8192
     :seon.config.ai/timeout-ms 300000}
 
    :deepseek
