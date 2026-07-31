@@ -497,21 +497,3 @@
     :seon.render.block/band :dynamic
     :seon.render.block/priority 90
     :seon.render/ai 'seon.context/trigger-ai}])
-
-(defn seed-tx
-  "Transaction data installing an ordinary agent's block set. PURE, and
-  IDEMPOTENT — upsert by name, so a reboot rewrites the same blocks and
-  any block the agent added itself survives untouched. Empty when
-  nothing would change, the converged-means-zero-writes rule."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id]
-                  :seon.store/transaction-data]}
-  [db agent-id]
-  (let [installed (into {}
-                        (map (juxt :seon.render.block/name identity))
-                        (block/blocks db agent-id))]
-    (if (every? (fn [wanted]
-                  (= wanted (get installed (:seon.render.block/name wanted))))
-                blocks)
-      []
-      (block/install-tx db agent-id blocks))))
