@@ -206,6 +206,7 @@
        [:nav {:class "seon-agent-routes"}
         [:a {:href (route/path ::route/agent {:id id})} "agent"]
         [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]]
+       (message-bar-html {:seon.cluster.agent/id id})
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -219,34 +220,84 @@
 ;;; Painting
 ;;; ---------------------------------------------------------------------------
 
-(defn surface-html
-  "One surface as the HTML string that will be morphed into its id.
+(declare walk-request)
 
-  A FAILED surface still paints, at its own id, as its error card: fail
-  loud, do not fall down. An omitted surface paints an empty wrapper at
-  its own id, so a later non-nil render still has a morph target."
-  {:malli/schema [:=> [:cat :seon.render/surface :seon.sci.admit/caps :any]
+(defn- unit-id
+  [agent-id unit]
+  (value/node-id
+   (assoc (:seon.render.walk/node unit)
+          :seon.cluster.agent/id agent-id
+          :seon.render.value/root [:seon.cluster.agent/id agent-id])
+   (:seon.render.walk/path unit)))
+
+(defn- rank-class
+  [rank]
+  (cond
+    (zero? rank) "seon-rank-primary"
+    (<= rank 3) "seon-rank-rail"
+    :else "seon-rank-deep"))
+
+(defn surface-html
+  "Serialize one walked HTML unit into its stable morph wrapper."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/id
+                       :seon.render.walk/unit
+                       [:int {:min 0}]]
                   :string]}
-  [surface caps db]
+  [agent-id unit rank]
+  (let [node (:seon.render.walk/node unit)
+        failure (:seon.error/value node)
+        output (:seon.render/output unit)
+        id (unit-id agent-id unit)
+        floor? (:seon.render/would-fall-to-floor? node)
+        attributes
+        (cond-> {:id id
+                 :class ["seon-walk-unit" (rank-class rank)]
+                 :style (str "order:" rank)
+                 :data-rank rank
+                 :data-unit-id id
+                 :data-walk-path (pr-str (:seon.render.walk/path unit))}
+          floor?
+          (assoc :data-floor "true" :data-show "$showEverything"))]
+    (hiccup/->string
+     [:article attributes
+      (if failure
+        [:div {:class "seon-error-card"
+               :data-error-kind (str (:seon.error/kind failure))}
+         [:span {:class "seon-error-card-message"}
+          (:seon.error/message failure)]]
+        output)])))
+
+(def ^:private stream-strip-id
+  (block/surface-id :stream))
+
+(defn- stream-strip-html
+  [stream-partial]
   (hiccup/->string
-   (if-let [failure (:seon.error/value surface)]
-     [:div {:id (:seon.render/surface-id surface)
-            :class "seon-error-card"
-            :data-block (subs (str (:seon.render.block/name surface)) 1)
-            :data-error-kind (str (:seon.error/kind failure))}
-      [:span {:class "seon-error-card-name"}
-       (str (:seon.render.block/name surface))]
-      [:span {:class "seon-error-card-message"}
-       (:seon.error/message failure)]]
-     (if-some [output (get surface :seon.render/output)]
-       (block/expand output
-                     {:seon.render/surfaces []
-                      :seon.sci.admit/caps caps
-                      :seon.db/db db})
-       [:div {:id (:seon.render/surface-id surface)} ""]))))
+   [:div {:id stream-strip-id
+          :class "seon-stream-strip"}
+    (when stream-partial
+      [:div {:class "seon-stream-live"}
+       [:span {:class "seon-stream-label"} "tokens"]
+       [:span {:class "seon-stream-count"}
+        (str (or (:seon.ai/tokens stream-partial) 0))]
+       [:span {:class "seon-stream-text"} (:seon.ai/text stream-partial)]
+       [:span {:class "seon-stream-cursor"} ""]])]))
+
+(defn- path-compare
+  "Lexicographic walk-path order; vector comparison orders by length first."
+  [left right]
+  (loop [index 0]
+    (cond
+      (= index (count left)) (compare (count left) (count right))
+      (= index (count right)) 1
+      :else
+      (let [step-order (compare (nth left index) (nth right index))]
+        (if (zero? step-order)
+          (recur (inc index))
+          step-order)))))
 
 (defn page-of
-  "One agent's page as `{surface-id → html}`. THE one serialization.
+  "One namespace page as `{element-id → html}`. THE one serialization.
 
   Derives the agent's html surfaces at `db` and serializes each through
   `surface-html`. The render proc and the initial paint both call THIS,
@@ -264,18 +315,38 @@
   {:malli/schema [:=> [:cat :seon.render.web/paint-request]
                   [:map-of :seon.render/surface-id :string]]}
   [{:keys [:seon.db/db :seon.cluster.agent/id] caps :seon.sci.admit/caps
-    :as request}]
-  (into {}
-        (map (fn [surface]
-               [(:seon.render/surface-id surface)
-                (surface-html surface caps db)]))
-        (block/surfaces db (merge {:seon.cluster.agent/id id
-                                   :seon.render/kind :seon.render/html
-                                   :seon.sci.admit/caps caps}
-                                  (select-keys
-                                   request
-                                   [:seon.cluster.run/live-processes
-                                    :seon.ai/partial])))))
+    stream-partial :seon.ai/partial}]
+  (let [node (render.walk/neighborhood (walk-request db caps id
+                                                     :seon.render/html))
+        units (render.walk/units node)
+        ranks (into {}
+                    (map-indexed (fn [rank unit]
+                                   [(:seon.render.walk/path unit) rank]))
+                    (reverse units))
+        rows (mapv (fn [unit]
+                     (let [element-id (unit-id id unit)]
+                       {:seon.render.web/element-id element-id
+                        :seon.render.walk/path (:seon.render.walk/path unit)
+                        :seon.render.web/html
+                        (surface-html id unit
+                                      (get ranks
+                                           (:seon.render.walk/path unit)))}))
+                   units)
+        paths (into {stream-strip-id [::stream-strip]}
+                    (map (juxt :seon.render.web/element-id
+                               :seon.render.walk/path))
+                    rows)
+        page (into (sorted-map-by
+                    (fn [left right]
+                      (let [path-order (path-compare (get paths left)
+                                                     (get paths right))]
+                        (if (zero? path-order)
+                          (compare left right)
+                          path-order))))
+                   (map (juxt :seon.render.web/element-id
+                              :seon.render.web/html))
+                   rows)]
+    (assoc page stream-strip-id (stream-strip-html stream-partial))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The per-agent debug value
@@ -948,15 +1019,18 @@
 
 (defn- walk-request
   [db caps agent-id kind]
-  {:seon.db/db db
-   :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-   :seon.render/kind kind
-   :seon.render/floor (if (= :seon.render/html kind)
-                        'seon.render.block/data-panel
-                        'seon.render.block/data-prose)
-   :seon.render/overrides {}
-   :seon.render/distance (:depth namespace-walk-options)
-   :seon.sci.admit/caps caps})
+  (let [viewer-namespace (agent-namespace db agent-id)]
+    (cond-> {:seon.db/db db
+             :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+             :seon.render/kind kind
+             :seon.render/floor (if (= :seon.render/html kind)
+                                  'seon.render.block/data-panel
+                                  'seon.render.block/data-prose)
+             :seon.render/overrides {}
+             :seon.render/distance (:depth namespace-walk-options)
+             :seon.sci.admit/caps caps}
+      viewer-namespace
+      (assoc :seon.render/namespace viewer-namespace))))
 
 (defn- walk-node-html
   [node path]
@@ -1002,12 +1076,28 @@
   [{:keys [:seon.store/connection]
     caps :seon.sci.admit/caps}
    agent-id]
-  (let [db @connection]
+  (let [db @connection
+        page (page-of {:seon.db/db db
+                       :seon.cluster.agent/id agent-id
+                       :seon.sci.admit/caps caps
+                       :seon.cluster.run/live-processes #{}})
+        stream-html (get page stream-strip-id)
+        unit-html (vals (dissoc page stream-strip-id))]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.cluster.agent/id agent-id
                    :seon.render/page
-                   [(html-walk db caps agent-id)]
+                   [[:section {:class "seon-namespace-page"
+                               :data-signals__ifmissing
+                               "{showEverything:false}"}
+                     [:label {:class "seon-floor-control"}
+                      [:input {:type "checkbox"
+                               :data-bind "showEverything"}]
+                      [:span "show everything"]]
+                     (into [:section {:class "seon-rank-layout"}]
+                           (map hiccup/raw)
+                           unit-html)
+                     (hiccup/raw stream-html)]]
                    :seon.render.web/feed-url
                    (route/path ::route/feed {:id agent-id})})}))
 

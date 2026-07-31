@@ -74,6 +74,7 @@
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/kind :seon.render/kind]
   [:seon.render/floor :seon.render/floor]
+  [:seon.render/namespace {:optional true} :seon.render/namespace]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.render/overrides {:optional true} :seon.render/overrides]]

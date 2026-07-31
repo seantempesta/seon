@@ -452,6 +452,7 @@
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/node]}
   [{:keys [:seon.db/db :seon.sci.admit/caps]
     :seon.render/keys [kind overrides floor]
+    viewer-namespace :seon.render/namespace
     :seon.render.walk/keys [lookup]
     :as request}]
   (let [remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
@@ -474,13 +475,15 @@
                         {:seon.error/kind ::elided
                          :seon.error/message
                          "elided transcript at the configured node cap"})
-                (let [unit {:seon.db/db db
+                (let [unit (cond-> {:seon.db/db db
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps caps
                             :seon.render.transcript/token-budget
                             (quot (long (:seon.config.eval.result/max-string
                                          caps))
                                   tokens/chars-per-token)}
+                             viewer-namespace
+                             (assoc :seon.render/namespace viewer-namespace))
                       declaration (if (= kind :seon.render/html)
                                     `transcript/render-html
                                     `transcript/render-ai)]
@@ -553,10 +556,14 @@
                             render-base (assoc base
                                                :seon.render/distance
                                                render-distance)
-                            unit (assoc pulled
-                                        :seon.db/db db
-                                        :seon.sci.admit/caps caps
-                                        :seon.render/distance render-distance)
+                            unit (cond-> (assoc pulled
+                                               :seon.db/db db
+                                               :seon.sci.admit/caps caps
+                                               :seon.render/distance
+                                               render-distance)
+                                   viewer-namespace
+                                   (assoc :seon.render/namespace
+                                          viewer-namespace))
                             specific (specific-projection unit kind overrides)
                             resolved (render/resolve-unit
                                       {:seon.render/unit
