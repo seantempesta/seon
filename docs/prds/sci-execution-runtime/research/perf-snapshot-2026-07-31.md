@@ -65,7 +65,13 @@ parked agents = +79 MiB RSS (≈12,600/GiB — bounded today by a FILED
 defect: each armed agent holds one platform thread; ~33,000/GiB after the
 fix, do not quote the higher number yet); commit-to-wire 3.7 ms flat at
 1/10/50 connections, byte-identical; sustained churn 60 s/816 commits
-with no memory growth; a stalled tab affects nobody. The one real
-ceiling: file-store commits at 8 tx/s (99.3% konserve file backend — the
-same commit is 1,088 tx/s in memory, 2,000 rows/s batched), an honest
-known limit of the current storage backend, not the model.
+with no memory growth; a stalled tab affects nobody. Write throughput, correctly framed
+(transact-throughput-regression-2026-07-31.md — a follow-up dig proved NO
+regression): a single durable commit costs ~123 ms serial (18–24 fsync'd
+file objects × ~8 ms APFS fsync — identical to the 2026-07-25 baseline),
+but the writer COALESCES concurrent callers into shared commits:
+**1,477 tx/s measured at 1,024 concurrent writers today** (8,450 tx/s in
+the July 25 measurements), 1,088 tx/s in memory, 2,000 rows/s batched.
+A filed friction issue enables the fork's unused `:fuse-index-roots?`
+options: the same durable commit becomes 1 object / 19 ms (5.3×, zero
+durability trade; fixed at store creation, lands via republish+refork).
