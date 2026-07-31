@@ -39,7 +39,7 @@
  :seon.ns/name [:symbol {:seon.db/identity true}]
  :seon.ns/source [:string {:min 1}]
  :seon.ns/doc :string
- :seon.ns/requires [:set :symbol]
+ :seon.ns/requires [:set :seon.db/ref]
  :seon.ns/aliases
  [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/imports

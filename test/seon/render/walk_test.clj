@@ -199,20 +199,23 @@
               :seon.render/distance 0})]
         (is (true? (:seon.render/would-fall-to-floor? result)))))))
 
-(deftest derived-edges-resolve-requires-trigger-and-asked-for-runs
+(deftest ordinary-requires-refs-and-derived-message-edges-are-walked
   (support/with-database
     (fn [connection]
       (seed-agents! connection "derived" ["asker" "answerer"])
       (d/transact connection
                   [{:seon.ns/name 'derived.target}
-                   {:seon.ns/name 'my.agents.asker
+                   {:seon.ns/name 'external.missing}])
+      (d/transact connection
+                  [{:seon.ns/name 'my.agents/asker
                     :seon.ns/requires
-                    #{'derived.target 'external.missing}}
+                    #{[:seon.ns/name 'derived.target]
+                      [:seon.ns/name 'external.missing]}}
                    {:seon.cluster.message/id "derived-message"
                     :seon.cluster.message/from
                     [:seon.cluster.agent/id "asker"]
                     :seon.cluster.message/to
-                    [:seon.cluster.agent/id "answerer"]
+                    [:seon.cluster.agent/id "asker"]
                     :seon.cluster.message/content "please answer"
                     :seon.cluster.message/at (java.util.Date.)}])
       (d/transact connection
@@ -243,14 +246,18 @@
             target-ns (:db/id
                        (d/pull db [:db/id]
                                [:seon.ns/name 'derived.target]))
+            external-ns (:db/id
+                         (d/pull db [:db/id]
+                                 [:seon.ns/name 'external.missing]))
             asker-refs (walk/refs db asker base-caps)
             answerer-refs (walk/refs db answerer base-caps)
             namespace-refs
             (walk/refs db
                        (:db/id
                         (d/pull db [:db/id]
-                                [:seon.ns/name 'my.agents.asker]))
-                       base-caps)]
+                                [:seon.ns/name 'my.agents/asker]))
+                       base-caps)
+            agent-walk (walk-agent db "asker" base-caps)]
         (is (some #(and (= :seon.render.walk/asked-for-run
                            (:seon.render.walk/attribute %))
                         (= run-eid (:seon.render.walk/target %)))
@@ -260,6 +267,13 @@
                         (= message-eid (:seon.render.walk/target %)))
                   answerer-refs))
         (is (some #(= target-ns (:seon.render.walk/target %)) namespace-refs))
-        (is (some #(= [:seon.ns/name 'external.missing]
-                      (:seon.render.walk/lookup %))
-                  namespace-refs))))))
+        (is (some #(= external-ns (:seon.render.walk/target %)) namespace-refs))
+        (is (some #(and (= :seon.ns/requires
+                           (:seon.render.walk/attribute %))
+                        (= target-ns (:seon.render.walk/lookup %)))
+                  (nodes agent-walk))
+            "the agent reaches a required namespace at distance two")
+        (is (some #(and (= external-ns (:seon.render.walk/lookup %))
+                        (= "external.missing" (:seon.render/output %)))
+                  (nodes agent-walk))
+            "a name-only external namespace renders its honest name")))))

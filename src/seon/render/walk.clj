@@ -382,17 +382,6 @@
        (or (:seon.render.block/name probe) (:db/txInstant probe)))
      (catch Throwable _ false))))
 
-(defn- required-namespace-edges
-  [db entity]
-  (into []
-        (map (fn [required]
-               (if-let [target (eid-of db [:seon.ns/name required])]
-                 {:seon.render.walk/attribute :seon.ns/requires
-                  :seon.render.walk/target target}
-                 {:seon.render.walk/attribute :seon.ns/requires
-                  :seon.render.walk/lookup [:seon.ns/name required]})))
-        (sort-by str (:seon.ns/requires entity))))
-
 (defn- trigger-message-edges
   [db entity]
   (when-let [run-eid (some-> entity :seon.cluster.agent/run :db/id)]
@@ -425,7 +414,7 @@
                   db agent-eid))))))
 
 (def ^:private derived-edge-functions
-  [required-namespace-edges trigger-message-edges asked-for-run-edges])
+  [trigger-message-edges asked-for-run-edges])
 
 (defn- derived-refs
   [db entity]

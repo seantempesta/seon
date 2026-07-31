@@ -675,9 +675,9 @@
                                     (cond-> {:tx-data tx-data}
                                       process (assoc :tx-meta
                                                      {:seon.db/process process})))))]
-      ;; Map expansion preserves this order inside the transaction. Every
-      ;; identity therefore exists before a requires lookup ref resolves it,
-      ;; including the shared name-only rows for external namespaces.
+      ;; Datahike processes tx-data in order. Every identity therefore exists
+      ;; before a requires lookup ref resolves it, including the shared
+      ;; name-only rows for external namespaces.
       (transact! (into namespace-bases namespace-relations))
       (transact! declaration-bases)
       (transact! call-rows)
