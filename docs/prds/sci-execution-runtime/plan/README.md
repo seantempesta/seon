@@ -1556,11 +1556,16 @@ may reintroduce a shadow build into the dev feedback path.
   in flight); the family-lens entity maps and all registration
   semantics are unchanged — this is file layout, not model.
   **Ruling 2026-07-31 #15 (owner): `:my/*` KEYS AND `my.<capability>`
-  TOOL NAMESPACES.** The agent's walked, agent-visible facts rename to
-  `:my/*` — `:my/id`, `:my/namespace`, `:my/instructions`,
-  `:my/cluster`, `:my/run` — so context reads as what it is from the
-  agent's seat; process machinery keys (creation/arm/routing/armed)
-  stay system-named. The tool/capability surface is `my.<capability>`
+  TOOL NAMESPACES.** The attributes STORED ON THE AGENT'S ENTITY
+  rename to `:my/*` — `:my/id`, `:my/namespace`, `:my/instructions`,
+  `:my/cluster`, `:my/run` — better names, NOT a category: the walk
+  visits EVERYTHING and renders EVERYTHING that has render functions,
+  with the floor taking the rest — no hand-tuned attribute lists, no
+  walked/unwalked classification anywhere (owner correction, same
+  conversation). Machinery keys (creation/arm/routing/armed) keep
+  system names only because they are function-contract and
+  process-local shapes, not entity attributes — there is nothing on
+  the entity to rename. The tool/capability surface is `my.<capability>`
   namespaces (`my.message`, `my.fs`, …) — one uniform convention:
   `my` is what an agent reads and calls. Peer rendering stays
   depth-aware (family lens, never raw keys), so the possessive reads
