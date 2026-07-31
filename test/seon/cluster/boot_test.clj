@@ -30,6 +30,7 @@
             [seon.flow :as seon.flow]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
@@ -80,35 +81,93 @@
   []
   (var-get (ns-resolve 'clojure.core.server 'servers)))
 
-(deftest incompatible-sovereign-schema-refusal-steers-the-operator
-  (let [cluster-name "legacy"
-        installed {:db/valueType :db.type/symbol
-                   :db/cardinality :db.cardinality/many}
-        failure
+(defn- seed-incompatible-sovereign!
+  [root cluster-name]
+  (let [opened (store/open-store!
+                {:seon.store/dir (str (io/file root "store"))})
+        branch (registry/cluster-branch cluster-name)]
+    (try
+      (registry/branch! {:seon.store/store opened
+                         :seon.cluster.registry/from :db
+                         :seon.store/branch branch})
+      (let [connection (store/open-branch! opened branch)
+            forms (schema.edn/packaged-forms)
+            declarations
+            (mapv
+             (fn [declaration]
+               (if (= :seon.ns/requires (:db/ident declaration))
+                 (assoc declaration :db/valueType :db.type/symbol)
+                 declaration))
+             (schema.datahike/malli->datahike-schema-in
+              {:seon.schema.projection/forms forms}
+              (schema/canonical-database-attributes forms)))]
         (try
-          (#'cluster/declaration-changes
-           {:schema {:seon.ns/requires installed}}
-           (schema.edn/packaged-forms)
-           cluster-name)
-          nil
-          (catch Exception error
-            error))
-        message (ex-message failure)
-        offense (:seon.boot/offense (ex-data failure))]
-    (testing "the refusal identifies the sovereign cluster and schema change"
-      (is (= :seon.boot/refused (:seon.error/kind (ex-data failure))))
-      (is (= cluster-name (:seon.boot/cluster-name offense)))
-      (is (= :seon.ns/requires (:seon.boot/attribute offense)))
-      (is (= installed (:seon.boot/installed offense)))
-      (is (= :db.type/ref
-             (get-in offense [:seon.boot/current :db/valueType]))))
-    (testing "the message names both destructive and preserving resolutions"
-      (is (str/includes? message "predates the incompatible schema change"))
-      (is (str/includes? message
-                         "bin/seon init legacy --force"))
-      (is (str/includes? message "destroys and reforks"))
-      (is (str/includes? message "export/import"))
-      (is (str/includes? message "preserve")))))
+          (d/transact connection declarations)
+          (d/transact
+           connection
+           [{:seon.source/digest (apply str (repeat 64 "a"))}
+            {:seon.ns/name 'legacy.core}
+            {:seon.fn/sym "legacy.core/f"}])
+          (finally
+            (d/release connection))))
+      (finally
+        (store/release-store! opened)))))
+
+(deftest incompatible-sovereign-schema-refusal-steers-the-operator
+  (let [root (bare-root)
+        cluster-name "legacy"
+        request {:seon.boot/cluster-name cluster-name
+                 :seon.boot/root root}]
+    (try
+      (seed-incompatible-sovereign! root cluster-name)
+      (let [failure (try
+                      (cluster/start! request)
+                      nil
+                      (catch Exception error
+                        error))
+            causes (take-while some? (iterate ex-cause failure))
+            mismatch
+            (some
+             (fn [cause]
+               (let [offense (:seon.boot/offense (ex-data cause))]
+                 (when (= :seon.ns/requires
+                          (:seon.boot/attribute offense))
+                   cause)))
+             causes)
+            outer-data (ex-data failure)
+            mismatch-offense (:seon.boot/offense (ex-data mismatch))
+            message (ex-message failure)]
+        (try
+          (testing "start! carries the degraded instance and cluster identity"
+            (is (= :seon.boot/refused (:seon.error/kind outer-data)))
+            (is (= cluster-name
+                   (get-in outer-data
+                           [:seon.boot/offense :seon.boot/cluster-name])))
+            (is (some? (:seon.boot/cluster-connection
+                        (:seon.boot/instance outer-data)))))
+          (testing "the cause chain retains the exact schema mismatch"
+            (is (some? mismatch))
+            (is (= cluster-name
+                   (:seon.boot/cluster-name mismatch-offense)))
+            (is (= :db.type/symbol
+                   (get-in mismatch-offense
+                           [:seon.boot/installed :db/valueType])))
+            (is (= :db.type/ref
+                   (get-in mismatch-offense
+                           [:seon.boot/current :db/valueType]))))
+          (testing "the wrapped message names both operator resolutions"
+            (is (str/includes? message
+                               "predates the incompatible schema change"))
+            (is (str/includes? message ":seon.ns/requires"))
+            (is (str/includes? message
+                               "bin/seon init legacy --force"))
+            (is (str/includes? message "destroys and reforks"))
+            (is (str/includes? message "export/import"))
+            (is (str/includes? message "preserve")))
+          (finally
+            (some-> outer-data :seon.boot/instance cluster/stop!))))
+      (finally
+        (delete-recursively! root)))))
 
 (deftest process-root-store-identity-is-canonical
   (let [root (bare-root)
