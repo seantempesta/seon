@@ -20,8 +20,9 @@ The mechanical seams are landed and their focused gates are green:
   every other namespace renderer distance 2, preserves namespace require
   edges, and never descends into namespace members; and
 - the seeded `:getting-started` instruction truthfully advertises the now-live
-  public call. The Ollama provider row uses the preflight value of 8,192 maximum
-  output tokens.
+  public call and now includes one complete durable-definition example as
+  owner-editable instruction data. The Ollama provider row uses the preflight
+  value of 8,192 maximum output tokens.
 
 The MVP model exit is **not green**. The finishing runs separate provider
 reasoning from agent behavior:
@@ -46,7 +47,16 @@ reasoning from agent behavior:
    contracted corpus row or message datom was created and no second turn
    opened. The reply did enumerate the seven schema keys visible in the
    opening walk, but never produced a settled walk-reading answer; and
-4. the `seon.flow` owner d2 context contains compact namespace cards rather
+4. the final DeepSeek drive received that example and corrected both earlier
+   definition defects: `get-message-schemas` was unqualified, carried the
+   required Malli attr-map, evaluated successfully, and installed as
+   `my.agents.context-mvp/get-message-schemas`. Its second form called
+   `my.message/send` with four arguments by treating `:about` as a keyword
+   argument. The rendered contract exposes only two- and three-argument
+   arities, so static analysis refused that form. No message datom was created,
+   the already-triggered run closed after its two receipts settled, and no
+   second turn opened; and
+5. the `seon.flow` owner d2 context contains compact namespace cards rather
    than raw member datoms, but remains 17,696 estimated tokens. Reverse and
    forward `:seon.ns/requires` connections bring 25 other namespace cards into
    the walk, including test namespaces. That remains filed for the budget wave
@@ -87,6 +97,36 @@ The separate namespace-attribution design gap remains filed at
 `my.agents.<id>` rather than the assigned namespace. It blocks owner-agent
 workflow attribution, not this nursery MVP's custody-based public walk.
 
+## Why the lint refusal did not produce another turn
+
+This is case **(b)**, not a one-turn harness budget.
+
+- The final prompt contains `:seon.config.run/max-episode-runs 100`. The
+  harness's `:stopped-after-first-turn` result is an observation made only when
+  one run is closed and `work/unanswered-triggers` is empty
+  (`tmp/context-mvp-drive.clj:271-288`); it is not a turn cap.
+- Static analysis replaces rejected source with a quoted flat
+  `:seon.cluster.loop/lint-rejected` value (`loop.cljc:93-118`). That ordinary
+  value is committed as the eval receipt's `result-edn`; it is not the separate
+  database-terminal-transaction refusal path.
+- A message is answered as soon as a run-opening transaction names it in
+  `:seon.db/trigger` (`work.cljc:554-583`). After every pass, the agent offers a
+  self-wake only when `more-agent-work?` can derive another situation
+  (`agent.clj:218-226`; `work.cljc:480-531`). Once all planned forms have
+  terminal receipts, the run closes. Because the original trigger is already
+  answered and the refused toolkit form created no self-message, there is no
+  unanswered trigger and therefore no next turn.
+
+The exact final run was `4c6c0788-99c8-4a2a-a862-1e1c33408cc7`. Receipt 0
+settled successfully with result
+`"my.agents.context-mvp/get-message-schemas"`. Receipt 1 settled the flat lint
+error in `result-edn`, with finding `my.message/send is called with 4 args but
+expects 2 or 3`; neither receipt carried `:seon.cluster.eval/error`. The run had
+one closed turn and zero unanswered triggers. A refusal is visible in a later
+turn when a new trigger causes one; the current design does not manufacture a
+retry trigger. Whether lint refusal should itself create work is therefore a
+run/trigger design question, not a harness repair, and no re-wake was added.
+
 ## Measurements
 
 All human-visible sizes use `seon.ai.tokens/estimate`; UTF-8 bytes are retained
@@ -103,6 +143,8 @@ only to identify the exact captured string.
 | no-thinking Ollama reply | 590 | 2,362 | visible but unreadable multi-form program |
 | DeepSeek first-turn prompt | 2,129 | 8,538 | exact whole nursery walk sent to the paid provider |
 | DeepSeek reply | 246 | 984 | two parsed forms; both rejected by static analysis |
+| final DeepSeek first-turn prompt | 2,193 | 8,797 | whole walk including the single durable-definition example |
+| final DeepSeek reply | 300 | 1,200 | contracted defn installed; toolkit form lint-refused for four-argument call |
 
 ### Exit-measure result
 
@@ -113,7 +155,8 @@ reported but does not pass.
 | Arm | Contracted defn | Toolkit message datom | Later-walk answer | Multi-turn | Result |
 |---|---|---|---|---|---|
 | Ollama, thinking disabled | no forms froze | none | none | 1 closed turn | incorrect: `no_code`, `no_toolkit_call` |
-| DeepSeek | no; qualified `defn` lint refusal | none | opening card was read, but no settled answer | 1 closed turn | incorrect: `uncontracted_code`, `no_toolkit_call` |
+| DeepSeek, before example | no; qualified `defn` lint refusal | none | opening card was read, but no settled answer | 1 closed turn | incorrect: `uncontracted_code`, `no_toolkit_call` |
+| DeepSeek, final example read | yes; installed and called by the second form | none; call lint-refused before eval | opening card was read, but no later-walk answer | 1 closed turn | incorrect: `no_toolkit_call` |
 
 The qualifying free probe against the same Ollama compatible endpoint returned:
 
@@ -155,9 +198,14 @@ the expected total for 25 reached namespace cards.
   tokens and the full truthful context. It was one deliberate paid attempt,
   received two lint-rejected receipts, and stopped after its first turn. No
   retry or prompt coaching was performed.
+- The final DeepSeek arm was one additional deliberate paid attempt with the
+  same task and provider configuration. The only prompt change was the seeded
+  owner-editable example. Its first receipt installed the contracted function;
+  its second receipt recorded the four-argument lint refusal. No harness turn
+  budget or runtime re-wake was changed, and no retry or coaching was added.
 - The repeated verbatim-capture groups below are chronological: birth
   projections, ordinary Ollama failure, no-thinking Ollama attempt, then the
-  DeepSeek attempt.
+  two DeepSeek attempts.
 
 ## Verbatim captured projections
 
@@ -1316,4 +1364,196 @@ back-reference to 4404
 ;; Now create the vector with self-message and complete value
 [(my.message/send "context-mvp" (str "The schemas used by my.message are: " (my.message/schema-names)))
  (my.run/complete "I have defined my.message/schema-names and sent myself a message asking what schemas are used.")]
+```
+
+## Verbatim captured projections
+
+### REAL AGENT EVAL (seon.render/walk) RESULT
+
+```clojure
+;; (seon.render/walk {:root [:seon.cluster.agent/id "context-mvp"], :depth 2}) => root=[:seon.cluster.agent/id "context-mvp"] basis=536870926 depth=2
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 1 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 2 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 3 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 4 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 1] depth=2 provenance=seon.cluster.instruction/instruction-ai
+This is a live Clojure REPL. Everything above is the output of `(seon.render/walk)` — run it yourself with `:depth`/`:root` to see more. Your reply is read as forms and evaluated in your namespace. A `defn` with `:malli/schema` becomes permanent; anything else is scratch. Talk to other agents with `(my.message/send! …)`. Prose lines are kept as `;;` comments.
+
+```clojure
+
+;; unqualified name — it lands in YOUR namespace
+;; the :malli/schema attr-map is what makes it permanent; without it this is scratch
+(defn greet
+  "Say hello."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [name]
+  (str "Hello, " name))
+
+```
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 2] depth=2 provenance=seon.render.ns/render-ai
+(ns my.message (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; schema :my.message/about = [:string {:min 1}]
+; schema :my.message/content = [:string {:min 1}]
+; schema :my.message/declination = [:map {:closed true} [:my.message/to :my.message/to] [:my.message/about :my.message/about] [:my.message/reason :my.message/reason]]
+; schema :my.message/message = [:map {:closed true} [:my.message/to :my.message/to] [:my.message/content :my.message/content] [:my.message/about {:optional true} :my.message/about]]
+; schema :my.message/reason = [:string {:min 1}]
+; schema :my.message/to = [:string {:min 1}]
+; schema :my.message/value = [:or :my.message/message :my.message/declination [:vector {:min 1} [:or :my.message/message :my.message/declination]]]
+
+; referenced schemas
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1}])
+; (register! :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+; fn my.message/decline — [:=> [:cat :my.message/to :my.message/about :my.message/reason] [:or :my.message/declination :seon.error/value]] — "Decline the assignment about `about`, giving `to` the reason."
+; fn my.message/send — [:function [:=> [:cat :my.message/to :my.message/content] [:or :my.message/message :seon.error/value]] [:=> [:cat :my.message/to :my.message/content :my.message/about] [:or :my.message/message :seon.error/value]]] — "Address `content` to `to`, optionally naming what it concerns."
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 3] depth=2 provenance=seon.render.ns/render-ai
+(ns my.run (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; schema :my.run/completed = [:map {:closed true} [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+; schema :my.run/disposition = [:enum :wait :completed]
+; schema :my.run/note = [:string {:min 1}]
+; schema :my.run/result = [:string {:min 1}]
+; schema :my.run
+```
+
+### TURN/ATTEMPT 1 CONTEXT
+
+```clojure
+;; (seon.render/walk {:root [:seon.cluster.agent/id "context-mvp"], :depth 2}) => root=[:seon.cluster.agent/id "context-mvp"] basis=536870929 depth=2
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 1 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 2 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 3 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 4 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided
+elided connections at the requested distance cap
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 1] depth=2 provenance=seon.cluster.instruction/instruction-ai
+This is a live Clojure REPL. Everything above is the output of `(seon.render/walk)` — run it yourself with `:depth`/`:root` to see more. Your reply is read as forms and evaluated in your namespace. A `defn` with `:malli/schema` becomes permanent; anything else is scratch. Talk to other agents with `(my.message/send! …)`. Prose lines are kept as `;;` comments.
+
+```clojure
+
+;; unqualified name — it lands in YOUR namespace
+;; the :malli/schema attr-map is what makes it permanent; without it this is scratch
+(defn greet
+  "Say hello."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [name]
+  (str "Hello, " name))
+
+```
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 2] depth=2 provenance=seon.render.ns/render-ai
+(ns my.message (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; schema :my.message/about = [:string {:min 1}]
+; schema :my.message/content = [:string {:min 1}]
+; schema :my.message/declination = [:map {:closed true} [:my.message/to :my.message/to] [:my.message/about :my.message/about] [:my.message/reason :my.message/reason]]
+; schema :my.message/message = [:map {:closed true} [:my.message/to :my.message/to] [:my.message/content :my.message/content] [:my.message/about {:optional true} :my.message/about]]
+; schema :my.message/reason = [:string {:min 1}]
+; schema :my.message/to = [:string {:min 1}]
+; schema :my.message/value = [:or :my.message/message :my.message/declination [:vector {:min 1} [:or :my.message/message :my.message/declination]]]
+
+; referenced schemas
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1}])
+; (register! :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+; fn my.message/decline — [:=> [:cat :my.message/to :my.message/about :my.message/reason] [:or :my.message/declination :seon.error/value]] — "Decline the assignment about `about`, giving `to` the reason."
+; fn my.message/send — [:function [:=> [:cat :my.message/to :my.message/content] [:or :my.message/message :seon.error/value]] [:=> [:cat :my.message/to :my.message/content :my.message/about] [:or :my.message/message :seon.error/value]]] — "Address `content` to `to`, optionally naming what it concerns."
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 3] depth=2 provenance=seon.render.ns/render-ai
+(ns my.run (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; schema :my.run/completed = [:map {:closed true} [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+; schema :my.run/disposition = [:enum :wait :completed]
+; schema :my.run/note = [:string {:min 1}]
+; schema :my.run/result = [:string {:min 1}]
+; schema :my.run/value = [:or :my.run/wait :my.run/completed]
+; schema :my.run/wait = [:map {:closed true} [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note]]
+
+; referenced schemas
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1}])
+; (register! :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+; fn my.run/complete — [:=> [:cat :my.run/result] [:or :my.run/completed :seon.error/value]] — "Finish this run with the reply the agent wants delivered."
+; fn my.run/wait — [:=> [:cat :my.run/note] [:or :my.run/wait :seon.error/value]] — "End this run with no reply, leaving a note saying what you await."
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0] depth=2 provenance=seon.render.block/data-prose
+{:seon.config.ai/api-key-variable "DEEPSEEK_API_KEY", :seon.config.eval/time-limit-ms 30000, :seon.config.eval.result/max-collection 64, :seon.config/cluster "context-mvp-138f0566", :seon.config.render/coalesce-ms 16, :seon.config.error/escalate-to "root", :seon.config.ai/model "deepseek-chat", :seon.config.ai/timeout-ms 300000, :seon.config.eval.result/max-nodes 4096, :seon.config.ai.retry/base-delay-ms 500, :seon.config.run/max-episode-runs 100, :seon.config.ai.retry/jitter-fraction 0.25, :seon.config/on-core-error :panic, :seon.config.ai/max-tokens 8192, :seon.config/applied-manifest-digest "dea361d76ae4b6e83414c2b7e5c7d85a977ac2c5dd041da3f016e55ae2700d24", :seon.config.message/max-chain 16, :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions", :seon.config.eval.result/max-string 4096, :db/id 4404, :seon.config.ai.retry/multiplier 2.0, :seon.config.ai.retry/maximum-total-delay-ms 3000, :seon.config.eval.result/max-depth 12, :seon.config.flow.compute/concurrency 18, :seon.config.error/recurrence-limit 3, :seon.config.flow.compute/queue-depth 10, :seon.config.ai.retry/maximum-delay-ms 4000, :seon.config.ai.retry/maximum-retries 2}
+;; path=[:seon.render.walk/neighbours 0] depth=1 provenance=seon.render.block/data-prose
+{:seon.cluster/instructions [{:db/id 747}], :seon.cluster/name "context-mvp-138f0566", :db/id 4406, :seon.cluster/toolkit [{:db/id 748} {:db/id 751}], :seon.cluster/config {:db/id 4404}}
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 4] depth=2 provenance=seon.render.agent/agent-ai
+Agent root is idle.
+;; path=[:seon.render.walk/neighbours 3 :seon.render.walk/neighbours 0] depth=2 provenance=:seon.render.walk/unknown
+back-reference to 4408
+;; path=[:seon.render.walk/neighbours 1] depth=1 provenance=seon.render.ns/render-ai
+(ns my.agents/context-mvp)
+
+;; no definitions yet; owned by agent context-mvp.
+;; path=[:seon.render.walk/neighbours 3] depth=1 provenance=seon.cluster.message/render-ai
+Agent root said to context-mvp: Define and call a permanent contracted function that returns the names of the schemas used by my.message, then return one vector containing a self-message made with my.message/send asking what those schemas are and a my.run/complete value; when that message starts your next turn, inspect your fresh walk and answer it.
+;; path=[] depth=0 provenance=seon.render.agent/agent-ai
+Agent context-mvp is running now.
+;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 5] depth=2 provenance=:seon.render.walk/unknown
+back-reference to 4410
+;; path=[:seon.render.walk/neighbours 2] depth=1 provenance=seon.cluster.run/render-ai
+Run 4c6c0788-99c8-4a2a-a862-1e1c33408cc7, opened #inst "2026-07-31T21:15:45.249-00:00". It is running now, held by 17212-1785532526371.
+;; path=[:seon.render.walk/neighbours 2 :seon.render.walk/neighbours 0] depth=2 provenance=:seon.render.walk/unknown
+back-reference to 4410
+;; path=[:seon.render.walk/neighbours 3 :seon.render.walk/neighbours 1] depth=2 provenance=:seon.render.walk/unknown
+back-reference to 4410
+;; path=[:seon.render.walk/neighbours 4] depth=1 provenance=seon.render.transcript/render-ai
+;; transcript/entry :message "2f20d72f-a265-4331-b325-40575d183915" :full
+;; at #inst "2026-07-31T21:15:45.169-00:00"
+;; Agent root sent this to you.
+(my.message/send "context-mvp" "Define and call a permanent contracted function that returns the names of the schemas used by my.message, then return one vector containing a self-message made with my.message/send asking what those schemas are and a my.run/complete value; when that message starts your next turn, inspect your fresh walk and answer it.")
+;; REPL state namespace=my.agents/context-mvp basis=536870929 time=#inst "2026-07-31T21:15:45.252-00:00"
+```
+
+### TURN/ATTEMPT 1 MODEL REPLY
+
+```clojure
+;; Evaluating the task: I need to define a permanent contracted function that returns the names of schemas used by my.message, call it, then return a vector with a self-message asking about those schemas and a my.run/complete value.
+
+;; First, let me inspect what schemas are in my.message. From the walk output, I can see these schemas:
+;; - :my.message/about
+;; - :my.message/content
+;; - :my.message/declination
+;; - :my.message/message
+;; - :my.message/reason
+;; - :my.message/to
+;; - :my.message/value
+
+;; Let me define a permanent function that returns these schema names:
+
+(defn get-message-schemas
+  "Returns the names of schemas used by my.message."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
+  []
+  [:my.message/about
+   :my.message/content
+   :my.message/declination
+   :my.message/message
+   :my.message/reason
+   :my.message/to
+   :my.message/value])
+
+;; Now let me call it to verify it works, then use the result:
+
+(let [schema-names (get-message-schemas)
+      self-msg (my.message/send "context-mvp" (str "What are the schemas used by my.message? " schema-names) :about "schemas")
+      completion (my.run/complete (str "Schema names: " schema-names))]
+  [self-msg completion])
 ```
