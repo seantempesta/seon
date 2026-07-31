@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: correctness
+severity: friction
 tags: [issue, flow, lifecycle, architecture]
 ---
 

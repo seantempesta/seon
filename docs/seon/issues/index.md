@@ -16,15 +16,14 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (3)
+## Blocker (2)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Context instruction refs have no schema or config owner](context-instruction-refs-have-no-schema-or-config-owner.md) | blocker | context/render W1 owner gate |
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (5)
+## Friction (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -33,10 +32,12 @@ See `README.md` for the convention.
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
 | [Stop the render walk following non-ref long attributes](render-walk-reverse-refs-matches-non-ref-longs.md) | friction | context/render wave (W1) |
+| [Give the work launcher's control read SPI priority or rebuild it as a var-process](work-launcher-control-alts-lacks-priority.md) | friction | flow-protocol wave |
 
-## Cleanup (2)
+## Cleanup (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Unify the nested-data walk shared by admission and rendering](value-admission-render-walk-overlap.md) | cleanup | general |
+| [Remove or implement monitor-graph's throwing command proc](monitor-graph-command-proc-throws.md) | cleanup | flow-protocol wave |
