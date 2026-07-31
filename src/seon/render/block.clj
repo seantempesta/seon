@@ -897,7 +897,11 @@
                 (keys unit))]
       (assoc unit :seon.render/value
              (apply dissoc unit
-                    :seon.db/db :seon.render/distance
+                    :seon.db/db
+                    :seon.render/distance
+                    :seon.render/namespace
+                    :seon.render/would-fall-to-floor?
+                    :seon.sci.admit/caps
                     (concat (render/kinds unit) omitted-render-keys))))))
 
 (defn data-panel

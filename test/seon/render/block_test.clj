@@ -573,6 +573,16 @@
   (testing "it panels the unit itself when no value key is present"
     (is (hiccup/hiccup? (block/data-panel {:seon.render.block/name :x
                                            :seon.sci.admit/caps caps}))))
+  (testing "router and admission request data is never presented as domain data"
+    (let [html (hiccup/->string
+                (block/data-panel
+                 {:seon.render.block/name :x
+                  :seon.render/would-fall-to-floor? true
+                  :seon.render/namespace 'my.viewer
+                  :seon.sci.admit/caps caps}))]
+      (is (not (str/includes? html "would-fall-to-floor")))
+      (is (not (str/includes? html "max-collection")))
+      (is (not (str/includes? html "my.viewer")))))
   (testing "nil and absent render values panel the same unit"
     (let [unit {:seon.render.block/name :x :seon.sci.admit/caps caps}]
       (is (= (block/data-panel unit)

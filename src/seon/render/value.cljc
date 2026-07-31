@@ -15,11 +15,11 @@
   identities; presentation never recursively walks an unadmitted tail."
   (:require [clojure.string :as str]
             [seon.ai.tokens :as tokens]
-            [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]
+            #?(:clj [seon.schema :as schema])
+            #?(:clj [seon.schema.edn :as schema.edn])
             [seon.sci.admit :as admit]))
 
-(schema.edn/load! {})
+#?(:clj (schema.edn/load! {}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Stable addresses
@@ -39,9 +39,12 @@
         address [(:seon.cluster.agent/id unit)
                  root-address
                  path]
-        digest (schema/sha-256
-                [(.getBytes ^String (pr-str address) "UTF-8")])]
-    (str "seon-value-" (subs digest 0 24))))
+        digest #?(:clj
+                  (schema/sha-256
+                   [(.getBytes ^String (pr-str address) "UTF-8")])
+                  :cljs (str (hash address)))]
+    (str "seon-value-" #?(:clj (subs digest 0 24)
+                           :cljs digest))))
 
 (defn- encoded
   [value]
