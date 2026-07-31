@@ -1403,6 +1403,16 @@ may reintroduce a shadow build into the dev feedback path.
   The AI projection is unaffected — agents always see everything.
   This does not change floor totality: the floor still renders
   anything when asked; only its default page visibility changes.
+  ADDENDUM (owner, same conversation): the floor's implementation
+  TAKES THE BEST PARTS of the previous raw-data HTML renderers (the
+  quarried structural value renderer and the old /data drill) merged
+  onto the one admission-codec skeleton; and THE DEBUG VIEW COMES
+  BACK TO LIFE, PER AGENT — the show-everything surface is each
+  agent's debug view (the walk from that agent's entity rendered
+  through the floor, drillable), always available alongside the
+  curated page. This realizes the earlier facts-link ruling ("an
+  agent row's facts link opens the /data drill rooted at THAT
+  AGENT'S ENTITY").
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
