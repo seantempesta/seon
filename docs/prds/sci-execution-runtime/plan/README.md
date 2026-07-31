@@ -1464,6 +1464,17 @@ may reintroduce a shadow build into the dev feedback path.
   never implement a flow mechanism from remembered semantics; the
   2026-07-31 control-protocol grounding (two stale-docstring
   corrections found by probe) is the recurring proof of why.
+  **Ruling 2026-07-31 #11 (owner): SKILLS ARE THE DELIVERY VEHICLE,
+  and confused agents are the update signal.** The important parts of
+  every settled design go INTO the skills, lanes are told to load
+  them, and the skills MUST be kept current and correct (the
+  blast-radius law's standing bar). The operational loop: when an
+  agent shows confusion, STOP it, fix the SKILL (with the
+  author-then-independently-verify discipline), then RESUME the agent
+  telling it to reread the skill or diff it against what it believed.
+  Learn from confused agents — their confusion locates the stale or
+  missing skill line; never fix only the one agent and leave the
+  skill wrong for the next hundred loads.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the

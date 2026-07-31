@@ -12,10 +12,11 @@ every unit is a block, and nothing renders outside it. Grounded in the seven
 2026-07-31 research reports (`research/context-walk-synthesis`,
 `render-current-state`, `render-invalidation-caching`,
 `agent-entity-graph-audit`, `agent-startup-audit`,
-`context-render-retirement`, `render-scheduling-design`) and the four
-"Ruling 2026-07-31" batches in `plan/README.md`. Status: DRAFT for
-falsification — adversarial REPL lanes run against this before sealing
-(ruling #4(5)).
+`context-render-retirement`, `render-scheduling-design`) and the ten
+"Ruling 2026-07-31" batches in `plan/README.md`. Status: SEALED — the
+adversarial falsification lanes ran (ruling #4(5)), both verdicts are
+folded in, and implementation waves are dispatched against this
+contract. Later owner rulings are folded in as marked revisions.
 
 ## 1. Ruled invariants this spec implements
 
@@ -24,7 +25,8 @@ falsification — adversarial REPL lanes run against this before sealing
    keys → same-schema fn in a governing namespace (viewer's, then owner's)
    → schema-attached default → structural floor. Slot redirect retired.
 3. Invalidation = Datahike dependency plans + per-attribute revision
-   counters; each render self-checks in O(deps). Never `d/entity`, never
+   commit-ids (compared by `not=`, §3) plus the conservative and code
+   revisions; each render self-checks in O(deps). Never `d/entity`, never
    wildcard pull, on any render path.
 4. Ordering = last-change transaction basis, per render, over the render's
    own read set. No pins, no bands, no hysteresis in v1; page and context
@@ -55,7 +57,10 @@ falsification — adversarial REPL lanes run against this before sealing
   [:seon.cluster.instruction/text :seon.cluster.instruction/text]]
 
  ;; cluster-owned authoritative set (on the config singleton):
- :seon.config/instructions [:set :seon.db/ref]
+ ;; [superseded by §2.2's cluster entity: the authoritative shared set
+ ;; is :seon.cluster/instructions — kept here struck-through for the
+ ;; revision trail, never to be installed]
+ ;; :seon.config/instructions [:set :seon.db/ref]
  ;; per-agent ADDITIVE set, empty by default:
  :seon.cluster.agent/instructions [:set :seon.db/ref]}
 ```
