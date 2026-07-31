@@ -258,6 +258,10 @@
 
 (defn- start-own-cluster!
   []
+  ;; A dedicated process root has no shared ancestor yet. Publish the exact
+  ;; committed source tree into its own `current-src` before the scratch branch
+  ;; forks; this is the same explicit operator boundary as `bin/seon init`.
+  (cluster/refresh-source! process-root)
   (try
     (with-redefs [config/defaults manifest]
       (cluster/start! {:seon.boot/cluster-name cluster-name
