@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, architecture]
 ---
@@ -46,3 +46,16 @@ and marked in the transcript's output.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## Resolution
+
+Resolved by `618175e83`. The transcript's independent message/receipt prose,
+preview clipping, result summaries, and interrupted-state wording were
+deleted. Message and receipt sentences now come from their schema-family
+projection selected by `seon.render.walk/projection` and invoked through
+`seon.render/render`; supplemental data and stored result values enter the
+one admission-backed data floor with the caller's caps. The recurring
+`receipt-content-enters-the-shared-capped-floor` proof exceeds both
+`max-string` and `max-collection`, asserts both in-band markers, and proves a
+late map entry is absent. `bin/test seon.render.transcript-test` passed on
+2026-07-31.

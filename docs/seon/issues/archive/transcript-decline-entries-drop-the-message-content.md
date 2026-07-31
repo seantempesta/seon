@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, testing]
 ---
@@ -50,3 +50,15 @@ reason-bearing message with no `from` is not attributed to this agent.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## Resolution
+
+Resolved by `618175e83`. The transcript now asks the walk's family resolver
+for the message projection and invokes it through `seon.render/render`, then
+renders distinct `:my.message/reason` metadata through the shared floor.
+`populated-history-restores-the-repl-fidelity-checklist` proves that decline
+content and reason both survive and that a reason-bearing message with no
+sender remains attributed to outside the cluster. The seeded fixture and the
+generative history use different content and reason strings; the property
+requires both for every visible generated decline. `bin/test
+seon.render.transcript-test` passed on 2026-07-31.
