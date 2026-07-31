@@ -1256,6 +1256,21 @@ may reintroduce a shadow build into the dev feedback path.
   LOWER priority than correctness elsewhere. Schema-home decision
   deferred to the config-aero mining's return. Helper re-armed
   live 2026-07-29 (armer-step direct invocation, the boot idiom).
+  **Ruling 2026-07-31 (owner): BLOCKS ARE THE ONE RENDER UNIT — NO
+  STATIC SCAFFOLD PATH.** Supersedes the 2026-07-29 late-morning
+  "blocks survive only as static scaffold" and (13)(b)'s "blocks stay
+  FOR NOW as scaffold"; (13)(c) THE DREAM is promoted from "sanctioned
+  if buildable" to the ruled direction. "Block" names the one render
+  unit in BOTH projections — a function's `:seon.render/ai` output
+  into agent context and its `:seon.render/html` output to the page
+  are two projections of the same block. Nothing renders outside this
+  system: the system message, the user's global instruction files
+  (AGENTS.md/CLAUDE.md), and REPL instructions become schema'd facts
+  on the agent's entity, reached by the same recursive entity walk and
+  rendered by ordinary (overridable) renderers. "Static" is not a
+  mechanism — it is a block whose facts rarely change, so it sorts
+  into the stable prefix naturally; pin/priority overrides are
+  ordering facts on the entity, never a second assembly path.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
