@@ -57,7 +57,13 @@
     (is (not= jane-id
               (value/node-id (assoc (unit nil jane-path)
                                     :seon.cluster.agent/id "other")
-                             jane-path)))))
+                             jane-path)))
+    (testing "non-debug entity floors do not duplicate DOM ids"
+      (let [anonymous (dissoc (unit nil jane-path)
+                              :seon.cluster.agent/id
+                              :seon.render.value/root)]
+        (is (not= (value/node-id (assoc anonymous :db/id 1) jane-path)
+                  (value/node-id (assoc anonymous :db/id 2) jane-path)))))))
 
 (deftest five-megabyte-string-is-capped-with-an-inspect-handle
   (let [raw (apply str (repeat (* 5 1024 1024) "x"))

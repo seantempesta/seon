@@ -30,8 +30,14 @@
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
                   :string]}
   [unit path]
-  (let [address [(:seon.cluster.agent/id unit)
-                 (:seon.render.value/root unit)
+  (let [root-address
+        (or (:seon.render.value/root unit)
+            (when-some [eid (:db/id unit)] [:db/id eid])
+            (when-some [block-name (:seon.render.block/name unit)]
+              [:seon.render.block/name block-name])
+            :seon.render.value/anonymous)
+        address [(:seon.cluster.agent/id unit)
+                 root-address
                  path]
         digest (schema/sha-256
                 [(.getBytes ^String (pr-str address) "UTF-8")])]
