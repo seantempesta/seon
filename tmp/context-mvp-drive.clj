@@ -40,6 +40,9 @@
 (def ^:private evidence-path
   (System/getenv "CONTEXT_MVP_EVIDENCE_PATH"))
 
+(def ^:private ollama-reasoning-effort
+  (System/getenv "CONTEXT_MVP_OLLAMA_REASONING_EFFORT"))
+
 (def ^:private exact-blocks (atom []))
 
 (def ^:private cluster-name
@@ -225,7 +228,20 @@
   (fn [request]
     (let [attempt (inc (count @captures))
           context (:seon.ai/prompt request)
-          completion (complete-fn request)
+          completion
+          (if (and (= :ollama provider) (seq ollama-reasoning-effort))
+            ;; Scratch qualification only: fresh Seon's target schema does not
+            ;; yet carry the provider-specific field. The direct endpoint probe
+            ;; must prove this exact compatible projection before a drive uses
+            ;; it; no production request mechanism is added here.
+            (let [base-request-body ai/request-body]
+              (with-redefs [ai/request-body
+                            (fn [provider-request]
+                              (assoc (base-request-body provider-request)
+                                     "reasoning_effort"
+                                     ollama-reasoning-effort))]
+                (complete-fn request)))
+            (complete-fn request))
           reply (:seon.ai/text completion)]
       (swap! captures conj
              {:context-mvp-drive/attempt attempt
@@ -363,6 +379,9 @@
   []
   (stamp "BOOT dedicated scratch cluster " cluster-name
          " at " process-root " with " (name provider))
+  (when (and (= :ollama provider) (seq ollama-reasoning-effort))
+    (stamp "OLLAMA compatible reasoning_effort="
+           (pr-str ollama-reasoning-effort)))
   (let [instance (start-own-cluster!)
         connection (:seon.boot/cluster-connection instance)
         process (cluster/process-identity (:seon.boot/advertisement instance))]
