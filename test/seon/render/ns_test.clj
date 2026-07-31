@@ -38,19 +38,22 @@
          ::sut/token-budget token-budget))
 
 (defn- reader-valid?
-  [text]
-  (try
-    (with-open [reader (PushbackReader. (StringReader. text))]
-      (loop []
-        (let [form (read {:eof ::eof
-                          :read-cond :allow
-                          :features #{:clj}}
-                         reader)]
-          (when-not (= ::eof form)
-            (recur)))))
-    true
-    (catch Throwable _
-      false)))
+  ([text]
+   (reader-valid? *ns* text))
+  ([reader-ns text]
+   (try
+     (binding [*ns* reader-ns]
+       (with-open [reader (PushbackReader. (StringReader. text))]
+         (loop []
+           (let [form (read {:eof ::eof
+                             :read-cond :allow
+                             :features #{:clj}}
+                            reader)]
+             (when-not (= ::eof form)
+               (recur))))))
+     true
+     (catch Throwable _
+       false))))
 
 (defn- install-namespace!
   [connection namespace-name source schema-rows function-rows]
@@ -90,16 +93,16 @@
             html2-text (hiccup/->string (sut/render-html d2))]
         (testing "distance zero is only the namespace name"
           (is (= "seon.flow" ai0)))
-        (testing "distance one is the authoritative stored source"
+        (testing "distance one composes every authoritative source row"
           (is (= `sut/render-ai routed-ai1)
               "the namespace entity map owns the family default")
           (is (str/starts-with? ai1 source))
           (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote source))
                                   ai1))))
-          (is (not (str/includes? ai1 "(defn current-work-launcher"))
-              "GI-1 does not duplicate per-member blocks beside real source")
-          (is (not (str/includes? ai1 "@installed-work-launcher")))
-          (is (reader-valid? ai1)))
+          (is (str/includes? ai1 "(defn current-work-launcher"))
+          (is (str/includes? ai1 "@installed-work-launcher")
+              "the full d1 tier includes private member source too")
+          (is (reader-valid? (the-ns 'seon.flow) ai1)))
         (testing "distance two is the public compact card"
           (is (str/includes? ai2 "[clojure.core.async :as async]"))
           (is (not (str/includes? ai2 "#:db"))
@@ -117,7 +120,8 @@
           (is (str/includes?
                html1-text
                "Production-shaped core.async.flow launchers"))
-          (is (not (str/includes? html1-text "seon-namespace-definitions")))
+          (is (str/includes? html1-text "seon-namespace-definitions"))
+          (is (str/includes? html1-text "seon.flow/current-work-launcher"))
           (is (str/includes? html2-text "seon-namespace-own-schemas"))
           (is (str/includes? html2-text "seon.flow/current-work-launcher"))
           (is (str/includes?
@@ -127,6 +131,30 @@
                     "\"")))
           (is (not (str/includes? html2-text "fault-graph-definition")))
           (is (not (str/includes? html2-text "@installed-work-launcher"))))))))
+
+(deftest distance-one-never-drops-a-member-when-source-is-absent
+  (support/with-database
+    (fn [connection]
+      (let [namespace-name 'fixture.total
+            exact-source "(defn exact [value] (str value))"
+            fallback-row
+            (dissoc
+             (function-row
+              namespace-name 'fallback nil
+              {:seon.fn/spec "[:=> [:cat :string] :string]"
+               :seon.fn/doc "Return the supplied value."})
+             :seon.fn/source)]
+        (install-namespace!
+         connection namespace-name "(ns fixture.total)" []
+         [(function-row namespace-name 'exact exact-source {}) fallback-row])
+        (let [unit (namespace-unit @connection namespace-name 1 100000)
+              ai (sut/render-ai unit)
+              html (hiccup/->string (sut/render-html unit))]
+          (is (str/includes? ai exact-source))
+          (is (str/includes? ai "(defn fallback"))
+          (is (str/includes? html exact-source))
+          (is (str/includes? html "fixture.total/fallback"))
+          (is (reader-valid? ai)))))))
 
 (deftest source-less-agent-namespace-routes-to-the-full-stub
   (support/with-database
@@ -195,15 +223,15 @@
             (binding [mr/*registry* {:fixture.external/a :boolean
                                      :fixture.external/b :int}]
               (sut/render-ai d2))]
-        (testing "d1 keeps source authoritative and traverses own schemas"
+        (testing "d1 composes namespace, member, and schema source"
           (is (str/starts-with? ai1 closure-source))
-          (is (not (str/includes? ai1 "(defn uses-own")))
+          (is (str/includes? ai1 "(defn uses-own"))
           (is (str/includes? ai1
                              "(register! :fixture.external/a [:or :string :fixture.external/b])"))
           (is (str/includes? ai1
                              "(register! :fixture.external/b [:maybe :fixture.external/a])"))
-          (is (not (str/includes? ai1
-                                  "(register! :fixture.closure/own"))))
+          (is (str/includes? ai1
+                             "(register! :fixture.closure/own")))
         (testing "d2 renders own records, one closure, and raw contracts"
           (is (str/includes?
                ai2

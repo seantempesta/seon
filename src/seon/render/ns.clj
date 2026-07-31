@@ -283,11 +283,6 @@
          (cond-> ['ns namespace-name]
            (seq requires) (conj (apply list :require requires)))))
 
-(defn- bare-source?
-  [namespace-name source]
-  (or (str/blank? source)
-      (= (str/trim source) (str "(ns " namespace-name ")"))))
-
 (defn- render-data
   [unit]
   (let [row (namespace-row unit)
@@ -383,18 +378,16 @@
 (defn- full-ai-text
   [{::keys [db schema-row-cache namespace-name namespace-source requires
             functions own-schemas owner-agent-id]}]
-  (let [stub? (bare-source? namespace-name namespace-source)
-        source (if (str/blank? namespace-source)
+  (let [source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
         member-parts
-        (when stub?
-          (concat (map function-source functions)
-                  (map (fn [row]
-                         (schema-registration-line
-                          (:seon.schema/key row)
-                          (schema-definition row)))
-                       own-schemas)))
+        (concat (map function-source functions)
+                (map (fn [row]
+                       (schema-registration-line
+                        (:seon.schema/key row)
+                        (schema-definition row)))
+                     own-schemas))
         schema-section
         (referenced-schema-ai-section
          db schema-row-cache functions own-schemas false)]
@@ -403,7 +396,7 @@
      (cond-> [source]
        (seq member-parts) (into member-parts)
        schema-section (conj schema-section)
-       (and stub? (empty? functions) (empty? own-schemas))
+       (and (empty? functions) (empty? own-schemas))
        (conj (empty-comment owner-agent-id))))))
 
 (defn- compact-ai-text
@@ -507,8 +500,7 @@
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source requires
             functions own-schemas owner-agent-id]}]
-  (let [stub? (bare-source? namespace-name namespace-source)
-        source (if (str/blank? namespace-source)
+  (let [source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
         schema-section
@@ -518,14 +510,14 @@
       [:h2 [:code (str namespace-name)]]
       [:pre {:class "seon-namespace-source"} [:code source]]]
      (cond-> []
-       (and stub? (seq functions))
+       (seq functions)
        (conj (into [:dl {:class "seon-namespace-definitions"}]
                    (mapcat full-function-html functions)))
-       (and stub? (seq own-schemas))
+       (seq own-schemas)
        (conj [:pre {:class "seon-namespace-own-schemas"}
               [:code (str/join "\n" (map compact-schema-line own-schemas))]])
        schema-section (conj schema-section)
-       (and stub? (empty? functions) (empty? own-schemas))
+       (and (empty? functions) (empty? own-schemas))
        (conj [:p {:class "seon-namespace-empty"}
               (str "No definitions yet"
                    (when owner-agent-id
