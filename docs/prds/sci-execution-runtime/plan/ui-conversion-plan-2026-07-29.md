@@ -22,6 +22,12 @@ This document sequences only its own slices. `plan/README.md` remains
 the one ordering authority for the program; where a ruling and this plan
 disagree, the ruling wins.
 
+[Partially superseded by the 2026-07-31 rulings: this plan's block SEED
+SETS and `:seon.render.block/band` ordering are the retired stored-membership
+contract. Membership is now the derived entity walk and order is the naive
+last-change transaction basis. The slices' page structure, morph targeting,
+grammar refusal, and route work are unaffected.]
+
 **Revised 2026-07-29 after falsification**
 ([../research/ui-plan-falsification-2026-07-29.md](../research/ui-plan-falsification-2026-07-29.md),
 `8a08a211f`). Slice 1's four plan-changing claims — the reverse-ref echo,

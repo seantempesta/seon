@@ -10,6 +10,12 @@ tags: [prd, agent, architecture]
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
 
+[Every render/context statement in the dated blocks below — "blocks survive
+only as static scaffold", "static blocks reduced to scaffold", the E/A/V
+invalidation shape, slot redirect, and banded/hysteresis ordering — is
+superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
+dated blocks stay as the record of what was believed when.]
+
 **WORKING EDGE — 2026-07-30, `current-src` publication. This block supersedes
 every dated block below it.** Repository indexing is static: the pinned
 clj-kondo analyzes the complete dependency classpath as resolution context,
