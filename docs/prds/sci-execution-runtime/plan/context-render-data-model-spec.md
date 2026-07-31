@@ -108,33 +108,55 @@ These are the ONLY exceptions to refs-only traversal; adding one requires
 naming it here. This keeps "no stored derivations" and dissolves both
 named walk-reach exceptions (requires, settlement).
 
-## 3. The block contract
+## 3. The render-unit contract (revised per falsification + rulings #7)
 
-A block instance is identified by `(root-entity, renderer-var, distance,
-projection)`. Producing it yields:
+Context is a TREE: leaf = renderable data, ref = branch; "block" is the
+informal name of a render unit in both projections, never a data type.
+THE CACHE IS PER FUNCTION CALL, not per walk: `(renderer-fn × explicit
+args) → bytes`, so the walk dumbly calls renderers and composition is
+free. Hidden walk state may never influence a render (the falsified
+viewer-leak came from the per-path visited set acting as an invisible
+argument): the per-path visited set is replaced by a per-walk rendered
+set emitting BACK-REFERENCES, which also kills the fan-in explosion
+(measured 1,112 nodes at d3 on a 12-entity clique). A cached call
+yields:
 
 ```clojure
 {:seon.render.block/bytes      bytes-or-string   ; ai text | html string
  :seon.render.block/digest     digest            ; equality suppression
- :seon.render.block/deps       #{attribute ...}  ; the dependency plan union
- :seon.render.block/revisions  {attribute rev}   ; last-seen, from db value
- :seon.render.block/basis      t}                ; max tx over the read set
+ :seon.render.block/deps       #{attribute ...}  ; the dependency plan
+ :seon.render.block/revisions  {attribute id}    ; last-seen per-attribute
+                                                 ; COMMIT IDS (UUIDs, not
+                                                 ; counters — compare not=)
+ :seon.render.block/changed-at t}                ; basis when the DIGEST
+                                                 ; last transitioned
 ```
 
-- `deps`/`revisions` come from the facade's evidence-capture pass
-  (dual-use per ruling 24: same functions, capture bound by the calling
-  pass). Concrete pull patterns are derived from the entity's schema
-  family — the wildcard-pull sites are replaced, or invalidation is a
-  no-op (scheduling F4).
-- Staleness: `∃ a ∈ deps : revisions[a] < current-revision[a]` — O(deps),
-  conservative-revision fail-closed.
-- `basis` is the ordering key. Per-render, over the render's own read set:
-  an instruction row untouched since seeding keeps its seed basis forever
-  and fronts every prompt; the REPL state line reads churning facts and
-  sinks to the tail as the natural cache boundary.
-- The production cache is cluster-global, keyed by the block identity plus
-  `basis`, digest-deduped (each output stored at most once). Process-local,
-  losable, rebuilt from facts — never a second truth.
+- `deps` capture comes from the READ FORM (`query-attribute-dependencies`,
+  3.75 µs) — never the +52% evidence-wrapping pass. Concrete pull
+  selectors derive mechanically from the entity's schema family,
+  intersected with `(:schema db)` (pulling an uninstalled attribute
+  throws); reverse expansion uses per-family ref subsets derived from the
+  schema EDN (the unbound-attribute reverse query registers `:all` AND
+  falsely matches plain longs — filed defect, W1).
+- Staleness of a cached call, three fail-closed comparisons:
+  `∃ a ∈ deps : not= revisions[a] current[a]` **∨** conservative-revision
+  moved (the ONLY signal on schema commits — omitting it was falsified)
+  **∨** the process-local CODE REVISION moved (renderer redefinition,
+  agent-published renderers, schema registration — none of which transact
+  domain attributes). `:db/txInstant` never enters `deps`; the check is
+  defined only on committed db values (`as-of`/`history`/`d/with` values
+  carry no cache context).
+- `changed-at` is the ordering key: the basis at which the cached call's
+  DIGEST last transitioned — derived by the cache at render time, never
+  stored as a fact (max-tx moves on no-op re-asserts and pulls return no
+  tx, so fact-side derivation was falsified). Display order is dumb
+  last-changed across ALL units regardless of tree position; near-equal
+  stamps cluster by branch so related units stay together (ruling #7(2)).
+- The call cache is cluster-global, digest-deduped (each output stored at
+  most once). Process-local, losable, rebuilt from facts — never a second
+  truth. Measured: the staleness sweep for 100 blocks × 1,702 deps is
+  66 µs per commit.
 
 ## 4. Renderer admissibility and execution
 
@@ -237,17 +259,21 @@ UI-unrebuilt ruling)
 Each wave: old tests pinning deleted paths die in the same commit; the
 replacing property (P1–P8) lands with the wave that makes it assertable.
 
-## 8. Open for owner
+## 8. Settled by owner (2026-07-31 batch 3) and remaining opens
 
-- Base-Var isolation: a fork isolates NEW names only — re-defining an
-  existing shared Var (`clojure.string/join`, a `my.*` fn) from one
-  agent's fork rebinds it for every fork in the JVM (probed). Needs a
-  ruling: freeze the shared base, copy-on-write per fork, or
-  accept-and-detect.
+SETTLED: base-Var redefinition = ACCEPT AND WARN (Clojure-shadowing
+style), composed with the DISTRIBUTED OWNERSHIP PROTOCOL: changing a
+symbol in a namespace you do not own means messaging its owner agent and
+receiving commit/rejection by reply; a message to an unowned namespace
+spins up and assigns an owner agent on demand (`owner-of` exists;
+on-demand creation is a new creation trigger, modeled in W1). Override
+resolution = one corpus query (functions + input/output schemas are
+facts) through the same query cache — nothing special. HTML floor = the
+data-panel/admission side, the value renderer's presentation ported into
+it (orchestrator pick, owner offered veto). Render cache = per function
+call; ordering = dumb last-changed with branch tie-clustering (§3).
 
-- W3 floor choice + whether namespace overrides resolve by `render-<kind>`
-  name convention or computed Malli-output matching (house rule favors
-  computed; costs a corpus query per resolution — measure first).
+STILL OPEN:
 - Root fleet oversight derives from live flow pings, not facts — it stays
   a first-party renderer (allowed: first-party, not agent-authored), but
   its data is process-local; decide whether ping summaries should commit
