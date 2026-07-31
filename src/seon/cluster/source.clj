@@ -45,24 +45,31 @@
   {:malli/schema [:=> [:cat :seon.source/digest-request]
                   :seon.source/snapshot]}
   [{roots :seon.source/roots}]
-  (let [directories (->> roots
-                         (map #(.getCanonicalFile (io/file %)))
-                         distinct
-                         (sort-by #(.getPath ^java.io.File %)))]
-    (doseq [^java.io.File root directories]
-      (when-not (.isDirectory root)
+  (let [declared (->> roots
+                      (map #(.getCanonicalFile (io/file %)))
+                      distinct
+                      (sort-by #(.getPath ^java.io.File %)))]
+    (doseq [^java.io.File root declared]
+      (when-not (or (.isDirectory root) (.isFile root))
         (refuse! ::root-absent
                  (str "the declared source root " (.getPath root)
-                      " is not a directory")
+                      " is neither a directory nor a file")
                  {::root (.getPath root)
                   :seon.source/roots roots})))
     (let [entries
-          (for [^java.io.File root directories
-                :let [prefix (inc (count (.getPath root)))]
-                entry (->> (file-seq root)
-                           (filter #(.isFile ^java.io.File %))
-                           (filter #(source-file? (.getName ^java.io.File %)))
-                           (sort-by #(subs (.getPath ^java.io.File %) prefix)))
+          (for [^java.io.File root declared
+                :let [directory? (.isDirectory root)
+                      prefix (inc (count (.getPath (if directory?
+                                                    root
+                                                    (.getParentFile root)))))]
+                entry (if directory?
+                        (->> (file-seq root)
+                             (filter #(.isFile ^java.io.File %))
+                             (filter #(source-file? (.getName ^java.io.File %)))
+                             (sort-by #(subs (.getPath ^java.io.File %) prefix)))
+                        ;; an explicitly declared file root is one digest
+                        ;; entry regardless of extension
+                        [root])
                 :let [file-digest
                       (schema/sha-256
                        [(Files/readAllBytes (.toPath ^java.io.File entry))])]]
