@@ -77,8 +77,8 @@
 (defn- stable-entries
   [value]
   (cond
-    (map? value) (seq value)
-    (set? value) (map (fn [entry] [entry entry]) value)
+    (map? value) (sort-by (comp pr-str first) (seq value))
+    (set? value) (map (fn [entry] [entry entry]) (sort-by pr-str value))
     (vector? value) (map-indexed vector value)
     (sequential? value) (map-indexed vector value)
     :else nil))
@@ -273,11 +273,15 @@
                 (< depth 2) (assoc :open "open"))
      [:summary {:class "seon-value-summary"} (summary raw)]
      [:dl {:class "seon-data-map"}
-      (map
-       (fn [[entry-key child]]
+      (map-indexed
+       (fn [index [entry-key child]]
          (let [drillable? (path-segment? entry-key)
-               child-path (if drillable? (conj path entry-key) path)
-               child-raw (when drillable? (raw-child raw entry-key))]
+               child-path (if drillable?
+                            (conj path entry-key)
+                            (conj path [:seon.render.value/entry index]))
+               child-raw (if drillable?
+                           (raw-child raw entry-key)
+                           child)]
            [:div {:class "seon-data-entry"}
             [:dt {:class "seon-data-key"}
              (if drillable?
@@ -312,10 +316,12 @@
               (< depth 2) (assoc :open "open"))
    [:summary {:class "seon-value-summary"} (summary raw)]
    [:ul {:class "seon-data-set"}
-    (map
-     (fn [child]
+    (map-indexed
+     (fn [index child]
        (let [drillable? (path-segment? child)
-             child-path (if drillable? (conj path child) path)]
+             child-path (if drillable?
+                          (conj path child)
+                          (conj path [:seon.render.value/entry index]))]
          [:li {:class "seon-data-entry"}
           (when drillable?
             (path-link unit child-path 0 (pr-str child) "seon-data-step"))

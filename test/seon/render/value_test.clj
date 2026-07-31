@@ -85,3 +85,23 @@
     (is (str/includes? html "#{} 2 members"))
     (is (str/includes? html "[] 2 items"))
     (is (str/includes? html "reference"))))
+
+(deftest composite-entries-have-distinct-stable-local-identities
+  (let [subject {[:first] {:value 1}
+                 [:second] {:value 2}
+                 :members #{[:a] [:b]}}
+        html (hiccup/->string (value/render-html (unit subject)))
+        ids (map second (re-seq #"id=\"(seon-value-[a-f0-9]+)\"" html))]
+    (is (= (count ids) (count (distinct ids)))
+        "non-drillable keys and set members never reuse their parent's id")))
+
+(deftest map-pages-are-independent-of-insertion-order
+  (let [left (array-map :d 4 :a 1 :c 3 :b 2)
+        right (array-map :b 2 :c 3 :a 1 :d 4)
+        page-unit (fn [subject]
+                    (assoc (unit subject)
+                           :seon.sci.admit/caps
+                           (assoc caps
+                                  :seon.config.eval.result/max-collection 2)))]
+    (is (= (hiccup/->string (value/render-html (page-unit left)))
+           (hiccup/->string (value/render-html (page-unit right)))))))
