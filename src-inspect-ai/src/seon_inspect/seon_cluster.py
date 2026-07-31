@@ -16,8 +16,6 @@ from pathlib import Path
 import re
 import socket
 import subprocess
-import threading
-import time
 from typing import Any, Callable
 import uuid
 
@@ -251,8 +249,6 @@ class ScratchClusterLease:
         socket_factory: Callable[..., Any],
         process_alive: Callable[[int, str | None], bool],
         timeout_s: float,
-        clock: Callable[[], float],
-        wait: Callable[[float], Any],
         token_factory: Callable[[], str],
     ):
         self.root = root
@@ -261,8 +257,6 @@ class ScratchClusterLease:
         self._socket_factory = socket_factory
         self._process_alive = process_alive
         self._timeout_s = timeout_s
-        self._clock = clock
-        self._wait = wait
         self._token_factory = token_factory
         self._released = False
 
@@ -275,10 +269,16 @@ class ScratchClusterLease:
 
     def _operator(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         command = [str(self.root / "bin" / "seon"), *arguments]
-        result = self._runner(
-            command, cwd=str(self.root), capture_output=True, text=True,
-            timeout=self._timeout_s,
-        )
+        try:
+            result = self._runner(
+                command, cwd=str(self.root), capture_output=True, text=True,
+                timeout=self._timeout_s,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ScratchClusterError(
+                "The private operator timeout backstop fired.",
+                command=command, cwd=str(self.root),
+                timeout_s=self._timeout_s) from error
         if result.returncode:
             raise ScratchClusterError(
                 "The private Seon operator command failed.",
@@ -310,29 +310,26 @@ class ScratchClusterLease:
         path.unlink()
 
     def _wait_ready(self) -> None:
-        deadline = self._clock() + self._timeout_s
-        last_error: BaseException | None = None
-        while self._clock() < deadline:
-            try:
-                advertisement = self._advertisement()
-                if not self._process_alive(advertisement["pid"],
-                                           advertisement["start_instant"]):
-                    self.advertisement_path.unlink(missing_ok=True)
-                    raise ScratchClusterError(
-                        "The fresh operator published a stale advertisement.",
-                        advertisement=advertisement)
-                value = self.eval_form("{:seon.cluster.harness/ready true}")
-                if value == {"seon.cluster.harness/ready": True}:
-                    return
-                last_error = ScratchClusterError(
-                    "The readiness form returned the wrong value.", value=value)
-            except (OSError, ScratchClusterError) as error:
-                last_error = error
-            self._wait(0.05)
-        raise ScratchClusterError(
-            "Timed out waiting for advertisement plus successful prepl eval; "
-            "the timeout is a backstop, not the readiness mechanism.",
-            timeout_s=self._timeout_s, cause=repr(last_error))
+        # `bin/seon start` returns only after its ready socket wins against
+        # process exit and the advertisement is published.  That completed
+        # command is the filesystem event; this check plus the prepl response
+        # proves both required readiness signals without polling.
+        try:
+            advertisement = self._advertisement()
+        except OSError as error:
+            raise ScratchClusterError(
+                "The completed start event carried no advertisement.",
+                path=str(self.advertisement_path), cause=repr(error)) from error
+        if not self._process_alive(advertisement["pid"],
+                                   advertisement["start_instant"]):
+            self.advertisement_path.unlink(missing_ok=True)
+            raise ScratchClusterError(
+                "The fresh operator published a stale advertisement.",
+                advertisement=advertisement)
+        value = self.eval_form("{:seon.cluster.harness/ready true}")
+        if value != {"seon.cluster.harness/ready": True}:
+            raise ScratchClusterError(
+                "The readiness form returned the wrong value.", value=value)
 
     def eval_form(self, form: str) -> Any:
         """Evaluate one form and return its ordinary JSON-projected value."""
@@ -376,8 +373,6 @@ def start_scratch_cluster(
     _socket_factory: Callable[..., Any] = socket.create_connection,
     _process_alive: Callable[[int, str | None], bool] = _default_process_alive,
     _timeout_s: float = 30.0,
-    _clock: Callable[[], float] = time.monotonic,
-    _wait: Callable[[float], Any] = threading.Event().wait,
     _token_factory: Callable[[], str] = lambda: uuid.uuid4().hex,
 ) -> ScratchClusterLease:
     """Create, initialize, start, and prove one isolated scratch cluster."""
@@ -394,8 +389,8 @@ def start_scratch_cluster(
     _make_runnable_root(root, repo_root)
     lease = ScratchClusterLease(
         root=root, name=name, runner=_runner, socket_factory=_socket_factory,
-        process_alive=_process_alive, timeout_s=_timeout_s, clock=_clock,
-        wait=_wait, token_factory=_token_factory)
+        process_alive=_process_alive, timeout_s=_timeout_s,
+        token_factory=_token_factory)
     start_attempted = False
     try:
         lease._recover_stale_advertisement()

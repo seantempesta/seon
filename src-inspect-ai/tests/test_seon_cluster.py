@@ -200,7 +200,6 @@ def test_stale_advertisement_is_removed_before_private_init(tmp_path):
         root=root, name=name, runner=runner,
         socket_factory=lambda *_a, **_kw: SentinelSocket(),
         process_alive=lambda pid, _instant: pid == 456, timeout_s=30,
-        clock=lambda: 0, wait=lambda _seconds: None,
         token_factory=lambda: "b" * 32,
     )
     path = lease.advertisement_path
@@ -229,7 +228,6 @@ def test_refuses_shared_root_and_live_advertisement(tmp_path):
         runner=lambda *_a, **_kw: None,
         socket_factory=lambda *_a, **_kw: SentinelSocket(),
         process_alive=lambda _pid, _instant: True, timeout_s=1,
-        clock=lambda: 0, wait=lambda _seconds: None,
         token_factory=lambda: "c" * 32,
     )
     with pytest.raises(sc.ScratchClusterError, match="live"):
