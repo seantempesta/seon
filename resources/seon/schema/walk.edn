@@ -17,6 +17,8 @@
  ; under the same rule).
  :seon.render.walk/lookup :any
  :seon.render.walk/target :int
+ :seon.render.walk/back-reference? :boolean
+ :seon.render/would-fall-to-floor? :boolean
 
  ; WHICH CONNECTION a neighbour was reached through. Named on the node
  ; so a reader never has to re-query to learn why a neighbour is there,
@@ -26,7 +28,9 @@
  :seon.render.walk/connection
  [:map {:closed true}
   [:seon.render.walk/attribute :seon.render.walk/attribute]
-  [:seon.render.walk/target :seon.render.walk/target]]
+  [:seon.render.walk/target {:optional true} :seon.render.walk/target]
+  [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
+  [:seon.error/value {:optional true} :seon.error/value]]
 
  ; ---------------------------------------------------------------------------
  ; THE RESOLUTION CHAIN (owner ruling 2026-07-28 post-midnight #3),
@@ -89,6 +93,10 @@
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/distance :seon.render/distance]
   [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
+  [:seon.render.walk/back-reference? {:optional true}
+   :seon.render.walk/back-reference?]
+  [:seon.render/would-fall-to-floor? {:optional true}
+   :seon.render/would-fall-to-floor?]
   [:seon.render/projection {:optional true} :seon.render/projection]
   [:seon.render/output {:optional true} :seon.render/output]
   [:seon.error/value {:optional true} :seon.error/value]
