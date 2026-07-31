@@ -1619,6 +1619,21 @@ may reintroduce a shadow build into the dev feedback path.
   punctuation, mid-only `.`, no `::`, no `/` — are enforced by the
   reader itself; a regex copying them would be a hand-maintained
   grammar). The corpus-existence check remains the real admission.
+  **Ruling 2026-07-31 #19 (owner): ADOPT REITIT WITH A `def` ROUTE
+  TABLE.** Reitit 0.10.1 (already vendored at the old pin) replaces
+  the hand dispatcher: routes as one edn `def` vector (data, not
+  facts — the facts shape is why reverse routing was never collected
+  before), a pure `path` fn replacing every hand-built href, misses
+  404, `/ns/{namespace}` canonical per ruling #18. Route-facts may
+  return as a second projection only if agent-authored pages ever
+  need dynamic routes. Model-override adoptions (orchestrator, from
+  agent-model-override-quarry, owner veto open): the runtime default
+  model lives on the CLUSTER entity (`:seon.cluster/model` +
+  `:seon.cluster/models` catalog — the config singleton is exactly
+  manifest-owned, enforced by reconcile); the per-agent override is
+  `:my/model`, a REF, ref-only in v1 (generation-option facts wait
+  for need); resolution moves to PER TURN inside the `:call` branch,
+  riding the filed dials-frozen-at-arm defect's fix.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
