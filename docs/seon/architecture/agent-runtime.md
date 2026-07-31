@@ -155,11 +155,16 @@ channels live in the `graph-def`; current status and metrics reach
 error channel feeds the cluster's one fault committer tagged with the agent.
 Database facts, never Flow channels, remain the durable work record.
 
-Every proc pins `:io` or `:compute` explicitly; classification is derived
+Flow is the sole global scheduling mechanism; render/context owns no local
+scheduler. Every proc carries the derived workload classification: leaves
+proven blocking-only use `:io`, units proven entirely compute use `:compute`,
+and mixed or unresolved work uses fail-closed `:mixed`. Classification derives
 per function from `:seon.workload` leaf metadata and call-graph reachability
-([[architecture]] §Scheduling). The eval seam runs on a `:compute` platform
-thread, arms the one `:interrupt-fn`, and holds its admitted permit until
-settlement. The graph reduces over the frozen form plan: the accumulator is
+([[architecture]] §Scheduling). Render, walk, and delivery procs follow the
+same rule, and one flooding agent cannot monopolize the bounded compute
+executor. The eval seam runs on a `:compute` platform thread, arms the one
+`:interrupt-fn`, and holds its admitted permit until settlement. The graph
+reduces over the frozen form plan: the accumulator is
 the current basis, initialized from the plan transaction report's `:db-after`;
 after each form, that form's transaction report supplies the next basis
 through `:db-after`.
@@ -215,10 +220,13 @@ ambiguous paid request.
 
 ## SCI interruption
 
-Every SCI invocation—agent eval, authored render, plan function, or schema
-predicate—installs the one zero-argument `:interrupt-fn`. SCI calls it at every
-`fn` body entrance. The invocation's `time-limit` is the only execution limit;
-when it expires, `interrupt!` stops the eval uncatchably.
+The SCI invocation boundary is the only path by which agent-authored code
+executes. Agent evals, plan functions, schema predicates, AI renderers, and HTML
+renderers all enter through it; no direct Var invocation or
+`requiring-resolve` path bypasses its interrupt, result-admission, or output
+bounds. Every invocation installs the one zero-argument `:interrupt-fn`. SCI
+calls it at every `fn` body entrance. The invocation's `time-limit` is the only
+execution limit; when it expires, `interrupt!` stops the eval uncatchably.
 
 Malli never constructs or forks a private SCI context. The schema projection
 resolves every admitted `[:fn]` symbol to its already-materialized
@@ -234,9 +242,14 @@ short interval identifies a spin, while a small count during a long interval
 identifies work blocked in a host call. Bounded output projection is a data
 boundary, not a second execution limit.
 
-`time-limit` is a required database configuration fact selected by invocation
-class. It is not a scheduling quantum. Expiry calls `interrupt!`, records an
-agent fault, and returns one flat error value:
+Each invocation class selects one default `time-limit` database configuration
+fact: a render pass may be shorter than a turn eval, but both belong to the one
+SCI door's dial family. A function that genuinely needs longer may raise the
+class default through `defn` metadata lifted into its program-graph row at
+index time exactly like `:seon.workload`; most functions carry no override.
+The limit is not a scheduling quantum. Normal completion cancels the active
+timer, so only runaway code meets it. Expiry calls `interrupt!` and produces
+one flat error value:
 
 ```clojure
 {:seon.error/message "..."
@@ -245,6 +258,14 @@ agent fault, and returns one flat error value:
  {:seon.eval/invocation-class :agent-eval
   :seon.eval/fn-entries 123}}
 ```
+
+The outer execution boundary wraps every invocation. The interrupt remains
+uncatchable inside SCI; after it propagates, the boundary catches the failure,
+returns the canonical flat error value, and submits a durable error fact routed
+to the agent that ran the code. That agent sees the fact in its next derived
+context, and the existing problem-routing model escalates it to root. No
+agent-code exception crosses into a proc, no failure is silently dropped, and
+no invocation can wedge its graph or siblings.
 
 The `:interrupt-fn` is cleared in `finally`, so a retained `ctx` cannot leak
 one invocation's interruption state into the next.
@@ -299,9 +320,10 @@ to cap around.
 
 ## Triggering, schedules, and orchestration
 
-Creation transacts one complete idle agent: identity, optional run defaults,
-home namespace and requirements, context components, purpose, and parent ref.
-Creation does not start a process or spend model tokens.
+Creation transacts one complete idle agent entity: identity, cluster ref,
+optional run defaults, home namespace and requirements, additive instruction
+refs, purpose, and parent ref. Creation does not start a process or spend model
+tokens.
 
 Messages are delivery. A message row points at its recipient through the one
 wake attribute. Committing it offers a coalesced wake; the wake carries no
@@ -340,6 +362,18 @@ from those facts, topologically loads declarations, and installs
 instrumentation from the same graph. A source change updates the shared
 program; it does not create a per-agent copy.
 
+A nonidentical base-Var redefinition is accepted and emits the ordinary
+Clojure-style shadowing warning. The new definition becomes the live binding
+and current program fact; the runtime never freezes an existing base Var merely
+because another agent defined it first.
+
+Every namespace has one assigned owner agent. An agent requesting a symbol
+change in another namespace sends that owner a durable message and receives a
+commit or rejection by reply. If a message targets an unowned namespace,
+message handling creates an agent and assigns the namespace on demand before
+ordinary delivery continues. Ownership coordinates distributed changes over
+the shared program graph; it is not an execution allowlist.
+
 Process replacement reloads declarations and current retained context. It does
 not replay scratch evals, provider calls, filesystem effects, Promises, sockets,
 or handles. Facts and receipts decide recovery; declaration loading is the only
@@ -347,9 +381,9 @@ program reconstruction.
 
 ## Isolation and process ownership
 
-The cluster JVM executes agent code, owns transactions and the
-committed-transaction feed for its store, evaluates renders through
-`seon.sci.eval/evaluate`, and serves its own web UI. Disposable leaf runtimes
+The cluster JVM executes agent code through the guarded SCI invocation
+boundary, owns transactions and the committed-transaction feed for its
+database, and serves its own web UI. Disposable leaf runtimes
 run packages and selected platform workers, never an agent's graph. See
 [[architecture]] for the complete topology.
 
