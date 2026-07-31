@@ -163,18 +163,14 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
 One vocabulary, each name grounded in a namespace + a schema/fn.
 
 - **block** — the ONE render unit in both projections: one render function's
-  identified output — the function, its stable element id, and its current
-  bytes. `:seon.render/ai` joins the prompt and `:seon.render/html` goes to
-  the page; they are two projections of the same block, never two systems.
-  Blocks are DERIVED by the recursive entity walk over the database value, not
-  a stored membership list, and they order by last-change transaction basis
-  (owner ruling 2026-07-31; see
-  `docs/prds/sci-execution-runtime/plan/README.md`). There is no static
-  scaffold path: the system message and imported instruction files are facts
-  on the agent entity rendered by ordinary, overridable renderers.
-  `:seon.render.block/block` in `seon.render.block`.
-  `:seon.render.block/name` is a plain `:keyword` — the app-level identity
-  (prompt header = DOM `#surface-<name>`), NOT a datahike identity.
+  identified output—the function, its explicit arguments, stable element id,
+  and current bytes. `:seon.render/ai` joins the prompt and
+  `:seon.render/html` goes to the page; they are two projections of the same
+  block, never two systems. Blocks are derived by the recursive entity walk,
+  not stored data types or a membership list. They order by the basis at which
+  their cached bytes last changed, with near-equal changes clustered by branch.
+  The cluster entity's instruction refs reach the system message and global
+  instruction files through the same walk; there is no static scaffold path.
 - **render** — a block's output; the one word for the projection. Engine:
   `seon.render`. A render is never stored.
 - **ai render** — a block's prompt-text output (a string, or a symbol
@@ -184,21 +180,17 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   human render; its response carries `:seon.render/hiccup`, which becomes a
   surface.
 - **prompt** — the agent's assembled context: the prompt computation acquires
-  ai renders at one immutable database value and concatenates them by priority,
-  prefixed by a system role resolved by
-  `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
-  override → the cluster's `:seon.config/system-text` datom → the shipped
-  `seon.agent.ctx/system-text` default. The system prompt is DB state and
-  per-request overridable ([[context]] §"The system prompt itself is DB state").
-- **page** — the human's UI: a layout placing html renders into slots. `seon.ui.*`.
+  AI renders from a tree rooted at the agent entity at one immutable database
+  value, then orders them by last-bytes-changed. The system role is an ordinary
+  `:seon.cluster.instruction` row reached through the cluster entity, not a
+  prefixed path outside rendering.
+- **page** — the human's UI: a layout over the resolved HTML render tree.
+  `seon.ui.*`.
 - **surface** — a resolved html render displayed by the web UI.
 - **card** — a compact/expanded visual CSS component; never an architectural
   object or persisted entity.
-- **slot** — a named, DB-keyed hole in a layout: `(slot :name)` →
-  `[:div {:id "surface-<name>" :data-slot :name}]`, keyed on
-  `:seon.render.block/name`.
-- **layout** — a render whose hiccup contains slots (it nests surfaces); a role,
-  not a stored kind. A render with no slots is a leaf surface.
+- **layout** — a first-party HTML renderer that arranges an already resolved
+  render tree; it never redirects renderer resolution or changes membership.
 - **canvas** — the focal, agent-controlled surface in an agent view: the
   agent↔human communication area.
 - **view** — an agent's page, route `/agent/{id}`: the canvas plus a
@@ -236,10 +228,8 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   same-schema render fn in the viewing agent's namespace, else the data's
   owning namespace → the schema-attached default → the structural floor) and
   emitting one block per rendered value. Membership and order are both
-  derived; the seeded `:seon.cluster.agent/blocks` collection,
-  `seon.render.block/install-tx`, and authored priority/band are RETIRED as a
-  second assembly path (owner ruling 2026-07-31). Overrides are ordinary
-  facts on the entity, read by the same walk.
+  derived. Overrides are ordinary facts reached by the same walk; no stored
+  block collection, redirect, priority, or band mechanism exists.
 - **program graph** — the collective `:seon.fn`, `:seon.ns`, `:seon.schema`,
   and `:seon.test` facts. Those established top-level attribute namespaces are
   their settled owners.
@@ -527,11 +517,12 @@ reachable from it at one database value, resolves a renderer per value, and
 emits one block each. There is no stored block collection, no seeded default
 set, no render-time merge, no provider, and no central catalog — and nothing
 renders outside this system, so the system message and imported instruction
-files are agent-entity facts rendered by ordinary renderers rather than a
-static scaffold. Order is the last-change transaction basis of the facts a
-block read; authored priority and bands are retired (owner ruling 2026-07-31;
-see `docs/prds/sci-execution-runtime/plan/README.md`). The `my.*` namespaces
-supply the render functions. See [[ui]] and [[context]].
+files are `:seon.cluster.instruction` facts reached from the cluster entity and
+rendered by ordinary renderers rather than a static scaffold. Every agent is a
+separate entity that points at that cluster and may add instruction refs. Order
+is the basis at which each cached function call's bytes last changed, with
+near-equal changes clustered by branch. No priority or band attributes exist.
+The `my.*` namespaces supply render functions. See [[ui]] and [[context]].
 
 ### Roles are capabilities
 
@@ -552,6 +543,7 @@ of one program graph. Agent-defining forms are `:seon.fn`, `:seon.ns`,
 attributes.
 The DB IS the running system (query → install exact namespace bindings →
 topo-sort by `:seon.ns/requires` plus refer targets → load; redefine = upsert).
+Base-Var redefinition is accepted with the ordinary Clojure-style warning.
 Aliases, imports (including nil masks for removed defaults), exact renamed
 refers, and actual loaded namespaces are separate facts; runtime never
 compresses them back into require syntax or stores JVM Class objects. Agent birth
@@ -559,6 +551,12 @@ commits its context components, home namespace/require rows, and safe declaratio
 facts atomically. After commit, the runtime loads those declarations without
 manufacturing quiet eval/transcript rows. The agent sees the resulting facts and
 code through ordinary context projections. See [[agent-runtime]].
+
+Each namespace has one owner agent. Another agent requests changes by messaging
+that owner and receives a commit or rejection by reply; an incoming message for
+an unowned namespace creates and assigns an owner on demand. This distributed
+ownership protocol coordinates changes without making code private or adding
+an execution allowlist.
 
 Source indexing is publication, never startup. clj-kondo statically analyzes
 first-party `src/` and `test/`; global schemas come from admitted EDN, not
@@ -616,19 +614,19 @@ UI-root == orchestrator-root), and process replacement recovery. See
 
 ### UI — [[ui]]
 
-The human UI is **pages** — a **layout** placing block html renders into named
-**slots**, each filled slot a **surface**; all pages are agent **views**, a tree of
+The human UI is **pages**—a **layout** arranging an already resolved tree of
+block HTML renders, each visible block a **surface**; all pages are agent **views**, a tree of
 routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the browser-action endpoint and its gate authorizes registered
 agent-owned home callbacks (it is not lifecycle authorization). The **live
 channel is ours**: each demanded normalized computation owns one database
-interest. A matching report wakes its render proc, which evaluates
-agent-authored renderers through `seon.sci.eval/evaluate`, suppresses equal
-results, and fans stable-ID element patches through per-tab
+interest. A matching report wakes its render proc, which invokes
+agent-authored renderers through the one SCI door, suppresses equal bytes, and
+fans stable-ID element patches through per-tab
 `(sliding-buffer 1)` taps. Reconnect resolves the current database value and
 repaints current truth. The doc owns
-block/render/canvas/slot/layout, the page tree, reitit + the gate, the SSE
+block/render/canvas/layout, the page tree, reitit + the gate, the SSE
 channel, and the derived-walk block model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
@@ -666,18 +664,16 @@ order, dates, measurements, and acceptance evidence.
   and the `my.kb`/`my.plan`/`my.agent` schemas.
 - [[agent-runtime]] — claim/run/turn/phase/derived-state, guarded evaluation,
   receipt recovery, creation-as-idle, and orchestrator-root lifecycle.
-- [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
+- [[ui]] — block/render/canvas/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
   derived-walk block model.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — historical turn reconstruction (database value + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
   `/agents/run` endpoint.
-- [[context]] — the dynamic context system: `context = f(db, location,
-  window, tail)`, last-change ordering (longest-unchanged first, no bands or
-  pins) with the free dynamic tail appended after the cache boundary,
-  namespace-as-location, pull-first relevance retrieval, and the UI twin of
-  every block.
+- [[context]] — the dynamic context tree, per-function-call cache,
+  last-bytes-changed ordering with branch tie-clustering, namespace-as-location,
+  pull-first relevance retrieval, and the UI twin of every block.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.
