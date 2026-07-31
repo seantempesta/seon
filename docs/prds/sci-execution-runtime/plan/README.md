@@ -1367,6 +1367,32 @@ may reintroduce a shadow build into the dev feedback path.
   limit is cancelled at completion and only runaway code ever meets
   it. Halting is bounded at runtime, never predicted. Mechanism
   details seal after the sci-interrupt ground-truth verdict.
+  **Rulings 2026-07-31 #7 (owner, decision batch 3 — cache grain, tree
+  order, distributed ownership):** (1) RENDER CACHING IS PER FUNCTION
+  CALL, not per walk: memoize (renderer fn × its arguments) → bytes,
+  "so it's effectively free to just dumbly call." The walk composes
+  independently cached calls; a shared entity rendered by the same fn
+  with the same args is byte-identical across agents by construction
+  (this dissolves the falsified P5 viewer-leak — the leak was walk
+  state, not call args). Staleness per cached call = its dependency
+  set + the code revision. (2) CONTEXT IS A TREE of render units —
+  leaf = renderable data, ref = branch; "block" remains the informal
+  NAME of a render unit in both projections, never a data type.
+  Display order is dumb last-bytes-changed across all units
+  REGARDLESS of tree position; near-equal timestamps cluster by
+  branch so related units stay together. (3) OVERRIDE RESOLUTION IS A
+  CORPUS QUERY: every function and its input/output schemas are
+  database facts — resolving a namespace's renderer for a schema is
+  one query through the same query cache. Nothing special. (4)
+  BASE-VAR REDEFINITION: ACCEPT AND WARN, the way Clojure warns on
+  shadowing — never freeze. (5) THE DISTRIBUTED OWNERSHIP PROTOCOL:
+  an agent's work centers on its own namespace; changing a symbol in
+  a namespace you do not own means MESSAGING its owner agent and
+  receiving its commit or rejection by reply. Every namespace is
+  assumed to have an owner agent — when a message arrives for an
+  unowned namespace, an agent is spun up and assigned on demand.
+  Agents build the system up in a DISTRIBUTED way; context is
+  distributed with them.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
