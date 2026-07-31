@@ -796,6 +796,21 @@
          :seon.db.process/id]
     :nil]}
   [connection cluster-name process]
+  ;; Transaction metadata cannot resolve a lookup ref introduced by that same
+  ;; transaction. Establish this process under the bootstrap provenance first;
+  ;; subsequent cluster and agent transactions can then name it honestly.
+  (when-not (d/q '[:find ?entity .
+                   :in $ ?process
+                   :where [?entity :seon.db.process/id ?process]]
+                 @connection process)
+    (require-committed!
+     (store/transact!
+      connection
+      {:tx-data [{:seon.db.process/id process}]
+       :tx-meta {:seon.db/process
+                 [:seon.db.process/id boot-process-identity]}})
+     {:seon.db.process/id process
+      :seon.boot/population :seon.db.process/process}))
   (let [toolkit-namespaces (instruction/toolkit-namespaces @connection)
         desired {:seon.cluster/name cluster-name
                  :seon.cluster/config
@@ -838,7 +853,7 @@
        (store/transact!
         connection
         {:tx-data
-         (cond-> [{:seon.db.process/id process}]
+         (cond-> []
            current
            (conj [:db/retract
                   [:seon.cluster/name cluster-name]

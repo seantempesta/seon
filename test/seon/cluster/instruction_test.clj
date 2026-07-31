@@ -37,8 +37,9 @@
          :seon.cluster.instruction/text "Owner revision."}
         {:seon.cluster.instruction/id :reply-grammar
          :seon.cluster.instruction/text "Superseded."}])
-      (cluster/populate-source!
-       {:seon.store/branch-connection connection})
+      (d/transact connection
+                  (#'cluster/instruction-row-changes
+                   @connection (instruction/seed-rows)))
       (is (= #{:getting-started}
              (set
               (d/q '[:find [?id ...]
@@ -73,7 +74,12 @@
                   [:seon.ns/name removed]])))
         (is (not= computed (cluster-toolkit @connection "toolkit")))
         (cluster/ensure-cluster-entity!
-         connection "toolkit" cluster/boot-process-identity)
+         connection "toolkit" "instruction-test-process")
+        (is (some? (d/q '[:find ?process .
+                          :where
+                          [?process :seon.db.process/id
+                           "instruction-test-process"]]
+                        @connection)))
         (is (= computed (cluster-toolkit @connection "toolkit")))))))
 
 (deftest ensure-entity-creates-once-and-resumes-untouched
