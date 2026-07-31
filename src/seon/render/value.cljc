@@ -95,17 +95,29 @@
   [value offset size]
   (try
     (if-let [entries (stable-entries value)]
-      (let [head (into [] (comp (drop offset) (take (inc size))) entries)
-            more? (> (count head) size)
-            page (if more? (pop head) head)
+      (let [before? (pos? offset)
+            available (max 0 (- size (if before? 1 0)))
+            head (into [] (comp (drop offset) (take (inc available))) entries)
+            more? (> (count head) available)
+            data-size (max 0 (- available (if more? 1 0)))
+            page (subvec head 0 (min data-size (count head)))
+            cut? (or before? more?)
             total (counted-size value)
             page-value
             (cond
-              (map? value) (into {} page)
-              (set? value) (into #{} (map second) page)
-              :else (mapv second page))]
+              (map? value) (cond-> (into {} page)
+                             cut? (assoc ::admit/elided true))
+              (set? value) (cond-> (into #{} (map second) page)
+                             cut? (conj ::admit/elided))
+              :else (cond-> (mapv second page)
+                      before? (as-> items (into [::admit/elided] items))
+                      more? (conj ::admit/elided)))
+            marker-step [:seon.render.value/elided]
+            steps (cond-> (mapv first page)
+                    before? (as-> page-steps (into [marker-step] page-steps))
+                    more? (conj marker-step))]
         {:seon.render.value/window page-value
-         :seon.render.value/steps (mapv first page)
+         :seon.render.value/steps steps
          :seon.render.value/offset offset
          :seon.render.value/shown (count page)
          :seon.render.value/total total
@@ -128,29 +140,31 @@
        :seon.render.value/more? false})))
 
 (defn- display-value
-  [unit raw caps]
-  (if (and (:seon.render.value/route-base unit)
+  [unit raw caps window?]
+  (if (and window?
+           (:seon.render.value/route-base unit)
            (:seon.render.data/cursor unit))
     (opened-window raw
                    (long (get-in unit [:seon.render.data/cursor
                                        :seon.render.data/offset] 0))
                    (long (:seon.config.eval.result/max-collection caps)))
-    {:seon.render.value/window raw
-     :seon.render.value/steps []
-     :seon.render.value/offset 0
-     :seon.render.value/shown 0
-     :seon.render.value/total (counted-size raw)
-     :seon.render.value/more? false}))
+    (let [total (counted-size raw)]
+      {:seon.render.value/window raw
+       :seon.render.value/steps []
+       :seon.render.value/offset 0
+       :seon.render.value/shown (or total 0)
+       :seon.render.value/total total
+       :seon.render.value/more? false})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One admitted projection
 ;;; ---------------------------------------------------------------------------
 
 (defn- admitted-view
-  [unit]
+  [unit window?]
   (when-let [caps (:seon.sci.admit/caps unit)]
     (let [raw (:seon.render/value unit)
-          window (display-value unit raw caps)
+          window (display-value unit raw caps window?)
           admitted
           (admit/admit
            {:seon.sci.admit/value (:seon.render.value/window window)
@@ -162,7 +176,11 @@
              :seon.render.value/tree (:seon.sci.admit/value admitted)
              :seon.render.value/truncated?
              (boolean (or (:seon.sci.admit/capped? admitted)
-                          (:seon.render.value/more? window)))))))
+                          (:seon.render.value/more? window)
+                          (pos? (:seon.render.value/offset window))
+                          (and (:seon.render.value/total window)
+                               (< (:seon.render.value/shown window)
+                                  (:seon.render.value/total window)))))))))
 
 (defn- summary
   [value]
@@ -184,7 +202,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :nil :seon.render.value/projection]]}
   [unit]
-  (when-let [view (admitted-view unit)]
+  (when-let [view (admitted-view unit false)]
     {:seon.render.value/tree (:seon.render.value/tree view)
      :seon.render.value/summary (summary (:seon.render.value/raw view))
      :seon.render.value/truncated?
@@ -215,6 +233,7 @@
        (or (contains? value ::admit/opaque)
            (contains? value ::admit/reference)
            (contains? value ::admit/type)
+           (contains? value ::admit/truncated-string)
            (contains? value ::admit/projection-error))))
 
 (defn- marker-text
@@ -236,8 +255,8 @@
   [raw step]
   (cond
     (and (map? raw) (contains? raw step)) (get raw step)
-    (and (vector? raw) (integer? step) (< -1 step (count raw)))
-    (nth raw step)
+    (and (sequential? raw) (integer? step) (<= 0 step))
+    (try (nth raw step) (catch #?(:clj Throwable :cljs :default) _ nil))
     (and (set? raw) (contains? raw step)) step
     :else nil))
 
@@ -248,6 +267,13 @@
   (cond
     (= ::admit/elided admitted)
     [:span {:class "seon-value-marker"} "‹elided›"]
+
+    (and (map? admitted) (contains? admitted ::admit/truncated-string))
+    [:span {:class "seon-data-string"}
+     (::admit/truncated-string admitted)
+     [:span {:class "seon-value-marker"}
+      (str "… ‹elided› ⟨" (tokens/estimate raw) " tokens⟩")]
+     [:span " " (path-link unit path 0 "inspect" "seon-data-step")]]
 
     (marker-map? admitted)
     [:span {:class "seon-value-marker"} (marker-text admitted)]
@@ -369,8 +395,9 @@
          (path-link unit path (max 0 (- offset size))
                     "← previous" "seon-data-page"))
        [:span {:class "seon-data-range"}
-        (str "showing " (if (zero? shown) 0 (inc offset))
-             "–" (+ offset shown)
+        (str "showing " (if (zero? shown)
+                           0
+                           (str (inc offset) "–" (+ offset shown)))
              (when total (str " of " total)))]
        (when more?
          (path-link unit path (+ offset shown)
@@ -393,7 +420,7 @@
   "Render any floor unit as admitted, drillable structural HTML."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-let [view (admitted-view unit)]
+  (if-let [view (admitted-view unit true)]
     (let [path (vec (get-in unit [:seon.render.data/cursor
                                   :seon.render.data/path] []))
           caps (:seon.sci.admit/caps unit)]

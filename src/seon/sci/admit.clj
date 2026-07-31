@@ -118,7 +118,7 @@
             limit (:seon.config.eval.result/max-string caps)]
         (if (<= (count described) limit)
           described
-          (subs described 0 limit)))
+          nil))
       (catch Throwable _ nil))))
 
 (defn- marker!
@@ -136,6 +136,16 @@
 
 (declare project)
 
+(defn- append-elision!
+  "Append the scalar cut marker, charging its one node."
+  [state accumulated emit]
+  (flag! state)
+  (if (take-node! state)
+    (emit accumulated ::elided)
+    ;; No child can fit. Replacing this collection node with the scalar
+    ;; is the only honest projection that still obeys the node cap.
+    (elide! state)))
+
 (defn- project-entries
   "Project up to `width` children, stopping when the node budget runs out.
   `emit` receives each child's projection. Truncation — by width or by
@@ -146,11 +156,31 @@
          accumulated (emit)]
     (cond
       (nil? remaining) accumulated
-      (>= taken width) (do (flag! state) accumulated)
-      (not (take-node! state)) accumulated
-      :else (recur (next remaining)
-                   (inc taken)
-                   (emit accumulated (project (first remaining) depth state))))))
+      (zero? @(:nodes state)) (elide! state)
+      :else
+      (let [after (next remaining)
+            cut-for-width? (and after (>= (inc taken) width))
+            cut-for-nodes? (and after (= 1 @(:nodes state)))]
+        (if (or cut-for-width? cut-for-nodes?)
+          (append-elision! state accumulated emit)
+          ;; When siblings remain, hold one node aside for their cut marker.
+          ;; A nested child may consume everything else, but it can never
+          ;; silently erase the parent's remaining siblings.
+          (let [reserved? (some? after)]
+            (when reserved? (vswap! (:nodes state) dec))
+            (take-node! state)
+            (let [child (project (first remaining) depth state)]
+              (when reserved? (vswap! (:nodes state) inc))
+              (recur after
+                     (inc taken)
+                     (emit accumulated child)))))))))
+
+(defn- mark-map-cut!
+  [state accumulated]
+  (flag! state)
+  (if (and (take-node! state) (take-node! state))
+    (assoc accumulated ::elided true)
+    (elide! state)))
 
 (defn- project-map
   [entries width depth state]
@@ -159,20 +189,28 @@
          accumulated {}]
     (cond
       (nil? remaining) accumulated
-      (>= taken width) (do (flag! state) accumulated)
-      ;; a map entry is TWO nodes, and a half-projected entry is not an
-      ;; entry: take both or neither
-      (not (and (pos? (dec @(:nodes state)))
-                (take-node! state)
-                (take-node! state)))
-      (do (flag! state) accumulated)
+      (< @(:nodes state) 2) (elide! state)
       :else
-      (let [[key value] (first remaining)]
-        (recur (next remaining)
-               (inc taken)
-               (assoc accumulated
-                      (project key depth state)
-                      (project value depth state)))))))
+      (let [after (next remaining)
+            cut-for-width? (or (>= taken width)
+                               (and after (>= (inc taken) width)))
+            ;; Two nodes form the marker entry and two form a real entry.
+            cut-for-nodes? (and after (< @(:nodes state) 4))]
+        (if (or cut-for-width? cut-for-nodes?)
+          (mark-map-cut! state accumulated)
+          (let [[entry-key entry-value] (first remaining)
+                reserved? (some? after)]
+            (when reserved? (vswap! (:nodes state) - 2))
+            ;; a map entry is TWO nodes, and a half-projected entry is not an
+            ;; entry: take both or neither
+            (take-node! state)
+            (take-node! state)
+            (let [projected-key (project entry-key depth state)
+                  projected-value (project entry-value depth state)]
+              (when reserved? (vswap! (:nodes state) + 2))
+              (recur after
+                     (inc taken)
+                     (assoc accumulated projected-key projected-value)))))))))
 
 (defn- project-node
   [value depth state]
@@ -198,12 +236,17 @@
       (inst? value)
       (if (instance? java.util.Date value)
         value
-        (java.util.Date. (long (inst-ms value))))
+        (java.util.Date. (inst-ms value)))
 
       (string? value)
       (if (<= (count value) max-string)
         value
-        (do (flag! state) (subs value 0 max-string)))
+        (do
+          (flag! state)
+          (if deep?
+            (elide! state)
+            (marker! state {::truncated-string (subs value 0 max-string)
+                            ::elided true}))))
 
       ;; EVERYTHING below this line projects to a structure — a
       ;; collection, or a marker map — and a structure emitted AT the
