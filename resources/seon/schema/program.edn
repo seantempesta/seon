@@ -47,7 +47,9 @@
  :seon.ns/refers
  [:set {:seon.db/component true} :seon.db/ref]
  :seon.ns/ns
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.ns/render-ai
+        :seon.render/html seon.render.ns/render-html}
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/source :seon.ns/source]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
