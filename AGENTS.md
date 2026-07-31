@@ -118,6 +118,15 @@ the lanes immediately after the checkpoint ends. If an interrupted operator
 leaves a recorded child alive, use `bin/seon down` so the supervisor reaps its
 own processes rather than killing the child directly.
 
+Periodically (and after any fork sync), commission an UPSTREAM-DELTA
+SWEEP of the vendored forks under `reference-code/`: what upstream
+shipped since our pin, and what sits IN our pin unevaluated (the
+2026-07-31 precedent: Datahike's opt-in index-root fusion — a 5×
+write-amplification win authored upstream in May — sat unnoticed until
+a perf dig read the writer source). Every adoptable delta gets an issue
+with an owner; experimental features gate on our own falsifiers, never
+upstream's word.
+
 After every big landing wave (a rung completing, a multi-lane day, a
 deletion wave), commission an INDEPENDENT adversarial audit of the
 changed tree — an agent that trusts no lane's report, sweeps for the
