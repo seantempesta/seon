@@ -27,7 +27,6 @@
             [seon.error :as error]
             [seon.problems :as problems]
             [seon.render :as render]
-            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
             [seon.test-support :as test-support]))
@@ -343,26 +342,3 @@
       (let [refused (problems/block {:seon.db/db @connection})]
         (is (hiccup/hiccup? refused))
         (is (str/includes? (hiccup/->string refused) "live-processes"))))))
-
-(deftest the-block-is-an-ordinary-block-and-renders-through-the-block-path
-  ;; The proof that the problems page needs no page-specific machinery:
-  ;; it is a block in an agent's set, addressed and morphed like any
-  ;; other block.
-  (with-db
-    (fn [connection]
-      (commit-wedged-run! connection)
-      (d/transact connection
-                  [{:seon.cluster.agent/id "root"
-                    :seon.cluster.agent/blocks
-                    [{:seon.render.block/name :problems
-                      :seon.render.block/priority 10
-                      :seon.render/html `problems-surface}]}])
-      (let [[surface] (block/surfaces @connection
-                                      {:seon.cluster.agent/id "root"
-                                       :seon.render/kind :seon.render/html
-                                       :seon.sci.admit/caps caps})]
-        (is (nil? (:seon.error/value surface)))
-        (is (= "surface-problems" (:seon.render/surface-id surface))
-            "one derivation for the hole and the patch")
-        (is (str/includes? (hiccup/->string (:seon.render/output surface))
-                           "not alive"))))))

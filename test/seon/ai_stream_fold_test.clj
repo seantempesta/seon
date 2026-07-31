@@ -32,7 +32,6 @@
             [org.httpkit.server :as http]
             [seon.ai :as ai]
             [seon.cluster.loop]
-            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.root :as root]
             [seon.test-support :as support])
@@ -268,47 +267,3 @@
         (is (= "Hello, world" (:seon.ai/text completion)))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The two exercise blocks — RE-GROUNDED (F2 §2.2)
-;;; ---------------------------------------------------------------------------
-
-(def ^:private agent-id "root")
-
-(deftest the-exercises-are-ordinary-blocks
-  ;; The claim the exercises exist to test, unchanged and now stronger:
-  ;; the highest-churn thing in the system needs no render machinery of
-  ;; its own AND no facts. The blocks read the TRANSIENT
-  ;; `:seon.ai/partial` the render pass threads through the one unit
-  ;; builder — never a query, because there is no row.
-  (support/with-database
-    (fn [connection]
-      (d/transact
-       connection
-       [{:seon.cluster.agent/id agent-id
-         :seon.cluster.agent/blocks
-         [{:seon.render.block/name :tokens :seon.render.block/priority 0
-           :seon.render/html `root/tokens-html}
-          {:seon.render.block/name :reply :seon.render.block/priority 10
-           :seon.render/html `root/text-html}]}])
-      (testing "before anything streams, they render idle rather than absent"
-        (let [surfaces (block/surfaces @connection
-                                       {:seon.cluster.agent/id agent-id
-                                        :seon.render/kind :seon.render/html
-                                        :seon.sci.admit/caps caps})]
-          (is (= 2 (count surfaces)))
-          (is (every? (comp nil? :seon.error/value) surfaces))
-          (is (str/includes? (hiccup/->string (:seon.render/output (second surfaces)))
-                             "idle"))))
-      (let [surfaces (block/surfaces @connection
-                                     {:seon.cluster.agent/id agent-id
-                                      :seon.render/kind :seon.render/html
-                                      :seon.sci.admit/caps caps
-                                      :seon.ai/partial
-                                      {:seon.ai/text "streaming now"
-                                       :seon.ai/tokens 42}})
-            html (str/join (map (comp hiccup/->string :seon.render/output)
-                                surfaces))]
-        (is (str/includes? html "42") "the live count")
-        (is (str/includes? html "streaming now") "the streamed text")
-        (is (str/includes? html "surface-tokens"))
-        (is (str/includes? html "surface-reply")
-            "each exercise is its own morph target, like every block")))))
