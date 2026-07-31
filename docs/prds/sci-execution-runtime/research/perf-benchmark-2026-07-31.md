@@ -45,7 +45,8 @@ work in progress, not service-level guarantees and not a tuned benchmark.**
 | 15 | Batched commit | **2,000 rows/s** at 1,000 rows/transaction | the ceiling is per-commit, not per-fact |
 | 16 | Cached read, warm database value | **3–7 µs**, 100k–190k queries/s | derive-don't-store is affordable |
 | 17 | Uncached read after a commit | **0.19–0.25 ms**, ~4,000 queries/s | a fresh basis costs a quarter of a millisecond |
-| 18 | Real end-to-end agent turn (local 35B) | **model-bound** — see §6 | the system is not the bottleneck |
+| 18 | 10 agents messaged at once | every run opened in **6 ms** median, all 10 settled | no starvation, no queue, no wedge |
+| 19 | Real turns, 10 concurrent agents | **6 completed** in 96–150 s; 5 provider failures, all recorded as facts | model-bound; failures never throw into the loop |
 
 Rows 6, 7 and 13 are the honest bad news and are expanded below. Row 7 has an
 open issue with acceptance criteria
@@ -385,6 +386,51 @@ median — unchanged.
 
 ## 6. Active agents — real turns against a local model
 
+Probe: `active.clj`, on a fresh cluster (`scale-10`) with the sanctioned local
+Ollama server and `qwen3.5:35b-a3b-coding-nvfp4`. **Real calls, no stub.** Ten
+agents were created (armed automatically by the armer, 11 armed within 3 s),
+then M of them were messaged at once and every run was followed from the
+message commit to its settlement. Each message asked for the same small task:
+evaluate `(+ 1 2)` and then call `my.run/complete`.
+
+| M agents | message commits | wake → run open (median / p95) | runs opened | runs settled |
+|---|---|---|---|---|
+| 2 | 179 ms | 168.8 ms / 168.8 ms | 2 / 2 | 2 / 2 |
+| 5 | 639 ms | **7.3 ms** / 226.2 ms | 5 / 5 | 5 / 5 |
+| 10 | 1,966 ms | **6.1 ms** / 241.8 ms | 10 / 10 | 10 / 10 |
+
+**Dispatch is immediate and fair.** At ten agents the median message-to-run-open
+was 6 ms, and the p95 of 242 ms is the serialized file-store commit of the ten
+messages themselves, not queueing in the runtime. Every agent that was messaged
+opened a run, and every run settled. **Nothing starved and nothing wedged**, at
+any M.
+
+**The model is the ceiling, and it degrades under concurrency.** Per-run
+outcomes, read from the committed facts:
+
+| stage | real turns completed | duration of each | provider failures |
+|---|---|---|---|
+| 2 agents | 1 | 103 s | — (1 run failed on a model *reply* mistake: an unbalanced map literal) |
+| 5 agents | 1 | 138 s | 4 (2 empty streams, 1 unreadable JSON, 1 timeout at the configured 300 s) |
+| 10 agents | **6** | 96, 106, 117, 128, 137, 150 s | 5 (1 empty stream, 1 unreadable JSON, 3 timeouts) |
+
+Each completed turn carries its own distinct `:seon.cluster.run/plan-digest`,
+so these are six genuinely different pieces of work, not one answer reused.
+Aggregate throughput therefore **rises** with concurrency — 6 real turns inside
+150 s at ten agents (**2.4 turns/min**) against one turn in 103 s at two
+(0.58 turns/min) — until the single local server saturates somewhere around six
+simultaneous 35B generations and starts closing connections and timing out.
+
+**Every failure became a fact, and the run closed.** Empty streams, unreadable
+JSON, a 300 s timeout, and a model reply the reader refused all landed as
+`:seon.cluster.run/error` on a settled run. That is the "nothing throws into
+the agent loop" claim tested under saturation rather than asserted: the
+provider fell over and the runtime did not.
+
+None of these numbers describe a product capability. They describe one 35B
+model on one laptop GPU, and they are here because they are what the fairness
+and settlement claims were tested against.
+
 ## 7. Honest caveats
 
 **One machine, one disk, one JVM.** Everything here is a laptop with a local
@@ -401,9 +447,11 @@ measurement says clearly where the cost is and that it is not in the
 architecture.
 
 **Model-bound is not system-bound.** A local 35B model on one Mac dominates
-any turn measurement. Historical evidence at 10 agents put 99.24 % of tokens
-in model thinking; the numbers in §6 measure fairness and dispatch, not
-capability.
+any turn measurement, and past ~6 simultaneous generations that server itself
+fails — empty streams, unreadable JSON, timeouts. Historical evidence at 10
+agents put 99.24 % of tokens in model thinking. §6 therefore measures dispatch
+fairness and failure handling, which the system owns, and not turns per minute,
+which it does not.
 
 **What is not built.** Revisioned packages and keyframes are designed and
 ruled but unbuilt — today's renderer emits full snapshots and diffs per tab.
