@@ -1592,6 +1592,17 @@ may reintroduce a shadow build into the dev feedback path.
   same walk, two panes. Vocabulary row added; "page" alone, "screen",
   "view", "dashboard" retire. Adding a namespace page is adding a
   route line, never per-page render code.
+  **Ruling 2026-07-31 #18 (owner): NAMESPACE ROUTES ARE CANONICAL,
+  AND ROUTING IS A BOOTSTRAP MECHANISM.** The default route shape is
+  `/ns/{full.namespace.path}` rendering that namespace's page; nice
+  aliases exist where wanted (`/` = root's namespace page, others as
+  needed) but namespaces stay the canonical addressing — clear, and
+  one agent per namespace. Resolving a namespace route ENSURES the
+  owner agent: if none exists, the route inits one on demand — the
+  same idempotent ensure-entity used by creation and by
+  message-to-unowned-namespace (ruling #7(5)); an existing agent
+  always resumes. Three triggers, one mechanism: create, message,
+  visit.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
