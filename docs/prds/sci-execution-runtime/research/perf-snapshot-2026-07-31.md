@@ -54,11 +54,18 @@ fills them.
 | Full test suite | ~8 s (606 tests / 2,680 assertions at last frozen gate) | plan ledger |
 | JVM load to REPL | 2.23 s | plan ledger |
 
-## Gaps (benchmark run dispatched 2026-07-31 evening)
+## The dedicated benchmark (landed same day)
 
-Not yet measured and NOT to be quoted: sustained database transactions/
-second (file store, realistic mixed writes); maximum simultaneous ACTIVE
-agents (driving turns concurrently, local model); steady-state JVM memory
-at 10/100/1,000 agents (parked and active); wake-to-render latency under
-concurrent load. The dedicated benchmark fills these; numbers land in
-`perf-benchmark-2026-07-31.md`.
+`perf-benchmark-2026-07-31.md` fills the gaps with 19 measured rows +
+methodology + reproduction scripts. Headlines: 25 clusters in one JVM at
++1.24 MiB RSS / 1.4 MiB disk each with ZERO cross-tenant interference
+(delivery 3.7 → 3.2 ms with 5 active neighbors); a new cluster boots into
+a running JVM in 518 ms; agent arm 0.47 ms at a 1,000-agent fleet; 1,000
+parked agents = +79 MiB RSS (≈12,600/GiB — bounded today by a FILED
+defect: each armed agent holds one platform thread; ~33,000/GiB after the
+fix, do not quote the higher number yet); commit-to-wire 3.7 ms flat at
+1/10/50 connections, byte-identical; sustained churn 60 s/816 commits
+with no memory growth; a stalled tab affects nobody. The one real
+ceiling: file-store commits at 8 tx/s (99.3% konserve file backend — the
+same commit is 1,088 tx/s in memory, 2,000 rows/s batched), an honest
+known limit of the current storage backend, not the model.
