@@ -1451,9 +1451,15 @@ may reintroduce a shadow build into the dev feedback path.
   conversation): flow is a foreign concept and model-written flow
   systems tend to be THE WRONG SYSTEM — the first attempt put every
   agent into ONE flow graph, forcing agents to run serially ("a
-  nightmare"), and the aha was that EVERY LONG-RUNNING PROCESS IS ITS
-  OWN FLOW GRAPH, controlled under the one system (the origin of the
-  2026-07-28 agents-are-flows ruling). Therefore: flow work ALWAYS
+  nightmare"), and the aha was that ALL LONGER-TERM STATEFUL
+  PROCESSES ARE FLOWS, each its own graph, controlled under the one
+  system (the origin of the 2026-07-28 agents-are-flows ruling).
+  Owner correction, same conversation, on the state discipline: the
+  state itself is stored IN THE DATABASE; where something like an
+  atom is genuinely required, it is initialized during the proc's
+  INIT phase and properly unwound in the shutdown transition — flow's
+  own lifecycle hooks, never ad-hoc setup or teardown outside them.
+  Therefore: flow work ALWAYS
   gets research + live probe testing BEFORE implementation lanes —
   never implement a flow mechanism from remembered semantics; the
   2026-07-31 control-protocol grounding (two stale-docstring
