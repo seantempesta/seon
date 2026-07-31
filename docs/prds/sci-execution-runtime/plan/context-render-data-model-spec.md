@@ -70,8 +70,18 @@ instruction file bytes, ingested at `bin/seon init`). Edits mutate
 ### 2.2 The cluster edge
 
 ```clojure
-;; resources/seon/schema/agent.edn addition  [TARGET]
-:seon.cluster.agent/cluster :seon.db/ref   ; → the config singleton
+;; [REVISED per owner ruling 2026-07-31 (W1 pushback): the config
+;; singleton is EXACTLY manifest-reconciled, so accreted facts get
+;; their own cluster entity — one per cluster branch, identity = the
+;; cluster name, holding the instruction ref set and cluster-global
+;; attributes, plus a ref to the config singleton. Every agent
+;; remains its OWN entity (owner-confirmed); its cluster ref points
+;; at the cluster entity, never the config singleton.]
+:seon.cluster/name        [:string {:seon.db/identity true}]
+:seon.cluster/config      :seon.db/ref        ; → the config singleton
+:seon.cluster/instructions [:set :seon.db/ref] ; the shared set (was
+                                               ; :seon.config/instructions)
+:seon.cluster.agent/cluster :seon.db/ref       ; → the cluster entity
 ```
 
 Written in `creation-tx`. d1 = the cluster (name, agent-relevant dials,
