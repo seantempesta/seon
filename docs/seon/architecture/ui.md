@@ -25,10 +25,12 @@ The web UI runs inside the **cluster JVM** beside the writer and the agent
 graphs. It
 serves HTTP through http-kit, frames SSE through the Datastar Clojure SDK, and
 reads the cluster's current immutable database values directly. Agent-authored
-renderers run through the one `seon.sci.eval/evaluate` path: a fresh `fork`,
-the one `:interrupt-fn`, value admission, and bounded output. Supervision,
-bounded evals, and cheap flow-graph rebuilds protect the process; the UI does
-not rely on a process wall.
+renderers run only through the one guarded SCI invocation boundary: the retained
+`ctx`/`fork`, one `:interrupt-fn`, the render invocation-class `time-limit`,
+value admission, and bounded output. No direct Var invocation or
+`requiring-resolve` path bypasses that door. Supervision, bounded evals, and
+cheap flow-graph rebuilds protect the process; the UI does not rely on a
+process wall.
 
 **Kind is the boundary (owner, 2026-07-29).** A kind is never chosen
 interior to the system: the delivery boundary states it — the agent
@@ -59,21 +61,19 @@ from database truth.
 ## The projection contract — one router, an open kind set
 
 Rendering is not a UI mechanism that other things borrow; it is one contract
-the UI is the largest consumer of. A **unit** is any map that declares, per
-**output kind**, the fully qualified symbol of the function projecting that
-unit into that kind. `seon.render/render` resolves the symbol late — with
-`requiring-resolve`, invoking the var, so re-evaluating a projection's `defn`
-changes the next render — and applies it to the unit; `seon.render/kinds`
-derives what a unit can become from the unit itself, so nothing keeps a
-registry of kinds or of producers.
+the UI is the largest consumer of. A **unit** is schema'd data discovered by
+the recursive entity walk. The boundary requests an output kind, and the
+renderer resolves one projection through the program graph. First-party Vars
+remain live under re-evaluation. A nonidentical base-Var redefinition is
+accepted and emits the ordinary Clojure-style warning. Agent-authored corpus
+functions are installed SCI values invoked through the guarded door, never
+host-resolved Vars.
 
-The kind set is therefore open, and each kind names its consumer:
+The kind set is open, and each kind names its consumer:
 `:seon.render/ai` is read by the prompt, `:seon.render/html` by a surface,
-`:seon.render/log` by the process log. Adding a kind is one key at the producer
-and one function; the router never changes. Declarations ride on the value
-being projected — derived when the projection depends on who is asking, as an
-error notice's steering prose does — and never as a stored symbol repeated on
-every row.
+`:seon.render/log` by the process log. Adding a kind adds a projection without
+changing the walk. Explicit declarations ride on the value being projected;
+otherwise the resolver queries the program graph and schema metadata.
 
 The log kind governs projecting a renderable unit for a log sink; it does not
 turn process-control annunciators into render units. A recursion-fence failure,
@@ -89,73 +89,48 @@ Failures are flat `:seon.error` values, never throws: the router runs on the
 error path, so an undeclared kind, an unresolvable symbol, and a projection
 that throws are each a value naming what is broken.
 
-### Generic default, specialist where the unit is built
+### One resolution chain and one floor
 
-Every kind has a **generic default** renderer that can project any value of its
-family, and a producer that knows more points that value's key at a
-**specialist** — chosen where the unit is BUILT, computed from the value's own
-attributes, never by a conditional at the consumer. `seon.render.block/select`
-is that choice: an ordered set of pure rules belonging to the one producer that
-owns the family, first accepting rule wins, falling through to the default.
-`:seon.render/html`'s generic default is `seon.render.block/data-panel`.
+Every discovered value resolves through one chain, most specific first:
 
-The two halves are one design. Because the key on the unit is the whole answer,
-**the consumer never branches and the specialist's name never leaves its
-producer** — which is what makes "consumers reach a value's renderings only
-through the router" a property of the code rather than a rule people remember.
-An error's steering prose is not a function anybody calls; it is the default
-that `:seon.render/ai` points at, and a malli violation's detailed explanation
-is a specialist the error producer selects from the fact's own attributes.
+1. explicit `:seon.render/ai` or `:seon.render/html` keys on the value;
+2. a same-schema renderer found by a program-graph query in the viewing
+   agent's namespace, then the data's owning namespace;
+3. the schema-attached default renderer; and
+4. the structural floor.
 
-The rules are a producer's, not a registry: they are built from one family's own
-attributes and are never consulted by anybody rendering. Selection is total,
-because it runs where units are built and that is often the error path — a rule
-that throws or does not resolve has not accepted, so a broken rule costs its own
-specialist and never the render. Both halves are late-resolved symbols, so
-re-evaluating a rule or a renderer changes the next render.
+Function rows carry input and output schemas, so namespace override resolution
+is one ordinary corpus query through the query cache. There is no producer rule
+registry, slot redirect, or second floor. A broken renderer yields a flat error
+unit and never promotes a different mechanism silently.
 
 ## The block and its two renders
 
-A **block** (`:seon.render.block/block`, owned by `seon.render.block`) is the UI's
-unit, and it declares two of the kinds above — selected by key presence, with
-no stored discriminator:
+A **block** is the informal name for one renderer function call's identified
+output in either projection, never a database entity or stored data type. Its
+identity derives from the renderer function and explicit arguments; the HTML
+projection derives one escaped stable DOM element id from that identity.
 
-- **ai render** (`:seon.render/ai`) → **prompt** text: a qualified symbol the
-  router resolves late.
-- **html render** (`:seon.render/html`) → a **surface**: a qualified symbol,
-  resolved the same way, whose output is hiccup.
+- **ai render** (`:seon.render/ai`) → prompt bytes.
+- **html render** (`:seon.render/html`) → a surface whose output is hiccup.
 
-The DURABLE slot is a qualified symbol only. A literal hiccup vector or a
-verbatim string is admissible on a runtime unit, but never in the database:
-restricting the stored value to one type is what lets it store natively as
-`:db.type/symbol` instead of a `pr-str` EDN string that every read has to
-decode. A block with nothing special to say points at the kind's generic
-default, which costs nothing to store and renders anything.
-
-Presence decides placement: ai-render-only = prompt only (no surface);
-html-render-only = a surface only (zero prompt tokens); both = both. A block
-declaring neither is legal and renders nowhere — it is data the agent owns and
-nothing displays.
-
-`:seon.render.block/name` is one keyword in three roles — the prompt header, the
-per-agent upsert key, and (through `seon.render.block/surface-id`) the DOM
-element id — always in sync, which is what makes "the agent edits the same
-thing the human sees" true. `surface-id` is the ONE derivation, so the hole and
-the patch cannot drift; it ESCAPES characters it cannot use rather than
-dropping them, because dropping is how two names become one id and two blocks
-morph over each other. Renders are symbols; the rendered output is ephemeral,
-never stored.
+The same call may provide either or both projections. Explicit render keys on a
+value override the corpus/schema chain, but their absence never makes the
+system partial: the structural floor can render any value in both projections.
+AI always includes every discovered unit. On the curated HTML page, a unit that
+would reach the generic structural floor is hidden by default and appears only
+when that tab enables **show everything**. The checkbox is transient per-tab
+display state, never a durable fact. Totality and default visibility are
+separate decisions.
 
 **The morph target is the block.** Each block is patched independently at its
-own `surface-id`, so a transcript append repaints the transcript and the header
-is not recomputed. This is the difference between the block set being a
-convenient grouping and being the unit of live update: interest, registration
-memory and equality suppression are all keyed by block, and "32 tabs, one
-authored evaluation" is one evaluation of one block. Whole-page morphing is not
-the live-update fallback: initial paint builds the page once, then every change
-targets the smallest stable block whose value changed. Serialization, authored
-evaluation, and slow-reader pressure therefore scale with changed content
-rather than page size.
+stable element id, so a transcript append repaints the transcript and the
+header is not recomputed. Cache and equality state are keyed by renderer
+function call, so equivalent calls share one byte result before fan-out.
+Whole-page morphing is not the live-update fallback: initial paint builds the
+page once, then every change targets the smallest stable block whose bytes
+changed. Serialization, authored evaluation, and slow-reader pressure
+therefore scale with changed content rather than page size.
 
 ## Membership is the walk — one derivation, no stored set
 
@@ -163,10 +138,12 @@ rather than page size.
 `docs/prds/sci-execution-runtime/plan/README.md`). The render walks the agent
 entity and the values reachable from it at one database value, resolves a
 renderer per value, and emits one block per rendered value. Membership and
-order both fall out of the facts: order is the last-change transaction basis of
-what the block read ([[context]]), and there is no static scaffold path — the
-system message and imported instruction files are ordinary facts on the agent
-entity rendered by ordinary, overridable renderers.
+order both fall out of the render calls: order is the basis at which each
+call's bytes last changed ([[context]]), and there is no static scaffold path.
+The cluster entity owns the authoritative refs to shared instruction rows;
+agent entities carry only genuine additions. Both are ordinary schema'd facts
+rendered by ordinary, overridable renderers, and instruction text mutates in
+place on its stable identity.
 
 **Resolution is one chain, most specific first:**
 
@@ -177,18 +154,8 @@ entity rendered by ordinary, overridable renderers.
 3. the schema-attached default renderer;
 4. the structural floor.
 
-There is one chain and one floor. The slot-redirect step is RETIRED from this
-contract until a concrete need names it.
-
-> **Superseded.** The seeded `:seon.cluster.agent/blocks` component collection,
-> `seon.render.block/install-tx`, `:seon.render.block/priority`, and
-> `:seon.render.block/band` were the pre-2026-07-31 stored-membership contract
-> (the "context-blocks" sealed contract,
-> `plan/context-blocks-contracts-2026-07-28.md`). They are retired as a second
-> assembly path. An always-on or reordered block is an ordinary fact on the
-> entity that the same walk reads — never a separate installation. The
-> replacement attribute set lands with the render/context contract rewrite;
-> until then treat the old attributes in [[data-model]] §4.2 as historical.
+There is one chain and one floor. A layout never redirects resolution, and no
+stored membership, band, or priority attribute exists.
 
 Global-vs-per-agent is decided by the DATA the render fn queries, never by the
 block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
@@ -196,10 +163,6 @@ block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
 fn scopes by what it reads. (See [[data-model]] for the domain schemas +
 data-ref scoping; [[agent-runtime]] for the fact-first atomic birth transaction
 and post-commit safe declaration load.)
-
-`:seon.render.block/name` remains a plain keyword and deliberately NOT a
-database identity, so two agents may each own a `:transcript`; uniqueness is
-per agent.
 
 ## The render engine
 
@@ -213,18 +176,17 @@ siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
 turn's complete ordinary database value. The turn acquires and formats
-the AI renders in last-change order ([[context]]); the web UI places
-the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
-N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
+the AI renders in last-bytes-changed order ([[context]]); the web UI applies
+the same order, including branch tie-clustering, to visible HTML renders.
+"What the agent saw at turn N" is a re-derive from that exact value; `:t` alone
+is not a durable bookmark.
 
-**The typed block renderer.** Above `seon.ui.html` sits one reusable value→hiccup
-layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`
-carries (the namespaced key ON the value, never a stored `:kind`): a **message**
-(`:seon.render/markdown`) → `seon.ui.markdown/md->hiccup`, a **source**
-(`:seon.render/source`) → `clj->hiccup`, a **data** projection → the value panel, a
-flat **error data** → an error card, a literal **hiccup** vector → passthrough, and
-anything else → the data panel (never throws). The transcript and the canvas both
-route their bodies through it, so every surface "just displays the block."
+**The structural floor is one merged data browser.** It combines the bounded
+value skeleton with `/data`'s drill navigation on the admission codec's one
+walk discipline. It can render any value without throwing, preserves
+identities/indices and explicit elision markers, and pays only for opened data.
+Specialized message, source, error, and hiccup projections sit above it through
+the one resolution chain; they do not create another walker or floor.
 
 **Markdown renders server-side.** Agent text becomes Hiccup through
 `seon.ui.markdown/md->hiccup`. The view shim does not parse Markdown in the
@@ -241,9 +203,9 @@ and technical data remain available in the separate debug/data surfaces. This
 changes only the HTML projection—the agent's AI transcript remains
 byte-faithful.
 
-**The database browser pays for opened data.** `/data` is bounded expansion
-whose CURSOR says where to resume instead of eliding — the same caps and the
-same walk as a value panel, one keeping the tail and one discarding it.
+**The database browser pays for opened data.** `/data` exposes the same
+structural floor directly. Bounded expansion uses a cursor that says where to
+resume instead of silently eliding.
 
 Navigation is a `get-in` path, and the cursor — path plus offset — lives in the
 URL. So a drilled position is a link somebody can send, reconnecting to one
@@ -276,8 +238,10 @@ default height. Scale is handled by disclosure and windowing, never smaller
 unbounded text.
 
 **Capability + cache.** The cluster JVM acquires authored program and ordinary
-inputs at one immutable database value and invokes authored code through
-`seon.sci.eval/evaluate` with the one `:interrupt-fn` and value admission.
+inputs at one immutable database value and invokes authored code through the
+one SCI door with the `:interrupt-fn`, invocation-class `time-limit`, and value
+admission. A function may raise the class default only through `defn` metadata
+lifted into its program row at index time; render owns no private timer dial.
 Renderers may request genuine effects only through
 `seon.effect/request!`; the normal render path remains pure and returns
 ordinary data. The byte-stable prefix of longest-unchanged blocks is
@@ -287,14 +251,14 @@ preserved for provider prefix-caching.
 configuration and file fingerprints, render inputs, and program artifact
 determine the cacheable bytes. Host timezone, process clocks, environment
 reads, ambient database state, and process-local result liveness cannot alter
-them. The same value rendered in a replacement process yields the same bytes;
-only an explicitly separated free-dynamic tail may vary under [[laws]].
+them. Process-local inputs are explicit renderer arguments and therefore part
+of the per-call identity; no free tail renders outside the block system.
 
-**Context assembly is its own domain.** How the prompt orders blocks by
-last change (no bands, no pins), the appended free dynamic tail, and the
+**Context assembly is its own domain.** How the prompt derives a tree and orders
+units by last-bytes-changed (no bands, no priority attributes) and the
 namespace-as-location model live in [[context]] — this doc owns the shared
-block/render machinery and the human-facing twin: every block renders an html
-representation for inspectability.
+block/render machinery and the human-facing projection. The structural HTML
+floor remains available for every block even when the curated page hides it.
 
 ### Render coverage converges on blocks
 
@@ -350,66 +314,40 @@ own morph target. The highest-churn thing in the system needs no render
 machinery of its own — which is the reason those two were chosen as the
 exercises that prove the design.
 
-## Slots and layouts
+## The tree and layouts
 
-- **slot** — `(slot :name)` emits
-  `[:div {:id "surface-<name>" :data-slot :name}]`, a
-  named, DB-keyed EMPTY hole keyed on `:seon.render.block/name`. It does not resolve
-  `:name`; it marks a hole. Resolution happens at expansion: render the named
-  block's html, and if THAT output contains more slots, recurse to fixpoint.
-- **layout** — a render whose hiccup contains slots; it queries the db (the
-  request carries it) + path-params and owns placement + CSS.
-  **layout-vs-surface is
-  a role, never stored**: a render with child slots is a layout, a render with
-  none is a leaf **surface**.
-- **top-level is DERIVED**, never a stored `:layout` flag: a block is top-level
-  when no other block's surface slots it in. A page is its top-level surfaces
-  in the same derived order, so several root cards and one all-slotting layout are the
-  same mechanism arranged differently. When every surface is slotted and none
-  is top-level, the slots form a closed cycle; every surface becomes top-level
-  and the cycle is reported in the hole that closes it, because rendering
-  nothing would be the silent failure this design refuses.
+A **layout** is an ordinary first-party HTML renderer over an already resolved
+render tree. It receives blocks and branch relationships as data and owns only
+placement and CSS. It never names a block to trigger renderer resolution,
+redirects one render to another, or changes membership. The retired slot
+redirect has no dormant fixpoint or missing-block installation behavior.
 
-**Expansion is BOUNDED, by a node budget and a depth budget, not only by a
-visited set.** A visited set is per path: it refuses cycles and permits fan-out,
-and a block set with no cycle anywhere can still expand exponentially. The
-budgets are the same `:seon.sci.admit/caps` dials the value codec takes, because
-a graph that fans out and can cycle is the problem that codec already solved and
-a second set of dials would drift from the first. Node and depth are separate
-budgets, because a long thin chain and a wide DAG are different ways to be too
-big. The walk is depth-first and left to right, so one input always elides the
-same holes — equality suppression depends on it.
+**Expansion is bounded** by node and depth budgets shared with the structural
+floor. The per-walk rendered set detects an already emitted unit and produces a
+back-reference, while branch budgets bound wide fan-out. Elision is explicit
+and drillable; a cycle, failed child render, or exhausted budget produces an
+in-place error/elision unit so one branch never blanks the page.
 
-**Pages are bounded folds over the entity graph.** A page begins with its root
-units and recursively reduces their rendered refs through this same mechanism.
-Following a connection is the same act as filling a slot: ask the router for a
-node, descend, count it, stop at the budget or at a node already on the path.
-The entity graph can genuinely cycle where a value tree could not, so the
-visited set is load-bearing and the budget bounds the fan-out. The `/data`
-browser is the purest case: paged `get-in` navigation into any nested value is
-bounded expansion whose cursor says where to resume instead of eliding.
-
-Expansion refuses in place rather than throwing, so one bad slot costs one hole
-and not the page: a slot naming a block the agent does not own keeps the hole
-and names the missing block (install it and the next render fills it); a slot
-naming a block whose surface FAILED gets that surface's error card, so the
-failure appears where it belongs; and a cycle is refused at the hole that
-closes it; and an exhausted budget keeps the hole and says which budget ran
-out. The visited set along the path is the observable fact for a CYCLE; the
-budgets are what bound a graph that merely fans out.
+**Pages are bounded folds over the entity tree.** A page begins at the route's
+agent entity, walks refs, resolves each schema'd value once through the one
+chain, and hands the resulting tree to its layout. The `/data` browser is the
+floor exposed directly: paged `get-in` navigation into any nested value uses
+the same bounded expansion and cursor discipline.
 
 ## Pages — agent view, root view, debug view, app
 
-Every **page** is a layout placing block html renders into slots; each filled slot
-is a surface. Pages may have different layouts, but all use one rendering,
+Every **page** is a layout arranging the already resolved HTML render tree;
+each visible block is a surface. Pages may have different layouts, but all use one rendering,
 render-unit, routing, and live-morph mechanism in one route tree:
 
 - **agent view** (`/agent/{id}`) — one agent: a large primary panel plus a right
-  rail containing every current HTML context-block render ordered by database
-  transaction recency. Selecting a rail card previews that render in the
-  primary panel; its explicit pin control keeps it selected across subsequent
-  updates. Missing and AI-only renders are omitted. The canvas is NOT a
-  `(slot :canvas)` block — it is the agent's focal surface projection.
+  rail of curated HTML renders. The rail uses the same
+  last-bytes-changed order and branch tie-clustering as context. Units that
+  would reach the generic HTML floor are hidden until this tab enables **show
+  everything**; AI-only projections remain absent from the curated rail.
+  Selecting a rail card previews that render in the primary panel; its explicit
+  focus control keeps it selected across subsequent updates. The canvas is the
+  agent's focal surface projection, not a renderer-resolution redirect.
 
   Two focus values are deliberately distinct. **Agent-derived focus** is shared
   database meaning: the agent's `:seon.render.canvas/content` pin when present,
@@ -492,18 +430,16 @@ render-unit, routing, and live-morph mechanism in one route tree:
   feed pressure on demand. It is one independently refreshed unit on the normal
   feed, persists no rolling projection, and contributes to root's AI context
   only when anomalous.
-- **debug view** (`/agent/{id}/debug`) — the exact AI context grouped into
-  collapsible blocks, with HTML twins alongside when present. It also derives
-  the total prompt token estimate, per-block token breakdown, cache boundary,
-  agent state, and turn diagnostics. It is available for every agent and does
-  not alter the prompt. Its page GET is an empty shell: the feed renders AI
-  once, retains the exact assembled prompt behind a lazy raw unit, and exposes
-  source-block bodies plus HTML twins as closed stubs. HTML discovery projects
-  metadata only; opening one twin materializes only that current renderer.
-  Raw AI disclosures are lazy slices of the already acquired prompt result,
-  not independent database render units; opening one performs no authored invocation.
-  It uses the same Datastar subscription graph and activation endpoint as every
-  other live page, not a provenance-routed debug interest. With no open page it
+- **debug view** (`/agent/{id}/debug`) — a read-only walk beginning at that
+  agent's entity through the one merged structural floor. It is always
+  available alongside the curated page, drillable by preserved refs and
+  `get-in` paths, and shows schema'd system apparatus as well as domain data.
+  The view exposes AI/HTML projections, total and per-unit token estimates,
+  dependency commit IDs, conservative/code revisions, digest,
+  last-bytes-changed order, agent state, and turn/error-routing diagnostics.
+  It ignores the curated page's floor-visibility checkbox and never transacts a
+  display choice. Its page GET remains an empty shell and uses the same
+  Datastar subscription graph as every other live page; with no open page it
   owns no database interest or render work.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol executed by the cluster JVM with the one
@@ -657,16 +593,18 @@ move.
 
 The live channel uses `core.async.flow` graphs inside the cluster JVM:
 
-1. a transaction commits and `listen!` wakes only matching registrations
-   through a `(sliding-buffer 1)` interest channel;
-2. the render proc runs each affected agent-authored renderer through the one
-   `seon.sci.eval/evaluate` path: `fork`, `:interrupt-fn`, admission, and
-   bounded output;
-3. the registration compares the completed Clojure value with its current
-   process-local snapshot using `=` and suppresses equal output;
-4. a `mult` fans each changed stable-ID element patch to one per-tab
+1. a transaction commits and offers a coalesced wake through a
+   `(sliding-buffer 1)` channel;
+2. the walk dumbly invokes each discovered renderer call; its per-call cache
+   answers immediately unless a dependency commit ID differs by `not=`, the
+   conservative revision moved, or the process-local code revision moved;
+3. first-party walk/render work runs on correctly classified Flow procs, while
+   agent-authored calls cross the bounded SCI launcher with `:interrupt-fn`,
+   invocation-class `time-limit`, admission, and output caps;
+4. the cache compares the completed bytes/digest and suppresses equal output;
+5. a `mult` fans each changed stable-ID element patch to one per-tab
    `(sliding-buffer 1)` tap for each visible render unit; and
-5. one connection-owned virtual thread per tab reads its tap and batches
+6. one connection-owned virtual thread per tab reads its tap and batches
    available Datastar element patches onto that tab's single SSE connection,
    with bounded writes.
 
@@ -675,16 +613,19 @@ the interest and render procs, their `step-fn`s, bounded channels, and `conns`.
 A tab is deliberately NOT a graph: connections churn with browsers while graph
 topology is static, so opening a tab taps the `mult` and starts one virtual
 thread that owns the SSE connection; closing the tab untaps and ends it.
-Core.async's `executor-for :compute` runs guarded render work; socket writes
-park their virtual threads. Each graph's report
-channel and unmodified `flow-monitor` are the operational and visualization
-surfaces. Flow channels are disposable in-process scheduling state, never a
-second database work ledger.
+Scheduling is global Flow policy, never a render-local scheduler. Blocking-only
+walk/read leaves use `:io`, units proven entirely compute use `:compute`, and
+mixed or unresolved work uses fail-closed `:mixed`; socket writes park their
+connection-owned virtual threads. The bounded compute executor remains fair
+when one agent floods wakes. Each graph's report channel and unmodified
+`flow-monitor` are the operational and visualization surfaces. Flow channels
+are disposable in-process scheduling state, never a second database work
+ledger.
 
-**Nothing rendered is stored.** The equality snapshot exists only in the
-registration's memory. Restart discards it and performs one render for every
-pinned canvas at boot. There is no stored render snapshot, presentation
-attribute, or replay log for display output.
+**Nothing rendered is stored.** Per-call bytes, digests, dependency commit IDs,
+and last-bytes-changed bases exist only in process memory. Restart discards the
+cache and re-derives demanded pages from facts. There is no stored render
+snapshot, presentation attribute, or replay log for display output.
 
 Streamed reply partials enter this same flow as another producer. The turn's
 provider fold reduces its byte stream for the durable terminal reply while
@@ -702,12 +643,13 @@ elements disappear through the same unit patch. Equivalent render-unit demands
 share one evaluation before `mult` fan-out; a slow tab retains only its newest
 patch per unit through its `(sliding-buffer 1)` tap.
 
-Datahike's reverse attribute interest index selects registrations from committed
-transaction reports. Each evaluation receives the report's exact immutable
-`:db-after` value. The analyzer's `:seon.fn/read-attrs` facts remain discovery
-metadata; actual observed Datahike reads determine invalidation, and missing
-evidence widens to `:all`. A registration's in-memory equality snapshot affects
-performance only and never becomes database authority.
+Each evaluation receives a committed report's exact immutable `:db-after`
+value. A renderer's read form yields its concrete attribute dependency plan and
+pull selector. The cache keeps last-seen per-attribute commit IDs and compares
+them directly on wake; there is no writer-side reverse registration index.
+Missing evidence uses the conservative revision, and code/schema changes use
+the process-local code revision. This process-local state affects performance
+only and never becomes database authority.
 
 The shim page and feed remain distinct GET routes. http-kit and the Datastar SDK
 own the one SSE response per tab; `Accept-Encoding` remains authoritative.
@@ -726,14 +668,15 @@ results, and the same render flow derives the visible consequence.
 ## Errors render as surfaces
 
 Any render failure becomes the flat error value from [[data-model]] §6 instead
-of crashing siblings. The html render shows it as an
-**error card** — friendly message, the offending block/route name and symbol, an
-actionable hint — ancestors and siblings untouched, self-healing on the next
-render. The SAME source feeds the agent's **warnings block** (its ai render), so a
-render failure the agent owns enters its prompt as fix-oriented prose; when the
-underlying fn is fixed, both the error card and the warning vanish (pure fn of state,
-never stored). Route/layout throws flow identically via the error-catch
-middleware.
+of crashing siblings. The HTML render shows it as an **error card**—friendly
+message, offending render-call identity and symbol, actionable hint—while
+ancestors and siblings continue. At the SCI boundary the same failure enters
+durable problem routing as a fact naming the agent that ran the code. That
+agent's next context reaches it and root receives the escalation through the
+same graph; no exception crosses into a proc and no failure disappears after
+one page pass. Fixing the underlying function replaces the current error card
+on the next render, while database history retains the forensic fact.
+Agent-authored route/layout failures follow the same guarantee.
 
 ## Downstream composition
 
