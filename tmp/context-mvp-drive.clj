@@ -24,8 +24,9 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.work :as work]
-            [seon.render.block :as block]
-            [seon.render.walk :as walk])
+            [seon.config :as config]
+            [seon.render :as render]
+            [seon.sci.eval :as sci.eval])
   (:import [java.nio.charset StandardCharsets]
            [java.util Date UUID]))
 
@@ -214,47 +215,91 @@
     (stamp "SEND one-sentence task: " one-sentence-task)
     (with-redefs [ai/complete (capturing-complete ai/complete captures)]
       (send-message! connection nursery-agent-id one-sentence-task)
-      ;; The first turn must send itself a message; that durable fact opens the
-      ;; second turn. Requiring two closed runs is the live multi-turn exit.
-      (await-fact!
-       connection
-       "two nursery turns closed and no trigger remains unanswered"
-       (fn [db]
-         (let [closed (- (closed-run-count db nursery-agent-id) before)]
-           (when (and (>= closed 2)
-                      (empty? (work/unanswered-triggers db nursery-agent-id)))
-             {:context-mvp-drive/closed-turns closed})))))
-    (stamp "RUN EVIDENCE " (pr-str (run-evidence @connection nursery-agent-id)))
-    (when (< (count @captures) 2)
-      (throw (ex-info "The drive closed two runs without two provider replies."
-                      {:context-mvp-drive/captures (count @captures)})))
-    :complete))
+      ;; A self-message keeps unanswered triggers non-empty between turns. If a
+      ;; first turn closes with none, the model has already missed the exit and
+      ;; waiting on a clock would hide the experiment's actual terminal fact.
+      (let [terminal
+            (await-fact!
+             connection
+             "nursery MVP terminal condition"
+             (fn [db]
+               (let [closed (- (closed-run-count db nursery-agent-id) before)
+                     unanswered (work/unanswered-triggers db nursery-agent-id)]
+                 (cond
+                   (and (>= closed 2) (empty? unanswered))
+                   {:context-mvp-drive/outcome :complete
+                    :context-mvp-drive/closed-turns closed}
+
+                   (and (= closed 1) (empty? unanswered))
+                   {:context-mvp-drive/outcome :stopped-after-first-turn
+                    :context-mvp-drive/closed-turns closed}
+
+                   :else nil))))]
+        (stamp "RUN EVIDENCE "
+               (pr-str (run-evidence @connection nursery-agent-id)))
+        (stamp "CAPTURE COUNT " (count @captures))
+        (if (= :complete (:context-mvp-drive/outcome terminal))
+          :complete
+          (throw (ex-info "The model stopped before the multi-turn MVP exit."
+                          terminal)))))))
 
 (defn- birth-context
-  [db depth]
-  (walk/prose
-   db
-   (walk/neighborhood
-    {:seon.db/db db
-     :seon.render.walk/lookup [:seon.cluster.agent/id owner-agent-id]
-     :seon.render/distance depth
-     :seon.render/kind :seon.render/ai
-     :seon.render/floor `block/data-prose
-     :seon.render/overrides {}
-     :seon.sci.admit/caps
-     {:seon.config.eval.result/max-depth 12
-      :seon.config.eval.result/max-collection 64
-      :seon.config.eval.result/max-string 16384
-      :seon.config.eval.result/max-nodes 4096}})))
+  [db agent-id depth caps]
+  (render/call-with-walk-context
+   {:seon.db/db db
+    :seon.cluster.agent/id agent-id
+    :seon.sci.admit/caps caps}
+   #(render/walk {:root [:seon.cluster.agent/id agent-id]
+                  :depth depth})))
+
+(defn- effective-caps
+  [db]
+  (config/result-caps (config/effective db cluster-name)))
 
 (defn- print-birth-contexts!
   [connection process]
-  (ensure-agent! connection process owner-agent-id)
-  (let [db @connection]
-    (doseq [depth [1 2]]
-      (print-exact! (str "seon.flow OWNER BIRTH CONTEXT d" depth)
-                    (birth-context db depth))))
+  (doseq [agent-id [nursery-agent-id owner-agent-id]]
+    (ensure-agent! connection process agent-id))
+  (let [db @connection
+        caps (effective-caps db)]
+    (doseq [[agent-id label] [[nursery-agent-id "NURSERY"]
+                              [owner-agent-id "seon.flow OWNER"]]
+            depth [1 2]]
+      (print-exact! (str label " BIRTH CONTEXT d" depth)
+                    (birth-context db agent-id depth caps))))
   :complete)
+
+(defn- verify-agent-walk-eval!
+  [connection process]
+  (ensure-agent! connection process nursery-agent-id)
+  (let [db @connection
+        caps (effective-caps db)
+        ctx (sci.eval/fork)
+        _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
+        evaluation
+        (render/call-with-walk-context
+         {:seon.store/branch-connection connection
+          :seon.cluster.agent/id nursery-agent-id
+          :seon.sci.admit/caps caps}
+         #(sci.eval/evaluate
+           {:seon.cluster.run.form/source "(seon.render/walk)"
+            :seon.cluster.run.form/ns
+            [:seon.ns/name (agent-namespace nursery-agent-id)]
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/ctx ctx
+            :seon.cluster.agent/id nursery-agent-id
+            :seon.sci.eval/time-limit-ms 30000
+            :seon.config/on-core-error :panic}))
+        value (:seon.sci.admit/value evaluation)]
+    (when-not (and (string? value)
+                   (re-find #"root=\[:seon\.cluster\.agent/id \"context-mvp\"\]"
+                            value))
+      (throw (ex-info "Public walk was not callable through the agent eval."
+                      {:context-mvp-drive/evaluation evaluation})))
+    (print-exact! "REAL AGENT EVAL (seon.render/walk) RESULT" value)
+    (stamp "REAL AGENT EVAL capped? "
+           (:seon.sci.admit/capped? evaluation))
+    :complete))
 
 (defn- start-own-cluster!
   []
@@ -286,9 +331,11 @@
         process (cluster/process-identity (:seon.boot/advertisement instance))]
     (try
       (case mode
-        :nursery (drive-nursery! connection process)
+        :nursery (do (verify-agent-walk-eval! connection process)
+                     (drive-nursery! connection process))
         :birth (print-birth-contexts! connection process)
         :all (do (print-birth-contexts! connection process)
+                 (verify-agent-walk-eval! connection process)
                  (drive-nursery! connection process))
         (throw (ex-info "Unknown CONTEXT_MVP_MODE."
                         {:context-mvp-drive/mode mode
