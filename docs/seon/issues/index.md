@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Context instruction refs have no schema or config owner](context-instruction-refs-have-no-schema-or-config-owner.md) | blocker | context/render W1 owner gate |
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
