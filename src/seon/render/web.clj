@@ -56,11 +56,13 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
+            [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
             [seon.render.value :as value]
+            [seon.render.walk :as render.walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
@@ -397,21 +399,6 @@
               :seon.render/value (debug-value db agent-id cursor caps)}
         id (value/node-id unit path)]
     {id (hiccup/->string (block/data-panel unit))}))
-
-(defn- debug-shell
-  [agent-id cursor]
-  (let [path (:seon.render.data/path cursor)
-        unit {:seon.cluster.agent/id agent-id
-              :seon.render.value/root [:seon.cluster.agent/id agent-id]}
-        id (value/node-id unit path)
-        feed-url (route/path ::route/feed
-                             {:id agent-id}
-                             {:debug "true"
-                              :path (pr-str path)
-                              :offset (str (:seon.render.data/offset cursor))})]
-    (shell {:seon.cluster.agent/id agent-id
-            :seon.render/page [[:div {:id id :class "seon-data-panel"}]]
-            :seon.render.web/feed-url feed-url})))
 
 (defn changed
   "The patches whose bytes differ between `delivered` and `page`.
@@ -956,29 +943,101 @@
                (str "The namespace owner for " namespace-name
                     " was not created.")})))))
 
-(defn- page-request
-  [{caps :seon.sci.admit/caps process :seon.cluster.run/process} agent-id]
-  {:seon.cluster.agent/id agent-id
-   :seon.sci.admit/caps caps
-   :seon.cluster.run/live-processes #{process}})
+(def ^:private namespace-walk-options
+  {:depth 2})
+
+(defn- walk-request
+  [db caps agent-id kind]
+  {:seon.db/db db
+   :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+   :seon.render/kind kind
+   :seon.render/floor (if (= :seon.render/html kind)
+                        'seon.render.block/data-panel
+                        'seon.render.block/data-prose)
+   :seon.render/overrides {}
+   :seon.render/distance (:depth namespace-walk-options)
+   :seon.sci.admit/caps caps})
+
+(defn- walk-node-html
+  [node path]
+  (let [failure (:seon.error/value node)
+        output (:seon.render/output node)]
+    [:article {:class "seon-data-panel"
+               :data-walk-path (pr-str path)}
+     [:div {:class "seon-data-row"}
+      [:span {:class "seon-data-key"} (pr-str path)]
+      [:span {:class "seon-data-scalar"}
+       (pr-str (:seon.render.walk/lookup node))]]
+     (cond
+       failure
+       [:div {:class "seon-error-card"
+              :data-error-kind (str (:seon.error/kind failure))}
+        [:span {:class "seon-error-card-message"}
+         (:seon.error/message failure)]]
+
+       (some? output)
+       output)
+     (map-indexed
+      (fn [index child]
+        (walk-node-html child
+                        (conj path :seon.render.walk/neighbours index)))
+      (:seon.render.walk/neighbours node))]))
+
+(defn- html-walk
+  [db caps agent-id]
+  (walk-node-html
+   (render.walk/neighborhood
+    (walk-request db caps agent-id :seon.render/html))
+   []))
+
+(defn- ai-walk
+  [db caps agent-id]
+  (render/call-with-walk-context
+   {:seon.db/db db
+    :seon.cluster.agent/id agent-id
+    :seon.sci.admit/caps caps}
+   #(render/walk namespace-walk-options)))
 
 (defn- page-response
-  [{:keys [:seon.store/connection] :as service} agent-id]
-  {:status 200
-   :headers {"content-type" "text/html; charset=utf-8"}
-   :body (shell {:seon.cluster.agent/id agent-id
-                 :seon.render/page
-                 (block/page @connection (page-request service agent-id))
-                 :seon.render.web/feed-url
-                 (route/path ::route/feed {:id agent-id})})})
-
-(defn- debug-response
-  [agent-id request]
-  (let [query (query-params request)
-        cursor (data/parse-cursor (get query "path") (get query "offset"))]
+  [{:keys [:seon.store/connection]
+    caps :seon.sci.admit/caps}
+   agent-id]
+  (let [db @connection]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
-     :body (debug-shell agent-id cursor)}))
+     :body (shell {:seon.cluster.agent/id agent-id
+                   :seon.render/page
+                   [(html-walk db caps agent-id)]
+                   :seon.render.web/feed-url
+                   (route/path ::route/feed {:id agent-id})})}))
+
+(defn- debug-response
+  [{:keys [:seon.store/connection]
+    caps :seon.sci.admit/caps}
+   agent-id]
+  (let [db @connection
+        ai (ai-walk db caps agent-id)
+        html (html-walk db caps agent-id)]
+    {:status 200
+     :headers {"content-type" "text/html; charset=utf-8"}
+     :body
+     (shell
+      {:seon.cluster.agent/id agent-id
+       :seon.render/page
+       [[:section {:class "seon-debug-walk"
+                   :style "display:grid;grid-template-columns:1fr 1fr;min-height:0"}
+         [:section {:id (str "debug-ai-" agent-id)
+                    :style "min-width:0;overflow:auto"}
+          [:h2 ":seon.render/ai"]
+          [:pre ai]]
+         [:section {:id (str "debug-html-" agent-id)
+                    :style "min-width:0;overflow:auto"}
+          [:h2 ":seon.render/html"]
+          html]]]
+       :seon.render.web/feed-url
+       (route/path ::route/feed
+                   {:id agent-id}
+                   {:debug "true" :path "[]" :offset "0"})})}))
 
 (defn- canonical-namespace-response
   [{:keys [:seon.store/connection] :as service} debug? request]
@@ -989,7 +1048,7 @@
       (let [owner (ensure-namespace-owner! service namespace-name)]
         (if (string? owner)
           (if debug?
-            (debug-response owner request)
+            (debug-response service owner)
             (page-response service owner))
           {:status 500
            :headers {"content-type" "text/plain; charset=utf-8"}
@@ -1000,7 +1059,7 @@
   (let [agent-id (get-in request [:path-params :id])]
     (if (agent-namespace @connection agent-id)
       (if debug?
-        (debug-response agent-id request)
+        (debug-response service agent-id)
         (page-response service agent-id))
       (not-found request))))
 

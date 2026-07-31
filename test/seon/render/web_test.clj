@@ -37,6 +37,7 @@
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.flow :as flow]
+            [seon.render :as render]
             [seon.render.agent :as render.agent]
             [seon.render.block :as block]
             [seon.render.root :as root]
@@ -359,15 +360,16 @@
 ;;; The document
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-page-places-every-surface-at-its-own-id
+(deftest the-namespace-page-is-the-html-walk
   (with-server two-blocks
     (fn [_connection server _context]
       (let [response (fetch server "/")
             body (.body response)]
         (is (= 200 (.statusCode response)))
-        (is (str/includes? body "id=\"surface-banner\""))
-        (is (str/includes? body "id=\"surface-counter\"")
-            "each block is its own morph target from the first paint")
+        (is (str/includes? body "data-walk-path=\"[]\""))
+        (is (str/includes? body "Agent root is idle."))
+        (is (str/includes? body "id=\"surface-transcript\"")
+            "the HTML projection includes the total walked neighbourhood")
         (is (str/starts-with? body "<!doctype html>"))))))
 
 (deftest the-feed-opener-is-a-sibling-of-the-morph-targets
@@ -398,10 +400,34 @@
                     [(block-map :banner 0 `banner-html)]}])
       (let [root (.body (fetch server "/"))
             other (.body (fetch server "/agent/agent-b"))]
-        (is (str/includes? root "surface-counter"))
-        (is (not (str/includes? other "surface-counter"))
-            "a different agent's page differs only in its block DATA")
-        (is (str/includes? other "surface-banner"))))))
+        (is (str/includes? root
+                           "[:seon.cluster.agent/id &quot;root&quot;]"))
+        (is (str/includes? other
+                           "[:seon.cluster.agent/id &quot;agent-b&quot;]"))
+        (is (str/includes? other "Agent agent-b is idle.")
+            "the alias selects a different root for the same HTML walk")))))
+
+(deftest debug-is-one-public-ai-walk-beside-the-html-walk
+  (with-server two-blocks
+    (fn [_connection server _context]
+      (let [calls (atom 0)
+            exact-ai "left<&\nright"]
+        (with-redefs [render/walk
+                      (fn [_options]
+                        (swap! calls inc)
+                        exact-ai)]
+          (let [response (fetch server "/agent/root/debug")
+                body (.body response)]
+            (is (= 200 (.statusCode response)))
+            (is (= 1 @calls)
+                "the left pane invokes the public walk exactly once")
+            (is (str/includes? body "id=\"debug-ai-root\""))
+            (is (str/includes? body "left&lt;&amp;\nright")
+                "HTML escaping preserves the exact AI bytes as pre text")
+            (is (str/includes? body "id=\"debug-html-root\""))
+            (is (str/includes? body "grid-template-columns:1fr 1fr"))
+            (is (str/includes? body "Agent root is idle.")
+                "the right pane is the HTML projection of the walk")))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server two-blocks
@@ -423,6 +449,8 @@
             owner (cluster.agent/owner-of @connection 'seon.flow)
             basis-after-known (:max-tx @connection)]
         (is (= 200 (.statusCode known)))
+        (is (str/includes? (.body known) "<code>seon.flow</code>")
+            "the canonical namespace page renders its owner's HTML walk")
         (is (= "seon.flow" owner))
         (is (= [process]
                (d/q '[:find [?process-id ...]
