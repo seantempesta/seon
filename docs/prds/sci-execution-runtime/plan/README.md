@@ -1532,9 +1532,21 @@ may reintroduce a shadow build into the dev feedback path.
   to see more, call it again; the explanation of the system is the
   system. Agent init: ENSURE THE ENTITY idempotently (create only if
   absent; an existing entity always RESUMES with all its facts), then
-  evaluate the walk as the episode's opening receipt. Transcript
-  aging supersedes older walk outputs. The call-grain cache stays
-  invisible underneath — performance is hidden, behavior never is.
+  evaluate the walk as the episode's opening act. The call-grain
+  cache stays invisible underneath — performance is hidden, behavior
+  never is.
+  CLARIFICATION (owner, same conversation): context ALWAYS opens with
+  exactly ONE walk — every turn re-derives it fresh at that turn's
+  basis, displayed as if the agent just issued the query; turn two
+  never re-walks-and-appends, the transcript is controlled so no
+  doubling exists. THE TRANSCRIPT IS A BRANCH INSIDE THE WALK OUTPUT
+  (the messages/runs reached from the entity), not a section after
+  it; ordering within the walk stays grouped last-changed (stable
+  branches front, churn tail, ties clustered by branch). The per-turn
+  walk output is a fresh PROJECTION, not a stored receipt —
+  what-the-agent-saw forensics is the turn-capture mechanism's job;
+  only the agent's own explicit walk calls (deeper dives it chooses)
+  are ordinary evals with ordinary receipts.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
