@@ -110,16 +110,20 @@
                    "docs/prds/sci-execution-runtime/research/"))
       (throw (ex-info "Evidence path must stay inside this repository's tmp or owning research directory."
                       {:context-mvp-drive/evidence-path evidence-path})))
-    (spit evidence-path
-          (str "---\ntype: research\nstatus: active\n"
-               "tags: [research, context, sci, mvp, evidence]\n---\n\n"
-               "# Context MVP seam proof — 2026-07-31\n\n"
-               "## Verbatim captured projections\n\n"
+    (let [evidence-file (java.io.File. evidence-path)
+          exists? (.exists evidence-file)]
+      (spit evidence-path
+            (str (when-not exists?
+                   (str "---\ntype: research\nstatus: active\n"
+                        "tags: [research, context, sci, mvp, evidence]\n---\n\n"
+                        "# Context MVP seam proof — 2026-07-31\n\n"))
+                 "## Verbatim captured projections\n\n"
                (apply str
                       (map (fn [[label text]]
                              (str "### " label "\n\n```clojure\n"
                                   text "\n```\n\n"))
-                           @exact-blocks))))
+                           @exact-blocks)))
+            :append exists?))
     (stamp "WROTE exact evidence to " evidence-path)))
 
 (defn- selected-provider-row
@@ -231,6 +235,9 @@
       (if (string? reply)
         (print-exact! (str "TURN/ATTEMPT " attempt " MODEL REPLY") reply)
         (do
+          (swap! exact-blocks conj
+                 [(str "TURN/ATTEMPT " attempt " PROVIDER VALUE")
+                  (pr-str completion)])
           (println (str "\n================ TURN/ATTEMPT " attempt
                         " PROVIDER VALUE ================"))
           (prn completion)
