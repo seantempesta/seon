@@ -207,7 +207,7 @@
           (is (str/includes? ai "No such namespace: missing.function"))
           (is (str/includes? ai ":seon.sci.eval/refused"))
           (is (str/includes? ai "problem-eval-error"))
-          (is (str/includes? ai "Its effect may have happened")))
+          (is (str/includes? ai "its effect may have happened")))
         (testing "old entries age only in the projection"
           (is (= [:summary :summary :full :full :full :full :full :full]
                  (mapv :detail ai-rows))))
@@ -308,8 +308,9 @@
         (let [ai (transcript/render-ai
                   (unit @connection 100000 narrow-caps))]
           (is (reader-valid? ai))
-          (is (str/includes? ai ":seon.sci.admit/elided"))
-          (is (str/includes? ai ":seon.sci.admit/truncated-string"))
+          (is (str/includes? ai "#:seon.sci.admit"))
+          (is (str/includes? ai ":truncated-string"))
+          (is (str/includes? ai ":elided true"))
           (is (not (str/includes? ai ":audit/field-39"))))))))
 
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set

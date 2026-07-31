@@ -353,6 +353,7 @@
   [entry]
   (cond-> {}
     (::source entry) (assoc :seon.cluster.run.form/source (::source entry))
+    (::error entry) (assoc :seon.cluster.eval/error (::error entry))
     (::error-kind entry) (assoc :seon.error/kind (::error-kind entry))
     (::problem-id entry) (assoc :seon.problems/id (::problem-id entry))
     (::interrupted-at entry)
