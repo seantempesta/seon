@@ -16,12 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (2)
+## Blocker (3)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
+| [Correct clj-kondo's `vswap!` arity before program publication](clj-kondo-vswap-arity-blocks-program-publication.md) | blocker | future analyzer wave |
 
 ## Friction (4)
 
