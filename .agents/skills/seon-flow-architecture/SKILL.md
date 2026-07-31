@@ -143,13 +143,44 @@ graph, agent lifecycle is those verbs applied to that agent's graph
 (Ruling 2026-07-31 #10, `docs/prds/sci-execution-runtime/plan/README.md:1439-1449`).
 
 **The scar behind that ruling.** The first agent-flow attempt put every agent
-into ONE graph, forcing agents to run serially; the aha — every long-running
-process is its OWN graph, controlled under the one system — is the origin of
-the 2026-07-28 agents-are-flows ruling (ADDENDUM,
-`plan/README.md:1450-1460`). The standing practice from the same addendum:
-**flow work always gets research plus a live probe before implementation —
-never write a flow mechanism from remembered semantics.** The two stale
-docstrings corrected below are the recurring proof.
+into ONE graph, forcing agents to run serially; the aha — **all longer-term
+STATEFUL processes are flows, each its own graph, controlled under the one
+system** — is the origin of the 2026-07-28 agents-are-flows ruling (ADDENDUM,
+`docs/prds/sci-execution-runtime/plan/README.md:1450-1466`). The standing
+practice from the same addendum: **flow work always gets research plus a live
+probe before implementation — never write a flow mechanism from remembered
+semantics.** The two stale docstrings corrected below are the recurring proof.
+
+### State discipline — the database, then flow's own hooks
+
+Owner correction in the same addendum
+(`plan/README.md:1457-1461`): **the state itself is stored IN THE DATABASE.**
+Where something like an atom is genuinely required, it is initialized during
+the proc's **init** phase and properly unwound in the **shutdown transition** —
+flow's own lifecycle hooks, never ad-hoc setup or teardown outside them.
+
+A step-fn is one function of four arities (`flow.clj:172-175`):
+
+| arity | when it runs | source |
+|---|---|---|
+| 0 `describe` | at `create-flow`/`process` construction, to discover channels, `:workload`, `:ping-map-fn` | `flow.clj:183-209`; `flow/impl.clj:246` |
+| 1 `init` | **once**, on the proc's own thread at `start`, before the loop — `(step args)`, args carrying `::flow/pid`. The place to acquire an atom, an external `::flow/in-ports`/`::flow/out-ports` channel, or any process-local resource | `flow.clj:211-225`; `flow/impl.clj:263` |
+| 2 `transition` | on **each actual status change** with `::flow/resume`, `::flow/pause`, or `::flow/stop` — and only when the status really changed | `flow.clj:234-243`; `flow/impl.clj:209-217` |
+| 3 `transform` | per message | `flow.clj:245`; `flow/impl.clj:304-305` |
+
+`::flow/stop` is the cleanup hook — the proc is never used again after it. It
+is invoked on the proc's own thread from whichever site saw the command
+(paused branch `flow/impl.clj:285`, running branch `:299`, mid-output `:237`)
+immediately before the loop falls out (`flow/impl.clj:321`). Two traps: there
+is **no `::flow/pause` transition at start** even though procs begin `:paused`
+(`flow/impl.clj:271`) — the first transition you see is `::flow/resume`; and
+because `transition` fires only on a real change, a repeated `pause` is a
+no-op, not a second teardown. Whatever `init` acquired, unwind it here, and
+never reach for a setup/teardown path outside these arities.
+
+Durable state is a database fact regardless. An atom in proc state is
+process-local, replaceable, and dies with the graph — if losing it would break
+recovery, it was a fact in the wrong place.
 
 Full grounding, audit and probe transcript:
 `docs/prds/sci-execution-runtime/research/flow-control-protocol-2026-07-31.md`.
