@@ -1356,6 +1356,17 @@ may reintroduce a shadow build into the dev feedback path.
   owner gate where semantics are hairy — the 2026-07-31 sci-interrupt
   episode (blocker claim → owner doubt → ground-truth lane, fix lane
   stopped pending verdict) is the recorded precedent.
+  **Ruling 2026-07-31 #6 (owner): TIME-LIMIT SMART DEFAULTS.** One
+  reasonable default limit halts everything; a function that genuinely
+  needs longer declares it with defn METADATA (lifted into the corpus
+  at index time exactly like `:seon.workload` — a computed rule, never
+  a hand list or per-site knob). 95% of functions never annotate. The
+  default is an invocation-class config fact (a render pass may carry
+  a shorter default than a turn eval — both facts under the one door's
+  dial family), and well-behaved code never waits on any timer: the
+  limit is cancelled at completion and only runaway code ever meets
+  it. Halting is bounded at runtime, never predicted. Mechanism
+  details seal after the sci-interrupt ground-truth verdict.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
