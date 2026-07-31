@@ -1,0 +1,40 @@
+:datoms 1616 :new-blobs 16 :commit {:n 20, :median-ms 98.189, :p95-ms 122.0}
+:datoms 6223 :new-blobs 18 :commit {:n 20, :median-ms 101.658, :p95-ms 115.4}
+:datoms 21337 :new-blobs 18 :commit {:n 20, :median-ms 108.352, :p95-ms 118.042}
+:datoms 60464 :new-blobs 18 :commit {:n 20, :median-ms 101.21, :p95-ms 112.122}
+:datoms 161114 :new-blobs 24 :commit {:n 20, :median-ms 125.068, :p95-ms 143.112}
+:coalescing {:callers 1, :txs 1024, :wall-ms 98173, :tx-per-s 10}
+:coalescing {:callers 4, :txs 1024, :wall-ms 72946, :tx-per-s 14}
+:coalescing {:callers 16, :txs 1024, :wall-ms 28477, :tx-per-s 36}
+:coalescing {:callers 64, :txs 1024, :wall-ms 10669, :tx-per-s 96}
+:coalescing {:callers 256, :txs 1024, :wall-ms 2942, :tx-per-s 348}
+:coalescing {:callers 1024, :txs 1024, :wall-ms 693, :tx-per-s 1477}
+:commit-wait-time 0 :serial {:n 20, :median-ms 45.205, :p95-ms 56.194}
+:commit-wait-time 0 :concurrent-64 {:callers 64, :txs 512, :wall-ms 2074, :tx-per-s 247}
+:commit-wait-time 5 :serial {:n 20, :median-ms 51.863, :p95-ms 57.069}
+:commit-wait-time 5 :concurrent-64 {:callers 64, :txs 512, :wall-ms 908, :tx-per-s 564}
+:commit-wait-time 25 :serial {:n 20, :median-ms 75.981, :p95-ms 79.992}
+:commit-wait-time 25 :concurrent-64 {:callers 64, :txs 512, :wall-ms 1087, :tx-per-s 471}
+:done
+:dir-force p2-63d9873c-ce3e-47b0-a0e7-3885474db98a grow :entries 22805 {:n 50, :median-ms 0.011, :p95-ms 0.039, :tx-per-s 90228}
+:dir-force p2-63d9873c-ce3e-47b0-a0e7-3885474db98a wait5 :entries 1045 {:n 50, :median-ms 0.011, :p95-ms 0.021, :tx-per-s 90909}
+:dir-force p2-63d9873c-ce3e-47b0-a0e7-3885474db98a conc :entries 39701 {:n 50, :median-ms 0.011, :p95-ms 0.026, :tx-per-s 89888}
+:dir-force p2-63d9873c-ce3e-47b0-a0e7-3885474db98a wait25 :entries 1045 {:n 50, :median-ms 0.01, :p95-ms 0.017, :tx-per-s 100000}
+:dir-force p2-63d9873c-ce3e-47b0-a0e7-3885474db98a wait0 :entries 1275 {:n 50, :median-ms 0.013, :p95-ms 0.106, :tx-per-s 74996}
+:dir-force store-d628a28a-7ecd-4317-bd61-44ce1e1a0c65 ks2 :entries 80 {:n 50, :median-ms 0.009, :p95-ms 0.012, :tx-per-s 113740}
+:dir-force store-d628a28a-7ecd-4317-bd61-44ce1e1a0c65 dh-hist :entries 792 {:n 50, :median-ms 0.009, :p95-ms 0.026, :tx-per-s 106191}
+:dir-force store-d628a28a-7ecd-4317-bd61-44ce1e1a0c65 dh-nohist :entries 456 {:n 50, :median-ms 0.008, :p95-ms 0.013, :tx-per-s 126326}
+:dir-force store-d628a28a-7ecd-4317-bd61-44ce1e1a0c65 ks :entries 80 {:n 50, :median-ms 0.008, :p95-ms 0.011, :tx-per-s 128337}
+:dir-force store-d628a28a-7ecd-4317-bd61-44ce1e1a0c65 dh-nosync :entries 785 {:n 50, :median-ms 0.008, :p95-ms 0.009, :tx-per-s 126310}
+:dir-force p2-68367f52-6213-438e-ab14-0df9f0832297 grow :entries 3586 {:n 50, :median-ms 0.008, :p95-ms 0.009, :tx-per-s 128353}
+:dir-force p2-2df7bac8-d90d-4b9a-9509-5120d01a6e3e grow :entries 102734 {:n 50, :median-ms 4.088, :p95-ms 4.381, :tx-per-s 245}
+A-default :datoms 21029 :new-blobs 18 {:n 25, :median-ms 99.944, :p95-ms 114.81, :tx-per-s 10}
+B-no-sync-blob :datoms 21029 :new-blobs 18 {:n 25, :median-ms 4.896, :p95-ms 6.453, :tx-per-s 204}
+C-in-place :datoms 21029 :new-blobs 18 {:n 25, :median-ms 48.449, :p95-ms 66.132, :tx-per-s 21}
+D-in-place-nosync :datoms 21026 :new-blobs 18 {:n 25, :median-ms 4.03, :p95-ms 6.98, :tx-per-s 248}
+E-no-history :datoms 21010 :new-blobs 9 {:n 25, :median-ms 54.788, :p95-ms 62.922, :tx-per-s 18}
+F-fuse-roots :datoms 21029 :new-blobs 12 {:n 25, :median-ms 66.997, :p95-ms 75.14, :tx-per-s 15}
+G-diff-buf :datoms 21029 :new-blobs 7 {:n 25, :median-ms 44.845, :p95-ms 49.012, :tx-per-s 22}
+H-amp-all :datoms 21026 :new-blobs 2 {:n 25, :median-ms 10.064, :p95-ms 12.457, :tx-per-s 99}
+I-amp-all-nohist :datoms 21013 :new-blobs 0 {:n 25, :median-ms 9.028, :p95-ms 9.738, :tx-per-s 111}
+:done
