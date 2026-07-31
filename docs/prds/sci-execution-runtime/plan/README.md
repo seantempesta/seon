@@ -1676,6 +1676,15 @@ may reintroduce a shadow build into the dev feedback path.
   from the call context and the corpus, never a hand list. The
   call-grain render cache is what keeps guarded assembly cheap
   (cached calls skip execution entirely).
+  **Ruling 2026-07-31 #22 (owner): ANY REFUSED FORM CONTINUES THE
+  EPISODE.** A turn containing ≥1 lint-refused form does not end the
+  episode: the loop opens the next turn immediately — the refusal
+  findings render in that walk's transcript branch, the agent fixes
+  and retries — bounded by the existing episode cap. This includes
+  the mixed case (some forms succeeded, one refused): the observed
+  MVP drive failure was exactly 1 success + 1 arity refusal ending
+  the episode with the intent dropped. The refusal steering already
+  existed as data; this ruling makes the turn that reads it exist.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
