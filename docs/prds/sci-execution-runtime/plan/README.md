@@ -1301,6 +1301,21 @@ may reintroduce a shadow build into the dev feedback path.
   message finds the front naturally because it never changes.
   Banding/hysteresis waits for a MEASURED oscillation; authored bands
   retire from context assembly.
+  **Ruling 2026-07-31 #3 (owner): SCHEDULING IS GLOBAL, THROUGH FLOW —
+  no render-local scheduling.** The reason the agent graph grew extra
+  channels was computation scheduling; that concern is pulled OUT of
+  the render/context design and treated globally. The rule stays the
+  derived classification: leaves proven blocking-only → `:io`
+  (virtual threads), units 100%-known compute → `:compute` (bounded ≈
+  cores), everything else → `:mixed` (fail-closed, its own platform
+  thread — the incentive to annotate). The system NEVER locks up
+  because one agent consumes the resources: flow already solves this
+  and is already in use — the render/context wave's obligation is to
+  PROVE it is used right (correct workload tags on every render/walk/
+  delivery proc, no blocking on `:compute`, no compute on `:io`,
+  fairness under one flooding agent), grounded in
+  workload-classification-2026-07-28.md and
+  workload-scheduling-truth-2026-07-29.md, never a new mechanism.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
