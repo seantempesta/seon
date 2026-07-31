@@ -1,27 +1,73 @@
 (ns seon.cluster.instruction-test
   "Computed cluster context membership and idempotent entity initialization."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
+            [clojure.tools.reader :as reader]
+            [clojure.tools.reader.reader-types :as reader-types]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.instruction :as instruction]
             [seon.test-support :as test-support]))
 
-(def ^:private getting-started-text
-  (str "This is a live Clojure REPL. Everything above is the output of "
-       "`(seon.render/walk)` — run it yourself with `:depth`/`:root` to "
-       "see more. Your reply is read as forms and evaluated in your "
-       "namespace. A `defn` with `:malli/schema` becomes permanent; "
-       "anything else is scratch. Talk to other agents with "
-       "`(my.message/send! …)`. Prose lines are kept as `;;` comments.\n\n"
-       "```clojure\n"
-       ";; unqualified name — it lands in YOUR namespace\n"
-       ";; the :malli/schema attr-map is what makes it permanent; without it this is scratch\n"
-       "(defn greet\n"
-       "  \"Say hello.\"\n"
-       "  {:malli/schema [:=> [:cat :string] :string]}\n"
-       "  [name]\n"
-       "  (str \"Hello, \" name))\n"
-       "```"))
+(def ^:private reader-options {:eof ::eof})
+
+(defn- code-spans
+  [text]
+  (mapv (fn [[_ fenced inline]] (or fenced inline))
+        (re-seq #"(?s)```clojure\s*(.*?)```|`([^`\n]+)`" text)))
+
+(defn- read-forms
+  [source]
+  (let [pushback (reader-types/indexing-push-back-reader source)]
+    (loop [forms []]
+      (let [form (reader/read reader-options pushback)]
+        (if (= ::eof form)
+          forms
+          (recur (conj forms form)))))))
+
+(defn- qualified-calls
+  [form]
+  (tree-seq coll? seq form))
+
+(defn- instruction-calls
+  [text]
+  (into []
+        (comp
+         (mapcat read-forms)
+         (mapcat qualified-calls)
+         (filter seq?)
+         (filter #(and (symbol? (first %))
+                       (namespace (first %))))
+         (map (fn [form]
+                {:seon.cluster.instruction/symbol (str (first form))
+                 :seon.cluster.instruction/arity (dec (count form))})))
+        (code-spans text)))
+
+(defn- function-branches
+  [spec]
+  (if (= :function (first spec)) (rest spec) [spec]))
+
+(defn- fixed-input-arity
+  [function-branch]
+  (let [input (second function-branch)
+        children (cond-> (rest input) (map? (second input)) rest)]
+    (when (contains? #{:cat :catn} (first input))
+      (count children))))
+
+(defn- call-resolution
+  [db call]
+  (let [function-symbol (:seon.cluster.instruction/symbol call)
+        function (d/pull db [:seon.fn/spec]
+                         [:seon.fn/sym function-symbol])
+        spec (some-> (:seon.fn/spec function) edn/read-string)
+        arities (into #{} (keep fixed-input-arity) (function-branches spec))]
+    (assoc call
+           :seon.cluster.instruction/spec spec
+           :seon.cluster.instruction/accepted-arities arities
+           :seon.cluster.instruction/resolved?
+           (and spec
+                (contains? arities
+                           (:seon.cluster.instruction/arity call))))))
 
 (defn- cluster-toolkit
   [db cluster-name]
@@ -38,7 +84,7 @@
   (is (re-find #"seon\.render/walk" instruction/getting-started-text))
   (is (= 1 (count (re-seq #"```clojure" instruction/getting-started-text))))
   (is (= [{:seon.cluster.instruction/id :getting-started
-           :seon.cluster.instruction/text getting-started-text}]
+           :seon.cluster.instruction/text instruction/getting-started-text}]
          (instruction/seed-rows)))
   (test-support/with-database
     (fn [connection]
@@ -63,6 +109,16 @@
                      :getting-started]
                     [?instruction :seon.cluster.instruction/text ?text]]
                   @connection))))))
+
+(deftest every-qualified-call-in-instruction-code-resolves-at-its-arity
+  (test-support/with-database
+    (fn [connection]
+      (let [calls (instruction-calls instruction/getting-started-text)
+            resolutions (mapv #(call-resolution @connection %) calls)]
+        (testing "the invariant is computed from every Clojure code span"
+          (is (seq calls))
+          (is (every? :seon.cluster.instruction/resolved? resolutions)
+              (pr-str resolutions)))))))
 
 (deftest cluster-toolkit-exactly-converges-to-the-computed-rule
   (test-support/with-database
