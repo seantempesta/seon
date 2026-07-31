@@ -19,15 +19,18 @@ agent calls over them.
 
 ## 1. TL;DR — the entity graph in one paragraph
 
-The **agent** (`:seon.agent/id`, identity) is the root. It OWNS, by
-cascade-retract component relationships, its **blocks**
-(`:seon.cluster.agent/blocks` → `:seon.render.block/block` children — the
-context units, each up to two renders)
-and its **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron
-maps). It POINTS (plain ref) at its current **run** (`:seon.agent/run`) and at
-the agent that started it (`:seon.agent/parent`), and uniquely POINTS at its
-resident program namespace (`:seon.cluster.agent/namespace` →
-`:seon.ns/name`); a run points back
+The **cluster** (`:seon.cluster/name`, identity) is the graph root for
+cluster-global facts. It points at the manifest-owned config singleton through
+`:seon.cluster/config` and at its shared instruction rows through
+`:seon.cluster/instructions`. Every **agent** is its own entity
+(`:seon.agent/id`, identity), points back to the cluster through
+`:seon.cluster.agent/cluster`, and may add instruction refs through
+`:seon.cluster.agent/instructions`. It OWNS, by a cascade-retract component
+relationship, its **schedules** (`:seon.agent/schedules` →
+`:seon.agent.schedule` cron maps). It POINTS (plain ref) at its current **run**
+(`:seon.agent/run`) and at the agent that started it (`:seon.agent/parent`), and
+uniquely POINTS at its resident program namespace
+(`:seon.cluster.agent/namespace` → `:seon.ns/name`); a run points back
 (`:seon.agent.run/agent`); **turns** point up to their run
 (`:seon.agent.turn/run`) and own their **evals**
 (`:seon.agent.turn/evals`). **Messages** (`:seon.agent.message`) and the one
@@ -68,7 +71,8 @@ its `[:or …]` body. Every ref attribute REFERENCES this shape — never inline
 `[:or :int :string …]`.
 
 A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
-`:seon.agent/run`, `:seon.agent/parent`, `:seon.cluster.agent/namespace`,
+`:seon.cluster/config`, `:seon.cluster.agent/cluster`, `:seon.agent/run`,
+`:seon.agent/parent`, `:seon.cluster.agent/namespace`,
 `:seon.agent.run/agent`,
 `:seon.agent.run/cause`, `:seon.agent.turn/run`,
 `:seon.agent.turn/cause-message`, `:seon.fn/ns`,
@@ -83,16 +87,14 @@ OWNED-children relationship: `{:seon.db/component true}` →
 to also be `:db.type/ref`, which `:seon.db/ref` provides. **Component = cascade
 retract:** on `[:db.fn/retractEntity parent]`, datahike's `retract-components`
 (in `db/transaction.cljc`) maps every component-attr datom to a child
-`retractEntity`, so retracting the agent retracts every owned block and schedule,
+`retractEntity`, so retracting the agent retracts every owned schedule,
 and retracting a turn retracts its evals. The owned-children attrs:
-`:seon.cluster.agent/blocks`, `:seon.agent/schedules`,
-`:seon.agent.turn/evals`,
+`:seon.agent/schedules`, `:seon.agent.turn/evals`,
 `:seon.render/children`. **Ground in** `transaction.cljc:730` (`retract-components`)
 and our bridge `src-old/seon/db/internal.cljs:344-350` (the component/identity facet) —
 [[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
-To REPLACE a whole component relationship (reconcile or block install/remove)
-so its owned
+To REPLACE a whole component relationship so its owned
 children match a desired set, retract the attribute with **`:db.fn/retractAttribute`**
 — only `retractAttribute` and `retractEntity` run `retract-components`; a plain
 `:db/retract` on the attribute severs the parent→child edges but leaves the child
@@ -107,8 +109,11 @@ key without first querying its eid.
 resolves its `[:seon.ns/name ...]` value to the namespace eid, then enforces
 ordinary AVET uniqueness on that eid. Consequently one namespace has at most
 one active resident agent, while messages, runs, plans, and parent refs keep
-pointing at the agent's sole upsert identity and stable eid. Namespace stewardship is sustained
-attention, never exclusive authority over shared code.
+pointing at the agent's sole upsert identity and stable eid. That ref is the
+namespace's edit owner: another agent requests a change by messaging the owner,
+and an incoming request for an unowned namespace creates and assigns an owner
+agent on demand. Ownership coordinates changes; it does not create a private
+copy of shared code.
 Changing that ref is an ordinary transaction, not a new identity. Its
 transaction is compared with the latest successful eval transaction to derive
 the next current namespace, so reassignment needs no mutable runtime flag and
@@ -136,6 +141,8 @@ value either satisfies its owning identity schema or is rejected.
 
 | identity attr | malli shape | datahike valueType | role |
 |---|---|---|---|
+| `:seon.cluster/name` | `[:string {:seon.db/identity true}]` | `:db.type/string` | cluster entity natural key within its branch |
+| `:seon.cluster.instruction/id` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | shared instruction natural key |
 | `:seon.agent/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/human-readable} :seon.db.id/agent-value]` | `:db.type/string` | readable agent natural key; `root` is reserved, not generated |
 | `:seon.agent.interaction/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact authored-interaction key; shares an entity with its run identity |
 | `:seon.agent.run/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/compact} :seon.db.id/compact-value]` | `:db.type/string` | compact **fencing token** |
@@ -202,20 +209,20 @@ attribute. The request ID remains on the transaction response and receipt
 recovery operations. Selective database events carry their interest's existing
 request ID and never expose the mutation receipt or rebuild a local replica.
 
-`:seon.render.block/name` is NOT an identity (see §4.2): it is a plain
-`:keyword`, a
-per-agent upsert key, not a global identity.
-
 ### 2.3 symbol-as-value — late binding to the program graph (NOT a ref)
 
-A render fn, a route handler, and a schedule fn are stored as **symbol values**,
-resolved late at use time through `seon.render.core/resolve-compiled`. They are
-NOT datahike
-refs — there is no entity to point at; the symbol names a var in the running
-program, which the program-graph entities (`:seon.fn`, `:seon.ns`) also describe,
-but the binding is by NAME at call time, not by eid at write time. This is what
-lets an agent transact `:seon.render/html 'my.agent.abc/status-surface` before (or
-after) the fn exists, and lets a redefine take effect with no re-transact.
+A route handler and schedule function may be stored as **symbol values**. They
+are NOT Datahike refs: the symbol names a binding described by the program
+graph, and the owning execution boundary resolves it at use time. Render
+resolution is stricter: explicit render keys on a value win, while a governing
+namespace's same-schema renderer is selected by a query over function facts.
+Agent-authored functions execute as installed SCI values through the one SCI
+door, never through `requiring-resolve` or a direct host-Var call.
+
+A nonidentical base-Var redefinition is accepted and emits the ordinary
+Clojure-style shadowing warning. The new definition becomes both the live
+binding and the current exact program fact; redefining never requires a second
+render-registration transaction.
 
 Two storage encodings, both VALUES:
 
@@ -455,11 +462,44 @@ though it is a `:map` the bridge cannot store: it is never transacted as an enti
 attr, so it never hits the bridge. Only transacted attributes must be
 bridge-storable. See [[library-grounding]].
 
-### 4.1 agent — `:seon.agent/*`
+### 4.1 cluster, instructions, and agents
+
+One cluster branch has one cluster entity. Its natural key is the cluster name;
+it points at the exact manifest-owned config singleton without putting
+accreted runtime facts on that singleton. The shared instruction ref set lives
+on the cluster entity and every agent points back to the cluster.
+
+| attribute | malli | datahike facet | notes |
+|---|---|---|---|
+| `:seon.cluster/name` | `[:string {:seon.db/identity true}]` | string / one / identity | one cluster entity per branch |
+| `:seon.cluster/config` | `:seon.db/ref` | ref / one | → the manifest-owned config singleton |
+| `:seon.cluster/instructions` | `[:set :seon.db/ref]` | ref / many | authoritative shared instruction set |
+
+An instruction is an independently identified shared entity. The cluster
+population creates the system message, reply grammar, messaging/declining
+grammar, and imported global-instruction rows. Editing an instruction mutates
+its text datom in place; no version row or repointed ref is created. Datahike
+history preserves the prior value for forensics.
+
+| attribute | malli | datahike facet | notes |
+|---|---|---|---|
+| `:seon.cluster.instruction/id` | `[:keyword {:seon.db/identity true}]` | keyword / one / identity | stable instruction identity |
+| `:seon.cluster.instruction/text` | `[:string {:min 1}]` | string / one | current instruction bytes, mutated in place |
+
+The `:seon.cluster.instruction/instruction` entity schema attaches the ordinary
+`:seon.render/ai` and `:seon.render/html` defaults. Both projections therefore
+use the same walk, per-call cache, error handling, and ordering as any other
+renderable data. The refs are plain refs because instruction rows are shared;
+retracting an agent never deletes an instruction.
+
+Every agent remains its own entity. There is no cluster-wide agent record and
+no agent discriminator on the cluster entity.
 
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.agent/id` | `[:and {:seon.db/identity true :seon.db.id/generator :seon.db.id.generator/human-readable} :seon.db.id/agent-value]` | string / one / identity | readable agent identity; reserved `root` is reconciled |
+| `:seon.cluster.agent/cluster` | `:seon.db/ref` | ref / one | → this agent's cluster entity |
+| `:seon.cluster.agent/instructions` | `[:set :seon.db/ref]` | ref / many | optional additive instruction refs; shared cluster refs remain authoritative |
 | `:seon.cluster.agent/namespace` | `[:and {:seon.db/unique true} :seon.db/ref]` | ref / one / unique value | required at formal creation; → the one `:seon.ns` entity this agent owns; ordinary transact reassigns it |
 | `:seon.agent/parent` | `:seon.db/ref` | ref / one | optional; → the agent that started this one (absent on the root agent — the base case) |
 | `:seon.agent/run` | `:seon.db/ref` | ref / one | optional; → current run; the fencing pointer + derived-state spine |
@@ -469,7 +509,6 @@ bridge-storable. See [[library-grounding]].
 | `:seon.agent.runtime/wake?` | `:boolean` | boolean / one | optional; false suppresses the process-local inbound listener while preserving manual hosting; absence means true |
 | `:seon.eval/home-requires` | serialized require-spec vector | string (EDN) / one | optional; exact per-agent home namespace declaration selected at birth and read during runtime reconstruction |
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
-| `:seon.cluster.agent/blocks` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | **historical** (superseded 2026-07-31 — see §4.2): the seeded block collection; membership is now derived by the entity walk |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
 | `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; generic entity-render override, not the focal canvas pin |
 | `:seon.render.canvas/content` | `:seon.render.canvas/content` | string (EDN) / one | optional; literal hiccup or qualified renderer symbol explicitly pinning the focal canvas; absence derives focus |
@@ -482,62 +521,21 @@ everything else optional. **State is derived, never stored** — there is no
 `:seon.agent/run` / `:seon.agent/parent` / `:seon.agent/terminated-at` lives in
 [[agent-runtime]].
 
-### 4.2 block — `:seon.render.block/block`
+### 4.2 render units are derived, not entities
 
-> **Superseded by the 2026-07-31 rulings**
-> (`docs/prds/sci-execution-runtime/plan/README.md`). Block MEMBERSHIP and
-> ORDER are now derived by the recursive entity walk and the last-change
-> transaction basis; the stored `:seon.cluster.agent/blocks` collection,
-> `:seon.render.block/priority`, `:seon.render.block/band`, and
-> `seon.render.block/install-tx` are retired as a second assembly path. The
-> attribute table below records the pre-ruling contract and is HISTORICAL; the
-> replacement facts land with the render/context contract rewrite. What
-> survives unchanged: a block is one render function's identified output, and
-> `:seon.render.block/name` is a plain keyword in three roles (prompt header,
-> per-agent key, DOM `#surface-<name>`), never a datahike identity.
+A block is the informal name for one render function call's identified output
+in AI and HTML. It is not a database entity or a stored data type. The recursive
+walk discovers schema'd data from the agent entity, resolves a renderer, and
+derives the block's stable element id and current bytes. The process-local
+per-call cache carries its dependency attributes, last-seen attribute commit
+IDs, conservative revision, code revision, digest, and last-bytes-changed
+basis; none is durable truth.
 
-A block is one context unit: a function-of-the-DB map with up to two renders.
-Block attributes live with their code owner, `seon.render.block`, and each
-agent owns its complete component collection through
-`:seon.cluster.agent/blocks`.
-
-| attribute | malli | datahike facet | notes |
-|---|---|---|---|
-| `:seon.render.block/name` | `:keyword` | keyword / one | per-agent upsert key; prompt header + DOM `#surface-<name>` — **NOT a datahike identity** |
-| `:seon.render.block/priority` | `:int` | long / one | prompt order AND default scroll order |
-| `:seon.render.block/band` | `[:enum :anchor :program :authored :continuity :dynamic]` | keyword / one | optional semantic cache/order band; absent means `:dynamic` |
-| `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the prompt-text render |
-| `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; present ⇒ a surface |
-
-```clojure
-;; ns seon.render.block
-(schema/register! :seon.render.block/block
-  [:map
-   [:seon.render.block/name     :seon.render.block/name]
-   [:seon.render.block/priority :seon.render.block/priority]
-   [:seon.render/ai             {:optional true} :seon.render/ai]
-   [:seon.render/html           {:optional true} :seon.render/html]
-   [:seon.render.block/band     {:optional true} :seon.render.block/band]])
-```
-
-**Seed-copy, one collection.** ALL blocks are seeded into the agent's own
-`:seon.cluster.agent/blocks` component collection at creation; render reads
-that COMPLETE collection sorted by `:seon.render.block/priority`. There is no
-render-time merge over a separate default set — each agent owns its complete
-block set. Each block is its own component entity, so it cascade-retracts with
-the agent. The pure `seon.render.block/install-tx` derivation and the
-priority-sort render are owned by [[ui]].
-
-**Name is a plain `:keyword`, not a datahike identity.** If it were
-`{:seon.db/identity true}` the uniqueness would be GLOBAL, and two agents could
-not both own a `:transcript` block (the second upsert would steal the first's
-eid). "Upsert by name" is an application-level merge WITHIN one agent's set, not
-a datahike identity upsert. The block schema REFERENCES the registered
-`:seon.render/ai` / `:seon.render/html` shapes — it never re-inlines
-`[:or :symbol :string]` (that would drift from the bridge's EDN-encoding
-detection, which keys off the registered form). The block carries no `:kind`:
-render presence (`:seon.render/ai` vs `:seon.render/html`) selects which render
-is produced (§3).
+There is no `:seon.cluster.agent/blocks` relationship and no
+`:seon.render.block/priority` or `:seon.render.block/band` attribute. Ordering
+comes from last-bytes-changed with branch tie-clustering, never a stored block
+fact. `:seon.render/ai` and `:seon.render/html` remain ordinary projection keys
+on values and schema defaults; their presence does not stamp an entity kind.
 
 ### 4.3 run — `:seon.agent.run/*`
 
@@ -885,9 +883,13 @@ the database rows are the one runtime authority. Acquisition installs aliases
 without loading their targets, orders authored namespaces by actual requires
 and refer targets, installs exact refers after their target Vars exist, then
 installs tests after all functions.
-| `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, plus source/spec/arglists/doc strings; renderer reads are runtime observations, not stored keyword literals |
+| `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, exact source/arglists/doc, and complete input/output schemas; renderer reads are runtime observations, not stored keyword literals |
 | `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | full canonical untruncated EDN form; globally identified, never namespace-owned |
 | `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`; each run references this stable declaration row |
+
+Resolving a governing namespace's renderer for a value schema is one query over
+these function rows through the ordinary query cache. There is no renderer
+registry or hand-maintained symbol list.
 
 Test outcomes are append-only observations, never last-passed/last-failed
 attributes on the declaration:
@@ -1034,8 +1036,7 @@ datahike's `retract-entity` (`transaction.cljc:897`) also retracts every
 incoming v-datom — the scoping edges vanish and the rows are ORPHANED: their own
 datoms survive, they match no agent-scoped read, and history keeps everything
 (`db/as-of` recovers). Component cascade is reserved for OWNED bounded sets
-(`:seon.cluster.agent/blocks`, `:seon.agent/schedules`), never for open-ended
-domain data.
+such as `:seon.agent/schedules`, never for open-ended domain data.
 
 ### 5.2 my.kb — the global knowledge base (no agent ref)
 
@@ -1053,9 +1054,10 @@ arglist). The worked shape is claim + graded provenance:
 (schema/register! ::claim [:string {:seon.db/identity true}])  ; upsert key
 ```
 
-`my.kb.shared` is the append-only shared-instructions singleton, identified by
-its `::shared` identity attribute and owning an `::instructions` component
-vector.
+`my.kb.shared` is the append-only shared-knowledge singleton, identified by its
+`::shared` identity attribute and owning an `::instructions` component vector.
+Those domain instructions are knowledge-base content, not the cluster's
+agent-context instruction rows from §4.1.
 
 ### 5.3 my.plan — the per-agent planning graph
 
@@ -1167,15 +1169,15 @@ mechanism are refined in place rather than replaced:
   requires the original file path;
 - tx metadata records who/process imported it; no provenance attributes are
   duplicated on the skill entity; and
-- `load`/`unload` remain explicit overrides over the one
-  installed block collection. Loaded state is derived from block
-  presence, never stored as a flag.
+- explicit context selection adds or retracts an ordinary ref on the agent
+  entity. The same recursive walk reaches the referenced schema'd data; no
+  installed-block collection or second assembly path exists.
 
-The default and test context trees contain no skills context block. Importing
-skill source therefore consumes no standing prompt tokens. Dynamic context, namespace
-cards/current source, and state-gated blocks remain responsible for normal
-capability discovery; explicit loading is available when a user or agent truly
-wants the source in context. `.agents/skills`, `seon-skills`, and
+The default and test context trees carry no skill refs. Importing skill source
+therefore consumes no standing prompt tokens. Dynamic context, namespace
+cards/current source, and state-gated render units remain responsible for
+normal capability discovery; explicit loading is available when a user or
+agent truly wants the source in context. `.agents/skills`, `seon-skills`, and
 `.claude/skills` resolve to one checked-in skill tree. The latter two paths are
 links for their runtime and Claude consumers, so no copied adapter can drift.
 
@@ -1190,7 +1192,10 @@ the path. The manifest is an operation input, never a runtime dependency:
 `resolve-config-singleton` resolves every knob (environment overrides manifest,
 which overrides defaults) and the exact population reconciler restores them as
 one `:seon.config` singleton entity (`[:seon.config/id "cluster"]`)—every dial a
-datom. No selection means no config transaction; it is not an empty manifest and
+datom. The cluster entity points at this singleton through
+`:seon.cluster/config`. Shared instructions and their ref set remain separate
+cluster facts, so exact manifest reconciliation never retracts accreted context
+data. No selection means no config transaction; it is not an empty manifest and
 does not fall back to `config/system.edn`. After a successful apply, later
 config-free boots use the committed database facts.
 
@@ -1206,9 +1211,10 @@ a valid explicitly selected desired value; an unknown key fails loud. The full b
 mechanics and replay-visible + live-tunable dials live in [[context]]
 §"Config-through-DB"; this section is the schema of record.
 
-Config owns only its declared populations/attributes. A selected startup or explicit apply
-retracts omitted managed values and stale exclusive rows, repairs partial state,
-and submits nothing when equal; agents/messages/plans/knowledge and every other
+Config owns only its declared populations/attributes. A selected startup or
+explicit apply retracts omitted managed values and stale exclusive rows,
+repairs partial state, and submits nothing when equal; the cluster entity,
+instruction rows and refs, agents, messages, plans, knowledge, and every other
 outside fact survive untouched. The resulting transaction is `{user root,
 process config}`. The compiler reads one immutable database value and sends its
 basis as `:seon.db/expected-basis-t`; Datahike checks that full-head precondition
@@ -1243,8 +1249,7 @@ section schemas remain colocated with `seon.config.resolve`.
    [:seon.ai/reply-evaluation     {:optional true} :seon.ai/reply-evaluation]      ; :batch | :first-form (orthogonal to streaming)
    [:seon.config/namespaces       {:optional true} :seon.config/namespaces-spec]   ; which nses render full
    [:seon.config/routes           {:optional true} [:vector :seon.config/route-spec]]
-   [:seon.config/render           {:optional true} :seon.config/render]            ; the render caps (EDN/eval/message/value…)
-   [:seon.config/system-text      {:optional true} :seon.config/system-text]       ; the system-prompt string → the datom
+   [:seon.config/render           {:optional true} :seon.config/render]            ; render caps + invocation-class time limits
    [:seon.config/on-core-error    {:optional true} :seon.config/on-core-error]     ; :crash | :gate | :log (the ONE fault dial)
    [:seon.config/web              {:optional true} :seon.config/web-spec]
    [:seon.config/repair           {:optional true} :seon.config/repair]
@@ -1252,42 +1257,34 @@ section schemas remain colocated with `seon.config.resolve`.
    [:seon.config/watchdog         {:optional true} :seon.config/watchdog]
    [:seon.config/schedule-breaker {:optional true} :seon.config/schedule-breaker]
    [:seon.config/model-variants   {:optional true} :seon.config/model-variants-spec] ; named sparse birth-time agent model attrs
-   [:seon.config/agent-context    {:optional true} :seon.config/agent-context]     ; the per-agent block tree + dials
-   [:seon.config/skills-dir       {:optional true} :seon.config/skills-dir]        ; importable SKILL.md source directory
-   [:seon.config/root-context     {:optional true} :seon.config/root-context]])    ; root block reconciliation + complete home-require scalar
+   [:seon.config/skills-dir       {:optional true} :seon.config/skills-dir]])      ; importable SKILL.md source directory
 ```
 
-Each key resolves onto the flat `:seon.config/singleton` entity (`config.cljs`,
-every knob `{:optional true}`, `:seon.config/id` the only required key), so the
-render caps, the reply facts, `system-text`, `on-core-error`, and the multi-agent
-dials are all datoms acquired with the agent turn's other database inputs.
-The singleton owns `:seon.config/agent-context` and
-`:seon.config/root-context` through cardinality-one component refs. Its
-context profiles, provider descriptors, model variants, and render-context
-file fingerprints are component sets whose child identities—not pull order—
-select their values.
+Each key resolves onto the flat `:seon.config/singleton` entity, with
+`:seon.config/id` as the only required key. Render caps, reply facts,
+`on-core-error`, and multi-agent dials are datoms acquired with the agent turn's
+other database inputs. Provider descriptors and model variants are component
+sets whose child identities—not pull order—select their values. System and
+global instruction bytes live only in `:seon.cluster.instruction` rows reached
+through the cluster entity; config does not keep a second prompt-text or block
+tree authority.
 `resolve-routes`
 produces canonical desired maps reconciled exactly when selected; absence from the
 final route population means removal. The optional skills section is an
 **import input**, not a loadout: it freezes and validates selected `SKILL.md`
-bytes into canonical database facts during apply, while the agent's skills
-context block remains absent unless explicitly installed. Later config-free
+bytes into canonical database facts during apply, while the agent has no skill
+ref unless explicitly selected. Later config-free
 boots use those facts and do not reread the directory. A selected manifest is
 the single env surface (its `#env` tags let a var override a manifest default).
 `SEON_PROFILE` / aero `#profile` is INERT — variants are separate manifest FILES
 selected by `SEON_CONFIG`, never in-file profiles.
 
-Root context has two deliberately different reconciliation shapes. Named block
-data follows the one block-population reconciliation rule. Root's
-home-require value is one complete curated scalar replacement; it is never
-unioned with the ordinary agent workbench.
-
 **Per-test / per-cluster recipe** — name your own manifest, zero src edits:
 
-- `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own
-  context / routes / render caps (pins `:batch`).
-- `bin/seon restart --config config/minimal.edn` — the minimal-tree
-  variant (`#include`s `system.edn`, inherits the current system-text).
+- a focused test selects its own manifest and therefore owns its reply mode,
+  routes, and render caps without changing source;
+- a minimal cluster population seeds a smaller authoritative instruction ref
+  set on its cluster entity rather than a manifest-declared block tree; and
 - A downstream repository selects its own manifest and curates its cluster
   independently; consumer-specific paths and launch commands stay downstream.
 
@@ -1332,11 +1329,17 @@ loop is owned by [[agent-runtime]].
 
 ### 6.1 Persistence per carrier
 
-- **Returned render / transact / capability errors** are transient in-memory
-  flat error values—constructed at the failure site, surfaced by a render or
-  a check, gone next render (self-healing). When a catch site calls
-  `seon.error/record!`, it also persists the bounded forensic projection below;
-  the transient envelope itself is never stored.
+- **Every agent-code failure**—eval, AI renderer, or HTML renderer—is wrapped
+  and caught at the one SCI execution boundary. The immediate result is a flat
+  error value, and the same failure always becomes a bounded durable error fact
+  routed through `:seon.error/agent` to the agent that ran the code. That
+  agent's next context reaches the fact; root reaches it through the same
+  problem-routing graph. Persistence is part of the guarantee, never an
+  optional catch-site decision.
+- **Returned transact and capability errors** remain flat in-memory values when
+  no agent-code boundary owns them. The eval that receives one records it in
+  its durable result/receipt. Core faults follow the separate fault-committer
+  path and configured escalation policy.
 - **The eval error is PERSISTED** as `:seon.eval/error` (the rendered headline) +
   `:seon.eval/error-data` (EDN of the structured payload) on the `:seon.eval`
   row (§4.9) — the durable log the runtime warn-checks query.
@@ -1348,6 +1351,7 @@ the presence of `:seon.error/fault` and carrying only EDN-safe projections:
 | attribute | malli | datahike facet | notes |
 |---|---|---|---|
 | `:seon.error/fault` | `[:enum :agent :core]` | keyword / one | fault population |
+| `:seon.error/agent` | `:seon.db/ref` | ref / one | optional route to the agent that executed the code; root derives escalation from the same fact |
 | `:seon.error/message` | `:string` | string / one | bounded deepest-cause headline |
 | `:seon.error/kind` | `:keyword` | keyword / one | optional diagnostic value enum |
 | `:seon.error/db` | `:seon.db/database-value` | ordinary encoded map / one | complete catch-site database value |
@@ -1394,9 +1398,8 @@ vector of pure `(db) → ::check-response` fns. Each response:
 surface vanishes when the problem is fixed (self-healing; never stored; a pure fn
 of the db). A check that THROWS becomes its own `:warn-check-error` cluster so one
 broken check can't blank the block. **Errors are just a handful of checks** among
-many — the runtime-error checks read the persisted eval-log error datoms
-(`:seon.eval/ok? false` + `:seon.eval/error`); a render-health check aggregates
-the transient render error values; the rest surface non-errors (perf,
+many — runtime checks read persisted eval and routed error facts; the rest
+surface non-errors (perf,
 lint, test status, message routing, unresolved surfaces).
 
 **Failure-site → surface (by carrier).** Every site catches, names a carrier, and
@@ -1404,15 +1407,15 @@ reaches at least one agent-visible AND one human-visible surface.
 
 | failure site | carrier | agent-visible | human-visible |
 |---|---|---|---|
-| **render** (block ai/html throws, missing symbol, execution deadline/exit) | transient flat error under the `:seon.render/error` key; an interrupted invocation also has durable eval/turn/run recovery facts | warnings block (render-health check) and the next-turn recovery section | the in-place error card (siblings untouched) |
+| **render** (block ai/html throws, missing symbol, `time-limit`) | flat error result + durable `:seon.error` fact routed by `:seon.error/agent` | that agent's next context; root receives the same problem through ordinary routing | the in-place error card (siblings untouched) |
 | **eval** (a form throws) | PERSISTED `:seon.eval/error` + `:seon.eval/error-data` | the eval's render in the transcript + the failed-eval checks | the transcript activity/error row |
 | **transact** (a tx is rejected) | transient flat database error value | the eval that called `transact!` records it | the transcript error row |
 | **capability denial** (fs / `/call` refuses) | flat error keys in the family result | the fs-denied check | the transcript error row |
 | **schema / instrumentation rejection** | `:seon.error/data` = the malli explain, under `:seon.eval/error-data` | the failed-eval check renders the structured error | the transcript error row |
 | **LLM / provider error** | `:seon.ai/error` → turn `:seon.agent.turn/status :error` | the transcript system line derived from the turn status | the same transcript line |
 | **throwing warn-check** | synthetic `:warn-check-error` cluster | the warnings block (that check degrades loudly) | the warnings surface |
-| **throwing layout / route handler** | transient flat error (same as render) | warnings block if the agent owns the route | a human error page / error card |
-| **runaway / hung eval** | run `:seon.agent.run/closed-reason :deadline-exceeded` | derived run-status surfaces “deadline exceeded” | the run-status surface |
+| **throwing layout / route handler** | flat error + durable routed fact when agent-authored | the owning agent's next context and root escalation | a human error page / error card |
+| **runaway agent code** | `interrupt!` → flat timeout error + durable routed fact | the running agent's next context and root escalation | the owning error surface |
 
 Two invariants: no agent code ever touches an SSE connection, and an
 agent-owned failure becomes a value the web UI renders. A core admission or
@@ -1425,13 +1428,14 @@ source.
 - [[architecture]] — the glossary (locked vocabulary), the cross-cutting
   principles (database-as-bus, derive-everything, failures-as-data with explicit
   core admission,
-  roles-as-capabilities, seed-copy-not-merge, code-as-data), deployment topology.
+  roles-as-capabilities, one recursive render walk, code-as-data), deployment
+  topology.
 - [[agent-runtime]] — claims / runs / turns / phases / derived-state, creation-as-idle,
   fact-first initialization, orchestrator-root lifecycle, substrate-message
   quietness, and the one execution-service contract.
-- [[ui]] — block / render / surface / slot / layout, view / root-agent-view / app,
-  reitit routing + the capability gate, the gzip-morph SSE channel, the
-  seed-copy + pure `seon.render.block/install-tx` override model.
+- [[ui]] — block / render / surface / layout, view / root-agent-view / app,
+  reitit routing + the capability gate, the selective Datastar morph channel,
+  and the one recursive entity-walk model.
 - [[toolkit]] — the `my.*` function catalog (the agent's action surface over these
   schemas).
 - [[roadmap]] — implementation state, gaps, work order, and evidence.
