@@ -156,7 +156,7 @@ reported but does not pass.
 |---|---|---|---|---|---|
 | Ollama, thinking disabled | no forms froze | none | none | 1 closed turn | incorrect: `no_code`, `no_toolkit_call` |
 | DeepSeek, before example | no; qualified `defn` lint refusal | none | opening card was read, but no settled answer | 1 closed turn | incorrect: `uncontracted_code`, `no_toolkit_call` |
-| DeepSeek, final example read | yes; installed and called by the second form | none; call lint-refused before eval | opening card was read, but no later-walk answer | 1 closed turn | incorrect: `no_toolkit_call` |
+| DeepSeek, final example read | installed; the later call did not evaluate | none; call lint-refused before eval | opening card was read, but no later-walk answer | 1 closed turn | incorrect: `no_toolkit_call` |
 
 The qualifying free probe against the same Ollama compatible endpoint returned:
 
