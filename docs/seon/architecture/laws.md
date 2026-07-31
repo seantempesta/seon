@@ -20,12 +20,13 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   standing instruction only after behavioral evidence supports it.
 - **Cache stability.** Aged transcript clips and stable-prefix material remain
   byte-identical. Eviction does not reflow retained content.
-- **Database-deterministic context body.** The same agent rendered from the
-  same immutable database value produces the same cacheable-body bytes.
-  A root-only free dynamic tail may add no more than roughly 50 estimated
-  tokens of live operational telemetry after every cache boundary; the exact
-  sent prompt blob is its historical authority. Filesystem reads and
-  process-local caches never alter the database-derived body.
+- **Explicit-input render determinism.** The same renderer function, immutable
+  database value, code revision, and explicit arguments produce the same
+  bytes. Root-only live telemetry is an ordinary first-party render unit whose
+  process-local inputs are explicit and whose output is capped at roughly 50
+  estimated tokens; nothing renders as a tail outside the block system. The
+  exact sent prompt blob is the historical authority for process-local inputs.
+  Filesystem reads and cache membership never alter database-derived calls.
 - **No synthetic compaction.** Bound raw transcript history by age and total
   rendered cost. Durable intent and knowledge live as queryable plan/database
   facts; never replace history with a model-authored summary.
