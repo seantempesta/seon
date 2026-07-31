@@ -1,6 +1,7 @@
 (ns seon.render.walk-test
   "Seeded properties for schema-derived neighbourhood membership and caps."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.set :as set]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -27,14 +28,16 @@
             node))
 
 (defn- walk-agent
-  [db agent-id caps]
+  ([db agent-id caps]
+   (walk-agent db agent-id caps 2))
+  ([db agent-id caps distance]
   (walk/neighborhood
    {:seon.db/db db
     :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
     :seon.render/kind :seon.render/ai
     :seon.render/floor 'seon.render.block/data-prose
     :seon.sci.admit/caps caps
-    :seon.render/distance 2}))
+    :seon.render/distance distance})))
 
 (defn- seed-agents!
   [connection cluster-name agent-ids]
@@ -169,15 +172,15 @@
                     (d/pull db-before [:db/id]
                             [:seon.cluster.agent/id "long-target"]))]
         (d/transact connection
-                    [{:seon.cluster.run.form/id "same-long"
+                    [{:seon.cluster.run/id "long-run"
+                      :seon.cluster.run/agent
+                      [:seon.cluster.agent/id "long-target"]
+                      :seon.cluster.run/opened-at (java.util.Date.)}
+                     {:seon.cluster.run.form/id "same-long"
                       :seon.cluster.run.form/run
                       [:seon.cluster.run/id "long-run"]
                       :seon.cluster.run.form/ordinal target
-                      :seon.cluster.run.form/source "(+ 1 1)"}
-                     {:seon.cluster.run/id "long-run"
-                      :seon.cluster.run/agent
-                      [:seon.cluster.agent/id "long-target"]
-                      :seon.cluster.run/opened-at (java.util.Date.)}])
+                      :seon.cluster.run.form/source "(+ 1 1)"}])
         (let [form-eid (:db/id
                         (d/pull @connection [:db/id]
                                 [:seon.cluster.run.form/id "same-long"]))
@@ -314,6 +317,94 @@
                   (nodes agent-walk))
             "the agent reaches a required namespace at distance two")
         (is (some #(and (= external-ns (:seon.render.walk/lookup %))
-                        (= "external.missing" (:seon.render/output %)))
+                        (.startsWith ^String (:seon.render/output %)
+                                     "(ns external.missing"))
                   (nodes agent-walk))
-            "a name-only external namespace renders its honest name")))))
+            "a name-only external namespace renders its compact card")))))
+
+(deftest namespace-detail-is-root-relative-and-members-stay-inside-the-card
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "namespace-distance")
+      (d/transact
+       connection
+       (agent/creation-tx
+        {:seon.cluster.agent/id "seon-flow-owner"
+         :seon.cluster/name "namespace-distance"
+         :seon.ns/name 'seon.flow}))
+      (let [db @connection
+            own-namespace-eid
+            (:db/id (d/pull db [:db/id] [:seon.ns/name 'seon.flow]))
+            required-namespace-eids
+            (d/q '[:find [?required ...]
+                   :in $ ?namespace
+                   :where [?namespace :seon.ns/requires ?required]]
+                 db own-namespace-eid)
+            toolkit-namespace-eids
+            (d/q '[:find [?toolkit ...]
+                   :in $ ?cluster-name
+                   :where
+                   [?cluster :seon.cluster/name ?cluster-name]
+                   [?cluster :seon.cluster/toolkit ?toolkit]]
+                 db "namespace-distance")
+            member-eids
+            (into
+             (set
+              (d/q '[:find [?function ...]
+                     :in $ ?namespace
+                     :where [?function :seon.fn/ns ?namespace]]
+                   db own-namespace-eid))
+             (map :db/id)
+             (mapcat val
+                     (select-keys
+                      (d/pull db
+                              [{:seon.ns/aliases [:db/id]}
+                               {:seon.ns/imports [:db/id]}
+                               {:seon.ns/refers [:db/id]}]
+                              own-namespace-eid)
+                      [:seon.ns/aliases :seon.ns/imports :seon.ns/refers])))
+            at-distance
+            (fn [distance]
+              (nodes (walk-agent db "seon-flow-owner" base-caps distance)))
+            d1-nodes (at-distance 1)
+            d2-nodes (at-distance 2)
+            namespace-nodes
+            (filter #(= 'seon.render.ns/render-ai
+                        (:seon.render/projection %))
+                    d2-nodes)
+            own-node
+            (some #(when (= own-namespace-eid
+                            (:seon.render.walk/lookup %))
+                     %)
+                  namespace-nodes)
+            reached-eids (into #{} (keep :seon.render.walk/lookup) d2-nodes)]
+        (testing "the root agent's own namespace is always the full tier"
+          (doseq [walk-nodes [d1-nodes d2-nodes]]
+            (let [node (some #(when (= own-namespace-eid
+                                      (:seon.render.walk/lookup %))
+                               %)
+                             walk-nodes)]
+              (is (= 1 (:seon.render/distance node)))
+              (is (.startsWith ^String (:seon.render/output node)
+                               "(ns seon.flow")))))
+        (testing "every other reached namespace is a compact card"
+          (is (seq required-namespace-eids))
+          (is (seq toolkit-namespace-eids))
+          (doseq [namespace-eid (concat required-namespace-eids
+                                        toolkit-namespace-eids)]
+            (is (some #(and (= namespace-eid
+                               (:seon.render.walk/lookup %))
+                            (= 2 (:seon.render/distance %)))
+                      namespace-nodes)))
+          (is (every? #(= 2 (:seon.render/distance %))
+                      (remove #(= own-namespace-eid
+                                  (:seon.render.walk/lookup %))
+                              namespace-nodes))))
+        (testing "namespace traversal preserves requires and absorbs members"
+          (is (seq (filter #(= :seon.ns/requires
+                              (:seon.render.walk/attribute %))
+                           (:seon.render.walk/neighbours own-node))))
+          (is (empty? (set/intersection member-eids reached-eids)))
+          (is (not (re-find #":seon\\.(?:fn/sym|ns\\.(?:alias|import|refer)/local)"
+                            (walk/prose db (walk-agent db "seon-flow-owner"
+                                                       base-caps 2))))))))))

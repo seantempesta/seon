@@ -511,6 +511,27 @@
   (reduce max 0 (map #(entity-last-changed db %)
                      (transcript-entity-ids db agent-eid))))
 
+(defn- assigned-namespace-eid
+  [db root-eid]
+  (d/q '[:find ?namespace .
+         :in $ ?agent
+         :where [?agent :seon.cluster.agent/namespace ?namespace]]
+       db root-eid))
+
+(defn- namespace-render-distance
+  [root-namespace-eid eid entity traversal-hops]
+  (if (contains? entity :seon.ns/name)
+    (if (= root-namespace-eid eid) 1 2)
+    traversal-hops))
+
+(defn- visible-connections
+  [entity connections]
+  (if (contains? entity :seon.ns/name)
+    (filterv #(= :seon.ns/requires
+                 (:seon.render.walk/attribute %))
+             connections)
+    connections))
+
 (defn neighborhood
   "One entity and its neighbours, rendered, as a VALUE.
 
@@ -523,9 +544,11 @@
 
   DISTANCE IS SPENT PER CONNECTION, exactly as `expand` spends it: the
   root renders at the requested distance, each neighbour one hop cheaper,
-  and a node with no hops left follows nothing. The unit carries the
-  distance so the renderer may read it — that is the whole call
-  convention, and a renderer that never looks is correct.
+  and a node with no hops left follows nothing. Namespace rendering is
+  root-relative: the root agent's assigned namespace receives distance 1,
+  while every other namespace receives distance 2. Namespace renderers
+  absorb their members; traversal preserves only `:seon.ns/requires` edges.
+  This normalization changes renderer input, never the traversal hop budget.
 
   Three bounds, none of them a clock: the hop budget (what was asked
   for), the caps' node budget (the absolute one — a graph that fans out
@@ -545,7 +568,10 @@
   (let [remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
         rendered-eids (volatile! #{})
         families (entity-families)
-        hops (long (get request :seon.render/distance 1))]
+        hops (long (get request :seon.render/distance 1))
+        root-eid (eid-of db lookup)
+        root-namespace-eid (when root-eid
+                             (assigned-namespace-eid db root-eid))]
     (letfn [(marker [lookup attribute hops failure]
               (cond-> {:seon.render.walk/lookup lookup
                        :seon.render/distance hops
@@ -632,10 +658,16 @@
                               :seon.error/message
                               (str "Nothing in the database answers to "
                                    (pr-str lookup) ".")})
-                      (let [unit (assoc pulled
+                      (let [render-distance
+                            (namespace-render-distance
+                             root-namespace-eid eid pulled hops)
+                            render-base (assoc base
+                                               :seon.render/distance
+                                               render-distance)
+                            unit (assoc pulled
                                         :seon.db/db db
                                         :seon.sci.admit/caps caps
-                                        :seon.render/distance hops)
+                                        :seon.render/distance render-distance)
                             specific (specific-projection unit kind overrides)
                             resolved (render/resolve-unit
                                       {:seon.render/unit
@@ -647,17 +679,20 @@
                             rendered (render/render
                                       {:seon.render/unit resolved
                                        :seon.render/kind kind})
-                            connections (try (refs db eid caps)
-                                             (catch Throwable failure
-                                               [{:seon.error/value
-                                                 {:seon.error/kind
-                                                  ::connections-failed
-                                                  :seon.error/message
-                                                  (str "Could not derive "
-                                                       "connections: "
-                                                       (.getMessage failure))}}]))
+                            connections
+                            (visible-connections
+                             pulled
+                             (try (refs db eid caps)
+                                  (catch Throwable failure
+                                    [{:seon.error/value
+                                      {:seon.error/kind
+                                       ::connections-failed
+                                       :seon.error/message
+                                       (str "Could not derive "
+                                            "connections: "
+                                            (.getMessage failure))}}])))
                             with-render
-                            (cond-> (assoc base
+                            (cond-> (assoc render-base
                                            :seon.render/projection chosen
                                            :seon.render/would-fall-to-floor?
                                            floor?)
@@ -681,16 +716,16 @@
                                     "elided connections at the requested distance cap"})])
 
                           :else with-render)))))))]
-      (if-let [eid (eid-of db lookup)]
-        (let [root (node lookup eid nil hops)
+      (if root-eid
+        (let [root (node lookup root-eid nil hops)
               agent-id (d/q '[:find ?id .
                               :in $ ?agent
                               :where [?agent :seon.cluster.agent/id ?id]]
-                            db eid)]
+                            db root-eid)]
           (if (and agent-id (pos? hops))
             (update root :seon.render.walk/neighbours
                     (fnil conj [])
-                    (transcript-node agent-id eid (dec hops)))
+                    (transcript-node agent-id root-eid (dec hops)))
             root))
         {:seon.render.walk/lookup lookup
          :seon.render/distance hops
@@ -718,11 +753,23 @@
   told nothing about a neighbour that exists would reason from a gap it
   cannot see. That is the same rule `seon.cluster.prompt` applies to a
   failed block."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.render.walk/node]
-                  [:maybe :string]]}
-  [db node]
-  (letfn [(units [node path depth branch]
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.render.walk/node]
+     [:maybe :string]]
+    [:=>
+     [:cat
+      :seon.db/database-value
+      :seon.render.walk/node
+      [:map {:closed true}
+       [:seon.render.walk/branch
+        {:optional true}
+        [:vector [:or :keyword :int]]]]]
+     [:maybe :string]]]}
+  ([db node]
+   (prose db node {}))
+  ([db node {requested-branch :seon.render.walk/branch}]
+   (letfn [(units [node path depth branch]
             (let [failure (:seon.error/value node)
                   output (:seon.render/output node)
                   text (cond
@@ -749,6 +796,11 @@
             (or (:seon.render/projection node)
                 (get-in node [:seon.error/value :seon.error/kind])
                 :seon.render.walk/unknown))
+          (within-branch? [path]
+            (or (nil? requested-branch)
+                (and (<= (count requested-branch) (count path))
+                     (= requested-branch
+                        (subvec path 0 (count requested-branch))))))
           (unit-lines [unit]
             (let [node (:seon.render.walk/node unit)
                   path (:seon.render.walk/path unit)
@@ -757,19 +809,25 @@
                     " depth=" depth
                     " provenance=" (pr-str (provenance node)))
                (:seon.render.walk/text unit)]))]
-    (let [root (:seon.render.walk/lookup node)
-          requested-depth (:seon.render/distance node)
-          basis (long (:max-tx db))
-          header (str ";; (seon.render/walk {:root " (pr-str root)
-                      " :depth " requested-depth "})"
-                      " => root=" (pr-str root)
-                      " basis=" basis
-                      " depth=" requested-depth)
-          ordered (sort-by
-                   (juxt (comp :seon.render.walk/changed-at
-                               :seon.render.walk/node)
-                         :seon.render.walk/branch
-                         :seon.render.walk/path)
-                   (units node [] 0 nil))
-          text (str/join "\n" (cons header (mapcat unit-lines ordered)))]
-      (when-not (str/blank? text) text))))
+     (let [root (:seon.render.walk/lookup node)
+           requested-depth (:seon.render/distance node)
+           basis (long (:max-tx db))
+           options (cond-> {:root root :depth requested-depth}
+                     (some? requested-branch)
+                     (assoc :branch requested-branch))
+           header (str ";; (seon.render/walk " (pr-str options) ")"
+                       " => root=" (pr-str root)
+                       " basis=" basis
+                       " depth=" requested-depth
+                       (when (some? requested-branch)
+                         (str " branch=" (pr-str requested-branch))))
+           ordered (->> (units node [] 0 nil)
+                        (filter (comp within-branch?
+                                      :seon.render.walk/path))
+                        (sort-by
+                         (juxt (comp :seon.render.walk/changed-at
+                                     :seon.render.walk/node)
+                               :seon.render.walk/branch
+                               :seon.render.walk/path)))
+           text (str/join "\n" (cons header (mapcat unit-lines ordered)))]
+       (when-not (str/blank? text) text)))))
