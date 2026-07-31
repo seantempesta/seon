@@ -426,3 +426,69 @@ refusal (`flow.clj:106-111`), and the buffer table all match source.
 4. Upstream-doc defect (informational, not ours to fix): `flow.clj:112-114` and
    `impl/graph.clj:19,23` both claim ping replies land on the report channel.
    They do not.
+
+## Independent skill verification
+
+Adversarial pass over the `seon-flow-architecture` skill's control-protocol
+and state-discipline sections (commits `d5bfde658`, `27107785d`), trusting
+neither the authoring lane nor this document. Every `file:line` anchor was
+reopened at that line in `reference-code/core.async` (`v1.10.874-alpha3`,
+`dc35f3e`) and in `src/`; every behavioral claim was re-probed from scratch
+with independently written probes — `tmp/flow_skill_verify_probe.clj` and
+`tmp/flow_skill_verify_probe2.clj`, written before reading
+`tmp/flow_control_probe.clj` — on `clojure -M:dev`, OpenJDK 26.
+
+Confirmed by probe: only `start` (3.6 ms) and `ping` (1.9 ms) are
+acknowledged, while `resume` (0.55 ms), `pause` (0.027 ms) and `stop`
+(0.015 ms) return before any proc observes them; `:already-running true` on
+re-`start`; ping replies arrive on the private per-call reply chan and the
+report channel polls `nil` twice across a ping; procs start `:paused` and
+`start` + `inject` alone delivered nothing; no `::flow/pause` transition at
+start, first transition is `::flow/resume`, and three consecutive `pause`
+calls produced exactly one `::flow/pause` transition per proc; the ping map's
+`:ins`/`:outs` datafy to `{:put-count :take-count :closed? :buffer}` and an
+undeclared `:ping-map-fn` returned the proc's whole init state; ping costs the
+full timeout when any addressed proc is busy (110 ms at 100, 310 ms at 300)
+while an answering `ping-proc` returns in 0.5 ms; unknown pid → `nil`;
+`inject`'s future stayed pending on a full paused proc and completed on
+resume; `command-proc` throws `AbstractMethodError` and is absent from the
+`flow` namespace.
+
+The mid-flight pause claim needed a second, better probe. Pausing the whole
+graph is not a valid test — the downstream proc is paused too, so nothing is
+consumed and delivery is unobservable. Re-run with `pause-proc` on the
+producer only, an 8-message output and a gated sink holding the buffer full:
+the transform ran to completion, the `::flow/pause` transition fired *during*
+`send-outputs`, and all 8 messages were still written downstream, while no new
+input was read. The skill's claim is exactly right; the naive probe is not.
+
+Four claims falsified and fixed in `SKILL.md`:
+
+1. **`init` does not run on the proc's own thread.** `(step args)`
+   (`flow/impl.clj:263`) is inside `spi/start`, which graph `start` calls
+   inline per proc (`:166-167`); `run` is submitted to the executor only at
+   `:323`. Probed: init recorded thread `main`, the `flow/start` caller.
+   Consequence now taught — a blocking `init` serializes into `flow/start` and
+   never gets the proc's `:io`/`:compute` context.
+2. **"`pause`, `pause-proc`, `resume-proc` and `ping-proc` have zero
+   first-party call sites" is false.** All four are called throughout `test/`
+   (`flow_test.clj`, `agent_test.clj`, `armed_test.clj`), and `ping-proc` is a
+   primary test probe. Corrected to: no production call site in `src/` beyond
+   `monitor-graph`'s passthroughs.
+3. **"No Seon agent is ever flow-`paused` today" is overstated.**
+   `test/seon/cluster/agent_test.clj:445-470` pauses a live agent graph during
+   an in-flight provider call and asserts these exact semantics. Reworded to
+   "nothing in the running system", with the test cited as the proof.
+4. **The maintenance surface's "Ruled shape" mis-attributed a lane proposal to
+   the owner.** Ruling #10 settles only that the verbs are flow's own and that
+   there is no bespoke machinery; the durable pause-decision-fact design is
+   this document's proposal (lines 252-257). Marked as proposed, not ruled.
+
+Everything else held: the full verb table, both stale-docstring corrections,
+the scar and state-discipline wording against the corrected ledger
+(`plan/README.md:1450-1466`, owner correction at `:1457-1461`), the four
+step-fn arity anchors, the parked-cost correction in
+`references/agent-graphs.md`, the `[TARGET]` markings, and both issue pointers
+(`src/seon/flow.clj:319` still lacks `:priority true`; `:623-624` still
+delegates to the unimplemented method). No contradiction was found between the
+new sections and the older parked/ping wording elsewhere in the skill.

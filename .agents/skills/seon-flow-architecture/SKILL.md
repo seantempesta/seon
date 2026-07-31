@@ -164,7 +164,7 @@ A step-fn is one function of four arities (`flow.clj:172-175`):
 | arity | when it runs | source |
 |---|---|---|
 | 0 `describe` | at `create-flow`/`process` construction, to discover channels, `:workload`, `:ping-map-fn` | `flow.clj:183-209`; `flow/impl.clj:246` |
-| 1 `init` | **once**, on the proc's own thread at `start`, before the loop — `(step args)`, args carrying `::flow/pid`. The place to acquire an atom, an external `::flow/in-ports`/`::flow/out-ports` channel, or any process-local resource | `flow.clj:211-225`; `flow/impl.clj:263` |
+| 1 `init` | **once**, on the thread that CALLED `flow/start` — not the proc's thread — before `run` is submitted to the executor: `(step args)`, args carrying `::flow/pid`. The place to acquire an atom, an external `::flow/in-ports`/`::flow/out-ports` channel, or any process-local resource | `flow.clj:211-225`; `flow/impl.clj:263,323,166-167` |
 | 2 `transition` | on **each actual status change** with `::flow/resume`, `::flow/pause`, or `::flow/stop` — and only when the status really changed | `flow.clj:234-243`; `flow/impl.clj:209-217` |
 | 3 `transform` | per message | `flow.clj:245`; `flow/impl.clj:304-305` |
 
@@ -177,6 +177,14 @@ is **no `::flow/pause` transition at start** even though procs begin `:paused`
 because `transition` fires only on a real change, a repeated `pause` is a
 no-op, not a second teardown. Whatever `init` acquired, unwind it here, and
 never reach for a setup/teardown path outside these arities.
+
+A third trap follows from where `init` runs (probed, `main` thread): **`init`
+must not block.** `create-flow`'s `start` calls `spi/start` inline for every
+proc (`flow/impl.clj:166-167`) and only then submits `run` to the `:io` or
+`:compute` executor (`flow/impl.clj:323`), so a slow init serializes into the
+`flow/start` caller and never gets the proc's own workload context. Acquire
+cheaply in `init`; do the blocking acquisition on the first `transform`, or
+hand the proc an already-open resource through its args.
 
 Durable state is a database fact regardless. An atom in proc state is
 process-local, replaceable, and dies with the graph — if losing it would break
@@ -203,7 +211,7 @@ it at both (`flow/impl.clj:295,234`).
 | verb | mechanics | guarantee | source |
 |---|---|---|---|
 | `create-flow` | pure construction; no channels, no threads | synchronous; throws on an invalid conn | `flow.clj:76`; `flow/impl.clj:38-69` |
-| `start` | builds control/report/error/io chans and launches every proc; returns `{:report-chan :error-chan}`, plus `:already-running true` if re-started | **synchronous and acknowledged** | `flow.clj:108`; `flow/impl.clj:94-173` |
+| `start` | builds control/report/error/io chans, runs every proc's `init` inline, then submits each `run`; returns `{:report-chan :error-chan}`, plus `:already-running true` if re-started | **synchronous and acknowledged** | `flow.clj:108`; `flow/impl.clj:94-173` |
 | `stop` | `>!!` `::flow/stop` to all, closes error+report, nils the chan registry | **asynchronous — NOT a join.** Returns before any proc exits | `flow.clj:123`; `flow/impl.clj:174-183` |
 | `pause` / `resume` | one `>!!` to `::flow/all` | **unacknowledged**; observed at the proc's next `alts!!` | `flow.clj:128,132`; `flow/impl.clj:184-185` |
 | `pause-proc` / `resume-proc` | identical with `::flow/to` = pid | same; still broadcast, each proc ignores unless addressed | `flow.clj:144,148`; `flow/impl.clj:187-188` |
@@ -278,28 +286,41 @@ transport law's precondition.
 
 ### Parked is not paused
 
-**No Seon agent is ever flow-`paused` today.** An agent graph is `:running` for
-its whole life; "parked" means each proc's `alts!!` is blocked on its input
-channels (`flow/impl.clj:295`) — an ordinary channel read on a virtual thread,
+**Nothing in the running system ever flow-`paused` an agent.** An agent graph
+is `:running` for its whole life; "parked" means each proc's `alts!!` is
+blocked on its input channels
+(`flow/impl.clj:295`) — an ordinary channel read on a virtual thread,
 woken by a datom-routed `offer!` onto the sliding-1 mailbox
 (`src/seon/cluster/wake.cljc:146-228`). A flow-`paused` proc instead parks on
 `(<!! control)` (`flow/impl.clj:284`). One blocked virtual thread either way,
 but different states: the measured ~8.5 KB is the **running-and-parked** shape
-and must not be cited as a paused-agent cost. `pause`, `pause-proc`,
-`resume-proc` and `ping-proc` have **zero first-party call sites** — half the
-protocol is unused, which is why there is currently no way to express
+and must not be cited as a paused-agent cost. `pause`, `pause-proc` and
+`resume-proc` have **no production call site in `src/`** — only
+`monitor-graph`'s passthrough arities (`src/seon/flow.clj:616-620`); the only
+`src/` uses of the protocol are `flow/start` + `flow/resume` at arm
+(`src/seon/cluster/agent.clj:391,401`), `flow/ping` in oversight
+(`src/seon/oversight.clj:90,125`), `flow/inject`, and `flow/stop`. The pause
+half is nonetheless test-covered, including a live agent graph paused during
+an in-flight provider call (`test/seon/cluster/agent_test.clj:445-470`,
+`test/seon/flow_test.clj:833-900`) — the semantics are proven, but nothing
+running exercises them, which is why there is still no way to express
 *suspended*.
 
 ### [TARGET] The maintenance surface
 
-Not built. Ruled shape: a pause/resume **decision** is a durable fact with
-provenance (so a re-armed graph after a crash comes back paused), while live
-**status** is always a fresh `flow/ping` and is **never stored** — storing it
-is stored-derived state that goes stale the instant someone pauses from a
-REPL. Verb invocations live in the runtime owner namespace for that graph
-(`seon.cluster.agent`, `seon.cluster`, `seon.flow`) as ordinary functions over
-one namespaced request map. Per ruling #10 there is no lifecycle service,
-registry, or manager namespace and no bespoke maintenance machinery.
+Not built. What ruling #10 actually settles is narrow: the verbs are flow's
+own, and there is no bespoke maintenance machinery. The rest below is the
+**proposed** shape from the grounding audit
+(`flow-control-protocol-2026-07-31.md:252-257`) — design input, not an owner
+ruling; do not cite it as settled. Proposed: a pause/resume **decision** is a
+durable fact with provenance (so a re-armed graph after a crash comes back
+paused), while live **status** is always a fresh `flow/ping` and is **never
+stored** — storing it is stored-derived state that goes stale the instant
+someone pauses from a REPL. Verb invocations live in the runtime owner
+namespace for that graph (`seon.cluster.agent`, `seon.cluster`, `seon.flow`)
+as ordinary functions over one namespaced request map. Per ruling #10 there is
+no lifecycle service, registry, or manager namespace and no bespoke
+maintenance machinery.
 
 Two current shapes are **defects — do not copy them**:
 `seon.flow/work-launcher-proc` re-implements the control protocol by hand and
