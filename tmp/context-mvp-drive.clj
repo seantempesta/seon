@@ -23,9 +23,9 @@
             [datahike.api :as d]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.render.block :as block]
             [seon.render.walk :as walk])
   (:import [java.nio.charset StandardCharsets]
            [java.util Date UUID]))
@@ -108,20 +108,15 @@
     "seon-flow-owner" 'seon.flow
     (symbol "my.agents" agent-id)))
 
-(defn- creation-data
+(defn- creation-request
   [agent-id]
-  (agent/creation-tx
-   {:seon.cluster.agent/id agent-id
-    :seon.cluster/name cluster-name
-    :seon.ns/name (agent-namespace agent-id)}))
+  {:seon.cluster.agent/id agent-id
+   :seon.cluster/name cluster-name
+   :seon.ns/name (agent-namespace agent-id)})
 
 (defn- ensure-agent!
-  [connection agent-id]
-  (when-not (d/q '[:find ?agent .
-                   :in $ ?id
-                   :where [?agent :seon.cluster.agent/id ?id]]
-                 @connection agent-id)
-    (d/transact connection (creation-data agent-id)))
+  [connection process agent-id]
+  (cluster/ensure-entity! connection process (creation-request agent-id))
   agent-id)
 
 (defn- closed-run-count
@@ -137,7 +132,7 @@
 
 (defn- run-evidence
   [db agent-id]
-  (->> (d/q '[:find ?opened ?run-id ?ordinal ?source ?status ?result
+  (->> (d/q '[:find ?opened ?run-id ?ordinal ?source ?result ?error ?cut
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
@@ -149,9 +144,11 @@
               [?form :seon.cluster.run.form/source ?source]
               [?receipt :seon.cluster.eval/run ?run]
               [?receipt :seon.cluster.eval/ordinal ?ordinal]
-              [?receipt :seon.cluster.eval/status ?status]
               [(get-else $ ?receipt :seon.cluster.eval/result-edn "-")
-               ?result]]
+               ?result]
+              [(get-else $ ?receipt :seon.cluster.eval/error "-") ?error]
+              [(get-else $ ?receipt :seon.cluster.eval/interrupted-at "-")
+               ?cut]]
             db agent-id)
        (sort-by (juxt (comp inst-ms first) #(nth % 2)))
        vec))
@@ -210,8 +207,8 @@
       completion)))
 
 (defn- drive-nursery!
-  [connection]
-  (ensure-agent! connection nursery-agent-id)
+  [connection process]
+  (ensure-agent! connection process nursery-agent-id)
   (let [captures (atom [])
         before (closed-run-count @connection nursery-agent-id)]
     (stamp "SEND one-sentence task: " one-sentence-task)
@@ -239,17 +236,20 @@
    db
    (walk/neighborhood
     {:seon.db/db db
-     :seon.render.walk/root
-     [:seon.cluster.agent/id owner-agent-id]
-     :seon.render.walk/depth depth
+     :seon.render.walk/lookup [:seon.cluster.agent/id owner-agent-id]
+     :seon.render/distance depth
      :seon.render/kind :seon.render/ai
-     :seon.render/max-entities 4096
-     :seon.render/max-string-chars 16384
-     :seon.render/max-coll-items 64})))
+     :seon.render/floor `block/data-prose
+     :seon.render/overrides {}
+     :seon.sci.admit/caps
+     {:seon.config.eval.result/max-depth 12
+      :seon.config.eval.result/max-collection 64
+      :seon.config.eval.result/max-string 16384
+      :seon.config.eval.result/max-nodes 4096}})))
 
 (defn- print-birth-contexts!
-  [connection]
-  (ensure-agent! connection owner-agent-id)
+  [connection process]
+  (ensure-agent! connection process owner-agent-id)
   (let [db @connection]
     (doseq [depth [1 2]]
       (print-exact! (str "seon.flow OWNER BIRTH CONTEXT d" depth)
@@ -278,13 +278,14 @@
   (stamp "BOOT dedicated scratch cluster " cluster-name
          " at " process-root " with " (name provider))
   (let [instance (start-own-cluster!)
-        connection (:seon.boot/cluster-connection instance)]
+        connection (:seon.boot/cluster-connection instance)
+        process (cluster/process-identity (:seon.boot/advertisement instance))]
     (try
       (case mode
-        :nursery (drive-nursery! connection)
-        :birth (print-birth-contexts! connection)
-        :all (do (print-birth-contexts! connection)
-                 (drive-nursery! connection))
+        :nursery (drive-nursery! connection process)
+        :birth (print-birth-contexts! connection process)
+        :all (do (print-birth-contexts! connection process)
+                 (drive-nursery! connection process))
         (throw (ex-info "Unknown CONTEXT_MVP_MODE."
                         {:context-mvp-drive/mode mode
                          :context-mvp-drive/known #{:nursery :birth :all}})))
