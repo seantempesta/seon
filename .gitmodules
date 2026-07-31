@@ -8,7 +8,7 @@
 	ignore = dirty
 [submodule "reference-code/clj-kondo"]
 	path = reference-code/clj-kondo
-	url = https://github.com/clj-kondo/clj-kondo.git
+	url = https://github.com/seantempesta/clj-kondo.git
 	ignore = dirty
 [submodule "reference-code/nrepl"]
 	path = reference-code/nrepl
@@ -290,7 +290,7 @@
 	url = https://github.com/seantempesta/superv.async.git
 [submodule "reference-code/partial-cps"]
 	path = reference-code/partial-cps
-	url = https://github.com/simm-is/partial-cps.git
+	url = https://github.com/seantempesta/partial-cps.git
 [submodule "reference-code/persistent-sorted-set"]
 	path = reference-code/persistent-sorted-set
 	url = https://github.com/replikativ/persistent-sorted-set.git
@@ -343,7 +343,7 @@
 	url = https://github.com/weavejester/integrant
 [submodule "reference-code/http-kit"]
 	path = reference-code/http-kit
-	url = https://github.com/http-kit/http-kit.git
+	url = https://github.com/seantempesta/http-kit.git
 [submodule "reference-code/core.async.flow-monitor"]
 	path = reference-code/core.async.flow-monitor
-	url = https://github.com/clojure/core.async.flow-monitor.git
+	url = https://github.com/seantempesta/core.async.flow-monitor.git
