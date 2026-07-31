@@ -1520,6 +1520,21 @@ may reintroduce a shadow build into the dev feedback path.
   that distance (a summary line), never raw keys — raw keys are the
   debug drill's deliberate territory. This resolved the recorded
   `:my/*` peer-view caveat.
+  **Ruling 2026-07-31 #13 (owner): NO MAGIC — context assembly IS an
+  explicit `seon.render/walk` eval.** The agent's context is the
+  printed output of a visible REPL call recorded as an ordinary eval
+  receipt in its run record — never a hidden assembly process. The
+  walk's ai output labels every unit with a `;;` header carrying its
+  PATH (a real get-in drill handle, the debug view's vocabulary), the
+  DEPTH it was found at, and provenance; groupings are shared path
+  prefixes; cross-branch order stays dumb last-changed. The same
+  function is agent-callable with arguments (root, depth, branch) —
+  to see more, call it again; the explanation of the system is the
+  system. Agent init: ENSURE THE ENTITY idempotently (create only if
+  absent; an existing entity always RESUMES with all its facts), then
+  evaluate the walk as the episode's opening receipt. Transcript
+  aging supersedes older walk outputs. The call-grain cache stays
+  invisible underneath — performance is hidden, behavior never is.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
