@@ -72,6 +72,29 @@
 ;;; The pre-provider capture
 ;;; ---------------------------------------------------------------------------
 
+(defn capture-ai
+  "Omit a recorded prompt from later AI context.
+
+  A capture is durable evidence of what an earlier turn saw, not new context
+  for a later turn. The walk remains total and still visits this entity; this
+  family lens alone decides that the AI projection has nothing relevant to
+  say."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [_unit]
+  nil)
+
+(defn capture-html
+  "Expose a recorded prompt in one compact debug disclosure."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [prompt (:seon.context.capture/prompt unit)]
+    [:details {:class "seon-family-entry seon-context-capture-entry"}
+     [:summary
+      (str "Context capture at database basis "
+           (:seon.context.capture/basis-t unit)
+           " — approximately " (tokens/estimate prompt) " tokens")]
+     [:pre {:class "seon-context-capture-prompt"} prompt]]))
+
 (defn- contribution-row
   "One durable contribution row: evidence, not content. No stored kind
   (constant `:seon.render/ai` on a prompt capture — a stored

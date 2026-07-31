@@ -43,7 +43,9 @@
  :seon.context.capture/contributions [:set {:seon.db/component true} :seon.db/ref]
 
  :seon.context.capture/capture
- [:map {:seon.db/entity true}
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.context/capture-ai
+        :seon.render/html seon.context/capture-html}
   [:seon.context.capture/id :seon.context.capture/id]
   [:seon.context.capture/run :seon.context.capture/run]
   [:seon.context.capture/basis-t :seon.context.capture/basis-t]
