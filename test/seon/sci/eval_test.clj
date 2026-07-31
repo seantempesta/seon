@@ -190,6 +190,28 @@
            (:seon.error/kind (:seon.sci.admit/value evaluation)))
         "the wrapped sci interrupt remains a flat time-limit value")))
 
+(deftest a-base-created-function-uses-the-invoking-threads-arm
+  ;; The interpreted corpus will be installed into `base`, so its functions
+  ;; capture the base's interrupt-fn when SCI creates them. Create this one on
+  ;; the test thread, then invoke it through a fork on another thread: arming
+  ;; must follow the invoking thread, not the thread that created the function.
+  (let [base (eval/base)
+        definition
+        (sci/eval-string*
+         base
+         (str "(defn substrate-base-spin [] "
+              "(loop [i 0] (recur (inc i))))"))
+        ctx (eval/fork)
+        evaluation (deadlined-in ctx "(substrate-base-spin)" 300)]
+    (is (ifn? definition))
+    (is (identical? (:interrupt-fn base) (:interrupt-fn ctx))
+        "the base and every fork share the one process guard")
+    (is (not= ::hung evaluation))
+    (is (cut? evaluation)
+        "the caller thread's arm cuts a function created on another thread")
+    (is (= :time
+           (:seon.eval/outcome (:seon.sci.admit/record evaluation))))))
+
 (deftest an-acquired-function-uses-the-current-evaluation-limit
   (test-support/with-database
     (fn [connection]

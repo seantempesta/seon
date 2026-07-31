@@ -6,8 +6,8 @@
   FRESH from the quarry's mechanism rather than ported: the old
   namespace's Semaphore, cached compute pool, database-derived binding
   table and lifecycle bindings are all gone, and what survives is the
-  part that was right — one shared base ctx, one guarded fork per run or
-  isolated evaluation, and time as the only limit.
+  part that was right — one shared base ctx, one process-wide guard with
+  thread-scoped arming, and time as the only limit.
 
   THE ARMED BOUNDARY. `:interrupt-fn` is sci's own hook, called on
   every interpreted fn and `loop/recur` body entrance
@@ -140,54 +140,60 @@
 ;;; The base context
 ;;; ---------------------------------------------------------------------------
 
+(declare process-interrupt-guard)
+
 (defonce ^:private base-ctx
   (delay
-    (let [run-ns (sci/create-ns 'my.run)
+    (let [guard @process-interrupt-guard
+          run-ns (sci/create-ns 'my.run)
           message-ns (sci/create-ns 'my.message)
           schema-ns (sci/create-ns 'seon.schema)
           test-ns (sci/create-ns 'clojure.test)]
-      (sci/init
-       {;; the interrupt-aware core: a lazy sequence built by NATIVE
-        ;; clojure.core enters no interpreted body, so `(range)` inside
-        ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
-        ;; alternatives for exactly this and they are opt-in
-        ;; (interrupt.md:56-60).
-        :namespaces
-        {'clojure.core sci.interrupt/clojure-core
-         'clojure.string sci.interrupt/clojure-string
-         ;; The schema surface is exactly its two lifecycle functions. Their
-         ;; dynamic registration overlay is bound per evaluation below.
-         'seon.schema
-         {'register! (sci/copy-var schema/register! schema-ns)
-          'unregister! (sci/copy-var schema/unregister! schema-ns)}
-         ;; A deftest must have clojure.test's actual macro and Var semantics.
-         ;; Derive the complete public namespace instead of maintaining a
-         ;; second hand list that silently omits a runnable test operation.
-         'clojure.test
-         (into {}
-               (map (fn [[sym v]] [sym (sci/copy-var* v test-ns)]))
-               (ns-publics 'clojure.test))
-         'my.run {'wait (sci/copy-var my.run/wait run-ns)
-                  'complete (sci/copy-var my.run/complete run-ns)}
-         ;; the second agent-facing value family, bound the same way and
-         ;; for the same reason: it is a PURE function returning a map,
-         ;; so copying the var into the base ctx is the whole binding —
-         ;; there is no capability to thread, no connection to close
-         ;; over, and nothing an agent could hold onto after the eval
-         'my.message {'send (sci/copy-var my.message/send message-ns)
-                      ;; the can't-fix answer is the same kind of value,
-                      ;; so it is the same kind of binding. Without it a
-                      ;; routed problem has no third arm at all: the
-                      ;; owner's only reachable answers are "fixed" —
-                      ;; which no fact can confirm — and silence.
-                      'decline (sci/copy-var my.message/decline message-ns)}}
-        ;; two broad roots rather than an enumeration of exception
-        ;; subclasses — an agent needs to catch things, not to be given
-        ;; a curated taxonomy
-        :classes {'Throwable Throwable
-                  'java.lang.Throwable Throwable
-                  'Error Error
-                  'java.lang.Error Error}}))))
+      (assoc
+       (sci/init
+        {:interrupt-fn (::interrupt-fn guard)
+         ;; the interrupt-aware core: a lazy sequence built by NATIVE
+         ;; clojure.core enters no interpreted body, so `(range)` inside
+         ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
+         ;; alternatives for exactly this and they are opt-in
+         ;; (interrupt.md:56-60).
+         :namespaces
+         {'clojure.core sci.interrupt/clojure-core
+          'clojure.string sci.interrupt/clojure-string
+          ;; The schema surface is exactly its two lifecycle functions. Their
+          ;; dynamic registration overlay is bound per evaluation below.
+          'seon.schema
+          {'register! (sci/copy-var schema/register! schema-ns)
+           'unregister! (sci/copy-var schema/unregister! schema-ns)}
+          ;; A deftest must have clojure.test's actual macro and Var semantics.
+          ;; Derive the complete public namespace instead of maintaining a
+          ;; second hand list that silently omits a runnable test operation.
+          'clojure.test
+          (into {}
+                (map (fn [[sym v]] [sym (sci/copy-var* v test-ns)]))
+                (ns-publics 'clojure.test))
+          'my.run {'wait (sci/copy-var my.run/wait run-ns)
+                   'complete (sci/copy-var my.run/complete run-ns)}
+          ;; the second agent-facing value family, bound the same way and
+          ;; for the same reason: it is a PURE function returning a map,
+          ;; so copying the var into the base ctx is the whole binding —
+          ;; there is no capability to thread, no connection to close
+          ;; over, and nothing an agent could hold onto after the eval
+          'my.message {'send (sci/copy-var my.message/send message-ns)
+                       ;; the can't-fix answer is the same kind of value,
+                       ;; so it is the same kind of binding. Without it a
+                       ;; routed problem has no third arm at all: the
+                       ;; owner's only reachable answers are "fixed" —
+                       ;; which no fact can confirm — and silence.
+                       'decline (sci/copy-var my.message/decline message-ns)}}
+         ;; two broad roots rather than an enumeration of exception
+         ;; subclasses — an agent needs to catch things, not to be given
+         ;; a curated taxonomy
+         :classes {'Throwable Throwable
+                   'java.lang.Throwable Throwable
+                   'Error Error
+                   'java.lang.Error Error}})
+       ::interrupt-guard guard))))
 
 (defn agent-namespace
   "The ONE namespace name for an agent: `my.agents.<id>`.
@@ -199,10 +205,9 @@
   (symbol (str "my.agents." agent-id)))
 
 (defn base
-  "The process-shared base context every evaluation forks.
-  One ctx per process, not per evaluation: building it is the expensive
-  part and forking is the cheap part, which is the whole reason sci has
-  `fork`."
+  "The process-shared base context and guard every evaluation forks.
+  One ctx and guard per process, not per evaluation: building the ctx is the
+  expensive part and forking it is cheap, which is why sci has `fork`."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
   @base-ctx)
@@ -279,20 +284,20 @@
     {::thread-arm thread-arm
      ::interrupt-fn interrupt-fn}))
 
+(defonce ^:private process-interrupt-guard
+  (delay (interrupt-guard)))
+
 (defn fork
-  "Fork the base context with one stable thread-scoped interrupt guard."
+  "Fork the base context while sharing its process-wide interrupt guard."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
-  (let [guard (interrupt-guard)]
-    (assoc (sci/fork (base))
-           :interrupt-fn (::interrupt-fn guard)
-           ::interrupt-guard guard)))
+  (sci/fork (base)))
 
 (defn- arm
   "Arm one guarded context on the current thread; return stop! and record.
-  A scheduled task flips this evaluation's flag at the deadline. The stable
-  interrupt-fn installed before acquisition reads the current thread's armed
-  state, so previously created functions use this deadline without sharing it
+  A scheduled task flips this evaluation's flag at the deadline. The
+  process-wide interrupt-fn reads the current thread's armed state, so
+  base-created and acquired functions use this deadline without sharing it
   with concurrent invocations on other threads."
   [ctx time-limit-ms]
   (let [guard (::interrupt-guard ctx)]
