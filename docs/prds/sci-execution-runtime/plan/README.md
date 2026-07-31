@@ -1664,6 +1664,18 @@ may reintroduce a shadow build into the dev feedback path.
   party dependency internals remain the compiled boundary (outside
   the corpus by definition). This makes the cluster's closed world
   TOTAL rather than repealed: the database contains the program.
+  ADDENDUM — THE EXECUTION POLICY IS DERIVED FROM WHO-FOR (owner,
+  same conversation): code executing ON BEHALF OF AN AGENT — its
+  evals, its renderers, and its CONTEXT ASSEMBLY ("the agent's
+  context IS the agent calling it") — runs under sci's guard, always:
+  an agent must never be able to take down the whole system, and a
+  renderer or walk bug is agent-path code. Compiled-outside-sci is an
+  OPTIMIZATION available only where BOTH computed conditions hold:
+  the path is hot AND it is not agent-driven (indexing, delivery
+  plumbing, boot) AND the code is trusted not to crash — derived
+  from the call context and the corpus, never a hand list. The
+  call-grain render cache is what keeps guarded assembly cheap
+  (cached calls skip execution entirely).
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
