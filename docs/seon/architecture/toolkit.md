@@ -90,16 +90,16 @@ one shared program graph and become available to every execution scope through
 program deltas. Source-transaction provenance records the author independently
 from the function's namespace.
 
-As the program grows, an ordinary database ref may assign a resident agent
-stewardship of a namespace. Stewardship means sustained attention, not
-exclusive edit authority: every agent can call and improve shared functions.
-An agent that finds a bug fixes it and adds the regression test immediately;
-it never waits for or forwards the defect to the steward. The steward derives
-callers, input shapes, failures, resource evidence, changes by other agents,
-and tests from the shared graph and continuously improves the namespace behind
-its published schemas. Every change uses the same validation, instrumentation,
-and test gate. Namespace names never encode agent IDs, and a steward process
-holds no private copy of the code.
+An ordinary database ref assigns one owner agent to each namespace. Every agent
+may call shared functions, but an agent that needs a symbol changed in another
+namespace sends its owner a durable message and receives the commit or
+rejection by reply. A message addressed to an unowned namespace creates an
+agent and assigns that namespace on demand. The owner derives callers, input
+shapes, failures, resource evidence, incoming requests, and tests from the
+shared graph and improves the namespace behind its published schemas. Every
+change uses the same validation, instrumentation, and test gate. Namespace
+names never encode agent IDs, and an owner process holds no private copy of the
+code. Ownership is a collaboration protocol, not a call-time security boundary.
 
 Root uses `seon.agent/set-namespace!` to change that ref for an existing agent;
 an ordinary agent may use it for itself or a descendant. The operation does
