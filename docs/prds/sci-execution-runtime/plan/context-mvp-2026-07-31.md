@@ -55,9 +55,13 @@ Contract authority: `context-render-data-model-spec.md` + README rulings
 
 ## Out (explicitly deferred)
 
-- The `:my/*` rename (awaits owner ruling; MVP ships on current keys).
-- HTML page membership inversion + floor checkbox (page keeps working
-  as-is; W4-html follows the MVP).
+- The `:my/*` rename (ruled #15; dispatches as one atomic wave after
+  this lane lands — MVP ships on current keys).
+- HTML page membership inversion + floor checkbox — NOT deferred
+  (owner, 2026-07-31 evening: "full rendering working for both ai and
+  html"): W4-html runs as the PARALLEL track, implementation
+  dispatching on its falsified plan, landing alongside or immediately
+  behind this lane rather than after the MVP proves anything.
 - Per-agent render proc, call-grain cache wiring, attribute-revision
   invalidation (context derives fresh each turn — correct under
   freshness-outranks-cache, just uncached; optimization lands after
