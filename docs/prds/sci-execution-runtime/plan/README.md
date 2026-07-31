@@ -1685,6 +1685,16 @@ may reintroduce a shadow build into the dev feedback path.
   MVP drive failure was exactly 1 success + 1 arity refusal ending
   the episode with the intent dropped. The refusal steering already
   existed as data; this ruling makes the turn that reads it exist.
+  **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
+  config option** — a manifest entry consumed at ancestor build/init
+  (creation-fixed, so per-store today; every forked cluster inherits
+  it), defaulting to current behavior (on), with per-attribute
+  `:db/noHistory` as the selective dial for churny attributes.
+  Per-cluster differentiation is upstream work, recorded on the filed
+  issue, not invented. FORK PUBLICATION AUTHORIZED (owner, same
+  conversation): create forks under the owner's GitHub account for
+  maintained submodules lacking remotes and push the maintained
+  branches — no force-pushes, nothing beyond our maintained branches.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
