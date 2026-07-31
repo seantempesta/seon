@@ -1555,6 +1555,19 @@ may reintroduce a shadow build into the dev feedback path.
   behind the context-mvp lane's landing (it owns instruction.edn
   in flight); the family-lens entity maps and all registration
   semantics are unchanged — this is file layout, not model.
+  **Ruling 2026-07-31 #15 (owner): `:my/*` KEYS AND `my.<capability>`
+  TOOL NAMESPACES.** The agent's walked, agent-visible facts rename to
+  `:my/*` — `:my/id`, `:my/namespace`, `:my/instructions`,
+  `:my/cluster`, `:my/run` — so context reads as what it is from the
+  agent's seat; process machinery keys (creation/arm/routing/armed)
+  stay system-named. The tool/capability surface is `my.<capability>`
+  namespaces (`my.message`, `my.fs`, …) — one uniform convention:
+  `my` is what an agent reads and calls. Peer rendering stays
+  depth-aware (family lens, never raw keys), so the possessive reads
+  correctly everywhere but the deliberate debug drill. The rename
+  dispatches as ONE atomic cross-cutting unit AFTER the context-mvp
+  lane lands (it owns the affected files in flight); schema EDN,
+  code, tests, and docs move in the same wave.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
