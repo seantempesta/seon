@@ -1650,6 +1650,20 @@ may reintroduce a shadow build into the dev feedback path.
   runaway inside a single COMPILED host call is bounded only by the
   submit-level wedge backstop, not the time-limit — a known,
   documented limit, not a silent one.
+  **Ruling 2026-07-31 #21 (owner): ALL FUNCTIONS ARE IN THE
+  DATABASE.** The corpus is the TOTAL code authority — first-party
+  system functions included (all 1,367 are already indexed with exact
+  source), not just agent-authored code. Agent-callable execution
+  derives from CORPUS ROWS at the cluster's basis: the precomputed
+  sci analysis direction (owner, same conversation — "we can
+  pre-compute the SCI cache or the AST") is the execution substrate
+  under measurement, recovering total interrupt coverage AND basis
+  fidelity while keeping any-function calls. Compiled JVM Vars are
+  the bootstrap and optimization substrate — and the host-binding
+  interim delivering ruling #20 now — never the authority. Third
+  party dependency internals remain the compiled boundary (outside
+  the corpus by definition). This makes the cluster's closed world
+  TOTAL rather than repealed: the database contains the program.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
