@@ -63,3 +63,12 @@ recurring measurement pins the render cost so a regression is visible.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+The context-MVP seam rerun in
+`docs/prds/sci-execution-runtime/research/mvp-seams-notes-2026-07-31.md`
+measured the production consequence after distance normalization removed raw
+namespace-member traversal: the `seon.flow` owner d2 walk still reached 25
+compact namespace cards and rendered 17,696 estimated tokens (71,302 UTF-8
+bytes). No raw alias/import/function entity datoms remained. The remaining
+size is therefore this absent namespace-card budget on the real walk path,
+not the repaired distance seam.
