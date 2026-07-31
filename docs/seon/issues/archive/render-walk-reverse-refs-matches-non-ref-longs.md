@@ -34,5 +34,4 @@ unbound Datalog query and wildcard entity pulls are gone.
 `seon.render.walk-test/reverse-reads-never-match-equal-non-ref-longs` plants a
 run-form ordinal equal to an agent eid and proves the form is not a reverse
 connection. Seeded P1 and P6 properties prove membership-or-elision and loud
-reverse truncation. Implementation commit: recorded in the W1 implementation
-notes with the final path-limited commit.
+reverse truncation. Implementation commit: `071ca1e50`.

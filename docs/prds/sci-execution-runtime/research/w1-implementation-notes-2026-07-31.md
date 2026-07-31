@@ -8,12 +8,20 @@ tags: [research, render, context, schema, datahike]
 
 ## State
 
-Production edits are paused at a schema-ownership design gate. The sealed
-contract's three new connection attributes cannot be installed and retained by
-the current schema/config owners as written. The namespace relaxation, walk
-repairs, derived edges, and properties are independently implementable, but
-landing a partial W1 would violate the cut-wave ordering and leave the central
-instruction path unprovable.
+W1 production edits landed in two path-limited commits:
+
+- `c189a3d12` — instruction/cluster schemas, exact `AGENTS.md` ingestion,
+  branch-local cluster population, agent cluster refs, creation provenance,
+  and the source-less namespace relaxation;
+- `071ca1e50` — schema-derived entity selectors and reverse ref subsets,
+  computed edges, global back-references, floor provenance, loud caps, P1/P5/P6,
+  and the archived reverse-long issue.
+
+Focused W1 gates are green. The reset-boundary `bin/seon init` and fresh
+`w1-proof` cluster proof are intentionally not claimed: the integration source
+tree is moving under another render lane, and that lane's landed namespace
+render declarations currently leave `seon.schema.program-test` red. This is
+the exact cross-lane stop boundary requested by the owner.
 
 ## Dependency ledger
 
@@ -87,7 +95,7 @@ P1 says every schema'd entity appears or leaves an elision marker, while the
 selector rule remains family-scoped. That is consistent if P1 intentionally
 does not promise that attributes outside every entity family render.
 
-The blocking contradiction is between spec §2.1/§2.2 and the current schema
+The original contradiction was between spec §2.1/§2.2 and the current schema
 and config ownership rules, not between the falsification report and the spec:
 
 1. `:seon.config/instructions` is specified as a cluster-owned connection on
@@ -98,9 +106,26 @@ and config ownership rules, not between the falsification report and the spec:
 3. The owned schema paths do not include the live agent entity map in
    `run.edn`; declarations in `agent.edn` alone cannot install the new refs.
 
-## Owner design gate — exactly three options
+Owner ruling commit `b2b3e019d` resolved that contradiction with the separate
+cluster entity. W1 installs the new agent attributes through the mechanically
+discovered `:seon.cluster.agent/context-links` entity family in `agent.edn`, so
+the live `run.edn` family remains untouched while every created agent carries
+the mandatory cluster ref.
 
-### 1. Separate cluster-facts entity — recommended
+One narrower pushback remains. The global agent-authored schema replacement
+path in `seon.cluster.run/program-row-tx` calls
+`assert-schema-data-unused!` before computing whether a replacement changes
+any physical Datahike declaration. Therefore an in-place logical loosening of
+`:seon.ns/ns` is still refused whenever namespace data exists, even though
+making `/source` optional is accretive and its Datahike declarations are
+identical. W1's packaged population accepts the relaxation because a fresh
+`current-src` is built from the new complete forms; changing the runtime
+replacement guard would cross the owned paths and requires a separate ruling
+on how logical tightenings are distinguished from loosenings.
+
+## Resolved owner design gate — the three options considered
+
+### 1. Separate cluster-facts entity — selected
 
 Guarantee: create one cluster-facts entity identified by the cluster name;
 agents point to it, and it owns the authoritative instruction refs. The config
@@ -149,15 +174,125 @@ membership; mutation of instruction text remains an ordinary row update.
 Capability given up: instruction membership as runtime-owned cluster data
 independent of manifest compilation.
 
-## Pending proof after the ruling
+## Implementation evidence
 
-- Seed `:reply-grammar`, `:messaging`, `:declining`, and `:global`; ensure the
-  source digest covers `AGENTS.md` bytes so `bin/seon init` cannot converge on
-  stale global instructions.
-- Create an agent through `store/transact!` with boot process provenance and
-  observe its cluster edge.
-- Walk at distance 1 and 2 and observe shared instruction bytes, the trigger
-  message, asked-for runs, and explicit collection/node elision markers.
-- Prove the non-ref-long regression and concrete reverse dependency plan.
-- Run seeded P1/P5/P6 properties, the focused namespaces, the full gate, and a
-  fresh `w1-proof` cluster; stop it after evidence collection.
+### Population and ownership
+
+`seon.cluster/populate-source!` reads `AGENTS.md` with
+`Files/readString(..., UTF_8)` and convergently upserts the four instruction
+rows. `AGENTS.md` is also a `source-roots` digest input, so changed global bytes
+cannot reuse a stale publication digest. After config reconciliation,
+`seed-cluster!` upserts exactly one `:seon.cluster/name` entity with the config
+ref and four instruction refs. `seed-root-agent!` passes cluster name through
+`creation-tx` and routes both creation and root block writes through
+`store/transact!` with a resolvable process entity and
+`:tx-meta {:seon.db/process ...}`.
+
+The resulting intended path is structurally enforced:
+
+```clojure
+agent --:seon.cluster.agent/cluster--> cluster
+cluster --:seon.cluster/config--------> config singleton
+cluster --:seon.cluster/instructions--> four shared instruction entities
+```
+
+No per-agent fact moved onto the cluster entity. Peers remain independent
+agent entities found only by reverse `:seon.cluster.agent/cluster` refs.
+
+### Walk and invalidation claims
+
+The nine falsification edits are reflected in the implementation:
+
+1. entity-family selectors come from raw registered entity forms;
+2. identity probes use each family's first child identity attribute;
+3. family pulls contain only that family's installed attributes;
+4. reverse pulls contain only installed ref attributes derived through the
+   Malli→Datahike bridge;
+5. all dependency-bearing reads are concrete pull/query clauses;
+6. refs and the three specified derived-edge functions are one connection
+   source;
+7. hidden per-path visitation is replaced by one per-walk rendered set with
+   explicit back-references;
+8. render resolution's `:seon.render/would-fall-to-floor?` is retained on each
+   walk node for W4;
+9. P1 checks membership-or-elision over generated graph sizes and collection
+   caps.
+
+The reverse-long regression plants
+`:seon.cluster.run.form/ordinal == <agent eid>` and proves the form eid is not
+among `walk/refs` targets. The old unbound reverse Datalog query and wildcard
+entity pulls no longer exist.
+
+### Seeded recurring proof
+
+These commands passed on Java 26.0.1:
+
+```text
+bin/test seon.render.walk-test
+Testing seon.render.walk-test
+
+bin/test seon.context-pilot-test
+Testing seon.context-pilot-test
+
+bin/test seon.cluster.agent-namespace-test
+Ran 4 tests containing 10 assertions.
+0 failures, 0 errors.
+
+bin/issues-index --check
+{:clean? true, :open-count 10, :archive-count 791}
+```
+
+`seon.render.walk-test` uses test.check seeds `2026073101`–`2026073103` and
+Malli-generated bounded graph sizes. P5 finds the four shared instruction eids
+from each of two agents' distance-2 walks and compares their leaf outputs for
+byte equality. P6 varies the active reverse collection cap and requires the
+attribute-specific elision marker; it separately proves the distance cap is
+visible in `walk/prose`.
+
+The decisive derived-edge assertions are:
+
+```clojure
+[:seon.ns/name 'external.missing]       ; visible unresolved require
+[:seon.render.walk/asked-for-run run-eid]
+[:seon.db/trigger message-eid]
+```
+
+All are computed at walk time. No derived edge is transacted.
+
+## Cross-lane integration stop
+
+The source-freeze prerequisite for `bin/seon init` is not satisfied. At the
+stop boundary, these other-lane paths are modified or untracked:
+
+```text
+src/seon/render/block.clj
+src/seon/render/data.clj
+src/seon/render/web.clj
+src/seon/render/transcript.clj
+test/seon/render/block_test.clj
+test/seon/render/data_test.clj
+test/seon/render/web_test.clj
+test/seon/render/transcript_test.clj
+```
+
+Independently, `bin/test seon.schema.program-test` has two failures in
+`catalog-render-declarations-resolve`: the test still asserts that program
+family render declarations are absent, while W3's landed namespace family now
+advertises both AI and HTML renderers. W1 did not edit that assertion or any
+other lane's files.
+
+Consequently these requested forms remain unrecorded rather than fabricated:
+
+- fresh `bin/seon init` over a frozen artifact;
+- `bin/seon start w1-proof`;
+- a live created agent's creating transaction provenance;
+- live distance-1/distance-2 instruction bytes and elision markers;
+- `bin/seon stop w1-proof`.
+
+## Remaining proof after the cross-lane boundary clears
+
+- Run the full gate after W3's stale schema assertion is reconciled.
+- Run `bin/seon init` over a frozen source tree, then the reset-boundary
+  `w1-proof` sequence above; stop the cluster after evidence collection.
+- Append the live creating-transaction, distance-1/distance-2 bytes, derived
+  edges, and elision forms to this report.
