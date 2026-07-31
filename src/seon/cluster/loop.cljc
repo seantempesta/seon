@@ -964,7 +964,7 @@
             ;; turn sends extends, and it cannot change while the run is
             ;; held
             trigger (message/trigger @connection run-id)
-            ctx (sci/fork (sci.eval/base))
+            ctx (sci.eval/fork)
             ;; First use of this run-local ctx materializes current program
             ;; facts. Boot and cluster creation never index or replay.
             acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx

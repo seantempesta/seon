@@ -14,6 +14,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.config :as config]
             [seon.cluster.work :as work]
             [seon.schema]
@@ -23,24 +24,34 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
+(defn- run-in
+  [ctx source time-limit-ms]
+  (eval/evaluate
+   (cond-> {:seon.cluster.run.form/source source
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/time-limit-ms time-limit-ms
+            ;; development disposition: a codec hole must be loud
+            ;; here of all places
+            :seon.config/on-core-error :panic}
+     ctx (assoc :seon.sci.eval/ctx ctx))))
+
 (defn- run
   ([source] (run source 2000))
   ([source time-limit-ms]
-   (eval/evaluate {:seon.cluster.run.form/source source
-                   :seon.sci.admit/caps caps
-                   :seon.sci.eval/time-limit-ms time-limit-ms
-                   ;; development disposition: a codec hole must be loud
-                   ;; here of all places
-                   :seon.config/on-core-error :panic})))
+   (run-in nil source time-limit-ms)))
 
-(defn- deadlined
+(defn- deadlined-in
   "Evaluate on another thread so a runaway FAILS the suite rather than
   hanging it — the guard being tested is exactly the one that should
   make this unnecessary."
-  [source time-limit-ms]
-  (let [task (future (run source time-limit-ms))]
+  [ctx source time-limit-ms]
+  (let [task (future (run-in ctx source time-limit-ms))]
     (or (deref task 10000 nil)
         (do (future-cancel task) ::hung))))
+
+(defn- deadlined
+  [source time-limit-ms]
+  (deadlined-in nil source time-limit-ms))
 
 ;;; PRESENCE IS THE STATE (owner ruling 2026-07-28): there is no
 ;;; status enum on an evaluation. These three disjoint readers ARE the
@@ -151,6 +162,110 @@
     (is (cut? evaluation))
     (is (not= :swallowed (:seon.sci.admit/value evaluation)))))
 
+(deftest a-previously-defined-function-uses-the-current-evaluation-limit
+  (let [ctx (eval/fork)
+        definition
+        (run-in ctx
+                "(defn spin [] (loop [i 0] (recur (inc i))))"
+                1000)
+        evaluation (deadlined-in ctx "(spin)" 300)]
+    (is (ok? definition))
+    (is (not= ::hung evaluation))
+    (is (cut? evaluation))
+    (is (= :time
+           (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
+    (is (= :seon.sci.eval/time-limit
+           (:seon.error/kind (:seon.sci.admit/value evaluation)))
+        "the wrapped sci interrupt remains a flat time-limit value")))
+
+(deftest an-acquired-function-uses-the-current-evaluation-limit
+  (test-support/with-database
+    (fn [connection]
+      (d/transact
+       connection
+       [{:seon.ns/name 'authored.interrupt
+         :seon.ns/source "(ns authored.interrupt)"}])
+      (d/transact
+       connection
+       [{:seon.fn/sym "authored.interrupt/spin"
+         :seon.fn/ns [:seon.ns/name 'authored.interrupt]
+         :seon.fn/source
+         (str "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
+              "(loop [i 0] (recur (inc i))))")
+         :seon.fn/arglists "([])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat] :int]"}])
+      (let [ctx (eval/fork)
+            acquired (eval/acquire! {:seon.sci.eval/ctx ctx
+                                     :seon.db/db @connection})
+            evaluation
+            (deadlined-in ctx "(authored.interrupt/spin)" 300)]
+        (is (= 2 (:seon.sci.eval/installed acquired)))
+        (is (not= ::hung evaluation))
+        (is (cut? evaluation))
+        (is (= :time
+               (:seon.eval/outcome
+                (:seon.sci.admit/record evaluation))))))))
+
+(deftest one-context-arms-concurrent-threads-independently
+  (let [ctx (eval/fork)
+        definition
+        (run-in
+         ctx
+         (str "(defn finite-spin [] "
+              "(loop [i 0] (if (< i 100000000) (recur (inc i)) i)))")
+         1000)
+        start (java.util.concurrent.CountDownLatch. 1)
+        submit
+        (fn [time-limit-ms]
+          (future
+            (.await start)
+            (run-in ctx "(finite-spin)" time-limit-ms)))
+        cut-task (submit 200)
+        complete-task (submit 10000)]
+    (is (ok? definition))
+    (.countDown start)
+    (let [cut-evaluation (deref cut-task 15000 ::hung)
+          complete-evaluation (deref complete-task 15000 ::hung)]
+      (is (not= ::hung cut-evaluation))
+      (is (not= ::hung complete-evaluation))
+      (is (cut? cut-evaluation))
+      (is (ok? complete-evaluation)
+          "arming and interrupting one thread never cuts its sibling")
+      (is (= 100000000
+             (:seon.sci.admit/value complete-evaluation))))))
+
+(deftest disarm-clears-the-current-threads-flag-exactly
+  (let [ctx (eval/fork)
+        {stop! :seon.sci.eval/stop!} (#'eval/arm ctx 30)
+        interrupt-fn (:interrupt-fn ctx)
+        backstop (+ (System/nanoTime) 1000000000)
+        reached
+        (loop []
+          (if (> (System/nanoTime) backstop)
+            ::hung
+            (let [interrupted
+                  (try
+                    (interrupt-fn)
+                    false
+                    (catch Throwable failure
+                      (if (eval/interrupted? failure)
+                        true
+                        (throw failure))))]
+              (if interrupted
+                true
+                (do
+                  (Thread/onSpinWait)
+                  (recur))))))]
+    (is (= true reached)
+        "the scheduled task published the observable interrupt event")
+    (stop!)
+    (is (nil? (interrupt-fn))
+        "the stable hook has no stale armed state after stop!")
+    (let [later (run-in ctx "(+ 1 2)" 1000)]
+      (is (ok? later))
+      (is (= 3 (:seon.sci.admit/value later))))))
+
 (def ^:private ordinary-source-value-generator
   (gen/one-of
    [gen/small-integer
@@ -237,9 +352,15 @@
 (deftest interrupted?-recognises-only-the-real-marker
   (is (false? (eval/interrupted? (ex-info "ordinary" {}))))
   (is (false? (eval/interrupted? (RuntimeException. "ordinary"))))
-  (is (true? (eval/interrupted? (ex-info "shaped" {:sci.impl/interrupt false})))
-      "PRESENCE is the whole test, not the value: sandboxed code cannot
-       set this key at all, so anything carrying it came from sci")
-  (is (true? (eval/interrupted?
-              (try ((requiring-resolve 'sci.interrupt/interrupt!) "x")
-                   (catch Throwable failure failure))))))
+  (is (false?
+       (eval/interrupted? (ex-info "forged" {:sci.impl/interrupt false})))
+      "sci's private marker identity, not key presence, owns the answer")
+  (let [interrupt
+        (try ((requiring-resolve 'sci.interrupt/interrupt!) "x")
+             (catch Throwable failure failure))]
+    (is (true? (eval/interrupted? interrupt)))
+    (is (true? (eval/interrupted?
+                (ex-info "location wrapper" {:sci/error true} interrupt))))
+    (is (false? (eval/interrupted?
+                 (ex-info "ordinary wrapper" {}
+                          (RuntimeException. "ordinary")))))))

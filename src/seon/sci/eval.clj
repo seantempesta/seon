@@ -6,8 +6,8 @@
   FRESH from the quarry's mechanism rather than ported: the old
   namespace's Semaphore, cached compute pool, database-derived binding
   table and lifecycle bindings are all gone, and what survives is the
-  part that was right — one shared base ctx, one fork per evaluation,
-  and time as the only limit.
+  part that was right — one shared base ctx, one guarded fork per run or
+  isolated evaluation, and time as the only limit.
 
   THE ARMED BOUNDARY. `:interrupt-fn` is sci's own hook, called on
   every interpreted fn and `loop/recur` body entrance
@@ -34,9 +34,10 @@
   ADMISSION HAPPENS INSIDE THE BOUNDARY, BEFORE DISARM. The value is
   realized and bounded by `seon.sci.admit/admit` while the interrupt-fn
   is still armed and still able to stop an infinite realization; the
-  timer is cancelled afterwards, in `finally`. That ordering is the
-  contract, not an implementation detail — after disarm there is no
-  limit left to stop anything.
+  timer is cancelled and the current thread's guard state is removed
+  afterwards, in `finally`. That ordering is the contract, not an
+  implementation detail — after disarm the stable guard is inert until
+  that thread's next evaluation arms it.
 
   NOTHING THROWS. Every failure is a flat `:seon.error` value carried
   inside an ordinary evaluation map: an agent's exception, a refused
@@ -45,11 +46,9 @@
   because there is nothing to catch.
 
   ONE OWNER FOR `interrupted?`. This namespace answers \"is this
-  throwable sci's uncatchable interrupt?\" for the whole system.
-  `seon.sci.admit` currently carries a private copy with a comment
-  saying the two must not diverge; re-pointing it here is a one-line
-  seal revision, flagged in the report rather than taken, because
-  `admit.clj` is sealed.
+  throwable sci's uncatchable interrupt?\" for the whole system, walking
+  wrappers through their causes with sci's own marker predicate.
+  `seon.sci.admit` resolves this owner rather than copying the test.
 
   AN AGENT EVALUATES IN ITS OWN NAMESPACE, by construction. The eval
   binds sci's own `*ns*` to `my.agents.<id>` for the whole form, so a
@@ -102,6 +101,7 @@
             [my.message]
             [my.run]
             [sci.core :as sci]
+            [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -109,7 +109,8 @@
             [seon.sci.admit :as admit]
             [seon.sci.reader :as reader])
   (:import [java.lang.management ManagementFactory]
-           [java.util.concurrent ScheduledThreadPoolExecutor TimeUnit]))
+           [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
+           [java.util.concurrent.atomic AtomicBoolean]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — src/seon/schema/eval.edn
@@ -212,23 +213,28 @@
 
 (defn interrupted?
   "True when `throwable` is sci's uncatchable interrupt.
-  THE single owner of this question. Read from sci's own marker key
-  (`reference-code/sci/src/sci/interrupt.cljc:41`) rather than from a
-  message or a class, because the marker is the only thing sandboxed
-  code cannot forge."
+  THE single owner of this question. Walk wrappers through their cause
+  chains and ask sci's own marker predicate
+  (`reference-code/sci/src/sci/impl/utils.cljc:51-56`) rather than
+  matching a message, class, or raw key, because the marker is the only
+  thing sandboxed code cannot forge."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [throwable]
-  (contains? (ex-data throwable) :sci.impl/interrupt))
+  (loop [candidate throwable]
+    (cond
+      (nil? candidate) false
+      (sci.utils/interrupt-ex? candidate) true
+      :else (recur (ex-cause candidate)))))
 
 (def ^:private thread-mx (ManagementFactory/getThreadMXBean))
 
 (defn- allocated-bytes
-  "Allocated bytes for the calling platform thread, or -1."
+  "Allocated bytes for the calling JVM thread, or -1."
   []
   (.getCurrentThreadAllocatedBytes
    ^com.sun.management.ThreadMXBean thread-mx))
 
-(defonce ^:private deadline-timer
+(defonce ^:private ^ScheduledThreadPoolExecutor deadline-timer
   (doto (ScheduledThreadPoolExecutor.
          1
          (reify java.util.concurrent.ThreadFactory
@@ -241,45 +247,100 @@
 ;;; than every one, because the interrupt-fn runs on EVERY interpreted
 ;;; body and its cost is the interpreter's cost. The time flag is read
 ;;; every time — that one is the limit and may not be sampled.
-(def ^:private allocation-sample-mask 1023)
+
+(deftype ^:private EvaluationArm
+  [^longs entries
+   ^longs sampled
+   ^AtomicBoolean reached
+   outcome
+   ^long started-at
+   ^long allocated-at-start
+   ^boolean measurable])
+
+(defn- interrupt-guard
+  "A stable hook whose armed evaluation state is thread-scoped."
+  []
+  (let [thread-arm (ThreadLocal.)
+        interrupt-fn
+        (fn []
+          (when-let [^EvaluationArm armed
+                     (.get ^ThreadLocal thread-arm)]
+            (let [^longs entries (.-entries armed)
+                  entrance-count (unchecked-inc (aget entries 0))]
+              (aset entries 0 (long entrance-count))
+              (when (.get ^AtomicBoolean (.-reached armed))
+                (vreset! (.-outcome armed) :time)
+                (sci.interrupt/interrupt! "time-limit"))
+              (when (and (.-measurable armed)
+                         (zero? (bit-and entrance-count 1023)))
+                (aset ^longs (.-sampled armed) 0
+                      (long (- (allocated-bytes)
+                               (.-allocated-at-start armed))))))))]
+    {::thread-arm thread-arm
+     ::interrupt-fn interrupt-fn}))
+
+(defn fork
+  "Fork the base context with one stable thread-scoped interrupt guard."
+  {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
+  []
+  (let [guard (interrupt-guard)]
+    (assoc (sci/fork (base))
+           :interrupt-fn (::interrupt-fn guard)
+           ::interrupt-guard guard)))
 
 (defn- arm
-  "Arm one evaluation's interrupt-fn; return it with stop! and record.
-  A scheduled task flips a volatile at the deadline — the interrupt-fn
-  itself does no clock arithmetic, because it runs on every interpreted
-  body entrance and its cost is the interpreter's cost."
-  [time-limit-ms]
-  (let [entries (long-array 1)
-        sampled (long-array 1)
-        reached? (volatile! false)
-        outcome (volatile! nil)
-        started-at (System/nanoTime)
-        allocated-at-start (allocated-bytes)
-        measurable? (not (neg? allocated-at-start))
-        task (.schedule deadline-timer
-                        ^Runnable #(vreset! reached? true)
-                        (long time-limit-ms)
-                        TimeUnit/MILLISECONDS)]
-    {:interrupt-fn
-     (fn []
-       (let [count (unchecked-inc (aget entries 0))]
-         (aset entries 0 count)
-         (when @reached?
-           (vreset! outcome :time)
-           (sci.interrupt/interrupt! "time-limit"))
-         (when (and measurable? (zero? (bit-and count allocation-sample-mask)))
-           (aset sampled 0 (- (allocated-bytes) allocated-at-start)))))
-     ::stop! (fn [] (.cancel task false) nil)
-     ::record
-     (fn [final-outcome]
-       {:seon.eval/fn-entries (aget entries 0)
-        :seon.eval/duration-ms (quot (- (System/nanoTime) started-at) 1000000)
-        :seon.eval/allocated-bytes (if measurable?
-                                     (max (aget sampled 0)
-                                          (- (allocated-bytes)
-                                             allocated-at-start))
-                                     -1)
-        :seon.eval/outcome (or @outcome final-outcome)})}))
+  "Arm one guarded context on the current thread; return stop! and record.
+  A scheduled task flips this evaluation's flag at the deadline. The stable
+  interrupt-fn installed before acquisition reads the current thread's armed
+  state, so previously created functions use this deadline without sharing it
+  with concurrent invocations on other threads."
+  [ctx time-limit-ms]
+  (let [guard (::interrupt-guard ctx)]
+    (when-not guard
+      (throw
+       (ex-info "Evaluation context has no stable interrupt guard."
+                {:seon.error/kind ::missing-interrupt-guard})))
+    (let [^ThreadLocal thread-arm (::thread-arm guard)]
+      (when (.get thread-arm)
+        (throw
+         (ex-info "Evaluation context is already armed on this thread."
+                  {:seon.error/kind ::already-armed})))
+      (let [entries (long-array 1)
+            sampled (long-array 1)
+            reached (AtomicBoolean. false)
+            outcome (volatile! nil)
+            started-at (System/nanoTime)
+            allocated-at-start (allocated-bytes)
+            measurable (not (neg? allocated-at-start))
+            armed (EvaluationArm. entries sampled reached outcome
+                                  started-at allocated-at-start measurable)]
+        (.set thread-arm armed)
+        (try
+          (let [task (.schedule deadline-timer
+                                ^Runnable #(.set reached true)
+                                (long time-limit-ms)
+                                TimeUnit/MILLISECONDS)]
+            {:interrupt-fn (::interrupt-fn guard)
+             ::stop!
+             (fn []
+               (.cancel ^Future task false)
+               (.set reached false)
+               (.remove thread-arm)
+               nil)
+             ::record
+             (fn [final-outcome]
+               {:seon.eval/fn-entries (aget entries 0)
+                :seon.eval/duration-ms
+                (quot (- (System/nanoTime) started-at) 1000000)
+                :seon.eval/allocated-bytes
+                (if measurable
+                  (max (aget sampled 0)
+                       (- (allocated-bytes) allocated-at-start))
+                  -1)
+                :seon.eval/outcome (or @outcome final-outcome)})})
+          (catch Throwable failure
+            (.remove thread-arm)
+            (throw failure)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
@@ -725,16 +786,16 @@
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
-  Runs on the CALLER's thread, which must be a `:compute` platform
-  thread — this never blocks and never submits, because the two jobs
-  the quarry's Semaphore conflated (backpressure and parallelism) now
-  belong to the caller's work launcher.
+  Runs synchronously on the caller's `:compute` workload task — this
+  never blocks and never submits, because the two jobs the quarry's
+  Semaphore conflated (backpressure and parallelism) now belong to the
+  caller's work launcher.
 
   Order is the contract:
-  1. arm the interrupt-fn with `::time-limit-ms`, the ONLY limit;
-  2. install it on the SUPPLIED ctx (the caller's per-run fork, so the
-     fold shares defs) or on a fresh fork of the base when none was
-     given;
+  1. use the SUPPLIED guarded ctx (the caller's per-run fork, so the
+     fold shares defs) or make a fresh guarded fork when none was given;
+  2. arm its stable interrupt-fn on the current thread with
+     `::time-limit-ms`, the ONLY limit;
   3. consume THE ONE reader event; source is never reparsed;
   4. evaluate;
   5. ADMIT the value — realized and bounded — while still armed;
@@ -755,13 +816,12 @@
     namespace-ref :seon.cluster.run.form/ns
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
-  (let [{:keys [interrupt-fn] stop! ::stop! record ::record}
-        (arm time-limit-ms)
-        ;; a supplied ctx is used AS GIVEN — forking it here would
+  (let [;; a supplied ctx is used AS GIVEN — forking it here would
         ;; discard the caller's accumulated defs, which is the bug this
         ;; contract exists to not repeat
-        evaluation-ctx (assoc (or ctx (sci/fork (base)))
-                              :interrupt-fn interrupt-fn)
+        evaluation-ctx (or ctx (fork))
+        {:keys [interrupt-fn] stop! ::stop! record ::record}
+        (arm evaluation-ctx time-limit-ms)
         printed (java.io.StringWriter.)
         namespace-name (or (second namespace-ref)
                            (when agent-id (agent-namespace agent-id))
