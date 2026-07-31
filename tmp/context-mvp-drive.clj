@@ -24,7 +24,6 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.work :as work]
-            [seon.config :as config]
             [seon.render.block :as block]
             [seon.render.walk :as walk])
   (:import [java.nio.charset StandardCharsets]
@@ -100,7 +99,7 @@
 
 (defn- manifest
   []
-  (merge (config/defaults) (selected-provider-row)))
+  (selected-provider-row))
 
 (defn- agent-namespace
   [agent-id]
@@ -263,9 +262,9 @@
   ;; forks; this is the same explicit operator boundary as `bin/seon init`.
   (cluster/refresh-source! process-root)
   (try
-    (with-redefs [config/defaults manifest]
-      (cluster/start! {:seon.boot/cluster-name cluster-name
-                       :seon.boot/root process-root}))
+    (cluster/start! {:seon.boot/cluster-name cluster-name
+                     :seon.boot/root process-root
+                     :seon.config/manifest (manifest)})
     (catch Throwable failure
       ;; `start!` publishes a degraded instance in ex-data when the tower
       ;; advanced far enough to own resources. It is still this script's
