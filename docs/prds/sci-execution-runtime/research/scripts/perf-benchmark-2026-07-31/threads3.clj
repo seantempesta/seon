@@ -1,0 +1,7 @@
+(def mixed (filterv (fn [^Thread t] (.startsWith (.getName t) "async-mixed"))
+                    (keys (Thread/getAllStackTraces))))
+(println :COUNT (count mixed))
+(def t (first mixed))
+(println :STATE (str (.getState ^Thread t)) :daemon (.isDaemon ^Thread t))
+(doseq [f (take 12 (.getStackTrace ^Thread t))] (println :FRAME (str f)))
+(println :STATES (pr-str (frequencies (map (fn [^Thread x] (str (.getState x))) mixed))))

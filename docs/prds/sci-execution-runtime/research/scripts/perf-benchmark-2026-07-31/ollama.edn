@@ -1,0 +1,12 @@
+; Preflight manifest overlay: point the cluster at the sanctioned local
+; Ollama server (docs/prds/sci-execution-runtime/research/
+; local-provider-2026-07-28.md) so a turn costs nothing and needs no key.
+{:seon.config.ai/endpoint "http://127.0.0.1:11434/v1/chat/completions"
+ :seon.config.ai/model "qwen3.5:35b-a3b-coding-nvfp4"
+ :seon.config.ai/max-tokens 8192
+ ; `:seon.config.ai/api-key-variable` is a REQUIRED dial and may not be
+ ; marked absent (`seon.config/compile-manifest` refuses
+ ; `:seon.config/required-absent`); `no-auth true` is what suppresses the
+ ; credential read at the leaf.
+ :seon.config.ai/no-auth true
+ :seon.config.ai/timeout-ms 300000}
