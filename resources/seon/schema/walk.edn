@@ -19,6 +19,7 @@
  :seon.render.walk/target :int
  :seon.render.walk/back-reference? :boolean
  :seon.render/would-fall-to-floor? :boolean
+ :seon.render.walk/changed-at [:int {:min 0}]
 
  ; WHICH CONNECTION a neighbour was reached through. Named on the node
  ; so a reader never has to re-query to learn why a neighbour is there,
@@ -92,6 +93,7 @@
  [:map {:closed true}
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/distance :seon.render/distance]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
   [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
   [:seon.render.walk/back-reference? {:optional true}
    :seon.render.walk/back-reference?]

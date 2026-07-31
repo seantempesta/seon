@@ -1,7 +1,7 @@
 (ns seon.render.agent-test
   "Slice 2: the three-block agent page and its family-owned transcript."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
@@ -41,8 +41,7 @@
   [connection]
   (transact-one!
    connection
-   {:seon.cluster.agent/id agent-id
-    :seon.cluster.agent/blocks agent/blocks})
+   {:seon.cluster.agent/id agent-id})
   (transact-one! connection {:seon.cluster.agent/id peer-id})
   (transact-one!
    connection

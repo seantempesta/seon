@@ -123,45 +123,6 @@
 ;;; 1. Distance selects how much of the world the prompt contains
 ;;; ---------------------------------------------------------------------------
 
-(deftest agent-birth-seeds-the-first-prompt
-  (support/with-database
-    (fn [connection]
-      (support/seed-cluster! connection "pilot-cluster")
-      (d/transact connection
-                  (cluster-agent/creation-tx
-                   {:seon.cluster.agent/id agent-id
-                    :seon.cluster/name "pilot-cluster"
-                    :seon.ns/name 'my.agents.pilot}))
-      (d/transact connection
-                  [{:seon.cluster.message/id message-id
-                    :seon.cluster.message/to
-                    [:seon.cluster.agent/id agent-id]
-                    :seon.cluster.message/content "show me the first prompt"
-                    :seon.cluster.message/at (Date. 1700000001000)}])
-      (d/transact connection
-                  {:tx-data
-                   [{:seon.cluster.run/id run-id
-                     :seon.cluster.run/agent
-                     [:seon.cluster.agent/id agent-id]
-                     :seon.cluster.run/opened-at (Date. 1700000010000)}
-                    {:seon.cluster.agent/id agent-id
-                     :seon.cluster.agent/run
-                     [:seon.cluster.run/id run-id]}]
-                   :tx-meta
-                   {:seon.db/trigger
-                    [:seon.cluster.message/id message-id]}})
-      (let [text (prompt-at connection 1)
-            names (into #{}
-                        (map :seon.render.block/name)
-                        (block/blocks (d/db connection) agent-id))]
-        (testing "birth installed the distance view, instructions, and scaffold"
-          (is (= (into #{} (map :seon.render.block/name) agent/blocks)
-                 names)))
-        (testing "the first prompt consumes the installed view and instructions"
-          (is (str/includes? text "Your namespace, as it stands right now:"))
-          (is (str/includes? text "Reply with Clojure forms to run, in order."))
-          (is (str/includes? text "show me the first prompt")))))))
-
 (deftest the-prompt-is-the-rendered-neighbourhood
   (with-world
     (fn [connection]
@@ -326,7 +287,8 @@
 (deftest the-viewers-override-wins-over-the-family-and-holds-for-the-walk
   (with-world
     (fn [connection]
-      (let [node (walk/neighborhood
+      (let [db (d/db connection)
+            node (walk/neighborhood
                   {:seon.db/db (d/db connection)
                    :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
                    :seon.render/kind :seon.render/ai
@@ -344,7 +306,8 @@
           (is (seq runs))
           (is (every? (comp #{`block/data-prose} :seon.render/projection)
                       runs))
-          (is (not (str/includes? (walk/prose node) "It paused, leaving"))))
+          (is (not (str/includes? (walk/prose db node)
+                                  "It paused, leaving"))))
         (testing "and the VIEWER IS CONSTANT: the agent's own lens still
                   rendered the root, so perspective never shifted to an
                   intermediate namespace"

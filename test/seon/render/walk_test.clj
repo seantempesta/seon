@@ -158,7 +158,7 @@
                   :seon.sci.admit/caps base-caps
                   :seon.render/distance 0})]
             (is (elision? result))
-            (is (re-find #"distance cap" (walk/prose result)))))))))
+            (is (re-find #"distance cap" (walk/prose db result)))))))))
 
 (deftest reverse-reads-never-match-equal-non-ref-longs
   (support/with-database
@@ -198,6 +198,46 @@
               :seon.sci.admit/caps base-caps
               :seon.render/distance 0})]
         (is (true? (:seon.render/would-fall-to-floor? result)))))))
+
+(deftest prose-labels-real-paths-and-orders-stable-before-churn
+  (support/with-database
+    (fn [connection]
+      (let [node {:seon.render.walk/lookup [:example/id "root"]
+                  :seon.render/distance 2
+                  :seon.render.walk/changed-at 0
+                  :seon.render/projection 'example/root
+                  :seon.render/output "root-output"
+                  :seon.render.walk/neighbours
+                  [{:seon.render.walk/lookup [:example/id "branch-a"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 7
+                    :seon.render/projection 'example/a
+                    :seon.render/output "branch-a"
+                    :seon.render.walk/neighbours
+                    [{:seon.render.walk/lookup [:example/id "branch-a-child"]
+                      :seon.render/distance 0
+                      :seon.render.walk/changed-at 7
+                      :seon.render/projection 'example/a-child
+                      :seon.render/output "branch-a-child"}]}
+                   {:seon.render.walk/lookup [:example/id "branch-b"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 7
+                    :seon.render/projection 'example/b
+                    :seon.render/output "branch-b"}
+                   {:seon.render.walk/lookup [:example/id "churn"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 9
+                    :seon.render/projection 'example/churn
+                    :seon.render/output "churn"}]}
+            text (walk/prose @connection node)]
+        (is (= 1 (count (re-seq #";; \(seon\.render/walk" text))))
+        (is (re-find #"path=\[:seon\.render\.walk/neighbours 0\].*depth=1.*example/a"
+                     text))
+        (is (< (.indexOf text "branch-a")
+               (.indexOf text "branch-a-child")
+               (.indexOf text "branch-b")
+               (.indexOf text "churn"))
+            "equal changes cluster by branch and the newest unit is last")))))
 
 (deftest ordinary-requires-refs-and-derived-message-edges-are-walked
   (support/with-database

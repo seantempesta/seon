@@ -23,18 +23,9 @@
  ; ownerless at any committed basis.
  :seon.cluster.agent/creation-request
  [:map {:closed true}
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.ns/name :seon.ns/name]
-  [:seon.cluster/name :seon.cluster/name]
-  [:seon.cluster.agent/seed-blocks
-   {:optional true}
-   :seon.cluster.agent/seed-blocks]]
-
- ; Ordinary creation uses the distance namespace view plus its system
- ; instructions and scaffold. Root supplies its own page block vector through
- ; this one explicit override, so creation remains one formal path without
- ; teaching ordinary callers about root.
- :seon.cluster.agent/seed-blocks [:vector :seon.render.block/block]
+ [:seon.cluster.agent/id :seon.cluster.agent/id]
+ [:seon.ns/name :seon.ns/name]
+  [:seon.cluster/name :seon.cluster/name]]
 
  ; Pure transaction data is heterogeneous Datahike input by definition.
  :seon.cluster.agent/creation-tx [:vector :map]

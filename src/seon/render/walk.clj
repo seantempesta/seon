@@ -67,7 +67,9 @@
   holds anything."
   (:require [clojure.string :as str]
             [datahike.api :as d]
+            [seon.ai.tokens :as tokens]
             [seon.render :as render]
+            [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -470,6 +472,45 @@
     (:db/id (d/pull db [:db/id] lookup))
     (catch Throwable _ nil)))
 
+(defn- entity-last-changed
+  "The newest transaction touching `eid`, derived from this database value."
+  [db eid]
+  (if eid
+    (reduce (fn [latest datom] (max latest (long (:tx datom))))
+            0
+            (d/datoms db :eavt eid))
+    0))
+
+(defn- transcript-entity-ids
+  "The durable message/run/eval entities summarized by one transcript branch."
+  [db agent-eid]
+  (into #{agent-eid}
+        (map first)
+        (concat
+         (d/q '[:find ?message
+                :in $ ?agent
+                :where [?message :seon.cluster.message/to ?agent]]
+              db agent-eid)
+         (d/q '[:find ?message
+                :in $ ?agent
+                :where [?message :seon.cluster.message/from ?agent]]
+              db agent-eid)
+         (d/q '[:find ?run
+                :in $ ?agent
+                :where [?run :seon.cluster.run/agent ?agent]]
+              db agent-eid)
+         (d/q '[:find ?receipt
+                :in $ ?agent
+                :where
+                [?run :seon.cluster.run/agent ?agent]
+                [?receipt :seon.cluster.eval/run ?run]]
+              db agent-eid))))
+
+(defn- transcript-last-changed
+  [db agent-eid]
+  (reduce max 0 (map #(entity-last-changed db %)
+                     (transcript-entity-ids db agent-eid))))
+
 (defn neighborhood
   "One entity and its neighbours, rendered, as a VALUE.
 
@@ -508,8 +549,38 @@
     (letfn [(marker [lookup attribute hops failure]
               (cond-> {:seon.render.walk/lookup lookup
                        :seon.render/distance hops
+                       :seon.render.walk/changed-at 0
                        :seon.error/value failure}
                 attribute (assoc :seon.render.walk/attribute attribute)))
+            (transcript-node [agent-id agent-eid hops]
+              (if (neg? (vswap! remaining dec))
+                (marker [::transcript agent-id]
+                        :seon.cluster.agent/transcript
+                        hops
+                        {:seon.error/kind ::elided
+                         :seon.error/message
+                         "elided transcript at the configured node cap"})
+                (let [unit {:seon.db/db db
+                            :seon.cluster.agent/id agent-id
+                            :seon.render.transcript/token-budget
+                            (quot (long (:seon.config.eval.result/max-string
+                                         caps))
+                                  tokens/chars-per-token)}
+                      declaration (if (= kind :seon.render/html)
+                                    `transcript/render-html
+                                    `transcript/render-ai)]
+                  {:seon.render.walk/lookup [::transcript agent-id]
+                   :seon.render.walk/attribute
+                   :seon.cluster.agent/transcript
+                   :seon.render/distance hops
+                   :seon.render.walk/changed-at
+                   (transcript-last-changed db agent-eid)
+                   :seon.render/projection declaration
+                   :seon.render/output
+                   ((if (= kind :seon.render/html)
+                      transcript/render-html
+                      transcript/render-ai)
+                    unit)})))
             (child [connection hops]
               (let [{:seon.render.walk/keys [attribute target lookup]
                      failure :seon.error/value} connection]
@@ -524,7 +595,9 @@
                            "A derived connection had no target."}))))
             (node [lookup eid attribute hops]
               (let [base (cond-> {:seon.render.walk/lookup lookup
-                                  :seon.render/distance hops}
+                                  :seon.render/distance hops
+                                  :seon.render.walk/changed-at
+                                  (entity-last-changed db eid)}
                            attribute
                            (assoc :seon.render.walk/attribute attribute))]
                 (cond
@@ -609,9 +682,19 @@
 
                           :else with-render)))))))]
       (if-let [eid (eid-of db lookup)]
-        (node lookup eid nil hops)
+        (let [root (node lookup eid nil hops)
+              agent-id (d/q '[:find ?id .
+                              :in $ ?agent
+                              :where [?agent :seon.cluster.agent/id ?id]]
+                            db eid)]
+          (if (and agent-id (pos? hops))
+            (update root :seon.render.walk/neighbours
+                    (fnil conj [])
+                    (transcript-node agent-id eid (dec hops)))
+            root))
         {:seon.render.walk/lookup lookup
          :seon.render/distance hops
+         :seon.render.walk/changed-at 0
          :seon.error/value
          {:seon.error/kind ::no-such-entity
           :seon.error/message (str "Nothing in the database answers to "
@@ -635,24 +718,58 @@
   told nothing about a neighbour that exists would reason from a gap it
   cannot see. That is the same rule `seon.cluster.prompt` applies to a
   failed block."
-  {:malli/schema [:=> [:cat :seon.render.walk/node] [:maybe :string]]}
-  [node]
-  (letfn [(lines [node depth]
-            (let [pad (str/join (repeat depth "  "))
-                  attribute (:seon.render.walk/attribute node)
-                  failure (:seon.error/value node)
-                  output (get node :seon.render/output)
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.render.walk/node]
+                  [:maybe :string]]}
+  [db node]
+  (letfn [(units [node path depth branch]
+            (let [failure (:seon.error/value node)
+                  output (:seon.render/output node)
                   text (cond
                          failure (:seon.error/message failure)
                          (string? output) (when-not (str/blank? output) output)
                          (some? output) (pr-str output))
-                  head (when text
-                         (str pad
-                              (when attribute (str "(" attribute ") "))
-                              (str/replace text "\n" (str "\n" pad))))]
-              (into (if head [head] [])
-                    (mapcat (fn [child]
-                              (lines child (if head (inc depth) depth))))
-                    (:seon.render.walk/neighbours node))))]
-    (let [text (str/join "\n" (lines node 0))]
+                  here (when text
+                         [{:seon.render.walk/node node
+                           :seon.render.walk/path path
+                           :seon.render.walk/found-depth depth
+                           :seon.render.walk/branch branch
+                           :seon.render.walk/text text}])]
+              (into (or here [])
+                    (mapcat
+                     (fn [[index child]]
+                       (let [child-path (conj path
+                                              :seon.render.walk/neighbours
+                                              index)]
+                         (units child child-path (inc depth)
+                                (or branch child-path))))
+                     (map-indexed vector
+                                  (:seon.render.walk/neighbours node))))))
+          (provenance [node]
+            (or (:seon.render/projection node)
+                (get-in node [:seon.error/value :seon.error/kind])
+                :seon.render.walk/unknown))
+          (unit-lines [unit]
+            (let [node (:seon.render.walk/node unit)
+                  path (:seon.render.walk/path unit)
+                  depth (:seon.render.walk/found-depth unit)]
+              [(str ";; path=" (pr-str path)
+                    " depth=" depth
+                    " provenance=" (pr-str (provenance node)))
+               (:seon.render.walk/text unit)]))]
+    (let [root (:seon.render.walk/lookup node)
+          requested-depth (:seon.render/distance node)
+          basis (long (:max-tx db))
+          header (str ";; (seon.render/walk {:root " (pr-str root)
+                      " :depth " requested-depth "})"
+                      " => root=" (pr-str root)
+                      " basis=" basis
+                      " depth=" requested-depth)
+          ordered (sort-by
+                   (juxt (comp :seon.render.walk/changed-at
+                               :seon.render.walk/node)
+                         :seon.render.walk/branch
+                         :seon.render.walk/path)
+                   (units node [] 0 nil))
+          text (str/join "\n" (cons header (mapcat unit-lines ordered)))]
       (when-not (str/blank? text) text))))

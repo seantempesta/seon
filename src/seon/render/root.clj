@@ -25,7 +25,6 @@
   Crash walk: pure renders over a database value. A kill loses a page
   that re-derives."
   (:require [datahike.api :as d]
-            [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render.block :as block]))
 
@@ -213,68 +212,3 @@
   [:section {:id (block/surface-id :problems) :class "seon-root-problems"}
    (heading "problems")
    (problems/block unit)])
-
-;;; ---------------------------------------------------------------------------
-;;; The seed
-;;; ---------------------------------------------------------------------------
-
-(def blocks
-  "Root's default block set — CONTENT, not a classification rule.
-
-  A vector of block data, installed at boot through the ordinary
-  `install-tx` upsert, so an agent that later removes or reorders one is
-  editing the same collection boot wrote. Priorities leave gaps so a
-  block can be inserted between two without renumbering anything.
-
-  This lives in code rather than in the cluster manifest for one honest
-  reason: the config reconciler carries scalar DIALS into facts, and a
-  block set is a collection of entities. `ui.md` says the manifest
-  declares the initial block data, and it should — that is an accretion
-  to the reconciler, not something to fake with an unstorable dial."
-  [{:seon.render.block/name :header
-    :seon.render.block/priority 0
-    :seon.render/html `header-html}
-   {:seon.render.block/name :problems
-    :seon.render.block/priority 10
-    :seon.render/html `problems-html}
-   {:seon.render.block/name :fleet-oversight
-    :seon.render.block/priority 15
-    :seon.render.block/band :dynamic
-    :seon.render/ai `oversight/block-ai
-    :seon.render/html `oversight/block-html}
-   {:seon.render.block/name :agents
-    :seon.render.block/priority 20
-    :seon.render/html `agents-html}
-   {:seon.render.block/name :messages
-    :seon.render.block/priority 30
-    :seon.render/html `messages-html}
-   ;; the two streaming exercises, seeded rather than dark (F2 R3, the
-   ;; block-seed decision): the highest-churn thing in the system rides
-   ;; the same per-block morph every other surface gets, and now that it
-   ;; needs no facts either, the live page is the standing proof
-   {:seon.render.block/name :tokens
-    :seon.render.block/priority 40
-    :seon.render/html `tokens-html}
-   {:seon.render.block/name :reply
-    :seon.render.block/priority 50
-    :seon.render/html `text-html}])
-
-(defn seed-tx
-  "Transaction data installing root's block set. PURE, and IDEMPOTENT.
-
-  Upsert by name, so a reboot rewrites the same blocks rather than
-  accumulating them, and an agent's own edits to any OTHER block survive
-  untouched. Returns empty tx-data when nothing would change, which is
-  the converged-means-zero-writes rule the reconciler already proved."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id]
-                  :seon.store/transaction-data]}
-  [db agent-id]
-  (let [installed (into {}
-                        (map (juxt :seon.render.block/name identity))
-                        (block/blocks db agent-id))]
-    (if (every? (fn [wanted]
-                  (= wanted (get installed (:seon.render.block/name wanted))))
-                blocks)
-      []
-      (block/install-tx db agent-id blocks))))

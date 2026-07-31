@@ -393,7 +393,7 @@
         caps (get unit :seon.sci.admit/caps)]
     (when (and db agent-id caps)
       (when-let [text
-                 (walk/prose
+                 (walk/prose db
                   (walk/neighborhood
                    (cond-> {:seon.db/db db
                             :seon.render.walk/lookup
@@ -432,68 +432,3 @@
                    :class "seon-card seon-neighborhood"}
          [:h2 "namespace"]
          [:ul {:class "seon-neighborhood-list"} content]]))))
-
-;;; ---------------------------------------------------------------------------
-;;; The seed
-;;; ---------------------------------------------------------------------------
-
-(def blocks
-  "An ordinary agent's default block set — CONTENT, not a classification
-  rule, and the same vector-of-block-data shape root's seed uses.
-
-  THE SCAFFOLD PLUS THE TWO BOUNDARIES. AI keeps its three stable
-  scaffold blocks, trigger, and namespace-at-distance view. HTML is the
-  existing message bar plus exactly three agent-page blocks: header,
-  ordered transcript, and focus-with-rail.
-
-  Priorities leave gaps so a block can be inserted between two without
-  renumbering anything. `:namespace` sits in the `:dynamic` band ahead
-  of the trigger, so the agent reads its world and then the question."
-  [{:seon.render.block/name :identity
-    :seon.render.block/band :anchor
-    :seon.render.block/priority 0
-    :seon.render/ai 'seon.context/identity-ai}
-   {:seon.render.block/name :execution
-    :seon.render.block/band :anchor
-    :seon.render.block/priority 10
-    :seon.render/ai 'seon.context/execution-ai}
-   {:seon.render.block/name :peers
-    :seon.render.block/band :anchor
-   :seon.render.block/priority 20
-    :seon.render/ai 'seon.context/peers-ai}
-   ;; what this agent asked another for, and whether the facts call it
-   ;; done — absent for an agent that has asked for nothing
-   {:seon.render.block/name :settlement
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 84
-    :seon.render/ai 'seon.context/settlement-ai}
-   ;; the routed problems this agent owns — absent for an agent with
-   ;; none, which is every agent until one is assigned
-   {:seon.render.block/name :assignments
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 85
-    :seon.render/ai 'seon.context/assignment-ai}
-   {:seon.render.block/name :agent-header
-    :seon.render.block/band :anchor
-    :seon.render.block/priority 25
-    :seon.render/html `agent-header-html}
-   {:seon.render.block/name :message-bar
-    :seon.render.block/band :anchor
-    :seon.render.block/priority 30
-    :seon.render/html 'seon.render.web/message-bar-html}
-   {:seon.render.block/name :transcript
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 40
-    :seon.render/html `transcript-html}
-   {:seon.render.block/name :focus
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 50
-    :seon.render/html `focus-html}
-   {:seon.render.block/name :namespace
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 80
-    :seon.render/ai `namespace-ai}
-   {:seon.render.block/name :trigger
-    :seon.render.block/band :dynamic
-    :seon.render.block/priority 90
-    :seon.render/ai 'seon.context/trigger-ai}])

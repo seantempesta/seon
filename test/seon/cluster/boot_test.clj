@@ -29,8 +29,6 @@
             [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
             [seon.program :as program]
-            [seon.render.block :as block]
-            [seon.render.root :as root-render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
@@ -1006,44 +1004,3 @@
 ;;; "a derivation disagrees with the facts it derives from", so the
 ;;; assertion is that equality, at the choke point, against a real store.
 ;;; ---------------------------------------------------------------------------
-
-(deftest boots-seeded-blocks-are-all-derivable
-  (let [root (fresh-root)]
-    (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "blocks"
-                                      :seon.boot/root root})]
-        (try
-          (let [db @(:seon.boot/cluster-connection instance)
-                agent-id "root"
-                relation (into #{}
-                               (map first)
-                               (d/q '[:find ?block
-                                      :in $ ?agent-id
-                                      :where
-                                      [?agent :seon.cluster.agent/id ?agent-id]
-                                      [?agent :seon.cluster.agent/blocks ?block]]
-                                    db agent-id))
-                derived (block/blocks db agent-id)]
-            (testing "the facts carry root's whole seeded set"
-              (is (= (count root-render/blocks) (count relation))))
-            (testing "the derivation agrees with the facts, one for one"
-              (is (= (count relation) (count derived)))
-              (is (= (into #{} (map :seon.render.block/name) root-render/blocks)
-                     (into #{} (map :seon.render.block/name) derived))))
-            (testing "every index answers the same, so no read is privileged"
-              (let [agent-eid (:e (first (d/datoms db :avet
-                                                   :seon.cluster.agent/id agent-id)))]
-                (is (= (count relation)
-                       (count (d/datoms db :eavt agent-eid
-                                        :seon.cluster.agent/blocks))))
-                (is (= relation
-                       (set (d/q '[:find [?block ...]
-                                   :in $ ?agent-id
-                                   :where
-                                   [?agent :seon.cluster.agent/id ?agent-id]
-                                   [?agent :seon.cluster.agent/blocks ?block]]
-                                 db agent-id)))))))
-          (finally
-            (cluster/stop! instance))))
-      (finally
-        (delete-recursively! root)))))
