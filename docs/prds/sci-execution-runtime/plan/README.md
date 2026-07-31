@@ -1634,6 +1634,22 @@ may reintroduce a shadow build into the dev feedback path.
   `:my/model`, a REF, ref-only in v1 (generation-option facts wait
   for need); resolution moves to PER TURN inside the `:call` branch,
   riding the filed dials-frozen-at-arm defect's fix.
+  **Ruling 2026-07-31 #20 (owner, emphatic): AGENTS CALL ANY FUNCTION
+  IN THE SYSTEM.** "The context is just the response from the
+  function call. No magic." The eval-time exclusion of first-party
+  namespaces from acquisition is REPEALED: agent evals resolve every
+  loaded system function (bound as the real compiled Vars — sci hosts
+  them directly; corpus interpretation is for agent-authored source).
+  `(seon.render/walk)` from an agent eval returns the same bytes
+  assembly shows, ambient db derived by the fn itself (the
+  ambient-database-values design — no injection machinery). The
+  `my.*` toolkit remains the CURATED, documented surface — a front
+  door, never a wall. Safety stays the ruled guarantee (armed guard,
+  caps, accept-and-warn, provenance) with ONE honestly recorded
+  residual: the interrupt fires at interpreted fn entrances, so a
+  runaway inside a single COMPILED host call is bounded only by the
+  submit-level wedge backstop, not the time-limit — a known,
+  documented limit, not a silent one.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
