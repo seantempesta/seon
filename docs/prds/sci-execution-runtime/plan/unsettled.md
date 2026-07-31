@@ -16,8 +16,32 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**WORKING EDGE — 2026-07-30, `current-src` publication. This block supersedes
-every dated block below it.** Repository indexing is static: the pinned
+**WORKING EDGE — 2026-07-31, the context/render design day. This block and
+the 2026-07-30 block below are both current; this one owns the
+context/render redesign.** The owner ruled the one-system redesign in seven
+recorded batches (README "Rulings 2026-07-31" #1–#7): blocks are the one
+render unit in both projections with NO static scaffold path; walk =
+discovery over schema'd data; per-function-call render caching; attribute
+commit-id + conservative + code-revision staleness; dumb last-changed
+ordering with branch tie-clustering; instructions as explicit mutate-in-
+place datoms; the sci door as the only agent-code execution path with the
+safety guarantee and time-limit smart defaults; accept-and-warn base-var
+redefinition under the distributed ownership protocol (message the
+namespace's owner agent; unowned namespaces get an agent on demand). The
+authored contract is `plan/context-render-data-model-spec.md`, REVISED on
+two adversarial falsification verdicts (walk/ordering/cache +
+invalidation) — seven research reports and the retirement wave plan are
+dated 2026-07-31 in `research/`. Landed today: W0 free cuts (slot
+redirects, dead seed-tx), doc reconciliation (21 conflicts), the kondo
+shared-cache contamination fix (`9a073b146` — init/populate/with-database
+repaired), and the sci time-limit ground truth (Seon's arm defect, not
+sci's; S2 per-run thread-scoped guard implemented, final proof in
+flight). Next: seal the spec after the sci lane lands, dispatch W1 (data
+model) + W2 (renderers) implementation lanes per the retirement report's
+wave plan.
+
+**HISTORICAL WORKING EDGE — 2026-07-30, `current-src` publication. This
+block supersedes every dated block below it.** Repository indexing is static: the pinned
 clj-kondo analyzes the complete dependency classpath as resolution context,
 but only first-party Clojure beneath `src/` and `test/` becomes namespace,
 function, and test rows. Global schemas come from the registered schema EDN.
