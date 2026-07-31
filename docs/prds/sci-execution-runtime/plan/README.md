@@ -1585,6 +1585,13 @@ may reintroduce a shadow build into the dev feedback path.
   omission), NEVER by lists. The right pane is the total walked
   universe; the left pane is the curated agent seat; comparing them
   is the point.
+  **Ruling 2026-07-31 #17 (owner): "NAMESPACE PAGE" is the noun for a
+  web screen.** Every screen is one namespace's surface — the route
+  resolves the namespace → its owner agent → the walk in the html
+  projection; `/` is root's namespace page; the debug variant is the
+  same walk, two panes. Vocabulary row added; "page" alone, "screen",
+  "view", "dashboard" retire. Adding a namespace page is adding a
+  route line, never per-page render code.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
