@@ -1933,11 +1933,36 @@
                success simply has none")
           (is (not (contains? row :seon.ai.attempt/failover-from))
               "nothing failed over, so nothing points anywhere")
+          (is (not (contains? row :seon.ai.attempt/usage-edn))
+              "provider usage remains absent when the provider omitted it")
           (is (not (contains? row :seon.ai/disposition))
               "and no disposition is stored on any row — it is derived
                at read from the durable evidence"))
         (is (nil? (d/q '[:find ?e . :where [?e :seon.error/id _]] @connection))
             "and a call that worked committed no error fact")))))
+
+(deftest successful-call-persists-the-providers-open-usage-document
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            requests (atom [])
+            usage {"prompt_tokens" 31
+                   "completion_tokens" 7
+                   "prompt_tokens_details" {"cached_tokens" 23}}]
+        (with-redefs [ai/complete
+                      (recording-completer
+                       requests
+                       [{:seon.ai/text "(my.run/complete \"one\")"
+                         :seon.ai/usage usage}])]
+          (binding [*evaluation* {:seon.cluster.eval/result-edn
+                                  (pr-str (my.run/complete "one"))
+                                  :seon.sci.admit/value (my.run/complete "one")}]
+            (drive! cluster 10)))
+        (let [[row :as rows] (attempt-rows @connection)]
+          (is (= 1 (count rows)))
+          (is (= usage
+                 (edn/read-string (:seon.ai.attempt/usage-edn row)))
+              "the provider-owned map survives the database round trip"))))))
 
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster

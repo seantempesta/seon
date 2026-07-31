@@ -577,6 +577,7 @@
          run-id :seon.cluster.run/id
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
+         usage :seon.ai/usage
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
         connection (:seon.store/branch-connection cluster)
@@ -601,6 +602,7 @@
               ;; exactly when it points at an error fact, and there is
               ;; no stored :success/:error label restating that.
               commit (assoc :seon.ai.attempt/error (:db/id (first commit)))
+              usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
               ;; ROLE BY CONNECTION: only the backup points back, so a
               ;; reader can tell a failover from a retry without a stamp
               failover-from (assoc :seon.ai.attempt/failover-from
@@ -902,6 +904,9 @@
                                                  :seon.cluster.run/id run-id
                                                  :seon.cluster.agent/id agent-id
                                                  :seon.ai.attempt/ordinal ordinal}
+                                          (contains? completion :seon.ai/usage)
+                                          (assoc :seon.ai/usage
+                                                 (:seon.ai/usage completion))
                                           failure (assoc :seon.error/value failure)
                                           failover-from
                                           (assoc :seon.ai.attempt/failover-from

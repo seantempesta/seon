@@ -120,6 +120,10 @@
  :seon.ai.attempt/run [:and {:seon.db/index true} :seon.db/ref]
  :seon.ai.attempt/ordinal [:int {:min 0}]
  :seon.ai.attempt/at :inst
+ ; The provider's open usage document after JSON decoding. Persisted as
+ ; EDN because its string-keyed, provider-owned shape is deliberately
+ ; open; cached-token normalization remains a read-time derivation.
+ :seon.ai.attempt/usage-edn :string
  ; The error FACT this attempt produced — the whole normalized record
  ; with its signature, prose projection and evidence, never a copy of
  ; its message. ITS PRESENCE IS THE OUTCOME (owner ruling 2026-07-28):
@@ -140,7 +144,7 @@
  ; pure functions of the durable evidence (`seon.ai/disposition`,
  ; `status-class`, the error fact's data-edn), derived at read rather
  ; than frozen beside the facts they restate.
- :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+ :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
 
  ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
