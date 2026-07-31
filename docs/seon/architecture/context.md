@@ -313,15 +313,19 @@ what makes the fn visible:
   `defn` in the namespace it belongs to; move to that `ns` (`in-ns`, plain
   REPL) and its renderers run. Nothing stored — pure derivation from
   code-in-the-graph + `*ns*`.
-- **Installed block (explicit override).**
-  `seon.render.block/install-tx` returns transaction data that pins a render
-  function at a chosen priority in one agent's block collection. Storage is
-  the exception for the non-derivable: always-on blocks (the plan anchor,
-  warnings, the transcript), a hand-set priority, or seeding another scope.
+- **A fact on the agent entity (the same walk, no second path).** Anything
+  that should render regardless of the current `ns` — the role/system
+  message, an imported instruction file, the plan anchor, warnings, the
+  transcript — is an ordinary schema'd fact on the agent's entity that the
+  recursive walk reaches and an ordinary (overridable) renderer projects. It
+  is not an installed block, and there is no static scaffold path (owner
+  ruling 2026-07-31; see
+  `docs/prds/sci-execution-runtime/plan/README.md`). The retired
+  `seon.render.block/install-tx` + `:seon.render.block/priority` collection
+  was the pre-ruling stored-membership contract.
 
-Rule: **derive the derivable, store only the overrides.** Both paths resolve
-into one ordered list of `(render-fn, position)` the renderer walks — never
-two rendering systems.
+Rule: **derive the derivable; an override is a fact the same walk reads.** One
+walk produces one ordered list of blocks — never two rendering systems.
 
 ## Explicit dependencies — injected at the eval boundary
 
@@ -438,71 +442,66 @@ path. An explicit `my.skills/load` uses the ordinary installed-block override
 when the full skill body is actually wanted; loaded state is derived from block
 presence.
 
-## Order = stability, so the cache holds
+## Order = last change, so the cache holds
 
-Position is sorted by **observed rendered-byte stability**, so the prompt reads
-most-stable → most-dynamic and the provider prefix-cache survives most turns.
-Every captured turn records each block's name, content hash, estimated tokens,
-position, and cache band as observability facts. The next ordering is a pure
-query over that changelog at the turn's immutable database value; it does not
-guess an arbitrary renderer's dependencies or persist a mutable stability
-field.
+Blocks are ordered by **when their facts last changed** and by nothing else:
+each block's position key is the latest basis transaction among the datoms its
+render actually read, ascending, so the prompt reads longest-unchanged →
+most-recently-changed and the provider prefix-cache survives most turns. The
+key is derived at the turn's immutable database value from the same attribute
+set the render's dependency plan already yields ([[ui]] — invalidation is
+attribute revisions); it is never a stored timestamp, a stored stability
+field, or an authored priority. Block identity is the final deterministic
+tie-break.
 
-For each block, a small Bayesian change/no-change history estimates the chance
-that its hash changes on the next turn. Configured priority supplies the prior
-for a new block. Within a semantic band, the ordering key is change risk per
-cacheable token: `p(change) / (tokens × (1 - p(change)))`. This is the pairwise
-order that maximizes expected reusable prefix tokens: large stable blocks rise,
-small volatile blocks sink. Name is the final deterministic tie-break. The
-learned order freezes for an explicit epoch and a block moves only when the
-score margin clears a hysteresis threshold; otherwise optimization churn would
-destroy the cache it is trying to preserve. The epoch and threshold graduate
-from provider usage plus Inspect outcomes, not intuition.
+There are **no bands, no pins, and no hysteresis**. A block that never
+changes — the system message, the role instruction, an imported instruction
+file — reaches the front because its facts are the oldest, not because
+something declared it fixed. A block that changes every turn sinks on its own.
+"Static" is a property of the facts, never a mechanism: everything a prompt
+contains is one block from one render fn over the db, and there is no second
+assembly path for anchors (owner ruling 2026-07-31 — see
+`docs/prds/sci-execution-runtime/plan/README.md`).
 
-Semantic bands remain inviolable: the database-derived stable body precedes
-the transcript window, which precedes the free dynamic tail. Declared
-read-attribute analysis remains useful for UI invalidation, but prompt ordering
-trusts the exact bytes the model received. The existing block-chain hash names
-the first invalidated prefix, while provider cache-read usage verifies that the
-learned order improves real reuse. The bands are:
+Banding, priority, and hysteresis are **deferred until a measured
+oscillation demands them**. Every captured turn already records each block's
+identity, content hash, estimated tokens, and position as observability facts,
+and provider cache-read usage measures real reuse; if that evidence shows the
+naive order thrashing the cache, the fix is designed against those numbers,
+not anticipated here.
 
-1. **minimal fixed blocks** — the concise role, canvas, plan, and other
-   deliberately installed anchors whose queries currently produce a value.
-2. **the agent's code namespaces** — current `ns` full source, real requirements
-   and explicitly selected namespaces as compact cards, and explicit full
-   selections. Cards carry the schemas their functions reference. The group is
-   sorted by last-modified so rarely touched code sits earliest and edit churn
-   sinks to its end. Generated development reconciles exact compact/full
-   selections on this same block; it does not add another code surface.
-3. **the current `ns`'s render fns** — the twins above; they *follow* the
-   stable code they belong to. Their output moves with the db, so this is
-   where the cache prefix ends.
-4. **the transcript** — recent doing acquired through a fixed-work newest-turn
-   window, with per-band caps, eval-result decay, and a fixed total budget for
-   older retained events. The same immutable database value and policy produce
-   the same bytes; the leading edge may evict the oldest retained turn whenever
-   a newer one arrives. Eviction never rewrites retained events into summaries,
-   and every truncated older tail is marked honestly. What must outlive the
-   window goes to the DB (plan, kb, blobs), not transcript residue; a large
-   inbound payload clips to a blob ref.
-5. **pull-first relevance (conditional, not a standing band)** — reference
-   code and retrieval beyond the current namespace are explicitly inspected or
-   called when needed. Functions whose *input* specs match the shapes the agent
-   is holding (a graph query — [[think-in-clojure]] §1) and embedding neighbors
-   for the current activity — is a search the agent CALLS, not a pushed block.
-   The context rebuild demoted it from a standing order position to pull-first:
-   it becomes a recompute-every-step tail block (a capped token budget, config
-   dial) only if a drive proves the need. When present it competes with nothing
-   cached and vanishes when its queries return empty; every element earns its
-   place in evaluations. ([[context-rebuild]] §"Deliberately NOT blocks".)
-6. **the free dynamic tail** — root-only live clock, Unix load averages in the
-   standard 1/5/15-minute order, and bounded process memory. Active-child
-   progress joins this tail only after solo-agent evaluations graduate; child
-   outcomes themselves remain database facts in the ordinary derived body.
+The one thing that is not ordered with the blocks is the **free dynamic tail**
+described at the top of this document: a root-only, comment-shaped, ~50-token
+report of live clock, Unix load averages (1/5/15), and bounded process memory,
+appended after the whole body and after every provider cache boundary
+precisely because it is deliberately uncacheable. Active-child progress joins
+that tail only after solo-agent evaluations graduate; child outcomes themselves
+remain database facts in the ordinary derived body.
 
-Code grows slowly against tokens spent running things, so groups 1–2 are the
-compounding asset: as the agent persists schemas, fns, and tests, its own
-code becomes the majority of its context — self-reinforcing, cheap, cached.
+Two content policies survive the retirement of the bands, because they are
+about what a block contains, not where it sits:
+
+- **the transcript** is acquired through a fixed-work newest-turn window, with
+  per-band caps, eval-result decay, and a fixed total budget for older retained
+  events. The same immutable database value and policy produce the same bytes;
+  the leading edge may evict the oldest retained turn whenever a newer one
+  arrives. Eviction never rewrites retained events into summaries, and every
+  truncated older tail is marked honestly. What must outlive the window goes to
+  the DB (plan, kb, blobs), not transcript residue; a large inbound payload
+  clips to a blob ref.
+- **relevance retrieval is pull-first, not a block.** Reference code and
+  retrieval beyond the current namespace are explicitly inspected or called
+  when needed. Functions whose *input* specs match the shapes the agent is
+  holding (a graph query — [[think-in-clojure]] §1) and embedding neighbors for
+  the current activity are a search the agent CALLS, not a pushed block. It
+  becomes a recompute-every-step block (a capped token budget, config dial)
+  only if a drive proves the need, and vanishes when its queries return empty.
+  ([[context-rebuild]] §"Deliberately NOT blocks".)
+
+Code grows slowly against tokens spent running things, so the code blocks are
+the compounding asset: as the agent persists schemas, fns, and tests, its own
+code becomes the majority of its context — self-reinforcing, cheap, and, being
+the least recently changed, naturally cached at the front.
 
 ## Multi-agent sections — subagents + orphaned-agents
 
@@ -616,8 +615,8 @@ re-resolves live config after the prompt database value has been chosen.
 
 ## See also
 
-- [[ui]] — the block, its two renders, the surface catalog,
-  `seon.render.block/install-tx`, and the live channel.
+- [[ui]] — the block, its two renders, the surface catalog, the derived
+  entity walk and its resolution chain, and the live channel.
 - [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
   twin an agent sees and the human watches), the `my.*` schemas.
 - [[observability]] — turn record, replay functions, the blob archive.

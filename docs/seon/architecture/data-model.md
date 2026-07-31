@@ -469,7 +469,7 @@ bridge-storable. See [[library-grounding]].
 | `:seon.agent.runtime/wake?` | `:boolean` | boolean / one | optional; false suppresses the process-local inbound listener while preserving manual hosting; absence means true |
 | `:seon.eval/home-requires` | serialized require-spec vector | string (EDN) / one | optional; exact per-agent home namespace declaration selected at birth and read during runtime reconstruction |
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
-| `:seon.cluster.agent/blocks` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.render.block/priority` at render |
+| `:seon.cluster.agent/blocks` | `[:set {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | **historical** (superseded 2026-07-31 — see §4.2): the seeded block collection; membership is now derived by the entity walk |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
 | `:seon.render/html` | `:seon.render/html` | string (EDN) / one | optional; generic entity-render override, not the focal canvas pin |
 | `:seon.render.canvas/content` | `:seon.render.canvas/content` | string (EDN) / one | optional; literal hiccup or qualified renderer symbol explicitly pinning the focal canvas; absence derives focus |
@@ -483,6 +483,18 @@ everything else optional. **State is derived, never stored** — there is no
 [[agent-runtime]].
 
 ### 4.2 block — `:seon.render.block/block`
+
+> **Superseded by the 2026-07-31 rulings**
+> (`docs/prds/sci-execution-runtime/plan/README.md`). Block MEMBERSHIP and
+> ORDER are now derived by the recursive entity walk and the last-change
+> transaction basis; the stored `:seon.cluster.agent/blocks` collection,
+> `:seon.render.block/priority`, `:seon.render.block/band`, and
+> `seon.render.block/install-tx` are retired as a second assembly path. The
+> attribute table below records the pre-ruling contract and is HISTORICAL; the
+> replacement facts land with the render/context contract rewrite. What
+> survives unchanged: a block is one render function's identified output, and
+> `:seon.render.block/name` is a plain keyword in three roles (prompt header,
+> per-agent key, DOM `#surface-<name>`), never a datahike identity.
 
 A block is one context unit: a function-of-the-DB map with up to two renders.
 Block attributes live with their code owner, `seon.render.block`, and each
@@ -1105,7 +1117,7 @@ lifecycle); the graph is walked by reverse lookups (`:my.plan/_parent`,
 `:my.plan/_needs`).
 
 **The render is windowed — never mostly-completed history.** The plan block
-([[context]] band 1) leads with the position anchor, then shows the open frontier
+([[context]]) leads with the position anchor, then shows the open frontier
 (the ready + active steps and their immediate context), then a **small
 recently-completed tail** (the last few `:my.plan/completed-at` steps as
 progress and resume grounding), and drops the long completed interior. The

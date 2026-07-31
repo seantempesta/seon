@@ -6,13 +6,14 @@ tags: [prd, agent, context, render]
 
 # Context-walk experiment protocol
 
-Owner-approved 2026-07-29: explore replacing the block system with pure
-walk-rendered context **in experimental stages that iterate** — "not just
-hope that our first idea is smart." This is a bounded experiment protocol,
-not a second program spine; the README rulings (13–15) own the design, this
-file owns only the experiment mechanics. Blocks remain the production path
-until a stage graduates past them; on graduation the block system DELETES in
-the same commit (never two standing paths).
+Owner-approved 2026-07-29, re-scoped by the 2026-07-31 rulings: the walk is
+now the RULED direction, not a candidate — "block" names the one render unit
+in both projections and there is no static scaffold path. What survives here
+is the staged, iterate-don't-guess EXPERIMENT MECHANIC: prove each step
+against real outputs before the next. This is not a second program spine; the
+README rulings (13–15 and the 2026-07-31 batch) own the design, this file owns
+only the experiment mechanics. The stored-membership block path deletes when a
+stage graduates past it (never two standing paths).
 
 Grounding evidence (all committed): code-graph-end-to-end-2026-07-29.md,
 old-context-assembly-2026-07-29.md, transcript-aging-quarry-2026-07-29.md,
@@ -46,15 +47,17 @@ drives renderer iteration, not framework rework.
 whole-event omission). Exit: transcript output matches the aging quarry's
 behavioral spec on constructed histories; guinea-pig turns stay sane.
 
-**S4 — churn ordering + digests.** Piece digests (registration-memory
-cache, derivable from scratch), two generational bands with hysteresis,
-canonical order within band. Measure REAL prompt-cache hit rates on
-sustained Ollama drives vs S2. Exit: measured hit-rate improvement;
-distance-only DOI and two bands unless the measurements demand more.
+**S4 — ordering measurement.** Ordering v1 is PURE NAIVE per the 2026-07-31
+ruling: blocks sort by last-change transaction basis, nothing else — no pins,
+no bands, no hysteresis. This stage MEASURES it: real prompt-cache hit rates
+on sustained Ollama drives vs S2, plus per-block piece digests
+(registration-memory cache, derivable from scratch) as the diagnostic. Exit:
+either the naive order holds, or a measured oscillation is recorded that
+justifies designing banding/hysteresis against those numbers.
 
 **S5 — graduation.** helper + root on the default cluster switch to
-walk-derived context; the block system deletes in the same commit (scaffold
-blocks become walk roots). The owner's bar, run as an agent eval: a fresh
+walk-derived context; the stored block system deletes in the same commit
+(its remaining members become ordinary agent-entity facts the walk reaches). The owner's bar, run as an agent eval: a fresh
 agent, told one sentence, changes what it sees by writing one defn. Exit:
 the eval passes and the owner signs the deletion.
 

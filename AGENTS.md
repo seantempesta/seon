@@ -377,10 +377,12 @@ There are two documentation layers and no third:
   design decision changes; never put current implementation state, gaps,
   sequencing, evidence, graduation status, or a migration diary there.
 - The active program roadmap (currently
-  `docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md`) is the high-level ledger of
-  current state, remaining architecture deltas, dependency order, and success
-  measures. It points to bounded successor PRDs; it does not absorb their
-  detailed audits or implementation plans.
+  `docs/prds/sci-execution-runtime/plan/README.md`, with `plan/unsettled.md`
+  for the working edge) is the high-level ledger of current state, remaining
+  architecture deltas, dependency order, and success measures. It points to
+  bounded successor PRDs; it does not absorb their detailed audits or
+  implementation plans. `program-synthesis-2026-07-21.md` is the superseded
+  historical anchor and sequences nothing.
 - `docs/prds/<chunk>/` contains one implementable roadmap chunk on its own
   branch. Its `roadmap.md` owns that chunk's exact source inventory, built/gap
   state, implementation order, evidence, and graduation status. Its localized

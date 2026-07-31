@@ -1,10 +1,23 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, agent, architecture]
 ---
 
 # Context blocks — contract package (2026-07-28)
+
+> **SUPERSEDED by the owner rulings of 2026-07-31** (see
+> [README.md](README.md), "Ruling 2026-07-31" and "Rulings 2026-07-31 #2").
+> Blocks are now the ONE render unit in both projections with NO static
+> scaffold path; membership is derived by the recursive entity walk, not a
+> stored per-agent block collection; invalidation is Datahike attribute
+> revisions; resolution is value render keys → same-schema namespace fn
+> (viewer's, then owner's) → schema-attached default → floor, with the
+> slot-redirect step retired; and ordering v1 is the naive last-change
+> transaction basis with no pins, bands, or hysteresis. This package is kept
+> as the record of the sealed 2026-07-28 contract and as quarry for the parts
+> that survive (omission = nil-punning, the router request shape, the
+> presence doctrine). Do not implement its stored-membership sections.
 
 The seal-ready contract for the context-blocks rung. It implements
 [../research/context-blocks-plan-2026-07-28.md](../research/context-blocks-plan-2026-07-28.md)

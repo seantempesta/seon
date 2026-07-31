@@ -96,8 +96,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    twins: agent and human look at ONE derived value; shared situational
    awareness is structural, not messaged (canvas-first mitigates fabrication —
    prose is where agents lie, [[laws]]). Every specced fn an agent writes
-   teaches the system when to surface it. Anchors: the render twins,
-   `seon.render.block/install-tx`, current-ns auto-run — [[context]].
+   teaches the system when to surface it. Anchors: the render twins, the
+   entity walk, current-ns auto-run — [[context]].
    Authorship provenance remains on the source transaction for attribution,
    maintenance, and policy without making that agent's home namespace a
    permanent silo. Published agent-authored functions are shared capabilities;
@@ -162,12 +162,19 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
 
 One vocabulary, each name grounded in a namespace + a schema/fn.
 
-- **block** — the context unit: a function-of-the-DB map with up to two renders,
-  owned through the agent's `:seon.cluster.agent/blocks` component ref and
-  rendered in `:seon.render.block/priority` order.
+- **block** — the ONE render unit in both projections: one render function's
+  identified output — the function, its stable element id, and its current
+  bytes. `:seon.render/ai` joins the prompt and `:seon.render/html` goes to
+  the page; they are two projections of the same block, never two systems.
+  Blocks are DERIVED by the recursive entity walk over the database value, not
+  a stored membership list, and they order by last-change transaction basis
+  (owner ruling 2026-07-31; see
+  `docs/prds/sci-execution-runtime/plan/README.md`). There is no static
+  scaffold path: the system message and imported instruction files are facts
+  on the agent entity rendered by ordinary, overridable renderers.
   `:seon.render.block/block` in `seon.render.block`.
-  `:seon.render.block/name` is a plain `:keyword` — the app-level upsert key (prompt
-  header = DOM `#surface-<name>`), NOT a datahike identity.
+  `:seon.render.block/name` is a plain `:keyword` — the app-level identity
+  (prompt header = DOM `#surface-<name>`), NOT a datahike identity.
 - **render** — a block's output; the one word for the projection. Engine:
   `seon.render`. A render is never stored.
 - **ai render** — a block's prompt-text output (a string, or a symbol
@@ -223,15 +230,16 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   readiness failure instead records one `:seon.error/fault :core` and fails
   admission in development or returns the configured bounded production fallback. See
   [[data-model]] and [[observability]].
-- **seed-copy** — the seed/override mechanism: ALL blocks are copied through
-  the agent's `:seon.cluster.agent/blocks` component ref at creation; render
-  reads that COMPLETE set sorted by priority. There is no render-merge, no
-  separate default set, and no provider.
-- **`seon.render.block/install-tx`** — the sole block-set derivation. It returns
-  transaction data that replaces same-named blocks wholesale within one
-  agent's `:seon.cluster.agent/blocks` collection. Removal retracts the block
-  entity and follows the component cascade; callers commit through the one
-  database owner.
+- **the walk** — the one block-membership derivation: a recursive read of the
+  agent entity and the values it reaches, resolving each value to a renderer
+  (explicit `:seon.render/ai` / `:seon.render/html` keys on the value → a
+  same-schema render fn in the viewing agent's namespace, else the data's
+  owning namespace → the schema-attached default → the structural floor) and
+  emitting one block per rendered value. Membership and order are both
+  derived; the seeded `:seon.cluster.agent/blocks` collection,
+  `seon.render.block/install-tx`, and authored priority/band are RETIRED as a
+  second assembly path (owner ruling 2026-07-31). Overrides are ordinary
+  facts on the entity, read by the same walk.
 - **program graph** — the collective `:seon.fn`, `:seon.ns`, `:seon.schema`,
   and `:seon.test` facts. Those established top-level attribute namespaces are
   their settled owners.
@@ -512,15 +520,18 @@ generated historical results, bespoke drive scripts, and parallel harnesses are
 not an optimization cache; they are deleted once their current behavior is
 covered by the owning runner.
 
-### Seed-copy, not merge
+### One walk, no second assembly path
 
-ALL blocks are copied through the agent's `:seon.cluster.agent/blocks`
-component ref at creation; render reads that complete set sorted by
-`:seon.render.block/priority` and stops. There is no render-time merge over a
-separate default set, no provider, and no central catalog.
-`seon.render.block/install-tx` purely derives replacement transaction data for
-one agent's collection; the database owner commits it. The `my.*` namespaces
-define the render functions and block data seeded at creation. See [[ui]].
+Block membership is DERIVED: the render walks the agent entity and the values
+reachable from it at one database value, resolves a renderer per value, and
+emits one block each. There is no stored block collection, no seeded default
+set, no render-time merge, no provider, and no central catalog — and nothing
+renders outside this system, so the system message and imported instruction
+files are agent-entity facts rendered by ordinary renderers rather than a
+static scaffold. Order is the last-change transaction basis of the facts a
+block read; authored priority and bands are retired (owner ruling 2026-07-31;
+see `docs/prds/sci-execution-runtime/plan/README.md`). The `my.*` namespaces
+supply the render functions. See [[ui]] and [[context]].
 
 ### Roles are capabilities
 
@@ -618,8 +629,7 @@ results, and fans stable-ID element patches through per-tab
 `(sliding-buffer 1)` taps. Reconnect resolves the current database value and
 repaints current truth. The doc owns
 block/render/canvas/slot/layout, the page tree, reitit + the gate, the SSE
-channel, and the seed-copy + pure `seon.render.block/install-tx` override
-model. See [[ui]].
+channel, and the derived-walk block model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
 
@@ -658,15 +668,16 @@ order, dates, measurements, and acceptance evidence.
   receipt recovery, creation-as-idle, and orchestrator-root lifecycle.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
-  seed-copy + `seon.render.block/install-tx` override.
+  derived-walk block model.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — historical turn reconstruction (database value + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
   `/agents/run` endpoint.
 - [[context]] — the dynamic context system: `context = f(db, location,
-  window, tail)`, the three-band cache gradient (stable prefix / sliding
-  transcript window / free dynamic tail), namespace-as-location, pull-first
-  relevance retrieval, and the UI twin of every band.
+  window, tail)`, last-change ordering (longest-unchanged first, no bands or
+  pins) with the free dynamic tail appended after the cache boundary,
+  namespace-as-location, pull-first relevance retrieval, and the UI twin of
+  every block.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.

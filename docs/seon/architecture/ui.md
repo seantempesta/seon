@@ -157,59 +157,49 @@ targets the smallest stable block whose value changed. Serialization, authored
 evaluation, and slow-reader pressure therefore scale with changed content
 rather than page size.
 
-## Seed-copy — one collection, no merge
+## Membership is the walk — one derivation, no stored set
 
-Each agent OWNS its complete block set in `:seon.cluster.agent/blocks`, seeded at creation.
-Render reads that complete collection sorted by
-`:seon.render.block/priority` and
-stops: there is no render-time merge and no separate default set — every block an
-agent renders, it owns. The set is deduped app-level by
-`:seon.render.block/name` (a
-plain `:keyword`, NOT a datahike identity, so two agents can each own a
-`:transcript` block); priority sorts with a stable by-name tiebreaker.
+**Blocks are derived, not installed** (owner ruling 2026-07-31; see
+`docs/prds/sci-execution-runtime/plan/README.md`). The render walks the agent
+entity and the values reachable from it at one database value, resolves a
+renderer per value, and emits one block per rendered value. Membership and
+order both fall out of the facts: order is the last-change transaction basis of
+what the block read ([[context]]), and there is no static scaffold path — the
+system message and imported instruction files are ordinary facts on the agent
+entity rendered by ordinary, overridable renderers.
+
+**Resolution is one chain, most specific first:**
+
+1. explicit `:seon.render/ai` / `:seon.render/html` keys ON THE VALUE;
+2. a same-schema render function in a governing namespace — the viewing
+   agent's own namespace first, else the data's owning namespace
+   (viewer-constancy);
+3. the schema-attached default renderer;
+4. the structural floor.
+
+There is one chain and one floor. The slot-redirect step is RETIRED from this
+contract until a concrete need names it.
+
+> **Superseded.** The seeded `:seon.cluster.agent/blocks` component collection,
+> `seon.render.block/install-tx`, `:seon.render.block/priority`, and
+> `:seon.render.block/band` were the pre-2026-07-31 stored-membership contract
+> (the "context-blocks" sealed contract,
+> `plan/context-blocks-contracts-2026-07-28.md`). They are retired as a second
+> assembly path. An always-on or reordered block is an ordinary fact on the
+> entity that the same walk reads — never a separate installation. The
+> replacement attribute set lands with the render/context contract rewrite;
+> until then treat the old attributes in [[data-model]] §4.2 as historical.
 
 Global-vs-per-agent is decided by the DATA the render fn queries, never by the
 block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
-`:my.plan/*` row carries `:my.plan/agent` (each agent sees its own). Same block
-registration; the render fn scopes by what it reads. (See [[data-model]] for the
-domain schemas + data-ref scoping; [[agent-runtime]] for the fact-first atomic
-birth transaction and post-commit safe declaration load.)
+`:my.plan/*` row carries `:my.plan/agent` (each agent sees its own). The render
+fn scopes by what it reads. (See [[data-model]] for the domain schemas +
+data-ref scoping; [[agent-runtime]] for the fact-first atomic birth transaction
+and post-commit safe declaration load.)
 
-## Installing and removing — the one override
-
-`seon.render.block/install-tx` is the sole function that shapes a block set. It
-is PURE: it returns transaction data and the caller commits it, so the
-derivation stays a function of a database value and one owner does the writing.
-
-- It takes a vector of blocks and targets one agent's
-  `:seon.cluster.agent/blocks`. Idempotent **upsert by
-  `:seon.render.block/name`**.
-- The upsert REPLACES a same-named block wholesale rather than merging it,
-  because removing a key from a block must remove it from the block — a merge
-  would make `:seon.render/ai` un-deletable and quietly keep a block in the
-  prompt after its author took it out.
-- Removal retracts the block entity; because `:seon.cluster.agent/blocks` is a
-  component collection, the child cascade-retracts.
-- Installing nothing is no transaction. Converged means zero writes.
-
-The name is a plain keyword and deliberately NOT a database identity, so two
-agents may each own a `:transcript`; uniqueness is per agent and the upsert
-enforces it.
-
-The cluster manifest declares the initial block data. Agents may later install
-and remove against the same database-owned collection. A pure ADD needs nothing
-more: name a block and its render symbols; the symbols resolve late.
-
-**Pinning a function is a block; config shapes the seed.** Any render function
-an agent wants always-on is nothing but a block. `install-tx` at a chosen
-priority returns replacement transaction data; retracting the component block
-drops it. The agent therefore dials context in and the cost is derived at
-render. (`my.skills` explicit load/unload reuses this exact override; importing
-skill source alone installs no block—see [[data-model]] §5.5 + [[context]].)
-The per-cluster `seon.config`
-manifest (aero `config/system.edn`) shapes the seed set declaratively WITHOUT a
-code change. An absent block tree means no blocks; no hidden code fallback or
-implicit skill-body injection exists.
+`:seon.render.block/name` remains a plain keyword and deliberately NOT a
+database identity, so two agents may each own a `:transcript`; uniqueness is
+per agent.
 
 ## The render engine
 
@@ -223,7 +213,7 @@ siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
 turn's complete ordinary database value. The turn acquires and formats
-the AI renders in `:seon.render.block/priority` order; the web UI places
+the AI renders in last-change order ([[context]]); the web UI places
 the same blocks' HTML renders into a layout's slots. "What the agent saw at turn
 N" is a re-derive from that exact value; `:t` alone is not a durable bookmark.
 
@@ -290,8 +280,8 @@ inputs at one immutable database value and invokes authored code through
 `seon.sci.eval/evaluate` with the one `:interrupt-fn` and value admission.
 Renderers may request genuine effects only through
 `seon.effect/request!`; the normal render path remains pure and returns
-ordinary data. The byte-stable cache prefix at low priority is preserved for
-provider prefix-caching.
+ordinary data. The byte-stable prefix of longest-unchanged blocks is
+preserved for provider prefix-caching.
 
 **Byte identity is a design property.** The complete database value, verified
 configuration and file fingerprints, render inputs, and program artifact
@@ -300,11 +290,11 @@ reads, ambient database state, and process-local result liveness cannot alter
 them. The same value rendered in a replacement process yields the same bytes;
 only an explicitly separated free-dynamic tail may vary under [[laws]].
 
-**Context assembly is its own domain.** How the prompt bands by dynamism
-(stable prefix / sliding window / free dynamic tail), the
-namespace-as-location model, and the cache gradient live in [[context]] —
-this doc owns the shared block/render machinery and the human-facing twin:
-every context band renders an html representation for inspectability.
+**Context assembly is its own domain.** How the prompt orders blocks by
+last change (no bands, no pins), the appended free dynamic tail, and the
+namespace-as-location model live in [[context]] — this doc owns the shared
+block/render machinery and the human-facing twin: every block renders an html
+representation for inspectability.
 
 ### Render coverage converges on blocks
 
@@ -374,7 +364,7 @@ exercises that prove the design.
   none is a leaf **surface**.
 - **top-level is DERIVED**, never a stored `:layout` flag: a block is top-level
   when no other block's surface slots it in. A page is its top-level surfaces
-  in priority order, so several root cards and one all-slotting layout are the
+  in the same derived order, so several root cards and one all-slotting layout are the
   same mechanism arranged differently. When every surface is slotted and none
   is top-level, the slots form a closed cycle; every surface becomes top-level
   and the cycle is reported in the hole that closes it, because rendering
@@ -748,8 +738,8 @@ middleware.
 ## Downstream composition
 
 A downstream cluster composes the same public mechanisms: route facts choose
-page handlers, block facts choose renderers, `seon.render.block/install-tx`
-derives block-collection replacement transaction data, canvas facts select
+page handlers, schemas and entity facts choose renderers through the one
+resolution chain, canvas facts select
 focal content, and an explicitly selected
 manifest supplies brand and route populations. Consumer-specific files,
 launchers, and wiring remain in the downstream repository. Mutable global
