@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (6)
+## Blocker (7)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
 | [Stop the render walk silently dropping entities outside registered families](render-walk-silently-drops-entities-outside-registered-families.md) | blocker | context wave fix lane |
 | [Mark value-floor truncation in band instead of printing a false shape](value-floor-truncates-in-band-without-a-placeholder.md) | blocker | context wave fix lane |
 | [Carry the message content on transcript decline entries](transcript-decline-entries-drop-the-message-content.md) | blocker | context wave fix lane |
@@ -27,10 +28,12 @@ See `README.md` for the convention.
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
 
-## Friction (12)
+## Friction (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Let a live config apply reach an armed agent graph](armed-agent-graphs-freeze-config-dials-at-arm.md) | friction | turn-loop preflight fix lane |
+| [Give `ai-prose` the ref shape the render walk actually hands it](error-render-puts-its-own-failure-in-agent-context.md) | friction | turn-loop preflight fix lane |
 | [Give render token budgets one config owner instead of private dials](render-token-budgets-are-private-dials-no-producer-supplies.md) | friction | context wave fix lane |
 | [Make the render wave's properties able to produce their failing cases](render-wave-properties-cannot-produce-their-failing-cases.md) | friction | context wave fix lane |
 | [Derive walk family detection from identity, not declaration order](walk-family-detection-depends-on-schema-declaration-order.md) | friction | context wave fix lane |
