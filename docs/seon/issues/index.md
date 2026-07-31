@@ -25,7 +25,7 @@ See `README.md` for the convention.
 | [Correct clj-kondo's `vswap!` arity before program publication](clj-kondo-vswap-arity-blocks-program-publication.md) | blocker | future analyzer wave |
 | [The sci time limit does not bind previously defined functions](sci-time-limit-does-not-bind-previously-defined-functions.md) | blocker | sci-interrupt ground-truth verification (diagnosis under owner-directed re-audit; fix lane stopped pending verdict) |
 
-## Friction (4)
+## Friction (5)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -33,6 +33,7 @@ See `README.md` for the convention.
 | [Partial hot reload leaves a live JVM running mixed old and new code](partial-hot-reload-produces-mixed-code-with-no-warning.md) | friction | general |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
+| [Stop the render walk following non-ref long attributes](render-walk-reverse-refs-matches-non-ref-longs.md) | friction | context/render wave (W1) |
 
 ## Cleanup (2)
 
