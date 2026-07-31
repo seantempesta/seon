@@ -80,3 +80,43 @@ No skill lane is needed for the 2026-07-31 rulings.
 - `ee9cf1b07` — architecture docs + root `AGENTS.md` + the two plan context docs.
 - `b85b23bae` — issue schedule, its convention docs, and the resolved checker note.
 - this file plus the `unsettled.md` / `ui-conversion-plan` pointers.
+
+## Second pass — ruling batches #3–#8
+
+The second pass reconciled the later 2026-07-31 decisions and removed residual
+batch #1–#2 contradictions from the present-tense target:
+
+- `context.md` now defines a render tree, per-function-call caching with
+  attribute commit IDs plus conservative/code revisions, last-bytes-changed
+  ordering with branch tie-clustering, cluster-owned mutable instruction rows,
+  the distributed namespace-owner protocol, and durable agent-error routing.
+  The former free tail and installed-skill block are ordinary tree render units.
+- `data-model.md` now defines the cluster entity, its config and instruction
+  refs, separate agent entities and additive instruction refs, and the
+  `:seon.cluster.instruction` family. Stored block membership, band, and priority
+  attributes are absent; agent-code error facts carry the responsible agent.
+- `ui.md` now has one corpus/schema resolution chain and one merged structural
+  floor, per-call invalidation, global Flow scheduling, shared recency ordering,
+  the opt-in per-tab HTML floor, and a read-only drillable per-agent debug walk.
+- `agent-runtime.md` now states that the SCI boundary is the only agent-code
+  path, defines invocation-class `time-limit` defaults and index-lifted metadata
+  raises, accepts base-Var redefinition with a warning, and records the
+  distributed namespace-owner and durable safety protocols.
+- `architecture.md`, `laws.md`, `toolkit.md`, `observability.md`, and root
+  `AGENTS.md` now use the same tree/cache/instruction, namespace-owner, and
+  durable error-routing vocabulary. No new “cluster entity” vocabulary row was
+  added because it is an ordinary entity identified by `:seon.cluster/name`;
+  the existing namespace attribute reference was corrected to
+  `:seon.cluster.agent/namespace`.
+
+The protected sealed spec remains internally stale in several places: its
+header says four batches and draft, its invariant summary says revision
+counters while the revised contract says commit IDs, an early schema comment
+puts instructions on the config singleton before the revised cluster edge, and
+its renderer-wave text predates the invocation-class limit and settled HTML
+floor rulings. Its message/error section also says agent mistakes remain only
+transcript values while ruling #5 requires a durable routed fact. The later
+numbered rulings and revised sections determine the architecture wording, so no
+target semantic choice was guessed. The exact meaning of “near-equal” branch
+clustering and whether fleet ping summaries become facts remain intentionally
+unspecified.
