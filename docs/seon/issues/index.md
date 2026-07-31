@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (7)
+## Blocker (8)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
 | [Stop the render walk silently dropping entities outside registered families](render-walk-silently-drops-entities-outside-registered-families.md) | blocker | context wave fix lane |
 | [Mark value-floor truncation in band instead of printing a false shape](value-floor-truncates-in-band-without-a-placeholder.md) | blocker | context wave fix lane |
