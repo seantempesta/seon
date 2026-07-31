@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, docs]
 ---
@@ -47,3 +47,24 @@ but the schedule's per-issue destinations survive only in
 Decide one home: either the generator learns to emit a destination
 column (preferred — one artifact, derived), or the schedule lives in a
 separate hand-owned file that the generator never touches.
+
+## Resolution 2026-07-31
+
+`bin/issues-index` no longer generates anything: `seon.dev.issues/run!` accepts
+only `[]` or `["--check"]` and both call `check!`
+(`script/seon/dev/issues.clj:196-215`), and `schedule-errors`
+(`script/seon/dev/issues.clj:131-157`) validates the schedule form — one row per
+open note, no duplicates, severity matching the note, no row for a closed note,
+no blank destination. The one home is decided: the hand-owned schedule WITH its
+destination column, checked by the command.
+
+The check was failing only because the schedule had drifted: nine rows named
+notes already archived as resolved, and the eval-time-schema row said `friction`
+where the note says `blocker`. The doc-reconciliation lane repaired
+`index.md` and corrected the stale "GENERATED FILE — do not hand-edit"
+header plus the matching claims in `README.md` and `AGENTS.md`.
+
+Proof: `bin/issues-index --check` →
+`{:clean? true, :open-count 9, :archive-count 785}` (exit 0); deleting one open
+note's row makes it exit 1 with `missing-schedule-row`, so the acceptance
+criterion holds in both directions.

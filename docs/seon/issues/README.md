@@ -57,8 +57,10 @@ appears exactly once with one disposition:
 
 Severity still ranks the work inside those destinations; it is not itself a
 destination. Update the schedule whenever an issue opens, closes, or changes
-owner. The older `bin/issues-index` command emits only a severity inventory and
-cannot represent named destinations, so it is not the authority for this file.
+owner. `bin/issues-index [--check]` only VALIDATES: it reads the notes plus
+`index.md` and fails on a missing, duplicated, or severity-mismatched row, a
+row naming a note that is no longer open, or a blank destination. It never
+generates or overwrites the schedule.
 
 ## Frontmatter template
 
