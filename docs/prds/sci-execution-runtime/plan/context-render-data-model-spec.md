@@ -150,12 +150,18 @@ projection)`. Producing it yields:
   EXISTING `:seon.config.eval/time-limit-ms` and result caps. Measured:
   armed direct invoke 3.2 µs vs full `evaluate` 100.8 µs; the per-entrance
   interrupt check is 7.8 ns. No render-specific dial set.
-- BLOCKER dependency: sci binds `:interrupt-fn` at fn CREATION, so an
-  armed ctx does not guard previously defined or acquired fns — the limit
-  is escapable today (issue:
-  `sci-time-limit-does-not-bind-previously-defined-functions.md`, live
-  repro). The fix (indirection read at entrance time, in the maintained
-  sci fork) gates every renderer wave and repairs today's run fold too.
+- BLOCKER dependency (ground truth, sci-interrupt-ground-truth report):
+  the escapable limit is SEON'S defect, not sci's — our `arm` cancels
+  its scheduled timer, leaving previously created/acquired fns holding a
+  permanently disarmed flag. Fix is first-party, no fork change: one
+  stable per-run guard object with a thread-scoped flag (shape S2),
+  installed on the run ctx before `acquire!`; three edit sites
+  (`sci/eval.clj` arm + assoc, `cluster/loop.cljc` run fork). Proven by
+  probe: both escapes close at the limit; disarm exact; sibling forks
+  isolated. Companion defect: `interrupted?` reads only top-level
+  ex-data and misses sci's wrapped interrupt (marker on the CAUSE), so
+  interrupts record as `:error` — fix walks the cause chain. Gates every
+  renderer wave and repairs today's run fold.
 - Renderer failure/interrupt = flat `:seon.error` value; the block renders
   as its error projection (loud), never omits silently, never throws into
   a proc. Catch sites must mirror `admit`'s interrupt pass-through — a
