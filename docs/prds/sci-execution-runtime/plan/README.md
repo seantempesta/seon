@@ -1475,6 +1475,28 @@ may reintroduce a shadow build into the dev feedback path.
   Learn from confused agents — their confusion locates the stale or
   missing skill line; never fix only the one agent and leave the
   skill wrong for the next hundred loads.
+  **Ruling 2026-07-31 #12 (owner): THE AGENT BOOTSTRAP MVP IS TOP
+  PRIORITY, translated into data attributes.** Agents must not write
+  everything from scratch — creation seeds enough to get them
+  acquainted and productive. The MVP-as-data: (a) THE REQUIRES ARE
+  THE CURRICULUM — creation seeds the agent's namespace with requires
+  of the agent-facing toolkit namespaces (a COMPUTED set from the
+  corpus, never a hand list), so the walk renders each as a compact
+  card at d2; (b) detail is INVERSE to distance — own namespace
+  renders full verbatim source at d1, required namespaces render the
+  compact card (sym — contract — first docline) at d2, correcting the
+  earlier same-words-opposite-reading tiering; (c) THE SCHEMA CLOSURE
+  returns — schemas referenced by rendered contracts render beside
+  the code (Malli's own walk, isolated placeholder registry,
+  transitive, capped loudly at 40), because a contract naming
+  `:seon.render/unit` is unreadable without it (quarry:
+  old-namespace-schema-lookup-quarry-2026-07-31.md); (d) requires
+  convert from symbols to REAL REFS with name-only rows minted for
+  external namespaces (legal since the source-less relaxation) —
+  the derived-edge workaround retires; (e) instructions carry the
+  non-derivable how-to prose. Naming of the agent's walked keys
+  (`:my/*` candidate) awaits the owner's explicit ruling — nothing
+  renames until then.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
