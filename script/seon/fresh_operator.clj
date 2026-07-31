@@ -814,24 +814,29 @@
          vec)))
 
 (defn- cluster-truth
-  [root]
-  (let [{:seon.fresh-operator/keys [advertisements jvms]}
-        (source-observations root)
-        canonical-root (.getCanonicalPath (java.io.File. root))
-        persisted-branches
-        (or
-         (some
-          (fn [jvm]
-            (when (and (= canonical-root
-                          (:seon.fresh-operator/root jvm))
-                       (:seon.fresh-operator/reachable? jvm)
-                       (:seon.fresh-operator/persisted-branches-observed?
-                        jvm))
-              (:seon.fresh-operator/persisted-branches jvm)))
-          jvms)
-         (offline-roster canonical-root))]
-    (derive-cluster-truth canonical-root persisted-branches
-                          advertisements jvms)))
+  ([root]
+   (cluster-truth
+    root {:seon.fresh-operator/read-offline-roster? true}))
+  ([root {:seon.fresh-operator/keys [read-offline-roster?]}]
+   (let [{:seon.fresh-operator/keys [advertisements jvms]}
+         (source-observations root)
+         canonical-root (.getCanonicalPath (java.io.File. root))
+         persisted-branches
+         (or
+          (some
+           (fn [jvm]
+             (when (and (= canonical-root
+                           (:seon.fresh-operator/root jvm))
+                        (:seon.fresh-operator/reachable? jvm)
+                        (:seon.fresh-operator/persisted-branches-observed?
+                         jvm))
+               (:seon.fresh-operator/persisted-branches jvm)))
+           jvms)
+          (when read-offline-roster?
+            (offline-roster canonical-root))
+          #{})]
+     (derive-cluster-truth canonical-root persisted-branches
+                           advertisements jvms))))
 
 (defn- own-cluster-truth
   [truth]
@@ -970,15 +975,18 @@
                     "from the live JVM registry")))))
 
 (defn- reconciled-truth!
-  [root]
-  (loop [truth (cluster-truth root)]
-    (let [repairs (repair-actions truth)]
-      (if (seq repairs)
-        (do
-          (doseq [repair repairs]
-            (apply-repair! repair))
-          (recur (cluster-truth root)))
-        truth))))
+  ([root]
+   (reconciled-truth!
+    root {:seon.fresh-operator/read-offline-roster? true}))
+  ([root truth-options]
+   (loop [truth (cluster-truth root truth-options)]
+     (let [repairs (repair-actions truth)]
+       (if (seq repairs)
+         (do
+           (doseq [repair repairs]
+             (apply-repair! repair))
+           (recur (cluster-truth root truth-options)))
+         truth)))))
 
 (defn- require-live-row!
   [truth name]
@@ -1260,7 +1268,9 @@
         (parse-start-arguments arguments)
         explicit-name? (boolean (explicit-start-name? arguments))
         manifest (if config-path (sparse-manifest root config-path) {})
-        truth (reconciled-truth! root)
+        truth
+        (reconciled-truth!
+         root {:seon.fresh-operator/read-offline-roster? false})
         existing
         (some
          #(when (and (:seon.fresh-operator/operator-root? %)

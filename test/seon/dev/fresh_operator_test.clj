@@ -187,6 +187,65 @@
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
+(defn- cold-start-calls
+  [root]
+  (let [code
+        (pr-str
+         `(do
+            (require 'seon.fresh-operator)
+            (let [calls# (atom [])
+                  operator-var#
+                  (fn [name#]
+                    (ns-resolve 'seon.fresh-operator name#))
+                  advertisement#
+                  {:seon.boot/cluster-name "cold-start"
+                   :seon.render.web/url "http://127.0.0.1:7994"
+                   :seon.boot/prepl-port 7993}]
+              (with-redefs-fn
+                {(operator-var# (symbol "source-observations"))
+                 (fn [_#]
+                   {:seon.fresh-operator/advertisements []
+                    :seon.fresh-operator/jvms []})
+                 (operator-var# (symbol "offline-roster"))
+                 (fn [_#]
+                   (swap! calls# conj :offline-roster)
+                   (throw
+                    (ex-info "cold start read the offline roster" {})))
+                 (operator-var# (symbol "launch!"))
+                 (fn [_root# name# _manifest# _ready-port#]
+                   (swap! calls# conj [:launch name#])
+                   {:seon.fresh-operator/pid 42})
+                 (operator-var# (symbol "await-advertisement!"))
+                 (fn [_root# _name# _pid# _ready-server#]
+                   advertisement#)
+                 (operator-var# (symbol "print-started!"))
+                 (fn [_root# name# _value#]
+                   (swap! calls# conj [:started name#]))}
+                (fn []
+                  ((var-get (operator-var# (symbol "start!")))
+                   ~(str root) ["cold-start"])))
+              (prn @calls#))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" (str (io/file project-root "script"))
+            "-e" code])
+           (.directory project-root)
+           (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The cold-start operator probe failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    (edn/read-string output)))
+
 (defn- process-output
   [^Process process]
   (future
@@ -489,6 +548,15 @@
                      [:seon.dev.fresh-operator-test/data
                       :seon.fresh-operator/candidates]))))))
 
+(deftest cold-start-defers-roster-read-to-the-launched-jvm
+  (let [root (fresh-root)]
+    (try
+      (is (= [[:launch "cold-start"] [:started "cold-start"]]
+             (cold-start-calls root))
+          "cold start launched one JVM without an offline roster JVM")
+      (finally
+        (delete-recursively! root)))))
+
 (deftest init-owns-current-source-and-dormant-cluster-lifecycle
   (let [root (runnable-root! (fresh-root))
         store-dir (str (io/file root "data" "clusters" "store"))
@@ -618,7 +686,7 @@
             "the new operator JVM reopened every observed branch fact")
         (is (= 0 (::exit live-status)) (::output live-status))
         (is (str/includes? (::output live-status) "1/1 clusters alive")
-            (::output live-status)))
+            (::output live-status))))
       (let [stopped (run-operator root "stop" name)]
         (is (= 0 (::exit stopped)) (::output stopped)))
       (finally
@@ -626,9 +694,9 @@
           (when (and (zero? (::exit status))
                      (not (str/includes? (::output status)
                                          "0/0 clusters alive")))
-          (let [stopped (run-operator root "down")]
-            (when-not (zero? (::exit stopped))
-              (binding [*out* *err*]
+            (let [stopped (run-operator root "down")]
+              (when-not (zero? (::exit stopped))
+                (binding [*out* *err*]
                   (println (::output stopped)))))))
         (delete-recursively! root)))))
 
