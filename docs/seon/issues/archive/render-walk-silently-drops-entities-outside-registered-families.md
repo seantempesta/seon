@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, architecture]
 ---
@@ -104,3 +104,43 @@ generator can produce the failing case.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## Resolution
+
+Resolved by `0fdc50615`.
+
+- `concrete-entity` now uses Datahike wildcard pull, whose EAVT expansion
+  reads every attribute the entity actually carries. Registered entity maps
+  remain renderer-family declarations; they no longer gate membership.
+- Reverse membership is derived from every installed ref attribute in
+  `(:schema db)`. Each attribute uses the exact Datahike AVET slice for the
+  target eid. Datahike makes ref attributes indexed by construction
+  (`reference-code/datahike/src/datahike/db/utils.cljc:306-313`), so this is
+  bounded by attribute and target without the deleted unbound Datalog query.
+- Each reverse attribute and the derived asked-for-run group retains at most
+  `:seon.config.eval.result/max-collection` targets. Every overflow emits a
+  flat `:seon.error/value` whose data names the attribute and exact omitted
+  count.
+- The prior apparatus filter and target-only deduplication were deleted.
+  Every entity and distinct attribute connection reaches the walk; renderers
+  alone decide whether their projection emits anything.
+
+Recurring proof: `bin/test seon.render.walk-test` passed 11 tests / 45
+assertions / 0 failures / 0 errors. The fixed-seed properties install raw
+`:audit/*` Datahike attributes outside every registered family, generate
+scalar subsets, and transact the same generated source entities through two
+independent inbound ref attributes. For each attribute, rendered targets plus
+that attribute's own exact-count marker account for every source.
+
+The retained load-only in-memory falsifier
+`tmp/walk-universal-floor-probe.clj` now renders the source as
+`{:audit/marker "unregistered", :audit/points-at #:db{:id ...}}` and includes
+`:audit/points-at` in the target's neighbour attributes. Before the fix it
+rendered only `#:db{:id ...}` and omitted that neighbour.
+
+The changed-source publication gate could not run: a fresh scratch cluster
+was refused because its cluster transaction references the absent
+`[:seon.cluster.instruction/id :getting-started]`. The exact independent
+failure is retained in
+`data/clusters/walk-universal-floor/logs/seon.log`; this issue's in-memory
+database acceptance boundary is green.
