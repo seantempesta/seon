@@ -8,12 +8,24 @@ tags: [research, render, ui]
 
 ## Result
 
-W3 now has one admission-backed structural floor. The router falls through to
+The router and per-agent debug view now share one admission-backed structural
+floor. The router falls through to
 `seon.render.block/data-panel`; that seam and the AI `data-prose` seam both
 delegate to `seon.render.value`, where `seon.sci.admit/admit` is the only
 nested-data admission walk (`src/seon/render.clj:166`,
 `src/seon/render/block.clj:903-939`, `src/seon/render/value.cljc:173-398`). The
 block expander no longer declares its own fallback before calling the router.
+
+One pre-W3 raw renderer remains reachable at `/data`:
+`src/seon/render/web.clj` still calls `seon.render.data/drill-html`, whose
+`entries` function realizes and sorts a whole collection before paging. The
+independent landing audit caught this after the W3 commit. Removing it and its
+pinning suite requires `src/seon/render/data.clj` and
+`test/seon/render/data_test.clj`, which were not W3-owned; even repointing that
+route would exceed the user's explicit `web.clj (the new route only)` boundary.
+Therefore the repository-wide **ONE floor** exit remains open on that exact
+ownership decision even though the router's two-floor defect and the new debug
+surface are resolved.
 
 The router's public `resolve-unit` associates the chosen declaration and
 `:seon.render/would-fall-to-floor?` on the returned unit. The boolean records
@@ -100,6 +112,27 @@ comparison because an explicit declaration may legitimately name the floor.
 W1 owns the required chain integration. Until it lands, W4 must call
 `resolve-unit` on an unresolved unit rather than infer the checkbox flag from a
 walk node's chosen symbol.
+
+## Independent landing audit
+
+The required post-landing adversarial pass found four W3-local defects, all
+fixed in follow-up commits:
+
+- entity and block floor calls without an explicit debug root could share a
+  DOM id; the fallback root now uses `:db/id` or block name;
+- composite map keys and set members reused their parent's id; each now gets a
+  deterministic output-local entry address;
+- map/set paging selected hash iteration order before sorting; selection now
+  uses canonical printed order, preserving page membership across equivalent
+  values; and
+- a bare unit could display router provenance, viewer namespace, and admission
+  caps as if they were domain data; `floor-unit` now removes those request
+  fields.
+
+The same pass caught unconditional JVM code in the `.cljc` namespace; schema
+loading and SHA-256 identity are now CLJ reader branches, with a CLJS-local
+stable hash fallback. Regressions cover distinct entity ids, composite entry
+ids, insertion-order-independent pages, and request-data omission.
 
 ## Proof
 

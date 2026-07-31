@@ -16,7 +16,10 @@ bounded edges remain to integrate:
 - a drilled collection selects its offset window before admitting that finite
   page; and
 - `seon.render.walk/projection` chooses and associates a declaration before it
-  calls the router, erasing whether the floor branch won.
+  calls the router, erasing whether the floor branch won; and
+- the live `/data` route still calls `seon.render.data/drill-html`, the old
+  independent raw renderer, because its owner and tests were outside W3's
+  explicit paths.
 
 ## Evidence
 
@@ -34,6 +37,12 @@ looks explicit. Comparing symbols is invalid because a producer may explicitly
 choose the same floor symbol. W3's evidence and live proof are recorded in
 `docs/prds/sci-execution-runtime/research/w3-floor-debug-notes-2026-07-31.md`.
 
+The remaining floor deletion is equally exact:
+`src/seon/render/web.clj:964-989` reaches
+`src/seon/render/data.clj:57-221`, which performs its own raw navigation,
+entry materialization, summaries, HTML, and ids without admission. Its old
+behavior suite is `test/seon/render/data_test.clj`.
+
 ## Owner
 
 W1 owns `src/seon/render/walk.clj`; integrate branch provenance there without
@@ -45,3 +54,5 @@ The walk hands an unresolved unit to the router, or carries an explicit
 source-derived branch fact, so downstream W4 filtering can read
 `:seon.render/would-fall-to-floor?` without comparing projection symbols. The
 offset window remains bounded and every dropped or failed value remains loud.
+The `/data` route delegates to the merged admitted floor and the superseded
+`drill-html` implementation/tests are deleted.
