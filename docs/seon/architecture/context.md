@@ -9,23 +9,21 @@ tags: [architecture, agent]
 > **Target design** (present tense). The block/render machinery lives in
 > [[ui]]; historical turn reconstruction + inspection in [[observability]]; the measured laws
 > that constrain this in [[laws]]. Implementation state lives in [[roadmap]]. This doc keeps
-> to Clojure primitives — `ns`, `defn`, `require`, var metadata, a db value
-> — and reserves only the names backed by real code (`block` =
-> `:seon.render.block/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
+> to Clojure primitives — `ns`, `defn`, `require`, var metadata, and a db value.
+> A block is the informal name for one render-function call in either
+> projection, never a stored data type.
 
-The prompt is nothing more than **functions applied to one immutable db value,
-in a stable order**:
+The prompt is a **tree of render units rooted at one agent entity**. Schema'd
+data are renderable leaves and refs are branches. The recursive walk discovers
+the tree from one immutable database value; a separate display projection
+orders the resulting units and joins their AI bytes.
 
-```clojure
-context = (str/join (map #(% db) (render-fns-in-scope agent)))
-```
-
-Every turn re-derives the cacheable body from one frozen db value. Nothing is
-accumulated. The agent, current turn, namespace, window policy, persisted
-timestamps, tool/schema graph, plan, event membership, and block order are facts
-or pure queries over that value. Rendering the same database value (the same
-store ID, branch, commit ID, and basis transaction) for the same agent produces
-a byte-identical body.
+Every turn re-derives the tree from one frozen db value. Nothing is accumulated.
+The agent, cluster, current turn, namespace, window policy, tool/schema graph,
+plan, event membership, and tree edges are facts or pure queries over that
+value. Rendering the same database value (the same store ID, branch, commit ID,
+and basis transaction), code revision, and explicit render arguments for the
+same agent produces a byte-identical body.
 Filesystem state, process-local cache membership, random ids, and map iteration
 order never leak into it. Which functions are in scope, and in what order, is
 the entire design — and whether that set is **complete** is what makes the agent
@@ -39,17 +37,22 @@ from another commit merely because both lack revision history. The render
 therefore sees the selected database value whether a read computes, joins
 single-flight, or hits cache.
 
-After that body, a deliberately tiny **free dynamic tail** may report live
-operational state whose value is useful precisely because it is current: wall
-clock, Unix load averages, process memory, and eventually active-child progress.
-It is root-only, comment-shaped, capped at roughly 50 estimated tokens, and
-always occupies the absolute end after every provider cache boundary. It never
-changes context membership, tool availability, plans, or transcript history.
-The sent prompt blob is the byte ground truth for the whole request; the
-recorded database value regenerates the body exactly and the captured blob preserves
-the ephemeral tail exactly. This makes prompt diffs, content hashes, cache
-attribution, and failure reproduction ordinary database operations rather than
-transcript archaeology.
+Render caching is **per function call**: `(renderer fn × explicit args) →
+bytes`. Each process-local entry retains the bytes and digest, the call's
+attribute dependency set, last-seen per-attribute commit IDs, the conservative
+database revision, the process-local code revision, and the basis at which its
+bytes last changed. A call is stale when any dependency commit ID differs by
+`not=`, the conservative revision moves, or the code revision moves. The walk
+may therefore call renderers dumbly and compose independently cached results;
+the cache is losable performance state, never another truth.
+
+Live root telemetry is an ordinary first-party render unit with explicit
+process-local inputs, not a tail outside the block system. It is comment-shaped,
+capped at roughly 50 estimated tokens, and omitted when normal. Whether fleet
+ping summaries become durable facts remains a separate data-model decision;
+the render contract does not invent persistence for them. The sent prompt blob
+is the byte ground truth for process-local inputs, while the recorded database
+value and code revision regenerate the database-derived calls.
 
 ## The projection must be complete — so the agent feels stateful
 
@@ -216,11 +219,8 @@ A `defn` whose input accepts the db and whose output carries a render key is
 a **renderer**, and the keys present decide where it goes:
 
 - `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
-- `{:seon.render/hiccup …}` → a **surface**: its own hiccup projection on the
-  agent's page (each block has its own separate surface, not a merged vector).
-  (`:seon.render/hiccup` is the fn's OUTPUT-map key that twin-detection reads,
-  `seon.agent.ctx.render-fns/twin-keys`; `:seon.render/html` is the stored
-  block/pin ATTR and the render-engine view selector — [[ui]].)
+- `{:seon.render/html …}` → a **surface**: its own HTML projection on the
+  agent's page.
 - **both keys → twins**: one value, two projections — the agent's context
   and the human's screen showing the same thing.
 
@@ -266,14 +266,16 @@ The process qualifier prevents root-owned boot/config facts from masquerading
 as root-agent authorship. `:seon.db/user` answers who; `:seon.db/process`
 answers which durable ingress. Deliberate canvas recency needs both facts.
 
-This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
-now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
-the db value (all data is reachable from it — [[think-in-clojure]]); it
-`require`s only the *code* it calls. It is pure over the frozen db, so it
-re-runs safely every turn, is bounded + errors-as-values through
-`seon.sci.eval/evaluate` (a throw becomes a flat error card, never a crash), and replays
-from an immutable database value ([[observability]]). The historical prompt
-blob—not a re-executed effect—is the byte ground truth.
+These are the block's two renders (`:seon.render/ai` /
+`:seon.render/html`). Its explicit args contain the db value and any other
+declared inputs; hidden walk state never influences output. First-party
+renderers remain pure over those inputs. Every agent-authored renderer executes
+only through the one SCI door. The boundary composes the uncatchable interrupt
+with wrap-and-catch: failed or runaway code becomes a flat `:seon.error` value,
+enters durable problem routing, appears in the running agent's next context,
+and escalates to root. No agent exception crosses into a proc and no failure is
+silently dropped. The historical prompt blob—not a re-executed effect—is the
+byte ground truth.
 
 ## Shared view — the agent knows the human sees it
 
@@ -284,7 +286,7 @@ context, the `:html` twin puts the full plan on the human's page. The agent
 can rely on "my human is seeing this" — it is structurally true, no
 messaging required. Planning in full detail *is* showing the human the plan.
 
-## What puts a fn in scope — writing it, or pinning it
+## How tree values find renderers
 
 The program graph is cluster-shared. A function written by one agent is a
 committed `:seon.fn` fact with its namespace, schema, source, dependencies, and
@@ -296,36 +298,32 @@ therefore accumulate as the application grows instead of remaining private to
 the process that first authored them. These facts use the settled top-level
 `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` attribute namespaces.
 
-A resident namespace steward is another database-derived consumer of this
-graph. Its context can include the namespace's current source, dependents,
-observed calls, failures, performance evidence, tests, and changes by other
-agents, letting it improve a shared capability in response to real use. Any
-agent that discovers a defect fixes the shared namespace directly and adds the
-test; the steward observes and builds on that transaction. Stewardship is a ref
-to an agent, not a namespace naming convention, edit lock, or exclusive runtime.
+Every namespace has one owner agent, identified by the namespace's unique
+`:seon.cluster.agent/namespace` ref. An agent that needs a symbol changed in
+another namespace sends its owner a durable message and receives a commit or
+rejection by reply. When a message targets an unowned namespace, the runtime
+creates an agent and assigns that namespace on demand before delivery. The
+owner's context includes current source, dependents, observed calls, failures,
+performance evidence, tests, and incoming change requests. Ownership is a
+distributed collaboration protocol, not a private program copy.
 
-Two ways, one mechanism (a render fn run over the db); they differ only in
-what makes the fn visible:
+Render membership comes only from the tree walk. The walk discovers schema'd
+values, then resolves each value through one chain: explicit render keys on the
+value; a same-schema renderer found by a program-graph query in the viewing
+agent's namespace and then the data's owning namespace; the schema-attached
+default; and the structural floor. A namespace renderer is a possible
+projection for discovered data, never membership by itself.
 
-- **Being in its namespace (derived, zero ceremony).** The render fns of the
-  agent's current `ns` are in scope regardless of which agent first authored
-  them. Authoring context is just writing a
-  `defn` in the namespace it belongs to; move to that `ns` (`in-ns`, plain
-  REPL) and its renderers run. Nothing stored — pure derivation from
-  code-in-the-graph + `*ns*`.
-- **A fact on the agent entity (the same walk, no second path).** Anything
-  that should render regardless of the current `ns` — the role/system
-  message, an imported instruction file, the plan anchor, warnings, the
-  transcript — is an ordinary schema'd fact on the agent's entity that the
-  recursive walk reaches and an ordinary (overridable) renderer projects. It
-  is not an installed block, and there is no static scaffold path (owner
-  ruling 2026-07-31; see
-  `docs/prds/sci-execution-runtime/plan/README.md`). The retired
-  `seon.render.block/install-tx` + `:seon.render.block/priority` collection
-  was the pre-ruling stored-membership contract.
+The cluster entity owns the authoritative ref set to
+`:seon.cluster.instruction` rows for the system message, reply grammar,
+messaging/declining grammar, and global instruction files. An agent entity
+carries only genuine additive instruction refs. Editing an instruction replaces
+its text datom on the same identity: no row versioning or ref repointing.
+Datahike history retains the prior text. Plans, warnings, transcripts, and
+other agent facts are reached from their ordinary refs in the same tree.
 
-Rule: **derive the derivable; an override is a fact the same walk reads.** One
-walk produces one ordered list of blocks — never two rendering systems.
+Rule: **derive the derivable; an override is data the same walk reads.** One
+walk produces one tree of render units—never two rendering systems.
 
 ## Explicit dependencies — injected at the eval boundary
 
@@ -389,17 +387,15 @@ reads/writes **per-agent** data (it stamps `:my.plan/agent me` and filters by
 it); a fn that does not is **global** (`my.kb`). You know where data goes by
 reading the arglist — not from an invisible binding.
 
-## Auto-run — the current `ns`'s render fns become context
+## Renderer discovery — the walk queries the program graph
 
-The current-`ns` render fns don't need the agent to call them: the render
-pass **queries the program graph** for fns in the current namespace whose
-output schema is a render type (`:seon.render/ai` / `:seon.render/html`) and
-**runs each through the same injecting wrapper** (they're map-in fns declaring
-`:seon.db/db` + `:seon.agent/id`), bounded + errors-as-values. Their outputs
-are the AI/HTML twins, positioned right after the stable code they belong to.
-So a `defn` in the agent's namespace becomes live context automatically —
-authoring context is writing a specced render fn, and the injection makes it
-run with no arguments the agent has to supply.
+The walk first discovers schema'd values. For each value, it queries the
+program graph for a same-schema renderer in the governing namespace and runs
+the winning function through the same injecting boundary. Renderer functions
+are map-in functions declaring `:seon.db/db`, `:seon.agent/id`, and their
+domain arguments; their presence alone never inserts a context unit. This keeps
+membership in the entity tree while allowing the current namespace to override
+how discovered data renders with zero registry ceremony.
 
 ### Root is a small specialization of the same mechanism
 
@@ -415,8 +411,8 @@ definitions never land in framework code. The resolved vector is persisted
 with root's home namespace; there is no runtime role registry or renderer
 allowlist. When root moves into an
 orchestration, database, or UI-session namespace, that
-namespace becomes current and its full source plus colocated render fns enter
-context through the same auto-run rule above. The root canvas's bounded AI twin
+namespace becomes current and its source plus applicable same-schema renderers
+enter context through the same walk-and-query rule above. The root canvas's bounded AI twin
 provides current fleet facts through the ordinary canvas block: every agent is
 listed compactly, while running, erroring, and recently active agents receive
 bounded recent-message, failed-eval, and canvas-AI detail. Root itself remains a
@@ -435,24 +431,24 @@ text is admitted.
 ### Importing a skill does not inject it
 
 Users may import standard `SKILL.md` content into canonical `my.skills` database
-facts, but skill-fact availability and prompt placement are independent. Default and
-test context trees omit the skills block. Namespace cards, current-namespace
-source, state-gated blocks, and pull references remain the normal discovery
-path. An explicit `my.skills/load` uses the ordinary installed-block override
-when the full skill body is actually wanted; loaded state is derived from block
-presence.
+facts, but skill-fact availability and prompt placement are independent. Default
+and test context trees carry no skill ref. Namespace cards, current-namespace
+source, state-gated render units, and pull references remain the normal
+discovery path. Explicit selection adds an ordinary schema'd ref reachable from
+the agent entity; it never installs a block or creates a second assembly path.
 
 ## Order = last change, so the cache holds
 
-Blocks are ordered by **when their facts last changed** and by nothing else:
-each block's position key is the latest basis transaction among the datoms its
-render actually read, ascending, so the prompt reads longest-unchanged →
-most-recently-changed and the provider prefix-cache survives most turns. The
-key is derived at the turn's immutable database value from the same attribute
-set the render's dependency plan already yields ([[ui]] — invalidation is
-attribute revisions); it is never a stored timestamp, a stored stability
-field, or an authored priority. Block identity is the final deterministic
-tie-break.
+Render units are ordered by **when their bytes last changed** and by nothing
+else. Each cached function call carries the basis at which its digest last
+transitioned; a no-op reassertion does not move it. Display order is ascending
+across every unit regardless of tree position, so the prompt reads
+longest-unchanged → most-recently-changed and the provider prefix-cache survives
+most turns. Near-equal changes cluster by branch so related units remain
+together; the target does not invent a threshold here. The key is derived by
+the per-call cache at render time and is never a stored timestamp, stability
+field, or authored priority. Stable render-call identity is the final
+deterministic tie-break within a branch cluster.
 
 There are **no bands, no pins, and no hysteresis**. A block that never
 changes — the system message, the role instruction, an imported instruction
@@ -463,20 +459,18 @@ contains is one block from one render fn over the db, and there is no second
 assembly path for anchors (owner ruling 2026-07-31 — see
 `docs/prds/sci-execution-runtime/plan/README.md`).
 
-Banding, priority, and hysteresis are **deferred until a measured
-oscillation demands them**. Every captured turn already records each block's
-identity, content hash, estimated tokens, and position as observability facts,
-and provider cache-read usage measures real reuse; if that evidence shows the
-naive order thrashing the cache, the fix is designed against those numbers,
-not anticipated here.
+Banding, priority, and hysteresis do not exist in this contract. Every captured
+turn already records each block's identity, content hash, estimated tokens, and
+position as observability facts, and provider cache-read usage measures real
+reuse. Evidence of oscillation would require a new ordering ruling; it does not
+reserve the retired attributes or a dormant second mechanism.
 
-The one thing that is not ordered with the blocks is the **free dynamic tail**
-described at the top of this document: a root-only, comment-shaped, ~50-token
-report of live clock, Unix load averages (1/5/15), and bounded process memory,
-appended after the whole body and after every provider cache boundary
-precisely because it is deliberately uncacheable. Active-child progress joins
-that tail only after solo-agent evaluations graduate; child outcomes themselves
-remain database facts in the ordinary derived body.
+Root-only live telemetry is an ordinary first-party render unit described at
+the top of this document. Its bytes participate in the same last-changed order;
+because its explicit process-local inputs change often, it naturally moves
+toward the end. Active-child outcomes remain database facts in the ordinary
+tree, while genuinely live progress may be another explicit process-local
+input to that same bounded unit.
 
 Two content policies survive the retirement of the bands, because they are
 about what a block contains, not where it sits:
@@ -520,7 +514,7 @@ closes; multi-agent visibility must not obscure the solo navigation signal:
   surface: completion is a **fact in the DB**, so a parent that was mid-turn or
   restarted still sees every child result — no acknowledgement, nothing to clear.
   After that proof closes, childless agents render empty → it costs them zero;
-  the compact running-progress view occupies the free dynamic tail while
+  the compact running-progress view occupies the root telemetry render unit while
   persisted outcomes remain in the database-derived body.
 - **`:orphaned-agents`** (root-only, config-injected via
   `:seon.config/root-context` like `:core-faults`) — live agents whose
@@ -530,19 +524,22 @@ closes; multi-agent visibility must not obscure the solo navigation signal:
 
 ## Inspectability — the human twin of every position
 
-The `:html` twin means every context position has a view the human can
-inspect: the per-block prompt-text + hiccup panes with per-block token counts
-  (`/agent/{id}/debug`), the agent's page showing the same surfaces, and — through
-[[observability]] — the exact historical context of any turn (`agent-debug/turn`,
-`turn-diff`, the prompt at its resolved commit, the prompt blob as byte ground truth).
-The human debugging an agent and the forensic agent debugging it read the
-same derived views.
+Every agent has a read-only debug view that begins at that agent's entity and
+walks the same tree through the one merged structural floor. It exposes every
+reachable schema'd value—including system apparatus hidden from the curated
+page—preserves identities and refs for drill navigation, and never transacts a
+display choice. The view also shows each unit's AI/HTML projections, token
+counts, cache dependencies/revisions, code revision, digest, last-bytes-changed
+basis, and error routing. Through [[observability]], the same surface reaches
+the exact historical context of any turn (`agent-debug/turn`, `turn-diff`, the
+prompt at its resolved commit, and the prompt blob as byte ground truth).
 
 ## Configuration
 
-Every effective dial is database data (`:seon.config/*`): the namespace compact
-and full presence-set pins, the transcript band schedule + decay, render caps, the
-predicted-relevance token cap, per-agent overrides in agent scope. A manifest is
+Every effective dial is database data (`:seon.config/*`): namespace projection
+policy, transcript age schedule + decay, render caps, invocation-class
+`time-limit` defaults, the predicted-relevance token cap, and per-agent
+overrides in agent scope. A manifest is
 an optional desired-state input explicitly selected for one startup/apply
 operation; no selection preserves DB facts and never falls back to
 `config/system.edn`. Environment overrides are captured only while compiling a
@@ -588,24 +585,22 @@ next prompt with no file edit). `:seon.ai/reply-evaluation` and the
 transcript's tier/decay datoms are the precedents this generalizes to the
 whole config surface.
 
-**The system prompt itself is DB state.** `seon.ai/effective-system-prompt`
-is one `or` chain: the per-request `:seon.ai/system-prompt` override (the one
-escape hatch) → the singleton's `:seon.config/system-text` datom (seeded from
-the manifest key; absent from the default manifest, so the default cluster is
-byte-identical) → the shipped `seon.agent.ctx/system-text`. A cluster owns its
-whole instruction floor from its own manifest file — `config/minimal.edn` is
-the worked example: it `#include`s `system.edn` and INHERITS the current v3.1
-system-text (the one source `system.edn` carries), supplying only a
-minimal block tree (namespaces + transcript) — the base the `repl` capability
-milestone measures from. Its companion rule:
-**a manifest that supplies explicit block data declares the COMPLETE
-block tree** — nothing (identity file-blocks included) is auto-prepended onto
-an enumerated tree.
+**Instructions are ordinary cluster facts.** The cluster entity's
+`:seon.cluster/instructions` ref set reaches named
+`:seon.cluster.instruction` rows for the system message, reply grammar,
+messaging/declining grammar, and imported global instruction bytes. Every agent
+points at the cluster and may carry an additive instruction ref set for genuine
+per-agent additions. An edit replaces `:seon.cluster.instruction/text` on the
+same identity; all agents see the new bytes on their next render, and Datahike
+history preserves the old value. There is no prompt-text singleton fallback,
+instruction versioning, complete block-tree manifest, or static prepend path.
+The manifest-owned config singleton remains a separate entity reached by
+`:seon.cluster/config`.
 
 The skills manifest section is an import input, never a default loadout. Apply
 freezes and validates the selected files, stores their canonical source facts,
 and then forgets the path. A later config-free boot reads those facts from the
-database and adds no skill block on its own.
+database and adds no agent instruction ref on its own.
 
 Prompt acquisition resolves the system text and the agent's selected context
 inside one compiled acquisition operation over one immutable database value. That one
