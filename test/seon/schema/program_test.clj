@@ -27,7 +27,11 @@
         :seon.ns/requires #{}
         :seon.ns/aliases #{}
         :seon.ns/imports #{}
-        :seon.ns/refers #{}})))
+        :seon.ns/refers #{}}))
+  (is (schema/valid-candidate-value?
+       :seon.ns/ns
+       {:seon.ns/name 'my.agents.source-less})
+      "an agent namespace is valid without invented source bytes"))
 
 (deftest catalog-render-declarations-resolve
   (let [catalog (schema/entity-catalog)

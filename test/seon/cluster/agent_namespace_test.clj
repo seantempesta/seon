@@ -14,10 +14,12 @@
 (deftest creation-assigns-one-queryable-namespace-owner
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "test")
       (d/transact
        connection
        (agent/creation-tx
         {:seon.cluster.agent/id "alice"
+         :seon.cluster/name "test"
          :seon.ns/name 'my.agents.alice}))
       (is (= "alice" (agent/owner-of @connection 'my.agents.alice)))
       (is (nil? (agent/owner-of @connection 'my.agents.nobody)))
@@ -32,10 +34,12 @@
 (deftest reassignment-is-an-ordinary-cardinality-one-transaction
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "test")
       (d/transact
        connection
        (agent/creation-tx
         {:seon.cluster.agent/id "alice"
+         :seon.cluster/name "test"
          :seon.ns/name 'my.agents.alice}))
       (d/transact connection
                   [{:seon.ns/name 'my.agents.reassigned}
@@ -49,10 +53,12 @@
 (deftest one-namespace-cannot-be-assigned-to-two-agents
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "test")
       (d/transact
        connection
        (agent/creation-tx
         {:seon.cluster.agent/id "alice"
+         :seon.cluster/name "test"
          :seon.ns/name 'my.agents.shared}))
       (let [refusal
             (test-support/refusal-data
@@ -67,12 +73,14 @@
 (deftest source-bearing-namespaces-without-owners-derive-one-problem-line
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "test")
       (d/transact connection
                   [{:seon.ns/name 'example.unowned
                     :seon.ns/source "(ns example.unowned)"}
                    {:seon.ns/name 'example.owned
                     :seon.ns/source "(ns example.owned)"}
                    {:seon.cluster.agent/id "owner"
+                    :seon.cluster.agent/cluster [:seon.cluster/name "test"]
                     :seon.cluster.agent/namespace
                     [:seon.ns/name 'example.owned]}])
       (let [value (found connection)

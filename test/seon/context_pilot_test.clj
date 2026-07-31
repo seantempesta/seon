@@ -58,11 +58,16 @@
   asked, a PREVIOUS run that paused with a note and left a receipt, and
   the held run this prompt is for. Every fact is one a real turn commits."
   [connection]
+  (support/seed-cluster! connection "pilot-cluster")
   (d/transact connection
-              (conj (cluster-agent/creation-tx
+              (into (cluster-agent/creation-tx
                      {:seon.cluster.agent/id agent-id
+                      :seon.cluster/name "pilot-cluster"
                       :seon.ns/name 'my.agents.pilot})
-                    {:seon.cluster.agent/id "peer"}))
+                    (cluster-agent/creation-tx
+                     {:seon.cluster.agent/id "peer"
+                      :seon.cluster/name "pilot-cluster"
+                      :seon.ns/name 'my.agents.peer})))
   (d/transact connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
@@ -121,9 +126,11 @@
 (deftest agent-birth-seeds-the-first-prompt
   (support/with-database
     (fn [connection]
+      (support/seed-cluster! connection "pilot-cluster")
       (d/transact connection
                   (cluster-agent/creation-tx
                    {:seon.cluster.agent/id agent-id
+                    :seon.cluster/name "pilot-cluster"
                     :seon.ns/name 'my.agents.pilot}))
       (d/transact connection
                   [{:seon.cluster.message/id message-id
@@ -408,9 +415,11 @@
 (deftest the-retired-interruption-block-is-covered-by-the-run-lens
   (support/with-database
     (fn [connection]
+      (support/seed-cluster! connection "pilot-cluster")
       (d/transact connection
                   (cluster-agent/creation-tx
                    {:seon.cluster.agent/id agent-id
+                    :seon.cluster/name "pilot-cluster"
                     :seon.ns/name 'my.agents.pilot}))
       (d/transact connection
                   [{:seon.cluster.message/id message-id

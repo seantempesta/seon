@@ -91,7 +91,10 @@
   by root, whose distinct page blocks remain unchanged."
   {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
                   :seon.cluster.agent/creation-tx]}
-  [{agent-id :seon.cluster.agent/id namespace-name :seon.ns/name :as request}]
+  [{agent-id :seon.cluster.agent/id
+    namespace-name :seon.ns/name
+    cluster-name :seon.cluster/name
+    :as request}]
   (let [namespace-tempid (str "namespace:" namespace-name)
         seed-blocks (if (contains? request :seon.cluster.agent/seed-blocks)
                       (:seon.cluster.agent/seed-blocks request)
@@ -99,7 +102,9 @@
     [{:db/id namespace-tempid
       :seon.ns/name namespace-name}
      (cond-> {:seon.cluster.agent/id agent-id
-              :seon.cluster.agent/namespace namespace-tempid}
+              :seon.cluster.agent/namespace namespace-tempid
+              :seon.cluster.agent/cluster
+              [:seon.cluster/name cluster-name]}
        (seq seed-blocks)
        (assoc :seon.cluster.agent/blocks (vec seed-blocks)))]))
 

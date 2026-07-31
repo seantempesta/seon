@@ -1,0 +1,43 @@
+{:seon.cluster.instruction/id
+ [:keyword {:seon.db/identity true}]
+
+ :seon.cluster.instruction/text
+ [:string {:min 1}]
+
+ :seon.cluster.instruction/instruction
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.instruction/instruction-ai
+        :seon.render/html seon.cluster.instruction/instruction-html}
+  [:seon.cluster.instruction/id :seon.cluster.instruction/id]
+  [:seon.cluster.instruction/text :seon.cluster.instruction/text]]
+
+ :seon.cluster.instruction/global-text
+ :seon.cluster.instruction/text
+
+ :seon.cluster.instruction/seed-request
+ [:map {:closed true}
+  [:seon.cluster.instruction/global-text
+   :seon.cluster.instruction/global-text]]
+
+ :seon.cluster.instruction/seed-rows
+ [:vector :seon.cluster.instruction/instruction]
+
+ ; Per-agent instructions are additive. Absence is the ordinary empty set;
+ ; the cluster's authoritative set lives on the separate cluster entity.
+ :seon.cluster.agent/instructions
+ [:set :seon.db/ref]
+
+ :seon.cluster/name
+ [:string {:min 1 :seon.db/identity true}]
+
+ :seon.cluster/config
+ :seon.db/ref
+
+ :seon.cluster/instructions
+ [:set :seon.db/ref]
+
+ :seon.cluster/cluster
+ [:map {:seon.db/entity true}
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.cluster/config :seon.cluster/config]
+  [:seon.cluster/instructions :seon.cluster/instructions]]}

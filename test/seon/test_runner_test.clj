@@ -50,11 +50,13 @@
   (test-support/with-database
     (fn [connection]
       (let [run-result (captured-run)]
+        (test-support/seed-cluster! connection "test")
         (d/transact connection (runner/record-tx run-result))
         (d/transact
          connection
          (agent/creation-tx
           {:seon.cluster.agent/id "fixture-owner"
+           :seon.cluster/name "test"
            :seon.ns/name 'seon.test-runner-failure-fixture}))
         (is
          (= #{["seon.test-runner-failure-fixture/failing-example"

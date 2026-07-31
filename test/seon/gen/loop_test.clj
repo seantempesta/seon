@@ -55,6 +55,7 @@
   (into []
         (mapcat (fn [[agent-id namespace-name]]
                   (agent/creation-tx {:seon.cluster.agent/id agent-id
+                                      :seon.cluster/name "generate-code-v0"
                                       :seon.ns/name namespace-name})))
         [["root" 'my.agents.root]
          ["planner" 'my.gen.planner]
@@ -67,10 +68,11 @@
   (test-support/with-database
    (fn [connection]
      (seon.flow/install-work-launcher!
-      {::seon.flow/configuration
+     {::seon.flow/configuration
        {:seon.config.flow.compute/queue-depth 10
         :seon.config.flow.compute/concurrency 2}})
      (try
+       (test-support/seed-cluster! connection "generate-code-v0")
        (d/transact connection
                    (conj cast-rows
                          {:seon.config/cluster "generate-code-v0"

@@ -20,6 +20,7 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.instruction :as instruction]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
@@ -44,7 +45,7 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files StandardCopyOption]))
+           [java.nio.file CopyOption Files Path StandardCopyOption]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bootstrap configuration — the CLOSED pre-store key set.
@@ -339,6 +340,19 @@
           desired))))
    (schema/canonical-schema-rows forms now)))
 
+(defn- instruction-row-changes
+  [db rows]
+  (into []
+        (remove
+         (fn [{instruction-id :seon.cluster.instruction/id :as desired}]
+           (= desired
+              (some-> (d/pull db
+                              [:seon.cluster.instruction/id
+                               :seon.cluster.instruction/text]
+                              [:seon.cluster.instruction/id instruction-id])
+                      (dissoc :db/id)))))
+        rows))
+
 (defn- accrete-schema-population!
   "Install the current additive schema population on one branch.
 
@@ -381,6 +395,19 @@
   [{connection :seon.store/branch-connection
     manifest :seon.fn/manifest}]
   (accrete-schema-population! connection)
+  (let [rows (instruction-row-changes
+              @connection
+              (instruction/seed-rows
+               {:seon.cluster.instruction/global-text
+                (Files/readString
+                 (Path/of "AGENTS.md" (make-array String 0))
+                 StandardCharsets/UTF_8)}))]
+    (when (seq rows)
+      (d/transact connection
+                  {:tx-data rows
+                   :tx-meta
+                   {:seon.db/process
+                    [:seon.db.process/id boot-process-identity]}})))
   (seon.fn/index!
    (cond-> {:seon.store/branch-connection connection
             :seon.db/process
@@ -400,7 +427,7 @@
 ;;; Datahike schema and canonical rows are installed into `current-src`.
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
-  (conj seon.fn/source-roots "resources"))
+  (conj seon.fn/source-roots "resources" "AGENTS.md"))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
@@ -745,6 +772,49 @@
 ;;; exist would have been a lie.
 (def root-agent-id "root")
 
+(defn- require-committed!
+  [result offense]
+  (when (:seon.error/kind result)
+    (refused! "The cluster population transaction was refused."
+              (assoc offense :seon.boot/result result)))
+  result)
+
+(defn- seed-cluster!
+  "Upsert the branch-local cluster entity after config reconciliation."
+  [connection cluster-name process]
+  (let [desired {:seon.cluster/name cluster-name
+                 :seon.cluster/config
+                 [:seon.config/cluster cluster-name]
+                 :seon.cluster/instructions
+                 (mapv (fn [instruction-id]
+                         [:seon.cluster.instruction/id instruction-id])
+                       instruction/instruction-ids)}
+        expected-current
+        {:seon.cluster/name cluster-name
+         :seon.cluster/config {:seon.config/cluster cluster-name}
+         :seon.cluster/instructions
+         (into #{}
+               (map (fn [instruction-id]
+                      {:seon.cluster.instruction/id instruction-id}))
+               instruction/instruction-ids)}
+        current (some-> (d/pull @connection
+                                '[:seon.cluster/name
+                                  {:seon.cluster/config
+                                   [:seon.config/cluster]}
+                                  {:seon.cluster/instructions
+                                   [:seon.cluster.instruction/id]}]
+                                [:seon.cluster/name cluster-name])
+                        (dissoc :db/id)
+                        (update :seon.cluster/instructions set))]
+    (when-not (= expected-current current)
+      (require-committed!
+       (store/transact!
+        connection
+        {:tx-data [{:seon.db.process/id process} desired]
+         :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+       {:seon.cluster/name cluster-name
+        :seon.boot/population :seon.cluster/cluster}))))
+
 (defn- seed-root-agent!
   "The root agent, and the blocks that make it a PAGE.
 
@@ -753,18 +823,32 @@
   no blocks would serve a blank page while claiming to be a view. The
   block install is an idempotent upsert by name, so a reboot rewrites
   the same set and any block an agent added itself survives."
-  [connection]
-  (d/transact connection
-              (cluster.agent/creation-tx
-               {:seon.cluster.agent/id root-agent-id
-                :seon.ns/name 'my.agents.root
-                ;; Root's page is already its own complete block set. Suppress
-                ;; the ordinary prompt seed here; root/seed-tx below remains
-                ;; the one convergent owner of the root page.
-                :seon.cluster.agent/seed-blocks []}))
+  [connection cluster-name process]
+  (require-committed!
+   (store/transact!
+    connection
+    {:tx-data
+     (into [{:seon.db.process/id process}]
+           (cluster.agent/creation-tx
+            {:seon.cluster.agent/id root-agent-id
+             :seon.cluster/name cluster-name
+             :seon.ns/name 'my.agents.root
+             ;; Root's page is already its own complete block set. Suppress
+             ;; the ordinary prompt seed here; root/seed-tx below remains
+             ;; the one convergent owner of the root page.
+             :seon.cluster.agent/seed-blocks []}))
+     :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+   {:seon.cluster.agent/id root-agent-id
+    :seon.boot/population :seon.cluster.agent/agent})
   (let [seed (root/seed-tx @connection root-agent-id)]
     (when (seq seed)
-      (d/transact connection seed))))
+      (require-committed!
+       (store/transact!
+        connection
+        {:tx-data seed
+         :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+       {:seon.cluster.agent/id root-agent-id
+        :seon.boot/population :seon.render.root/blocks}))))
 
 (defn- serve!
   "Bind the cluster's web view, or refuse LOUDLY.
@@ -1172,10 +1256,12 @@
                            {:seon.config/connection connection
                             :seon.boot/cluster-name cluster-name}
                            config-request))))
+        process (process-identity (:seon.boot/advertisement instance))
+        _ (seed-cluster! connection cluster-name process)
         ;; AFTER the dials are facts, because the root agent is who the
         ;; escalation dial names, and BEFORE the loop is armed, because
         ;; an armed loop may need to address it on its first pass
-        _ (seed-root-agent! connection)
+        _ (seed-root-agent! connection cluster-name process)
         ;; INSTRUMENTATION IS NOT WIRED HERE, and the reason is
         ;; evidence rather than taste. Wiring `seon.instrument/apply!`
         ;; into boot was tried: every test that boots a cluster then

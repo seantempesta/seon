@@ -115,6 +115,7 @@
            connection
            (agent/creation-tx
             {:seon.cluster.agent/id "restart-a"
+             :seon.cluster/name cluster-name
              :seon.ns/name 'my.agents.restart-a}))
           (with-redefs
             [ai/complete
@@ -277,6 +278,7 @@
            connection
            (agent/creation-tx
             {:seon.cluster.agent/id "restart-b"
+             :seon.cluster/name cluster-name
              :seon.ns/name 'my.agents.restart-b}))
           (with-redefs
             [ai/complete
