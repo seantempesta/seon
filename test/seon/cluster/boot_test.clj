@@ -80,6 +80,36 @@
   []
   (var-get (ns-resolve 'clojure.core.server 'servers)))
 
+(deftest incompatible-sovereign-schema-refusal-steers-the-operator
+  (let [cluster-name "legacy"
+        installed {:db/valueType :db.type/symbol
+                   :db/cardinality :db.cardinality/many}
+        failure
+        (try
+          (#'cluster/declaration-changes
+           {:schema {:seon.ns/requires installed}}
+           (schema.edn/packaged-forms)
+           cluster-name)
+          nil
+          (catch Exception error
+            error))
+        message (ex-message failure)
+        offense (:seon.boot/offense (ex-data failure))]
+    (testing "the refusal identifies the sovereign cluster and schema change"
+      (is (= :seon.boot/refused (:seon.error/kind (ex-data failure))))
+      (is (= cluster-name (:seon.boot/cluster-name offense)))
+      (is (= :seon.ns/requires (:seon.boot/attribute offense)))
+      (is (= installed (:seon.boot/installed offense)))
+      (is (= :db.type/ref
+             (get-in offense [:seon.boot/current :db/valueType]))))
+    (testing "the message names both destructive and preserving resolutions"
+      (is (str/includes? message "predates the incompatible schema change"))
+      (is (str/includes? message
+                         "bin/seon init legacy --force"))
+      (is (str/includes? message "destroys and reforks"))
+      (is (str/includes? message "export/import"))
+      (is (str/includes? message "preserve")))))
+
 (deftest process-root-store-identity-is-canonical
   (let [root (bare-root)
         relative-store (str (io/file root "store"))

@@ -283,22 +283,36 @@
    :seon.schema/created-at
    :seon.db.id/generator])
 
+(defn- incompatible-declaration-message
+  [cluster-name attribute]
+  (let [target-name (or cluster-name "NAME")
+        subject (if cluster-name
+                  (str "Cluster `" cluster-name "`")
+                  "This branch")]
+    (str subject " predates the incompatible schema change for `" attribute
+         "` and cannot be reopened in place. "
+         "`bin/seon init " target-name " --force` destroys and reforks it from "
+         "`current-src`; use export/import instead to preserve its data.")))
+
 (defn- declaration-changes
   "Missing declarations, refusing non-accretive storage changes."
-  [db forms]
+  [db forms cluster-name]
   (into
    []
    (keep
     (fn [{attribute :db/ident :as declaration}]
       (if-let [installed (get (:schema db) attribute)]
         (when-not
-         (= (dissoc declaration :db/ident)
+          (= (dissoc declaration :db/ident)
             (select-keys installed (keys (dissoc declaration :db/ident))))
           (refused!
-           "The cluster schema cannot be changed in place; reset it."
-           {:seon.boot/attribute attribute
-            :seon.boot/installed installed
-            :seon.boot/current declaration}))
+           (incompatible-declaration-message cluster-name attribute)
+           (cond->
+            {:seon.boot/attribute attribute
+             :seon.boot/installed installed
+             :seon.boot/current declaration}
+             cluster-name
+             (assoc :seon.boot/cluster-name cluster-name))))
         declaration)))
    (schema.datahike/malli->datahike-schema-in
     {:seon.schema.projection/forms forms}
@@ -374,10 +388,11 @@
   `:write` schema mode. Every opened branch therefore passes through this
   choke point before any domain transaction. Missing declarations and
   canonical rows accrete; an incompatible declaration refuses loudly and
-  names reset as the remedy. A converged reopen issues no transaction."
-  [connection]
+  names refork or export/import as the resolutions. A converged reopen issues
+  no transaction."
+  [connection cluster-name]
   (let [forms (schema.edn/packaged-forms)
-        declarations (declaration-changes @connection forms)]
+        declarations (declaration-changes @connection forms cluster-name)]
     (when (seq declarations)
       (d/transact connection {:tx-data declarations}))
     (let [process-rows (missing-process-rows @connection)]
@@ -408,7 +423,7 @@
     :nil]}
   [{connection :seon.store/branch-connection
     manifest :seon.fn/manifest}]
-  (accrete-schema-population! connection)
+  (accrete-schema-population! connection nil)
   (let [rows (instruction-row-changes
               @connection
               (instruction/seed-rows))]
@@ -1297,7 +1312,7 @@
         ;; Install it before recovery or config can transact a newly added
         ;; attribute. This is the same population that creates `current-src`;
         ;; converged reopens issue zero transactions.
-        _ (accrete-schema-population! connection)
+        _ (accrete-schema-population! connection cluster-name)
         ;; BEFORE anything resumes: a previous process's wreckage is
         ;; settled here, so the first pass of any loop derives work from
         ;; facts that already tell the truth about who holds what
