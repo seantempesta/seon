@@ -48,6 +48,16 @@ implementation. Related but distinct from
 Datahike-side create-time options; this note owns the missing backing
 capability underneath them.
 
+Taken 2026-07-31 by the konserve filestore batch lane. Design, crash proof,
+and measurements are recorded in
+`docs/prds/sci-execution-runtime/research/konserve-multi-assoc-notes-2026-07-31.md`.
+
+Local implementation commit: `reference-code/konserve` `737697d`. The full
+fork suite and real-Datahike four-stage forced-kill proof are green. The issue
+stays open through fork publication and because the unfused 18-object exact
+probe regressed from `93.732 ms` to `156.093 ms`; the combined fusion path
+improved from `20.019 ms` to `18.012 ms` and clears the `<=25 ms` gate.
+
 ## Acceptance
 
 - `(konserve.utils/multi-key-capable? store)` is true for a `:file` store.
