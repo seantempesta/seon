@@ -774,12 +774,11 @@
 ;;; The armed layers — the fault consumer, the root agent, and the loop
 ;;; ---------------------------------------------------------------------------
 
-;;; THE ROOT AGENT. One entity, seeded at boot, idempotent by identity.
-;;; It costs one datom and no process: an agent is attributes and
-;;; connections, so "exists" is the id and nothing else. It exists so
-;;; escalation has somewhere honest to go — before it, the escalation
-;;; dial had to ship absent because naming an agent that might not
-;;; exist would have been a lie.
+;;; THE ROOT AGENT. One entity, ensured at boot through the same atomic
+;;; id + namespace + cluster-ref transition every agent uses. It costs no
+;;; process. It exists so escalation has somewhere honest to go — before it,
+;;; the escalation dial had to ship absent because naming an agent that might
+;;; not exist would have been a lie.
 (def root-agent-id "root")
 
 (defn- require-committed!
