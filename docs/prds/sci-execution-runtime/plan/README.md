@@ -1338,6 +1338,24 @@ may reintroduce a shadow build into the dev feedback path.
   BEFORE SEALING by adversarial Opus REPL lanes — crash renderers,
   loop them, flood wakes, measure — per the proven
   plan → falsify → seal cycle.
+  **Ruling 2026-07-31 #5 (owner): THE AGENT-CODE SAFETY GUARANTEE, and
+  no snap decisions on key mechanisms.** (1) ALL agent-executed code —
+  evals, AI renderers, HTML renderers — is SAFE by guarantee: it can
+  neither crash the system nor lock it up. Every failure is wrapped and
+  caught at the execution boundary, becomes a flat `:seon.error` value,
+  and flows to the error channel so SOMETHING CAN FIX IT: the fault
+  commits as a durable fact routed to the agent that ran the code (its
+  next context carries the error) and escalates to root per the
+  existing problem-routing model — never a silent drop, never a thrown
+  exception crossing into a proc. The uncatchable interrupt and the
+  wrap-and-catch compose: interrupt stops the runaway, the boundary
+  converts it to the error value, the routing delivers it for repair.
+  (2) Mechanism decisions on key system parts (the interrupt design,
+  isolation shapes, executor changes) are NEVER made from a single
+  lane's diagnosis: independent source-grounded verification first,
+  owner gate where semantics are hairy — the 2026-07-31 sci-interrupt
+  episode (blocker claim → owner doubt → ground-truth lane, fix lane
+  stopped pending verdict) is the recorded precedent.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
