@@ -1547,6 +1547,14 @@ may reintroduce a shadow build into the dev feedback path.
   what-the-agent-saw forensics is the turn-capture mechanism's job;
   only the agent's own explicit walk calls (deeper dives it chooses)
   are ordinary evals with ordinary receipts.
+  **Ruling 2026-07-31 #14 (owner): ONE SCHEMA EDN FILE.** The separate
+  per-family EDN files under `resources/seon/schema/` are retired —
+  schemas are GLOBAL, and the file split falsely reads as namespacing.
+  Consolidate into one schema EDN resource; the loader, ancestor
+  digest, and docs update in the same wave. Sequenced immediately
+  behind the context-mvp lane's landing (it owns instruction.edn
+  in flight); the family-lens entity maps and all registration
+  semantics are unchanged — this is file layout, not model.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
