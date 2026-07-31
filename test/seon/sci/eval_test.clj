@@ -16,7 +16,10 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.config :as config]
+            [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
+            [sci.core :as sci]
+            [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
@@ -215,6 +218,51 @@
         (is (= :time
                (:seon.eval/outcome
                 (:seon.sci.admit/record evaluation))))))))
+
+(deftest acquisition-binds-loaded-first-party-compiled-vars
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/fork)
+            _ (eval/acquire! {:seon.sci.eval/ctx ctx
+                              :seon.db/db @connection})
+            evaluation
+            (run-in ctx "(seon.sci.eval/agent-namespace \"probe\")" 2000)
+            external (run-in ctx "(datahike.api/q '[:find ?e :where [?e]])"
+                             2000)]
+        (is (identical? #'eval/agent-namespace
+                        (get-in (sci/namespace-state ctx)
+                                ['seon.sci.eval 'agent-namespace]))
+            "the host binding is the live compiled Var, never a copied root")
+        (is (ok? evaluation))
+        (is (= 'my.agents.probe (:seon.sci.admit/value evaluation)))
+        (is (failed? external)
+            "loaded dependencies are not first-party merely because loaded")))))
+
+(deftest public-walk-is-callable-through-an-agent-sci-eval
+  (test-support/with-database
+    (fn [connection]
+      (test-support/seed-cluster! connection "host-walk")
+      (d/transact connection
+                  (agent/creation-tx
+                   {:seon.cluster.agent/id "host-walker"
+                    :seon.cluster/name "host-walk"
+                    :seon.ns/name 'my.agents.host-walker}))
+      (let [ctx (eval/fork)
+            _ (eval/acquire! {:seon.sci.eval/ctx ctx
+                              :seon.db/db @connection})
+            evaluation
+            (render/call-with-walk-context
+             {:seon.store/branch-connection connection
+              :seon.cluster.agent/id "host-walker"
+              :seon.sci.admit/caps caps}
+             #(run-in ctx "(seon.render/walk)" 5000))
+            value (:seon.sci.admit/value evaluation)]
+        (is (ok? evaluation))
+        (is (string? value))
+        (is (re-find #"root=\[:seon\.cluster\.agent/id \"host-walker\"\]"
+                     value))
+        (is (true? (:seon.sci.admit/capped? evaluation))
+            "the ordinary top-level result cap still applies to a host call")))))
 
 (deftest one-context-arms-concurrent-threads-independently
   (let [ctx (eval/fork)

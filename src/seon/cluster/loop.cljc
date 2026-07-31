@@ -964,8 +964,20 @@
       ;; armed, so this branch is only the ordinary live fold over one
       ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
       :resume
-      (let [evaluate (requiring-resolve
-                      (:seon.cluster.loop/evaluate cluster))
+      (let [compiled-evaluate
+            (requiring-resolve (:seon.cluster.loop/evaluate cluster))
+            ;; The closure runs on the actual compute worker, so JVM dynamic
+            ;; custody encloses compiled host calls made by SCI. Binding around
+            ;; `submit-evaluation!!` would rely on executor thread propagation.
+            ;; The public walk dereferences this exact live branch connection;
+            ;; no database value is injected into the interpreter context.
+            evaluate
+            (fn [request]
+              (render/call-with-walk-context
+               {:seon.store/branch-connection connection
+                :seon.cluster.agent/id agent-id
+                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+               #(compiled-evaluate request)))
             ;; the message this run is answering, read ONCE per turn: it
             ;; is the head of the conversation chain every message this
             ;; turn sends extends, and it cannot change while the run is

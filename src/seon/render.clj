@@ -69,7 +69,9 @@
   commits, or holds anything, so a kill during a render loses a value
   that was never durable. Whether the PROJECTION is pure is the
   projection's own contract; the ones this repository ships are."
-  (:require [seon.schema :as schema]
+  (:require [datahike.api :as d]
+            [seon.config :as config]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -77,6 +79,146 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Ambient walk custody
+;;; ---------------------------------------------------------------------------
+
+(def ^:dynamic ^:private *walk-context* nil)
+
+(defn call-with-walk-context
+  "Call `body` with one agent's ambient walk custody."
+  {:malli/schema
+   [:=>
+    [:catn
+     [:seon.render.walk/context
+      [:map {:closed true}
+       [:seon.cluster.agent/id :seon.cluster.agent/id]
+       [:seon.db/db {:optional true} :seon.db/database-value]
+       [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+       [:seon.store/branch-connection
+        {:optional true}
+        :seon.store/branch-connection]]]
+     [:seon.render.walk/body [:fn clojure.core/ifn?]]]
+    :any]}
+  [context body]
+  (binding [*walk-context* context]
+    (body)))
+
+(defn- walk-error
+  [message]
+  (str ";; (seon.render/walk) => error\n" message))
+
+(defn- ambient-database-value
+  []
+  (or (:seon.db/db *walk-context*)
+      (some-> (:seon.store/branch-connection *walk-context*) deref)))
+
+(defn- custody-cluster-name
+  [db agent-id]
+  (d/q '[:find ?cluster-name .
+         :in $ ?agent-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.cluster.agent/cluster ?cluster]
+         [?cluster :seon.cluster/name ?cluster-name]]
+       db agent-id))
+
+(defn- repl-state
+  [db agent-id]
+  (let [basis (long (:max-tx db))
+        namespace-name
+        (d/q '[:find ?name .
+               :in $ ?agent-id
+               :where
+               [?agent :seon.cluster.agent/id ?agent-id]
+               [?agent :seon.cluster.agent/namespace ?namespace]
+               [?namespace :seon.ns/name ?name]]
+             db agent-id)
+        instant (:db/txInstant (d/pull db [:db/txInstant] basis))]
+    (str ";; REPL state namespace=" (pr-str namespace-name)
+         " basis=" basis
+         " time=" (pr-str instant))))
+
+(defn walk
+  "Return the calling agent's labeled database walk as text.
+
+  With no arguments, root is the agent whose held run supplied this eval's
+  custody, depth is 2, and the database value is dereferenced here from that
+  cluster's live branch connection. Prompt assembly binds its exact immutable
+  database value and calls this same function. `:branch` is a labeled PATH
+  from the output and restricts the result to that `get-in` subtree.
+
+  Failures are text the agent can inspect; this boundary never throws."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :string]
+    [:=>
+     [:cat
+      [:map {:closed true}
+       [:root {:optional true} :seon.render.walk/lookup]
+       [:depth {:optional true} [:int {:min 0}]]
+       [:branch
+        {:optional true}
+        [:vector [:or :keyword :int]]]]]
+     :string]]}
+  ([]
+   (walk {}))
+  ([options]
+   (try
+     (let [db (ambient-database-value)
+           agent-id (:seon.cluster.agent/id *walk-context*)]
+       (cond
+         (nil? db)
+         (walk-error "No live cluster database is bound to this evaluation.")
+
+         (nil? agent-id)
+         (walk-error "No calling agent is bound to this evaluation.")
+
+         :else
+         (let [cluster-name (custody-cluster-name db agent-id)
+               caps (or (:seon.sci.admit/caps *walk-context*)
+                        (when cluster-name
+                          (config/result-caps
+                           (config/effective db cluster-name))))]
+           (cond
+             (nil? cluster-name)
+             (walk-error (str "Agent " (pr-str agent-id)
+                              " has no cluster connection."))
+
+             (or (empty? caps) (some nil? (vals caps)))
+             (walk-error (str "Cluster " (pr-str cluster-name)
+                              " has no complete render caps."))
+
+             :else
+             (let [root (get options :root
+                             [:seon.cluster.agent/id agent-id])
+                   depth (long (get options :depth 2))
+                   branch (:branch options)
+                   neighborhood
+                   ((requiring-resolve 'seon.render.walk/neighborhood)
+                    {:seon.db/db db
+                     :seon.render.walk/lookup root
+                     :seon.render/kind :seon.render/ai
+                     :seon.render/floor 'seon.render.block/data-prose
+                     :seon.render/overrides {}
+                     :seon.render/distance depth
+                     :seon.sci.admit/caps caps})
+                   selected (when (contains? options :branch)
+                              (get-in neighborhood branch))]
+               (if (and (contains? options :branch) (not (map? selected)))
+                 (walk-error (str "No walk branch exists at "
+                                  (pr-str branch) "."))
+                 (str ((requiring-resolve 'seon.render.walk/prose)
+                       db neighborhood
+                       (cond-> {}
+                         (contains? options :branch)
+                         (assoc :seon.render.walk/branch branch)))
+                      "\n" (repl-state db agent-id))))))))
+     (catch Throwable failure
+       (walk-error (str "Walk failed: "
+                        (or (ex-message failure)
+                            (.getName (class failure)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contract

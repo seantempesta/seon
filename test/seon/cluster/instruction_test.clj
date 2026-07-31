@@ -26,6 +26,7 @@
         db cluster-name)))
 
 (deftest source-has-one-owner-editable-getting-started-row
+  (is (re-find #"seon\.render/walk" instruction/getting-started-text))
   (is (= [{:seon.cluster.instruction/id :getting-started
            :seon.cluster.instruction/text getting-started-text}]
          (instruction/seed-rows)))

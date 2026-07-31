@@ -82,11 +82,11 @@
   THE CTX IS SUPPLIED, NOT BUILT HERE. `base` is the minimum N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
   plus the two `my.run` dispositions and both `my.message` values — and a
-  caller may pass its own.
-  The computed binding table (capability functions derived from
-  program-graph facts, filtered by a derived namespace policy) is N5's
-  and is deliberately absent: a hand-listed callable surface here would
-  be the L17 violation the quarry's own comment warned about.
+  caller may pass its own. `acquire!` then intersects core-provenanced
+  program namespaces with the JVM's loaded namespace set and binds their
+  actual compiled Vars. The set is computed, never listed. Agent-authored
+  program rows retain the interpreted installation path after those host
+  bindings are present.
 
   Crash walk: this namespace owns no durable state. A kill during an
   evaluation leaves the loop's running receipt (one with no terminal
@@ -628,21 +628,59 @@
         (sci/install-namespace-state! ctx namespace-state))
       installed)))
 
+(defn- admission-source
+  [db source-tx]
+  (:seon.schema.admission/source
+   (schema/admission-from-asserting-transaction db source-tx)))
+
+(defn- install-loaded-first-party-namespaces!
+  "Bind loaded first-party namespaces as their actual compiled JVM Vars.
+
+  Namespace membership is the intersection of core-provenanced program rows
+  and Clojure's loaded namespace set. `ns-interns` supplies the namespace's
+  real Vars, not copied roots, so a re-evaluated `defn` changes the next host
+  call without reacquisition.
+
+  Safety residual from ruling #20: once execution enters one compiled host
+  call, SCI's interrupt hook sees no interpreted function entrance. Runaway
+  work inside that call is bounded by the submit-level wedge backstop, not the
+  evaluation time-limit."
+  [ctx db namespace-assertions]
+  (let [first-party-names
+        (into #{}
+              (comp
+               (filter (fn [[_ _ source-tx]]
+                         (= :core (admission-source db source-tx))))
+               (map first))
+              namespace-assertions)
+        loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))]
+    (doseq [namespace-name (sort-by str first-party-names)
+            :let [host-namespace (get loaded-by-name namespace-name)]
+            :when host-namespace]
+      (sci/add-namespace! ctx namespace-name (ns-interns host-namespace)))))
+
 (defn acquire!
-  "Install current agent-authored functions into a ctx at one database value.
-  Ancestor-authored rows describe the compiled/base program and participate
-  in schema projection; they are not replayed as interpreted source. This
-  reads program rows only—receipts and eval results are outside the query by
-  construction."
+  "Install compiled first-party and interpreted agent program into one ctx.
+
+  Loaded core-provenanced namespaces bind their actual JVM Vars. Current
+  agent-authored namespaces, contracted functions, and tests then install from
+  database program rows through the existing interpreted path. Receipts and
+  eval results are outside both derivations by construction."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
   (let [projection (schema/projection-from-database db)
         ctx (assoc ctx :seon.schema/projection projection)
+        namespace-assertions
+        (d/q '[:find ?namespace-name ?source ?source-tx
+               :where
+               [?namespace :seon.ns/name ?namespace-name]
+               [?namespace :seon.ns/source ?source ?source-tx]]
+             db)
         agent-authored?
         (fn [source-tx]
-          (= :agent
-             (:seon.schema.admission/source
-              (schema/admission-from-asserting-transaction db source-tx))))
+          (= :agent (admission-source db source-tx)))
+        _ (install-loaded-first-party-namespaces!
+           ctx db namespace-assertions)
         namespace-rows
         (into
          []
@@ -655,11 +693,7 @@
                              {:seon.ns/imports [*]}
                              {:seon.ns/refers [*]}]
                          [:seon.ns/name namespace-name]))))
-         (d/q '[:find ?namespace-name ?source ?source-tx
-                :where
-                [?namespace :seon.ns/name ?namespace-name]
-                [?namespace :seon.ns/source ?source ?source-tx]]
-              db))
+         namespace-assertions)
         function-rows
         (into
          []
