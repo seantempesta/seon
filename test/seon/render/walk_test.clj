@@ -82,17 +82,17 @@
 (defn- elision?
   [node]
   (boolean
-   (some #(= :seon.render.walk/elided
-             (get-in % [:seon.error/value :seon.error/kind]))
+   (some #(= 'seon.render.walk/elision
+             (:seon.render/projection %))
          (nodes node))))
 
 (defn- reverse-elision?
   [node]
   (boolean
-   (some #(and (= :seon.render.walk/elided
-                  (get-in % [:seon.error/value :seon.error/kind]))
+   (some #(and (= 'seon.render.walk/elision
+                  (:seon.render/projection %))
                (re-find #"reverse :seon.cluster.agent/cluster"
-                        (get-in % [:seon.error/value :seon.error/message] "")))
+                        (str (:seon.render/output %))))
          (nodes node))))
 
 (deftest p1-out-of-family-attributes-reach-the-floor
@@ -242,7 +242,7 @@
         (support/assert-check!
          (tc/quick-check 100 property :seed (+ 2 property-seed))
          "P6: reverse collection truncation must emit an elision marker.")
-        (testing "distance truncation is loud too"
+        (testing "distance truncation is one compact actionable line"
           (let [result
                 (walk/neighborhood
                  {:seon.db/db db
@@ -251,9 +251,37 @@
                   :seon.render/kind :seon.render/ai
                   :seon.render/floor 'seon.render.block/data-prose
                   :seon.sci.admit/caps base-caps
-                  :seon.render/distance 0})]
+                  :seon.render/distance 0})
+                prose (walk/prose db result)]
             (is (elision? result))
-            (is (re-find #"distance cap" (walk/prose db result)))))))))
+            (is (= 1 (count (re-seq #"branches elided" prose))))
+            (is (re-find #"branches elided · \d+ tokens" prose))
+            (is (str/includes?
+                 prose
+                 (str "(seon.render/walk "
+                      (pr-str {:root [:seon.cluster.agent/id
+                                      (first agent-ids)]
+                               :depth 1})
+                      ")")))
+            (is (not (str/includes? prose
+                                    "elided connections at the requested")))))
+        (testing "the html frontier is a quiet affordance, not an error"
+          (let [result
+                (walk/neighborhood
+                 {:seon.db/db db
+                  :seon.render.walk/lookup
+                  [:seon.cluster.agent/id (first agent-ids)]
+                  :seon.render/kind :seon.render/html
+                  :seon.render/floor 'seon.render.block/data-html
+                  :seon.sci.admit/caps base-caps
+                  :seon.render/distance 0})
+                marker (some #(when (= 'seon.render.walk/elision
+                                       (:seon.render/projection %))
+                                %)
+                             (nodes result))]
+            (is (nil? (:seon.error/value marker)))
+            (is (= "seon-walk-elision"
+                   (get-in marker [:seon.render/output 1 :class])))))))))
 
 (deftest asked-for-run-edges-use-the-collection-cap
   (support/with-database
@@ -354,12 +382,12 @@
               :seon.render/distance 0})]
         (is (true? (:seon.render/would-fall-to-floor? result)))))))
 
-(deftest prose-labels-real-paths-and-orders-stable-before-churn
+(deftest prose-orders-one-logical-unit-with-compact-actionable-labels
   (support/with-database
     (fn [connection]
       (let [node {:seon.render.walk/lookup [:example/id "root"]
                   :seon.render/distance 2
-                  :seon.render.walk/changed-at 0
+                  :seon.render.walk/changed-at 99
                   :seon.render/projection 'example/root
                   :seon.render/output "root-output"
                   :seon.render.walk/neighbours
@@ -383,7 +411,27 @@
                     :seon.render/distance 1
                     :seon.render.walk/changed-at 9
                     :seon.render/projection 'example/churn
-                    :seon.render/output "churn"}]}
+                    :seon.render/output "churn"}
+                   {:seon.render.walk/lookup [:example/id "branch-b"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 10
+                    :seon.render/projection 'example/duplicate
+                    :seon.render/output "duplicate-branch-b"}
+                   {:seon.render.walk/lookup [:example/id "same-bytes"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 10
+                    :seon.render/projection 'example/same-bytes
+                    :seon.render/output "branch-b"}
+                   {:seon.render.walk/lookup [:example/id "seen"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 11
+                    :seon.render.walk/back-reference? true}
+                   {:seon.render.walk/lookup
+                    [:seon.render.walk/transcript "root"]
+                    :seon.render/distance 1
+                    :seon.render.walk/changed-at 1
+                    :seon.render/projection 'seon.render.transcript/render-ai
+                    :seon.render/output "transcript-tail"}]}
             flattened (walk/units node)
             text (walk/prose @connection node)]
         (is (= flattened (walk/units node))
@@ -393,20 +441,28 @@
                 [:seon.render.walk/neighbours 0
                  :seon.render.walk/neighbours 0]
                 [:seon.render.walk/neighbours 1]
-                [:seon.render.walk/neighbours 2]]
+                [:seon.render.walk/neighbours 2]
+                [:seon.render.walk/neighbours 4]
+                [:seon.render.walk/neighbours 6]]
                (mapv :seon.render.walk/path flattened))
-            "path is the total tie-breaker after changed-at and branch")
-        (is (= [0 7 7 7 9]
+            "root and transcript are stable rails around ordered branches")
+        (is (= [99 7 7 7 9 10 1]
                (mapv :seon.render.walk/changed-at flattened))
             "changed-at is lifted onto every unit")
         (is (= 1 (count (re-seq #";; \(seon\.render/walk" text))))
-        (is (re-find #"path=\[:seon\.render\.walk/neighbours 0\].*depth=1.*example/a"
+        (is (re-find #"d1 · example/a · :branch \[:seon\.render\.walk/neighbours 0\]"
                      text))
-        (is (< (.indexOf text "branch-a")
+        (is (not (str/includes? text "duplicate-branch-b"))
+            "one logical lookup is rendered only once")
+        (is (= 2 (count (re-seq #"(?m)^branch-b$" text)))
+            "distinct facts survive even when their projection bytes match")
+        (is (< (.indexOf text "root-output")
+               (.indexOf text "branch-a")
                (.indexOf text "branch-a-child")
                (.indexOf text "branch-b")
-               (.indexOf text "churn"))
-            "equal changes cluster by branch and the newest unit is last")))))
+               (.indexOf text "churn")
+               (.indexOf text "transcript-tail"))
+            "own state is first, branches stay grouped, transcript is last")))))
 
 (deftest ordinary-requires-refs-and-derived-message-edges-are-walked
   (support/with-database

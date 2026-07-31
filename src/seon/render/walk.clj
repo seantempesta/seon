@@ -443,9 +443,9 @@
   for), the caps' node budget (the absolute one — a graph that fans out
   needs a node budget and not merely a loop guard, the lesson
   `seon.render.block/expand` already paid for), and the caps' collection
-  budget on each reverse attribute. Every active bound emits an error-valued
-  elision node. A per-walk rendered set emits explicit back-references on
-  cycles and fan-in; it never silently changes a renderer's input.
+  budget on each reverse attribute. Every active bound emits a quiet elision
+  node. A per-walk rendered set stops cycles and fan-in from rendering the
+  same entity again; it never silently changes a renderer's input.
 
   Every failure is a node carrying a flat `:seon.error/value`. Nothing
   throws."
@@ -461,12 +461,27 @@
         root-eid (eid-of db lookup)
         root-namespace-eid (when root-eid
                              (assigned-namespace-eid db root-eid))]
-    (letfn [(marker [lookup attribute hops failure]
-              (cond-> {:seon.render.walk/lookup lookup
-                       :seon.render/distance hops
-                       :seon.render.walk/changed-at 0
-                       :seon.error/value failure}
-                attribute (assoc :seon.render.walk/attribute attribute)))
+    (letfn [(elision-node [lookup attribute hops failure]
+              (let [message (:seon.error/message failure)]
+                (cond-> {:seon.render.walk/lookup lookup
+                         :seon.render/distance hops
+                         :seon.render.walk/changed-at 0
+                         :seon.render/projection 'seon.render.walk/elision
+                         :seon.render/output
+                         (if (= kind :seon.render/html)
+                           [:span {:class "seon-walk-elision"
+                                   :data-walk-elided "true"}
+                            "… " message]
+                           message)}
+                  attribute (assoc :seon.render.walk/attribute attribute))))
+            (marker [lookup attribute hops failure]
+              (if (= ::elided (:seon.error/kind failure))
+                (elision-node lookup attribute hops failure)
+                (cond-> {:seon.render.walk/lookup lookup
+                         :seon.render/distance hops
+                         :seon.render.walk/changed-at 0
+                         :seon.error/value failure}
+                  attribute (assoc :seon.render.walk/attribute attribute))))
             (transcript-node [agent-id agent-eid hops]
               (if (neg? (vswap! remaining dec))
                 (marker [::transcript agent-id]
@@ -520,11 +535,11 @@
                            (assoc :seon.render.walk/attribute attribute))]
                 (cond
                   (neg? (vswap! remaining dec))
-                  (assoc base :seon.error/value
-                         {:seon.error/kind ::elided
-                          :seon.error/message
-                          (str "elided — this neighbourhood is larger than "
-                               "the configured node cap")})
+                  (elision-node lookup attribute hops
+                                {:seon.error/kind ::elided
+                                 :seon.error/message
+                                 (str "elided — this neighbourhood is larger "
+                                      "than the configured node cap")})
 
                   (nil? eid)
                   (assoc base :seon.error/value
@@ -534,10 +549,7 @@
                                (pr-str lookup) ".")})
 
                   (contains? @rendered-eids eid)
-                  (assoc base
-                         :seon.render.walk/back-reference? true
-                         :seon.render/output
-                         (str "back-reference to " (pr-str lookup)))
+                  (assoc base :seon.render.walk/back-reference? true)
 
                   :else
                   (let [_ (vswap! rendered-eids conj eid)
@@ -640,7 +652,11 @@
 
   This is the shared membership and ordering seam for every projection. The
   node remains present so a consumer can inspect render provenance, while the
-  keys used by page assembly are lifted onto the unit value."
+  keys used by page assembly are lifted onto the unit value. The root is the
+  stable head, ordinary branches retain grouped last-changed order, and the
+  synthetic transcript is the stable tail. Repeated logical lookups and
+  back-references contribute no second unit; distinct entities remain distinct
+  even when their projections happen to produce identical bytes."
   {:malli/schema
    [:=> [:cat :seon.render.walk/node] :seon.render.walk/units]}
   [node]
@@ -673,21 +689,50 @@
                                         (or branch child-path))))
                      (map-indexed vector
                                   (:seon.render.walk/neighbours node))))))]
-    (->> (flatten-units node [] 0 nil)
-         (sort-by (juxt :seon.render.walk/changed-at
-                        :seon.render.walk/branch
-                        :seon.render.walk/path))
-         vec)))
+    (letfn [(transcript-unit? [unit]
+              (let [lookup (get-in unit [:seon.render.walk/node
+                                         :seon.render.walk/lookup])]
+                (and (vector? lookup)
+                     (= ::transcript (first lookup)))))
+            (sort-key [unit]
+              (let [path (:seon.render.walk/path unit)]
+                [(cond
+                   (empty? path) 0
+                   (transcript-unit? unit) 2
+                   :else 1)
+                 (:seon.render.walk/changed-at unit)
+                 (:seon.render.walk/branch unit)
+                 path]))
+            (logical-key [unit]
+              (let [node (:seon.render.walk/node unit)]
+                (when-not (= 'seon.render.walk/elision
+                             (:seon.render/projection node))
+                  [:seon.render.walk/lookup
+                   (:seon.render.walk/lookup node)])))]
+      (->> (flatten-units node [] 0 nil)
+           (remove (comp :seon.render.walk/back-reference?
+                         :seon.render.walk/node))
+           (sort-by sort-key)
+           (reduce (fn [{seen-values :seen accumulated :units :as state} unit]
+                     (let [logical-value (logical-key unit)]
+                       (if (and logical-value
+                                (contains? seen-values logical-value))
+                         state
+                         {:seen (cond-> seen-values
+                                  logical-value (conj logical-value))
+                          :units (conj accumulated unit)})))
+                   {:seen #{} :units []})
+           :units))))
 
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
 
-  Depth is INDENTATION, and the connection is named on the line that
-  introduces its node, so a reader (and a model) can see that the run
-  under an agent was reached through `:seon.cluster.run/agent` rather
-  than inferring it. A node that rendered nothing contributes nothing and
-  neither does its indentation — omission is nil-punning here exactly as
-  it is in a block, so a family with nothing to say costs no tokens.
+  Each unit gets one compact comment carrying its depth and projection. A
+  branch root also retains the literal `:branch` path accepted by
+  `seon.render/walk`, so shortening presentation never removes the drill
+  handle. A node that rendered nothing contributes nothing — omission is
+  nil-punning here exactly as it is in a block, so a family with nothing to
+  say costs no tokens.
 
   A node carrying a flat error contributes ITS MESSAGE, because a reader
   told nothing about a neighbour that exists would reason from a gap it
@@ -718,6 +763,10 @@
                 (and (<= (count requested-branch) (count path))
                      (= requested-branch
                         (subvec path 0 (count requested-branch))))))
+          (elision-unit? [unit]
+            (= 'seon.render.walk/elision
+               (get-in unit [:seon.render.walk/node
+                             :seon.render/projection])))
           (unit-lines [unit]
             (let [node (:seon.render.walk/node unit)
                   path (:seon.render.walk/path unit)
@@ -728,9 +777,9 @@
                          failure (:seon.error/message failure)
                          (string? output) output
                          (some? output) (pr-str output))]
-              [(str ";; path=" (pr-str path)
-                    " depth=" depth
-                    " provenance=" (pr-str (provenance node)))
+              [(str ";; d" depth " · " (pr-str (provenance node))
+                    (when (= path (:seon.render.walk/branch unit))
+                      (str " · :branch " (pr-str path))))
                text]))]
      (let [root (:seon.render.walk/lookup node)
            requested-depth (:seon.render/distance node)
@@ -747,5 +796,18 @@
            ordered (->> (units node)
                         (filter (comp within-branch?
                                       :seon.render.walk/path)))
-           text (str/join "\n" (cons header (mapcat unit-lines ordered)))]
+           elisions (filter elision-unit? ordered)
+           visible (remove elision-unit? ordered)
+           elision-line
+           (when (seq elisions)
+             (let [former-noise (str/join "\n" (keep :seon.render/output
+                                                       elisions))]
+               (str ";; " (count elisions) " branches elided · "
+                    (tokens/estimate former-noise) " tokens · inspect with "
+                    "(seon.render/walk "
+                    (pr-str {:root root :depth (inc requested-depth)}) ")")))
+           lines (concat [header]
+                         (when elision-line [elision-line])
+                         (mapcat unit-lines visible))
+           text (str/join "\n" lines)]
        (when-not (str/blank? text) text)))))
