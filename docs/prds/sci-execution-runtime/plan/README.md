@@ -1691,7 +1691,12 @@ may reintroduce a shadow build into the dev feedback path.
   it), defaulting to current behavior (on), with per-attribute
   `:db/noHistory` as the selective dial for churny attributes.
   Per-cluster differentiation is upstream work, recorded on the filed
-  issue, not invented. FORK PUBLICATION AUTHORIZED (owner, same
+  issue, not invented. CONFIRMED (owner, same conversation): history
+  STAYS ON — "I really want time travel features" — and churny
+  attributes get per-attribute `:db/noHistory`, identified by
+  MEASUREMENT (per-attribute datom-growth census in the storage/GC
+  wave), never by guess; the existing `:seon.db/no-history?` usage is
+  the precedent. FORK PUBLICATION AUTHORIZED (owner, same
   conversation): create forks under the owner's GitHub account for
   maintained submodules lacking remotes and push the maintained
   branches — no force-pushes, nothing beyond our maintained branches.
