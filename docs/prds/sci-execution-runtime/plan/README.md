@@ -1436,6 +1436,17 @@ may reintroduce a shadow build into the dev feedback path.
   proven need for ambient runtime health in context ever appears, the
   latest-wins snapshot-fact design is the recorded shape to reach for
   — on evidence, not by default.
+  **Ruling 2026-07-31 #10 (owner): UNIFORM AGENTS + FLOW'S OWN
+  CONTROL PROTOCOL FOR ALL PROCESS MAINTENANCE.** Every agent has the
+  same base and components — nothing special anywhere; any agent that
+  wants fleet awareness walks the cluster entity like any other data.
+  System process maintenance — ping, start, stop, pause, resume,
+  everything — uses core.async.flow's OWN protocol (flow ships
+  ping/pause/resume/stop/inject and per-proc variants; agents ARE
+  flow graphs, so agent lifecycle is flow's verbs applied to the
+  agent's graph). No bespoke maintenance machinery; a grounding audit
+  maps the full protocol from reference-code source and checks
+  current usage before any lifecycle surface is designed.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
