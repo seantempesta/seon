@@ -1447,6 +1447,17 @@ may reintroduce a shadow build into the dev feedback path.
   agent's graph). No bespoke maintenance machinery; a grounding audit
   maps the full protocol from reference-code source and checks
   current usage before any lifecycle surface is designed.
+  ADDENDUM — THE SCAR AND THE STANDING PRACTICE (owner, same
+  conversation): flow is a foreign concept and model-written flow
+  systems tend to be THE WRONG SYSTEM — the first attempt put every
+  agent into ONE flow graph, forcing agents to run serially ("a
+  nightmare"), and the aha was that EVERY LONG-RUNNING PROCESS IS ITS
+  OWN FLOW GRAPH, controlled under the one system (the origin of the
+  2026-07-28 agents-are-flows ruling). Therefore: flow work ALWAYS
+  gets research + live probe testing BEFORE implementation lanes —
+  never implement a flow mechanism from remembered semantics; the
+  2026-07-31 control-protocol grounding (two stale-docstring
+  corrections found by probe) is the recurring proof of why.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
