@@ -117,6 +117,10 @@
 
     :else []))
 
+(defn- namespace-ref
+  [namespace-name]
+  [:seon.ns/name namespace-name])
+
 (defn- namespace-context [entry]
   (let [form (read-jvm-form (exact-source entry))]
     (reduce
@@ -172,7 +176,8 @@
     (cond-> {:seon.ns/name namespace-name
              :seon.ns/source (exact-source entry)}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
-      (seq requires) (assoc :seon.ns/requires requires)
+      (seq requires)
+      (assoc :seon.ns/requires (into #{} (map namespace-ref) requires))
       (seq aliases)
       (assoc :seon.ns/aliases
              (into #{} (map (fn [[local target]]
@@ -602,7 +607,21 @@
         source-only
         (remove (fn [row]
                   (contains? canonical-keys (:seon.schema/key row)))
-                source-rows)]
+                source-rows)
+        source-namespace-names
+        (into #{} (keep :seon.ns/name) source-only)
+        required-namespace-names
+        (into #{}
+              (comp
+               (mapcat #(or (:seon.ns/requires %) []))
+               (map second))
+              source-only)
+        external-namespace-rows
+        (->> required-namespace-names
+             (remove source-namespace-names)
+             (sort-by str)
+             (mapv (fn [namespace-name]
+                     {:seon.ns/name namespace-name})))]
     (doseq [{schema-key :seon.schema/key
              form-string :seon.schema/form}
             (filter :seon.schema/key source-only)]
@@ -612,7 +631,8 @@
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key}))))
-    (into (vec source-only) canonical-schemas)))
+    (into (into (vec source-only) external-namespace-rows)
+          canonical-schemas)))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis."
@@ -632,6 +652,15 @@
                       {:seon.error/kind ::index-refused
                        ::existing-program-entity existing})))
     (let [namespaces (filterv :seon.ns/name program-rows)
+          namespace-bases
+          (mapv #(dissoc % :seon.ns/requires) namespaces)
+          namespace-relations
+          (into []
+                (keep (fn [row]
+                        (when (seq (:seon.ns/requires row))
+                          (select-keys row
+                                       [:seon.ns/name :seon.ns/requires]))))
+                namespaces)
           declarations (filterv #(not (:seon.ns/name %)) program-rows)
           declaration-bases (mapv #(dissoc % :seon.fn/calls) declarations)
           call-rows
@@ -646,7 +675,10 @@
                                     (cond-> {:tx-data tx-data}
                                       process (assoc :tx-meta
                                                      {:seon.db/process process})))))]
-      (transact! namespaces)
+      ;; Map expansion preserves this order inside the transaction. Every
+      ;; identity therefore exists before a requires lookup ref resolves it,
+      ;; including the shared name-only rows for external namespaces.
+      (transact! (into namespace-bases namespace-relations))
       (transact! declaration-bases)
       (transact! call-rows)
       {:seon.reconcile/converged? false

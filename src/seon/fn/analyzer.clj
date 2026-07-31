@@ -156,9 +156,17 @@
         (group-by :seon.ns.alias/target-ns aliases)
         refers-by-target
         (group-by :seon.ns.refer/target-ns refers)
+        required-targets
+        (into #{}
+              (map (fn [target]
+                     (if (and (vector? target)
+                              (= :seon.ns/name (first target)))
+                       (second target)
+                       target)))
+              requires)
         targets
         (sort-by str
-                 (into (set requires)
+                 (into required-targets
                        (concat (keys aliases-by-target)
                                (keys refers-by-target))))]
     (mapcat

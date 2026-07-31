@@ -70,8 +70,9 @@
                (:seon.fn/source
                 (get by-id [:seon.fn/sym "sample.core/map->Pair"]))))
       (testing "namespace context is exact source data"
-        (is (= #{'clojure.test 'clojure.test.check.clojure-test
-                 'clojure.string}
+        (is (= #{[:seon.ns/name 'clojure.test]
+                 [:seon.ns/name 'clojure.test.check.clojure-test]
+                 [:seon.ns/name 'clojure.string]}
                (:seon.ns/requires namespace-row)))
         (is (contains? (:seon.ns/aliases namespace-row)
                        {:seon.ns.alias/local 'str
@@ -93,6 +94,49 @@
       (is (= #{"first.party/trim"} (into #{} (keep :seon.fn/sym) rows)))
       (is (not-any? #(= "clojure.string/trim" (:seon.fn/sym %)) rows))))
   (is (= ["src" "test"] seon.fn/source-roots)))
+
+(deftest requires-resolve-totally
+  (test-support/with-database
+    (fn [connection]
+      (let [db @connection
+            requires
+            (d/q '[:find ?namespace ?required ?required-name
+                   :where
+                   [?namespace :seon.ns/requires ?required]
+                   [?required :seon.ns/name ?required-name]]
+                 db)
+            required-eids
+            (into #{} (map second) requires)
+            name-only-eids
+            (d/q '[:find [?namespace ...]
+                   :where
+                   [?namespace :seon.ns/name]
+                   (not [?namespace :seon.ns/source])]
+                 db)
+            name-only-eids (set name-only-eids)
+            external-eids-by-name
+            (reduce
+             (fn [by-name [_ required required-name]]
+               (cond-> by-name
+                 (contains? name-only-eids required)
+                 (update required-name (fnil conj #{}) required)))
+             {}
+             requires)]
+        (is (seq requires))
+        (is (every? (fn [[_ required required-name]]
+                      (and (integer? required)
+                           (symbol? required-name)))
+                    requires))
+        (is (some name-only-eids required-eids)
+            "external requires are shared name-only namespace rows")
+        (is (every? #(= 1 (count %)) (vals external-eids-by-name))
+            "each external namespace name resolves to exactly one eid")
+        (is (empty?
+             (d/q '[:find ?namespace ?required
+                    :where
+                    [?namespace :seon.ns/requires ?required]
+                    (not [?required :seon.ns/name])]
+                  db)))))))
 
 (deftest publication-refuses-every-error-level-analyzer-finding
   (let [root (fixture-root)]
