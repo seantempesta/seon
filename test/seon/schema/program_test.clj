@@ -36,8 +36,14 @@
 (deftest catalog-render-declarations-resolve
   (let [catalog (schema/entity-catalog)
         program-keys #{:seon.fn/fn :seon.ns/ns :seon.schema/schema}]
-    (testing "unbuilt program specialists are absent"
-      (doseq [row (filter (comp program-keys :seon.schema.catalog/key)
+    (testing "the namespace family declares both render projections"
+      (doseq [row (filter (comp #{:seon.ns/ns} :seon.schema.catalog/key)
+                          catalog)]
+        (is (contains? row :seon.schema.catalog/render-ai))
+        (is (contains? row :seon.schema.catalog/render-html))))
+    (testing "families with no built specialist stay bare"
+      (doseq [row (filter (comp (disj program-keys :seon.ns/ns)
+                                :seon.schema.catalog/key)
                           catalog)]
         (is (not (contains? row :seon.schema.catalog/render-ai)))
         (is (not (contains? row :seon.schema.catalog/render-html)))))
