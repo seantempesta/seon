@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup])
   (:import [java.io PushbackReader StringReader]))
@@ -204,6 +205,7 @@
   [identities message]
   (let [about-eid (get-in message [:seon.cluster.message/about :db/id])]
     {::kind :message
+     ::entity message
      ::id (:seon.cluster.message/id message)
      ::at (:seon.cluster.message/at message)
      ::content (:seon.cluster.message/content message)
@@ -220,6 +222,7 @@
   (let [receipt-eid (:db/id receipt)
         ordinal (:seon.cluster.eval/ordinal receipt)]
     {::kind :eval
+     ::entity receipt
      ::id (:seon.cluster.eval/id receipt)
      ::at (:seon.cluster.eval/at receipt)
      ::ordinal ordinal
@@ -264,200 +267,124 @@
         (catch Throwable _
           {::unreadable? true})))))
 
-(defn- readable-source?
-  [source]
-  (when (string? source)
-    (with-open [reader (PushbackReader. (StringReader. source))]
-      (try
-        (loop []
-          (let [form (read {:eof ::eof
-                            :read-cond :allow
-                            :features #{:clj}}
-                           reader)]
-            (if (= ::eof form) true (recur))))
-        (catch Throwable _
-          false)))))
-
-(defn- result-shape
-  [serialized]
-  (let [{::keys [read-value unreadable?]} (read-result serialized)
-        value read-value]
-    (cond
-      (nil? serialized) nil
-      unreadable? "unreadable stored result"
-      (map? value) (str "map with " (count value) " entr"
-                        (if (= 1 (count value)) "y" "ies"))
-      (vector? value) (str "vector with " (count value) " items")
-      (set? value) (str "set with " (count value) " members")
-      (sequential? value) "sequence"
-      (string? value) (str "string, " (tokens/estimate value) " tokens")
-      (keyword? value) "keyword"
-      (symbol? value) "symbol"
-      (number? value) "number"
-      (boolean? value) "boolean"
-      (nil? value) "nil"
-      :else (.getSimpleName (class value)))))
-
-(defn- wait-note
-  [serialized]
-  (let [value (::read-value (read-result serialized))]
-    (when (and (map? value) (= :wait (:my.run/disposition value)))
-      (:my.run/note value))))
-
 (defn- entry-header
   [entry detail]
   (str ";; transcript/entry " (pr-str (::kind entry)) " "
        (pr-str (::id entry)) " " (pr-str detail) "\n"
        ";; at " (pr-str (::at entry))))
 
-(defn- message-form
-  [entry]
-  (let [to (::to entry)
-        about (::about entry)]
-    (cond
-      (and (::about-ref? entry) (nil? about))
-      (list 'comment
-            (cond-> {:seon.transcript/unresolved-about? true
-                     :seon.cluster.message/to to
-                     :seon.cluster.message/content (::content entry)}
-              (::reason entry) (assoc :my.message/reason (::reason entry))))
+(defn- floor-text
+  [unit value]
+  (let [rendered
+        (render/render
+         {:seon.render/unit
+          {:seon.render/value value
+           :seon.cluster.agent/id (:seon.cluster.agent/id unit)
+           :seon.sci.admit/caps (:seon.sci.admit/caps unit)}
+          :seon.render/kind :seon.render/ai})]
+    (or (:seon.render/output rendered)
+        (pr-str rendered))))
 
-      (::reason entry)
-      (list 'my.message/decline to about (::reason entry))
+(defn- floor-value
+  [unit value]
+  (let [text (floor-text unit value)
+        {::keys [read-value unreadable?]} (read-result text)]
+    (if unreadable? text read-value)))
 
-      (::from entry)
-      (cond-> (list 'my.message/send to (::content entry))
-        about (concat (list about)))
-
-      :else (::content entry))))
-
-(defn- message-direction
-  [agent-id entry]
-  (cond
-    (= agent-id (::from entry))
-    (str ";; You sent this to agent " (::to entry) ".")
-
-    (::from entry)
-    (str ";; Agent " (::from entry) " sent this to you.")
-
-    :else ";; This arrived from outside the agent population."))
-
-(defn- clipped
-  [value token-budget]
+(defn- bounded-scalar
+  [unit value]
   (when (some? value)
-    (tokens/clip-str (str value) token-budget)))
+    (let [bounded (floor-text unit value)]
+      (if (= (pr-str value) bounded) value bounded))))
 
-(defn- full-message
-  [agent-id entry]
-  (str (entry-header entry :full) "\n"
-       (message-direction agent-id entry) "\n"
-       (pr-str (message-form entry))))
+(defn- rendered-family
+  [unit family-unit distance]
+  (let [declaration
+        ((requiring-resolve 'seon.render.walk/projection)
+         family-unit
+         {:seon.render/kind :seon.render/ai
+          :seon.render/overrides {}
+          :seon.render/floor 'seon.render.block/data-prose})
+        rendered
+        (render/render
+         {:seon.render/unit
+          (assoc family-unit
+                 :seon.render/ai declaration
+                 :seon.db/db (:seon.db/db unit)
+                 :seon.render/distance distance
+                 :seon.sci.admit/caps (:seon.sci.admit/caps unit))
+          :seon.render/kind :seon.render/ai})
+        output (or (:seon.render/output rendered)
+                   (floor-text unit rendered))]
+    (bounded-scalar unit output)))
 
-(defn- summary-message
-  [agent-id entry preview-budget]
-  (let [entry (cond-> (assoc entry ::content
-                              (clipped (::content entry) preview-budget))
-                (::reason entry)
-                (assoc ::reason (clipped (::reason entry) preview-budget)))]
-    (str (entry-header entry :summary) "\n"
-         (message-direction agent-id entry) "\n"
-         (pr-str (message-form entry)))))
-
-(defn- full-eval
+(defn- message-extra
   [entry]
-  (let [source (if (readable-source? (::source entry))
-                 (::source entry)
-                 (pr-str
-                  (list 'comment
-                        {:seon.cluster.run.form/source (::source entry)
-                         :seon.render.transcript/unreadable? true})))
-        result (when (::result entry)
-                 (let [{::keys [unreadable?]} (read-result (::result entry))]
-                   (str ";; =>\n"
-                        (if unreadable?
-                          (pr-str
-                           (list 'comment
-                                 {:seon.cluster.eval/result-edn
-                                  (::result entry)
-                                  :seon.render.transcript/unreadable? true}))
-                          (::result entry)))))
-        error (when (::error entry)
-                (pr-str
-                 (list
-                  'comment
-                  (cond-> {:seon.cluster.eval/error (::error entry)}
-                    (::error-kind entry)
-                    (assoc :seon.error/kind (::error-kind entry))
-                    (::problem-id entry)
-                    (assoc :seon.problems/id (::problem-id entry))))))
-        interrupted
-        (when (::interrupted-at entry)
-          (pr-str
-           (list 'comment
-                 {:seon.cluster.eval/interrupted-at (::interrupted-at entry)}
-                 "Its effect may have happened; nothing was retried.")))
-        running
-        (when-not (or result error interrupted)
-          (pr-str (list 'comment
-                        {:seon.cluster.eval/state :running})))
-        output (when-let [printed (::output entry)]
-                 (pr-str (list 'comment
-                               {:seon.cluster.eval/output printed})))]
-    (str/join
-     "\n"
-     (cond-> [(entry-header entry :full)
-              source]
-       output (conj output)
-       result (conj result)
-       error (conj error)
-       interrupted (conj interrupted)
-       running (conj running)))))
+  (cond-> {}
+    (::about entry) (assoc :seon.cluster.message/about (::about entry))
+    (and (::about-ref? entry) (nil? (::about entry)))
+    (assoc :seon.transcript/unresolved-about? true)
+    (::reason entry) (assoc :my.message/reason (::reason entry))))
 
-(defn- summary-data
-  [entry preview-budget]
-  (let [half (quot preview-budget 2)]
-    (cond-> {:seon.transcript/eval (::id entry)
-             :seon.cluster.eval/at (::at entry)
-             :seon.cluster.eval/ordinal (::ordinal entry)
-             :seon.cluster.run.form/source
-             (clipped (or (::source entry) "<missing source>") half)}
-      (::result entry)
-      (assoc :seon.cluster.eval/result-summary
-             (result-shape (::result entry)))
-      (wait-note (::result entry))
-      (assoc :my.run/note (clipped (wait-note (::result entry)) half))
-      (::error entry)
-      (assoc :seon.cluster.eval/error (clipped (::error entry) half))
-      (::error-kind entry)
-      (assoc :seon.error/kind (::error-kind entry))
-      (::problem-id entry)
-      (assoc :seon.problems/id (::problem-id entry))
-      (::interrupted-at entry)
-      (assoc :seon.cluster.eval/interrupted-at (::interrupted-at entry)
-             :seon.transcript/effect-may-have-happened? true)
-      (::output entry)
-      (assoc :seon.cluster.eval/output-tokens
-             (tokens/estimate (::output entry))))))
+(defn- message-text
+  [unit entry detail]
+  (let [entity (cond-> (::entity entry)
+                 (::content entry)
+                 (assoc :seon.cluster.message/content
+                        (bounded-scalar unit (::content entry))))
+        sentence (rendered-family unit entity 1)
+        extra (message-extra entry)]
+    (str (bounded-scalar unit (entry-header entry detail)) "\n"
+         (pr-str
+          (cond-> (list 'comment sentence)
+            (seq extra) (concat (list (floor-value unit extra))))))))
 
-(defn- summary-entry
-  [agent-id entry preview-budget]
-  (case (::kind entry)
-    :message (summary-message agent-id entry preview-budget)
-    :eval (str (entry-header entry :summary) "\n"
-               (pr-str (list 'comment
-                             (summary-data entry preview-budget))))))
+(defn- bounded-result
+  [unit serialized]
+  (when (some? serialized)
+    (let [{::keys [read-value unreadable?]} (read-result serialized)]
+      (floor-text unit
+                  (if unreadable?
+                    {:seon.cluster.eval/result-edn serialized
+                     :seon.render.transcript/unreadable? true}
+                    read-value)))))
+
+(defn- receipt-extra
+  [entry]
+  (cond-> {}
+    (::source entry) (assoc :seon.cluster.run.form/source (::source entry))
+    (::error-kind entry) (assoc :seon.error/kind (::error-kind entry))
+    (::problem-id entry) (assoc :seon.problems/id (::problem-id entry))
+    (::interrupted-at entry)
+    (assoc :seon.cluster.eval/interrupted-at (::interrupted-at entry))))
+
+(defn- receipt-text
+  [unit entry detail]
+  (let [entity
+        (cond-> (::entity entry)
+          (::result entry)
+          (assoc :seon.cluster.eval/result-edn
+                 (bounded-result unit (::result entry)))
+          (::error entry)
+          (assoc :seon.cluster.eval/error
+                 (bounded-scalar unit (::error entry)))
+          (::output entry)
+          (assoc :seon.cluster.eval/output
+                 (bounded-scalar unit (::output entry))))
+        sentence (rendered-family unit entity 2)
+        extra (receipt-extra entry)]
+    (str (bounded-scalar unit (entry-header entry detail)) "\n"
+         (pr-str (list 'comment sentence (floor-value unit extra))))))
 
 (defn- projected-entry
-  [agent-id entry detail preview-budget]
+  [unit entry detail]
   {::kind (::kind entry)
    ::id (::id entry)
    ::at (::at entry)
    ::detail detail
-   ::text (case detail
-            :full (case (::kind entry)
-                    :message (full-message agent-id entry)
-                    :eval (full-eval entry))
-            :summary (summary-entry agent-id entry preview-budget))})
+   ::text (case (::kind entry)
+            :message (message-text unit entry detail)
+            :eval (receipt-text unit entry detail))})
 
 (defn- entry-name
   [entry]
@@ -511,22 +438,10 @@
   (<= (output-tokens entries elided) budget))
 
 (defn- best-summary
-  [agent-id entry newer older-count budget]
-  (letfn [(candidate [preview]
-            (projected-entry agent-id entry :summary preview))
-          (fits-preview? [preview]
-            (fits? budget
-                   (into [(candidate preview)] newer)
-                   older-count))]
-    (when (fits-preview? 0)
-      (loop [low 0
-             high budget]
-        (if (< low high)
-          (let [middle (quot (inc (+ low high)) 2)]
-            (if (fits-preview? middle)
-              (recur middle high)
-              (recur low (dec middle))))
-          (candidate low))))))
+  [unit entry newer older-count budget]
+  (let [candidate (projected-entry unit entry :summary)]
+    (when (fits? budget (into [candidate] newer) older-count)
+      candidate)))
 
 (defn- projection
   [unit]
@@ -556,7 +471,7 @@
         (let [entry (nth entries index)
               recent? (<= recent-start index)
               full (when recent?
-                     (projected-entry agent-id entry :full 0))
+                     (projected-entry unit entry :full))
               with-full (when full (into [full] newer))
               older-count (+ unacquired index)]
           (cond
@@ -565,7 +480,7 @@
 
             :else
             (if-let [summary
-                     (best-summary agent-id entry newer older-count budget)]
+                     (best-summary unit entry newer older-count budget)]
               (recur (dec index) (into [summary] newer))
               {::entries newer
                ::elided (+ unacquired (inc index))

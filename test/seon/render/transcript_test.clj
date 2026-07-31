@@ -15,16 +15,24 @@
 (def ^:private property-seed 2026073104)
 (def ^:private agent-id "transcript-agent")
 (def ^:private peer-id "transcript-peer")
+(def ^:private caps
+  {:seon.config.eval.result/max-depth 12
+   :seon.config.eval.result/max-collection 64
+   :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-nodes 4096})
 
 (defn- at
   [offset]
   (java.util.Date. (long (+ 1785500000000 offset))))
 
 (defn- unit
-  [db token-budget]
-  {:seon.db/db db
-   :seon.cluster.agent/id agent-id
-   :seon.render.transcript/token-budget token-budget})
+  ([db token-budget]
+   (unit db token-budget caps))
+  ([db token-budget render-caps]
+   {:seon.db/db db
+    :seon.cluster.agent/id agent-id
+    :seon.render.transcript/token-budget token-budget
+    :seon.sci.admit/caps render-caps}))
 
 (defn- reader-valid?
   [text]
@@ -96,6 +104,7 @@
     {:seon.cluster.message/id "outside-0"
      :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
      :seon.cluster.message/content "Start with the failed deployment."
+     :my.message/reason "An external observation, not this agent's decline."
      :seon.cluster.message/at (at 0)}
     {:seon.cluster.message/id "peer-1"
      :seon.cluster.message/from [:seon.cluster.agent/id peer-id]
@@ -138,8 +147,8 @@
      :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
      :seon.cluster.message/to [:seon.cluster.agent/id peer-id]
      :seon.cluster.message/about [:seon.problems/id "problem-transcript"]
-     :seon.cluster.message/content "The namespace is not mine."
-     :my.message/reason "The namespace is not mine."
+     :seon.cluster.message/content "I cannot make the requested edit."
+     :my.message/reason "The namespace is owned by another agent."
      :seon.cluster.message/at (at 4000)}
     {:seon.cluster.run/id "run-error"
      :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
@@ -184,11 +193,16 @@
           (is (reader-valid? ai))
           (is (str/includes?
                ai
-               "(my.message/send \"transcript-agent\" \"Repair the owning namespace.\" \"problem-transcript\")"))
+               "Agent transcript-peer said to transcript-agent: Repair the owning namespace."))
           (is (str/includes?
                ai
-               "(my.message/decline \"transcript-peer\" \"problem-transcript\" \"The namespace is not mine.\")"))
-          (is (str/includes? ai "(+ 20 22)\n;; =>\n42"))
+               "Agent transcript-agent said to transcript-peer: I cannot make the requested edit."))
+          (is (str/includes? ai "The namespace is owned by another agent."))
+          (is (str/includes? ai "An external observation, not this agent's decline."))
+          (is (str/includes? ai "From outside this cluster to transcript-agent"))
+          (is (not (str/includes? ai
+                                  "Agent transcript-agent said to transcript-agent: Start with")))
+          (is (str/includes? ai "Form 0 returned 42"))
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "No such namespace: missing.function"))
           (is (str/includes? ai ":seon.sci.eval/refused"))
@@ -259,11 +273,44 @@
         (is (reader-valid? ai))
         (is (str/includes?
              ai
-             "(my.message/send \"transcript-peer\" \"Inspect the test fact.\" \"target-fact\")"))
-        (is (str/includes? ai ":seon.cluster.run.form/source \"(\""))
-        (is (str/includes? ai ":seon.cluster.eval/result-edn \"{\""))
+             "Agent transcript-agent said to transcript-peer: Inspect the test fact."))
+        (is (str/includes? ai "#:seon.cluster.run.form{:source \"(\"}"))
+        (is (str/includes? ai ":seon.cluster.eval/result-edn \\\"{\\\""))
         (is (= ["about-test" "eval-malformed"]
                (mapv :id (ai-entries ai))))))))
+
+(deftest receipt-content-enters-the-shared-capped-floor
+  (support/with-database
+    (fn [connection]
+      (let [result (into {}
+                         (map (fn [index]
+                                [(keyword "audit" (str "field-" index))
+                                 (str "long-value-" index)]))
+                         (range 40))
+            narrow-caps (assoc caps
+                               :seon.config.eval.result/max-collection 3
+                               :seon.config.eval.result/max-string 8)]
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.run/id "run-capped"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 0)}
+          {:seon.cluster.run.form/id "form-capped"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "run-capped"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(identity result)"}
+          {:seon.cluster.eval/id "eval-capped"
+           :seon.cluster.eval/run [:seon.cluster.run/id "run-capped"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 1000)
+           :seon.cluster.eval/result-edn (pr-str result)}])
+        (let [ai (transcript/render-ai
+                  (unit @connection 100000 narrow-caps))]
+          (is (reader-valid? ai))
+          (is (str/includes? ai ":seon.sci.admit/elided"))
+          (is (str/includes? ai ":seon.sci.admit/truncated-string"))
+          (is (not (str/includes? ai ":audit/field-39"))))))))
 
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
   (support/with-database
@@ -336,7 +383,7 @@
        (contains? #{:message-about :message-decline} event-kind)
        (assoc :seon.cluster.message/about [:seon.test/sym "generated-target"])
        (= :message-decline event-kind)
-       (assoc :my.message/reason content))]
+       (assoc :my.message/reason (str "declined: " content)))]
     (let [run-id (str "run-" id)
           form-id (str "form-" id)
           source (if (= :receipt-invalid event-kind)
@@ -410,7 +457,12 @@
                       html-rows (html-entries html-value)
                       visible-ids (mapv :id ai-rows)
                       ordered-ids (mapv :id (expected-order events))
-                      elided (ai-elided ai)]
+                      elided (ai-elided ai)
+                      visible-id-set (set visible-ids)
+                      visible-declines
+                      (filter #(and (= :message-decline (:event-kind %))
+                                    (contains? visible-id-set (:id %)))
+                              events)]
                   (and
                    (= ai-rows
                       (mapv #(select-keys % [:id :kind :detail]) html-rows))
@@ -421,6 +473,11 @@
                    (or (zero? elided)
                        (and (str/includes? ai "older transcript entr")
                             (str/includes? html "older transcript entr")))
+                   (every? (fn [{:keys [content]}]
+                             (and (str/includes? ai content)
+                                  (str/includes? ai
+                                                 (str "declined: " content))))
+                           visible-declines)
                    (<= (tokens/estimate ai) budget)
                    (<= (tokens/estimate html) budget)
                    (reader-valid? ai)))))))
