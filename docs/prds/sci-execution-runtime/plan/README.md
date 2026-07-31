@@ -1505,7 +1505,17 @@ may reintroduce a shadow build into the dev feedback path.
   namespaces; a namespace-owner agent's curriculum is its real
   namespace's own requires, no seeding needed — acquaintance falls
   out of the code graph. Nothing may assume agent namespace =
-  `my.agents.*`. (2) Peer rendering is depth-aware by construction:
+  `my.agents.*`. REVISION (owner, same conversation): owner agents
+  STILL need bootstrapping — there is ONE CORE BASE SET, uniform for
+  every agent, never special instructions for special namespaces. It
+  is CLUSTER-CARRIED: `:seon.cluster/instructions` (shared prose) +
+  `:seon.cluster/toolkit` (ref set of the core base namespaces every
+  agent sees as compact cards at d2; membership COMPUTED from the
+  corpus's agent-facing surface, never a hand list) + the shared
+  schema attributes' good default renderers. This supersedes 12(a)'s
+  seed-requires-into-the-nursery shape: nothing fakes requires into
+  any namespace; every agent's context = the uniform base set (via
+  its cluster ref) + its own namespace's real world. (2) Peer rendering is depth-aware by construction:
   agent B found in agent A's walk renders through B's family lens at
   that distance (a summary line), never raw keys — raw keys are the
   debug drill's deliberate territory. This resolved the recorded
