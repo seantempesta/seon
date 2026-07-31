@@ -16,18 +16,15 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (8)
+## Blocker (5)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
-| [Stop the render walk silently dropping entities outside registered families](render-walk-silently-drops-entities-outside-registered-families.md) | blocker | context wave fix lane |
-| [Mark value-floor truncation in band instead of printing a false shape](value-floor-truncates-in-band-without-a-placeholder.md) | blocker | context wave fix lane |
-| [Carry the message content on transcript decline entries](transcript-decline-entries-drop-the-message-content.md) | blocker | context wave fix lane |
-| [Settle one prose owner for messages and eval receipts](transcript-is-a-second-renderer-for-messages-and-receipts.md) | blocker | context wave fix lane |
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Register the generic render value schema before instrumentation](fresh-operator-instrumentation-cannot-resolve-render-value-schema.md) | blocker | Core |
+| [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
 ## Friction (17)
 
