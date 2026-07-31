@@ -198,7 +198,11 @@
       ;; vector whose head is a vector is not hiccup — the grammar
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
-      [:main {:class "seon-main"} (seq page)]
+      [:main {:class "seon-main"}
+       [:nav {:class "seon-agent-routes"}
+        [:a {:href (str "/agent/" (path-segment id))} "agent"]
+        [:a {:href (str "/agent/" (path-segment id) "/debug")} "debug"]]
+       (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
       ;; looks alive while receiving nothing.
@@ -282,50 +286,65 @@
   (= :db.cardinality/many
      (get-in db [:schema attribute :db/cardinality])))
 
-(defn- debug-entity
+(defn- direct-attribute
+  [db eid attribute]
+  (let [values (map (fn [datom]
+                      (let [setting (nth datom 2)]
+                        (if (ref-attribute? db attribute)
+                          {:db/id setting}
+                          setting)))
+                    (d/datoms db :eavt eid attribute))]
+    (if (many-attribute? db attribute)
+      values
+      (first values))))
+
+(defn- generic-entity
   "Every direct attribute of one entity, with refs left as drill handles.
 
-  Reverse refs are intentionally present as well: blocks and transaction
-  entities are apparatus in the context walk, but the debug view exists to
-  expose that apparatus. This is the one permitted generic read. It runs only
-  for an open debug tab and scans unknown/family-less attributes honestly."
-  [db eid caps]
-  (let [groups (group-by #(nth % 1) (d/datoms db :eavt eid))
+  Reverse refs are intentionally present as well: `walk/refs` derives concrete
+  per-family selectors and excludes apparatus for context, while this view must
+  expose blocks, transaction entities, and unknown/family-less attributes.
+  This is therefore the one permitted generic read. It runs only for an open
+  debug tab and pays that wider wake/read cost honestly. Its newest-first cap
+  and flat error-valued elision match the walk's settled semantics."
+  [db eid caps reverse?]
+  (let [attributes (into (sorted-set-by #(compare (str %1) (str %2)))
+                         (map #(nth % 1))
+                         (d/datoms db :eavt eid))
         direct
         (into {:db/id eid}
-              (map (fn [[attribute datoms]]
-                     (let [values (mapv (fn [datom]
-                                          (let [setting (nth datom 2)]
-                                            (if (ref-attribute? db attribute)
-                                              {:db/id setting}
-                                              setting)))
-                                        datoms)]
-                       [attribute
-                        (if (many-attribute? db attribute)
-                          (vec (sort-by pr-str values))
-                          (first values))])))
-              groups)
+              (map (fn [attribute]
+                     [attribute (direct-attribute db eid attribute)]))
+              attributes)
         width (long (:seon.config.eval.result/max-collection caps))
         reverse-groups
-        (->> (d/q '[:find ?source ?attribute
-                    :in $ ?target
-                    :where [?source ?attribute ?target]]
-                  db eid)
-             (filter (fn [[_source attribute]]
-                       (ref-attribute? db attribute)))
-             (group-by second)
-             (sort-by (comp str key))
-             (into {}
-                   (map (fn [[attribute pairs]]
-                          (let [sources (->> pairs (map first) sort vec)
-                                shown (mapv (fn [source] {:db/id source})
-                                            (take width sources))]
-                            [attribute
-                             (cond-> shown
-                               (> (count sources) width)
-                               (conj :seon.sci.admit/elided))])))))]
+        (when reverse?
+          (->> (d/q '[:find ?source ?attribute
+                      :in $ ?target
+                      :where [?source ?attribute ?target]]
+                    db eid)
+               (filter (fn [[_source attribute]]
+                         (ref-attribute? db attribute)))
+               (group-by second)
+               (sort-by (comp str key))
+               (into {}
+                     (map (fn [[attribute pairs]]
+                            (let [sources (->> pairs (map first) distinct sort reverse)
+                                  shown (mapv (fn [source] {:db/id source})
+                                              (sort (take width sources)))
+                                  elided (- (count sources) (count shown))]
+                              [attribute
+                               (cond-> shown
+                                 (pos? elided)
+                                 (conj
+                                  {:seon.error/kind :seon.render.walk/elided
+                                   :seon.error/message
+                                   (str "elided " elided " reverse " attribute
+                                        " connection"
+                                        (when-not (= 1 elided) "s")
+                                        " at the configured collection cap")}))]))))))]
     (cond-> direct
-      (seq reverse-groups)
+      (and reverse? (seq reverse-groups))
       (assoc :seon.render.debug/reverse-refs reverse-groups))))
 
 (defn- entity-handle?
@@ -340,14 +359,17 @@
                              :db/id)]
     (letfn [(open [current]
               (if (entity-handle? current)
-                (debug-entity db (:db/id current) caps)
+                (generic-entity db (:db/id current) caps true)
                 current))
             (descend [current step]
-              (let [opened (open current)]
+              (let [opened (open current)
+                    missing (Object.)
+                    index-step? (and (sequential? opened) (int? step) (< -1 step))
+                    indexed (when index-step?
+                              (nth opened step missing))]
                 (cond
                   (and (map? opened) (contains? opened step)) (get opened step)
-                  (and (sequential? opened) (int? step)
-                       (< -1 step (count opened))) (nth opened step)
+                  (and index-step? (not (identical? missing indexed))) indexed
                   (and (set? opened) (contains? opened step)) step
                   :else
                   (reduced
@@ -962,30 +984,43 @@
                                    :seon.render.web/render-channel])))
 
         (and (= :get method) (= "/data" uri))
-        ;; The entity lookup ref selects the drill root; the cursor
-        ;; navigates within that ordinary value. With no entity the
-        ;; canonical database attributes remain the front page.
         (let [query (query-params request)
               entity? (contains? query "entity")
               entity (query-entity (get query "entity"))
-              value (if entity?
-                      (when entity
-                        (d/pull @connection '[*] entity))
-                      (schema/canonical-database-attributes))]
+              root-value (if entity?
+                           (when-let [eid (some-> (when entity
+                                                   (d/pull @connection [:db/id]
+                                                           entity))
+                                                 :db/id)]
+                             (generic-entity @connection eid caps false))
+                           (schema/canonical-database-attributes))
+              cursor (data/parse-cursor (get query "path")
+                                        (get query "offset"))
+              found (data/at root-value cursor)
+              opened-value (if (contains? found :seon.render.data/value)
+                             (:seon.render.data/value found)
+                             found)
+              route-base (if entity?
+                           (str "/data?entity="
+                                (URLEncoder/encode (get query "entity") "UTF-8"))
+                           "/data")
+              unit {:seon.cluster.agent/id id
+                    :seon.render.value/root
+                    (if entity?
+                      (or entity [:seon.render.data/entity (get query "entity")])
+                      :seon.render.data/schema)
+                    :seon.render.value/route-base route-base
+                    :seon.render.data/cursor cursor
+                    :seon.sci.admit/caps caps
+                    :seon.render/value opened-value}]
           {:status 200
            :headers {"content-type" "text/html; charset=utf-8"}
            :body (shell {:seon.cluster.agent/id id
                          :seon.render/page
-                         [(data/drill-html
-                           {:seon.render/value value
-                            :seon.sci.admit/caps caps
-                            :seon.render.data/cursor
-                            (data/parse-cursor (get query "path")
-                                               (get query "offset"))})]
-                         ;; no feed: a drilled page is a position, and
-                         ;; repainting it under the reader would move
-                         ;; the ground they are standing on. Reload is
-                         ;; the refresh, and the URL is the state.
+                         [(block/data-panel unit)]
+                         ;; `/data` has no dedicated repaint derivation: the
+                         ;; shared shell retains its ordinary agent feed, while
+                         ;; reload plus the URL remains the data position.
                          :seon.render.web/feed-url (str "/feed/" id)})})
 
         (and (= :get method) (str/starts-with? uri "/css/"))

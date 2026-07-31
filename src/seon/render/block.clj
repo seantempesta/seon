@@ -887,8 +887,8 @@
 
 (defn- floor-unit
   [unit]
-  (if-some [floor-value (get unit :seon.render/value)]
-    (assoc unit :seon.render/value floor-value)
+  (if (contains? unit :seon.render/value)
+    unit
     (let [omitted-render-keys
           (into []
                 (comp
@@ -912,10 +912,10 @@
   producer has to write a renderer before it can be seen — which is the
   property that makes the pattern worth having.
 
-  Reads a non-nil value under `:seon.render/value` from the unit, so a
+  Reads a value under `:seon.render/value` from the unit, so a
   producer declaring `{:seon.render/html `data-panel :seon.render/value
-  x}` needs nothing else. A unit with no such value (absent or nil)
-  panels the unit itself, minus its own projection declarations and
+  x}` needs nothing else. A unit with no such key panels the unit itself,
+  minus its own projection declarations and
   omitted render keys: a bare map is data too, and printing a symbol
   back at a reader is noise.
 
@@ -952,7 +952,7 @@
   family defaults instead of backstopping them.
 
   Same value selection and the same ONE bounding owner as `data-panel` —
-  a non-nil `:seon.render/value` when the producer supplies one, the
+  a `:seon.render/value` when the producer supplies that key (including nil), the
   unit minus its own declarations otherwise, bounded by the caps the
   eval door already carries. Caps are REQUIRED and there is no shipped
   constant, because a second set of size dials would drift from the

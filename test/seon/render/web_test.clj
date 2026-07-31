@@ -920,21 +920,21 @@
                        "now visible")
         "the stable id lets the later whole-element morph land")))
 
-(deftest the-data-drill-is-browsable-and-its-cursor-is-in-the-url
+(deftest data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
   (with-server two-blocks
     (fn [_connection server _context]
       (let [root (.body (fetch server "/data"))]
-        (is (str/includes? root "seon-data-drill"))
+        (is (str/includes? root "seon-data-panel"))
         (is (str/includes? root "showing 1")
             "a window, and it says so"))
       (testing "a stale or mangled cursor shows the root rather than failing"
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
-          (is (str/includes? (.body response) "seon-data-drill")))))))
+          (is (str/includes? (.body response) "seon-data-panel")))))))
 
-(deftest the-data-drill-resolves-an-entity-root
+(deftest data-resolves-an-entity-root-and-preserves-it-in-floor-links
   (with-server two-blocks
     (fn [connection server _context]
       (d/transact connection
@@ -945,12 +945,37 @@
             body (.body response)
             default-body (.body (fetch server "/data"))]
         (is (= 200 (.statusCode response)))
-        (is (str/includes? body "seon-data-drill"))
+        (is (str/includes? body "seon-data-panel"))
         (is (and (str/includes? body ":seon.cluster.agent/id")
-                 (str/includes? body ">alice</dd>"))
+                 (str/includes? body ">alice</span>"))
             "the drill root is the pulled entity, not the schema vector")
         (is (str/includes? default-body ":seon.ai.attempt/at")
-            "without entity the schema vector remains the drill root")))))
+            "without entity the schema vector remains the drill root")
+        (is (str/includes? body
+                           "entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D")
+            "every floor handle preserves the selected entity root")))))
+
+(deftest data-caps-a-five-megabyte-attribute-through-the-shared-floor
+  (with-server two-blocks
+    (fn [connection server _context]
+      (let [namespace-name 'my.agents.w3-data-cap
+            huge (apply str (repeat (* 5 1024 1024) "x"))
+            entity (URLEncoder/encode
+                    (pr-str [:seon.ns/name namespace-name]) "UTF-8")
+            path (URLEncoder/encode (pr-str [:seon.ns/source]) "UTF-8")]
+        (d/transact connection
+                    [{:seon.ns/name namespace-name :seon.ns/source huge}])
+        (let [response (fetch server (str "/data?entity=" entity
+                                          "&path=" path "&offset=0"))
+              body (.body response)]
+          (is (= 200 (.statusCode response)))
+          (is (< (count body) 100000))
+          (is (str/includes? body "1310720 tokens"))
+          (is (str/includes? body "inspect"))
+          (is (str/includes? body "elided"))
+          (is (str/includes? body "seon-data-panel"))
+          (is (str/includes? body (str "entity=" entity))
+              "the capped value retains a handle back to the same root"))))))
 
 (defn- debug-feed-path
   [agent-id path]
@@ -962,8 +987,11 @@
   (with-server two-blocks
     (fn [connection server _context]
       (d/transact connection [{:seon.cluster.agent/id "alice"}])
-      (let [root (.body (fetch server "/agent/root/debug"))
+      (let [agent-page (.body (fetch server "/agent/root"))
+            root (.body (fetch server "/agent/root/debug"))
             alice (.body (fetch server "/agent/alice/debug"))]
+        (is (str/includes? agent-page "/agent/root/debug")
+            "the always-available debug view is linked from the curated page")
         (is (str/includes? root "debug=true"))
         (is (str/includes? alice "/feed/alice"))
         (is (not= root alice) "the stable root address includes the agent"))

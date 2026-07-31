@@ -583,10 +583,14 @@
       (is (not (str/includes? html "would-fall-to-floor")))
       (is (not (str/includes? html "max-collection")))
       (is (not (str/includes? html "my.viewer")))))
-  (testing "nil and absent render values panel the same unit"
+  (testing "nil is a value while an absent value key panels the unit"
     (let [unit {:seon.render.block/name :x :seon.sci.admit/caps caps}]
-      (is (= (block/data-panel unit)
-             (block/data-panel (assoc unit :seon.render/value nil))))))
+      (is (not= (block/data-panel unit)
+                (block/data-panel (assoc unit :seon.render/value nil))))
+      (is (str/includes?
+           (hiccup/->string
+            (block/data-panel (assoc unit :seon.render/value nil)))
+           "nil"))))
   (testing "nil and absent declarations are equally absent from the panel"
     (let [unit {:seon.render.block/name :x :seon.sci.admit/caps caps}]
       (is (= (block/data-panel unit)

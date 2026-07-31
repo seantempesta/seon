@@ -16,16 +16,12 @@ nested-data admission walk (`src/seon/render.clj:166`,
 `src/seon/render/block.clj:903-939`, `src/seon/render/value.cljc:173-398`). The
 block expander no longer declares its own fallback before calling the router.
 
-One pre-W3 raw renderer remains reachable at `/data`:
-`src/seon/render/web.clj` still calls `seon.render.data/drill-html`, whose
-`entries` function realizes and sorts a whole collection before paging. The
-independent landing audit caught this after the W3 commit. Removing it and its
-pinning suite requires `src/seon/render/data.clj` and
-`test/seon/render/data_test.clj`, which were not W3-owned; even repointing that
-route would exceed the user's explicit `web.clj (the new route only)` boundary.
-Therefore the repository-wide **ONE floor** exit remains open on that exact
-ownership decision even though the router's two-floor defect and the new debug
-surface are resolved.
+The pre-W3 `/data` raw renderer is deleted. `seon.render.data` now owns only
+total cursor parsing and `get-in` selection; the route passes the selected
+value to `seon.render.block/data-panel`. Its independent entry realization,
+summary, HTML, id, and paging implementation and the tests that pinned those
+details are gone. `/data`, routed units, and per-agent debug nodes therefore
+all reach the same admitted HTML floor.
 
 The router's public `resolve-unit` associates the chosen declaration and
 `:seon.render/would-fall-to-floor?` on the returned unit. The boolean records
@@ -64,7 +60,8 @@ tabs cost nothing.
   `238a85cc555a38892f2f9a7583c9cf5cec0fb201`. The existing write-state drain
   completion remains the socket backpressure owner; W3 added no writer.
 - First-party precedents: `src/seon/render/web.clj`'s exact four-route
-  dispatcher and feed; `src/seon/render/data.clj`'s EDN path/offset cursor;
+  dispatcher and feed; the former `src/seon/render/data.clj` EDN path/offset
+  cursor vocabulary;
   `src/seon/render/block.clj`'s admission-backed panel; and
   `src/seon/sci/admit.clj`'s finite ordinary-data codec.
 
@@ -91,27 +88,31 @@ The debug entity reader shows every direct current attribute and both forward
 and reverse ref handles. Therefore the blocks referenced by the agent and
 transaction entities pointing to the agent are drillable here, even though
 the context walk correctly excludes both as apparatus. Reverse-ref truncation
-uses the existing collection cap and appends the admission elision marker.
+uses W1's newest-first cap, restores ascending display order, and appends the
+same flat `:seon.render.walk/elided` error shape as the context walk.
 
 This is intentionally a generic EAVT read plus a generic reverse-ref query.
 It is the exception allowed by ruling #8: 168 of 323 installed attributes are
 outside every current family, and a debug view that used only family pull
 selectors would lie by omission. The cost is conservative wake/read behavior:
 while a debug tab is open, every commit can re-read its opened entity and
-reverse refs. It does not affect closed tabs or the curated page; W5 should
-not copy this read shape into ordinary render invalidation.
+reverse refs. Direct cardinality-many values remain lazy from `d/datoms`, so
+the floor consumes only the opened window instead of materializing the whole
+attribute first. The generic `/data` entity root uses the same lazy direct read
+without reverse refs instead of wildcard pull. Attribute discovery must still
+scan that entity's current EAVT datoms; this on-demand wake/read cost does not
+affect closed tabs or the curated page, and W5 should not copy the shape into
+ordinary render invalidation.
 
 ## Protected-walk boundary
 
-`src/seon/render/walk.clj` remains untouched. Its current `projection`
-function selects a winner and associates that declaration onto the unit before
-calling the router (`src/seon/render/walk.clj:151-175,382-390`). That erases
-branch provenance for callers downstream of the walk: an inherited floor can
-look explicit to `resolve-unit`. W3 did not work around this with symbol
-comparison because an explicit declaration may legitimately name the floor.
-W1 owns the required chain integration. Until it lands, W4 must call
-`resolve-unit` on an unresolved unit rather than infer the checkbox flag from a
-walk node's chosen symbol.
+`src/seon/render/walk.clj` remained untouched by W3. W1 landed the protected
+integration in `071ca1e50`: projection resolution now threads
+`:seon.render/would-fall-to-floor?`, family-derived concrete selectors replace
+wildcard context reads, and truncation is a loud flat error value. W3's debug
+reader deliberately does not call W1's context `refs`: that function excludes
+apparatus and family-less attributes by contract, while the on-demand debug
+surface must expose both. Debug does reuse W1's cap ordering and error shape.
 
 ## Independent landing audit
 
@@ -134,12 +135,26 @@ loading and SHA-256 identity are now CLJ reader branches, with a CLJS-local
 stable hash fallback. Regressions cover distinct entity ids, composite entry
 ids, insertion-order-independent pages, and request-data omission.
 
+The post-W1 deletion audit found no remaining second floor. Its four boundary
+findings were resolved before landing: curated agent pages now link the
+always-available per-agent debug route; direct cardinality-many EAVT values are
+lazy until the admitted floor opens a bounded window; explicit nil wording now
+matches `floor-unit`; and the `/data` comment now states that the required
+shared shell retains the ordinary agent feed even though `/data` has no
+dedicated repaint derivation.
+
 ## Proof
 
 Focused recurring gates, all green:
 
-- `bin/test seon.render.value-test seon.render-test seon.render.block-test`
-- `bin/test seon.render.web-test`
+- `bin/test seon.render.data-test seon.render.web-test`: 39 tests, 169
+  assertions, zero failures and zero errors, including the recurring real-HTTP
+  5 MiB `/data` cap regression and the curated-page debug link.
+- After replacing cursor `count` with bounded explicit-index access,
+  `seon.render.data-test` independently passed 3 tests and 21 assertions.
+- `bin/test seon.render.value-test seon.render-test seon.render.block-test
+  seon.render.agent-test seon.render.data-test seon.render.web-test`: 92 tests,
+  329 assertions, zero failures and zero errors.
 - `clj-kondo --lint` over the seven changed source/test files: zero errors;
   remaining warnings pre-existed except the intentionally named generic
   bindings.
@@ -166,7 +181,30 @@ Live proof used scratch cluster `w3-proof`, then stopped it with
   loud `elided` markers. The patch stayed below 100 KB rather than carrying
   the 5 MiB source.
 
-The in-app browser runtime reported no available browser instances during the
-visual pass. The live route and SSE proof therefore used the real local HTTP
-server directly; the recurring web suite independently exercises the same
-paths over real sockets and validates the Datastar morph bytes.
+After the `/data` deletion, the scratch cluster was re-proved against the
+post-change handler. The cluster initially shared a JVM whose web dispatcher
+had captured the old function; W3 hot-reloaded the four owner namespaces and
+restarted only `w3-proof` before measuring. This proves hot-reloaded Vars plus
+a fresh web handler in a cluster forked from the published current source; it
+does not claim that file edits automatically synchronize sovereign clusters.
+
+- `/data?entity=[:seon.ns/name w3.proof.large]&path=[:seon.ns/source]`
+  returned 5,715 bytes with the one panel, `1,310,720 tokens`, `inspect`, loud
+  `elided`, and a root-preserving handle.
+- The three-level debug path
+  `[:seon.cluster.agent/blocks 0 :seon.render.block/name]` returned 850 bytes
+  with the block name and a stable drilled-node id.
+- The apparatus path
+  `[:seon.render.debug/reverse-refs :seon.db/user 0]` returned 3,527 bytes and
+  exposed `:db/txInstant` under a stable id.
+- The debug 5 MiB path
+  `[:seon.cluster.agent/namespace :seon.ns/source]` returned 5,276 bytes with
+  the token estimate, inspect affordance, loud elision, and stable id.
+
+`w3-proof` was stopped after the proof. The in-app browser runtime reported no
+available browser instances, so the live route and SSE proof used the real
+local HTTP server directly; the recurring web suite independently exercises
+the same paths over real sockets and validates the Datastar morph bytes.
+The final post-audit repaint also verified that `GET /agent/root` contains
+`/agent/root/debug`, the debug route remains a stable floor panel, and the 5
+MiB `/data` response remains capped and loud.
