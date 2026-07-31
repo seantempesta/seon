@@ -42,9 +42,26 @@ test-coverage addition.
 
 ## Owner
 
-`reference-code/datahike` as a maintained fork, and whoever owns the next
-database wave. This is a real merge across a 95/28 divergence, not a
-fast-forward; it is not safe to automate.
+Owned by the 2026-07-31 Datahike upstream-sync wave. The first merge attempt
+stopped at the required semantic-conflict boundary; full evidence is in
+`docs/prds/sci-execution-runtime/research/datahike-upstream-sync-notes-2026-07-31.md`.
+
+## Current blocker
+
+Upstream `3342c643` and maintained Seon commits encode opposite schema
+policies:
+
+- upstream rejects adding `:db/index` when current or historical datoms exist;
+  maintained `58764d90` + `c1c4c293` backfill current and temporal AVET and
+  deliberately allow the monotonic `nil -> true` transition; and
+- upstream rejects schema removal while history exists; maintained
+  `5cdbc88a` + `b73550bf` fence only current data so removal after retraction
+  preserves ordinary temporal datoms for Seon's historical schema projection.
+
+The merge also has incompatible recursive-rule and equality-obligation
+execution contracts. A no-commit merge produced 50 hunks in 12 files,
+including 27 in `query/execute.cljc`. It was aborted without a commit, push,
+or gitlink change. The maintained branch remains `9b3be9d5`.
 
 ## Acceptance
 
@@ -55,3 +72,5 @@ fast-forward; it is not safe to automate.
   query engine changed, so a fixture-only proof is not sufficient.
 - The merged revision is published on a branch of our own remote and the
   gitlink records it.
+- The owner rules explicitly on indexed-attribute backfill and schema removal
+  with retained history before the merge is retried.
