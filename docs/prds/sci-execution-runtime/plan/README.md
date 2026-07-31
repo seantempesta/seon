@@ -1316,6 +1316,28 @@ may reintroduce a shadow build into the dev feedback path.
   fairness under one flooding agent), grounded in
   workload-classification-2026-07-28.md and
   workload-scheduling-truth-2026-07-29.md, never a new mechanism.
+  **Rulings 2026-07-31 #4 (owner, decision batch 2 — instruction facts,
+  ordering unification, the sci-only render door):** (1) SHARED
+  INSTRUCTIONS ARE EXPLICIT DATOMS: system message, reply grammar, the
+  user's global instruction files — inserted as instruction rows
+  (cluster population seeds them; cluster owns the authoritative ref
+  set, a per-agent set exists for genuine additions), rendered by
+  schema-attached default renderers through the SAME cache and render
+  system as everything else. (2) MUTATE IN PLACE — "dynamic context is
+  the goal of the system. We accept higher context cache churn so all
+  agents are instantly up to date with new schemas, functions, tools,
+  capabilities." No instruction versioning/repointing; Datahike
+  history keeps forensics. (3) BANDS AND PRIORITY DIE ENTIRELY:
+  `:seon.render.block/band`/`priority` retire; the HTML page orders by
+  recency like context (the described UX — last ~3 modified visible)
+  — one ordering mechanism everywhere. (4) THE SCI DOOR IS THE ONLY
+  WAY agent-authored render code executes, BOTH projections — every
+  agent renderer is untrusted, may loop, and runs under the one
+  `:interrupt-fn` + `time-limit` (flow's compute-timeout is a report,
+  not a cancellation — it bounds nothing). (5) DESIGNS ARE FALSIFIED
+  BEFORE SEALING by adversarial Opus REPL lanes — crash renderers,
+  loop them, flood wakes, measure — per the proven
+  plan → falsify → seal cycle.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
