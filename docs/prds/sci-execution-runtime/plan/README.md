@@ -1700,6 +1700,10 @@ may reintroduce a shadow build into the dev feedback path.
   conversation): create forks under the owner's GitHub account for
   maintained submodules lacking remotes and push the maintained
   branches — no force-pushes, nothing beyond our maintained branches.
+  **Completed 2026-07-31:** twelve maintained tips are exact on named
+  owner branches, all owner clone URLs are in `.gitmodules`, and upstream
+  remains a second local remote. Proof:
+  `research/fork-publication-2026-07-31.md`.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
