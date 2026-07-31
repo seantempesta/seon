@@ -529,6 +529,109 @@
       (finally
         (delete-recursively! root)))))
 
+(defn- live-cluster-counts
+  [root name marker]
+  (let [advertisement
+        (edn/read-string
+         (slurp (io/file root "data" "clusters" name "prepl.edn")))
+        form
+        (pr-str
+         `(do
+            (require 'datahike.api 'seon.cluster)
+            (let [instance#
+                  (get @@(ns-resolve 'seon.cluster
+                                     (symbol "running-instances"))
+                       ~name)
+                  connection# (:seon.boot/cluster-connection instance#)]
+              {:seon.dev.fresh-operator-test/marker-count
+               (datahike.api/q
+                '[:find (count ?e) .
+                  :in $ ?marker
+                  :where [?e :seon.db.process/id ?marker]]
+                @connection# ~marker)
+               :seon.dev.fresh-operator-test/agent-count
+               (datahike.api/q
+                '[:find (count ?e) .
+                  :where [?e :seon.cluster.agent/id]]
+                @connection#)
+               :seon.dev.fresh-operator-test/message-count
+               (datahike.api/q
+                '[:find (count ?e) .
+                  :where [?e :seon.cluster.message/id]]
+                @connection#)})))]
+    (edn/read-string (prepl-eval advertisement form))))
+
+(defn- populate-live-cluster!
+  [root name marker]
+  (let [advertisement
+        (edn/read-string
+         (slurp (io/file root "data" "clusters" name "prepl.edn")))
+        form
+        (pr-str
+         `(do
+            (require 'datahike.api 'seon.cluster)
+            (let [instance#
+                  (get @@(ns-resolve 'seon.cluster
+                                     (symbol "running-instances"))
+                       ~name)
+                  connection# (:seon.boot/cluster-connection instance#)]
+              (datahike.api/transact
+               connection# [{:seon.db.process/id ~marker}])
+              :populated)))]
+    (edn/read-string (prepl-eval advertisement form))))
+
+(deftest populated-stopped-cluster-reopens-after-full-operator-restart
+  (let [root (runnable-root! (fresh-root))
+        name "restart-populated"
+        marker "restart-populated-marker"]
+    (try
+      (let [published (run-operator root "init")
+            forked (run-operator root "init" name)]
+        (is (= 0 (::exit published)) (::output published))
+        (is (= 0 (::exit forked)) (::output forked)))
+      (let [started (run-operator root "start" name)]
+        (is (= 0 (::exit started)) (::output started))
+        (is (str/includes? (::output started) name) (::output started)))
+      (is (= :populated (populate-live-cluster! root name marker)))
+      (let [before (live-cluster-counts root name marker)
+            live-status (run-operator root "status")]
+        (is (= 1 (::marker-count before)))
+        (is (= 0 (::exit live-status)) (::output live-status))
+        (is (str/includes? (::output live-status) "1/1 clusters alive")
+            (::output live-status))
+        (let [stopped (run-operator root "stop" name)]
+          (is (= 0 (::exit stopped)) (::output stopped)))
+      (let [stopped-status (run-operator root "status")]
+        (is (= 0 (::exit stopped-status)) (::output stopped-status))
+        (is (str/includes? (::output stopped-status) name)
+            (::output stopped-status))
+        (is (str/includes? (::output stopped-status) "stopped")
+            (::output stopped-status))
+        (is (str/includes? (::output stopped-status) "0/0 clusters alive")
+            (::output stopped-status)))
+      (let [started (run-operator root "start" name)]
+        (is (= 0 (::exit started)) (::output started))
+        (is (str/includes? (::output started) name) (::output started)))
+      (let [after (live-cluster-counts root name marker)
+            live-status (run-operator root "status")]
+        (is (= before after)
+            "the new operator JVM reopened every observed branch fact")
+        (is (= 0 (::exit live-status)) (::output live-status))
+        (is (str/includes? (::output live-status) "1/1 clusters alive")
+            (::output live-status)))
+      (let [stopped (run-operator root "stop" name)]
+        (is (= 0 (::exit stopped)) (::output stopped)))
+      (finally
+        (let [status (run-operator root "status")]
+          (when (and (zero? (::exit status))
+                     (not (str/includes? (::output status)
+                                         "0/0 clusters alive")))
+          (let [stopped (run-operator root "down")]
+            (when-not (zero? (::exit stopped))
+              (binding [*out* *err*]
+                  (println (::output stopped)))))))
+        (delete-recursively! root)))))
+
 (deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
   (let [form (operator-private-value 'add-form "scratch" {})
         start-var #'cluster/start!

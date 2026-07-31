@@ -1,5 +1,5 @@
 (ns seon.fresh-operator
-  "The thin advertisement-derived operator for the fresh JVM system."
+  "The persisted-roster operator for the fresh JVM system."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -18,6 +18,7 @@
 (def ^:private prepl-eval-ms 30000)
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
+(def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
 (def ^:private detach-python
   (str "import subprocess,sys\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
@@ -433,7 +434,8 @@
    '(do
       (require 'datahike.connections
                'seon.cluster
-               'seon.cluster.process)
+               'seon.cluster.process
+               'seon.cluster.registry)
       (let [instances#
             @@(ns-resolve 'seon.cluster (symbol "running-instances"))
             configured-cluster-root#
@@ -450,6 +452,8 @@
                       .getCanonicalPath))
             registered-roots#
             (into #{} (keep operator-root#) (vals instances#))
+            held-stores#
+            (into [] (keep :seon.store/store) (vals instances#))
             process-root#
             (or
              (when (= 1 (count registered-roots#))
@@ -486,7 +490,58 @@
              (let [branch# (when (vector? connection-id#)
                              (peek connection-id#))]
                (when (keyword? branch#) branch#))))
-          (keys @datahike.connections/*connections*))}))))
+          (keys @datahike.connections/*connections*))
+         :seon.fresh-operator/persisted-branches
+         (into
+          #{}
+          (mapcat
+           (fn [store#]
+             (seon.cluster.registry/roster store#)))
+          held-stores#)
+         :seon.fresh-operator/persisted-branches-observed?
+         (boolean (seq held-stores#))}))))
+
+(defn- offline-roster-form
+  [root]
+  (pr-str
+   `(do
+      (require 'seon.cluster.registry 'seon.cluster.store)
+      (let [store#
+            (seon.cluster.store/open-store!
+             {:seon.store/dir ~(str (fs/path (cluster-root root) "store"))})]
+        (try
+          (println ~roster-result-prefix
+                   (pr-str (seon.cluster.registry/roster store#)))
+          (finally
+            (seon.cluster.store/release-store! store#)))))))
+
+(defn- offline-roster
+  [root]
+  (if-not (fs/directory? (fs/path (cluster-root root) "store"))
+    #{}
+    (let [builder
+          (doto
+           (ProcessBuilder.
+            ^java.util.List
+            ["clojure" "-M:dev" "-e" (offline-roster-form root)])
+            (.directory (.toFile (fs/path root)))
+            (.redirectErrorStream true))
+          _ (.putAll (.environment builder) (child-environment root))
+          process (.start builder)
+          output (slurp (.getInputStream process))
+          exit (.waitFor process)]
+      (when-not (zero? exit)
+        (fail! "The persisted cluster roster could not be read."
+               {:seon.fresh-operator/exit exit
+                :seon.fresh-operator/output output}))
+      (or
+       (some
+        (fn [line]
+          (when (str/starts-with? line roster-result-prefix)
+            (edn/read-string (subs line (count roster-result-prefix)))))
+        (str/split-lines output))
+       (fail! "The persisted cluster roster reader returned no result."
+              {:seon.fresh-operator/output output})))))
 
 (declare prepl-eval! terminal-value)
 
@@ -615,7 +670,7 @@
     (conj :seon.fresh-operator/registration-without-branch)))
 
 (defn- derive-cluster-truth
-  [operator-root advertisements jvms]
+  [operator-root persisted-branches advertisements jvms]
   (let [operator-root (.getCanonicalPath (java.io.File. operator-root))
         registrations
         (into [] (mapcat :seon.fresh-operator/registrations) jvms)
@@ -631,9 +686,17 @@
                  [root cluster-name]))
              branches)))
          jvms)
+        persisted-pairs
+        (into
+         #{}
+         (keep
+          (fn [branch]
+            (when-let [cluster-name (branch-cluster-name branch)]
+              [operator-root cluster-name])))
+         persisted-branches)
         pairs
         (into
-         branch-pairs
+         (into branch-pairs persisted-pairs)
          (concat
           (map (juxt :seon.fresh-operator/root
                      :seon.fresh-operator/name)
@@ -707,6 +770,8 @@
                         (select-keys
                          advertisement
                          [:seon.boot/pid :seon.boot/start-instant])))
+                  persisted?
+                  (contains? persisted-branches branch)
                   inconsistencies
                   (inconsistency-values
                    name advertisement-observations registrations branch-jvms)]
@@ -723,6 +788,7 @@
                :seon.fresh-operator/registrations registrations
                :seon.fresh-operator/branch-open?
                (boolean (seq branch-jvms))
+               :seon.fresh-operator/persisted? persisted?
                :seon.fresh-operator/branch branch
                :seon.fresh-operator/owning-jvms owning-jvms
                :seon.fresh-operator/process process
@@ -750,8 +816,22 @@
 (defn- cluster-truth
   [root]
   (let [{:seon.fresh-operator/keys [advertisements jvms]}
-        (source-observations root)]
-    (derive-cluster-truth root advertisements jvms)))
+        (source-observations root)
+        canonical-root (.getCanonicalPath (java.io.File. root))
+        persisted-branches
+        (or
+         (some
+          (fn [jvm]
+            (when (and (= canonical-root
+                          (:seon.fresh-operator/root jvm))
+                       (:seon.fresh-operator/reachable? jvm)
+                       (:seon.fresh-operator/persisted-branches-observed?
+                        jvm))
+              (:seon.fresh-operator/persisted-branches jvm)))
+          jvms)
+         (offline-roster canonical-root))]
+    (derive-cluster-truth canonical-root persisted-branches
+                          advertisements jvms)))
 
 (defn- own-cluster-truth
   [truth]
@@ -762,6 +842,7 @@
   (into []
         (comp
          (filter :seon.fresh-operator/operator-root?)
+         (filter :seon.fresh-operator/persisted?)
          (map :seon.fresh-operator/name)
          (distinct))
         truth))
@@ -1186,7 +1267,10 @@
                      (= name (:seon.fresh-operator/name %)))
             %)
          truth)]
-    (when existing
+    (when (and existing
+               (or (:seon.fresh-operator/advertised? existing)
+                   (:seon.fresh-operator/registered? existing)
+                   (:seon.fresh-operator/branch-open? existing)))
       (fail! "The cluster already has live operator state."
              {:seon.fresh-operator/name name
               :seon.fresh-operator/inconsistencies
@@ -1471,6 +1555,9 @@
     (:seon.fresh-operator/process-alive? row)
     "drift"
 
+    (:seon.fresh-operator/persisted? row)
+    "stopped"
+
     :else
     "stale"))
 
@@ -1500,6 +1587,13 @@
          (filter
           #(and (:seon.fresh-operator/registered? %)
                 (:seon.fresh-operator/process-alive? %))
+          rows))
+        live-state-count
+        (count
+         (filter
+          #(or (:seon.fresh-operator/advertised? %)
+               (:seon.fresh-operator/registered? %)
+               (:seon.fresh-operator/branch-open? %))
           rows))]
     (println (format "%-22s %8s %-9s %7s %-24s %s"
                      "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
@@ -1526,7 +1620,7 @@
                (if (seq inconsistencies)
                  (str/join ", " (map clojure.core/name inconsistencies))
                  "-")))))
-    (println (str alive-count "/" (count rows) " clusters alive"))
+    (println (str alive-count "/" live-state-count " clusters alive"))
     (println
      (str "orphan seon JVMs: "
           (if (seq orphan-pids)
