@@ -1424,6 +1424,18 @@ may reintroduce a shadow build into the dev feedback path.
   "No static scaffold" now has ZERO exceptions: every agent,
   including root, is its entity plus its namespace, walked and
   rendered by the one system.
+  CORRECTION (owner, same conversation — the oversight family is
+  RETRACTED as stored-derived): root's fleet view is DYNAMIC QUERIES
+  over facts that already exist (reverse cluster refs → agents →
+  runs/errors/messages), rendered by root-namespace functions through
+  the ordinary walk — no `:seon.oversight` family, no snapshot facts,
+  no stored summaries. The genuinely process-local sliver (proc
+  liveness, channel depths, executor utilization) stays OUT of
+  rendered context: faults already commit as durable error facts, and
+  live runtime internals are REPL-probe territory on demand. If a
+  proven need for ambient runtime health in context ever appears, the
+  latest-wins snapshot-fact design is the recorded shape to reach for
+  — on evidence, not by default.
 - **The bootstrap is a shared database ancestor.** One deliberate build
   indexes ALL code and produces the bootstrap; a freshly started cluster
   loads it, a restarted cluster resumes from it. Every cluster shares the
