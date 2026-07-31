@@ -594,7 +594,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | provider descriptor row | adapter, integration | one hosted provider's data row under the config singleton |
 | packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
 | contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
-| `:interrupt-fn` | the guard, the door, the cage | the ONE zero-arg fn sci calls on every fn body entrance; `reference-code/sci/doc/interrupt.md:6` ↔ `seon.sci.interrupt` |
+| `:interrupt-fn` | the guard, the door, the cage | the ONE zero-arg fn sci calls on every fn body entrance; `reference-code/sci/doc/interrupt.md:6` ↔ `seon.sci.eval` (arm/stop!) |
 | `interrupt!` | stop!, steering-error! | how an `:interrupt-fn` stops an eval uncatchably; `reference-code/sci/src/sci/interrupt.cljc:32` |
 | `time-limit` | fuel, gas, interpreter-step budget, deadline-ms | the ONLY limit. Sci counts nothing — it has no step concept; `reference-code/sci/doc/interrupt.md:32` |
 | `:seon.eval/fn-entries` | a step budget | a RECORDED DIAGNOSTIC, never a limit: 271M entries in 500ms reads as a spin, 12 reads as blocked in a host call |

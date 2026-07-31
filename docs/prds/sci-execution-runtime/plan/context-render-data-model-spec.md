@@ -143,13 +143,27 @@ projection)`. Producing it yields:
   admission — the durability gate, unchanged).
 - First-party renderers run inline on the owning `:io` proc (C1: db reads
   can block on lazy index restore).
-- Agent-authored renderers execute ONLY via the sci door: launcher submit
-  under the compute permits, `:interrupt-fn` armed, the EXISTING eval
-  time-limit/output-cap dials (no render-specific dial set — one door, one
-  set of dials; a render-specific budget would be a parallel mechanism).
+- Agent-authored renderers execute ONLY via the sci door, as a THIRD door
+  operation beside `evaluate`/`acquire!` (sci-door-ctx-sharing report §5):
+  arm once per render PASS, invoke the installed sci fn VALUES directly
+  (never `requiring-resolve` — it throws on corpus fns), bound by the
+  EXISTING `:seon.config.eval/time-limit-ms` and result caps. Measured:
+  armed direct invoke 3.2 µs vs full `evaluate` 100.8 µs; the per-entrance
+  interrupt check is 7.8 ns. No render-specific dial set.
+- BLOCKER dependency: sci binds `:interrupt-fn` at fn CREATION, so an
+  armed ctx does not guard previously defined or acquired fns — the limit
+  is escapable today (issue:
+  `sci-time-limit-does-not-bind-previously-defined-functions.md`, live
+  repro). The fix (indirection read at entrance time, in the maintained
+  sci fork) gates every renderer wave and repairs today's run fold too.
 - Renderer failure/interrupt = flat `:seon.error` value; the block renders
   as its error projection (loud), never omits silently, never throws into
-  a proc.
+  a proc. Catch sites must mirror `admit`'s interrupt pass-through — a
+  bare `catch Throwable` swallowing the uncatchable interrupt is a defect.
+- Ctx sharing: fork-per-agent-per-basis (fork is 72 ns; one shared
+  installed base). Compiled schema state is already an agent-free value
+  (`projection-from-database` + fingerprint reuse); it gains a per-cluster
+  basis-keyed holder, and the process-global `activate!` retires.
 
 ## 5. Message and error flow (owner question settled by existing law)
 
@@ -218,6 +232,12 @@ Each wave: old tests pinning deleted paths die in the same commit; the
 replacing property (P1–P8) lands with the wave that makes it assertable.
 
 ## 8. Open for owner
+
+- Base-Var isolation: a fork isolates NEW names only — re-defining an
+  existing shared Var (`clojure.string/join`, a `my.*` fn) from one
+  agent's fork rebinds it for every fork in the JVM (probed). Needs a
+  ruling: freeze the shared base, copy-on-write per fork, or
+  accept-and-detect.
 
 - W3 floor choice + whether namespace overrides resolve by `render-<kind>`
   name convention or computed Malli-output matching (house rule favors
