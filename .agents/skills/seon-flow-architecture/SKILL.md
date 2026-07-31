@@ -37,7 +37,8 @@ Deeper research, all with evidence, lives in
 `flow-inventory-2026-07-28.md`, `workload-classification-2026-07-28.md`,
 `workload-scheduling-truth-2026-07-29.md`,
 `agent-flow-render-falsification-2026-07-29.md`,
-`render-pipeline-design-2026-07-29.md`. Cite them; don't re-derive them.
+`render-pipeline-design-2026-07-29.md`,
+`flow-control-protocol-2026-07-31.md`. Cite them; don't re-derive them.
 
 Read the progressive-disclosure references when the map is not enough:
 
@@ -134,6 +135,150 @@ the mistake unrepresentable rather than discovered under load.
                        {:seon.cluster.loop/cluster handle})
 ```
 
+## The control protocol — flow already ships lifecycle
+
+**Do not hand-roll a lifecycle path.** Ping, start, stop, pause, resume and
+their per-proc variants are flow's own verbs, and because every agent IS a
+graph, agent lifecycle is those verbs applied to that agent's graph
+(Ruling 2026-07-31 #10, `docs/prds/sci-execution-runtime/plan/README.md:1439-1449`).
+
+**The scar behind that ruling.** The first agent-flow attempt put every agent
+into ONE graph, forcing agents to run serially; the aha — every long-running
+process is its OWN graph, controlled under the one system — is the origin of
+the 2026-07-28 agents-are-flows ruling (ADDENDUM,
+`plan/README.md:1450-1460`). The standing practice from the same addendum:
+**flow work always gets research plus a live probe before implementation —
+never write a flow mechanism from remembered semantics.** The two stale
+docstrings corrected below are the recurring proof.
+
+Full grounding, audit and probe transcript:
+`docs/prds/sci-execution-runtime/research/flow-control-protocol-2026-07-31.md`.
+Paths below are relative to
+`reference-code/core.async/src/main/clojure/clojure/core/async/`.
+
+### One wire, broadcast, filtered by the receiver
+
+`start` creates ONE control chan of buffer 10 wrapped in a mult
+(`flow/impl.clj:99-100`); each proc taps it with its own `(chan 10)` delivered
+as `::flow/control` in its `:ins` (`flow/impl.clj:153-159`). **Every command
+reaches every proc**; addressing is the receiving proc filtering on `::flow/to`
+(`flow/impl.clj:199-207`; contract `flow/spi.clj:32-42`). `send-command` is a
+plain `>!!` (`flow/impl.clj:71-75`). The SPI *requires* control priority in
+every read and write `alts!!` (`flow/spi.clj:32-34`); the stock proc supplies
+it at both (`flow/impl.clj:295,234`).
+
+### The verb table
+
+| verb | mechanics | guarantee | source |
+|---|---|---|---|
+| `create-flow` | pure construction; no channels, no threads | synchronous; throws on an invalid conn | `flow.clj:76`; `flow/impl.clj:38-69` |
+| `start` | builds control/report/error/io chans and launches every proc; returns `{:report-chan :error-chan}`, plus `:already-running true` if re-started | **synchronous and acknowledged** | `flow.clj:108`; `flow/impl.clj:94-173` |
+| `stop` | `>!!` `::flow/stop` to all, closes error+report, nils the chan registry | **asynchronous — NOT a join.** Returns before any proc exits | `flow.clj:123`; `flow/impl.clj:174-183` |
+| `pause` / `resume` | one `>!!` to `::flow/all` | **unacknowledged**; observed at the proc's next `alts!!` | `flow.clj:128,132`; `flow/impl.clj:184-185` |
+| `pause-proc` / `resume-proc` | identical with `::flow/to` = pid | same; still broadcast, each proc ignores unless addressed | `flow.clj:144,148`; `flow/impl.clj:187-188` |
+| `ping` / `ping-proc` | fresh per-call reply chan, `alts!!` against a timeout | **synchronous, timeout-bounded, partial** — non-answering procs are simply absent | `flow.clj:136,152`; `flow/impl.clj:76-86,186,189` |
+| `inject` | resolves `[pid io-id]` to a channel, `futurize`s a `doseq >!!` on `:io` | **asynchronous, backpressured**: the future completes only when every message is **put**, so a full buffer on a paused proc leaves it incomplete | `flow.clj:157`; `flow/impl.clj:190-197` |
+| `command-proc` | declared in the `Graph` protocol, **not implemented** by `create-flow`'s reify and not exposed in `flow` | throws `AbstractMethodError` (probed). Treat as nonexistent | declared `flow/impl/graph.clj:24-25` |
+
+Only `start` and `ping` are acknowledged. `pause`, `resume` and `stop` are
+channel puts — never treat one as a completion. Seon's own join is a
+proc-published completion promise-chan layered on flow's `::flow/stop`
+transition (`src/seon/cluster/agent.clj:202-206`, `src/seon/flow.clj:564-570`);
+that is not a second mechanism, it supplies the one guarantee flow omits.
+
+### Two documented-vs-actual corrections — READ THESE
+
+**1. Ping replies do NOT go to the report channel.** `flow/start`'s docstring
+says "'ping' responses will show up here" (`flow.clj:112-114`), and
+`flow/impl/graph.clj:19,23` and `flow/spi.clj:48-49` say the same. **All three
+are wrong for this revision.** The implementation creates a private per-call
+`reply-chan` and the proc pongs to `(::flow/reply-chan cmd)`
+(`flow/impl.clj:77,80,205`); the report channel stays empty across a ping
+(probed). Any design that observes pings by tapping the report channel is
+built on a stale docstring.
+
+**2. Pause does not interrupt an in-flight transform, and does not suppress
+its already-computed outputs.** Status is re-read only at `alts!!` points; a
+running transform is a plain function call (`flow/impl.clj:304-305`) with no
+interrupt path. In `send-outputs` a pause is handled and the loop **recurs on
+the same messages** — only `:exit` breaks out (`flow/impl.clj:221,230-239`).
+So pause ⇒ no *new* input is read, but the current transform completes and its
+entire output is still written downstream; stop ⇒ the current transform
+completes and its *remaining* outputs are abandoned at the next message
+boundary. This is the mechanical justification for the agent graph's two-proc
+split: the mailbox answers control in microseconds while the turn's provider
+call is uninterruptible.
+
+### The ping reply, and what it costs
+
+`pong` (`flow/impl.clj:272-279`) writes per proc:
+
+```clojure
+#:clojure.core.async.flow{:pid :sink, :status :paused   ; :paused | :running
+                          :count 3                      ; transform passes
+                          :ins {:in <datafied chan>}    ; minus ::control/::casts
+                          :outs {}                      ; minus ::error/::report
+                          :state {...}}                 ; (ping-map-fn state)
+```
+
+Everything but `::flow/state` is `postwalk`ed through flow's `datafy`
+(`flow/impl.clj:22-27,275`), so a channel becomes
+`{:put-count :take-count :closed? :buffer {...}}` — what
+`seon.oversight/occupancy` reads. **`:ping-map-fn` defaults to `identity`**
+(`flow.clj:191-193`; `flow/impl.clj:246`), so an unguarded proc's ping returns
+its whole state including closures and connections. **Always declare a
+`:ping-map-fn`.**
+
+Cost model: a ping costs the FULL `timeout-ms` whenever *any* addressed proc
+fails to answer, because `ret-chan` is `(async/take n reply-chan)` and closes
+early only when all `n` reply (`flow/impl.clj:78,81-85`). An unknown pid
+returns `nil`, never an error — indistinguishable from a busy proc. Pair the
+ping with the graph's datafied `:procs` to tell them apart, as
+`src/seon/oversight.clj:126` already does. Oversight's budget is 20 ms
+(`src/seon/oversight.clj:39,90,125`).
+
+### Procs start `:paused`
+
+`start` alone runs nothing (`flow/impl.clj:271`; `flow/spi.clj:30`) — `arm!`
+does `start` → `resume` (`src/seon/cluster/agent.clj:388-401`). A stopped graph
+may be started again, which builds all-new channels and zeroed proc state
+(`flow/impl.clj:99-124`), so everything in flight at stop is lost — exactly the
+transport law's precondition.
+
+### Parked is not paused
+
+**No Seon agent is ever flow-`paused` today.** An agent graph is `:running` for
+its whole life; "parked" means each proc's `alts!!` is blocked on its input
+channels (`flow/impl.clj:295`) — an ordinary channel read on a virtual thread,
+woken by a datom-routed `offer!` onto the sliding-1 mailbox
+(`src/seon/cluster/wake.cljc:146-228`). A flow-`paused` proc instead parks on
+`(<!! control)` (`flow/impl.clj:284`). One blocked virtual thread either way,
+but different states: the measured ~8.5 KB is the **running-and-parked** shape
+and must not be cited as a paused-agent cost. `pause`, `pause-proc`,
+`resume-proc` and `ping-proc` have **zero first-party call sites** — half the
+protocol is unused, which is why there is currently no way to express
+*suspended*.
+
+### [TARGET] The maintenance surface
+
+Not built. Ruled shape: a pause/resume **decision** is a durable fact with
+provenance (so a re-armed graph after a crash comes back paused), while live
+**status** is always a fresh `flow/ping` and is **never stored** — storing it
+is stored-derived state that goes stale the instant someone pauses from a
+REPL. Verb invocations live in the runtime owner namespace for that graph
+(`seon.cluster.agent`, `seon.cluster`, `seon.flow`) as ordinary functions over
+one namespaced request map. Per ruling #10 there is no lifecycle service,
+registry, or manager namespace and no bespoke maintenance machinery.
+
+Two current shapes are **defects — do not copy them**:
+`seon.flow/work-launcher-proc` re-implements the control protocol by hand and
+its `alts!!` omits `:priority true`, violating `flow/spi.clj:32-34`
+(`src/seon/flow.clj:319`;
+`docs/seon/issues/work-launcher-control-alts-lacks-priority.md`), and
+`seon.flow/monitor-graph`'s `command-proc` arity delegates to the
+unimplemented protocol method and throws (`src/seon/flow.clj:623-624`;
+`docs/seon/issues/monitor-graph-command-proc-throws.md`).
+
 ## Workloads: the measured truth
 
 - **`:io`** — core.async's default is a virtual thread per task on a
@@ -182,8 +327,11 @@ belongs in the database.
 ## Agent graphs
 
 Every agent is its own flow graph, created with the agent from one
-blueprint, parked between episodes (two `:io` procs), and kicked off by the
-messages it receives (`src/seon/cluster/agent.clj:246-270`). The ~8.5 KB and
+blueprint (two `:io` procs) and kicked off by the messages it receives
+(`src/seon/cluster/agent.clj:246-270`). Between episodes it is **`:running`
+and parked on a channel read, never flow-`paused`** — see *Parked is not
+paused* above; the graph stays `:running` from `arm!` onward
+(`src/seon/cluster/agent.clj:388-401`). The ~8.5 KB and
 one-virtual-thread baseline was the steady 1,000 one-proc graph case on an
 18-core Mac, JDK 26, `-Xmx512m`; it is not a production-agent heap
 measurement:
@@ -268,6 +416,9 @@ is a regression even if tests pass:
 - **A central loop, dispatcher, scheduler, or active-set.** Agents are
   independent flows; the JVM's threads are cheap.
 - **`:mixed`, or an unannotated proc.** Refused at construction.
+- **A hand-rolled lifecycle or control path.** Flow ships
+  ping/pause/resume/stop/inject and per-proc variants; use them on the
+  graph that owns the thing (Ruling 2026-07-31 #10).
 - **Polling or `Thread/sleep` where an event exists.** Interfaces express
   their dependencies and publish their own readiness; a timeout may only
   guard genuinely unobservable external state, and its firing is itself a

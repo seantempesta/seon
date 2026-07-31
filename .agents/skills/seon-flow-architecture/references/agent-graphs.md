@@ -108,7 +108,12 @@ JDK 26 and `-Xmx512m`. Its idle case used one-proc graphs sharing the default
 executors; its lifecycle case ran 1,000 create/start/resume/stop cycles of a
 three-proc, two-connection graph. It measured:
 
-- about 8.5 KB and one virtual thread per parked proc;
+- about 8.5 KB and one virtual thread per parked proc — parked meaning
+  **`:running` and blocked on a channel read**
+  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:295`),
+  which is the state Seon keeps agents in; no flow-`paused` graph has been
+  measured, so do not cite this as a paused-agent cost
+  (`docs/prds/sci-execution-runtime/research/flow-control-protocol-2026-07-31.md`);
 - about 8.3 MB for 1,000 measured one-proc graphs;
 - 21.6 ms to start those 1,000 one-proc graphs; and
 - about 0.084 ms per stop/start lifecycle for measured three-proc graphs.
