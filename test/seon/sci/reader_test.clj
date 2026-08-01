@@ -129,10 +129,12 @@
         (is (<= source-start source-end (count text)))))))
 
 (deftest the-accepted-tag-set-is-total-and-read-eval-is-always-refused
+  ;; BUILT-IN tags (#inst, #uuid) are no longer refused: the reader
+  ;; defers to clojure.core/default-data-readers for tags it does not
+  ;; own, so a real REPL's literals read (2026-08-01 parity gate). Only
+  ;; genuinely unknown tags refuse.
   (let [tag-cases
-        [['inst "#inst \"2020-01-01\""]
-         ['uuid "#uuid \"00000000-0000-0000-0000-000000000000\""]
-         ['foo/bar "#foo/bar {:x 1}"]]]
+        [['foo/bar "#foo/bar {:x 1}"]]]
     (doseq [[tag text] tag-cases]
       (let [refused (events text)]
         (is (= :seon.sci.reader/refused-tag
@@ -171,10 +173,15 @@
            {:readers (fn [_] (fn [_] :hostile-tag-value))
             :read-eval true}))]
     (with-redefs [sci/init hostile-init]
-      (is (= :seon.sci.reader/refused-tag
-             (:seon.error/kind (events "#inst \"2020-01-01\""))))
+      ;; a hostile ctx cannot make a BUILT-IN tag mean something else:
+      ;; #inst still reads as the default data reader's value, never
+      ;; the hostile :hostile-tag-value
+      (is (inst? (first (mapv :seon.sci.reader/form
+                              (events "#inst \"2020-01-01\"")))))
       (is (= :seon.sci.reader/refused-tag
              (:seon.error/kind (events "#=(+ 20 22)"))))
+      (is (= :seon.sci.reader/refused-tag
+             (:seon.error/kind (events "#foo/bar {:x 1}"))))
       (is (= [['inst "2020-01-01"]]
              (mapv :seon.sci.reader/form
                    (events
