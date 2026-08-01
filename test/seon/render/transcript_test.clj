@@ -308,8 +308,8 @@
         (let [ai (transcript/render-ai
                   (unit @connection 100000 narrow-caps))]
           (is (reader-valid? ai))
-          (is (str/includes? ai ":seon.sci.admit/truncated-string"))
-          (is (str/includes? ai "... ..."))
+          (is (str/includes? ai "…"))
+          (is (str/includes? ai "elided"))
           (is (not (str/includes? ai ":audit/field-39"))))))))
 
 (deftest capped-state-is-derived-from-receipt-size-without-a-boolean

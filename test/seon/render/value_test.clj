@@ -1,342 +1,140 @@
 (ns seon.render.value-test
-  "Behavior classes for the one admission-backed structural floor."
-  (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
+  "The render floor is one adapter over the sealed print emitter."
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [seon.config :as config]
+            [seon.print :as print]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
-            [seon.sci.admit :as admit]
-            [seon.test-support :as test-support]))
+            [seon.sci.admit :as admit]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
 (defn- unit
-  ([raw] (unit raw []))
-  ([raw path]
-   {:seon.cluster.agent/id "root"
-    :seon.render.value/root [:seon.cluster.agent/id "root"]
-    :seon.render.value/route-base "/agent/root/debug"
-    :seon.render.data/cursor {:seon.render.data/path path
-                              :seon.render.data/offset 0}
-    :seon.render/value raw
-    :seon.sci.admit/caps caps}))
+  [raw]
+  {:seon.cluster.agent/id "root"
+   :seon.render/value raw
+   :seon.sci.admit/caps caps})
 
-(defn- rendered-twins
-  ([raw bounded-caps]
-   (rendered-twins raw bounded-caps {}))
-  ([raw bounded-caps options]
-   (let [bounded-unit (assoc (unit raw)
-                             :seon.sci.admit/caps bounded-caps
-                             :seon.render.value/options options)]
-     [(value/render-ai bounded-unit)
-      (hiccup/->string (value/render-html bounded-unit))])))
+(defn- routed-unit
+  [raw size]
+  (assoc (unit raw)
+         :seon.render.value/root [:seon.cluster.agent/id "root"]
+         :seon.render.value/route-base "/data"
+         :seon.render.data/cursor {:seon.render.data/path []
+                                   :seon.render.data/offset 0}
+         :seon.render.value/options
+         {:seon.render.value/max-collection size}))
 
-(defn- cut-marker?
-  [projection]
+(defn- lexical-hiccup-text
+  [form]
   (cond
-    (= ::admit/elided projection) true
-    (map? projection)
-    (or (contains? projection ::admit/truncated-string)
-        (= true (::admit/elided projection))
-        (some cut-marker? (mapcat identity projection)))
-    (coll? projection) (some cut-marker? projection)
-    :else false))
+    (string? form) form
+    (sequential? form)
+    (let [[tag & body] form
+          body (if (map? (first body)) (next body) body)]
+      (if (contains? #{:summary :nav} tag)
+        ""
+        (apply str (map lexical-hiccup-text body))))
+    :else ""))
 
-(defn- loud-twins?
-  ([raw bounded-caps]
-   (loud-twins? raw bounded-caps {}))
-  ([raw bounded-caps options]
-   (and (cut-marker?
-         (:seon.render.value/tree
-          (value/prepare
-           (assoc (unit raw)
-                  :seon.sci.admit/caps bounded-caps
-                  :seon.render.value/options options))))
-        (every? #(str/includes? % "elided")
-                (rendered-twins raw bounded-caps options)))))
-
-(defn- quiet-twins?
-  ([raw bounded-caps]
-   (quiet-twins? raw bounded-caps {}))
-  ([raw bounded-caps options]
-   (and (not (cut-marker?
-              (:seon.render.value/tree
-               (value/prepare
-                (assoc (unit raw)
-                       :seon.sci.admit/caps bounded-caps
-                       :seon.render.value/options options)))))
-        (every? #(not (str/includes? % "elided"))
-                (rendered-twins raw bounded-caps options)))))
-
-(defn- assert-cap-property!
-  [seed property label]
-  (test-support/assert-check!
-   (tc/quick-check 80 property :seed seed)
-   label))
-
-(deftest one-admission-produces-both-floor-data-twins
-  (let [calls (atom 0)
-        original admit/admit]
+(deftest one-admission-and-one-tee-produce-the-floor-twins
+  (let [admissions (atom 0)
+        emissions (atom 0)
+        original-admit admit/admit
+        original-emit print/emit-both]
     (with-redefs [admit/admit (fn [request]
-                               (swap! calls inc)
-                               (original request))]
+                               (swap! admissions inc)
+                               (original-admit request))
+                  print/emit-both (fn [node options]
+                                    (swap! emissions inc)
+                                    (original-emit node options))]
       (let [projection (value/prepare (unit {:a [1 2 3]}))]
-        (is (= 1 @calls))
-        (is (vector? (value/render-html-data projection)))
-        (is (string? (value/render-ai-data projection)))))))
+        (is (= 1 @admissions))
+        (is (= 1 @emissions))
+        (is (= "{:a [1 2 3]}" (value/render-ai-data projection)))
+        (is (vector? (value/render-html-data projection)))))))
 
-(deftest ai-leaves-use-repl-printing-and-clojures-own-elision-idiom
-  (let [one-line (value/render-ai
-                  (assoc (unit [1 2 3])
-                         :seon.render.value/options
-                         {:seon.render.value/width 80}))
-        multi-line (value/render-ai
-                    (assoc (unit (vec (range 20)))
-                           :seon.render.value/options
-                           {:seon.render.value/width 20}))
-        elided (value/render-ai
-                (assoc-in (unit (vec (range 20)))
-                          [:seon.sci.admit/caps
-                           :seon.config.eval.result/max-collection]
-                          4))]
-    (is (= "[1 2 3]" one-line)
-        "pprint's trailing newline never changes one-line pr-str output")
-    (is (str/includes? multi-line "\n")
-        "pprint is selected only when its layout actually breaks")
-    (is (str/includes? elided "..."))
-    (is (not (str/includes? elided ":seon.sci.admit/elided")))))
+(deftest stored-print-data-feeds-both-sinks-without-readmission
+  (let [stored (:seon.cluster.eval/result-edn
+                (admit/admit
+                 {:seon.sci.admit/value '(1 2 3)
+                  :seon.sci.admit/interrupt-fn (fn [])
+                  :seon.sci.admit/caps caps
+                  :seon.config/on-core-error :record}))
+        projection
+        (with-redefs [admit/admit (fn [_]
+                                   (throw (ex-info "readmitted" {})))]
+          (value/prepare
+           {:seon.cluster.eval/result-edn stored
+            :seon.sci.admit/caps caps}))]
+    (is (= "(1 2 3)" (:seon.render.value/text projection)))
+    (is (= "(1 2 3)"
+           (lexical-hiccup-text
+            (:seon.print/hiccup
+             (print/emit-both (:seon.render.value/tree projection)
+                              (:seon.render.value/options projection))))))))
 
-(deftest caps-are-loud-and-lazy-safe
-  (let [realized (atom 0)
-        raw (map (fn [number] (swap! realized inc) number) (range))
-        html (hiccup/->string (value/render-html (unit raw)))]
-    (is (<= @realized
-            (inc (:seon.config.eval.result/max-collection caps))))
-    (is (str/includes? html "elided")))
-  (testing "a realization failure becomes visible data"
-    (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
-          output (value/render-ai (unit raw))]
-      (is (string? output))
-      (is (or (str/includes? output "projection-error")
-              (str/includes? output "poison"))))))
+(deftest print-options-merge-over-declared-stock-defaults
+  (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
+  (is (= "(...)"
+         (value/render-ai
+          (assoc (unit '(1 2 3))
+                 :seon.print/options {:seon.print/length 0
+                                      :seon.print/level nil}))))
+  (is (= "#"
+         (value/render-ai
+          (assoc (unit '(1 2 3))
+                 :seon.print/options {:seon.print/length nil
+                                      :seon.print/level 0}))))
+  (is (str/includes?
+       (value/render-ai
+        (assoc (unit (vec (range 20)))
+               :seon.print/options {:seon.print/width 20}))
+       "\n")))
 
-(deftest depth-cuts-are-in-band-in-both-twins
-  (assert-cap-property!
-   202607310201
-   (prop/for-all [limit (gen/choose 1 8)]
-     (let [bounded-caps (assoc caps
-                               :seon.config.eval.result/max-depth limit)
-           nested (fn [depth]
-                    (reduce (fn [value _] [value]) :leaf (range depth)))]
-       (and (loud-twins? (nested (inc limit)) bounded-caps
-                         {:seon.render.value/max-depth limit})
-            (quiet-twins? (nested limit) bounded-caps
-                          {:seon.render.value/max-depth limit}))))
-   "depth cuts must be in band"))
+(deftest admission-caps-stay-the-outer-safety-bound
+  (let [bounded (assoc (unit (vec (range 20)))
+                       :seon.sci.admit/caps
+                       (assoc caps
+                              :seon.config.eval.result/max-collection 4))
+        text (value/render-ai bounded)
+        html (hiccup/->string (value/render-html bounded))]
+    (is (str/includes? text "..."))
+    (is (str/includes? text "elided"))
+    (is (str/includes? html "seon-print-elision"))
+    (is (str/includes? html "seon-data-capped"))))
 
-(deftest collection-cuts-are-in-band-in-both-twins
-  (assert-cap-property!
-   202607310202
-   (prop/for-all [limit (gen/choose 1 20)]
-     (let [bounded-caps (assoc caps
-                               :seon.config.eval.result/max-collection limit)
-           with-window-size
-           (fn [raw]
-             (assoc (unit raw)
-                    :seon.render.value/options
-                    {:seon.render.value/max-collection limit}))
-           loud?
-           (fn [raw]
-             (let [bounded-unit
-                   (assoc (with-window-size raw)
-                          :seon.sci.admit/caps bounded-caps)]
-               (and (cut-marker?
-                     (:seon.render.value/tree (value/prepare bounded-unit)))
-                    (every? #(str/includes? % "elided")
-                            [(value/render-ai bounded-unit)
-                             (hiccup/->string
-                              (value/render-html bounded-unit))]))))
-           quiet?
-           (fn [raw]
-             (let [bounded-unit
-                   (assoc (with-window-size raw)
-                          :seon.sci.admit/caps bounded-caps)]
-               (and (not (cut-marker?
-                          (:seon.render.value/tree
-                           (value/prepare bounded-unit))))
-                    (every? #(not (str/includes? % "elided"))
-                            [(value/render-ai bounded-unit)
-                             (hiccup/->string
-                              (value/render-html bounded-unit))]))))]
-       (and (loud? (vec (range (inc limit))))
-            (quiet? (vec (range limit))))))
-   "collection cuts must be in band"))
+(deftest references-stay-opaque
+  (let [text (value/render-ai (unit (atom 42)))]
+    (is (re-matches #"#object\[clojure\.lang\.Atom 0x[0-9a-f]+\]" text))
+    (is (not (str/includes? text "42")))))
 
-(deftest string-cuts-are-in-band-in-both-twins
-  (assert-cap-property!
-   202607310203
-   (prop/for-all [limit (gen/choose 1 40)]
-     (let [bounded-caps (assoc caps
-                               :seon.config.eval.result/max-string limit)]
-       (and (loud-twins? (apply str (repeat (inc limit) "x")) bounded-caps)
-            (quiet-twins? (apply str (repeat limit "x")) bounded-caps))))
-   "string cuts must be in band"))
-
-(deftest node-budget-cuts-are-in-band-in-both-twins
-  (assert-cap-property!
-   202607310204
-   (prop/for-all [limit (gen/choose 3 24)]
-     (let [bounded-caps (assoc caps
-                               :seon.config.eval.result/max-nodes limit)
-           matrix (vec (repeat limit (vec (repeat limit :x))))]
-       (and (loud-twins? matrix bounded-caps)
-            (quiet-twins? :x bounded-caps))))
-   "node-budget cuts must be in band"))
-
-(deftest audit-floor-falsifiers-name-the-exact-cut
-  (let [matrix (vec (repeat 5 (vec (repeat 5 :x))))
-        matrix-tree (:seon.render.value/tree
-                     (value/prepare
-                      (assoc (unit matrix)
-                             :seon.sci.admit/caps
-                             (assoc caps
-                                    :seon.config.eval.result/max-nodes 8))))
-        map-tree (:seon.render.value/tree
-                  (value/prepare
-                   (assoc (unit {:a 1 :b 2 :c 3 :d 4 :e 5 :f 6})
-                          :seon.sci.admit/caps
-                          (assoc caps
-                                 :seon.config.eval.result/max-nodes 4))))
-        list-tree (:seon.render.value/tree
-                   (value/prepare
-                    (assoc (unit (list "abcdef"))
-                           :seon.sci.admit/caps
-                           (assoc caps
-                                  :seon.config.eval.result/max-string 3))))]
-    (is (= ::admit/elided (second matrix-tree))
-        "the exhausted matrix row is a marker, never []")
-    (is (= true (::admit/elided map-tree))
-        "the partial map carries its marker entry")
-    (is (= "abc" (::admit/truncated-string (first list-tree)))
-        "a clipped string inside a list remains visible and marked")
-    (is (str/includes?
-         (hiccup/->string
-          (value/render-html
-           (assoc (unit (list "abcdef"))
-                  :seon.sci.admit/caps
-                  (assoc caps :seon.config.eval.result/max-string 3))))
-         "inspect")
-        "sequential raw children retain the clipped string handle")))
-
-(deftest ai-does-not-apply-the-html-cursor-window
-  (let [raw (into {} (map (fn [number] [number number]) (range 40)))
-        cursor-unit (assoc (unit raw)
-                           :seon.render.data/cursor
-                           {:seon.render.data/path []
-                            :seon.render.data/offset 500})
-        ai (value/render-ai cursor-unit)
-        html (hiccup/->string (value/render-html cursor-unit))]
-    (is (not= "{}" ai))
-    (is (str/includes? ai "39"))
-    (is (str/includes? html ":seon.sci.admit/elided"))
-    (is (str/includes? html "showing 0 of 40"))))
-
-(deftest retained-paths-and-root-identity-stay-navigable
+(deftest routed-page-size-is-separate-from-print-length
   (let [html (hiccup/->string
-              (value/render-html
-               (unit {:api/results [{:user/name "Jane"}]})))
-        jane-path [:api/results 0 :user/name]
-        jane-id (value/node-id (unit nil jane-path) jane-path)]
-    (is (str/includes? html "/agent/root/debug?path="))
-    (is (str/includes? html "%3Aapi%2Fresults"))
-    (is (= jane-id (value/node-id (unit nil jane-path) jane-path)))
-    (is (not= jane-id
-              (value/node-id (assoc (unit nil jane-path)
-                                    :seon.cluster.agent/id "other")
-                             jane-path)))
-    (testing "non-debug entity floors do not duplicate DOM ids"
-      (let [anonymous (dissoc (unit nil jane-path)
-                              :seon.cluster.agent/id
-                              :seon.render.value/root)]
-        (is (not= (value/node-id (assoc anonymous :db/id 1) jane-path)
-                  (value/node-id (assoc anonymous :db/id 2) jane-path)))))))
+              (value/render-html (routed-unit (vec (range 40)) 3)))]
+    (is (str/includes? html "showing 1–2 of 40"))
+    (is (str/includes? html "offset=2"))
+    (is (str/includes? html "seon-data-capped"))))
 
-(deftest five-megabyte-string-is-capped-with-an-inspect-handle
-  (let [raw (apply str (repeat (* 5 1024 1024) "x"))
-        html (hiccup/->string (value/render-html (unit raw)))]
-    (is (< (count html) 100000))
-    (is (str/includes? html "1310720 tokens"))
-    (is (str/includes? html "inspect"))
-    (is (str/includes? html "elided"))))
+(deftest realization-failure-is-visible-data
+  (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
+        text (value/render-ai (routed-unit raw 3))]
+    (is (str/includes? text "window-failed"))
+    (is (str/includes? text "poison"))))
 
-(deftest structural-kinds-and-opaque-handles-remain-legible
-  (let [reference (atom {:too "private"})
-        html (hiccup/->string
-              (value/render-html
-               (unit {:map {:a 1}
-                      :set #{1 2}
-                      :vector [1 2]
-                      :reference reference})))]
-    (is (str/includes? html "{} 4 keys"))
-    (is (str/includes? html "#{} 2 members"))
-    (is (str/includes? html "[] 2 items"))
-    (is (str/includes? html "reference"))))
-
-(deftest composite-entries-have-distinct-stable-local-identities
-  (let [subject {[:first] {:value 1}
-                 [:second] {:value 2}
-                 :members #{[:a] [:b]}}
-        html (hiccup/->string (value/render-html (unit subject)))
-        ids (map second (re-seq #"id=\"(seon-value-[a-f0-9]+)\"" html))]
-    (is (= (count ids) (count (distinct ids)))
-        "non-drillable keys and set members never reuse their parent's id")))
-
-(deftest map-pages-are-independent-of-insertion-order
-  (let [left (array-map :d 4 :a 1 :c 3 :b 2)
-        right (array-map :b 2 :c 3 :a 1 :d 4)
-        page-unit (fn [subject]
-                    (assoc (unit subject)
-                           :seon.render.value/options
-                           {:seon.render.value/max-collection 2}))]
-    (is (= (hiccup/->string (value/render-html (page-unit left)))
-           (hiccup/->string (value/render-html (page-unit right)))))))
-
-(deftest render-options-size-the-window-beneath-the-admission-ceiling
-  (let [raw (vec (range 40))
-        default-html (hiccup/->string (value/render-html (unit raw)))
-        wider-html
-        (hiccup/->string
-         (value/render-html
-          (assoc (unit raw)
-                 :seon.render.value/options
-                 {:seon.render.value/max-collection 12})))
-        safety-html
-        (hiccup/->string
-         (value/render-html
-          (-> (unit raw)
-              (assoc :seon.render.value/options
-                     {:seon.render.value/max-collection 12})
-              (assoc-in [:seon.sci.admit/caps
-                         :seon.config.eval.result/max-collection]
-                        4))))]
-    (is (str/includes? default-html "showing 1–7 of 40")
-        "no explicit options use the registered presentation default")
-    (is (str/includes? wider-html "showing 1–11 of 40")
-        "an explicit options map widens the routed window")
-    (is (str/includes? safety-html "showing 1–3 of 40")
-        "the admission cap remains the outer safety bound")))
-
-(deftest stored-result-windows-consume-the-presentation-options
-  (let [large-string (pr-str (apply str (repeat 10000 "x")))
-        string-window (value/result-window-edn (unit :unused) large-string)
-        collection-window
-        (value/result-window-edn (unit :unused) (pr-str (vec (range 40))))]
-    (is (< (count string-window) (count large-string))
-        "a large scalar cannot be stored whole beside its blob")
-    (is (str/includes? string-window "truncated-string"))
-    (is (str/includes? collection-window "elided"))
-    (is (< (count collection-window) 200))))
+(deftest oversized-result-window-remains-tagged-data
+  (let [full (:seon.cluster.eval/result-edn
+              (admit/admit
+               {:seon.sci.admit/value (vec (range 40))
+                :seon.sci.admit/interrupt-fn (fn [])
+                :seon.sci.admit/caps caps
+                :seon.config/on-core-error :record}))
+        window (value/result-window-edn (routed-unit :unused 3) full)
+        node (edn/read-string window)]
+    (is (< (count window) (count full)))
+    (is (= [0 1 :seon.print/elided]
+           (mapv #(or (:seon.print/value %) (:seon.print/face %))
+                 (:seon.print/items node))))))

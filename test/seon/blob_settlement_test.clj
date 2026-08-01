@@ -42,7 +42,7 @@
                        {:seon.cluster.eval/result-edn "42"})]
             (is (= (count full) (:seon.cluster.eval/result-size large)))
             (is (< (count (:seon.cluster.eval/result-edn large)) (count full)))
-            (is (= [0 1 :seon.sci.admit/elided]
+            (is (= [0 1 :seon.print/elided]
                    (mapv (fn [node]
                            (or (:seon.print/value node)
                                (:seon.print/face node)))

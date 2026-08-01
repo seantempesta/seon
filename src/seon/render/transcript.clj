@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.print :as print]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup])
@@ -297,16 +298,7 @@
           {:seon.render/value value
            :seon.cluster.agent/id (:seon.cluster.agent/id unit)
            :seon.sci.admit/caps caps
-           ;; Transcript owns its aggregate token budget. Its value leaves use
-           ;; the generous receipt bounds so presentation defaults cannot
-           ;; truncate headers and prose before that budget is applied.
-           :seon.render.value/options
-           {:seon.render.value/max-depth
-            (:seon.config.eval.result/max-depth caps)
-            :seon.render.value/max-collection
-            (:seon.config.eval.result/max-collection caps)
-            :seon.render.value/max-string
-            (:seon.config.eval.result/max-string caps)}}
+           :seon.print/options (:seon.print/options unit)}
           :seon.render/kind :seon.render/ai})]
     (or (:seon.render/output rendered)
         (pr-str rendered))))
@@ -369,11 +361,17 @@
   [unit serialized]
   (when (some? serialized)
     (let [{::keys [read-value unreadable?]} (read-result serialized)]
-      (floor-text unit
-                  (if unreadable?
-                    {:seon.cluster.eval/result-edn serialized
-                     :seon.render.transcript/unreadable? true}
-                    read-value)))))
+      (cond
+        unreadable?
+        (floor-text unit {:seon.cluster.eval/result-edn serialized
+                          :seon.render.transcript/unreadable? true})
+
+        (and (map? read-value) (:seon.print/face read-value))
+        (print/emit-text read-value
+                         (merge (print/default-options)
+                                (:seon.print/options unit)))
+
+        :else (floor-text unit read-value)))))
 
 (defn- receipt-extra
   [entry]

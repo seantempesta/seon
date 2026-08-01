@@ -1,34 +1,21 @@
 (ns seon.render.value
-  "Presentation for the one admission-backed structural floor.
-
-  `seon.sci.admit/admit` is the only bounded walk. This namespace presents
-  that finite ordinary value as AI text or drillable HTML; it never samples
-  the raw value through a second safety codec. The HTML projection keeps the
-  quarry's useful affordances: stable path identities, collapsible structure,
-  typed summaries, loud elision, opaque markers, breadcrumbs, and path/offset
-  handles whose root selector is preserved by the route base.
-
-  A routed drill windows only the value the reader opened before admission.
-  Closed debug tabs therefore cost nothing and a large unopened child is only
-  summarized by the parent. Raw values are consulted after admission only for
-  O(1) count/length summaries and for the already-bounded set of retained path
-  identities; presentation never recursively walks an unadmitted tail."
+  "Unit adapter from admitted print data to the two floor projections."
   (:require [clojure.string :as str]
-            [clojure.walk :as walk]
-            #?(:clj [clojure.pprint :as pprint])
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as edn])
-            [seon.ai.tokens :as tokens]
+            [seon.print :as print]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
-            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]))
 
 #?(:clj (schema.edn/load! {}))
 
-;;; ---------------------------------------------------------------------------
-;;; Stable addresses
-;;; ---------------------------------------------------------------------------
+(def ^:private print-option-keys
+  #{:seon.print/length
+    :seon.print/level
+    :seon.print/width
+    :seon.print/namespace-maps?
+    :seon.print/table?})
 
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
@@ -41,15 +28,12 @@
             (when-some [block-name (:seon.render.block/name unit)]
               [:seon.render.block/name block-name])
             :seon.render.value/anonymous)
-        address [(:seon.cluster.agent/id unit)
-                 root-address
-                 path]
+        address [(:seon.cluster.agent/id unit) root-address path]
         digest #?(:clj
                   (schema/sha-256
                    [(.getBytes ^String (pr-str address) "UTF-8")])
                   :cljs (str (hash address)))]
-    (str "seon-value-" #?(:clj (subs digest 0 24)
-                           :cljs digest))))
+    (str "seon-value-" #?(:clj (subs digest 0 24) :cljs digest))))
 
 (defn- encoded
   [value]
@@ -60,8 +44,7 @@
   [unit path offset]
   (when-let [base (:seon.render.value/route-base unit)]
     (str base (if (str/includes? base "?") "&" "?")
-         "path=" (encoded (pr-str path))
-         "&offset=" offset)))
+         "path=" (encoded (pr-str path)) "&offset=" offset)))
 
 (defn- path-link
   [unit path offset label css-class]
@@ -69,47 +52,22 @@
     [:a {:class css-class :href url} label]
     label))
 
-(defn- path-segment?
-  [value]
-  (or (nil? value)
-      (boolean? value)
-      (number? value)
-      (string? value)
-      (keyword? value)
-      (symbol? value)))
-
-;;; ---------------------------------------------------------------------------
-;;; Opened-value window
-;;; ---------------------------------------------------------------------------
-
-(defn- option-defaults
-  []
-  (into {}
-        (keep
-         (fn [entry]
-           (when (vector? entry)
-             (let [attribute (first entry)
-                   properties
-                   (schema.form/attr-form-properties
-                    (schema/schema-definition attribute))]
-               (when (contains? properties :seon.render.value/default)
-                 [attribute (:seon.render.value/default properties)])))))
-        (schema/schema-definition :seon.render.value/options)))
-
-(defn- effective-options
+(defn- print-options
   [unit]
-  (merge (option-defaults)
-         (:seon.render.value/options unit)))
+  (merge (print/default-options)
+         (select-keys (:seon.render.value/options unit) print-option-keys)
+         (:seon.print/options unit)))
 
-(defn- presentation-caps
-  [caps options]
-  (assoc caps
-         :seon.config.eval.result/max-depth
-         (min (:seon.config.eval.result/max-depth caps)
-              (:seon.render.value/max-depth options))
-         :seon.config.eval.result/max-string
-         (min (:seon.config.eval.result/max-string caps)
-              (:seon.render.value/max-string options))))
+(defn- page-size
+  [unit]
+  (long
+   (min (or (:seon.render.value/max-collection unit)
+            (:seon.render.value/max-collection
+             (:seon.render.value/options unit))
+            (:seon.config.eval.result/max-collection
+             (:seon.sci.admit/caps unit)))
+        (:seon.config.eval.result/max-collection
+         (:seon.sci.admit/caps unit)))))
 
 (defn- stable-entries
   [value]
@@ -125,43 +83,23 @@
   (when (counted? value)
     (try (count value) (catch #?(:clj Throwable :cljs :default) _ nil))))
 
-(defn- shown-count
-  [value]
-  (cond
-    (and (map? value) (= true (::admit/elided value))) (dec (count value))
-    (coll? value) (count (remove #(= ::admit/elided %) value))
-    :else 0))
-
 (defn- opened-window
   [value offset size]
   (try
     (if-let [entries (stable-entries value)]
-      (let [before? (pos? offset)
-            available (max 0 (- size (if before? 1 0)))
+      (let [available (max 0 (dec size))
             head (into [] (comp (drop offset) (take (inc available))) entries)
             more? (> (count head) available)
-            data-size (max 0 (- available (if more? 1 0)))
-            page (subvec head 0 (min data-size (count head)))
-            cut? (or before? more?)
-            total (counted-size value)
-            page-value
-            (cond
-              (map? value) (cond-> (into {} page)
-                             cut? (assoc ::admit/elided true))
-              (set? value) (cond-> (into #{} (map second) page)
-                             cut? (conj ::admit/elided))
-              :else (cond-> (mapv second page)
-                      before? (as-> items (into [::admit/elided] items))
-                      more? (conj ::admit/elided)))
-            marker-step [:seon.render.value/elided]
-            steps (cond-> (mapv first page)
-                    before? (as-> page-steps (into [marker-step] page-steps))
-                    more? (conj marker-step))]
+            page (subvec head 0 (min available (count head)))
+            page-value (cond
+                         (map? value) (into {} page)
+                         (set? value) (into #{} (map second) page)
+                         :else (mapv second page))]
         {:seon.render.value/window page-value
-         :seon.render.value/steps steps
+         :seon.render.value/steps (mapv first page)
          :seon.render.value/offset offset
          :seon.render.value/shown (count page)
-         :seon.render.value/total total
+         :seon.render.value/total (counted-size value)
          :seon.render.value/more? more?})
       {:seon.render.value/window value
        :seon.render.value/steps []
@@ -171,376 +109,159 @@
        :seon.render.value/more? false})
     (catch #?(:clj Throwable :cljs :default) failure
       {:seon.render.value/window
-       {::admit/projection-error (.getName #?(:clj (class failure)
-                                              :cljs (type failure)))
-        ::admit/name (or (ex-message failure) "realization failed")}
+       {:seon.error/kind :seon.render.value/window-failed
+        :seon.error/message (or (ex-message failure) "realization failed")}
        :seon.render.value/steps []
        :seon.render.value/offset offset
        :seon.render.value/shown 0
        :seon.render.value/total nil
        :seon.render.value/more? false})))
 
-(defn result-window-edn
-  "Bound serialized result text to the render presentation options."
-  {:malli/schema
-   [:=> [:cat :seon.render/unit :seon.cluster.eval/result-edn]
-    :seon.cluster.eval/result-edn]}
-  [unit result-edn]
-  (let [caps (:seon.sci.admit/caps unit)
-        options (effective-options unit)
-        size (long (min (:seon.render.value/max-collection options)
-                        (:seon.config.eval.result/max-collection caps)))
-        raw (edn/read-string result-edn)
-        window (opened-window raw 0 size)
-        admitted
-        (admit/admit
-         {:seon.sci.admit/value (:seon.render.value/window window)
-          :seon.sci.admit/caps (presentation-caps caps options)
-          :seon.sci.admit/interrupt-fn (fn [])
-          :seon.config/on-core-error :record})]
-    (:seon.cluster.eval/result-edn admitted)))
-
 (defn- display-value
-  [unit raw caps options window?]
-  (if (and window?
-           (:seon.render.value/route-base unit)
+  [unit]
+  (if (and (:seon.render.value/route-base unit)
            (:seon.render.data/cursor unit))
-    (let [size
-          (long
-           (min (:seon.render.value/max-collection options)
-                (:seon.config.eval.result/max-collection caps)))]
-      (assoc
-       (opened-window raw
-                      (long (get-in unit [:seon.render.data/cursor
-                                          :seon.render.data/offset] 0))
-                      size)
-       :seon.render.value/size size))
-    (let [total (counted-size raw)]
+    (opened-window
+     (:seon.render/value unit)
+     (long (get-in unit [:seon.render.data/cursor
+                         :seon.render.data/offset] 0))
+     (page-size unit))
+    (let [raw (:seon.render/value unit)
+          total (counted-size raw)]
       {:seon.render.value/window raw
        :seon.render.value/steps []
-       :seon.render.value/size 0
        :seon.render.value/offset 0
        :seon.render.value/shown (or total 0)
        :seon.render.value/total total
        :seon.render.value/more? false})))
 
-;;; ---------------------------------------------------------------------------
-;;; One admitted projection
-;;; ---------------------------------------------------------------------------
-
-(declare html-projection)
-
-(defn- admitted-view
-  [unit window?]
-  (when-let [caps (:seon.sci.admit/caps unit)]
-    (let [raw (:seon.render/value unit)
-          options (effective-options unit)
-          window (display-value unit raw caps options window?)
-          admitted
-          (admit/admit
-           {:seon.sci.admit/value (:seon.render.value/window window)
-            :seon.sci.admit/caps (presentation-caps caps options)
-            :seon.sci.admit/interrupt-fn (fn [])
-            :seon.config/on-core-error :record})]
-      (assoc window
-             :seon.render.value/raw raw
-             :seon.render.value/options options
-             :seon.render.value/tree (:seon.sci.admit/value admitted)
-             :seon.render.value/truncated?
-             (boolean (or (:seon.sci.admit/capped? admitted)
-                          (:seon.render.value/more? window)
-                          (pos? (:seon.render.value/offset window))
-                          (and (:seon.render.value/total window)
-                               (< (:seon.render.value/shown window)
-                                  (:seon.render.value/total window)))))))))
-
-(defn- summary
-  [value]
-  (cond
-    (map? value) (str "{} " (count value) " keys")
-    (set? value) (str "#{} " (count value) " members")
-    (vector? value) (str "[] " (count value) " items")
-    (and (sequential? value) (counted? value))
-    (str "() " (count value) " items")
-    (sequential? value) "() sequence"
-    (string? value) (str "string · " (tokens/estimate value)
-                         " tokens")
-    (= ::admit/elided value) "elided"
-    (nil? value) "nil"
-    :else (str (type value))))
-
-(defn prepare
-  "Admit one floor unit once into the finite projection both twins consume."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :nil :seon.render.value/projection]]}
-  [unit]
-  (when-let [view (admitted-view unit false)]
-    {:seon.render.value/tree (:seon.render.value/tree view)
-     :seon.render.value/summary (summary (:seon.render.value/raw view))
-     :seon.render.value/options (:seon.render.value/options view)
-     :seon.render.value/truncated?
-     (:seon.render.value/truncated? view)
-     :seon.render.value/html (html-projection unit view)}))
-
-(defn render-html-data
-  "Render HTML from one already admitted projection."
-  {:malli/schema [:=> [:cat :seon.render.value/projection]
-                  :seon.render/hiccup]}
-  [projection]
-  (:seon.render.value/html projection))
-
-(defn- repl-tree
-  [tree]
-  (walk/postwalk
-   (fn [value]
-     (cond
-       (= ::admit/elided value) '...
-       (and (map? value) (= true (get value '...)))
-       (assoc value '... '...)
-       :else value))
-   tree))
-
-(defn- repl-str
-  [tree width]
-  (let [compact (pr-str tree)
-        pretty #?(:clj (binding [pprint/*print-right-margin* width]
-                         (str/replace (with-out-str (pprint/pprint tree))
-                                      #"\n$" ""))
-                  :cljs (if (number? width) compact compact))]
-    (if (str/includes? pretty "\n") pretty compact)))
-
-(defn render-ai-data
-  "Render AI text from one already admitted projection."
-  {:malli/schema [:=> [:cat :seon.render.value/projection] :string]}
-  [projection]
-  (str (repl-str (repl-tree (:seon.render.value/tree projection))
-                 (:seon.render.value/width
-                  (:seon.render.value/options projection)))
-       (when (:seon.render.value/truncated? projection)
-         " ; elided — this value is larger than the configured caps")))
-
-;;; ---------------------------------------------------------------------------
-;;; HTML presentation over finite admitted data
-;;; ---------------------------------------------------------------------------
-
-(defn- marker-map?
-  [value]
-  (and (map? value)
-       (or (contains? value ::admit/opaque)
-           (contains? value ::admit/reference)
-           (contains? value ::admit/type)
-           (contains? value ::admit/truncated-string)
-           (contains? value ::admit/projection-error))))
-
-(defn- marker-text
-  [value]
-  (cond
-    (= ::admit/elided value) "‹elided›"
-    (::admit/reference value)
-    (str "#‹" (::admit/reference value)
-         (when-some [marker-name (::admit/name value)]
-           (str " " marker-name)) "›")
-    (::admit/opaque value)
-    (str "#‹" (::admit/opaque value)
-         (when-some [marker-name (::admit/name value)]
-           (str " " marker-name)) "›")
-    (::admit/type value) (str "#‹" (::admit/type value) "›")
-    :else (pr-str value)))
-
-(defn- raw-child
-  [raw step]
-  (cond
-    (and (map? raw) (contains? raw step)) (get raw step)
-    (and (sequential? raw) (integer? step) (<= 0 step))
-    (try (nth raw step) (catch #?(:clj Throwable :cljs :default) _ nil))
-    (and (set? raw) (contains? raw step)) step
-    :else nil))
-
-(declare html-node)
-
-(defn- leaf
-  [unit admitted raw path]
-  (cond
-    (= ::admit/elided admitted)
-    [:span {:class "seon-value-marker"} "‹elided›"]
-
-    (and (map? admitted) (contains? admitted ::admit/truncated-string))
-    [:span {:class "seon-data-string"}
-     (::admit/truncated-string admitted)
-     [:span {:class "seon-value-marker"}
-      (str "… ‹elided› ⟨" (tokens/estimate raw) " tokens⟩")]
-     [:span " " (path-link unit path 0 "inspect" "seon-data-step")]]
-
-    (marker-map? admitted)
-    [:span {:class "seon-value-marker"} (marker-text admitted)]
-
-    (string? admitted)
-    (let [whole-length (when (string? raw) (count raw))
-          clipped? (and whole-length (> whole-length (count admitted)))]
-      [:span {:class "seon-data-string"}
-       admitted
-       (when clipped?
-         [:span {:class "seon-value-marker"}
-          (str "… ⟨" (tokens/estimate raw) " tokens⟩")])
-       (when clipped?
-         [:span " " (path-link unit path 0 "inspect" "seon-data-step")])])
-
-    (nil? admitted)
-    [:span {:class "seon-data-nil"} "nil"]
-
-    :else
-    [:span {:class "seon-data-scalar"} (pr-str admitted)]))
-
-(defn- map-node
-  [unit admitted raw path depth]
-  (let [entries (sort-by (comp pr-str first) (seq admitted))]
-    [:details (cond-> {:class "seon-value-node"}
-                (< depth 2) (assoc :open "open"))
-     [:summary {:class "seon-value-summary"} (summary raw)]
-     [:dl {:class "seon-data-map"}
-      (map-indexed
-       (fn [index [entry-key child]]
-         (let [drillable? (path-segment? entry-key)
-               child-path (if drillable?
-                            (conj path entry-key)
-                            (conj path [:seon.render.value/entry index]))
-               child-raw (if drillable?
-                           (raw-child raw entry-key)
-                           child)]
-           [:div {:class "seon-data-entry"}
-            [:dt {:class "seon-data-key"}
-             (if drillable?
-               (path-link unit child-path 0 (pr-str entry-key)
-                          "seon-data-step")
-               (str (pr-str entry-key) " · non-drillable"))]
-            [:dd {:class "seon-data-value"}
-             (html-node unit child child-raw child-path (inc depth))]]))
-       entries)]]))
-
-(defn- sequential-node
-  [unit admitted raw path depth steps]
-  [:details (cond-> {:class "seon-value-node"}
-              (< depth 2) (assoc :open "open"))
-   [:summary {:class "seon-value-summary"} (summary raw)]
-   [:ol {:class "seon-data-list"}
-    (map
-     (fn [index child]
-       (let [step (or (get steps index) index)
-             child-path (conj path step)
-             child-raw (raw-child raw step)]
-         [:li {:class "seon-data-entry"}
-          (path-link unit child-path 0 (pr-str step) "seon-data-step")
-          [:span " "]
-          (html-node unit child child-raw child-path (inc depth))]))
-     (range)
-     admitted)]])
-
-(defn- set-node
-  [unit admitted raw path depth]
-  [:details (cond-> {:class "seon-value-node"}
-              (< depth 2) (assoc :open "open"))
-   [:summary {:class "seon-value-summary"} (summary raw)]
-   [:ul {:class "seon-data-set"}
-    (map-indexed
-     (fn [index child]
-       (let [drillable? (path-segment? child)
-             child-path (if drillable?
-                          (conj path child)
-                          (conj path [:seon.render.value/entry index]))]
-         [:li {:class "seon-data-entry"}
-          (when drillable?
-            (path-link unit child-path 0 (pr-str child) "seon-data-step"))
-          [:span " "]
-          (html-node unit child child child-path (inc depth))]))
-     (sort-by pr-str admitted))]])
-
-(defn- node-content
-  [unit admitted raw path depth steps]
-  (cond
-    (marker-map? admitted) (leaf unit admitted raw path)
-    (map? admitted) (map-node unit admitted raw path depth)
-    (set? admitted) (set-node unit admitted raw path depth)
-    (sequential? admitted)
-    (sequential-node unit admitted raw path depth steps)
-    :else (leaf unit admitted raw path)))
-
-(defn- html-node
-  ([unit admitted raw path depth]
-   (html-node unit admitted raw path depth []))
-  ([unit admitted raw path depth steps]
-   [:div {:id (node-id unit path) :class "seon-value-node-body"}
-    (node-content unit admitted raw path depth steps)]))
+(defn- admitted-projection
+  [value caps]
+  (let [admitted
+        (admit/admit
+         {:seon.sci.admit/value value
+          :seon.sci.admit/caps caps
+          :seon.sci.admit/interrupt-fn (fn [])
+          :seon.config/on-core-error :record})]
+    {:seon.render.value/tree
+     (edn/read-string (:seon.cluster.eval/result-edn admitted))
+     :seon.render.value/truncated? (:seon.sci.admit/capped? admitted)}))
 
 (defn- breadcrumbs
   [unit path]
   (when (:seon.render.value/route-base unit)
     [:nav {:class "seon-data-crumbs"}
      (path-link unit [] 0 "root" "seon-data-crumb")
-     (map
-      (fn [index]
-        (path-link unit (subvec path 0 (inc index)) 0
-                   (pr-str (nth path index)) "seon-data-crumb"))
-      (range (count path)))]))
+     (map (fn [index]
+            (path-link unit (subvec path 0 (inc index)) 0
+                       (pr-str (nth path index)) "seon-data-crumb"))
+          (range (count path)))]))
 
 (defn- pager
-  [unit path {:seon.render.value/keys [offset shown total more? size]}]
+  [unit path {:seon.render.value/keys [offset shown total more?]}]
   (when (:seon.render.value/route-base unit)
-    (let [size (long size)]
+    (let [size (page-size unit)]
       [:div {:class "seon-data-pager"}
        (when (pos? offset)
          (path-link unit path (max 0 (- offset size))
                     "← previous" "seon-data-page"))
        [:span {:class "seon-data-range"}
-        (str "showing " (if (zero? shown)
-                           0
-                           (str (inc offset) "–" (+ offset shown)))
+        (str "showing " (if (zero? shown) 0
+                            (str (inc offset) "–" (+ offset shown)))
              (when total (str " of " total)))]
        (when more?
-         (path-link unit path (+ offset shown)
-                    "next →" "seon-data-page"))])))
+         (path-link unit path (+ offset shown) "next →" "seon-data-page"))])))
 
-(defn- html-projection
-  [unit view]
-  (let [path (vec (get-in unit [:seon.render.data/cursor
-                                :seon.render.data/path] []))
-        offset (long (get-in unit [:seon.render.data/cursor
-                                   :seon.render.data/offset] 0))
-        size (long (min (:seon.render.value/max-collection
-                         (:seon.render.value/options view))
-                        (:seon.config.eval.result/max-collection
-                         (:seon.sci.admit/caps unit))))
-        window (-> (opened-window (:seon.render.value/tree view) offset size)
-                   (assoc :seon.render.value/size size
-                          :seon.render.value/total
-                          (:seon.render.value/total view)))
-        window (cond-> window
-                 (:seon.render.value/truncated? view)
-                 (assoc :seon.render.value/shown
-                        (shown-count (:seon.render.value/window window))
-                        :seon.render.value/more? true))
-        admitted (:seon.render.value/window window)]
-    [:div {:id (node-id unit path) :class "seon-data-panel"}
-     (breadcrumbs unit path)
-     [:div {:class "seon-value-summary"}
-      (summary (:seon.render.value/raw view))]
-     (pager unit path window)
-     (node-content unit admitted admitted path 0
-                   (:seon.render.value/steps window))
-     (when (or (:seon.render.value/truncated? view)
-               (:seon.render.value/more? window)
-               (pos? offset))
-       [:p {:class "seon-data-capped"}
-        "elided — this value is larger than the configured caps"
-        (when (:seon.render.value/route-base unit)
-          [:span " · " (path-link unit path 0 "inspect this path"
-                                   "seon-data-step")])])]))
+(defn prepare
+  "Admit one floor unit once and tee the finite print node to both sinks."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :nil :seon.render.value/projection]]}
+  [unit]
+  (when-let [caps (:seon.sci.admit/caps unit)]
+    (let [window (display-value unit)
+          admitted (if-let [result-edn (:seon.cluster.eval/result-edn unit)]
+                     {:seon.render.value/tree (edn/read-string result-edn)
+                      :seon.render.value/truncated? false}
+                     (admitted-projection
+                      (:seon.render.value/window window) caps))
+          tree (:seon.render.value/tree admitted)
+          options (print-options unit)
+          emitted (print/emit-both tree options)
+          truncated? (boolean
+                      (or (:seon.render.value/truncated? admitted)
+                          (:seon.render.value/more? window)
+                          (pos? (:seon.render.value/offset window))))
+          path (vec (get-in unit [:seon.render.data/cursor
+                                  :seon.render.data/path] []))]
+      {:seon.render.value/tree tree
+       :seon.render.value/options options
+       :seon.render.value/truncated? truncated?
+       :seon.render.value/text (:seon.print/text emitted)
+       :seon.render.value/html
+       [:div {:id (node-id unit path) :class "seon-data-panel"}
+        (breadcrumbs unit path)
+        (pager unit path window)
+        (:seon.print/hiccup emitted)
+        (when truncated?
+          [:p {:class "seon-data-capped"}
+           "elided — this value is larger than the configured window"]) ]})))
 
-;;; ---------------------------------------------------------------------------
-;;; The floor twins
-;;; ---------------------------------------------------------------------------
+(defn render-ai-data
+  "Return the text sink result from one already prepared projection."
+  {:malli/schema [:=> [:cat :seon.render.value/projection] :string]}
+  [projection]
+  (str (:seon.render.value/text projection)
+       (when (:seon.render.value/truncated? projection)
+         " ; elided — this value is larger than the configured window")))
+
+(defn render-html-data
+  "Return the hiccup sink result from one already prepared projection."
+  {:malli/schema [:=> [:cat :seon.render.value/projection]
+                  :seon.render/hiccup]}
+  [projection]
+  (:seon.render.value/html projection))
+
+(defn- window-node
+  [node size]
+  (let [face (:seon.print/face node)
+        limit (max 0 (dec size))]
+    (case face
+      (:seon.print/vector :seon.print/list :seon.print/set)
+      (let [items (:seon.print/items node)
+            cut? (> (count items) limit)]
+        (assoc node :seon.print/items
+               (cond-> (subvec (vec items) 0 (min limit (count items)))
+                 cut? (conj {:seon.print/face :seon.print/elided}))))
+
+      (:seon.print/map :seon.print/record)
+      (let [entries (:seon.print/entries node)
+            cut? (> (count entries) limit)]
+        (assoc node :seon.print/entries
+               (cond-> (subvec (vec entries) 0 (min limit (count entries)))
+                 cut? (conj {:seon.print/face :seon.print/elided}))))
+
+      :seon.print/string
+      {:seon.print/face :seon.print/truncated-string
+       :seon.print/value ""
+       :seon.print/length (count (:seon.print/value node))}
+
+      node)))
+
+(defn result-window-edn
+  "Store a small tagged data window beside an oversized result blob."
+  {:malli/schema
+   [:=> [:cat :seon.render/unit :seon.cluster.eval/result-edn]
+    :seon.cluster.eval/result-edn]}
+  [unit result-edn]
+  (let [parsed (edn/read-string result-edn)
+        node (if (and (map? parsed) (contains? parsed :seon.print/face))
+               parsed
+               (:seon.render.value/tree
+                (admitted-projection parsed (:seon.sci.admit/caps unit))))]
+    (pr-str (window-node node (page-size unit)))))
 
 (defn render-ai
-  "Render any floor unit as admitted structural text."
+  "Render any floor unit through the admitted text sink."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
   (if-let [projection (prepare unit)]
@@ -549,7 +270,7 @@
          "them nothing bounds what it would say.")))
 
 (defn render-html
-  "Render any floor unit as admitted, drillable structural HTML."
+  "Render any floor unit through the admitted hiccup sink."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (if-let [projection (prepare unit)]

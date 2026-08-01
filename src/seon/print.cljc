@@ -336,7 +336,18 @@
 
 (defmethod emit ::set
   [node sink options depth path]
-  (emit-sequential node sink options depth path "#{" "}" " "))
+  (if (structural-cut? options depth)
+    (-token sink ::prune "#")
+    (let [items (::items node)
+          [visible cut?] (visible-items items options)
+          descriptor (node-description node path "#{" "}" " "
+                                       (str "#{} " (count items) " members"))]
+      (-open sink descriptor)
+      (emit-separated visible sink options depth path " " emit-node)
+      (when cut?
+        (when (seq visible) (-token sink ::separator " "))
+        (-token sink ::elision "..."))
+      (-close sink descriptor))))
 
 (defmethod emit ::map
   [node sink options depth path]
@@ -369,7 +380,7 @@
 
 (defmethod emit ::truncated-string
   [node sink _ _ _]
-  (-token sink ::string (pr-str (::value node))))
+  (-token sink ::string (pr-str (str (::value node) "…"))))
 
 (defmethod emit ::failed
   [node sink _ _ _]

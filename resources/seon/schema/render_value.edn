@@ -1,58 +1,31 @@
-{; The proven presentation bounds from the quarry's structural renderer.
- ; `:seon.render.value/options` is the complete per-call shape and the
- ; implementation derives its presentation defaults from these registrations.
- ; `max-collection` is also the database-backed `/data` page-size dial; its
- ; explicit shipped decision remains in config/default.edn. Admission's
- ; separate config facts remain the outer safety maxima.
- :seon.render.value/max-depth
- [:int {:min 1 :seon.render.value/default 3}]
-
+{; The one positive `/data` and oversized-receipt page-size dial. Its shipped
+ ; decision lives only in config/default.edn; admission caps remain the outer
+ ; safety bound and print presentation has its own :seon.print family.
  :seon.render.value/max-collection
- [:int {:min 1
-        :seon.render.value/default 8
-        :seon.config/dial true}]
+ [:int {:min 1 :seon.config/dial true}]
 
- :seon.render.value/max-map-visits
- [:int {:min 1 :seon.render.value/default 32}]
-
- :seon.render.value/max-string
- [:int {:min 1 :seon.render.value/default 80}]
-
- :seon.render.value/shape-sample
- [:int {:min 1 :seon.render.value/default 8}]
-
- :seon.render.value/width
- [:int {:min 20 :seon.render.value/default 72}]
-
+ ; A render unit may combine the page-size dial with explicit print options,
+ ; but every print key is declared exactly once in print.edn.
  :seon.render.value/options
  [:map {:closed true}
-  [:seon.render.value/max-depth {:optional true}
-   :seon.render.value/max-depth]
   [:seon.render.value/max-collection {:optional true}
    :seon.render.value/max-collection]
-  [:seon.render.value/max-map-visits {:optional true}
-   :seon.render.value/max-map-visits]
-  [:seon.render.value/max-string {:optional true}
-   :seon.render.value/max-string]
-  [:seon.render.value/shape-sample {:optional true}
-   :seon.render.value/shape-sample]
-  [:seon.render.value/width {:optional true}
-   :seon.render.value/width]]
+  [:seon.print/length {:optional true} [:maybe :seon.print/length]]
+  [:seon.print/level {:optional true} [:maybe :seon.print/level]]
+  [:seon.print/width {:optional true} :seon.print/width]
+  [:seon.print/namespace-maps? {:optional true}
+   :seon.print/namespace-maps?]
+  [:seon.print/table? {:optional true} :seon.print/table?]]
 
- ; Genuine polymorphic boundary: the universal renderer accepts any value and
- ; returns a bounded structural tree whose recursive grammar is owned by the
- ; implementation and tested as a total codec.
  :seon.render/value :any
- :seon.render.value/tree :any
- :seon.render.value/summary :string
+ :seon.render.value/tree :seon.print/node
  :seon.render.value/truncated? :boolean
+ :seon.render.value/text :string
  :seon.render.value/html :seon.render/hiccup
  :seon.render.value/projection
  [:map {:closed true}
   [:seon.render.value/tree :seon.render.value/tree]
-  [:seon.render.value/summary :seon.render.value/summary]
   [:seon.render.value/truncated? :seon.render.value/truncated?]
+  [:seon.render.value/text :seon.render.value/text]
   [:seon.render.value/html :seon.render.value/html]
-  [:seon.render.value/options :seon.render.value/options]
-  [:seon.render.value/width {:optional true} :seon.render.value/width]
-  [:seon.render.value/schemas {:optional true} [:vector :map]]]}
+  [:seon.render.value/options :seon.print/options]]}
