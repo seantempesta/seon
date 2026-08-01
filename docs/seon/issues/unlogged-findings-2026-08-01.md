@@ -40,6 +40,17 @@ classes with no stated reason, which silently blocks
 
 Blocks "the agent can do everything within reason".
 
+SEQUENCING CONSTRAINT (owner conversation, 2026-08-01 late): default-
+allow interop must land TOGETHER WITH per-eval interop observation —
+the eval record gaining a "touched host interop" fact beside
+`fn-entries`/`allocated-bytes`. Restore safety (stateless resume's
+re-eval-only-provably-pure rule) and effect observability both derive
+from "pure Clojure over data touches no host classes"; sci resolves
+every host call at analysis (`:phase "analysis"` refusal proven live
+2026-08-01), so the observation is available at the interpreter level.
+Shipping wide interop without the flag makes purity unknowable and
+silently converts every restored session into a value-only restore.
+
 ## 2. Agents have no way to record their own facts
 
 Agents can read the graph (`seon.db/q`/`pull`/`pull-many`) but the write
