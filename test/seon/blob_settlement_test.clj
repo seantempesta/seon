@@ -18,6 +18,9 @@
        (:seon.store/connection opened)
        [{:db/ident :seon.config.eval.result/blob-threshold
          :db/valueType :db.type/long
+         :db/cardinality :db.cardinality/one}
+        {:db/ident :seon.render.value/max-collection
+         :db/valueType :db.type/long
          :db/cardinality :db.cardinality/one}])
       (registry/branch! {:seon.store/store opened
                          :seon.cluster.registry/from :db
@@ -25,7 +28,8 @@
       (let [connection (store/open-branch! opened :settlement-test)]
         (try
           (d/transact connection
-                      [{:seon.config.eval.result/blob-threshold 65536}])
+                      [{:seon.config.eval.result/blob-threshold 65536
+                        :seon.render.value/max-collection 3}])
           (let [caps (config/result-caps (config/defaults))
                 full (pr-str (vec (range 20000)))
                 large (#'loop/settlement-result
@@ -38,6 +42,13 @@
                        {:seon.cluster.eval/result-edn "42"})]
             (is (= (count full) (:seon.cluster.eval/result-size large)))
             (is (< (count (:seon.cluster.eval/result-edn large)) (count full)))
+            (is (= [0 1 :seon.sci.admit/elided]
+                   (mapv (fn [node]
+                           (or (:seon.print/value node)
+                               (:seon.print/face node)))
+                         (:seon.print/items
+                          (read-string
+                           (:seon.cluster.eval/result-edn large))))))
             (is (= full
                    (blob/get connection
                              (:seon.cluster.eval/result-blob large))))

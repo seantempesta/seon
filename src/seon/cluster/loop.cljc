@@ -298,17 +298,27 @@
          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
        db))
 
+(defn- result-window-page-size
+  [db]
+  (d/q '[:find ?size .
+         :where [_ :seon.render.value/max-collection ?size]]
+       db))
+
 (defn- settlement-result
   [cluster evaluation]
   (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
     (let [connection (:seon.store/branch-connection cluster)
           result-size (long (count result-edn))
-          threshold (result-blob-threshold @connection)]
+          db @connection
+          threshold (result-blob-threshold db)]
       (if (and threshold (> result-size threshold))
         (assoc evaluation
                :seon.cluster.eval/result-edn
                (render.value/result-window-edn
-                {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+                {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                 :seon.render.value/options
+                 {:seon.render.value/max-collection
+                  (result-window-page-size db)}}
                 result-edn)
                :seon.cluster.eval/result-blob
                (blob/put! connection result-edn)
