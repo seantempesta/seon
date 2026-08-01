@@ -128,11 +128,14 @@
 (deftest store-faithful-is-class-metadata-and-value-exact
   (let [tagged (with-meta [1 2] {:session true})
         ordered (sorted-set-by > 1 2 3)
+        function-map {:f (fn [] 1)}
         lazy-value (map inc [1 2])]
     (is (eval/store-faithful? tagged))
     (is (= tagged (edn/read-string (eval/store-faithful-edn tagged))))
     (is (not (eval/store-faithful? ordered))
         "a comparator-losing set is = but its restored class differs")
+    (is (not (eval/store-faithful? function-map))
+        "a function nested in otherwise ordinary data refuses the value tier")
     (is (not (eval/store-faithful? lazy-value))
         "a lazy sequence must not silently become a list")
     (is (not (eval/store-faithful? (fn [] 1)))

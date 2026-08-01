@@ -136,6 +136,7 @@
                     "(def names [\"Ada\" \"Grace\"])"
                     "(def limit 10)"
                     "(def scale (fn [v] (* v limit)))"
+                    "(def function-map {:scale (fn [v] (* v limit))})"
                     "(def ordered (into (sorted-set) [2 1]))"
                     "(def tagged (with-meta [1 2] {:session true}))"
                     (str "(def effectful-data (do (.toUpperCase \"x\") "
@@ -150,11 +151,16 @@
            (is (= ["my.agents.session-image/limit"]
                   (mapv :seon.code.def/id
                         (:seon.sci.eval/session-defs redefinition))))
-           (commit-evaluation! connection redefinition 8)))
+           (commit-evaluation! connection redefinition 9)))
        (let [fresh (eval/cluster-ctx @connection connection)
              resolved #(some-> (sci/resolve fresh %) deref)]
          (is (= 200000 (count (resolved 'my.agents.session-image/big))))
          (is (= 44 ((resolved 'my.agents.session-image/scale) 4)))
+         (is (= 44
+                ((get (resolved 'my.agents.session-image/function-map)
+                      :scale)
+                 4))
+             "a function nested in a map restores through its pure form")
          (is (= "Ada, Grace"
                 (str/join
                  ", " (resolved 'my.agents.session-image/names))))
@@ -182,6 +188,15 @@
                              [:seon.code.def/value-edn]
                              [:seon.code.def/id
                               "my.agents.session-image/effectful-data"]))))
+         (is (= {:seon.code.def/source
+                 "(def function-map {:scale (fn [v] (* v limit))})"}
+                (d/pull @connection
+                        [:seon.code.def/source
+                         :seon.code.def/value-edn
+                         :seon.code.def/blob]
+                        [:seon.code.def/id
+                         "my.agents.session-image/function-map"]))
+             "nested closures force the source tier rather than a partial value")
          (is (contains? (get (sci/namespace-interns fresh) namespace-name)
                         'dropped)
              "an unrestorable name is pre-interned, never marker-bound")
