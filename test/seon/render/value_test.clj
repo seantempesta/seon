@@ -113,11 +113,19 @@
     (is (not (str/includes? text "42")))))
 
 (deftest routed-page-size-is-separate-from-print-length
+  ;; a configured window of N shows N items — the lookahead slot detects
+  ;; more? without costing a row (the 2026-08-01 off-by-one regression)
   (let [html (hiccup/->string
               (value/render-html (routed-unit (vec (range 40)) 3)))]
-    (is (str/includes? html "showing 1–2 of 40"))
-    (is (str/includes? html "offset=2"))
+    (is (str/includes? html "showing 1–3 of 40"))
+    (is (str/includes? html "offset=3"))
     (is (str/includes? html "seon-data-capped"))))
+
+(deftest a-window-of-one-shows-one-item-not-an-empty-claim-of-more
+  (let [window (#'value/opened-window [:a :b :c] 0 1)]
+    (is (= 1 (:seon.render.value/shown window)))
+    (is (= [:a] (:seon.render.value/window window)))
+    (is (true? (:seon.render.value/more? window)))))
 
 (deftest realization-failure-is-visible-data
   (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])

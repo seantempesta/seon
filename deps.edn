@@ -79,7 +79,7 @@
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-Xmx512m"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
 
   ;; The system test gate: `bin/test` (all suites) or
   ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
@@ -96,7 +96,7 @@
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-Xmx512m"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
 
   ;; ---------------------------------------------------------------------
   ;; OLD SYSTEM (quarry) — everything below serves src-old/ and is used
@@ -144,7 +144,7 @@
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-Xmx512m"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
 
   ;; JVM agent host — composes onto :writer (`clojure -M:writer:host ...`).
   :host

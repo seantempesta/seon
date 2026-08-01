@@ -87,7 +87,7 @@
   [value offset size]
   (try
     (if-let [entries (stable-entries value)]
-      (let [available (max 0 (dec size))
+      (let [available (max 0 size)
             head (into [] (comp (drop offset) (take (inc available))) entries)
             more? (> (count head) available)
             page (subvec head 0 (min available (count head)))
