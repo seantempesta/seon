@@ -1745,9 +1745,16 @@ may reintroduce a shadow build into the dev feedback path.
   **Ruling 2026-08-01 #27 (owner): ONE LIVE PROGRAM GRAPH PER CLUSTER —
   shared inside it, never across it.** An agent making a GLOBAL change
   is intended: the benefit agent A creates must be IMMEDIATELY
-  available to agent B in the same cluster (this is why sci's
-  shared-Var fork behavior is the propagation mechanism, not a defect —
-  the isolation issue raised against it was overruled and archived).
+  available to agent B in the same cluster. (The isolation issue raised
+  against sci's shared-Var behavior was overruled and archived. CORRECTED
+  2026-08-01 by `plan/per-cluster-base-context-2026-08-01.md`: `sci/fork`
+  is NOT the sharing mechanism — measured, a `def` propagates to sibling
+  forks only when the base entry is already a `sci.lang.Var`, and what
+  `acquire!` installs is host `clojure.lang.Var`s, which do not
+  propagate. Today's cross-agent visibility comes entirely from the
+  per-turn reinstall from the database. Ruling #29's ONE LIVE CTX PER
+  CLUSTER is what actually makes this sharing true; it cannot be bought
+  by forking.)
   The boundary is the CLUSTER, matching the database boundary that
   already exists: no cross-cluster sharing, ever. Today's base ctx is a
   process `defonce` and one JVM hosts many clusters, so the boundary is

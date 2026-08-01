@@ -19,8 +19,13 @@ mechanics stand; their PRESENTATION is replaced by this).
    ran (or could rerun) with identical results. The creation-run
    is a real run executed through the real eval path at agent creation
    — real receipts, real prompt fact, real db reads. Cost is prepaid:
-   the interpreted-corpus substrate installs all schemas+functions once
-   per process (489 ms / 3 MB, measured), each agent forks in ns, the
+   the interpreted-corpus substrate installs all schemas+functions
+   (CORRECTED 2026-08-01: the remembered "489 ms / 3 MB per process" was
+   a misattribution — `sci/init` costs 0.1 ms / 20 KB; the cost is
+   `acquire!`, measured 283 ms / 1.75 MB and today paid EVERY TURN, of
+   which 211 ms is rebuilding the schema projection and ~72 ms is
+   recomputing `admission-source` per row. Ruling #29 moves it off the
+   hot path entirely; see `plan/per-cluster-base-context-2026-08-01.md`), each agent forks in ns, the
    creation-run evals are ~3 µs each + real db reads. Times are real; db
    queries are always `now`.
 
