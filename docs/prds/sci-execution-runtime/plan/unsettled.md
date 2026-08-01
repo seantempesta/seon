@@ -40,6 +40,20 @@ flight). Next: seal the spec after the sci lane lands, dispatch W1 (data
 model) + W2 (renderers) implementation lanes per the retirement report's
 wave plan.
 
+**LIVE OPERATOR CHECKPOINT — 2026-07-31.** Dormant cluster existence now
+derives from the persisted Datahike branch roster; runtime advertisements,
+registrations, and open connections are only the liveness overlay. The real
+operator restart regression crosses two JVM identities and preserves its
+populated fact counts. A subsequent shared-root failure was not missing
+published data: reforked `default` contained all 572 schema rows, including
+`:seon.render.walk/units`, while the older anchor JVM had candidate=true and
+active=false for that key. `seon.instrument/apply!` now activates a changed
+loaded candidate generation before Malli collection and skips the rebuild
+when already converged (`e80f9e92d`, `8544b5cc0`). Focused instrumentation
+proof passed 10 tests / 40 assertions. Cold `default` then reached READY at
+port 7994; status reported 1/1 with no orphan JVM, and `/`, `/ns/seon.flow`,
+and `/agent/root/debug` returned HTTP 200 with the two debug projections.
+
 **HISTORICAL WORKING EDGE — 2026-07-30, `current-src` publication. This
 block supersedes every dated block below it.** Repository indexing is static: the pinned
 clj-kondo analyzes the complete dependency classpath as resolution context,

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, operator, runtime]
 ---
@@ -143,3 +143,27 @@ session's runtime boundary. Per the lane stop rule, this issue is reopened
 until the owner makes a genuinely fresh anchor available and the exact
 literal command can be rerun. The source and recurring full gate are green;
 only that shared live-process acceptance proof remains.
+
+## Final class correction and live proof
+
+The later `:seon.render.walk/units` failure proved why attempt 3 remained
+incomplete. In the stale `w4-html` JVM, `schema.edn/load!` made the key visible
+in candidate forms while the stable Malli default registry continued reading
+an older active projection. The reforked `default` branch was not stale: a
+read-only query at branch head `6a6d3c6d-7e15-5640-a5fc-556008be653e`
+returned 572 canonical schema rows and
+`:seon.render.walk/units = "[:vector :seon.render.walk/unit]"`.
+
+Commit `e80f9e92d` completes the one instrumentation operation: after loading
+resources, `apply!` admits and activates a changed complete candidate
+generation before Malli collection. Commit `8544b5cc0` skips that projection
+build when candidate and active forms already agree, keeping cold boot inside
+the readiness boundary. The regression constructs the exact
+active-old/candidate-new/hot-Var state; `seon.instrument-test` passed 10 tests
+/ 40 assertions with zero failures and errors.
+
+The final cold shared-root proof started `default` READY on PID 35130. Its
+active projection and database both contain `:seon.render.walk/units`, status
+reported `1/1` with no orphan JVM, `/`, `/ns/seon.flow`, and
+`/agent/root/debug` all returned HTTP 200, and the debug response contained
+the distinct AI and HTML pane roots.
