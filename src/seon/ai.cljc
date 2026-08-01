@@ -56,10 +56,14 @@
   kill after it returns but before the plan commits loses the reply,
   and nothing re-calls."
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [datahike.api :as d]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form])
   (:import [java.io BufferedReader InputStreamReader]
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -90,6 +94,47 @@
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
 
+(defn- map-attributes
+  [schema-key]
+  (into #{}
+        (comp (filter vector?) (map first))
+        (schema/schema-definition schema-key)))
+
+(defn settings
+  "Resolved AI settings for one agent. Pure."
+  {:malli/schema
+   [:=> [:cat :seon.config/effective :seon.config/agent-overlay]
+    :seon.config/effective]}
+  [cluster-settings agent-settings]
+  (merge cluster-settings agent-settings))
+
+(defn agent-overlay
+  "Declared setting overrides for one agent in a database value."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+    :seon.config/agent-overlay]}
+  [db agent-id]
+  (let [attributes (map-attributes :seon.config/agent-overlay)]
+    (select-keys
+     (or (d/pull db (vec attributes) [:seon.cluster.agent/id agent-id]) {})
+     attributes)))
+
+(defn- config-ai-ident->request-ident
+  [config-ident]
+  (keyword "seon.ai" (name config-ident)))
+
+(defn- primary-setting-entries
+  [dials]
+  (into {}
+        (keep
+         (fn [[config-ident value]]
+           (when (= "seon.config.ai" (namespace config-ident))
+             [(if (= :seon.config.ai/no-auth config-ident)
+                config-ident
+                (config-ai-ident->request-ident config-ident))
+              value])))
+        dials))
+
 (defn targets
   "The primary descriptor row and the OPTIONAL backup, from the dials.
   PURE, and the ONE assembly for both roles — a second hand-written
@@ -109,19 +154,11 @@
   is exactly what `:seon.ai/backup?` reads downstream."
   {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai/targets]}
   [dials]
-  (let [primary
-        (cond->
-         (merge
-          {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
-           :seon.ai/model (:seon.config.ai/model dials)
-           :seon.ai/max-tokens (:seon.config.ai/max-tokens dials)
-           :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
-          (if (:seon.config.ai/no-auth dials)
-            {:seon.config.ai/no-auth true}
-            {:seon.ai/api-key-variable
-             (:seon.config.ai/api-key-variable dials)}))
-          (:seon.config.ai/thinking dials)
-          (assoc :seon.ai/thinking (:seon.config.ai/thinking dials)))]
+  (let [primary-settings (primary-setting-entries dials)
+        primary
+        (if (:seon.config.ai/no-auth dials)
+          (dissoc primary-settings :seon.ai/api-key-variable)
+          (dissoc primary-settings :seon.config.ai/no-auth))]
     (cond-> {:seon.ai/primary primary}
       (:seon.config.ai.backup/model dials)
       (assoc :seon.ai/backup
@@ -204,38 +241,164 @@
                  budgeted
                  (conj schedule clamped)))))))
 
+(def ^:private omit-wire-value ::omit-wire-value)
+
+(defn thinking-wire-value
+  "OpenAI-compatible thinking toggle for one resolved setting."
+  {:malli/schema [:=> [:cat :seon.ai/thinking] :map]}
+  [thinking]
+  {"type" (if (= :disabled thinking) "disabled" "enabled")})
+
+(defn reasoning-effort-wire-value
+  "OpenAI-compatible reasoning effort, or the omission marker."
+  {:malli/schema [:=> [:cat :seon.ai/thinking] [:or :string :keyword]]}
+  [thinking]
+  (if (= :disabled thinking) omit-wire-value (name thinking)))
+
+(defn response-format-wire-value
+  "OpenAI-compatible structured-output document for one setting."
+  {:malli/schema [:=> [:cat :seon.ai/response-format] :map]}
+  [response-format]
+  {"type" (str/replace (name response-format) "-" "_")})
+
+(defn- config-registration-properties
+  [config-ident]
+  (schema.form/attr-form-properties (schema/schema-definition config-ident)))
+
+(defn- wire-setting-triples
+  []
+  (->> (map-attributes :seon.config/effective)
+       (mapcat
+        (fn [config-ident]
+          (map (fn [[wire-key coercion]]
+                 [config-ident wire-key coercion])
+               (:seon.ai/wire
+                (config-registration-properties config-ident)))))
+       (sort-by (juxt (comp str first) second))
+       vec))
+
+(defn- coercion-function
+  [coercion]
+  #?(:clj (requiring-resolve coercion)
+     :cljs (case coercion
+             clojure.core/identity identity
+             seon.ai/thinking-wire-value thinking-wire-value
+             seon.ai/reasoning-effort-wire-value reasoning-effort-wire-value
+             seon.ai/response-format-wire-value response-format-wire-value)))
+
+;; DeepSeek documents these controls as silently ignored whenever thinking is
+;; enabled. This is the one accepted provider constant; a second provider with
+;; a different set is the trigger to move the fact into descriptor data.
+;; `research/deepseek-thinking-mode-api-2026-08-01.md`, "Parameters silently
+;; ignored in thinking mode"; owner ruling #34, 2026-08-01.
+(def ^:private thinking-inert-settings
+  #{:seon.config.ai/temperature
+    :seon.config.ai/top-p
+    :seon.config.ai/frequency-penalty
+    :seon.config.ai/presence-penalty})
+
+(defn wire-settings
+  "Wire fields honoured for a request and configured fields that are inert."
+  {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/wire-settings]}
+  [request]
+  (let [thinking? (not= :disabled (:seon.ai/thinking request))
+        inert (if thinking?
+                (into #{}
+                      (filter #(contains? request
+                                          (config-ai-ident->request-ident %)))
+                      thinking-inert-settings)
+                #{})]
+    (reduce
+     (fn [result [config-ident wire-key coercion]]
+       (let [request-ident (config-ai-ident->request-ident config-ident)]
+         (if (or (contains? inert config-ident)
+                 (not (contains? request request-ident)))
+           result
+           (let [wire-value ((coercion-function coercion)
+                             (get request request-ident))]
+             (if (= omit-wire-value wire-value)
+               result
+               (assoc-in result [:seon.ai/sent wire-key] wire-value))))))
+     {:seon.ai/sent {}
+      :seon.ai/inert inert}
+     (wire-setting-triples))))
+
+(defn- extra-body-request-ident
+  []
+  (some
+   (fn [config-ident]
+     (when (true? (:seon.ai/extra-body
+                   (config-registration-properties config-ident)))
+       (config-ai-ident->request-ident config-ident)))
+   (map-attributes :seon.config/effective)))
+
+(defn- extra-body
+  [request]
+  (if-let [encoded (get request (extra-body-request-ident))]
+    (try
+      (let [decoded (edn/read-string encoded)]
+        (if (and (map? decoded) (every? string? (keys decoded)))
+          decoded
+          {:seon.error/kind ::invalid-extra-body
+           :seon.error/message
+           "The configured extra body must be an EDN map with string keys."
+           :seon.error/data {::request-transmitted? false
+                             ::response-started? false
+                             ::output-observed? false}}))
+      (catch #?(:clj Throwable :cljs :default) failure
+        {:seon.error/kind ::invalid-extra-body
+         :seon.error/message
+         (str "The configured extra body is not readable EDN: "
+              (ex-message failure))
+         :seon.error/data {::request-transmitted? false
+                           ::response-started? false
+                           ::output-observed? false}}))
+    {}))
+
+(defn- request-headers
+  [key]
+  (cond-> {"content-type" "application/json"}
+    key (assoc "authorization" (str "Bearer " key))))
+
 (defn request-body
-  "The provider request document for one completion. Pure.
-  DeepSeek thinking is one optional value: absence leaves the provider's
-  default untouched, `:disabled` sends an explicit off switch, and an
-  effort sends explicit on plus `reasoning_effort`. Unsupported sampling
-  controls are never emitted."
-  {:malli/schema [:=> [:cat :seon.ai/request] [:map]]}
-  [{:keys [:seon.ai/model :seon.ai/max-tokens
-           :seon.ai/system :seon.ai/prompt :seon.ai/thinking]
-    stream? :seon.ai/stream?}]
+  "The provider request document, or a pre-call flat error. Pure."
+  {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/request-body]}
+  [{:keys [:seon.ai/model :seon.ai/system :seon.ai/prompt]
+    stream? :seon.ai/stream?
+    :as request}]
   ;; STRING keys: this is the wire document, not Clojure data. It is
   ;; built as strings and read back as strings, so nothing in between
   ;; has to remember which side of the boundary it is on.
-  (cond-> {"model" model
-           "max_tokens" max-tokens
-           "stream" (boolean stream?)
-           "messages" (cond-> []
-                        system (conj {"role" "system" "content" system})
-                        true (conj {"role" "user" "content" prompt}))}
-    ;; ask for usage on the stream. OpenRouter now returns it always and
-    ;; documents the option as a deprecated no-op, so this is harmless
-    ;; where it is ignored and load-bearing where it is not
-    ;; (docs/seon/reference/llm-adapters.md:169-179)
-    stream? (assoc "stream_options" {"include_usage" true})
-
-    thinking
-    (assoc "thinking" {"type" (if (= :disabled thinking)
-                                  "disabled"
-                                  "enabled")})
-
-    (contains? #{:low :high :max} thinking)
-    (assoc "reasoning_effort" (name thinking))))
+  (let [base (cond->
+               {"model" model
+                "stream" (boolean stream?)
+                "messages" (cond-> []
+                             system (conj {"role" "system" "content" system})
+                             true (conj {"role" "user" "content" prompt}))}
+               ;; `docs/seon/reference/llm-adapters.md:169-179`.
+               stream? (assoc "stream_options" {"include_usage" true}))
+        sent (:seon.ai/sent (wire-settings request))
+        builder-body (merge base sent)
+        extra (extra-body request)]
+    (if (:seon.error/kind extra)
+      extra
+      (let [builder-owned-keys
+            (into (set (keys builder-body))
+                  (keys (request-headers ::protected-placeholder)))
+            conflicts (set/intersection builder-owned-keys
+                                        (set (keys extra)))]
+        (if (seq conflicts)
+          {:seon.error/kind ::extra-body-conflict
+           :seon.error/message
+           "The configured extra body cannot override request-builder fields."
+           :seon.error/data {::protected-keys (vec (sort conflicts))
+                             ::request-transmitted? false
+                             ::response-started? false
+                             ::output-observed? false}}
+          ;; LiteLLM's useful escape hatch, but with Seon's error-as-value
+          ;; boundary: provider-owned fields merge last only after conflicts
+          ;; with the builder's ACTUAL emitted keys have been refused.
+          (merge builder-body extra))))))
 
 (defn stream-event
   "One SSE line folded into the accumulating snapshot. PURE.
@@ -357,6 +520,27 @@
        (map? body) (vec (sort (keys body)))
        (nil? body) ::nil
        :else (str (class body))))))
+
+(defn normalize-usage
+  "Comparable token counts derived from one open provider usage document."
+  {:malli/schema [:=> [:cat :seon.ai/usage] :seon.ai/normalized-usage]}
+  [usage]
+  (let [cached (or (get usage "cached_tokens")
+                   (get usage "prompt_cache_hit_tokens")
+                   (get-in usage ["prompt_tokens_details" "cached_tokens"]))]
+    (cond-> {}
+      (int? (get usage "prompt_tokens"))
+      (assoc :seon.ai.usage/prompt-tokens (get usage "prompt_tokens"))
+
+      (int? (get usage "completion_tokens"))
+      (assoc :seon.ai.usage/completion-tokens
+             (get usage "completion_tokens"))
+
+      (int? (get usage "total_tokens"))
+      (assoc :seon.ai.usage/total-tokens (get usage "total_tokens"))
+
+      (int? cached)
+      (assoc :seon.ai.usage/cached-tokens cached))))
 
 (defn credential
   "The API key named by `:seon.ai/api-key-variable`, or nil.
@@ -495,18 +679,14 @@
 
 (defn- http-request-data
   "Ordinary request data for the JDK leaf."
-  [request key]
+  [request key body]
   (cond-> {:seon.ai/endpoint (:seon.ai/endpoint request)
            :seon.ai/timeout-ms (:seon.ai/timeout-ms request)
            :seon.ai/stream? (boolean (:seon.ai/stream? request))
-           :seon.ai.http/headers {"content-type" "application/json"}
-           :seon.ai.http/body (json/write-str (request-body request))}
+           :seon.ai.http/headers (request-headers key)
+           :seon.ai.http/body (json/write-str body)}
     (:seon.ai/sink request)
-    (assoc :seon.ai/sink (:seon.ai/sink request))
-
-    key
-    (assoc-in [:seon.ai.http/headers "authorization"]
-              (str "Bearer " key))))
+    (assoc :seon.ai/sink (:seon.ai/sink request))))
 
 (defn- send-request
   "Send one ordinary request map through the JDK HTTP leaf."
@@ -640,9 +820,16 @@
   [{:keys [:seon.ai/api-key-variable]
     no-auth :seon.config.ai/no-auth
     :as request}]
-  (let [key (when-not no-auth (credential api-key-variable))]
-    (if (or no-auth key)
-      (send-request (http-request-data request key))
+  (let [body (request-body request)
+        key (when-not no-auth (credential api-key-variable))]
+    (cond
+      (:seon.error/kind body)
+      body
+
+      (or no-auth key)
+      (send-request (http-request-data request key body))
+
+      :else
       {:seon.error/kind ::no-credential
        :seon.error/message (if (string? api-key-variable)
                              (str "The environment variable "

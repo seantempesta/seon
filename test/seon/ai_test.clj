@@ -16,6 +16,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -50,6 +51,7 @@
             :seon.ai/model (:seon.config.ai/model @dials)
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
+            :seon.ai/thinking :disabled
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
         "the primary IS the four dials, and nothing reshapes them")
@@ -62,9 +64,9 @@
            :seon.ai/request
            (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))
     (is (= 65536 (:seon.ai/max-tokens (:seon.ai/primary targets)))
-        "thinking default-on has interim headroom while calibration runs")
-    (is (not (contains? (:seon.ai/primary targets) :seon.ai/thinking))
-        "absence reaches the wire as the provider's documented default")))
+        "the interim output budget remains until flash calibration lands")
+    (is (= :disabled (:seon.ai/thinking (:seon.ai/primary targets)))
+        "the shipped fast-turn posture explicitly disables thinking")))
 
 (deftest thinking-is-one-config-fact-with-three-wire-states
   (testing "absence leaves the provider default untouched"
@@ -153,6 +155,7 @@
             :seon.ai/model "claude-probe"
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
+            :seon.ai/thinking :disabled
             :seon.ai/timeout-ms 30000}
            backup))
     (is (not= (:seon.ai/api-key-variable primary)
@@ -268,6 +271,97 @@
     (is (vector? (get body "messages"))
         "one non-streaming chat completion, nothing else")
     (is (false? (get body "stream")))))
+
+(deftest settings-resolve-by-one-agent-over-cluster-merge
+  (let [cluster (config/defaults)
+        override {:seon.config.ai/model "planner-model"
+                  :seon.config.ai/thinking :high}
+        resolved (ai/settings cluster override)]
+    (is (= "planner-model" (:seon.config.ai/model resolved)))
+    (is (= :high (:seon.config.ai/thinking resolved)))
+    (is (= (:seon.config.ai/endpoint cluster)
+           (:seon.config.ai/endpoint resolved)))
+    (is (schema/valid-candidate-value? :seon.config/effective resolved))))
+
+(deftest agent-overlay-reads-only-derived-per-agent-attributes
+  (test-support/with-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.cluster.agent/id "planner"
+                    :seon.config.ai/model "planner-model"
+                    :seon.config.ai/thinking :high}])
+      (is (= {:seon.config.ai/model "planner-model"
+              :seon.config.ai/thinking :high}
+             (ai/agent-overlay @connection "planner")))
+      (is (= {} (ai/agent-overlay @connection "absent"))))))
+
+(deftest registered-wire-triples-own-coercion-and-thinking-inertness
+  (let [request (assoc base
+                       :seon.ai/thinking :high
+                       :seon.ai/temperature 0.4
+                       :seon.ai/top-p 0.8
+                       :seon.ai/stop ["END"]
+                       :seon.ai/response-format :json-object)
+        {:seon.ai/keys [sent inert]} (ai/wire-settings request)]
+    (is (= {"max_tokens" 8192
+            "thinking" {"type" "enabled"}
+            "reasoning_effort" "high"
+            "stop" ["END"]
+            "response_format" {"type" "json_object"}}
+           sent))
+    (is (= #{:seon.config.ai/temperature :seon.config.ai/top-p} inert))
+    (is (not (contains? (ai/request-body request) "temperature")))))
+
+(deftest disabled-thinking-emits-sampling-and-omits-effort
+  (let [body (ai/request-body
+              (assoc base
+                     :seon.ai/thinking :disabled
+                     :seon.ai/temperature 0.4
+                     :seon.ai/presence-penalty -0.5))]
+    (is (= {"type" "disabled"} (get body "thinking")))
+    (is (= 0.4 (get body "temperature")))
+    (is (= -0.5 (get body "presence_penalty")))
+    (is (not (contains? body "reasoning_effort")))))
+
+(deftest extra-body-merges-last-but-cannot-rewrite-any-builder-owned-key
+  (is (= true
+         (get (ai/request-body
+               (assoc base :seon.ai/extra-body-edn
+                      "{\"vendor_option\" true}"))
+              "vendor_option")))
+  (doseq [protected ["model" "max_tokens" "authorization"]]
+    (let [failure (ai/request-body
+                   (assoc base :seon.ai/extra-body-edn
+                          (pr-str {protected "override"})))]
+      (is (= :seon.ai/extra-body-conflict (:seon.error/kind failure)))
+      (is (= [protected]
+             (get-in failure
+                     [:seon.error/data :seon.ai/protected-keys])))))
+  (is (= :seon.ai/invalid-extra-body
+         (:seon.error/kind
+          (ai/request-body (assoc base :seon.ai/extra-body-edn "[:not :a-map]"))))))
+
+(deftest an-extra-body-conflict-refuses-before-the-http-leaf
+  (let [sent (atom 0)
+        outcome
+        (with-redefs-fn
+          {#'seon.ai/send-request (fn [_] (swap! sent inc))}
+          #(ai/complete
+            (assoc base :seon.ai/extra-body-edn
+                   "{\"authorization\" \"leak\"}")))]
+    (is (= :seon.ai/extra-body-conflict (:seon.error/kind outcome)))
+    (is (zero? @sent))))
+
+(deftest usage-cache-detail-is-normalized-only-at-read
+  (is (= {:seon.ai.usage/prompt-tokens 91
+          :seon.ai.usage/completion-tokens 42
+          :seon.ai.usage/total-tokens 133
+          :seon.ai.usage/cached-tokens 73}
+         (ai/normalize-usage
+          {"prompt_tokens" 91
+           "completion_tokens" 42
+           "total_tokens" 133
+           "prompt_tokens_details" {"cached_tokens" 73}}))))
 
 (deftest a-foreign-document-either-yields-text-or-says-why
   (testing "the shape a provider actually returns"
