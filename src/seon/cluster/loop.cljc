@@ -51,6 +51,7 @@
             [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.fn.analyzer :as fn.analyzer]
+            [seon.program :as program]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -291,6 +292,81 @@
                            :seon.cluster.run/process process
                            :seon.cluster.run/closed-at now})
             nil))))
+
+(defn- capability-free-references?
+  "True when no referenced program-graph function reaches a workload leaf.
+  Missing symbols contribute no invented classification; SCI's independent
+  host-interop observation closes the host-resolution side of the proof."
+  [db roots]
+  (loop [pending (seq (sort-by str roots))
+         visited #{}]
+    (if-let [function-symbol (first pending)]
+      (if (contains? visited function-symbol)
+        (recur (next pending) visited)
+        (let [row (d/pull db
+                          [:seon.fn/workload
+                           {:seon.fn/calls [:seon.fn/sym]}]
+                          [:seon.fn/sym (str function-symbol)])
+              called (map (comp symbol :seon.fn/sym)
+                          (:seon.fn/calls row))]
+          (if (:seon.fn/workload row)
+            false
+            (recur (concat (next pending) called)
+                   (conj visited function-symbol)))))
+      true)))
+
+(defn- exact-session-row-tx
+  [db row]
+  (let [row (program/canonical-row row)
+        existing (d/pull db '[*]
+                         [:seon.code.def/id (:seon.code.def/id row)])
+        changed (when existing (program/changed-attributes existing row))]
+    (concat
+     (when existing
+       (map (fn [attribute]
+              [:db/retract (:db/id existing) attribute])
+            (filter #(contains? existing %) changed)))
+     [(assoc row :db/id
+             (or (:db/id existing)
+                 (str "code.def:" (:seon.code.def/id row))))])))
+
+(defn- session-image-tx
+  "Exact session-image changes riding beside one terminal receipt."
+  [db evaluation ordinal]
+  (let [host-clean?
+        (zero? (get-in evaluation
+                       [:seon.sci.admit/record
+                        :seon.eval/host-interop-count]
+                       0))
+        rows
+        (map
+         (fn [candidate]
+           (let [pure? (and host-clean?
+                            (capability-free-references?
+                             db (:seon.sci.eval/referenced-vars candidate)))]
+             (cond-> (-> candidate
+                         (dissoc :seon.sci.eval/value
+                                 :seon.sci.eval/referenced-vars)
+                         (assoc :seon.code.def/ordinal ordinal))
+               (not pure?)
+               (-> (dissoc :seon.code.def/source)
+                   (assoc :seon.code.def/unrestorable
+                          (if host-clean?
+                            "Defining form reaches a capability leaf."
+                            "Defining form touched host interop."))))))
+         (:seon.sci.eval/session-defs evaluation))
+        contracted-id
+        (get-in evaluation [:seon.sci.eval/program-row :seon.fn/sym])
+        contracted-entry
+        (when contracted-id
+          (d/pull db [:db/id]
+                  [:seon.code.def/id contracted-id]))]
+    (into
+     (if contracted-entry
+       [[:db/retractEntity (:db/id contracted-entry)]]
+       [])
+     (mapcat #(exact-session-row-tx db %))
+     rows)))
 
 (defn- result-blob-threshold
   [db]
@@ -1205,8 +1281,13 @@
                     outcome
                     (store/transact!
                      connection
-                     (cond-> {:tx-data (into (terminal-tx receipt now)
-                                             (concat rows refusals))}
+                     (cond->
+                      {:tx-data
+                       (into (terminal-tx receipt now)
+                             (concat rows
+                                     refusals
+                                     (session-image-tx
+                                      @connection evaluation ordinal)))}
                        ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
                        ;; A delivering transaction names the message
                        ;; being answered, exactly as the opening one

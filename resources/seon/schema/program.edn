@@ -95,4 +95,23 @@
    :seon.store/branch-connection]
   [:seon.db/process {:optional true} :seon.db/ref]
   [:seon.fn/roots {:optional true} :seon.fn/roots]
-  [:seon.fn/manifest {:optional true} :map]]}
+  [:seon.fn/manifest {:optional true} :map]]
+
+ ; One namespace name's current REPL definition. Presence of source means the
+ ; defining form is proven replay-safe; presence of unrestorable states why it
+ ; cannot be reconstructed. Contracted functions remain in :seon.fn only.
+ :seon.code.def/id [:string {:min 1 :seon.db/identity true}]
+ :seon.code.def/ns :seon.db/ref
+ :seon.code.def/name :symbol
+ :seon.code.def/source [:string {:min 1}]
+ :seon.code.def/unrestorable [:string {:min 1}]
+ :seon.code.def/ordinal [:int {:min 0}]
+ :seon.code.def/def
+ [:map {:seon.db/entity true}
+  [:seon.code.def/id :seon.code.def/id]
+  [:seon.code.def/ns :seon.code.def/ns]
+  [:seon.code.def/name :seon.code.def/name]
+  [:seon.code.def/source {:optional true} :seon.code.def/source]
+  [:seon.code.def/unrestorable {:optional true}
+   :seon.code.def/unrestorable]
+  [:seon.code.def/ordinal :seon.code.def/ordinal]]}

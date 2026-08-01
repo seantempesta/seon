@@ -105,6 +105,7 @@
             [my.message]
             [my.run]
             [sci.core :as sci]
+            [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.error :as error]
@@ -434,11 +435,84 @@
                      (let [qualified (str (symbol (str namespace-name)
                                                   (str intern-name)))]
                        [[:seon.fn/sym qualified]
-                        [:seon.test/sym qualified]]))
+                        [:seon.test/sym qualified]
+                        [:seon.code.def/id qualified]]))
                    (sort-by str
                             (remove (get after namespace-name #{})
                                     intern-names)))))
         before))
+
+(def ^:private absent-intern (Object.))
+
+(defn- intern-values
+  "Dereferenced SCI intern roots keyed by qualified name.
+
+  This intentionally snapshots values, not env maps or Var identities: SCI
+  redefinition mutates the existing Var root and assocs the identical Var back
+  into the env. Values are not traversed here."
+  [ctx]
+  (let [namespace-state (sci/namespace-state ctx)]
+    (into {}
+          (mapcat
+           (fn [[namespace-name intern-names]]
+             (keep
+              (fn [intern-name]
+                (let [sci-var (get-in namespace-state
+                                      [namespace-name intern-name])]
+                  (when (sci.utils/var? sci-var)
+                    [(symbol (str namespace-name) (str intern-name))
+                     (if (sci.vars/hasRoot sci-var)
+                       @sci-var
+                       absent-intern)])))
+              intern-names))
+           (sci/namespace-interns ctx)))))
+
+(defn- same-intern-value?
+  [left right]
+  (or (identical? left right)
+      (and (not (identical? absent-intern left))
+           (not (identical? absent-intern right))
+           (= (class left) (class right))
+           (= (meta left) (meta right))
+           (= left right))))
+
+(defn- resolved-form-vars
+  "Every SCI Var a form mentions, resolved after the form changed its ctx.
+  Over-approximation is deliberate: a shadowed local can only make purity
+  fail closed; a qualified or macro-expanded host touch is independently
+  observed by SCI's analyzer."
+  [ctx form]
+  (into #{}
+        (comp
+         (filter symbol?)
+         (keep (fn [candidate]
+                 (try
+                   (let [resolved (sci/resolve ctx candidate)]
+                     (when (sci.utils/var? resolved)
+                       (sci/var->symbol resolved)))
+                   (catch Throwable _ nil)))))
+        (tree-seq coll? seq form)))
+
+(defn- changed-session-defs
+  [ctx before source form contracted-function]
+  (let [after (intern-values ctx)]
+    (into []
+          (comp
+           (remove (fn [[qualified value]]
+                     (or (= (str qualified) contracted-function)
+                         (identical? absent-intern value)
+                         (same-intern-value?
+                          (get before qualified absent-intern) value))))
+           (map (fn [[qualified value]]
+                  {:seon.code.def/id (str qualified)
+                   :seon.code.def/ns
+                   [:seon.ns/name (symbol (namespace qualified))]
+                   :seon.code.def/name (symbol (name qualified))
+                   :seon.code.def/source source
+                   :seon.sci.eval/value value
+                   :seon.sci.eval/referenced-vars
+                   (resolved-form-vars ctx form)})))
+          after)))
 
 (defn- deleted-schema-key
   [row]
@@ -925,6 +999,50 @@
        functions-installed
        namespace-order))))
 
+(defn install-session-image!
+  "Restore namespace session definitions into one cold cluster ctx.
+
+  Pass 1 creates every namespace and interns every name unbound. Pass 2
+  evaluates only rows whose source presence records the terminal transaction's
+  purity proof, in deterministic ordinal/id order. Unrestorable rows remain
+  unbound; their durable fact is the statement of what is absent."
+  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
+  [{ctx :seon.sci.eval/ctx db :seon.db/db}]
+  (let [rows
+        (->> (d/q '[:find [?entry ...]
+                    :where [?entry :seon.code.def/id _]]
+                  db)
+             (map #(d/pull db '[* {:seon.code.def/ns [:seon.ns/name]}] %))
+             (remove
+              (fn [row]
+                (some? (d/pull db [:db/id]
+                               [:seon.fn/sym (:seon.code.def/id row)]))))
+             (sort-by (juxt :seon.code.def/ordinal :seon.code.def/id))
+             vec)]
+    (doseq [{namespace-ref :seon.code.def/ns
+             intern-name :seon.code.def/name} rows]
+      (let [namespace-name (:seon.ns/name namespace-ref)]
+        (when-not (sci/find-ns ctx namespace-name)
+          (sci/add-namespace! ctx namespace-name {}))
+        (sci/intern ctx namespace-name intern-name)))
+    (doseq [{namespace-ref :seon.code.def/ns
+             source :seon.code.def/source}
+            (filter :seon.code.def/source rows)]
+      (let [namespace-name (:seon.ns/name namespace-ref)
+            namespace-object (sci/create-ns namespace-name)
+            form (:seon.sci.reader/form
+                  (one-event source namespace-name ctx))]
+        (sci/binding [sci/ns namespace-object]
+          (sci/eval-form ctx form))))
+    {:seon.sci.eval/ctx ctx
+     :seon.sci.eval/unrestorable
+     (into []
+           (keep (fn [row]
+                   (when-let [reason (:seon.code.def/unrestorable row)]
+                     {:seon.code.def/id (:seon.code.def/id row)
+                      :seon.code.def/unrestorable reason})))
+           rows)}))
+
 (defn cluster-ctx
   "Build and cold-acquire one cluster's live SCI program context."
   {:malli/schema [:=> [:cat :seon.db/database-value]
@@ -933,12 +1051,15 @@
   (let [ctx (build-base-ctx)
         acquired (acquire! {:seon.sci.eval/ctx ctx
                             :seon.db/db db})
-        projection (:seon.schema/projection acquired)]
-    (assoc ctx
-           :seon.schema/projection projection
-           ::projection-state
-           (atom {::basis-transaction (long (:max-tx db))
-                  :seon.schema/projection projection}))))
+        projection (:seon.schema/projection acquired)
+        ctx (assoc ctx
+                   :seon.schema/projection projection
+                   ::projection-state
+                   (atom {::basis-transaction (long (:max-tx db))
+                          :seon.schema/projection projection}))]
+    (install-session-image! {:seon.sci.eval/ctx ctx
+                             :seon.db/db db})
+    ctx))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
@@ -994,6 +1115,7 @@
             execution-ctx (if namespace-unmap?
                             (sci/fork evaluation-ctx)
                             evaluation-ctx)
+            before-intern-values (intern-values execution-ctx)
             before-namespace-state
             (when namespace-unmap?
               (sci/namespace-state execution-ctx))
@@ -1120,6 +1242,11 @@
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
+              evaluation-record (record :ok)
+              session-defs
+              (changed-session-defs
+               execution-ctx before-intern-values source form
+               (:seon.fn/sym row))
               admitted (admit/admit
                         {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn interrupt-fn
@@ -1128,7 +1255,7 @@
                          ;; not read a dial of its own, and this
                          ;; evaluator does not default one
                          :seon.config/on-core-error on-core-error
-                         :seon.sci.admit/record (record :ok)})]
+                         :seon.sci.admit/record evaluation-record})]
           (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn admitted)
@@ -1138,6 +1265,8 @@
                    :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
                    :seon.sci.admit/record (:seon.sci.admit/record admitted)}
             row (assoc :seon.sci.eval/program-row row)
+            (seq session-defs)
+            (assoc :seon.sci.eval/session-defs session-defs)
             (seq (str printed))
             (assoc :seon.cluster.eval/output
                    (bounded-output printed caps))))
