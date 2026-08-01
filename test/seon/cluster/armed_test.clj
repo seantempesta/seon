@@ -33,6 +33,7 @@
             [seon.cluster.run :as run]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
@@ -139,24 +140,27 @@
           (is (some? (:seon.flow/fault-channel
                       (:seon.flow/error-fanout instance))))
           (is (zero? @(:seon.error/drops instance))))
-        (testing "the handle was derived from facts, not assembled by hand
-        in a script: the provider comes from the dials"
+        (testing "the handle retains identity while AI settings stay live"
           (let [handle (:seon.cluster.loop/cluster instance)]
             (is (seon.schema/valid-candidate-value? :seon.cluster.loop/cluster
                                                     handle))
-            (is (str/starts-with?
-                 (:seon.ai/endpoint (:seon.ai/primary handle))
-                 "https://"))
+            (is (= "armed" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle)))
-            (testing "and the shipped document configures NO backup, so
-            the handle simply has no backup key — absence, never nil"
-              (is (not (contains? handle :seon.ai/backup))))
-            (testing "while the backoff strategy IS derived from the
-            dials, because the no-backup path is the only resilience a
-            default cluster has"
+            (is (empty? (select-keys handle
+                                     [:seon.ai/primary
+                                      :seon.ai/backup
+                                      :seon.ai.retry/strategy])))
+            (let [settings (ai/settings
+                            (config/effective @connection "armed")
+                            (ai/agent-overlay @connection "root"))
+                  targets (ai/targets settings)]
+              (is (str/starts-with?
+                   (:seon.ai/endpoint (:seon.ai/primary targets))
+                   "https://"))
+              (is (not (contains? targets :seon.ai/backup)))
               (is (seon.schema/valid-candidate-value?
                    :seon.ai.retry/strategy
-                   (:seon.ai.retry/strategy handle))))))))))
+                   (ai/retry-strategy settings))))))))))
 
 (deftest two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]

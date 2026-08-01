@@ -32,7 +32,9 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.flow :as seon.flow]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -74,24 +76,17 @@
        (test-support/seed-cluster! connection "generate-code-v0")
        (d/transact connection
                    (conj cast-rows
-                         {:seon.config/cluster "generate-code-v0"
-                          :seon.config.run/max-episode-runs 100}))
+                         (:seon.config/desired-row
+                          (config/compile-manifest
+                           {:seon.boot/cluster-name "generate-code-v0"
+                            :seon.config/manifest
+                            {:seon.config.run/max-episode-runs 100}}))))
        (body {:seon.store/branch-connection connection
+              :seon.cluster/name "generate-code-v0"
               :seon.cluster.run/process process
+              :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
               :seon.cluster.wake/channel
               (async/chan (async/sliding-buffer 1))
-              :seon.ai/primary
-              {:seon.ai/endpoint "http://127.0.0.1:1/v1"
-               :seon.ai/model "probe"
-               :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
-               :seon.ai/timeout-ms 200}
-              :seon.ai.retry/strategy
-              {:seon.ai.retry/base-delay-ms 1
-               :seon.ai.retry/multiplier 2.0
-               :seon.ai.retry/jitter-fraction 0.0
-               :seon.ai.retry/maximum-delay-ms 1
-               :seon.ai.retry/maximum-retries 0
-               :seon.ai.retry/maximum-total-delay-ms 0}
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
               :seon.config.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic

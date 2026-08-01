@@ -24,6 +24,7 @@
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.schema :as schema]
@@ -104,22 +105,14 @@
 (defn- handle
   [connection ctx]
   {:seon.store/branch-connection connection
+   :seon.cluster/name
+   (d/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
+        @connection)
    :seon.sci.eval/ctx ctx
    :seon.cluster.run/process process
    ;; replaced per agent by arm! — present so the handle validates
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
    :seon.cluster.loop/completion (async/promise-chan)
-   :seon.ai/primary {:seon.ai/endpoint "http://127.0.0.1:1/v1"
-                     :seon.ai/model "probe"
-                     :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
-                     :seon.ai/timeout-ms 200}
-   :seon.ai.retry/strategy
-   {:seon.ai.retry/base-delay-ms 1
-    :seon.ai.retry/multiplier 2.0
-    :seon.ai.retry/jitter-fraction 0.0
-    :seon.ai.retry/maximum-delay-ms 1
-    :seon.ai.retry/maximum-retries 0
-    :seon.ai.retry/maximum-total-delay-ms 0}
    :seon.cluster.loop/evaluate 'seon.cluster.agent-test/fake-evaluate
    :seon.sci.admit/caps {:seon.config.eval.result/max-depth 6
                          :seon.config.eval.result/max-collection 8
@@ -129,6 +122,12 @@
    :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16})
+
+(defn- config-row
+  [cluster-name overlay]
+  (:seon.config/desired-row
+   (config/compile-manifest {:seon.boot/cluster-name cluster-name
+                             :seon.config/manifest overlay})))
 
 (defn- armory
   "A routing entry with a test fault channel already joined."
@@ -289,8 +288,8 @@
                 events (database-events connection)]
             (d/transact connection
                         [{:seon.cluster.agent/id "all-refused"}
-                         {:seon.config/cluster "r22-all-refused"
-                          :seon.config.run/max-episode-runs 3}])
+                         (config-row "r22-all-refused"
+                                     {:seon.config.run/max-episode-runs 3})])
             (try
               (with-redefs [ai/complete
                             (scripted-completer
@@ -344,8 +343,8 @@
                 events (database-events connection)]
             (d/transact connection
                         [{:seon.cluster.agent/id "mixed-refusal"}
-                         {:seon.config/cluster "r22-mixed-refusal"
-                          :seon.config.run/max-episode-runs 3}])
+                         (config-row "r22-mixed-refusal"
+                                     {:seon.config.run/max-episode-runs 3})])
             (try
               (with-redefs [ai/complete
                             (scripted-completer
@@ -397,8 +396,8 @@
                          :seon.cluster.work/now (Date.)}]
             (d/transact connection
                         [{:seon.cluster.agent/id "capped-refusal"}
-                         {:seon.config/cluster "r22-capped-refusal"
-                          :seon.config.run/max-episode-runs 1}])
+                         (config-row "r22-capped-refusal"
+                                     {:seon.config.run/max-episode-runs 1})])
             (try
               (with-redefs [ai/complete
                             (scripted-completer
@@ -443,8 +442,9 @@
             armer-channel (async/chan (async/sliding-buffer 1))
             ledger (atom [])]
         (d/transact connection
-                    (into [{:seon.config/cluster "trial"
-                            :seon.config.run/max-episode-runs 100}]
+                    (into [(config-row
+                            "trial"
+                            {:seon.config.run/max-episode-runs 100})]
                           (map (fn [agent-id]
                                  {:seon.cluster.agent/id agent-id}))
                           agent-ids))
@@ -593,9 +593,10 @@
     (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
-        (d/transact connection [{:seon.cluster.agent/id "parked"}
-                                {:seon.config/cluster "park-2026072812"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "parked"}
+                     (config-row "park-2026072812"
+                                 {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (recording-completer
@@ -645,9 +646,10 @@
             ledger (atom [])
             latch (promise)
             in-flight (promise)]
-        (d/transact connection [{:seon.cluster.agent/id "pausable"}
-                                {:seon.config/cluster "pause-2026072813"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "pausable"}
+                     (config-row "pause-2026072813"
+                                 {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (fn [request]
@@ -739,10 +741,11 @@
       (let [request {:seon.cluster.agent/id "alice"
                      :seon.cluster.run/process process
                      :seon.cluster.work/now (Date.)}]
-        (d/transact connection [{:seon.cluster.agent/id "alice"}
-                                {:seon.cluster.agent/id "bob"}
-                                {:seon.config/cluster "cap-2026072814"
-                                 :seon.config.run/max-episode-runs 3}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "alice"}
+                     {:seon.cluster.agent/id "bob"}
+                     (config-row "cap-2026072814"
+                                 {:seon.config.run/max-episode-runs 3})])
         ;; episode 1: a human asks
         (outside-trigger! connection "alice" "h1" "human asks")
         (opened-run! connection "alice" "e1" "h1" now)
@@ -838,9 +841,10 @@
                      ([state input message]
                       (swap! v2-ran inc)
                       (step state input message))))]
-        (d/transact connection [{:seon.cluster.agent/id "reloaded"}
-                                {:seon.config/cluster "hot-2026072815"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "reloaded"}
+                     (config-row "hot-2026072815"
+                                 {:seon.config.run/max-episode-runs 100})])
         (try
           (let [entry (arm-one! connection ctx routing "reloaded")
                 ;; the CONTROL: an identically-shaped graph whose turn
@@ -925,10 +929,11 @@
             ledger (atom [])
             evaluation-sources (atom [])
             evaluate fake-evaluate]
-        (d/transact connection [{:seon.cluster.agent/id "midfold"}
-                                {:seon.cluster.agent/id "waiting"}
-                                {:seon.config/cluster "restamp-2026072816"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "midfold"}
+                     {:seon.cluster.agent/id "waiting"}
+                     (config-row "restamp-2026072816"
+                                 {:seon.config.run/max-episode-runs 100})])
         ;; the dead process's history: open+claim on an outside
         ;; trigger, a three-form plan, form 0 settled, form 1 STARTED
         ;; and never settled, and a capability-shaped form 2 that had
@@ -1107,9 +1112,10 @@
       (let [other "77777-1"
             routing (armory)
             ledger (atom [])]
-        (d/transact connection [{:seon.cluster.agent/id "held"}
-                                {:seon.config/cluster "p2-2026072818"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "held"}
+                     (config-row "p2-2026072818"
+                                 {:seon.config.run/max-episode-runs 100})])
         (outside-trigger! connection "held" "m-held" "busy elsewhere")
         (d/transact connection
                     {:tx-data (into (run/open-tx
@@ -1168,6 +1174,7 @@
       (let [routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
             armer-handle (assoc (handle connection ctx)
+                                :seon.cluster/name "route-trial"
                                 :seon.cluster.wake/channel armer-channel
                                 :seon.cluster.loop/completion
                                 (async/promise-chan))
@@ -1184,8 +1191,9 @@
             ledger (atom [])
             created (atom [])
             message-count (atom 0)]
-        (d/transact connection [{:seon.config/cluster "route-trial"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [(config-row "route-trial"
+                                 {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (recording-completer
@@ -1288,9 +1296,10 @@
     (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
-        (d/transact connection [{:seon.cluster.agent/id "waiter"}
-                                {:seon.config/cluster "wait-2026072820"
-                                 :seon.config.run/max-episode-runs 100}])
+        (d/transact connection
+                    [{:seon.cluster.agent/id "waiter"}
+                     (config-row "wait-2026072820"
+                                 {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (recording-completer
