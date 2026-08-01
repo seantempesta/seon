@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, context, render, agent]
 ---
@@ -44,3 +44,16 @@ An agent's prompt contains no copy of a previous prompt, no
 `:seon.ai.attempt` row, and no bare transaction entity. Observability keeps
 those facts for the debug surface and forensics; the agent-facing walk omits
 them. Two consecutive no-op turns produce captures of comparable size.
+
+## Resolution
+
+Resolved at the ruled renderer boundary by `da2b2a499`: the capture family
+returns nil for `:seon.render/ai` and a collapsed exact-prompt disclosure for
+`:seon.render/html`. The walk stays total and contains no capture exclusion
+list. A real two-render fixture committed the first 1,288-token prompt as a
+capture; the next prompt remained 1,288 estimated tokens, contained the
+getting-started instruction once, and did not contain the first prompt as a
+substring. The proof also removed the retired contribution band after
+`capture-tx` exposed a stored-nil refusal (`41cdbc65b`). Raw attempt and transaction facts
+remain total-walk neighbours by the explicit renderer-relevance ruling; this
+closure is for the context-quine defect named by the issue.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, agent]
 ---
@@ -52,3 +52,12 @@ contracts (and, within budget, sources) in its context; when the budget
 truncates, the omission note states how many definitions were dropped. The
 distance-1 branch honours the token budget instead of branching on whether
 the `ns` form happens to be bare.
+
+## Resolution
+
+Resolved by `eed1c633d`. Distance 1 now composes the stored namespace source
+and every exact member source; when namespace source is absent it synthesizes
+the namespace form and still emits member blocks, so distance 1 cannot render
+neither. The `seon.flow` proof found all 48 indexed function sources in the
+owner's context (99,495 characters / 24,873 estimated tokens). The focused
+gate passed 5 tests / 67 assertions.

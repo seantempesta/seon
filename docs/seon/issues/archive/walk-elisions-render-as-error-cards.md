@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web, context]
 ---
@@ -45,3 +45,12 @@ card.
 An elided branch is not an error card and does not carry `data-error-kind`.
 In the AI projection the frontier is stated ONCE (a single line naming how
 many branches were cut and how to widen `:depth`), not once per cut edge.
+
+## Resolution
+
+Resolved by `8fdedd29e`. Elisions are ordinary marker nodes with no
+`:seon.error/value`; HTML receives one quiet `seon-walk-elision` affordance,
+and AI assembly reduces every frontier marker to one line containing the
+count, estimated tokens, and literal deeper `seon.render/walk` call. The
+nursery proof fell from 42 opening lines to one; the recurring tests prove the
+marker carries no error value or error-card data.

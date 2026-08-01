@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, context, toolkit]
 ---
@@ -54,3 +54,12 @@ A fresh agent's first turn sends a message successfully without a
 lint-rejected form. The instruction's example call matches the function's
 committed `:seon.fn/spec`; a test derives the named symbols from the program
 graph so the text cannot drift from the toolkit again.
+
+## Resolution
+
+Resolved by `69c3e740b`. The populated instruction now names the real
+two-argument call, `(my.message/send "agent-id" "message")`. The recurring
+test extracts qualified calls from the instruction's actual inline and fenced
+code spans, resolves each against the populated program graph, and checks the
+called arity against its stored `:seon.fn/spec`; it is not a hand-maintained
+symbol list. The focused gate passed 4 tests / 16 assertions.

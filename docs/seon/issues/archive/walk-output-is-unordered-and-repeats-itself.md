@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, context, render, agent]
 ---
@@ -48,3 +48,16 @@ The projection opens with the agent's own state and its newest unread work,
 followed by instructions and toolkit, with older material last. Path labels
 are absent or reduced to something an agent can act on. One committed fact
 renders once per projection.
+
+## Resolution
+
+Resolved by `8fdedd29e` and `3ffaba05b`. `seon.render.walk/units` is the one
+post-flatten sorter: the root is the stable head, ordinary branches retain
+grouped last-changed order, and the synthetic transcript is the stable tail.
+Labels are compact depth/provenance comments; a branch root retains the
+literal path accepted by the deeper-walk call. The per-walk rendered set now
+also consumes the transcript's structural membership, so message content,
+matched form source, and eval result have one projection rather than both a
+raw unit and transcript copy. A real-fact regression gives each one a unique
+sentinel and observes exactly one occurrence. The nursery owner moved from
+line 101 of 213 to line 4 of 72.
