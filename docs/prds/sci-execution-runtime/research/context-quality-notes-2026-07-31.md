@@ -76,7 +76,7 @@ source in the same distance-1 unit:
 ```clojure
 (defn- executor?
   [value]
-  (instance? java.util.concurrent.ExecutorService value))
+  (instance? Executor value))
 ```
 
 After committing the first rendered context as a real
@@ -104,5 +104,8 @@ constructor/schema were corrected before this measurement was accepted.
 - Walk caps, compact markers, stable ordering, and real transcript-fact
   dedupe: 12 tests / 58 assertions.
 
-The final integrated gate and issue-index check are recorded in the issue
-resolutions after all source files were frozen.
+After all source files were frozen, the namespace/instruction/capture/prompt
+checkpoint passed 14 tests / 106 assertions and the seeded walk checkpoint
+passed 12 tests / 58 assertions, both with zero failures and zero errors.
+`bin/issues-index --check` reported 42 open notes and 802 archived notes with a
+clean index.
