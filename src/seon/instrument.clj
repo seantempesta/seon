@@ -80,10 +80,10 @@
   the first one found this way was real (`loop.cljc` passing a
   transaction argument map where the contract said vector — see
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`)."
-  (:require [clojure.string :as str]
-            [malli.core :as m]
+  (:require [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -197,13 +197,14 @@
   this tree — so it says so on stderr rather than passing quietly.
 
   Call it again after re-evaluating anything: a re-`defn` silently
-  strips the wrapper and no watch fires. Every apply first reloads the
-  classpath schema population because collecting current contracts cannot
-  compile a named reference that a fresh or hot-reloaded process has not yet
-  contributed."
+  strips the wrapper and no watch fires. Every apply first reloads and
+  activates the complete candidate schema population because Malli collection
+  compiles against Seon's stable active registry. Merely contributing a new
+  named reference leaves an already-active projection unchanged."
   {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
   (schema.edn/load! {})
+  (schema/activate! (schema/snapshot))
   (let [registered (count (mi/clj-collect! {:ns (all-ns)}))]
     (case mode
       :panic
