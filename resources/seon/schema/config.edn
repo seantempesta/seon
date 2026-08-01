@@ -93,6 +93,17 @@
  :seon.config.ai/max-tokens
  :seon.ai/max-tokens
 
+ ; Optional by design: absence sends no thinking field, so the provider owns
+ ; its documented default (DeepSeek v4 Flash is default-on/high). :disabled
+ ; sends explicit off. :low/:high/:max send explicit on plus that effort.
+ ; Vendor mapping captured 2026-08-01:
+ ; requested low/high/xhigh/max -> Flash low/high/high/max;
+ ; requested low/high/xhigh/max -> Pro high/high/max/max until its announced
+ ; early-August mapping update. Seon exposes low/high/max and lets the provider
+ ; perform its model-specific mapping; there is no model-name branch here.
+ :seon.config.ai/thinking
+ [:and {:seon.config/optional true} :seon.ai/thinking]
+
  :seon.config.ai/api-key-variable
  [:string {:min 1}]
 

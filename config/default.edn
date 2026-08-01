@@ -142,10 +142,14 @@
  :seon.config.ai/model "deepseek-v4-flash"
 
  ; Unit: maximum provider completion tokens, including reasoning tokens.
- ; Provenance: the 2026-07-29 real thinking-model calibration exhausted
- ; 4,096 tokens without visible content; 8,192 completed three consecutive
- ; ordinary Seon task shapes while preserving thinking.
- :seon.config.ai/max-tokens 8192
+ ; Provenance: thinking default-on interim; flash-bench calibration pending.
+ ; The former 8,192 default retained the same starvation class already seen
+ ; at 4,096, so the live default must carry ample reasoning + reply headroom.
+ :seon.config.ai/max-tokens 65536
+
+ ; Absence is intentional: DeepSeek v4 Flash defaults thinking ON at effort
+ ; high. A sparse overlay may set :disabled or an explicit :low/:high/:max.
+ :seon.config.ai/thinking :seon.config/absent
 
  ; Unit: the NAME of an environment variable. Never the credential —
  ; the key is read at the leaf, never becomes a datom, never enters Git.

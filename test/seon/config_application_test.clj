@@ -47,6 +47,8 @@
    {:mode :arm-time :consumer 'seon.ai/targets}
    :seon.config.ai/max-tokens
    {:mode :arm-time :consumer 'seon.ai/targets}
+   :seon.config.ai/thinking
+   {:mode :arm-time :consumer 'seon.ai/targets}
    :seon.config.ai/api-key-variable
    {:mode :arm-time :consumer 'seon.ai/targets}
    :seon.config.ai/no-auth
@@ -92,6 +94,7 @@
    :seon.config.ai/endpoint "http://127.0.0.1:1/primary"
    :seon.config.ai/model "application-proof"
    :seon.config.ai/max-tokens 123
+   :seon.config.ai/thinking :high
    :seon.config.ai/api-key-variable "SEON_APPLICATION_PROOF_KEY"
    :seon.config.ai/timeout-ms 222
    :seon.config.ai.backup/model "application-proof-backup"
@@ -160,16 +163,22 @@
             (is (= {:seon.ai/endpoint "http://127.0.0.1:1/primary"
                     :seon.ai/model "application-proof"
                     :seon.ai/max-tokens 123
+                    :seon.ai/thinking :high
                     :seon.ai/api-key-variable "SEON_APPLICATION_PROOF_KEY"
                     :seon.ai/timeout-ms 222}
                    (:seon.ai/primary handle)))
             (is (= {:seon.ai/endpoint "http://127.0.0.1:1/backup"
                     :seon.ai/model "application-proof-backup"
                     :seon.ai/max-tokens 123
+                    :seon.ai/thinking :high
                     :seon.ai/api-key-variable
                     "SEON_APPLICATION_PROOF_BACKUP_KEY"
                     :seon.ai/timeout-ms 333}
                    (:seon.ai/backup handle)))
+            (is (= :high
+                   (:seon.config.ai/thinking
+                    (config/effective @connection name)))
+                "the descriptor value came back through the database fact")
             (is (= {:seon.ai.retry/base-delay-ms 11
                     :seon.ai.retry/multiplier 1.5
                     :seon.ai.retry/jitter-fraction 0.1

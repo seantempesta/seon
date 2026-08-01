@@ -83,8 +83,9 @@ backend, and retry policy—are database-owned and resolve agent entity override
 | `SEON_AI_MAX_TOKENS` | `:seon.ai/max-tokens` | int | all | |
 | `SEON_AI_COMPLETION_LIMIT_FIELD` | `:seon.ai/completion-limit-field` | `max-tokens`\|`max-completion-tokens` | openai-compat | wire name for the output cap; default `max-tokens` |
 | `SEON_AI_TIMEOUT_MS` | `:seon.ai/timeout-ms` | int | all | wall-clock; default `60000` |
-| `SEON_AI_THINKING` | `:seon.ai/thinking` | `false`\|`true`\|`high`\|`max`\|… | all | see Thinking |
-| `SEON_AI_TEMPERATURE` | `:seon.ai/temperature` | double | deepseek, openai-compat | **ignored by anthropic** (sampling params 400 on Opus 4.7+/Fable) |
+| — | `:seon.config.ai/thinking` | `:disabled`\|`:low`\|`:high`\|`:max` | fresh DeepSeek | optional database fact; absence leaves the provider default untouched |
+| `SEON_AI_THINKING` | — | — | deleted pod only | no fresh runtime environment-variable path; use a typed config manifest/overlay |
+| `SEON_AI_TEMPERATURE` | — | — | deleted pod only | fresh Seon sends no sampling controls; DeepSeek silently ignores them in thinking mode |
 | `SEON_AI_BASE_URL` | `:seon.ai/base-url` | string | openai-compat | the `/v1` ROOT (preferred) — see baseURL |
 | `SEON_AI_API_KEY_ENV` | `:seon.ai/api-key-env` | string | deepseek, openai-compat | NAME of the env var holding the key |
 | `SEON_AI_EXTRA_BODY` | `:seon.ai/extra-body-edn` | EDN-map string | all | extra request fields for the agent loop — see Extra request fields |
@@ -129,11 +130,11 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 |---|---|---|
 | model | `deepseek-v4-flash` | `claude-opus-4-8` |
 | endpoint | `https://api.deepseek.com/v1` | `https://api.anthropic.com/v1/messages` (SDK-owned) |
-| temperature | `0.7` | n/a (never sent) |
-| max_tokens | `4096` | `16000` |
+| temperature | n/a (never sent) | n/a (never sent) |
+| max_tokens | `65536` interim | `16000` |
 | completion-limit-field | `max-tokens` | n/a |
 | timeout-ms | `60000` | `60000` |
-| thinking | disabled unless turned on | adaptive when truthy |
+| thinking | field absent; v4 Flash defaults on/high | adaptive when truthy |
 
 `:openai-compat` has **no shipped endpoint or temperature** —
 `SEON_AI_BASE_URL` is required (missing → a legible error envelope at call
@@ -191,17 +192,32 @@ thinking constraints are model data: K2.7 Code cannot disable thinking.
 
 ### Thinking
 
-- `:deepseek` always sends an explicit toggle: `{:thinking {:type "disabled"}}`
-  unless `SEON_AI_THINKING` is truthy (`"true"` → enabled; `"high"`/`"max"` →
-  enabled + that `reasoning_effort`).
-- `:openai-compat` sends ONLY the STANDARD OpenAI param (fixed 2026-07-10):
-  an effort string (`"minimal"`…`"xhigh"`) goes out as `reasoning_effort`;
-  the vendor `:thinking` field is NEVER sent (strict gateways — Meta Model
-  API, vLLM — HTTP-400 unknown params). `"true"` sends nothing (no standard
-  wire form; reasoning models reason by default). For servers that gate
-  reasoning differently (e.g. Qwen), use `:extra-body`.
-- `:anthropic` maps any truthy thinking to `{:thinking {:type "adaptive"}}`;
-  falsy omits the key entirely.
+Fresh Seon's DeepSeek surface is one optional database-backed dial,
+`:seon.config.ai/thinking`, projected onto the target as `:seon.ai/thinking`.
+There is no `SEON_AI_THINKING` runtime read and no agent-local mirror today.
+
+- absent → omit both wire fields. DeepSeek v4 Flash applies its documented
+  default: thinking enabled at effort high;
+- `:disabled` → `{"thinking":{"type":"disabled"}}`; and
+- `:low`, `:high`, or `:max` → explicit enabled plus the matching
+  `reasoning_effort` string.
+
+The vendor's 2026-08-01 model mapping is requested low/high/xhigh/max → Flash
+low/high/high/max and Pro high/high/max/max (the Pro low mapping was announced
+to change in early August). Seon exposes low/high/max and sends the chosen
+value directly; it never branches on a model name.
+
+DeepSeek silently ignores `temperature`, `top_p`, `presence_penalty`, and
+`frequency_penalty` in thinking mode. Fresh Seon sends none of them, so its
+request and recorded config do not claim sampling control the provider says it
+does not have. Response `reasoning_content` is a sibling of visible `content`;
+the parser excludes it from reply text while retaining provider usage,
+`completion_tokens_details.reasoning_tokens`, and `finish_reason`.
+
+Authoritative contract and dated live evidence:
+`../../prds/sci-execution-runtime/research/deepseek-thinking-mode-api-2026-08-01.md`
+and
+`../../prds/sci-execution-runtime/research/deepseek-thinking-live-proof-2026-08-01.md`.
 
 ## Model catalog — the top models and their good configs (2026-07-19)
 
@@ -273,10 +289,15 @@ DEEPSEEK_API_KEY=<key>
 - **Retired legacy slugs (gone since 2026-07-24):** `deepseek-chat` and
   `deepseek-reasoner`. Current identifiers, verified against the live
   `/models` endpoint 2026-08-01: `deepseek-v4-flash` / `deepseek-v4-pro`.
-- DeepSeek thinking-mode tool continuation requires replaying the complete
-  assistant message, including `reasoning_content`, before the tool result.
-  Seon's one-shot visible-text path is verified; provider-native multi-turn
-  continuation is not yet a maintained agent-loop claim.
+- Fresh Seon has no tool-call or provider-message continuation representation.
+  Its maintained model path is one prompt to one completion, so it cannot yet
+  claim thinking-mode tool continuation. The vendor contract requires every
+  assistant tool-call message—including complete `reasoning_content` and
+  non-null content—to be replayed in all subsequent requests. That acceptance
+  contract is tracked in
+  `../../prds/sci-execution-runtime/research/deepseek-thinking-mode-api-2026-08-01.md`;
+  the live Flash endpoint was permissive when reasoning was omitted on the
+  probe date, which is not permission to weaken the documented shape.
 
 ### Meta Model API (`:openai-compat`) — Muse Spark 1.1
 
@@ -411,35 +432,13 @@ ANTHROPIC_API_KEY=<key>
 
 ### Per-agent routing
 
-Every non-secret provider field has a per-agent mirror:
-`agent-provider`, `agent-model`, `agent-temperature`, `agent-max-tokens`,
-`agent-completion-limit-field`, `agent-thinking`, `agent-timeout-ms`,
-`agent-base-url`, `agent-api-key-env`, `agent-dg-backend`, and
-`agent-extra-body-edn`; `agent-max-retries` controls retries and
-`agent-attempt-timeout-ms` optionally replaces the process-default outer bound.
-Absent values fall through to the global row or process default; there is no stored `:inherit` sentinel (a declared `:inherit` is rejected with steering).
-These attributes can be transacted onto an existing agent, supplied through
-the manifest's ordinary/root agent context for atomic birth, or included in a
-per-mint context override. Prefer named birth variants when the same role is
-reused:
-
-```clojure
-:seon.config/model-variants
-{:planning {:seon.ai/agent-provider :openai-compat
-            :seon.ai/agent-model "kimi-k3"
-            :seon.ai/agent-completion-limit-field :max-completion-tokens
-            :seon.ai/agent-base-url "https://api.moonshot.ai/v1"
-            :seon.ai/agent-api-key-env "MOONSHOT_API_KEY"
-            :seon.ai/agent-timeout-ms 300000
-            :seon.ai/agent-attempt-timeout-ms 360000}
- :execution {:seon.ai/agent-provider :deepseek
-             :seon.ai/agent-model "deepseek-v4-flash"
-             :seon.ai/agent-thinking "false"}}
-```
-
-Pass `:seon.config/model-variant :planning` to `create!`, `mint!`, `start!`, or
-`delegate!`. The name is resolved from the same acquired configuration on each
-stale-database retry, while only the selected agent attributes persist.
+Fresh Seon has no per-agent provider or thinking override yet. The cluster's
+descriptor is derived from its effective config facts at arm time. The active
+roadmap requires future model configuration to be overridable at the agent or
+situation without creating a second config mechanism, but that work is coupled
+to agent modes and is not implemented. Names such as `:seon.ai/agent-thinking`
+and `:seon.config/model-variants` describe deleted pod machinery and must not be
+used as current APIs.
 
 ## Serving Qwen3.6-35B-A3B (or any OpenAI-compatible server)
 
@@ -499,26 +498,17 @@ not optional**, to keep reasoning out of the reply.
 
 ## Tool / function calling (default off)
 
-Pass OpenAI-format tool definitions and a tool-choice; they are included in the
-request only when present. Returned `tool_calls` surface as
-`:seon.ai/tool-calls` on the result (and inside `:seon.ai/raw`). The default
-emit-and-eval loop is unaffected when you pass no tools.
+Fresh Seon exposes no tool definitions, tool results, assistant message
+history, or `tool_calls` in its closed request/completion schemas. There is no
+continuation path to configure or call. The old explicit-adapter example was
+deleted with the pod and is not a supported debugging surface.
 
-```clojure
-(seon.ai.openai-compat/complete
-  {:seon.ai/ctx         "what's the weather in Paris?"
-   :seon.ai/tools       [{:type "function"
-                          :function {:name "get_weather"
-                                     :description "Current temp for a city."
-                                     :parameters {:type "object"
-                                                  :properties {:city {:type "string"}}
-                                                  :required ["city"]}}}]
-   :seon.ai/tool-choice "auto"})
-;; → {:seon.ai/text "…" :seon.ai/tool-calls [{...}] :seon.ai/usage {...} :seon.ai/raw …}
-```
-
-The ordinary agent-loop request schema does not expose tools yet; these options
-are currently for explicit adapter calls and wire-contract tests.
+Any future tool continuation must add one faithful message representation at
+the `seon.ai` owner. In thinking mode it must retain the complete assistant
+message after a tool call and replay its `reasoning_content` in every later
+request, while ordinary no-tool turns may omit reasoning. The open issue
+`thinking-tool-continuations-have-no-faithful-request-shape` owns that missing
+capability and its acceptance contract.
 
 ## Extra request fields (`:seon.ai/extra-body`)
 

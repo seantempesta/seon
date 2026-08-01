@@ -9,7 +9,9 @@
   live call against the real provider is the falsifier the orchestrator
   runs once by hand; a suite that needs a paid call to be green is a
   suite nobody runs."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
@@ -58,7 +60,30 @@
     the call site is one assoc"
       (is (schema/valid-candidate-value?
            :seon.ai/request
-           (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))))
+           (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))
+    (is (= 65536 (:seon.ai/max-tokens (:seon.ai/primary targets)))
+        "thinking default-on has interim headroom while calibration runs")
+    (is (not (contains? (:seon.ai/primary targets) :seon.ai/thinking))
+        "absence reaches the wire as the provider's documented default")))
+
+(deftest thinking-is-one-config-fact-with-three-wire-states
+  (testing "absence leaves the provider default untouched"
+    (let [body (ai/request-body base)]
+      (is (not (contains? body "thinking")))
+      (is (not (contains? body "reasoning_effort")))))
+  (testing "explicit disable sends only the off switch"
+    (let [body (ai/request-body (assoc base :seon.ai/thinking :disabled))]
+      (is (= {"type" "disabled"} (get body "thinking")))
+      (is (not (contains? body "reasoning_effort")))))
+  (testing "each configured effort means explicit on plus that effort"
+    (doseq [effort [:low :high :max]]
+      (let [target (get-in (ai/targets
+                            (assoc @dials :seon.config.ai/thinking effort))
+                           [:seon.ai/primary])
+            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+        (is (= effort (:seon.ai/thinking target)))
+        (is (= {"type" "enabled"} (get body "thinking")))
+        (is (= (name effort) (get body "reasoning_effort")))))))
 
 (deftest no-auth-is-an-explicit-exclusive-target-shape
   (let [target {:seon.ai/endpoint "http://127.0.0.1:8090/v1/chat/completions"
@@ -126,7 +151,7 @@
                            :seon.config.ai.backup/timeout-ms 30000))]
     (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
             :seon.ai/model "claude-probe"
-            :seon.ai/max-tokens 8192
+            :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
             :seon.ai/timeout-ms 30000}
            backup))
@@ -259,6 +284,84 @@
       (let [outcome (ai/completion-text body)]
         (is (error? outcome) (str "must classify: " (pr-str body)))
         (is (= :seon.ai/unparseable-body (:seon.error/kind outcome)))))))
+
+(def ^:private thinking-usage
+  {"prompt_tokens" 91
+   "completion_tokens" 42
+   "total_tokens" 133
+   "completion_tokens_details" {"reasoning_tokens" 40}})
+
+(deftest a-thinking-response-retains-visible-text-finish-and-complete-usage
+  (let [completion
+        (ai/completion-text
+         {"choices" [{"message" {"role" "assistant"
+                                  "reasoning_content" "private reasoning"
+                                  "content" "OK"}
+                      "finish_reason" "stop"}]
+          "usage" thinking-usage})]
+    (is (= "OK" (:seon.ai/text completion)))
+    (is (= "stop" (:seon.ai/finish-reason completion)))
+    (is (= 42 (:seon.ai/tokens completion)))
+    (is (= thinking-usage (:seon.ai/usage completion)))
+    (is (not (contains? completion :seon.ai/reasoning-content))
+        "reasoning is not reply text and no unsupported continuation is implied")))
+
+(deftest a-reasoning-starved-response-is-a-named-evidenced-error
+  (let [usage {"prompt_tokens" 104
+               "completion_tokens" 8
+               "total_tokens" 112
+               "completion_tokens_details" {"reasoning_tokens" 8}}
+        failure
+        (ai/completion-text
+         {"choices" [{"message" {"role" "assistant"
+                                  "reasoning_content" "all reasoning"
+                                  "content" ""}
+                      "finish_reason" "length"}]
+          "usage" usage})]
+    (is (= :seon.ai/token-starvation (:seon.error/kind failure)))
+    (is (= "length" (get-in failure
+                             [:seon.error/data :seon.ai/finish-reason])))
+    (is (= 8 (get-in failure
+                      [:seon.error/data :seon.ai/usage
+                       "completion_tokens_details" "reasoning_tokens"])))
+    (is (schema/valid-candidate-value? :seon.error/value failure))))
+
+(deftest streaming-reasoning-never-becomes-text-and-retains-terminal-evidence
+  (let [lines [(str "data: {\"choices\":[{\"delta\":{"
+                          "\"reasoning_content\":\"private\","
+                          "\"content\":null},\"finish_reason\":null}]}")
+               "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}"
+               (str "data: {\"choices\":[{\"delta\":{\"content\":\"\"},"
+                    "\"finish_reason\":\"stop\"}],\"usage\":"
+                    (json/write-str thinking-usage) "}")
+               "data: [DONE]"]
+        seen (atom [])
+        body (java.io.ByteArrayInputStream.
+              (.getBytes (str/join "\n" lines) "UTF-8"))
+        completion (#'seon.ai/streamed-completion
+                    body #(swap! seen conj (:seon.ai/text %)))]
+    (is (= ["OK"] @seen))
+    (is (= "OK" (:seon.ai/text completion)))
+    (is (= "stop" (:seon.ai/finish-reason completion)))
+    (is (= thinking-usage (:seon.ai/usage completion)))))
+
+(deftest a-reasoning-only-length-stream-is-the-same-named-error
+  (let [usage {"completion_tokens" 1
+               "completion_tokens_details" {"reasoning_tokens" 1}}
+        lines [(str "data: {\"choices\":[{\"delta\":{"
+                          "\"reasoning_content\":\"x\",\"content\":null},"
+                          "\"finish_reason\":null}]}")
+               (str "data: {\"choices\":[{\"delta\":{\"content\":\"\"},"
+                    "\"finish_reason\":\"length\"}],\"usage\":"
+                    (json/write-str usage) "}")
+               "data: [DONE]"]
+        body (java.io.ByteArrayInputStream.
+              (.getBytes (str/join "\n" lines) "UTF-8"))
+        failure (#'seon.ai/streamed-completion body nil)]
+    (is (= :seon.ai/token-starvation (:seon.error/kind failure)))
+    (is (= "length" (get-in failure
+                             [:seon.error/data :seon.ai/finish-reason])))
+    (is (= usage (get-in failure [:seon.error/data :seon.ai/usage])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; complete — one attempt, four failure shapes, never a throw

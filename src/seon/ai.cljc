@@ -110,15 +110,18 @@
   {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai/targets]}
   [dials]
   (let [primary
-        (merge
-         {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
-          :seon.ai/model (:seon.config.ai/model dials)
-          :seon.ai/max-tokens (:seon.config.ai/max-tokens dials)
-          :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
-         (if (:seon.config.ai/no-auth dials)
-           {:seon.config.ai/no-auth true}
-           {:seon.ai/api-key-variable
-            (:seon.config.ai/api-key-variable dials)}))]
+        (cond->
+         (merge
+          {:seon.ai/endpoint (:seon.config.ai/endpoint dials)
+           :seon.ai/model (:seon.config.ai/model dials)
+           :seon.ai/max-tokens (:seon.config.ai/max-tokens dials)
+           :seon.ai/timeout-ms (:seon.config.ai/timeout-ms dials)}
+          (if (:seon.config.ai/no-auth dials)
+            {:seon.config.ai/no-auth true}
+            {:seon.ai/api-key-variable
+             (:seon.config.ai/api-key-variable dials)}))
+          (:seon.config.ai/thinking dials)
+          (assoc :seon.ai/thinking (:seon.config.ai/thinking dials)))]
     (cond-> {:seon.ai/primary primary}
       (:seon.config.ai.backup/model dials)
       (assoc :seon.ai/backup
@@ -203,12 +206,13 @@
 
 (defn request-body
   "The provider request document for one completion. Pure.
-  Quarried from `src-old/seon/ai/openai_compat/core.cljc:11` — the
-  shape is right and survives; what dies with the quarry is everything
-  around it (streaming, thinking modes, provider dispatch)."
+  DeepSeek thinking is one optional value: absence leaves the provider's
+  default untouched, `:disabled` sends an explicit off switch, and an
+  effort sends explicit on plus `reasoning_effort`. Unsupported sampling
+  controls are never emitted."
   {:malli/schema [:=> [:cat :seon.ai/request] [:map]]}
   [{:keys [:seon.ai/model :seon.ai/max-tokens
-           :seon.ai/system :seon.ai/prompt]
+           :seon.ai/system :seon.ai/prompt :seon.ai/thinking]
     stream? :seon.ai/stream?}]
   ;; STRING keys: this is the wire document, not Clojure data. It is
   ;; built as strings and read back as strings, so nothing in between
@@ -223,7 +227,15 @@
     ;; documents the option as a deprecated no-op, so this is harmless
     ;; where it is ignored and load-bearing where it is not
     ;; (docs/seon/reference/llm-adapters.md:169-179)
-    stream? (assoc "stream_options" {"include_usage" true})))
+    stream? (assoc "stream_options" {"include_usage" true})
+
+    thinking
+    (assoc "thinking" {"type" (if (= :disabled thinking)
+                                  "disabled"
+                                  "enabled")})
+
+    (contains? #{:low :high :max} thinking)
+    (assoc "reasoning_effort" (name thinking))))
 
 (defn stream-event
   "One SSE line folded into the accumulating snapshot. PURE.
@@ -252,14 +264,17 @@
     (if (or (nil? payload) (= "[DONE]" payload) (str/blank? payload))
       snapshot
       (let [chunk (try (json/read-str payload) (catch Throwable _ nil))
-            delta (some-> chunk (get "choices") first (get "delta")
-                          (get "content"))
+            choice (some-> chunk (get "choices") first)
+            delta (some-> choice (get "delta") (get "content"))
+            finish-reason (some-> choice (get "finish_reason"))
             usage (get chunk "usage")
             text (cond-> (:seon.ai/text snapshot)
                    (string? delta) (str delta))]
         (cond-> (assoc snapshot :seon.ai/text text)
           ;; newest usage wins, and only when the provider sent one
           (map? usage) (assoc :seon.ai/usage usage)
+          (string? finish-reason)
+          (assoc :seon.ai/finish-reason finish-reason)
           ;; THE LIVE TOKEN COUNT, from the same fold rather than a
           ;; second mechanism: the provider's own completion count when
           ;; it has told us, and the chunk count until then — which is
@@ -295,6 +310,32 @@
           {:seon.ai/text "" :seon.ai/tokens 0}
           lines))
 
+(defn- parsed-completion
+  [content finish-reason usage tokens body-shape]
+  (let [evidence (cond-> {::body-shape body-shape}
+                   (string? finish-reason)
+                   (assoc ::finish-reason finish-reason)
+                   (map? usage) (assoc ::usage usage))]
+    (cond
+      (and (= "length" finish-reason) (str/blank? content))
+      {:seon.error/kind ::token-starvation
+       :seon.error/message
+       "The provider exhausted the completion budget before replying."
+       :seon.error/data evidence}
+
+      (and (string? content) (seq content))
+      (cond-> {:seon.ai/text content}
+        (map? usage) (assoc :seon.ai/usage usage)
+        (some? tokens) (assoc :seon.ai/tokens tokens)
+        (string? finish-reason)
+        (assoc :seon.ai/finish-reason finish-reason))
+
+      :else
+      {:seon.error/kind ::unparseable-body
+       :seon.error/message
+       "The provider's response carried no assistant text."
+       :seon.error/data evidence})))
+
 (defn completion-text
   "The assistant text in a decoded provider response, or a flat error.
   Pure, and the one `:any` in this namespace: the response is a foreign
@@ -305,18 +346,19 @@
                   [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]]
                    :seon.error/value]]}
   [body]
-  (let [content (when (map? body)
-                  (some-> (get body "choices") first
-                          (get "message") (get "content")))]
-    (if (and (string? content) (seq content))
-      {:seon.ai/text content}
-      {:seon.error/kind ::unparseable-body
-       :seon.error/message
-       "The provider's response carried no assistant text."
-       :seon.error/data {::body-shape (cond
-                                        (map? body) (vec (sort (keys body)))
-                                        (nil? body) ::nil
-                                        :else (str (class body)))}})))
+  (let [choice (when (map? body) (some-> (get body "choices") first))
+        content (some-> choice (get "message") (get "content"))
+        finish-reason (some-> choice (get "finish_reason"))
+        usage (when (map? body) (get body "usage"))]
+    (parsed-completion
+     content
+     finish-reason
+     usage
+     (some-> usage (get "completion_tokens"))
+     (cond
+       (map? body) (vec (sort (keys body)))
+       (nil? body) ::nil
+       :else (str (class body))))))
 
 (defn credential
   "The API key named by `:seon.ai/api-key-variable`, or nil.
@@ -445,17 +487,13 @@
   failed the call however cleanly it closed the socket."
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
-    (let [snapshot (stream-fold (line-seq reader) sink)
-          text (:seon.ai/text snapshot)]
-      (if (str/blank? text)
-        {:seon.error/kind ::unparseable-body
-         :seon.error/message
-         "The provider streamed no assistant text."
-         :seon.error/data {::body-shape ::empty-stream}}
-        (cond-> {:seon.ai/text text
-                 :seon.ai/tokens (:seon.ai/tokens snapshot)}
-          (:seon.ai/usage snapshot) (assoc :seon.ai/usage
-                                           (:seon.ai/usage snapshot)))))))
+    (let [snapshot (stream-fold (line-seq reader) sink)]
+      (parsed-completion
+       (:seon.ai/text snapshot)
+       (:seon.ai/finish-reason snapshot)
+       (:seon.ai/usage snapshot)
+       (:seon.ai/tokens snapshot)
+       ::empty-stream))))
 
 (defn- http-request-data
   "Ordinary request data for the JDK leaf."
@@ -514,9 +552,19 @@
                                (.body response)))]
         (if (<= 200 status 299)
           (try
-            (if stream?
-              (streamed-completion (.body response) sink)
-              (completion-text (json/read-str (.body response))))
+            (let [completion
+                  (if stream?
+                    (streamed-completion (.body response) sink)
+                    (completion-text (json/read-str (.body response))))]
+              (if (:seon.error/kind completion)
+                (update completion :seon.error/data merge
+                        {::status status
+                         ::error-class :response
+                         ::http-status status
+                         ::request-transmitted? true
+                         ::response-started? true
+                         ::output-observed? true})
+                completion))
             (catch Throwable failure
               {:seon.error/kind ::unparseable-body
                :seon.error/message (str "The provider's response was not "
