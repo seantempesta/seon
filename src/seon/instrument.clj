@@ -117,6 +117,19 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private message-problem-limit
+  "Maximum Malli problems rendered in a contract-violation headline."
+  3)
+
+(defn- admitted-edn
+  [caps value]
+  (:seon.cluster.eval/result-edn
+   (admit/admit {:seon.sci.admit/value value
+                 :seon.sci.admit/interrupt-fn (constantly nil)
+                 :seon.sci.admit/caps caps
+                 ;; the reporter may not panic on the way to reporting a panic
+                 :seon.config/on-core-error :record})))
+
 (defn- violation
   "One malli report as a flat, bounded, agent-readable value.
   `:args` can hold ANYTHING — a live Datahike connection is an ordinary
@@ -147,6 +160,13 @@
     (let [[offended value] (if (= :malli.core/invalid-output kind)
                              [(:output data) (:value data)]
                              [(:input data) (:args data)])
+          explanation (m/explain offended value)
+          problems (:errors explanation)
+          problem-count (count problems)
+          shown-problems (vec (take message-problem-limit problems))
+          problems-omitted (- problem-count (count shown-problems))
+          headline (me/humanize (assoc explanation :errors shown-problems))
+          all-problems (me/humanize explanation)
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
                             (= :cat (first schema-form))
@@ -157,23 +177,21 @@
                :seon.error/message
                (str (:fn-name data) " violated its contract ("
                     (name kind) "): "
-                    (pr-str (me/humanize (m/explain offended value))))
+                    (pr-str headline)
+                    (when (pos? problems-omitted)
+                      (str " [" problems-omitted " problems omitted]")))
                :seon.error/data
                (cond-> {::malli kind
                         ::arm (if (= :malli.core/invalid-output kind)
                                 :output
                                 :input)
-                        ::schema (pr-str expected)}
+                        ::schema (pr-str expected)
+                        ::problem-count problem-count}
                  (:fn-name data) (assoc ::fn (str (:fn-name data))))}
         caps
-        (update :seon.error/data assoc ::args
-                (:seon.cluster.eval/result-edn
-                 (admit/admit {:seon.sci.admit/value value
-                               :seon.sci.admit/interrupt-fn (constantly nil)
-                               :seon.sci.admit/caps caps
-                               ;; the reporter may not panic on the way to
-                               ;; reporting a panic
-                               :seon.config/on-core-error :record})))))))
+        (update :seon.error/data assoc
+                ::args (admitted-edn caps value)
+                ::problems (admitted-edn caps all-problems))))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.

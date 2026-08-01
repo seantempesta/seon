@@ -17,6 +17,7 @@
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
@@ -38,6 +39,29 @@
 (defn ^{:malli/schema [:=> [:cat :int] :int]} doubled
   [n]
   (* 2 n))
+
+(defn ^{:malli/schema
+        [:=>
+         [:cat [:map {:closed true} [:seon.instrument-test/expected :int]]]
+         :int]}
+  closed-map-input
+  [_]
+  1)
+
+(defn ^{:malli/schema
+        [:=>
+         [:cat :map]
+         [:map {:closed true} [:seon.instrument-test/expected :int]]]}
+  closed-map-output
+  [value]
+  value)
+
+(defn- many-key-map
+  []
+  (into {:seon.instrument-test/expected 1}
+        (map (fn [index]
+               [(keyword "seon.instrument-test.unexpected" (str index)) index]))
+        (range 200)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; It catches, and it throws
@@ -87,6 +111,44 @@
        (is (not (contains? (:seon.error/data data) :seon.instrument/args))
            "and with no caps to bound them they are OMITTED, never
             printed unbounded")))))
+
+(deftest many-problem-contract-violations-have-bounded-headlines
+  (let [caps {:seon.config.eval.result/max-depth 4
+              :seon.config.eval.result/max-collection 4
+              :seon.config.eval.result/max-string 64
+              :seon.config.eval.result/max-nodes 64}
+        offending (many-key-map)]
+    (try
+      (instrument/apply! {:seon.config/on-core-error :panic
+                          :seon.sci.admit/caps caps})
+      (doseq [[expected-arm expected-kind function-name invoke]
+              [[:input :malli.core/invalid-input
+                "seon.instrument-test/closed-map-input"
+                #(closed-map-input offending)]
+               [:output :malli.core/invalid-output
+                "seon.instrument-test/closed-map-output"
+                #(closed-map-output offending)]]]
+        (let [failure (try (invoke) (catch Exception thrown thrown))
+              data (ex-data failure)
+              message (:seon.error/message data)
+              instrument-data (:seon.error/data data)]
+          (testing (name expected-arm)
+            (is (= expected-kind (:seon.instrument/malli instrument-data)))
+            (is (= expected-arm (:seon.instrument/arm instrument-data)))
+            (is (str/includes? message function-name)
+                "the bounded headline still names the violated function")
+            (is (str/includes? message (name expected-kind)))
+            (is (re-find #"\[197 problems omitted\]" message)
+                "the first three of 200 problems carry an exact omitted count")
+            (is (< (count message) 1000)
+                "the headline is independent of the many-key value's size")
+            (is (= 200 (:seon.instrument/problem-count instrument-data)))
+            (is (string? (:seon.instrument/problems instrument-data))
+                "the full humanized problems go through value admission")
+            (is (< (count (:seon.instrument/problems instrument-data)) 2000)
+                "the admitted full problems remain bounded"))))
+      (finally
+        (instrument/remove!)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Idempotence, and the measured hot-reload strip
