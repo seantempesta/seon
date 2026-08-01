@@ -31,6 +31,25 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 7 — gate + audit verdicts, repair lanes dispatched.** Frozen
+full gate: 753 tests / 3,547 assertions / 8 RED — six render.web async
+timeouts (one suspected cause: the floor migration meeting the full web
+stack), one reader-surface regression, one canonical-schema census
+drift. Wave-2 adversarial audit (`7a2141a5f`): print path CONFIRMED
+(88 rows + 10 promotions independently recounted); 1A partially
+falsified (17-var residue still crosses clusters); 1C FALSIFIED twice —
+nondeterministic sci built-ins replay as "pure" (determinism is a
+missing leg of ruling #32's proof) and failed-eval defs get no session
+delta (silently vanish on restart); MCP partially falsified (frame
+provenance a subtler hand list; onExit PID-reuse window). Four issues
+filed by the audit. REPAIR LANES RUNNING: `gate-red-triage`
+(render/reader/census, owns render+print+failing tests) and
+`session-repair-contracts` (determinism leg computed-not-hand-listed,
+failed-eval delta at the terminal seam, then ruling #33's agent
+contract enforcement at the one ctx-install seam). Next after both:
+gate rerun → the parsed-contract implementation from the malli
+research → interop expansion.
+
 **ADDENDUM 6 — print path COMPLETE (3A+3B+3C), 1C at checkpoint.**
 Lane 3 finished: sealed grammar + sinks + floor migration + options
 (52/220 focused, P-TOTAL/P-TEE standing) and 3C promotion `050fff5c7`
