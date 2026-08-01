@@ -769,7 +769,8 @@ a claim here without a number is not.
 | 1.0 | — | — | — |
 | 1A | — | baseline: `acquire!` 352/392/378 ms on `default`, 1,469 `:seon.fn` rows (2026-08-01, re-measured) | — |
 | 1B | — | — | — |
-| 1C | — | baseline: image install 21.9 ms / 200 names, 0.174 ms/form | — |
+| 1C | `92d2e39be` | 200-name install remains bounded by the recurring 50 ms falsifier | fresh-JVM recurring proof in `c4002a83a` |
+| 1C′ | `78b1e6eca`, `319fc6ccb`, `a1100e9e1` | focused 39 tests / 168 assertions; class+metadata+value, nested closure, 200k blob, dedup, history-GC falsifiers | private-root phases: `big` blob size 1,288,891; cross-agent result `[200000 40 "Ada, Grace"]` |
 | 1D | — | — | — |
 | 2A | — | baseline: `projection-with-function-contract` 44.6 ms; contracted `defn` 21.6–30.5 ms | — |
 | 2B | — | baseline: 17 writable Vars shared across independent inits | — |
