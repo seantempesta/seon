@@ -446,7 +446,9 @@ Commits:
 
 - `6e33f4e95` — production-door `repl-session` shim plus Family B;
 - `64339dd13` — computed Edamame fallback for built-in reader tags; and
-- `9a74c52ab` — every remaining executable row plus the pending ledger.
+- `9a74c52ab` — every remaining executable row plus the pending ledger; and
+- `c4c6859aa` — row isolation and location extraction hardened against
+  process-global instrumentation churn.
 
 The recurring gate is `test/seon/repl_parity_test.clj`. Each executable
 row is one discovered `deftest` carrying `:parity/row`; known divergences
@@ -490,6 +492,14 @@ REPL parity pending rows (19): A7, D10, E1, E5, E9, E10, E15, E16,
 F5, F6, G5, G9, I1, I2, I3, I4, I5, I7, I8
 
 Ran 69 tests containing 69 assertions.
+0 failures, 0 errors.
+```
+
+The ordered integration checkpoint also passes with the existing eval suite:
+
+```text
+bin/test seon.repl-parity-test seon.sci.eval-test
+Ran 89 tests containing 147 assertions.
 0 failures, 0 errors.
 ```
 
