@@ -19,13 +19,25 @@ ordinary interop an agent would reach for — `java.time.Instant/now`,
 COMPUTED (sci's `:classes` supports allow/deny structure — read
 `reference-code/sci` for the mechanism).
 
-OWNER DIRECTION 2026-08-01 (refinement): adding the useful Java packages
-that cannot crash the system to sci's own allow list is FINE — it just
-must not be THE main solution. So: a curated allow set is an acceptable
-floor for obviously-safe value classes, while the general mechanism
-stays computed (derive from what the corpus actually reaches, with the
-deny side owning genuinely dangerous surfaces). Blocks "the agent can do
-everything within reason".
+OWNER DIRECTION 2026-08-01, settled shape: **DEFAULT-ALLOW, DENY AT THE
+SITE WITH A REASON.** Expose everything, and exclude only what genuinely
+blows up — recorded as METADATA AT THE DEFINITION SITE carrying the very
+real and specific issue that justifies it, never as a curated list in a
+config file. That satisfies the no-hand-maintained-lists rule the same
+way `^{:seon.workload :io}` does: the exclusion set is DERIVED at index
+time from decorations colocated with the thing they describe, so the
+reason travels with the code and cannot rot into an unexplained list.
+
+For first-party functions this is exact: a `defn` carries the deny
+metadata. For JDK classes, which we cannot decorate, the analogous
+honest form is a SMALL denial set where each entry names its specific
+failure (process control, JVM exit, unbounded native effects) and is
+justified in place — everything else is exposed by default. The
+inversion to avoid is the one we have today: an allow list of four
+classes with no stated reason, which silently blocks
+`java.time.Instant/now`.
+
+Blocks "the agent can do everything within reason".
 
 ## 2. Agents have no way to record their own facts
 
