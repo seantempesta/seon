@@ -57,3 +57,35 @@ genuine deep fork in our vendored fork with a test proving parent
 isolation for pre-existing vars AND correct free-name resolution for
 pre-existing interpreted fns. Whichever is chosen, a regression pins the
 parent-isolation behavior so the next design does not rediscover it.
+
+## Orchestrator escalation, 2026-08-01: this is CROSS-AGENT CONTAMINATION today
+
+Falsified live against the running `default` cluster by the
+orchestrator (not a fixture):
+
+```clojure
+(let [base (se/base)                      ; the process-shared base ctx
+      fork-a (se/fork)]
+  (sci.core/eval-string* fork-a "(in-ns 'my.message) (def send \"CLOBBERED-BY-A\")")
+  {:base-after      @(sci.core/resolve base 'my.message/send)   ; => "CLOBBERED-BY-A"
+   :fresh-fork-sees @(sci.core/resolve (se/fork) 'my.message/send)}) ; => "CLOBBERED-BY-A"
+```
+
+The base ctx every agent forks from is MUTATED, so one agent redefining
+any corpus name silently changes that name for every other agent in the
+process and for every agent created afterwards, across clusters. Today
+`acquire!` reinstalls program rows per run, which MASKS this for corpus
+functions (the reinstall overwrites the poisoned Var) — that mask is
+accidental, and it disappears exactly when we park a hot ctx per agent
+(the session-persistence slice 1) or skip a redundant acquire.
+
+Severity: this is the one thing in the fresh tree that lets an agent
+mistake escape its own session. It blocks parked-ctx work and must be
+fixed at the sci fork seam (we own the fork:
+`reference-code/sci`) — the candidate is a per-fork Var copy-on-write
+for names inherited from the parent, so a fork's `def` interns a NEW
+Var in the fork's env rather than `bindRoot`ing the shared one.
+
+Acceptance: the probe above shows the base unchanged and a fresh fork
+seeing the original definition; a regression covers the class; parked
+hot ctxs are safe to enable afterwards.
