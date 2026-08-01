@@ -380,7 +380,7 @@
 
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
-            io-executor task-executor]}]
+            task-executor]}]
   {:procs
    {::work-launcher
     {:proc
@@ -396,8 +396,7 @@
       {::parallelism parallelism
        ::active-work active-work})}}
    :conns []
-   :compute-exec compute-executor
-   :io-exec io-executor})
+   :compute-exec compute-executor})
 
 (defn start-work-launcher!
   "Start the one bounded work launcher from acquired config facts."
@@ -421,7 +420,6 @@
            ::active-work active-work
            ::queue-depth queue-depth
            ::compute-executor (:compute root-executors)
-           ::io-executor (:io root-executors)
            ::task-executor task-executor}))
         started (flow/start graph)]
     (flow/resume graph)

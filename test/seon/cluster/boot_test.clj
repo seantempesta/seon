@@ -282,6 +282,19 @@
 ;;; Root executors — one pair per JVM, shared
 ;;; ---------------------------------------------------------------------------
 
+(defn- observe-executor-step
+  ([]
+   {:ins {::observe-executor "A request to observe the proc workload thread."}
+    :ping-map-fn (constantly {})})
+  ([args]
+   args)
+  ([state _transition]
+   state)
+  ([{::keys [observations completed] :as state} _input workload]
+   (swap! observations assoc workload (.isVirtual (Thread/currentThread)))
+   (.countDown ^CountDownLatch completed)
+   [state nil]))
+
 (deftest root-executors-are-one-shared-pair
   (let [first-pair (cluster/root-executors)
         second-pair (cluster/root-executors)]
@@ -289,6 +302,32 @@
         "repeated calls return the SAME compute executor")
     (is (identical? (:io first-pair) (:io second-pair))
         "repeated calls return the SAME io executor")))
+
+(deftest root-executor-workloads-run-on-the-required-thread-kinds
+  (let [{:keys [compute io]} (cluster/root-executors)
+        observations (atom {})
+        completed (CountDownLatch. 2)
+        proc-args {::observations observations ::completed completed}
+        graph
+        (flow/create-flow
+         {:procs
+          {:io {:proc (seon.flow/var-process
+                       #'observe-executor-step :io proc-args)}
+           :compute {:proc (seon.flow/var-process
+                            #'observe-executor-step :compute proc-args)}}
+          :conns []
+          :io-exec io
+          :compute-exec compute})]
+    (try
+      (flow/start graph)
+      (flow/resume graph)
+      (.get (flow/inject graph [:io ::observe-executor] [:io]))
+      (.get (flow/inject graph [:compute ::observe-executor] [:compute]))
+      (test-support/await-event! completed ::executor-workloads)
+      (is (= {:io true :compute false} @observations)
+          "blocking transport uses virtual threads; compute stays platform-bound")
+      (finally
+        (flow/stop graph)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The live lifecycle — real sockets, real files, this JVM

@@ -17,6 +17,7 @@
   the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
+            [clojure.core.async.impl.dispatch :as async.dispatch]
             [clojure.core.server]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.instruction :as instruction]
@@ -158,14 +159,15 @@
     {:compute
      (flow/bounded-platform-executor
       (.availableProcessors (Runtime/getRuntime)))
-     :io (java.util.concurrent.Executors/newCachedThreadPool)}))
+     :io (async.dispatch/executor-for :io)}))
 
 (defn root-executors
   "The process root's two shared executors.
   One bounded `:compute` platform-thread executor (parallelism =
   available processors — a computed hardware fact) and one `:io`
-  executor for blocking transport. Idempotent per JVM: repeated calls return the SAME
-  executor objects (the root owns them; cluster graphs share them).
+  dependency-owned `:io` executor for blocking transport. Idempotent per JVM:
+  repeated calls return the SAME executor objects (the root owns them; cluster
+  graphs share them).
   This is deliberately process-global state — the one sanctioned kind:
   a genuinely process-local artifact, like a compiler state or a
   connection."
