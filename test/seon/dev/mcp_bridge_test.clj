@@ -15,6 +15,16 @@
 (def ^:private launcher
   (io/file project-root "bin/mcp-server"))
 
+(def ^:private loaded-bridge
+  (delay (load-file (.getPath server-source))))
+
+(defn- bridge-var
+  [var-symbol]
+  @loaded-bridge
+  (or (ns-resolve 'seon.dev.mcp var-symbol)
+      (throw (ex-info "The MCP bridge var did not resolve."
+                      {:seon.dev.mcp-test/symbol var-symbol}))))
+
 (defn- rpc-responses
   [requests]
   (let [process (.start
@@ -80,6 +90,43 @@
       (is completed? "Babashka bridge load exceeded ten seconds.")
       (is (= 0 (when completed? (.exitValue process))) output)
       (is (str/includes? output ":bridge-loaded") output))))
+
+(deftest evaluation-exceptions-keep-only-model-legible-frames
+  (let [event {:tag :ret
+               :val (pr-str
+                     {:cause "The root cause."
+                      :phase :execution
+                      :via [{:type 'clojure.lang.ExceptionInfo
+                             :message "The wrapper."
+                             :data {:large "not projected"}
+                             :at ['clojure.lang.Compiler 'eval "Compiler.java" 1]}
+                            {:type 'java.lang.IllegalStateException
+                             :message "The root cause."}]
+                      :trace [['clojure.lang.Compiler 'eval "Compiler.java" 1]
+                              ['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
+                              ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
+                              ['repl_context_prototype$door 'invoke "prototype.clj" 44]
+                              ['seon.omega$outer 'invokeStatic "omega.clj" 50]]})
+               :ns "user"
+               :ms 7
+               :form "(fail)"
+               :exception true}
+        projected ((bridge-var 'project-exception-event) event)
+        value (read-string (:val projected))]
+    (is (= (dissoc event :val) (dissoc projected :val))
+        "The prepl tag/namespace/timing/form/exception vocabulary survives.")
+    (is (= "The root cause." (:cause value)))
+    (is (= :execution (:phase value)))
+    (is (= [{:type 'clojure.lang.ExceptionInfo :message "The wrapper."}
+            {:type 'java.lang.IllegalStateException
+             :message "The root cause."}]
+           (:via value)))
+    (is (= [['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
+            ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
+            ['repl_context_prototype$door 'invoke "prototype.clj" 44]]
+           (:trace value)))
+    (is (= 2 (:seon.dev.mcp/frames-omitted value)))
+    (is (not (str/includes? (:val projected) "not projected")))))
 
 (deftest registrations-use-one-jvm-neutral-server-name
   (let [claude-registration (slurp (io/file project-root ".mcp.json"))

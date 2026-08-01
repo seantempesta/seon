@@ -27,6 +27,7 @@
 (def max-output-tokens 16000)
 (def min-output-tokens 64)
 (def max-transport-events 256)
+(def max-exception-frames 3)
 (def server-info {:name "seon" :version "0.3.0"})
 
 ;; [cluster session-id] -> one stateful io-prepl socket and its endpoint.
@@ -370,6 +371,44 @@
        (count kept)])
     [event 0]))
 
+(defn- first-party-frame?
+  [frame]
+  (let [class-name (str (first frame))]
+    (or (str/starts-with? class-name "seon.")
+        (= "user" class-name)
+        (str/starts-with? class-name "user$")
+        (str/starts-with? class-name "repl_context")
+        (str/starts-with? class-name "repl-context"))))
+
+(defn- project-exception-value
+  [value]
+  (let [throwable-map
+        (try
+          (if (string? value) (edn/read-string value) value)
+          (catch Throwable _ nil))]
+    (if-not (map? throwable-map)
+      value
+      (let [trace (vec (:trace throwable-map))
+            frames (into []
+                         (comp (filter first-party-frame?)
+                               (take max-exception-frames))
+                         trace)]
+        (pr-str
+         (array-map
+          :cause (:cause throwable-map)
+          :phase (:phase throwable-map)
+          :via (mapv #(select-keys % [:type :message])
+                     (:via throwable-map))
+          :trace frames
+          :seon.dev.mcp/frames-omitted (- (count trace)
+                                          (count frames))))))))
+
+(defn- project-exception-event
+  [event]
+  (if (:exception event)
+    (update event :val project-exception-value)
+    event))
+
 (defn- collect-prepl-response!
   [{:keys [socket reader]} timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
@@ -380,7 +419,10 @@
         (when-not (pos? remaining-ms)
           (throw (SocketTimeoutException. "io-prepl deadline exceeded")))
         (.setSoTimeout ^Socket socket (int remaining-ms))
-        (let [event (edn/read {:eof ::eof} reader)]
+        (let [event (edn/read {:eof ::eof} reader)
+              event (if (map? event)
+                      (project-exception-event event)
+                      event)]
           (cond
             (= ::eof event)
             (throw (ex-info "Cluster closed the io-prepl session."
