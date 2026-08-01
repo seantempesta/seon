@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, mcp, dev-feedback]
+tags: [research, mcp, tooling]
 ---
 
 # MCP toolset audit — the model's experience of `bin/mcp-server`
@@ -335,19 +335,19 @@ folding `list_sessions` into `runtime_status`; no new tool is justified.
 - **Fix 1 landed** in `a99001ecb`. The many-key contract message fell from
   25,915 characters to about 220 while retaining the function, violation arm,
   first three problems, and omitted count; 11 tests / 58 assertions passed.
-- **Fix 2 landed.** The unresolved-symbol `:val` fell from 2,342 characters /
+- **Fix 2 landed** in `560e3d603`. The unresolved-symbol `:val` fell from 2,342 characters /
   33 raw frames to 362 characters / zero retained first-party frames plus an
   omitted count of 33. A first-party contract failure retained three
   `seon.*`/`user` frames and omitted 23.
-- **Fix 3 landed.** The live repository status fell from 19 lines to four:
+- **Fix 3 landed** in `a8c30e21f`. The live repository status fell from 19 lines to four:
   the alive row leads, the process-root store is absent, and 16 dormant
   cluster directories occupy one named summary line. Stale, invalid, and
   unreadable advertisements remain individual rows.
-- **Fix 4 landed.** At `max_output_tokens: 64`, the 371-character preview-only
+- **Fix 4 landed** in `43aab84c0`. At `max_output_tokens: 64`, the 371-character preview-only
   fallback became a 304-character structured envelope retaining runtime,
   cluster, session, `tag`, `ns`, `ms`, and `form`. Its 1,002-character `:val`
   reports zero retained / 1,002 total rather than double-escaped preview text.
-- **Fix 5 landed.** The newline-separated two-form refusal grew from 233
+- **Fix 5 landed** in `f12679974`. The newline-separated two-form refusal grew from 233
   positionless characters to 365 useful characters naming line 2, column 1,
   and preview `(+ 3 4)` while retaining the `(do ...)` remedy. The same
   handler path passed in both the JVM and the Babashka server process.
