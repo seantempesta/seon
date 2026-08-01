@@ -1844,6 +1844,34 @@ may reintroduce a shadow build into the dev feedback path.
   deliberately unsettled — the owner wants design agreement before
   sequencing; do not dispatch resume implementation on the recorded
   forms-only lean.
+  **Ruling 2026-08-01 #34 (owner, night): THE AI SETTINGS MODEL IS
+  SEALED** per `plan/ai-settings-design-2026-08-01.md`. (1) UNIFORM
+  overridability — "ideally everything so we don't have two systems":
+  every registered AI dial gains `:seon.config/per-agent` treatment
+  through the ONE registration fold; the agent entity carries the SAME
+  attribute idents as the override (absence = inherit); one pure merge
+  at the loop's one call site (which also fixes the boot-captured
+  targets defect — settings resolve per turn, not per restart);
+  effective settings recorded on the attempt row. (2) Thinking-mode's
+  inert params stay a CONSTANT with provenance at the one site; a
+  second provider with a different inert set is the generalization
+  trigger. (3) CREDENTIALS: fully uniform ANYWAY — the owner explicitly
+  accepts that an agent (once the write surface lands) could override
+  `endpoint`/`api-key-variable`, including the exfiltration hazard the
+  design named (endpoint pointed at an agent-controlled server with our
+  credential attached). Recorded as an ACCEPTED HAZARD, to be revisited
+  at the write-surface design if the owner chooses — not silently.
+  (4) NO model-derived max-tokens floor yet; it lands when the model
+  registry (upstream LiteLLM's maintained pricing/context JSON consumed
+  as facts — design option C) provides real numbers. LITELLM VERDICT
+  sealed with it: full adoption REJECTED (their effort table already
+  silently wrong for our default model; their wrapping destroys the
+  phase evidence that enforces the no-retry ruling; a real :io/:compute
+  violation in their streaming), the five steal items adopted into our
+  wire cores (extra-body-merged-last, protected-key refusal, the
+  canonical/wire/coercion triple, reasoning-sibling parsing, cache
+  usage normalization at read), and option C's registry queued as its
+  own unit.
   **Ruling 2026-08-01 #33 (owner, evening): FUNCTION CONTRACTS PERSIST
   PARSED, AND AGENT CONTRACTS ENFORCE.** (1) `:seon.fn/spec` as one
   opaque EDN string is insufficient: the contract also persists PARSED,
