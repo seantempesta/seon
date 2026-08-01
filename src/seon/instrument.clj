@@ -117,10 +117,6 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private message-problem-limit
-  "Maximum Malli problems rendered in a contract-violation headline."
-  3)
-
 (defn- admitted-edn
   [caps value]
   (:seon.cluster.eval/result-edn
@@ -161,11 +157,7 @@
                              [(:output data) (:value data)]
                              [(:input data) (:args data)])
           explanation (m/explain offended value)
-          problems (:errors explanation)
-          problem-count (count problems)
-          shown-problems (vec (take message-problem-limit problems))
-          problems-omitted (- problem-count (count shown-problems))
-          headline (me/humanize (assoc explanation :errors shown-problems))
+          problem-count (count (:errors explanation))
           all-problems (me/humanize explanation)
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
@@ -174,12 +166,16 @@
                      (second schema-form)
                      schema-form)]
       (cond-> {:seon.error/kind ::contract-violated
+               ;; ALL problems, bounded by the ONE general printer (the
+               ;; admission caps) — never a second literal limit. A large
+               ;; problem count is itself the broken-system signal, carried
+               ;; as ::problem-count for the warning consumers.
                :seon.error/message
                (str (:fn-name data) " violated its contract ("
                     (name kind) "): "
-                    (pr-str headline)
-                    (when (pos? problems-omitted)
-                      (str " [" problems-omitted " problems omitted]")))
+                    (if caps
+                      (admitted-edn caps all-problems)
+                      (pr-str all-problems)))
                :seon.error/data
                (cond-> {::malli kind
                         ::arm (if (= :malli.core/invalid-output kind)
@@ -189,9 +185,7 @@
                         ::problem-count problem-count}
                  (:fn-name data) (assoc ::fn (str (:fn-name data))))}
         caps
-        (update :seon.error/data assoc
-                ::args (admitted-edn caps value)
-                ::problems (admitted-edn caps all-problems))))))
+        (update :seon.error/data assoc ::args (admitted-edn caps value))))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.

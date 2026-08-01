@@ -138,15 +138,12 @@
             (is (str/includes? message function-name)
                 "the bounded headline still names the violated function")
             (is (str/includes? message (name expected-kind)))
-            (is (re-find #"\[197 problems omitted\]" message)
-                "the first three of 200 problems carry an exact omitted count")
-            (is (< (count message) 1000)
-                "the headline is independent of the many-key value's size")
-            (is (= 200 (:seon.instrument/problem-count instrument-data)))
-            (is (string? (:seon.instrument/problems instrument-data))
-                "the full humanized problems go through value admission")
-            (is (< (count (:seon.instrument/problems instrument-data)) 2000)
-                "the admitted full problems remain bounded"))))
+            (is (< (count message) 2000)
+                "all problems flow through the ONE general printer, so the
+                message stays bounded by the admission caps — never by a
+                second literal limit")
+            (is (= 200 (:seon.instrument/problem-count instrument-data))
+                "the problem count is the broken-system signal"))))
       (finally
         (instrument/remove!)))))
 
