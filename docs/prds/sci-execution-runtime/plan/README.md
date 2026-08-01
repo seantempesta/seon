@@ -1855,7 +1855,12 @@ may reintroduce a shadow build into the dev feedback path.
   evaluation (does it genuinely modulate reasoning by task difficulty,
   or always-think, or miscalibrate); if it genuinely modulates, it
   becomes the planner default instead of always-high — evidence
-  pending in the flash quality interrogation.
+  pending in the flash quality interrogation. SHARPENED same night:
+  the SHIPPED DEFAULT is thinking explicitly `:disabled` on
+  `deepseek-v4-flash` with the bench-optimized params — "reasonably
+  smart fast and cheap" (median turn 9.8 s vs 21.3 s thinking-high,
+  $0.0003 vs $0.0007 off-peak); thinking is an opt-IN per-agent
+  override (planners), never the shipped posture.
   **Ruling 2026-08-01 #34 (owner, night): THE AI SETTINGS MODEL IS
   SEALED** per `plan/ai-settings-design-2026-08-01.md`. (1) UNIFORM
   overridability — "ideally everything so we don't have two systems":
