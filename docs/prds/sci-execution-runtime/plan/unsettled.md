@@ -16,6 +16,16 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM 5 — post-restart.** MCP fixes CONFIRMED live (bounded
+structured envelope with retained/total evidence; alive-first
+discovery). Owner instruction for the sci-fork observer (already
+committed as sci `47f6c8b` on the fork's `seon` branch): at landing,
+MERGE to the fork's `main`, push `seantempesta/sci`, and update the
+dependency — sci is consumed via `:local/root reference-code/sci`, so
+the dependency update is the root submodule-pointer bump (put the
+submodule on the merged `main`). Same treatment applies to future fork
+work: no long-lived feature branches on our forks.
+
 **ADDENDUM 4 — 2026-08-01 night, RESTART BOUNDARY.** 1A ACCEPTANCE
 BANKED on the fresh substrate: agent A defined a contracted fn, agent B
 called it next turn through the live ctx; turn-path `acquire!` count
