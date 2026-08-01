@@ -1685,6 +1685,25 @@ may reintroduce a shadow build into the dev feedback path.
   MVP drive failure was exactly 1 success + 1 arity refusal ending
   the episode with the intent dropped. The refusal steering already
   existed as data; this ruling makes the turn that reads it exist.
+  **Ruling 2026-08-01 #24 (owner): THE CONTEXT IS A REPL SESSION,
+  faked nowhere; the DEBUG INTERFACE and the CONTEXT are one thing.**
+  Full design: `plan/repl-session-context-2026-08-01.md`. The context,
+  transcript, and per-agent debug page are one REPL-session render:
+  `:seon.render/ai` = plain text that reads as a real session file and
+  parses clean (P9); `:seon.render/html` = the same session as
+  composable HTML collapsing hairy structures via the general renderer;
+  a markdown projection aids human review. The TRANSCRIPT IS A VECTOR
+  OF MAPS the run loop already stores (ordered forms + receipts);
+  context = PRINT that interleave, replay = EVAL it. The agent is
+  Clojure's `user` (session starts at `user=>`); the person is "the
+  human". The prompt is a real agent-owned fact (`:my/prompt`) set by a
+  real fn; the creation-run runs through the real eval path so the
+  tutorial is genuine history. Teach single→informed-batch (round-trips
+  are expensive); the seed task FORCES graph discovery. NO growth
+  metaphors — creation, not birth. Next-phase crux (open): a print path
+  emitting text (ai) and HTML nodes (html) from ONE traversal,
+  mirroring Clojure's own printer — closer to the metal, no parallel
+  printer.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
