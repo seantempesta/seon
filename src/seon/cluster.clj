@@ -16,7 +16,6 @@
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
-            [seon.ai :as ai]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [seon.cluster.agent :as cluster.agent]
@@ -1032,20 +1031,16 @@
   nil)
 
 (defn- loop-handle
-  "The cluster handle the loop proc carries, derived from FACTS.
-  Everything in it comes from the instance and the effective dials, so
-  the assembly the live drives were doing by hand happens once, here,
-  where production does it."
+  "The process resources and structural dials the loop proc carries.
+
+  AI settings are deliberately absent: the `:call` branch resolves them
+  from current cluster and agent facts once per turn, so config apply and
+  per-agent overrides take effect on the next turn without rebuilding the
+  graph."
   [connection cluster-name process ctx wake-channel stream-channel completion]
   (let [dials (config/effective @connection cluster-name)]
-    (cond-> (merge
-             ;; MERGED WHOLE, never re-keyed: `seon.ai/targets` owns the
-             ;; role names, so a backup cannot arrive here under a name
-             ;; only this function knows. Its `:seon.ai/backup` key is
-             ;; ABSENT when no backup is configured, and that absence is
-             ;; the whole failover contract.
-             (ai/targets dials)
-             {:seon.store/branch-connection connection
+    (cond-> {:seon.store/branch-connection connection
+              :seon.cluster/name cluster-name
               :seon.cluster.run/process process
               :seon.sci.eval/ctx ctx
               :seon.cluster.wake/channel wake-channel
@@ -1054,7 +1049,6 @@
               ;; is never parked by presentation
               :seon.cluster.loop/stream-channel stream-channel
               :seon.cluster.loop/completion completion
-              :seon.ai.retry/strategy (ai/retry-strategy dials)
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
@@ -1067,7 +1061,7 @@
               ;; way it carries every other dial — derived from facts
               ;; once, here, never read at the call site
               :seon.config.message/max-chain
-              (:seon.config.message/max-chain dials)})
+              (:seon.config.message/max-chain dials)}
       (:seon.config.error/escalate-to dials)
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))

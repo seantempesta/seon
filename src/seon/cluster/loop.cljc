@@ -48,6 +48,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.fn.analyzer :as fn.analyzer]
@@ -777,6 +778,7 @@
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
          usage :seon.ai/usage
+         settings :seon.ai/settings
          finish-reason :seon.ai/finish-reason
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
@@ -802,6 +804,8 @@
               ;; exactly when it points at an error fact, and there is
               ;; no stored :success/:error label restating that.
               commit (assoc :seon.ai.attempt/error (:db/id (first commit)))
+              settings
+              (assoc :seon.ai.attempt/settings-edn (pr-str settings))
               usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
               finish-reason
               (assoc :seon.ai.attempt/finish-reason finish-reason)
@@ -957,7 +961,21 @@
       ;; row. That is what makes "exactly two calls" and "exactly one
       ;; call" queryable facts rather than claims.
       :call
-      (let [;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
+      (let [;; ONE TURN, ONE RESOLUTION. Both reads use this immutable
+            ;; database value, and resolution stays outside the attempt
+            ;; reduce so failover/backoff cannot change settings halfway
+            ;; through a turn. Applying config or retracting/asserting an
+            ;; agent override therefore changes the NEXT turn, without a
+            ;; graph rebuild or a cached derived projection.
+            db @connection
+            settings (ai/settings
+                      (config/effective db (:seon.cluster/name cluster))
+                      (ai/agent-overlay db agent-id))
+            targets (ai/targets settings)
+            primary (:seon.ai/primary targets)
+            backup (:seon.ai/backup targets)
+            strategy (ai/retry-strategy settings)
+            ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
             ;; one `offer!` of the run id plus the complete
             ;; `:seon.ai/partial` snapshot
             ;; onto the cluster's ONE sliding-1 stream conn — newest
@@ -1065,20 +1083,19 @@
             ;; text and alone places that string in `:seon.ai/prompt` —
             ;; the bytes the capture recorded are the bytes sent.
             text (:seon.cluster.prompt/text rendered)
-            backup (:seon.ai/backup cluster)
             ;; DERIVED ONCE, and EMPTY whenever a backup exists. That is
             ;; the whole "backoff only on the no-backup path" rule, held
             ;; by the data instead of by a condition inside the reduce.
             schedule (if backup
                        []
-                       (ai/delays (:seon.ai.retry/strategy cluster) rand))]
+                       (ai/delays strategy rand))]
         (if (refused! cluster captured now
                       {:seon.cluster.agent/id agent-id
                        :seon.cluster.run/id run-id})
           ;; a refused capture ends the turn exactly as a refused plan
           ;; freeze does — NO provider call without its durable evidence
           (report :error 0)
-          (loop [target (:seon.ai/primary cluster)
+          (loop [target primary
                  ordinal (attempts @connection run-id)
                  ;; ABSENT on the primary and on every backoff retry;
                  ;; present only on the backup, where it is both the role
@@ -1110,6 +1127,7 @@
                                                         (nil? failover-from))}))
                   fact (record-attempt! cluster
                                         (cond-> {:seon.ai/target target
+                                                 :seon.ai/settings settings
                                                  :seon.cluster.run/id run-id
                                                  :seon.cluster.agent/id agent-id
                                                  :seon.ai.attempt/ordinal ordinal}

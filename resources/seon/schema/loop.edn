@@ -8,7 +8,7 @@
  ; which the `:call` arm's sink offers complete `:seon.ai/partial`
  ; snapshots. OPTIONAL because a suite or a REPL drives a turn without a
  ; render pipeline — absent means the call runs one-shot.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target] [:seon.ai.retry/strategy :seon.ai.retry/strategy] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed
@@ -16,12 +16,11 @@
  ; handle itself and flow adds the key only at start. Instrumentation
  ; found this the first time it ran against a real boot — the contract
  ; was wrong about its own live input and nothing had ever checked.
- ; `:seon.cluster.loop/provider` is DELETED, not deprecated. It was this
- ; exact four-key map under a second name, and once `seon.ai/targets`
- ; derives both roles from the dials there is nothing for a loop-local
- ; copy of the shape to be. The handle now carries `:seon.ai/primary`
- ; and the OPTIONAL `:seon.ai/backup` — `targets`' own keys, merged in
- ; whole, so the handle cannot re-key them wrongly.
+ ; `:seon.cluster.loop/provider` is DELETED, not deprecated. The later
+ ; boot-captured `:seon.ai/primary`, optional backup, and retry strategy
+ ; are deleted too: `:call` resolves those values from current cluster
+ ; and agent facts once per turn. The handle carries the cluster name
+ ; needed for that live read, never a cached projection of its AI facts.
  ; `:seon.cluster.eval/output` is what the form PRINTED, captured as
  ; bounded receipt evidence. Both closed shapes below omitted it while
  ; the code has threaded it since the base-ctx fixes — a contract wrong

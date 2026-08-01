@@ -15,7 +15,8 @@
      `kill -9` falsifier against a real child stays the orchestrator's
      integration proof, in the style of `store_child.clj`; it proves
      the process boundary, and this proves the derivation."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [my.run :as my.run]
             [seon.ai :as ai]
@@ -198,16 +199,16 @@
                 first-rows (settings-attempts @connection)]
             (is (= 2 (count first-rows)))
             (is (every? #(= first-settings
-                            (read-string
+                            (edn/read-string
                              (:seon.ai.attempt/settings-edn %)))
                         first-rows))
             (is (= "stop" (:seon.ai.attempt/finish-reason
                             (second first-rows))))
             (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
-                   (read-string
+                   (edn/read-string
                     (:seon.ai.attempt/usage-edn (second first-rows)))))
             (is (not (contains?
-                      (read-string
+                      (edn/read-string
                        (:seon.ai.attempt/usage-edn (second first-rows)))
                       :seon.ai/settings))
                 "settings are beside usage, never inside it"))
@@ -237,7 +238,7 @@
               (is (= "after-apply" (:seon.ai/model last-row)))
               (is (= "after-apply"
                      (:seon.config.ai/model
-                      (read-string
+                      (edn/read-string
                        (:seon.ai.attempt/settings-edn last-row))))))))))))
 
 (defn- lint-plan
