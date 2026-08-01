@@ -117,6 +117,17 @@
   [cluster]
   (io/file (cluster-root) cluster "prepl.edn"))
 
+(defn- process-root-store-directory?
+  [directory]
+  ;; `seon.cluster.store/lock-file` derives the process-root flock as the
+  ;; canonical store path plus ".lock". Cluster directories have no such
+  ;; sibling; this identifies the role without reserving a directory name.
+  (try
+    (.isFile (io/file (str (.getCanonicalPath ^java.io.File directory)
+                           ".lock")))
+    (catch Throwable _
+      false)))
+
 (defn- process-start-instant
   [pid]
   (try
@@ -192,10 +203,12 @@
           directories (when (.isDirectory root) (.listFiles root))]
       (->> directories
            (filter #(.isDirectory ^java.io.File %))
+           (remove process-root-store-directory?)
            (map #(.getName ^java.io.File %))
            (filter valid-cluster?)
            (mapv read-advertisement)
-           (sort-by :seon.dev.mcp/cluster)
+           (sort-by (juxt #(not= :alive (:seon.dev.mcp/state %))
+                          :seon.dev.mcp/cluster))
            vec))
     (catch Throwable throwable
       [{:seon.dev.mcp/cluster "<discovery>"
@@ -533,11 +546,20 @@
 
 (defn- execute-runtime-status
   [_]
-  (let [rows (advertisement-rows)]
+  (let [rows (advertisement-rows)
+        missing (filterv #(= :missing (:seon.dev.mcp/state %)) rows)
+        visible (remove #(= :missing (:seon.dev.mcp/state %)) rows)
+        status-lines
+        (cond-> (mapv row-status-line visible)
+          (seq missing)
+          (conj (str "  " (count missing)
+                     " clusters with no advertisement: "
+                     (str/join ", "
+                               (map :seon.dev.mcp/cluster missing)))))]
     (mcp-success
      (str "fresh JVM clusters:\n"
-          (if (seq rows)
-            (str/join "\n" (map row-status-line rows))
+          (if (seq status-lines)
+            (str/join "\n" status-lines)
             "  (none)")
           "\nCLJ io-prepl sessions: " (count @clj-sessions)))))
 

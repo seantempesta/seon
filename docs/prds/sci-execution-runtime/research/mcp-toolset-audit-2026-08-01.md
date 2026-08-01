@@ -339,3 +339,7 @@ folding `list_sessions` into `runtime_status`; no new tool is justified.
   33 raw frames to 362 characters / zero retained first-party frames plus an
   omitted count of 33. A first-party contract failure retained three
   `seon.*`/`user` frames and omitted 23.
+- **Fix 3 landed.** The live repository status fell from 19 lines to four:
+  the alive row leads, the process-root store is absent, and 16 dormant
+  cluster directories occupy one named summary line. Stale, invalid, and
+  unreadable advertisements remain individual rows.

@@ -25,6 +25,26 @@
       (throw (ex-info "The MCP bridge var did not resolve."
                       {:seon.dev.mcp-test/symbol var-symbol}))))
 
+(defn- current-process-start-date
+  []
+  (java.util.Date/from
+   (.get (.startInstant (.info (java.lang.ProcessHandle/current))))))
+
+(defn- advertisement
+  [cluster pid start-instant]
+  {:seon.boot/cluster-name cluster
+   :seon.boot/prepl-host "127.0.0.1"
+   :seon.boot/prepl-port 31337
+   :seon.boot/pid pid
+   :seon.boot/start-instant start-instant})
+
+(defn- delete-known-files!
+  [files]
+  (doseq [file (reverse files)]
+    (when (.exists ^java.io.File file)
+      (is (.delete ^java.io.File file)
+          (str "Could not delete MCP fixture path " file)))))
+
 (defn- rpc-responses
   [requests]
   (let [process (.start
@@ -127,6 +147,59 @@
            (:trace value)))
     (is (= 2 (:seon.dev.mcp/frames-omitted value)))
     (is (not (str/includes? (:val projected) "not projected")))))
+
+(deftest runtime-status-leads-with-live-and-collapses-dormant-clusters
+  (let [fixture-root (io/file project-root "tmp"
+                              (str "mcp-status-" (random-uuid)))
+        clusters-root (io/file fixture-root "data" "clusters")
+        alive-dir (io/file clusters-root "alive")
+        stale-dir (io/file clusters-root "stale")
+        invalid-dir (io/file clusters-root "invalid")
+        unreadable-dir (io/file clusters-root "unreadable")
+        dormant-a-dir (io/file clusters-root "dormant-a")
+        dormant-b-dir (io/file clusters-root "dormant-b")
+        store-dir (io/file clusters-root "physical-data")
+        alive-ad (io/file alive-dir "prepl.edn")
+        stale-ad (io/file stale-dir "prepl.edn")
+        invalid-ad (io/file invalid-dir "prepl.edn")
+        unreadable-ad (io/file unreadable-dir "prepl.edn")
+        store-entry (io/file store-dir "00000000.ksv")
+        store-lock (io/file (str (.getPath store-dir) ".lock"))
+        known-paths [fixture-root (io/file fixture-root "data") clusters-root
+                     alive-dir stale-dir invalid-dir unreadable-dir
+                     dormant-a-dir dormant-b-dir store-dir
+                     alive-ad stale-ad invalid-ad unreadable-ad
+                     store-entry store-lock]
+        pid (.pid (java.lang.ProcessHandle/current))]
+    (try
+      (doseq [directory [alive-dir stale-dir invalid-dir unreadable-dir
+                         dormant-a-dir dormant-b-dir store-dir]]
+        (is (.mkdirs directory)))
+      (spit alive-ad (pr-str (advertisement "alive" pid
+                                           (current-process-start-date))))
+      (spit stale-ad (pr-str (advertisement "stale" pid
+                                           (java.util.Date. 0))))
+      (spit invalid-ad (pr-str {:not :an-advertisement}))
+      (spit unreadable-ad "{")
+      (spit store-entry "store data")
+      (spit store-lock "")
+      (let [result
+            (with-redefs-fn {(bridge-var 'project-root)
+                             (.getCanonicalPath fixture-root)}
+              #((bridge-var 'execute-runtime-status) {}))
+            text (get-in result [:content 0 :text])
+            lines (str/split-lines text)]
+        (is (str/includes? (second lines) "alive state=alive") text)
+        (is (str/includes? text "stale state=stale") text)
+        (is (str/includes? text "invalid state=invalid") text)
+        (is (str/includes? text "unreadable state=unreadable") text)
+        (is (str/includes? text
+                           "2 clusters with no advertisement: dormant-a, dormant-b")
+            text)
+        (is (not (str/includes? text "state=missing")) text)
+        (is (not (str/includes? text "physical-data")) text))
+      (finally
+        (delete-known-files! known-paths)))))
 
 (deftest registrations-use-one-jvm-neutral-server-name
   (let [claude-registration (slurp (io/file project-root ".mcp.json"))
