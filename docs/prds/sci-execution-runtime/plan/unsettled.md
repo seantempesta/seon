@@ -16,7 +16,70 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**WORKING EDGE — 2026-07-31 END OF DAY: THE ONE-SYSTEM CONVERGENCE IS
+**WORKING EDGE — 2026-08-01: THE REPL SESSION IS THE CONTEXT, AND THE
+FLOOR IS BEING MADE HONEST.** The day's frame: an agent lives in a real
+Clojure REPL rendered from facts; the debug page and the context are one
+thing; the floor must never silently lie. Rulings #24-#28 recorded in
+README (REPL session; caps to measured knees + blob tier; print path
+sealed; one program graph PER CLUSTER; stateless resume).
+
+LANDED TODAY (all committed, branch pushed at checkpoints):
+- REPL-native door: arity errors read like Clojure's own, bare
+  `dir`/`doc` resolve, `doc` derives from `:seon.fn` facts (c6db32f56).
+- Contract-violation messages bounded by the ONE general printer, no
+  literal problem limit (d69708a2c) — the take-3 headline was an owner
+  veto.
+- `seon.db` slice 1: `q` + `pull`, dual arities, dynamic custody
+  (5599d72b2) — the exam query returns 7 uncapped through the real door.
+  Remaining slices (`pull-many`, eager bounded `entity`, `datoms`, the
+  27-file migration) IN FLIGHT.
+- MCP toolset fixes 1-5 (bounded messages, cause+first-party-frame
+  error envelopes, alive-first `runtime_status` excluding the store dir,
+  trim-in-place truncation, positioned multi-form refusals).
+- Admission `inst?` hotspot: 4,436 → 380 bytes/node (eed7cf53f).
+
+IN FLIGHT at write time: the caps-blob-print wave (steps 2-6: options
+wiring, cap raise, `seon.blob` + receipt accretion with the konserve-GC
+reachability union, derived `capped?`, print-floor wiring); the seon.db
+remaining slices; three design lanes (stateless resume, per-cluster base
+contexts, and the already-returned print-path/parity/grader research).
+
+THE RESEARCH CORPUS FROM TODAY (read these before touching their seams):
+`research/sci-repl-realism-audit-2026-08-01.md` (21 divergences),
+`research/admission-caps-and-blob-fallback-2026-08-01.md` (measured
+knees; the 80× store amplification), `research/repl-parity-test-mining-
+2026-08-01.md` (59-row checklist mined from sci/clojure/babashka test
+suites + the one-line reader-tag fix), `research/grader-mechanics-
+grounding-2026-08-01.md` (fact-space rewriting proven; four hazards),
+`research/sci-session-persistence-2026-08-01.md` (ctx anatomy, measured
+park vs replay), `research/mcp-toolset-audit-2026-08-01.md`.
+Plans: `plan/print-path-design-2026-08-01.md` (SEALED contract),
+`plan/grader-in-fact-space-2026-08-01.md`,
+`plan/repl-session-context-2026-08-01.md` (the day's design + owner
+directions), `plan/stateless-resume-design-2026-08-01.md` (in flight),
+`plan/per-cluster-base-context-2026-08-01.md` (in flight).
+
+BLOCKERS AND HAZARDS OPEN AT WRITE TIME:
+- `acquire!` has no per-row containment — one poisoned agent row bricks
+  every eval on its branch (issue filed; generation zero blocks on it,
+  and it bites ordinary agents today).
+- The program graph is process-wide, so it crosses clusters (ruling #27
+  violation; issue filed; blocks parked hot ctxs).
+- `seon.sci.eval` is not hot-reloadable (issue filed).
+- konserve GC sweeps anything outside Datahike reachability — the blob
+  wave carries the reachability-union fix.
+- Contracted `defn` rebuilds the whole schema projection (21-30 ms per
+  agent defn; issue filed).
+- Pre-existing: the walk test exceeding admission caps (the cap raise
+  may close it).
+
+NEXT (ordered): finish the in-flight wave → integration gate (full
+suite + live proofs + a `seon.problems` derivation on a fresh cluster)
+→ the standing adversarial audit of the day's tree → the print-path +
+parity-gate implementation wave → compaction (prepared, deliberately
+unwritten) → the grader/generation-zero minimal list.
+
+**SUPERSEDED — 2026-07-31 END OF DAY: THE ONE-SYSTEM CONVERGENCE IS
 LIVE.** `default` serves at 7994 on the walk architecture: namespace
 pages (`/ns/{namespace}`, reitit, reverse routing, 404-writes-nothing),
 the two-pane debug (`/agent/{id}/debug` — exact AI bytes beside
