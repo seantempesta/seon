@@ -119,13 +119,15 @@
     (catch #?(:clj Throwable :cljs :default) _
       nil)))
 
-(defn- bind-predicates
+(defn bind-predicates
   "Replace every predicate symbol before Malli compilation.
 
    Malli evaluates symbol/string/list predicate code by constructing its own
    SCI context. Seon admits only named predicates and supplies their already
    materialized callables from the corpus environment, so unresolved code
    fails closed here instead of opening that second evaluator."
+  {:malli/schema
+   [:=> [:cat :seon.schema/value :map] :seon.schema/value]}
   [form predicate-functions]
   (walk/postwalk
    (fn [value]
@@ -949,22 +951,24 @@
                                 (conj visited reference))))))
                       references)))
             (walk-function [compiled row-identity row-definition row-admission]
-              (case (m/type compiled)
-                :=>
-                (let [[input output] (m/children compiled)]
-                  (into
-                    (walk-schema input :input row-identity row-definition
-                                 row-admission #{})
-                    (walk-schema output :output row-identity row-definition
-                                 row-admission #{})))
-
-                :function
-                (into []
-                      (mapcat
-                        #(walk-function % row-identity row-definition
-                                        row-admission))
-                      (m/children compiled))
-
+              (if (m/-function-schema? compiled)
+                (into
+                 []
+                 (mapcat
+                  (fn [arity]
+                    (let [{:keys [input output guard]}
+                          (m/-function-info arity)]
+                      (cond->
+                       (into
+                        (walk-schema input :input row-identity row-definition
+                                     row-admission #{})
+                        (walk-schema output :output row-identity row-definition
+                                     row-admission #{}))
+                        guard
+                        (into
+                         (walk-schema guard :guard row-identity row-definition
+                                      row-admission #{}))))))
+                 (m/-function-schema-arities compiled))
                 (walk-schema compiled :schema row-identity row-definition
                              row-admission #{})))]
       (let [compiled
