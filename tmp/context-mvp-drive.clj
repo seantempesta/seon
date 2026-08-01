@@ -356,13 +356,20 @@
             :seon.cluster.agent/id nursery-agent-id
             :seon.sci.eval/time-limit-ms 30000
             :seon.config/on-core-error :panic}))
-        value (:seon.sci.admit/value evaluation)]
-    (when-not (and (string? value)
+        value (:seon.sci.admit/value evaluation)
+        walk-text
+        (cond
+          (string? value) value
+          (and (map? value)
+               (contains? value :seon.sci.admit/truncated-string))
+          (:seon.sci.admit/truncated-string value)
+          :else nil)]
+    (when-not (and (string? walk-text)
                    (re-find #"root=\[:seon\.cluster\.agent/id \"context-mvp\"\]"
-                            value))
+                            walk-text))
       (throw (ex-info "Public walk was not callable through the agent eval."
                       {:context-mvp-drive/evaluation evaluation})))
-    (print-exact! "REAL AGENT EVAL (seon.render/walk) RESULT" value)
+    (print-exact! "REAL AGENT EVAL (seon.render/walk) RESULT" walk-text)
     (stamp "REAL AGENT EVAL capped? "
            (:seon.sci.admit/capped? evaluation))
     :complete))
