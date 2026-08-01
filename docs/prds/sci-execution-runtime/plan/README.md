@@ -1844,6 +1844,25 @@ may reintroduce a shadow build into the dev feedback path.
   deliberately unsettled — the owner wants design agreement before
   sequencing; do not dispatch resume implementation on the recorded
   forms-only lean.
+  **Ruling 2026-08-01 #31 (owner, late): LEAVE THE GATE ALONE FOR NOW;
+  ALL AGENTS DO EVERYTHING; AUTHENTIC REPL, FOOT-SHOOTING PERMITTED BUT
+  HARD.** The existing selective-admission gate stays exactly as it is
+  ("Leave the current gate alone for now"); no per-agent distinctions
+  yet ("I am allowing all agents to do everything right now. Eventually
+  we will want distinctions"). The safety posture is CONTRACTS, not
+  restrictions: an authentic REPL experience "including shooting
+  yourself in the foot, but it should be hard to shoot yourself in the
+  foot — so functions should check their inputs." Instrumentation
+  CONFIRMED live at ruling time: 388 instrumented vars on `default`,
+  dial `:panic`, `mi/instrument!` with `:scope #{:input :output}`
+  (instrument.clj:240) — inputs AND outputs checked. HOT PATH
+  DISPATCHED: one shared live ctx per cluster (refactor-wave Lane 1,
+  slices 1.0+1A) implements ruling #29 now; the ctx's env stays sci's
+  own atom for the moment, and replacing it with a durable
+  structural-sharing mechanism (atom protocol over Datahike/konserve,
+  closure detection with re-eval against the restored ctx) is a
+  commissioned research lane, source-read from reference-code and
+  REPL-probed, never guessed.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
