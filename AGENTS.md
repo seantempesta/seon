@@ -474,7 +474,15 @@ For Claude-started lanes, the script owns the conventions: model/effort dials
 (`LANE_MODEL`, `LANE_EFFORT`), the `-o` summary
 in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
 the user's task panel shows the live transcript while
-`<name>-stdout.log` persists. Tracked means lane exit re-invokes the
+`<name>-stdout.log` persists. THE WRAPPER'S STDOUT IS THE OWNER'S LIVE
+VIEW: run `bin/codex-agent run|resume` BARE as the tracked background
+command — never pipe it through `tail`/`head`/`grep` and never redirect
+it, because any filter reduces the owner's panel to one line at exit
+(this happened 2026-08-01; the owner had to ask why lanes were
+invisible). For a lane already running whose wrapper you do not own,
+give the owner a tracked background `tail -n 40 -f
+tmp/orchestrator/<name>-stdout.log` follower whose description names
+the lane. Tracked means lane exit re-invokes the
 orchestrator — no watcher loops. Lane stdout never enters the
 orchestrator's context: read the summary (`bin/codex-agent summary <name>`),
 then query the log selectively with `tail`/`rg`, never a whole-file
