@@ -1,15 +1,16 @@
 {; The proven presentation bounds from the quarry's structural renderer.
- ; These are renderer-local per-call options, not new cluster configuration
- ; facts. Each registration owns its shipped presentation default, and
- ; `:seon.render.value/options` is the complete set from which the
- ; implementation derives those defaults. Admission's existing config facts
- ; remain hard safety maxima; adding these as `seon.config.*` dials would
- ; create a second defaults authority outside config/default.edn.
+ ; `:seon.render.value/options` is the complete per-call shape and the
+ ; implementation derives its presentation defaults from these registrations.
+ ; `max-collection` is also the database-backed `/data` page-size dial; its
+ ; explicit shipped decision remains in config/default.edn. Admission's
+ ; separate config facts remain the outer safety maxima.
  :seon.render.value/max-depth
  [:int {:min 1 :seon.render.value/default 3}]
 
  :seon.render.value/max-collection
- [:int {:min 1 :seon.render.value/default 8}]
+ [:int {:min 1
+        :seon.render.value/default 8
+        :seon.config/dial true}]
 
  :seon.render.value/max-map-visits
  [:int {:min 1 :seon.render.value/default 32}]
@@ -50,5 +51,6 @@
   [:seon.render.value/tree :seon.render.value/tree]
   [:seon.render.value/summary :seon.render.value/summary]
   [:seon.render.value/truncated? :seon.render.value/truncated?]
+  [:seon.render.value/options :seon.render.value/options]
   [:seon.render.value/width {:optional true} :seon.render.value/width]
   [:seon.render.value/schemas {:optional true} [:vector :map]]]}

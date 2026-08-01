@@ -81,7 +81,10 @@
   (let [realized (atom 0)
         raw (map (fn [number] (swap! realized inc) number) (range))
         html (hiccup/->string (value/render-html (unit raw)))]
-    (is (<= @realized (inc (:seon.config.eval.result/max-collection caps))))
+    (is (<= @realized
+            (inc (:seon.render.value/max-collection
+                  (:seon.render.value/options
+                   (value/prepare (unit :probe)))))))
     (is (str/includes? html "elided")))
   (testing "a realization failure becomes visible data"
     (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
@@ -107,9 +110,37 @@
    202607310202
    (prop/for-all [limit (gen/choose 1 20)]
      (let [bounded-caps (assoc caps
-                               :seon.config.eval.result/max-collection limit)]
-       (and (loud-twins? (vec (range (inc limit))) bounded-caps)
-            (quiet-twins? (vec (range limit)) bounded-caps))))
+                               :seon.config.eval.result/max-collection limit)
+           with-window-size
+           (fn [raw]
+             (assoc (unit raw)
+                    :seon.render.value/options
+                    {:seon.render.value/max-collection limit}))
+           loud?
+           (fn [raw]
+             (let [bounded-unit
+                   (assoc (with-window-size raw)
+                          :seon.sci.admit/caps bounded-caps)]
+               (and (cut-marker?
+                     (:seon.render.value/tree (value/prepare bounded-unit)))
+                    (every? #(str/includes? % "elided")
+                            [(value/render-ai bounded-unit)
+                             (hiccup/->string
+                              (value/render-html bounded-unit))]))))
+           quiet?
+           (fn [raw]
+             (let [bounded-unit
+                   (assoc (with-window-size raw)
+                          :seon.sci.admit/caps bounded-caps)]
+               (and (not (cut-marker?
+                          (:seon.render.value/tree
+                           (value/prepare bounded-unit))))
+                    (every? #(not (str/includes? % "elided"))
+                            [(value/render-ai bounded-unit)
+                             (hiccup/->string
+                              (value/render-html bounded-unit))]))))]
+       (and (loud? (vec (range (inc limit))))
+            (quiet? (vec (range limit))))))
    "collection cuts must be in band"))
 
 (deftest string-cuts-are-in-band-in-both-twins
@@ -241,3 +272,28 @@
                                   :seon.config.eval.result/max-collection 2)))]
     (is (= (hiccup/->string (value/render-html (page-unit left)))
            (hiccup/->string (value/render-html (page-unit right)))))))
+
+(deftest render-options-size-the-window-beneath-the-admission-ceiling
+  (let [raw (vec (range 40))
+        default-html (hiccup/->string (value/render-html (unit raw)))
+        wider-html
+        (hiccup/->string
+         (value/render-html
+          (assoc (unit raw)
+                 :seon.render.value/options
+                 {:seon.render.value/max-collection 12})))
+        safety-html
+        (hiccup/->string
+         (value/render-html
+          (-> (unit raw)
+              (assoc :seon.render.value/options
+                     {:seon.render.value/max-collection 12})
+              (assoc-in [:seon.sci.admit/caps
+                         :seon.config.eval.result/max-collection]
+                        4))))]
+    (is (str/includes? default-html "showing 1–7 of 40")
+        "no explicit options use the registered presentation default")
+    (is (str/includes? wider-html "showing 1–11 of 40")
+        "an explicit options map widens the routed window")
+    (is (str/includes? safety-html "showing 1–3 of 40")
+        "the admission cap remains the outer safety bound")))

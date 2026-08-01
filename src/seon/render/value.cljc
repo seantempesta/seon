@@ -15,8 +15,9 @@
   identities; presentation never recursively walks an unadmitted tail."
   (:require [clojure.string :as str]
             [seon.ai.tokens :as tokens]
-            #?(:clj [seon.schema :as schema])
+            [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]))
 
 #?(:clj (schema.edn/load! {}))
@@ -76,6 +77,25 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Opened-value window
 ;;; ---------------------------------------------------------------------------
+
+(defn- option-defaults
+  []
+  (into {}
+        (keep
+         (fn [entry]
+           (when (vector? entry)
+             (let [attribute (first entry)
+                   properties
+                   (schema.form/attr-form-properties
+                    (schema/schema-definition attribute))]
+               (when (contains? properties :seon.render.value/default)
+                 [attribute (:seon.render.value/default properties)])))))
+        (schema/schema-definition :seon.render.value/options)))
+
+(defn- effective-options
+  [unit]
+  (merge (option-defaults)
+         (:seon.render.value/options unit)))
 
 (defn- stable-entries
   [value]
@@ -140,17 +160,24 @@
        :seon.render.value/more? false})))
 
 (defn- display-value
-  [unit raw caps window?]
+  [unit raw caps options window?]
   (if (and window?
            (:seon.render.value/route-base unit)
            (:seon.render.data/cursor unit))
-    (opened-window raw
-                   (long (get-in unit [:seon.render.data/cursor
-                                       :seon.render.data/offset] 0))
-                   (long (:seon.config.eval.result/max-collection caps)))
+    (let [size
+          (long
+           (min (:seon.render.value/max-collection options)
+                (:seon.config.eval.result/max-collection caps)))]
+      (assoc
+       (opened-window raw
+                      (long (get-in unit [:seon.render.data/cursor
+                                          :seon.render.data/offset] 0))
+                      size)
+       :seon.render.value/size size))
     (let [total (counted-size raw)]
       {:seon.render.value/window raw
        :seon.render.value/steps []
+       :seon.render.value/size 0
        :seon.render.value/offset 0
        :seon.render.value/shown (or total 0)
        :seon.render.value/total total
@@ -164,7 +191,8 @@
   [unit window?]
   (when-let [caps (:seon.sci.admit/caps unit)]
     (let [raw (:seon.render/value unit)
-          window (display-value unit raw caps window?)
+          options (effective-options unit)
+          window (display-value unit raw caps options window?)
           admitted
           (admit/admit
            {:seon.sci.admit/value (:seon.render.value/window window)
@@ -173,6 +201,7 @@
             :seon.config/on-core-error :record})]
       (assoc window
              :seon.render.value/raw raw
+             :seon.render.value/options options
              :seon.render.value/tree (:seon.sci.admit/value admitted)
              :seon.render.value/truncated?
              (boolean (or (:seon.sci.admit/capped? admitted)
@@ -205,6 +234,7 @@
   (when-let [view (admitted-view unit false)]
     {:seon.render.value/tree (:seon.render.value/tree view)
      :seon.render.value/summary (summary (:seon.render.value/raw view))
+     :seon.render.value/options (:seon.render.value/options view)
      :seon.render.value/truncated?
      (:seon.render.value/truncated? view)}))
 
@@ -387,9 +417,9 @@
       (range (count path)))]))
 
 (defn- pager
-  [unit path {:seon.render.value/keys [offset shown total more?]} caps]
+  [unit path {:seon.render.value/keys [offset shown total more? size]}]
   (when (:seon.render.value/route-base unit)
-    (let [size (long (:seon.config.eval.result/max-collection caps))]
+    (let [size (long size)]
       [:div {:class "seon-data-pager"}
        (when (pos? offset)
          (path-link unit path (max 0 (- offset size))
@@ -422,13 +452,12 @@
   [unit]
   (if-let [view (admitted-view unit true)]
     (let [path (vec (get-in unit [:seon.render.data/cursor
-                                  :seon.render.data/path] []))
-          caps (:seon.sci.admit/caps unit)]
+                                  :seon.render.data/path] []))]
       [:div {:id (node-id unit path) :class "seon-data-panel"}
        (breadcrumbs unit path)
        [:div {:class "seon-value-summary"}
         (summary (:seon.render.value/raw view))]
-       (pager unit path view caps)
+       (pager unit path view)
        (node-content unit
                      (:seon.render.value/tree view)
                      (:seon.render.value/raw view)

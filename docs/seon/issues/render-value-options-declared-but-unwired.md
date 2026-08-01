@@ -28,3 +28,16 @@ page size; this issue covers the REST of the options map.
 Acceptance: a unit rendered with no options shows the schema defaults;
 the same unit with explicit options widens; admission caps still cap
 both; regression covers the class.
+
+## Partial resolution — 2026-08-01 caps/blob wave step 2
+
+The routed `/data` window now consumes
+`:seon.render.value/max-collection` through the existing options map. Per-call
+options merge over defaults derived from the registered option attributes, and
+the database-backed page-size dial is read on each request; the separate
+admission width remains its outer ceiling.
+
+This issue stays open because `max-depth`, `max-map-visits`, `max-string`,
+`shape-sample`, and `width` are still declared but not presentation inputs.
+Acceptance requires those remaining options to have honest consumers rather
+than merely riding through the map.

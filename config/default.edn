@@ -25,6 +25,12 @@
  ; Unit: total nodes visited across the whole projection.
  :seon.config.eval.result/max-nodes 4096
 
+ ; Unit: retained entries in one routed `/data` window, including its
+ ; navigation elision marker. Provenance: the 2026-08-01 cap measurements
+ ; raised admission width to runaway-query scale; presentation remains at the
+ ; structural renderer's proven readable default and must not inherit it.
+ :seon.render.value/max-collection 8
+
  ; Unit: milliseconds of wall clock per agent evaluation.
  ; Provenance: the ONLY limit sci has — it counts no steps, so this is
  ; the whole bound on an interpreted form (reference-code/sci/doc/

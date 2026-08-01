@@ -56,6 +56,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
+            [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.data :as data]
@@ -1126,16 +1127,21 @@
   [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps}
    request]
-  (let [query (query-params request)
+  (let [db @connection
+        query (query-params request)
         entity? (contains? query "entity")
         entity (query-entity (get query "entity"))
         root-value (if entity?
                      (when-let [eid (some-> (when entity
-                                             (d/pull @connection [:db/id]
+                                             (d/pull db [:db/id]
                                                      entity))
                                            :db/id)]
-                       (generic-entity @connection eid caps false))
+                       (generic-entity db eid caps false))
                      (schema/canonical-database-attributes))
+        options
+        (select-keys
+         (config/effective db (current-cluster-name db))
+         [:seon.render.value/max-collection])
         cursor (data/parse-cursor (get query "path") (get query "offset"))
         found (data/at root-value cursor)
         opened-value (if (contains? found :seon.render.data/value)
@@ -1151,6 +1157,7 @@
                 (or entity [:seon.render.data/entity (get query "entity")])
                 :seon.render.data/schema)
               :seon.render.value/route-base route-base
+              :seon.render.value/options options
               :seon.render.data/cursor cursor
               :seon.sci.admit/caps caps
               :seon.render/value opened-value}]
