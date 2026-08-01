@@ -78,8 +78,8 @@
   :dev
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
+              "-XX:G1PeriodicGCInterval=30000"]}
 
   ;; The system test gate: `bin/test` (all suites) or
   ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
@@ -95,8 +95,8 @@
                 {:local/root "reference-code/core.async.flow-monitor"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
+              "-XX:G1PeriodicGCInterval=30000"]}
 
   ;; ---------------------------------------------------------------------
   ;; OLD SYSTEM (quarry) — everything below serves src-old/ and is used
@@ -143,8 +143,8 @@
     org.slf4j/slf4j-simple {:mvn/version "2.0.16"}}
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "--sun-misc-unsafe-memory-access=allow"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=25.0"]}
+              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
+              "-XX:G1PeriodicGCInterval=30000"]}
 
   ;; JVM agent host — composes onto :writer (`clojure -M:writer:host ...`).
   :host
