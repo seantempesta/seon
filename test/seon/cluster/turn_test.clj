@@ -1988,7 +1988,8 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"one\")"
-                         :seon.ai/usage usage}])]
+                         :seon.ai/usage usage
+                         :seon.ai/finish-reason "stop"}])]
           (binding [*evaluation* {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "one"))
                                   :seon.sci.admit/value (my.run/complete "one")}]
@@ -1997,7 +1998,39 @@
           (is (= 1 (count rows)))
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn row)))
-              "the provider-owned map survives the database round trip"))))))
+              "the provider-owned map survives the database round trip")
+          (is (= "stop" (:seon.ai.attempt/finish-reason row))
+              "finish reason is its own fact, never inserted into usage"))))))
+
+(deftest reasoning-starvation-persists-usage-finish-and-the-named-error
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            requests (atom [])
+            usage {"prompt_tokens" 104
+                   "completion_tokens" 8
+                   "completion_tokens_details" {"reasoning_tokens" 8}}
+            failure {:seon.error/kind :seon.ai/token-starvation
+                     :seon.error/message
+                     "The provider exhausted the completion budget before replying."
+                     :seon.error/data
+                     {:seon.ai/finish-reason "length"
+                      :seon.ai/usage usage
+                      :seon.ai/error-class :response
+                      :seon.ai/request-transmitted? true
+                      :seon.ai/response-started? true
+                      :seon.ai/output-observed? true}}]
+        (with-redefs [ai/complete (recording-completer requests [failure])]
+          (drive! cluster 10))
+        (let [[row :as rows] (attempt-rows @connection)
+              error-fact (d/pull @connection '[*]
+                                 (:db/id (:seon.ai.attempt/error row)))]
+          (is (= 1 (count rows)))
+          (is (= usage
+                 (edn/read-string (:seon.ai.attempt/usage-edn row))))
+          (is (= "length" (:seon.ai.attempt/finish-reason row)))
+          (is (= :seon.ai/token-starvation (:seon.error/kind error-fact))
+              "the receipt points at the named starvation error fact"))))))
 
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster

@@ -777,6 +777,7 @@
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
          usage :seon.ai/usage
+         finish-reason :seon.ai/finish-reason
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
         connection (:seon.store/branch-connection cluster)
@@ -802,6 +803,8 @@
               ;; no stored :success/:error label restating that.
               commit (assoc :seon.ai.attempt/error (:db/id (first commit)))
               usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
+              finish-reason
+              (assoc :seon.ai.attempt/finish-reason finish-reason)
               ;; ROLE BY CONNECTION: only the backup points back, so a
               ;; reader can tell a failover from a retry without a stamp
               failover-from (assoc :seon.ai.attempt/failover-from
@@ -1090,6 +1093,13 @@
                                 sink (assoc :seon.ai/stream? true
                                             :seon.ai/sink sink)))
                   failure (when (:seon.error/kind completion) completion)
+                  usage (or (:seon.ai/usage completion)
+                            (get-in completion
+                                    [:seon.error/data :seon.ai/usage]))
+                  finish-reason
+                  (or (:seon.ai/finish-reason completion)
+                      (get-in completion
+                              [:seon.error/data :seon.ai/finish-reason]))
                   ;; a backup is only ever a target ONCE: the attempt that
                   ;; already failed over cannot fail over again, and that
                   ;; is what bounds a failover at exactly two calls
@@ -1103,9 +1113,10 @@
                                                  :seon.cluster.run/id run-id
                                                  :seon.cluster.agent/id agent-id
                                                  :seon.ai.attempt/ordinal ordinal}
-                                          (contains? completion :seon.ai/usage)
-                                          (assoc :seon.ai/usage
-                                                 (:seon.ai/usage completion))
+                                          usage (assoc :seon.ai/usage usage)
+                                          finish-reason
+                                          (assoc :seon.ai/finish-reason
+                                                 finish-reason)
                                           failure (assoc :seon.error/value failure)
                                           failover-from
                                           (assoc :seon.ai.attempt/failover-from
