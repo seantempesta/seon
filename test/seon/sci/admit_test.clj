@@ -244,6 +244,18 @@
           (is (empty? (:forbidden
                        (measure (:seon.sci.admit/value admitted))))))))))
 
+(deftest inst-projection-keeps-common-and-exotic-inst-values-readable
+  (let [date (java.util.Date. 41)
+        instant (java.time.Instant/ofEpochMilli 42)
+        exotic (reify clojure.core/Inst
+                 (inst-ms* [_] 43))]
+    (is (= date
+           (:seon.sci.admit/value (admit/admit (request date)))))
+    (is (= (java.util.Date. 42)
+           (:seon.sci.admit/value (admit/admit (request instant)))))
+    (is (= (java.util.Date. 43)
+           (:seon.sci.admit/value (admit/admit (request exotic)))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — realization inside it, nothing after it
 ;;; ---------------------------------------------------------------------------

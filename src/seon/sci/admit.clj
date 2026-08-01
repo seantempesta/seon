@@ -230,13 +230,12 @@
       (char? value) value
       (uuid? value) value
 
-      ;; every inst is EDN-readable as a Date; java.time.Instant is NOT
-      ;; (it prints as #object and refuses to read back — probed), so the
-      ;; projection normalizes to the readable one
-      (inst? value)
-      (if (instance? java.util.Date value)
-        value
-        (java.util.Date. (inst-ms value)))
+      ;; Date is the ordinary inst and must take the allocation-free path.
+      ;; Instant is the other core implementation and normalizes to Date;
+      ;; the protocol fallback below is reserved for genuinely exotic Inst
+      ;; extensions instead of scanning every collection node.
+      (instance? java.util.Date value) value
+      (instance? java.time.Instant value) (java.util.Date. (inst-ms value))
 
       (string? value)
       (if (<= (count value) max-string)
@@ -287,6 +286,12 @@
       (or (coll? value) (seq? value) (instance? java.util.Collection value))
       (project-entries value max-collection child-depth state
                        (fn ([] []) ([accumulated child] (conj accumulated child))))
+
+      ;; A third party may extend clojure.core/Inst. This intentionally comes
+      ;; after every ordinary scalar and collection classification so its
+      ;; protocol lookup is paid only for an exotic leaf.
+      (inst? value)
+      (java.util.Date. (inst-ms value))
 
       ;; a sci type instance that is neither map- nor collection-like
       ;; (a deftype) is named by sci, not by its host class
