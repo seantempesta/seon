@@ -95,6 +95,32 @@
      connection
      {:tx-data (#'loop/session-image-tx @connection stored ordinal)})))
 
+(deftest session-macro-without-a-program-row-fails-closed
+  (with-file-database
+   (fn [connection]
+     (let [namespace-name 'my.agents.session-macro
+           _ (d/transact connection
+                         {:tx-data
+                          [{:seon.config.eval.result/blob-threshold 32768}
+                           {:seon.ns/name namespace-name
+                            :seon.ns/source
+                            "(ns my.agents.session-macro)"}]})
+           ctx (eval/cluster-ctx @connection connection)
+           _ (evaluate! ctx namespace-name
+                        "(defmacro hidden [] '(fn [] 7))")
+           evaluation (evaluate! ctx namespace-name
+                                 "(def hidden-value (hidden))")
+           candidate (first (:seon.sci.eval/session-defs evaluation))
+           stored (#'loop/store-session-values! connection evaluation)
+           row (first (#'loop/session-image-tx @connection stored 1))]
+       (is (= #{'my.agents.session-macro/hidden}
+              (:seon.sci.eval/unproven-called-vars candidate)))
+       (is (nil? (:seon.code.def/source row))
+           "an unstorable value is never replayed through an unproven macro")
+       (is (= "Defining form calls a Var absent from the program graph."
+              (:seon.code.def/unrestorable row)))
+       (is (not (contains? row :seon.sci.eval/unproven-called-vars)))))))
+
 (deftest fresh-context-restores-the-forms-session-image
   (with-file-database
    (fn [connection]
@@ -208,7 +234,8 @@
                 :seon.code.def/name (symbol (last (str/split id #"/")))
                 :seon.code.def/source "(def ignored nil)"
                 :seon.sci.eval/value value
-                :seon.sci.eval/referenced-vars #{}}]})
+                :seon.sci.eval/referenced-vars #{}
+                :seon.sci.eval/unproven-called-vars #{}}]})
            left (#'loop/store-session-values!
                  connection (evaluation "my.agents.dedup/left"))
            right (#'loop/store-session-values!

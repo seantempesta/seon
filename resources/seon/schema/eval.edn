@@ -11,6 +11,7 @@
  :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
  :seon.sci.eval/program-row :map
  :seon.sci.eval/referenced-vars [:set :symbol]
+ :seon.sci.eval/unproven-called-vars [:set :symbol]
  :seon.sci.eval/session-def
  [:map {:closed true}
   [:seon.code.def/id :seon.code.def/id]
@@ -18,7 +19,9 @@
   [:seon.code.def/name :seon.code.def/name]
   [:seon.code.def/source :seon.code.def/source]
   [:seon.sci.eval/value :any]
-  [:seon.sci.eval/referenced-vars :seon.sci.eval/referenced-vars]]
+  [:seon.sci.eval/referenced-vars :seon.sci.eval/referenced-vars]
+  [:seon.sci.eval/unproven-called-vars
+   :seon.sci.eval/unproven-called-vars]]
  :seon.sci.eval/session-defs [:vector :seon.sci.eval/session-def]
  :seon.sci.eval/install-request
  [:map {:closed true}

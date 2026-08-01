@@ -501,20 +501,41 @@
   Over-approximation is deliberate: a shadowed local can only make purity
   fail closed; a qualified or macro-expanded host touch is independently
   observed by SCI's analyzer."
-  [ctx form]
-  (into #{}
-        (comp
-         (filter symbol?)
-         (keep (fn [candidate]
-                 (try
-                   (let [resolved (sci/resolve ctx candidate)]
-                     (when (sci.utils/var? resolved)
-                       (sci/var->symbol resolved)))
-                   (catch Throwable _ nil)))))
-        (tree-seq coll? seq form)))
+  [ctx namespace-name form]
+  (sci/binding [sci/ns (sci/create-ns namespace-name)]
+    (into #{}
+          (comp
+           (filter symbol?)
+           (keep (fn [candidate]
+                   (try
+                     (let [resolved (sci/resolve ctx candidate)]
+                       (when (sci.utils/var? resolved)
+                         (sci/var->symbol resolved)))
+                     (catch Throwable _ nil)))))
+          (tree-seq coll? seq form))))
+
+(defn- unproven-called-vars
+  "Non-builtin Vars occurring in call position. A missing program row for one
+  is not silently pure: this is the fail-closed edge for session macros and
+  other process-local callables outside :seon.fn."
+  [ctx namespace-name form]
+  (sci/binding [sci/ns (sci/create-ns namespace-name)]
+    (into #{}
+          (keep
+           (fn [expression]
+             (when (seq? expression)
+               (let [candidate (first expression)]
+                 (when (symbol? candidate)
+                   (try
+                     (let [resolved (sci/resolve ctx candidate)]
+                       (when (and (sci.utils/var? resolved)
+                                  (not (:sci/built-in (meta resolved))))
+                         (sci/var->symbol resolved)))
+                     (catch Throwable _ nil)))))))
+          (tree-seq coll? seq form))))
 
 (defn- changed-session-defs
-  [ctx before source form contracted-function]
+  [ctx namespace-name before source form contracted-function]
   (let [after (intern-values ctx)]
     (into []
           (comp
@@ -531,7 +552,9 @@
                    :seon.code.def/source source
                    :seon.sci.eval/value value
                    :seon.sci.eval/referenced-vars
-                   (resolved-form-vars ctx form)})))
+                   (resolved-form-vars ctx namespace-name form)
+                   :seon.sci.eval/unproven-called-vars
+                   (unproven-called-vars ctx namespace-name form)})))
           after)))
 
 (defn- deleted-schema-key
@@ -1291,7 +1314,7 @@
               evaluation-record (record :ok)
               session-defs
               (changed-session-defs
-               execution-ctx before-intern-values source form
+               execution-ctx namespace-name before-intern-values source form
                (:seon.fn/sym row))
               admitted (admit/admit
                         {:seon.sci.admit/value value

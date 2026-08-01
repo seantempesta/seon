@@ -295,25 +295,31 @@
 
 (defn- capability-free-references?
   "True when no referenced program-graph function reaches a workload leaf.
-  Missing symbols contribute no invented classification; SCI's independent
-  host-interop observation closes the host-resolution side of the proof."
-  [db roots]
-  (loop [pending (seq (sort-by str roots))
-         visited #{}]
-    (if-let [function-symbol (first pending)]
-      (if (contains? visited function-symbol)
-        (recur (next pending) visited)
-        (let [row (d/pull db
-                          [:seon.fn/workload
-                           {:seon.fn/calls [:seon.fn/sym]}]
-                          [:seon.fn/sym (str function-symbol)])
-              called (map (comp symbol :seon.fn/sym)
-                          (:seon.fn/calls row))]
-          (if (:seon.fn/workload row)
-            false
-            (recur (concat (next pending) called)
-                   (conj visited function-symbol)))))
-      true)))
+  A called SCI Var absent from the program graph fails closed; SCI's
+  independent host-interop observation closes the host-resolution side."
+  [db roots unproven-called-vars]
+  (let [program-row
+        (fn [function-symbol]
+          (d/pull db
+                  [:seon.fn/sym :seon.fn/workload
+                   {:seon.fn/calls [:seon.fn/sym]}]
+                  [:seon.fn/sym (str function-symbol)]))]
+    (if (some #(nil? (:seon.fn/sym (program-row %)))
+              unproven-called-vars)
+      false
+      (loop [pending (seq (sort-by str roots))
+             visited #{}]
+        (if-let [function-symbol (first pending)]
+          (if (contains? visited function-symbol)
+            (recur (next pending) visited)
+            (let [row (program-row function-symbol)
+                  called (map (comp symbol :seon.fn/sym)
+                              (:seon.fn/calls row))]
+              (if (:seon.fn/workload row)
+                false
+                (recur (concat (next pending) called)
+                       (conj visited function-symbol)))))
+          true)))))
 
 (defn- exact-session-row-tx
   [db row]
@@ -343,14 +349,19 @@
          (fn [candidate]
            (let [stored? (or (:seon.code.def/value-edn candidate)
                              (:seon.code.def/blob candidate))
+                 unproven-called-vars
+                 (:seon.sci.eval/unproven-called-vars candidate)
                  pure? (and host-clean?
                             (capability-free-references?
-                             db (:seon.sci.eval/referenced-vars candidate)))]
+                             db
+                             (:seon.sci.eval/referenced-vars candidate)
+                             unproven-called-vars))]
              (cond
                stored?
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
+                           :seon.sci.eval/unproven-called-vars
                            :seon.code.def/source
                            :seon.code.def/unrestorable)
                    (assoc :seon.code.def/ordinal ordinal))
@@ -359,6 +370,7 @@
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
+                           :seon.sci.eval/unproven-called-vars
                            :seon.code.def/unrestorable)
                    (assoc :seon.code.def/ordinal ordinal))
 
@@ -366,12 +378,19 @@
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
+                           :seon.sci.eval/unproven-called-vars
                            :seon.code.def/source)
                    (assoc :seon.code.def/ordinal ordinal
                           :seon.code.def/unrestorable
-                          (if host-clean?
-                            "Defining form reaches a capability leaf."
-                            "Defining form touched host interop."))))))
+                          (cond
+                            (not host-clean?)
+                            "Defining form touched host interop."
+
+                            (seq unproven-called-vars)
+                            "Defining form calls a Var absent from the program graph."
+
+                            :else
+                            "Defining form reaches a capability leaf."))))))
          (:seon.sci.eval/session-defs evaluation))
         contracted-id
         (get-in evaluation [:seon.sci.eval/program-row :seon.fn/sym])

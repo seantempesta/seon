@@ -50,11 +50,12 @@
                :value (:seon.sci.admit/value evaluation)
                :err error
                :ending-ns (:seon.sci.eval/ending-ns evaluation)
-               ;; Until the sealed print path lands, result-edn is the exact
-               ;; value face the production transcript has available. Keeping
-               ;; this seam explicit makes every print-path repair promote a
-               ;; row instead of changing its expectation.
-               :printed result-edn}]
+               ;; Keep the sealed print tree visible to rows that characterize
+               ;; presentation divergences. Passing stock-value rows compare
+               ;; the finite semantic projection admitted from that same tree.
+               :printed result-edn
+               :semantic-printed
+               (pr-str (:seon.sci.admit/value evaluation))}]
           [(or (:seon.sci.eval/ending-ns evaluation) namespace-name)
            (conj results result)]))
       ['user []]
@@ -329,7 +330,7 @@
 
 (defparity "B8" :passing
   (compared "[:a 1]"
-            (:printed
+            (:semantic-printed
              (first (repl-session ["(first {:a 1})"])))))
 
 (defparity "B9" :known-divergence
@@ -371,16 +372,16 @@
 
 (defparity "A3" :passing
   (compared ["1N" "1M"]
-            (mapv :printed (repl-session ["1N" "1M"]))))
+            (mapv :semantic-printed (repl-session ["1N" "1M"]))))
 
 (defparity "A4" :passing
   (compared ["\\a" "\\newline"]
-            (mapv :printed
+            (mapv :semantic-printed
                   (repl-session ["\\a" "\\newline"]))))
 
 (defparity "A5" :passing
   (compared "\"a\\n\\\"\\\\b\""
-            (:printed
+            (:semantic-printed
              (first (repl-session ["\"a\\n\\\"\\\\b\""])))))
 
 (defparity "A6" :passing
@@ -394,7 +395,7 @@
   (compared
    ["#inst \"2020-01-01T00:00:00.000-00:00\""
     "#uuid \"550e8400-e29b-41d4-a716-446655440000\""]
-   (mapv :printed
+   (mapv :semantic-printed
          (repl-session
           ["#inst \"2020-01-01T00:00:00.000-00:00\""
            "#uuid \"550e8400-e29b-41d4-a716-446655440000\""]))))
@@ -461,7 +462,8 @@
   (let [plan (reply/sources "[] [] [999]" 'user)
         sources (mapv :seon.cluster.run.form/source plan)
         results (repl-session sources)]
-    (compared ["[]" "[]" "[999]"] (mapv :printed results))))
+    (compared ["[]" "[]" "[999]"]
+              (mapv :semantic-printed results))))
 
 (defparity "C8" :passing
   (let [results

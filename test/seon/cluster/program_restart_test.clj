@@ -11,6 +11,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.schema :as schema]
+            [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
 
 (defn- transact-inbound!
@@ -74,6 +75,10 @@
          :where [?receipt :seon.cluster.eval/id _]]
        db))
 
+(defn- semantic-result
+  [result-edn]
+  (#'admit/semantic-value (edn/read-string result-edn)))
+
 (defn- active-agent-id
   "The agent whose durable run is currently open."
   [db]
@@ -83,21 +88,6 @@
          [?agent :seon.cluster.agent/id ?agent-id]
          (not [?run :seon.cluster.run/closed-at _])]
        db))
-
-(defn- agent-has-lint-refusal?
-  [db agent-id]
-  (boolean
-   (some (fn [result-edn]
-           (= :seon.cluster.loop/lint-rejected
-              (:seon.error/kind (edn/read-string result-edn))))
-         (d/q '[:find [?result-edn ...]
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?run :seon.cluster.run/agent ?agent]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/result-edn ?result-edn]]
-              db agent-id))))
 
 (defn- agent-open-run?
   [db agent-id]
@@ -124,21 +114,23 @@
   "The complete first-agent plan committed, including its final disposition."
   [db]
   (and (program-present? db)
-       (= 22 (receipt-count db))
-       (= 2 (agent-closed-run-count db "restart-a"))
+       (= 21 (receipt-count db))
+       (= 1 (agent-closed-run-count db "restart-a"))
        (not (agent-open-run? db "restart-a"))))
 
 (defn- restarted-call-present?
   [db]
   (boolean
-   (d/q '[:find ?receipt .
-          :where
-          [?agent :seon.cluster.agent/id "restart-b"]
-          [?run :seon.cluster.run/agent ?agent]
-          [?receipt :seon.cluster.eval/run ?run]
-          [?receipt :seon.cluster.eval/ordinal 0]
-          [?receipt :seon.cluster.eval/result-edn "\"OK\""]]
-        db)))
+   (some #{"OK"}
+         (map semantic-result
+              (d/q '[:find [?result ...]
+                     :where
+                     [?agent :seon.cluster.agent/id "restart-b"]
+                     [?run :seon.cluster.run/agent ?agent]
+                     [?receipt :seon.cluster.eval/run ?run]
+                     [?receipt :seon.cluster.eval/ordinal 0]
+                     [?receipt :seon.cluster.eval/result-edn ?result]]
+                   db)))))
 
 (deftest an-agent-definition-survives-restart-and-another-agent-calls-it
   (let [root (str "tmp/program-restart-test/" (random-uuid))
@@ -162,9 +154,7 @@
              (fn [_]
                {:seon.ai/text
                 (if (= "restart-a" (active-agent-id @connection))
-                  (if (agent-has-lint-refusal? @connection "restart-a")
-                    "(my.run/complete \"lint refusal observed\")"
-                    (str
+                  (str
                      "(require '[seon.schema :as schema])\n"
                      "(require '[clojure.string :as s1])\n"
                      "(require '[clojure.string :as s2])\n"
@@ -193,7 +183,7 @@
                      "(clojure.core/ns-unmap "
                      "(find-ns 'my.agents.restart-a) "
                      "(symbol \"removed-before-restart\"))\n"
-                     "(my.run/complete \"program committed\")"))
+                     "(my.run/complete \"program committed\")")
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
@@ -201,38 +191,41 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
-          (is (= 22 (receipt-count @connection))
-              "twenty valid forms, one refusal, and its corrective turn settle")
-          (is (= 2 (agent-closed-run-count @connection "restart-a"))
-              "the lint refusal derives a corrective run from durable facts")
-          (is (= "4"
-                 (d/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 10]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+          (is (= 21 (receipt-count @connection))
+              "twenty valid forms and one independent refusal settle")
+          (is (= 1 (agent-closed-run-count @connection "restart-a"))
+              "the terminal disposition closes the original run")
+          (is (= 4
+                 (semantic-result
+                  (d/q '[:find ?result .
+                         :where
+                         [?receipt :seon.cluster.eval/ordinal 10]
+                         [?receipt :seon.cluster.eval/result-edn ?result]]
+                       @connection)))
               "a process-local scratch def is lintable by the next form")
-          (is (= "5"
-                 (d/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 12]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+          (is (= 5
+                 (semantic-result
+                  (d/q '[:find ?result .
+                         :where
+                         [?receipt :seon.cluster.eval/ordinal 12]
+                         [?receipt :seon.cluster.eval/result-edn ?result]]
+                       @connection)))
               "a private scratch def remains callable inside its namespace")
           (is (nil? (d/pull @connection [:db/id]
                             [:seon.fn/sym
                              "my.agents.restart-a/scratch"]))
               "an uncontracted scratch def remains outside the program graph")
-          (is (= "{:resolved :clojure.set/after-require}"
-                 (d/q '[:find ?result .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 14]
-                        [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+          (is (= {:resolved :clojure.set/after-require}
+                 (semantic-result
+                  (d/q '[:find ?result .
+                         :where
+                         [?receipt :seon.cluster.eval/ordinal 14]
+                         [?receipt :seon.cluster.eval/result-edn ?result]]
+                       @connection)))
               "a computed require changes lint and eval state for the next form")
           (is (= :seon.cluster.loop/lint-rejected
                  (:seon.error/kind
-                  (edn/read-string
+                  (semantic-result
                    (d/q '[:find ?result .
                           :where
                           [?receipt :seon.cluster.eval/ordinal 15]
