@@ -34,7 +34,13 @@
        "```"))
 
 (defn toolkit-namespaces
-  "Public contracted `my.*` namespaces in one database program graph."
+  "Public contracted `my.*` namespaces in one database program graph.
+
+  A CLUSTER-LEVEL RENDERING HINT, never a grant. Every agent may call
+  every function in its cluster's program graph (ruling #20); this set
+  only names the namespaces worth showing first in a fresh agent's
+  context. Nothing consults it to decide whether a call is permitted,
+  and nothing may start to."
   {:malli/schema
    [:=> [:cat :seon.db/database-value]
     :seon.cluster/toolkit-namespaces]}
