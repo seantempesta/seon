@@ -2,7 +2,6 @@
   "Live restart proof for database-backed SCI program acquisition."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [datahike.core :as datahike]
@@ -76,17 +75,59 @@
          :where [?receipt :seon.cluster.eval/id _]]
        db))
 
+(defn- active-agent-id
+  "The agent whose durable run is currently open."
+  [db]
+  (d/q '[:find ?agent-id .
+         :where
+         [?run :seon.cluster.run/agent ?agent]
+         [?agent :seon.cluster.agent/id ?agent-id]
+         (not [?run :seon.cluster.run/closed-at _])]
+       db))
+
+(defn- agent-has-lint-refusal?
+  [db agent-id]
+  (boolean
+   (some (fn [result-edn]
+           (= :seon.cluster.loop/lint-rejected
+              (:seon.error/kind (edn/read-string result-edn))))
+         (d/q '[:find [?result-edn ...]
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?run :seon.cluster.run/agent ?agent]
+                [?receipt :seon.cluster.eval/run ?run]
+                [?receipt :seon.cluster.eval/result-edn ?result-edn]]
+              db agent-id))))
+
+(defn- agent-open-run?
+  [db agent-id]
+  (boolean
+   (d/q '[:find ?run .
+          :in $ ?agent-id
+          :where
+          [?agent :seon.cluster.agent/id ?agent-id]
+          [?run :seon.cluster.run/agent ?agent]
+          (not [?run :seon.cluster.run/closed-at _])]
+        db agent-id)))
+
+(defn- agent-closed-run-count
+  [db agent-id]
+  (d/q '[:find (count ?run) .
+         :in $ ?agent-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.cluster.run/closed-at _]]
+       db agent-id))
+
 (defn- authored-program-settled?
   "The complete first-agent plan committed, including its final disposition."
   [db]
   (and (program-present? db)
-       (= 21 (receipt-count db))
-       (some? (d/q '[:find ?closed .
-                     :where
-                     [?agent :seon.cluster.agent/id "restart-a"]
-                     [?run :seon.cluster.run/agent ?agent]
-                     [?run :seon.cluster.run/closed-at ?closed]]
-                   db))))
+       (= 22 (receipt-count db))
+       (= 2 (agent-closed-run-count db "restart-a"))
+       (not (agent-open-run? db "restart-a"))))
 
 (defn- restarted-call-present?
   [db]
@@ -119,39 +160,41 @@
              :seon.ns/name 'my.agents.restart-a}))
           (with-redefs
             [ai/complete
-             (fn [{prompt :seon.ai/prompt}]
+             (fn [_]
                {:seon.ai/text
-                (if (str/includes? prompt "You are agent restart-a")
-                  (str
-                   "(require '[seon.schema :as schema])\n"
-                   "(require '[clojure.string :as s1])\n"
-                   "(require '[clojure.string :as s2])\n"
-                   "(require '[clojure.string :refer [upper-case] "
-                   ":rename {upper-case up}])\n"
-                   "(require 'clojure.set)\n"
-                   "(require '[missing.restart.namespace :as-alias ghost])\n"
-                   "(require '[clojure.test :refer [deftest]])\n"
-                   "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
-                   "persisted [x] (do (s1/lower-case x) "
-                   "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
-                   "(schema/register! ::nonnegative "
-                   "(vector :int {:min 0}))\n"
-                   "(defn scratch [x] (inc x))\n"
-                   "(scratch 3)\n"
-                   "(defn- scratch-private [x] (inc x))\n"
-                   "(scratch-private 4)\n"
-                   "(require (if true '[clojure.set :as dynamic] "
-                   "'[clojure.string :as dynamic]))\n"
-                   "{:resolved ::dynamic/after-require}\n"
-                   "(missing-independent-form 4)\n"
-                   "(deftest persisted-test :reopened)\n"
-                   "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
-                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                   "removed-before-restart [x] (inc x))\n"
-                   "(clojure.core/ns-unmap "
-                   "(find-ns 'my.agents.restart-a) "
-                   "(symbol \"removed-before-restart\"))\n"
-                   "(my.run/complete \"program committed\")")
+                (if (= "restart-a" (active-agent-id @connection))
+                  (if (agent-has-lint-refusal? @connection "restart-a")
+                    "(my.run/complete \"lint refusal observed\")"
+                    (str
+                     "(require '[seon.schema :as schema])\n"
+                     "(require '[clojure.string :as s1])\n"
+                     "(require '[clojure.string :as s2])\n"
+                     "(require '[clojure.string :refer [upper-case] "
+                     ":rename {upper-case up}])\n"
+                     "(require 'clojure.set)\n"
+                     "(require '[missing.restart.namespace :as-alias ghost])\n"
+                     "(require '[clojure.test :refer [deftest]])\n"
+                     "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
+                     "persisted [x] (do (s1/lower-case x) "
+                     "(s2/lower-case x) (name ::ghost/value) (up x)))\n"
+                     "(schema/register! ::nonnegative "
+                     "(vector :int {:min 0}))\n"
+                     "(defn scratch [x] (inc x))\n"
+                     "(scratch 3)\n"
+                     "(defn- scratch-private [x] (inc x))\n"
+                     "(scratch-private 4)\n"
+                     "(require (if true '[clojure.set :as dynamic] "
+                     "'[clojure.string :as dynamic]))\n"
+                     "{:resolved ::dynamic/after-require}\n"
+                     "(missing-independent-form 4)\n"
+                     "(deftest persisted-test :reopened)\n"
+                     "(clojure.core/ns-unmap *ns* (symbol \"String\"))\n"
+                     "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                     "removed-before-restart [x] (inc x))\n"
+                     "(clojure.core/ns-unmap "
+                     "(find-ns 'my.agents.restart-a) "
+                     "(symbol \"removed-before-restart\"))\n"
+                     "(my.run/complete \"program committed\")"))
                   "(my.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
@@ -159,8 +202,10 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
-          (is (= 21 (receipt-count @connection))
-              "twenty valid forms settle despite one independent refusal")
+          (is (= 22 (receipt-count @connection))
+              "twenty valid forms, one refusal, and its corrective turn settle")
+          (is (= 2 (agent-closed-run-count @connection "restart-a"))
+              "the lint refusal derives a corrective run from durable facts")
           (is (= "4"
                  (d/q '[:find ?result .
                         :where
@@ -286,9 +331,9 @@
              :seon.ns/name 'my.agents.restart-b}))
           (with-redefs
             [ai/complete
-             (fn [{prompt :seon.ai/prompt}]
+             (fn [_]
                {:seon.ai/text
-                (if (str/includes? prompt "You are agent restart-b")
+                (if (= "restart-b" (active-agent-id @connection))
                   (str
                    "(my.agents.restart-a/persisted \"ok\")\n"
                    "(my.run/complete \"restarted definition called\")")
