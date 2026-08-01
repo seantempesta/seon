@@ -12,6 +12,27 @@ agent `print-method` stays refused (fork-local form recorded for later
 if ever wanted); honest faces — true `sci.lang.Namespace` class, atoms
 print without deref. The contract below is SEALED for implementation.
 
+**AMENDED by the parity mining
+(`research/repl-parity-test-mining-2026-08-01.md`, 59-row checklist,
+2026-08-01):** (1) the reader-tag fix is ONE COMPUTED LINE — edamame
+already falls through to `clojure.core/default-data-readers` when the
+`:readers` fn returns nil; our `accepted-reader` must return nil for
+tags it does not own instead of a refusal handler (falsified live,
+`tmp/edamame_tag_probe.clj`) — the per-caller tag-set idea is dead.
+(2) The dispatch table gains the Throwable VALUE face: stock
+`#error {…}` (round-tripping `Throwable->map`) — what `*e` holds;
+adopted under the standing as-stock-as-possible ruling, owner may veto.
+(3) The error report line builds on `sci/stacktrace` +
+`sci/format-stacktrace` (sci ships them) — never a rebuilt formatter.
+(4) `*e` binds the CAUSE-side value so `(ex-data *e)` shows user
+ex-data, not the `:sci.impl/*` wrapper — the S2/S3 collision resolved
+at the binding site. (5) Exact upstream edge bytes are acceptance
+rows: empty colls never elide, `*print-level* 0` → `#`, the
+level×length matrix, `##Inf`/`##NaN` for Float, demunged fn names via
+sci's own `clojure.repl/demunge`. The parity GATE is one namespace
+`test/seon/repl_parity_test.clj` under `bin/test`, fed by a
+`repl-session` shim through the production door.
+
 
 Ruling #24's open crux: *"how does a REPL print, and can we print
 composable HTML the same way? Closer to the metal — mirror how Clojure's
