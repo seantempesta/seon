@@ -402,11 +402,9 @@ how discovered data renders with zero registry ceremony.
 Root receives one concise role-specific block: understand the fleet, start or
 select an ordinary agent, route/delegate work, and respond to recovery notices.
 It does not receive a broad root manual. Its capabilities appear as compact,
-fully specified home-required namespace cards. Root's require vector is an
-additive overlay by namespace identity on the complete ordinary/downstream
-workbench, so filesystem, shell, web, database, skills, canvas, and consumer
-product capabilities remain present while root refers its small orchestration
-surface directly into the safe `my.agent.root` home namespace. Root-authored
+fully specified namespace cards. This is a RENDERING overlay by namespace
+identity, never a grant: root can call exactly what every other agent can
+call (ruling #20), and the cards only decide what root SEES first. Root-authored
 definitions never land in framework code. The resolved vector is persisted
 with root's home namespace; there is no runtime role registry or renderer
 allowlist. When root moves into an

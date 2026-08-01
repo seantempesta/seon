@@ -945,9 +945,10 @@ There is no cluster synchronization operation. `init NAME --force` is the
 explicit destructive refork from the current published commit.
 Agent-authored namespace, function, schema, and test forms enter through the
 eval analyzer tee. The whole live program graph is therefore queryable
-without a second test registry. Agent context renders only `my.*` members in
-full source while source-owned members stay indexed-but-summarized. The render
-policy is owned by [[ui]]; the declaration facts are owned here.
+without a second test registry. Context RENDERING selects which members appear in full source
+versus indexed-but-summarized; it never limits what an agent may call
+(ruling #20 — every function in the cluster's graph is callable). The
+render policy is owned by [[ui]]; the declaration facts are owned here.
 
 ### 4.12 completed restore — `:seon.db.restore/*`
 

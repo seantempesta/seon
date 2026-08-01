@@ -53,11 +53,13 @@ protected implementation or invent a second tool protocol.
 | Protected substrate | `seon.*` | changed as core source, never redefined by an agent | enforce capabilities, schemas, bounds, database and runtime contracts |
 | Editable composition | allowed application namespaces, conventionally `my.*` | ordinary cluster-shared program facts agents may extend | compose domain data, plan, canvas, skills, applications, and reusable helpers |
 
-An agent's home requirements expose only the protected capabilities and `my.*`
-namespaces appropriate to that agent. Root receives a complete curated
-home-require scalar with lifecycle and navigation capabilities; ordinary agents
-do not inherit those grants. A namespace's full source becomes context when it
-is current. The entire toolkit is not rendered unconditionally every turn.
+EVERY AGENT MAY CALL EVERY FUNCTION (ruling #20). There is no per-agent
+grant, curated home-require scalar, or execution allowlist: the cluster's
+program graph is one live graph and any function in it is callable by any
+agent in that cluster. What differs per agent is only what is RENDERED —
+a namespace's full source becomes context when it is current, and the
+entire toolkit is never rendered unconditionally every turn. Rendering is
+a context-economy decision; it never gates execution.
 
 ## Intended `my.*` namespaces
 
@@ -164,9 +166,10 @@ semantics and is not mistaken for a work or materialization bound.
 
 `my.fs`, `my.shell`, and `my.web` are the public filesystem, process, fetch,
 and search namespaces. Their schemas and protected policy leaves name allowed
-paths, domains, deadlines, output bounds, and errors. An agent sees one only
-when its curated home requirements expose it; composition never weakens
-`effect/request!`.
+paths, domains, deadlines, output bounds, and errors. Every agent can CALL these; what a capability
+itself permits (paths, domains, deadlines, bounds) is enforced by the
+protected policy leaves at the guarded door, not by hiding the function
+from some agents. Composition never weakens `effect/request!`.
 
 ### Packages
 

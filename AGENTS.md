@@ -33,11 +33,15 @@ already owns the behavior.
 THE CONVERSION TEST IS SIMPLIFICATION, not relocation (owner ruling
 2026-07-24 night, after the R52/R53 pattern): a function that "runs on
 the new tier" but keeps its old-model shape is NOT converted — it is a
-ported defect. Under the stateless claim-native model the agent-facing
-surface reduces to three shapes: pure code returning VALUES the driver
-interprets (lifecycle, dispositions, plans); genuine capability
-requests through the one guarded door (fs, web, llm, db); and durable
-FACTS the driver commits (memory, messages, receipts). Anything
+ported defect. Under the stateless claim-native model EFFECTS reduce to three
+shapes: pure code returning VALUES the driver interprets (lifecycle,
+dispositions, plans); genuine capability requests through the one
+guarded door (fs, web, llm, db); and durable FACTS the driver commits
+(memory, messages, receipts). THIS IS A RULE ABOUT HOW EFFECTS HAPPEN,
+NEVER ABOUT WHAT IS CALLABLE: every agent may call every function in
+its cluster's program graph (ruling #20), and any reading of "three
+shapes" as a restricted toolkit is the poisoned inversion that ruling
+overturned. Anything
 agent-facing that performs runtime semantics effectfully from inside
 an eval — leaf-bound lifecycle calls, in-eval turn/run mutation,
 side-channel delivery — is old-engine residue: redesign it into one of
@@ -617,7 +621,8 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
 | reduce (plan execution) | fold | executing a plan is a reduce over its forms; the accumulator is the basis; `clojure.core/reduce` ↔ the Datahike transaction report's `:db-after` (`r/fold` is parallel — wrong word) |
 | run loop | driver, driving | the loop claiming runs via `:db.fn/cas` and reducing plans; `src-old/seon/agent/driver.clj` until the rename wave |
-| `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every flat `my.*` tool call enters; effects carry the one request identity |
+| `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — the door is about effects crossing out, never about which functions an agent may call (ruling #20); effects carry the one request identity |
+| every function is callable | toolkit, grants, home-requires, agent-facing surface (as a limit), allowlist | ruling #20: an agent may call ANY function in its cluster's program graph. Per-agent GRANTS do not exist; what differs per agent is only what is RENDERED into its context, which never gates execution. The guarded door bounds EFFECTS (fs/web/llm/db), not callability |
 | program graph | corpus | the collective name for `:seon.fn`/`:seon.ns`/`:seon.schema` facts; owners rename to `seon.code.fn`/`.ns`/`.schema`/`.test` |
 | proc, step-fn, conns, graph-def, report channel | invented scheduler nouns | `clojure.core.async.flow`'s own vocabulary — adopted Path A, `seon.flow` implements `flow.spi`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/spi.clj` |
 | `(sliding-buffer 1)` tap | latest-wins mailbox | core.async's own newest-only delivery; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/buffers.clj` |
@@ -1133,5 +1138,7 @@ embeddings PRD.
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
 - `src-old/seon/AGENTS.md` — State A one-mechanism and runtime ownership table;
-- `src-old/my/AGENTS.md` — State A agent-facing toolkit constraints;
+- `src-old/my/AGENTS.md` — State A quarry only; its per-agent toolkit
+  CONSTRAINTS are superseded by ruling #20 (every agent may call every
+  function) and must never be treated as current authority;
 - `AGENT.md` — thin delegated-lane compatibility adapter.
