@@ -168,7 +168,55 @@ agent's own past, the single most trained-on repair signal.)
 
 ## Prototype
 
-`tmp/repl-context-prototype.clj` constructs the session view from the
-LIVE default cluster's real facts (default up at 7994) and writes ai +
-markdown files, proving the printer against real data before the
-production renderers land.
+`tmp/repl_context_prototype.clj` (v2) constructs the session view from
+the LIVE default cluster's real facts (default up at 7994) and writes
+ai + markdown files, proving the printer against real data before the
+production renderers land. v2 runs every runnable form through the
+REAL door (`seon.sci.eval` fork → acquire! → evaluate) and captures
+the true outputs; only the unbuilt fns' outputs are authored, each
+named in `authored-targets` in the file. Artifacts:
+`tmp/repl-context-nursery.{ai.txt,md}` (570 tokens) and
+`tmp/repl-context-root-real.{ai.txt,md}` (192 tokens — root's actual
+stored turn, zero authored bytes).
+
+### Prototype v2 findings (2026-08-01, all REPL-verified live)
+
+- **P9 forces two print rules.** Feeding the full ai context to the
+  reader fails on bare prose (`database:` is an invalid token) and on
+  `#object[…]`. Resolutions proven in the prototype: (1) prose-emitting
+  outputs (`help`, `doc`'s docstring body) PRINT AS `;` COMMENT LINES;
+  (2) opaque admitted values print as the admitted projection map
+  (`#:seon.sci.admit{:opaque "sci.lang.Namespace", :name …}`) — honest
+  (it is what the driver stores) and reader-clean. A nicer face is the
+  print-method crux. With both, P9 passes: nursery reads as 38 forms,
+  root-real as 14, zero failures.
+- **The door today**: `(in-ns …)` works (admitted as opaque map);
+  `clojure.repl/dir` WORKS and prints exactly the installed public fns
+  (`decline`, `send` — `send-value` is `:seon.fn/private? true`), but
+  bare `dir`/`doc` are unresolved (refer wiring pending); `doc` prints
+  NOTHING for corpus fns (must be wired to `:seon.fn/doc`/`arglists`
+  facts, not var metadata); `seon.db/q` and `datahike.api/q` are both
+  unresolved — the any-function db surface for agent evals is a real
+  gap, the exam cannot run through the door yet (the count, 7, is
+  computed JVM-side by the same query).
+- **`my.message/send` value-shape works end to end**: returns
+  `#:my.message{:to "root", :content "hi"}` through admission.
+- **One reader event per evaluation** is enforced
+  (`::reader-event-count` refusal), so a batch is several form rows
+  echoed at several prompts — the printer renders per-form prompts,
+  which is also what pasting a batch into a real REPL looks like.
+- **Wrong arity prints garbage**: `(my.message/send)` surfaces as
+  `Execution error: :malli.core/invalid-schema` — the single most
+  trained-on repair signal (arity error) is unteachable in this form.
+  Issue filed: `docs/seon/issues/arity-mistake-prints-invalid-schema.md`.
+  The owner-agent turn-3 error-recovery mockup blocks on this fix (its
+  history beat needs real, legible arity bytes).
+- **Refusal face**: rendered as `;; Execution error: …` comment so P9
+  holds (bare `Execution error: Unable to resolve symbol: x` does not
+  read).
+- **Arrivals** render as `;; ← <from> (HH:MM)` + the pr-str'd content
+  line (reader-clean); a message with no from-agent renders as
+  `the human`.
+- **Prompt truth**: the historical prompt is derived from the receipt's
+  own `:seon.cluster.eval/ns` (root's real turn prints
+  `my.agents.root=> `), never from the current prompt fact.
