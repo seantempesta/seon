@@ -16,6 +16,28 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM 3 — 2026-08-01 night, HANDOFF STATE (owner restarting the
+app for the MCP server fixes).** SYSTEM RESET owner-ordered and done:
+store wiped (old test data discarded deliberately), current-src
+republished from HEAD (commit 6a6e4857, digest 230eef81), fresh
+`default` on a new JVM serving HEAD — corpus verified 1,556 fn / 678
+test / 200 ns rows, page 200. LANDED since addendum 2: 1A live
+per-cluster ctx (`ac9de46b9` + fixtures `f4529e542`); print 3A sealed
+grammar (`94220a629`) + semantic-value restore (`f01d6d3f6`); both
+cross-lane seams (`91decd350` page-size fact, `1376a601d` print-var
+capture); ALL FOUR MCP audit fixes (`5a83efc2e`, `727e436b9`), issues
+archived, one new reader-chase finding filed
+(old-writer-port-consumers-survive-outside-mcp). NEW BLOCKER FILED:
+agent-authored contracts do not enforce in the live ctx (live-probed;
+its own slice after 1C). Ruling #32 sealed + value-first clarification;
+print Amendment 3 recorded. IN FLIGHT: hot-ctx-lane1 (1A live
+acceptance on the fresh substrate → 1C forms → 1C′ values);
+print-path-lane3 (3B floor/options). NEXT after both: frozen full gate
+on the quiet tree → 3C parity promotion → live-ctx contract slice →
+the coupled interop wave. A restarted session re-derives from this
+block + `git log` + `bin/seon status`; lane summaries in
+`tmp/orchestrator/`; resume lanes with `bin/codex-agent resume <name>`.
+
 **ADDENDUM 2 — 2026-08-01 night.** Rulings #31 and #32 recorded (gate
 untouched + contracts-as-safety; the SEALED restore rule +
 forms-then-values order + coupled interop wave + atom protocol CLOSED).
