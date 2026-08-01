@@ -521,6 +521,8 @@
           (seq (set/intersection changed-attributes
                                  unsafe-attributes))
           (conj :component-or-cardinality-many-change)
+          (contains? changed-attributes :seon.fn/spec)
+          (conj :function-contract-change)
           added-many-or-component?
           (conj :component-or-cardinality-many-addition)
           (some (fn [program-identity]
@@ -597,6 +599,91 @@
         {:seon.error/kind ::index-refused
          ::missing-population identity-attr})))))
 
+(defn- add-contract-facts
+  [program-rows]
+  (let [schema-forms
+        (into (sorted-map)
+              (keep (fn [{schema-key :seon.schema/key
+                          form-string :seon.schema/form}]
+                      (when schema-key
+                        [schema-key (edn/read-string form-string)])))
+              program-rows)
+        function-contracts
+        (into (sorted-map)
+              (keep (fn [{function-symbol :seon.fn/sym
+                          spec :seon.fn/spec}]
+                      (when spec
+                        [(symbol function-symbol) (edn/read-string spec)])))
+              program-rows)
+        projection (schema/build-projection schema-forms function-contracts)
+        compile-options (:seon.schema.projection/compile-options projection)
+        predicate-functions
+        (:seon.schema.projection/predicate-functions projection)
+        schema-keys (set (keys schema-forms))]
+    (mapv (fn [row]
+            (program/with-contract-facts
+             {:seon.program/row row
+              :seon.program/compile-options compile-options
+              :seon.program/predicate-functions predicate-functions
+              :seon.program/schema-keys schema-keys}))
+          program-rows)))
+
+(defn backfill-contract-facts!
+  "Backfill every contracted function missing either parsed component root.
+
+   All missing graphs commit in one transaction. A converged call performs no
+   transaction; ordinary producers remain responsible for new and changed
+   rows so their specs and parsed facts are atomic."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.store/branch-connection :seon.store/branch-connection]
+      [:seon.db/process {:optional true} :seon.db/ref]]]
+    :seon.reconcile/result]}
+  [{connection :seon.store/branch-connection process :seon.db/process}]
+  (let [db @connection
+        projection (schema/projection-from-database db)
+        compile-options (:seon.schema.projection/compile-options projection)
+        predicate-functions
+        (:seon.schema.projection/predicate-functions projection)
+        schema-keys (set (keys (:seon.schema.projection/forms projection)))
+        missing
+        (d/q '[:find ?function ?function-symbol ?spec
+               :where
+               [?function :seon.fn/sym ?function-symbol]
+               [?function :seon.fn/spec ?spec]
+               (or (not [?function :seon.fn/arities])
+                   (not [?function :seon.fn/ast]))]
+             db)
+        tx-data
+        (into
+         []
+         (mapcat
+          (fn [[function function-symbol spec]]
+            (let [current (d/pull db [:seon.fn/arities :seon.fn/ast]
+                                  function)
+                  parsed
+                  (program/contract-facts
+                   {:seon.program/function-symbol function-symbol
+                    :seon.program/spec spec
+                    :seon.program/compile-options compile-options
+                    :seon.program/predicate-functions predicate-functions
+                    :seon.program/schema-keys schema-keys})]
+              (concat
+               (keep (fn [attribute]
+                       (when (contains? current attribute)
+                         [:db.fn/retractAttribute function attribute]))
+                     [:seon.fn/arities :seon.fn/ast])
+               [(assoc parsed :db/id function)]))))
+         (sort-by second missing))]
+    (when (seq tx-data)
+      (d/transact connection
+                  (cond-> {:tx-data tx-data}
+                    process (assoc :tx-meta {:seon.db/process process}))))
+    {:seon.reconcile/converged? (empty? tx-data)
+     :seon.reconcile/operations (count missing)}))
+
 (defn- desired-program-rows
   [request]
   (let [source-rows (rows request)
@@ -631,8 +718,9 @@
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key}))))
-    (into (into (vec source-only) external-namespace-rows)
-          canonical-schemas)))
+    (add-contract-facts
+     (into (into (vec source-only) external-namespace-rows)
+           canonical-schemas))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis."
