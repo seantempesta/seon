@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.context :as context]
             [seon.render.hiccup :as hiccup]
             [seon.render.walk :as walk]
             [seon.test-support :as support]))
@@ -50,8 +51,7 @@
            :seon.context.contribution/position 0
            :seon.render.block/name :walk
            :seon.context.contribution/hash "capture-hash"
-           :seon.context.contribution/tokens 12
-           :seon.context.contribution/band :dynamic}]}])
+           :seon.context.contribution/tokens 12}]}])
       (let [db @connection
             ai-node (capture-neighbourhood db :seon.render/ai)
             ai-capture (node-by-projection ai-node
@@ -76,3 +76,35 @@
           (is (str/includes? html "<details"))
           (is (str/includes? html "Context capture at database basis 42"))
           (is (str/includes? html sentinel)))))))
+
+(deftest one-walk-capture-transacts-without-a-legacy-band
+  (support/with-database
+    (fn [connection]
+      (d/transact connection [{:seon.cluster.run/id "one-walk-run"}])
+      (let [db @connection
+            rendered
+            {:seon.cluster.prompt/text "one fresh walk"
+             :seon.context/contributions
+             [{:seon.render.block/name :walk
+               :seon.render/kind :seon.render/ai
+               :seon.context.contribution/position 0
+               :seon.context.contribution/text "one fresh walk"
+               :seon.context.contribution/hash "one-walk-hash"
+               :seon.context.contribution/tokens 3
+               :seon.render/projection 'seon.render/walk}]
+             :seon.db/db db}
+            tx-data
+            (context/capture-tx
+             {:seon.cluster.run/id "one-walk-run"
+              :seon.cluster.prompt/rendered-context rendered})]
+        (d/transact connection tx-data)
+        (let [capture
+              (d/pull @connection
+                      [{:seon.context.capture/contributions
+                        '[*]}]
+                      [:seon.context.capture/id
+                       (str "one-walk-run-context-" (:max-tx db))])]
+          (is (= 1 (count (:seon.context.capture/contributions capture))))
+          (is (not (contains?
+                    (first (:seon.context.capture/contributions capture))
+                    :seon.context.contribution/band))))))))

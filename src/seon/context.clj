@@ -109,9 +109,7 @@
              :seon.context.contribution/hash
              (:seon.context.contribution/hash record)
              :seon.context.contribution/tokens
-             (:seon.context.contribution/tokens record)
-             :seon.context.contribution/band
-             (:seon.context.contribution/band record)}
+             (:seon.context.contribution/tokens record)}
       (:seon.render/projection record)
       (assoc :seon.render/projection (:seon.render/projection record))
       failure
