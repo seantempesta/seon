@@ -201,3 +201,39 @@
    (pull* (current-database-value) pattern entity-id))
   ([database pattern entity-id]
    (pull* database pattern entity-id)))
+
+(defn- pull-many*
+  [database pattern entity-ids]
+  (if (error-value? database)
+    database
+    (try
+      (let [response
+            (d/pull-many-with-evidence database pattern entity-ids)]
+        (append-pull-evidence! database response)
+        (:datahike.pull-many/result response))
+      (catch Throwable error
+        (append-read-evidence!
+         {:seon.db/db database
+          :seon.db/source-argument-position 0
+          :datahike.read/dependency-plan :all})
+        (dependency-error ::pull-many error)))))
+
+(defn pull-many
+  "Pull input-aligned entities over an explicit or current database value."
+  {:malli/schema
+   [:function
+    [:=>
+     [:cat
+      [:vector :seon.schema/value]
+      [:sequential :seon.schema/value]]
+     [:or [:vector [:or :nil :map]] :seon.error/value]]
+    [:=>
+     [:cat
+      :seon.db/database-value
+      [:vector :seon.schema/value]
+      [:sequential :seon.schema/value]]
+     [:or [:vector [:or :nil :map]] :seon.error/value]]]}
+  ([pattern entity-ids]
+   (pull-many* (current-database-value) pattern entity-ids))
+  ([database pattern entity-ids]
+   (pull-many* database pattern entity-ids)))

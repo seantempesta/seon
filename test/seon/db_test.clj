@@ -25,6 +25,9 @@
 (def ^:private schema-ref
   [:seon.schema/key :my.message/content])
 
+(def ^:private missing-schema-ref
+  [:seon.schema/key :seon.db-test/missing])
+
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database
    (fn [connection]
@@ -44,7 +47,12 @@
                   (db/q nonzero-source-query "my.message"))))
          (testing "pull has equivalent explicit and current forms"
            (is (= (db/pull database schema-pattern schema-ref)
-                  (db/pull schema-pattern schema-ref)))))))))
+                  (db/pull schema-pattern schema-ref))))
+         (testing "pull-many has equivalent explicit and current forms"
+           (is (= (db/pull-many database schema-pattern
+                                [schema-ref missing-schema-ref schema-ref])
+                  (db/pull-many schema-pattern
+                                [schema-ref missing-schema-ref schema-ref])))))))))
 
 (deftest current-database-resolves-once-per-call
   (test-support/with-database
@@ -58,7 +66,9 @@
            (db/q exam-query)
            (is (= 1 @calls))
            (db/pull schema-pattern schema-ref)
-           (is (= 2 @calls))))))))
+           (is (= 2 @calls))
+           (db/pull-many schema-pattern [schema-ref])
+           (is (= 3 @calls))))))))
 
 (deftest unbound-current-database-is-a-flat-error
   (let [result (binding [db/*conn* nil]
@@ -79,11 +89,38 @@
        (binding [db/*conn* connection
                  db/*capture-context* entries]
          (db/q exam-query)
-         (db/pull schema-pattern schema-ref))
-       (is (= [0 0]
+         (db/pull schema-pattern schema-ref)
+         (db/pull-many schema-pattern [schema-ref missing-schema-ref]))
+       (is (= [0 0 0]
               (mapv :seon.db/source-argument-position @entries)))
        (is (every? #(contains? % :datahike.read/dependency-plan)
                    @entries))))))
+
+(deftest pull-many-preserves-input-alignment-with-one-shared-plan
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           entity-ids [schema-ref missing-schema-ref schema-ref]
+           calls (atom [])
+           pull-many-with-evidence d/pull-many-with-evidence
+           entries (atom [])]
+       (with-redefs [d/pull-many-with-evidence
+                     (fn [db-value pattern eids]
+                       (swap! calls conj [db-value pattern eids])
+                       (pull-many-with-evidence db-value pattern eids))]
+         (binding [db/*capture-context* entries]
+           (let [result (db/pull-many database schema-pattern entity-ids)]
+             (is (= [(d/pull database schema-pattern schema-ref)
+                     nil
+                     (d/pull database schema-pattern schema-ref)]
+                    result))
+             (is (= 3 (count result))))))
+       (is (= 1 (count @calls)))
+       (is (= [[database schema-pattern entity-ids]] @calls))
+       (is (= 1 (count @entries)))
+       (is (= (:datahike.read/dependency-plan
+               (pull-many-with-evidence database schema-pattern entity-ids))
+              (:datahike.read/dependency-plan (first @entries))))))))
 
 (deftest slice-one-exposes-no-lazy-entity-read
   (test-support/with-database
@@ -105,7 +142,8 @@
 (deftest malformed-reads-return-flat-errors
   (test-support/with-database
    (fn [connection]
-     (let [result (db/q @connection '[:find])]
+     (doseq [result [(db/q @connection '[:find])
+                     (db/pull-many @connection schema-pattern ["not-an-eid"])]]
        (is (= :seon.db/invalid-read (:seon.error/kind result)))
        (is (string? (:seon.error/message result)))
        (is (map? (:seon.error/data result)))))))
