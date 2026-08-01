@@ -131,7 +131,7 @@ def test_selected_lock_admits_runtime_build_inputs():
         "script", "resources", "config", "seon-skills", "acme",
         "bb.edn", "build.clj", "deps.edn",
         "shadow-cljs.edn", "package.json", "package-lock.json",
-        "bin/seon", "bin/acme", "bin/fix-bootstrap-macros",
+        "bin/seon", "bin/acme",
     } <= admitted
 
 

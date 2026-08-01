@@ -59,7 +59,6 @@
     "package-lock.json",
     "bin/seon",
     "bin/acme",
-    "bin/fix-bootstrap-macros",
     "src-inspect-ai/pyproject.toml",
     "src-inspect-ai/uv.lock",
     "src-inspect-ai/evaluation-sources.lock.json",
