@@ -1703,7 +1703,28 @@ may reintroduce a shadow build into the dev feedback path.
   metaphors — creation, not birth. Next-phase crux (open): a print path
   emitting text (ai) and HTML nodes (html) from ONE traversal,
   mirroring Clojure's own printer — closer to the metal, no parallel
-  printer.
+  printer. AMENDED 2026-08-01 (owner): P9-as-reader is DEAD — only
+  FORMS must re-run; printed output prints exactly as a real Clojure
+  REPL prints (prose, error reports, `#object[…]` faces); the earlier
+  outputs-as-comments rules are deleted. The session must be as close
+  to a stock Clojure REPL as possible (realism audit:
+  `research/sci-repl-realism-audit-2026-08-01.md`).
+  **Ruling 2026-08-01 #25 (owner): ADMISSION CAPS MOVE TO THE MEASURED
+  COMPUTE KNEES AND THE BLOB TIER IS BUILT.** Caps must never impede
+  normal work — crossing one is a loud derived warning meaning
+  something stupid happened. Approved defaults (measured,
+  `research/admission-caps-and-blob-fallback-2026-08-01.md`):
+  max-nodes 65,536 (master walk bound), max-collection 8,192,
+  max-depth 64, max-string 262,144. Serialized size gets its OWN
+  governor: `seon.blob` over konserve bassoc/bget on the already-open
+  file store; result-edn over 65,536 chars writes the full generous
+  projection ONCE as a blob (measured 80× store amplification for
+  datom-stored payloads vs 10 ms/8 MB via konserve), the receipt
+  carrying result-blob (digest) + result-size + a bounded window.
+  `capped?` is DERIVED from result-size, never stored; the transcript
+  prints the loud "N of M shown" line from it. Preconditions: the
+  admit `inst?` hotspot fix and decoupling render page size from
+  max-collection (issues filed 2026-08-01).
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
