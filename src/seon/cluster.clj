@@ -37,7 +37,6 @@
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
             [seon.problems :as problems]
-            [seon.render.block :as block]
             [seon.render.web :as web]
             [taoensso.timbre :as log]
             [seon.schema :as schema]
@@ -1514,9 +1513,6 @@
                             [?a :seon.cluster.agent/id _]] db)
                      0)
                  0)
-        blocks (if db
-                 (count (block/blocks db root-agent-id))
-                 0)
         found (if db
                 (problems/problems
                  db {:seon.cluster.run/live-processes
@@ -1526,7 +1522,6 @@
              :seon.boot/pid (:seon.boot/pid advertisement)
              :seon.boot/prepl-port (:seon.boot/prepl-port advertisement)
              :seon.cluster.agent/count agents
-             :seon.block/count blocks
              ;; `{}` when healthy — the same value `problems` derives, so
              ;; the banner screams exactly when the facts do and nobody
              ;; maintains a second notion of "fine"
@@ -1563,8 +1558,6 @@
      (into [(str "  repl         " (:seon.boot/prepl-port ready)
                  "  (pid " (:seon.boot/pid ready) ")")
             (str "  agents       " (:seon.cluster.agent/count ready))
-            (str "  blocks       " (:seon.block/count ready)
-                 " live on root")
             (str "  problems     " (if (empty? problems)
                                      "none"
                                      (str (count problems) " families — "

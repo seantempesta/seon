@@ -1,89 +1,19 @@
-{; ---------------------------------------------------------------------------
- ; THE BLOCK — the one mechanism behind every page and every prompt.
- ;
- ; Owner ruling, 2026-07-27 night, binding on N4: the root interface "is
- ; really just different context blocks that return :seon.render/ai and
- ; :seon.render/html", so blocks are central and root and agent views are
- ; ONE mechanism. Root is per-cluster and root is an agent, so "root's
- ; page" is not a second code path — it is the root agent's block set.
- ;
- ; A block is a UNIT for the landed router (src/seon/render.clj): a map
- ; declaring, per output kind, the qualified symbol that projects it.
- ; That is why this file registers no renderer table, no page registry
- ; and no dispatch: `:seon.render/html` below is one more kind key on an
- ; open set, exactly as `:seon.render/log` was, and `seon.render/render`
- ; needs no edit to route a block.
- ;
- ; File boundaries are editorial (the loader is one global population),
- ; so the `:seon.render/html` kind is declared HERE, in the file that
- ; owns its first consumer, rather than by editing the sealed
- ; render.edn — the same reason error.edn owns nothing about the router.
- ; ---------------------------------------------------------------------------
-
- ; THE NAME IN THREE ROLES, and always in sync because there is only one
- ; of it: the prompt header the agent reads, the upsert key within one
- ; agent's block set, and (through `seon.render.block/surface-id`) the
- ; DOM element id the morph targets. That third role is what makes "the
- ; agent edits the same thing the human sees" true rather than a slogan.
- ;
- ; A plain `:keyword`, deliberately NOT a database identity: two agents
- ; each own a `:transcript` block, and making the name unique across the
- ; store would forbid exactly the arrangement the design requires.
- ; Uniqueness is per agent and is enforced by the upsert, not by Datahike.
+{; The retained block vocabulary belongs to in-memory render values and stable
+ ; DOM ids. Namespace-page membership and ordering come from `render.walk`;
+ ; nothing here declares or stores an agent-owned block set.
  :seon.render.block/name :keyword
 
- ; ORDER IS DERIVED FROM DATA, never from position. Cardinality-many is a
- ; SET in Datahike (persistent_set.cljc:133), so a block set has no
- ; stored order to lose; the render sorts by priority with the name as a
- ; stable tiebreaker, which makes two derivations of one database value
- ; the same value. Lower sorts first, so a header can sit at 0 without
- ; anybody renumbering the rest.
- :seon.render.block/priority :int
-
- ; The semantic cache band, AUTHORED like priority: an installer's
- ; ordering decision, not a derived classification (no name→band table
- ; anywhere — R34). Absent = :dynamic, the free tail, so most blocks
- ; declare nothing. Ordering is (band ordinal, priority, name); the band
- ; order is the enum's own order and bands never cross.
+ ; Temporary dependency of the in-flight context-contribution schema. The
+ ; context lane removes both together; no render code reads this attribute.
  :seon.render.block/band [:enum :anchor :program :authored :continuity :dynamic]
 
- ; DECLARED trusted runtime inputs — the request keys this block's
- ; projections read beyond the database value. The interface expresses
- ; its dependency (the timeouts-ruling corollary): the request builder
- ; refuses AT CONSTRUCTION when a membership needs an absent input,
- ; before any projection runs, instead of every consumer growing its own
- ; fence card. Post-N5 this becomes derivable from the program graph;
- ; the attribute stays as the declaration the derivation must match.
- :seon.context/inputs [:set :qualified-keyword]
-
- ; THE BLOCK ENTITY. `:seon.db/entity true` is load-bearing rather than
- ; decorative: `canonical-database-attributes` installs entity-map
- ; entries by construction, and a family declared only as standalone
- ; attributes is unavailable to the LIVE boot path even while fixtures
- ; that install explicit lists stay green — the fixture-vs-live-boot
- ; class that already bit the message family (38ab48470).
- ;
- ; Both render keys are OPTIONAL and presence decides placement, which is
- ; the whole selection mechanism: ai only = prompt only (no surface),
- ; html only = a surface only (zero prompt tokens), both = both. A block
- ; carrying neither is legal and renders nowhere — it is data the agent
- ; owns and nothing displays, and refusing it would be inventing a rule
- ; the design does not need.
+ ; An in-memory named render declaration accepted by the retained direct
+ ; `unit`/`surface` helpers. It is not a database entity family.
  :seon.render.block/block
- [:map {:seon.db/entity true}
+ [:map
   [:seon.render.block/name :seon.render.block/name]
-  [:seon.render.block/priority :seon.render.block/priority]
   [:seon.render/ai {:optional true} :seon.render/ai]
-  [:seon.render/html {:optional true} :seon.render/html]
-  [:seon.render.block/band {:optional true} :seon.render.block/band]
-  [:seon.context/inputs {:optional true} :seon.context/inputs]]
-
- ; EACH AGENT OWNS ITS COMPLETE SET, seeded at creation. There is no
- ; render-time merge with a default set and no fallback: every block an
- ; agent renders, it owns, so "what does this agent see?" is one pull
- ; rather than a reconstruction. Component, so removing the agent
- ; cascade-retracts its blocks and no orphan block outlives its owner.
- :seon.cluster.agent/blocks [:set {:seon.db/component true} :seon.db/ref]
+  [:seon.render/html {:optional true} :seon.render/html]]
 
  ; ---------------------------------------------------------------------------
  ; THE HTML KIND
@@ -145,8 +75,7 @@
    [:seon.render/kind :seon.render/kind]
    [:seon.error/value :seon.error/value]]]
 
- ; The agent's blocks rendered into one kind, in priority order. A vector
- ; because the ORDER is the meaning; the set it came from had none.
+ ; Rendered values supplied to the retained bounded slot expander.
  :seon.render/surfaces [:vector :seon.render/surface]
 
  ; ---------------------------------------------------------------------------
@@ -183,26 +112,7 @@
  ; distance SELECTS WITHIN them.
  :seon.render/distance [:int {:min 0}]
 
- ; What a caller asks for. The database value is a positional argument
- ; rather than a key, matching the landed `seon.problems/problems`
- ; signature — one convention for "pure over a database value", not two.
- ; caps + trusted inputs now ride the request — the ONE builder threads
- ; them into every projection (review finding 3).
- ; `:seon.ai/partial` is the TRANSIENT stream snapshot (F2 §2): the
- ; render pass threads the channel-borne presentation value through the
- ; one unit builder, so the streaming blocks read it exactly where every
- ; block reads its inputs — never a query, never a fact.
- :seon.render/surfaces-request
- [:map {:closed true}
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.render/kind :seon.render/kind]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.ai/partial {:optional true} :seon.ai/partial]
-  [:seon.cluster.run/live-processes {:optional true}
-   :seon.cluster.run/live-processes]]
-
- ; the unit builder's input — one shape for prompt, page, debug, capture
+ ; The retained direct unit builder's input.
  :seon.render/unit-request
  [:map {:closed true}
   [:seon.db/db :seon.db/database-value]
@@ -218,13 +128,8 @@
  ; refused in place, naming what it needed, rather than silently
  ; rendering an empty hole.
  ;
- ; DISTANCE is optional here for the accretion's sake and NOT because
- ; the two cases are equivalent: absent means the caps alone bound the
- ; walk, which is exactly what this expansion did before the ruling;
- ; present means each ref hop spends one, so a neighbor is rendered at
- ; distance-1 and 0 follows nothing. `page` always supplies it (implied
- ; 1 at the one builder), so the page path is distance-disciplined and a
- ; bare `expand` call is unchanged.
+ ; DISTANCE is optional: absent means the caps alone bound the expansion;
+ ; present means each ref hop spends one.
  :seon.render/expansion
  [:map {:closed true}
   [:seon.render/surfaces :seon.render/surfaces]
@@ -232,23 +137,7 @@
   [:seon.render/distance {:optional true} :seon.render/distance]
   [:seon.db/db {:optional true} :seon.db/database-value]]
 
- ; What a page needs. Caps are REQUIRED, and they are the SAME four
- ; dials `seon.sci.admit` already takes — expansion is a walk over a
- ; graph that can fan out and can cycle, which is precisely the problem
- ; the admission codec already solved, so it uses that solution's dials
- ; rather than inventing a second set to drift from them.
- :seon.render/page-request
- [:map {:closed true}
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.cluster.run/live-processes {:optional true}
-   :seon.cluster.run/live-processes]]
-
- ; A page is the html surfaces with every slot expanded, in the order
- ; the top-level blocks sort. Top-level is DERIVED (a block no other
- ; block's hiccup slots into), never a stored `:layout` flag — the
- ; layout-vs-surface distinction is a role the hiccup reveals.
+ ; The shell's ordered hiccup fragment.
  :seon.render/page [:vector :seon.render/hiccup]
 
  ; ---------------------------------------------------------------------------

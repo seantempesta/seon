@@ -37,7 +37,6 @@
    :seon.context.contribution/text text
    :seon.context.contribution/hash (context/contribution-hash text)
    :seon.context.contribution/tokens (tokens/estimate text)
-   :seon.context.contribution/band :dynamic
    :seon.render/projection 'seon.render/walk})
 
 (defn prompt

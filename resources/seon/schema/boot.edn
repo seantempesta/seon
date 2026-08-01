@@ -33,7 +33,6 @@
  :seon.boot/start-instant :inst
  :seon.boot/store-dir [:string {:min 1}]
  :seon.cluster.agent/count [:int {:min 0}]
- :seon.block/count [:int {:min 0}]
 
  ; THE BOOT BANNER'S data, derived from a started instance. Optional
  ; where the tower may not have reached — a degraded instance still has
@@ -44,7 +43,6 @@
   [:seon.boot/pid :seon.boot/pid]
   [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
   [:seon.cluster.agent/count :seon.cluster.agent/count]
-  [:seon.block/count :seon.block/count]
   [:seon.problems/problems :seon.problems/problems]
   [:seon.render.web/url {:optional true} :seon.render.web/url]
   [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]
