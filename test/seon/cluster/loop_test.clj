@@ -18,14 +18,18 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [my.run :as my.run]
+            [seon.ai :as ai]
             [seon.config :as config]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.fn.analyzer :as fn.analyzer]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.sci.eval :as sci.eval])
+            [seon.sci.eval :as sci.eval]
+            [seon.test-support :as test-support])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
@@ -34,6 +38,207 @@
 
 (def ^:private now (Date. 1700000000000))
 (def ^:private process "process/one")
+
+(deftest two-agents-resolve-one-config-row-with-ordinary-inheritance
+  (test-support/with-database
+    (fn [connection]
+      (let [cluster-name "settings-resolution"]
+        (config/apply! {:seon.config/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (test-support/seed-cluster! connection cluster-name)
+        (d/transact
+         connection
+         (into (cluster.agent/creation-tx
+                {:seon.cluster.agent/id "planner"
+                 :seon.ns/name 'my.agents.planner
+                 :seon.cluster/name cluster-name})
+               (cluster.agent/creation-tx
+                {:seon.cluster.agent/id "worker"
+                 :seon.ns/name 'my.agents.worker
+                 :seon.cluster/name cluster-name})))
+        (d/transact connection
+                    [{:seon.cluster.agent/id "planner"
+                      :seon.config.ai/thinking :high}])
+        (let [db @connection
+              cluster-settings (config/effective db cluster-name)
+              planner-settings
+              (ai/settings cluster-settings (ai/agent-overlay db "planner"))
+              worker-settings
+              (ai/settings cluster-settings (ai/agent-overlay db "worker"))]
+          (is (= :high (:seon.config.ai/thinking planner-settings)))
+          (is (= :disabled (:seon.config.ai/thinking worker-settings))
+              "absence on the agent inherits the explicit shipped default")
+          (is (= (:seon.config.ai/model cluster-settings)
+                 (:seon.config.ai/model planner-settings)
+                 (:seon.config.ai/model worker-settings)))
+          (is (= #{:seon.config.ai/thinking}
+                 (set (keys (ai/agent-overlay db "planner")))))
+          (is (empty? (ai/agent-overlay db "worker"))))))))
+
+(defn- prepare-call!
+  [connection agent-id run-id message-id]
+  (d/transact connection
+              [{:seon.cluster.message/id message-id
+                :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                :seon.cluster.message/content "prove live settings"
+                :seon.cluster.message/at now}])
+  (d/transact
+   connection
+   {:tx-data [{:seon.cluster.run/id run-id
+               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+               :seon.cluster.run/opened-at now
+               :seon.cluster.run/process process}
+              {:seon.cluster.agent/id agent-id
+               :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
+    :tx-meta {:seon.db/trigger
+              [:seon.cluster.message/id message-id]}}))
+
+(defn- call-work
+  [agent-id run-id]
+  {:seon.cluster.work/situation :call
+   :seon.cluster.agent/id agent-id
+   :seon.cluster.run/id run-id})
+
+(defn- settings-attempts
+  [db]
+  (->> (d/q '[:find ?run-id ?ordinal ?attempt
+              :where
+              [?attempt :seon.ai.attempt/run ?run]
+              [?run :seon.cluster.run/id ?run-id]
+              [?attempt :seon.ai.attempt/ordinal ?ordinal]]
+            db)
+       (map (fn [[run-id ordinal attempt]]
+              (assoc (d/pull db '[*] attempt)
+                     ::attempt-run-id run-id
+                     ::attempt-ordinal ordinal)))
+       (sort-by (juxt ::attempt-run-id ::attempt-ordinal))
+       vec))
+
+(deftest call-resolves-once-records-settings-and-sees-next-turn-config
+  (test-support/with-database
+    (fn [connection]
+      (let [cluster-name "live-settings"
+            agent-id "planner"
+            settings-fn ai/settings
+            overlay-fn ai/agent-overlay
+            resolutions (atom [])
+            overlays (atom [])
+            requests (atom [])
+            cluster {:seon.store/branch-connection connection
+                     :seon.cluster/name cluster-name
+                     :seon.cluster.run/process process
+                     :seon.sci.admit/caps
+                     {:seon.config.eval.result/max-depth 6
+                      :seon.config.eval.result/max-collection 8
+                      :seon.config.eval.result/max-string 4096
+                      :seon.config.eval.result/max-nodes 256}
+                     :seon.config.error/recurrence-limit 3
+                     :seon.config.message/max-chain 8}
+            unpaid {:seon.error/kind :seon.ai/transport-failure
+                    :seon.error/message "connection refused"
+                    :seon.error/data
+                    {:seon.ai/error-class :transport-before-send
+                     :seon.ai/request-transmitted? false
+                     :seon.ai/response-started? false
+                     :seon.ai/output-observed? false}}
+            completions (atom [unpaid
+                               {:seon.ai/text "(identity 1)"
+                                :seon.ai/usage
+                                {"completion_tokens_details"
+                                 {"reasoning_tokens" 7}}
+                                :seon.ai/finish-reason "stop"}
+                               {:seon.ai/text "(identity 2)"
+                                :seon.ai/finish-reason "stop"}])]
+        (config/apply!
+         {:seon.config/connection connection
+          :seon.boot/cluster-name cluster-name
+          :seon.config/manifest
+          {:seon.config.ai/model "before-apply"
+           :seon.config.ai.backup/model "backup-before-apply"}})
+        (test-support/seed-cluster! connection cluster-name)
+        (d/transact
+         connection
+         (cluster.agent/creation-tx
+          {:seon.cluster.agent/id agent-id
+           :seon.ns/name 'my.agents.live-settings
+           :seon.cluster/name cluster-name}))
+        (d/transact connection
+                    [{:seon.cluster.agent/id agent-id
+                      :seon.config.ai/thinking :high}])
+        (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
+        (with-redefs [ai/agent-overlay
+                      (fn [db id]
+                        (swap! overlays conj [db id])
+                        (overlay-fn db id))
+                      ai/settings
+                      (fn [cluster-settings agent-settings]
+                        (let [resolved
+                              (settings-fn cluster-settings agent-settings)]
+                          (swap! resolutions conj resolved)
+                          resolved))
+                      ai/complete
+                      (fn [request]
+                        (swap! requests conj request)
+                        (let [completion (first @completions)]
+                          (swap! completions subvec 1)
+                          completion))]
+          (cluster.loop/turn
+           {:seon.cluster.loop/cluster cluster
+            :seon.cluster.work/next
+            (call-work agent-id "settings-run-1")}
+           now)
+          (testing "failover reuses the turn's one resolution"
+            (is (= 1 (count @overlays)))
+            (is (= 1 (count @resolutions)))
+            (is (= ["before-apply" "backup-before-apply"]
+                   (mapv :seon.ai/model @requests)))
+            (is (= [:high :high]
+                   (mapv :seon.ai/thinking @requests))))
+          (let [first-settings (first @resolutions)
+                first-rows (settings-attempts @connection)]
+            (is (= 2 (count first-rows)))
+            (is (every? #(= first-settings
+                            (read-string
+                             (:seon.ai.attempt/settings-edn %)))
+                        first-rows))
+            (is (= "stop" (:seon.ai.attempt/finish-reason
+                            (second first-rows))))
+            (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
+                   (read-string
+                    (:seon.ai.attempt/usage-edn (second first-rows)))))
+            (is (not (contains?
+                      (read-string
+                       (:seon.ai.attempt/usage-edn (second first-rows)))
+                      :seon.ai/settings))
+                "settings are beside usage, never inside it"))
+
+          (d/transact connection
+                      (run/close-tx
+                       {:seon.cluster.run/id "settings-run-1"
+                        :seon.cluster.run/process process
+                        :seon.cluster.run/closed-at now}))
+          (config/apply!
+           {:seon.config/connection connection
+            :seon.boot/cluster-name cluster-name
+            :seon.config/manifest
+            {:seon.config.ai/model "after-apply"}})
+          (prepare-call! connection agent-id "settings-run-2" "settings-message-2")
+          (cluster.loop/turn
+           {:seon.cluster.loop/cluster cluster
+            :seon.cluster.work/next
+            (call-work agent-id "settings-run-2")}
+           now)
+          (testing "the same loop handle sees config apply on the next turn"
+            (is (= 2 (count @overlays)))
+            (is (= 2 (count @resolutions)))
+            (is (= "after-apply" (:seon.ai/model (last @requests))))
+            (is (= :high (:seon.ai/thinking (last @requests))))
+            (let [last-row (last (settings-attempts @connection))]
+              (is (= "after-apply" (:seon.ai/model last-row)))
+              (is (= "after-apply"
+                     (:seon.config.ai/model
+                      (read-string
+                       (:seon.ai.attempt/settings-edn last-row))))))))))))
 
 (defn- lint-plan
   [sources]
