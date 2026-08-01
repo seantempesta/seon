@@ -181,15 +181,15 @@ stored turn, zero authored bytes).
 
 ### Prototype v2 findings (2026-08-01, all REPL-verified live)
 
-- **P9 forces two print rules.** Feeding the full ai context to the
-  reader fails on bare prose (`database:` is an invalid token) and on
-  `#object[…]`. Resolutions proven in the prototype: (1) prose-emitting
-  outputs (`help`, `doc`'s docstring body) PRINT AS `;` COMMENT LINES;
-  (2) opaque admitted values print as the admitted projection map
-  (`#:seon.sci.admit{:opaque "sci.lang.Namespace", :name …}`) — honest
-  (it is what the driver stores) and reader-clean. A nicer face is the
-  print-method crux. With both, P9 passes: the bootstrap session reads as 38 forms,
-  root-real as 14, zero failures.
+- **P9 REDEFINED (owner, 2026-08-01): forms re-run, output is output.**
+  The original "whole context reads clean through the reader" forced
+  prose outputs to print as `;` comment lines and error faces to hide in
+  comments — no real REPL does that, and the goal is a session
+  indistinguishable from a real Clojure REPL. P9 now: every FORM after a
+  prompt echo must read and re-run identically (the replay property);
+  printed output prints exactly as a REPL prints it — prose, error
+  reports, `#object[…]` faces and all. The earlier comment-prefixing
+  rules are DELETED.
 - **The door today**: `(in-ns …)` works (admitted as opaque map);
   `clojure.repl/dir` WORKS and prints exactly the installed public fns
   (`decline`, `send` — `send-value` is `:seon.fn/private? true`), but
@@ -211,9 +211,9 @@ stored turn, zero authored bytes).
   Issue filed: `docs/seon/issues/arity-mistake-prints-invalid-schema.md`.
   The owner-agent turn-3 error-recovery mockup blocks on this fix (its
   history beat needs real, legible arity bytes).
-- **Refusal face**: rendered as `;; Execution error: …` comment so P9
-  holds (bare `Execution error: Unable to resolve symbol: x` does not
-  read).
+- **Refusal face**: `Execution error: …` printed bare, exactly as
+  clojure.main reports it (the comment-wrapped variant is deleted with
+  the P9 redefinition).
 - **Arrivals** render as `;; ← <from> (HH:MM)` + the pr-str'd content
   line (reader-clean); a message with no from-agent renders as
   `the human`.
