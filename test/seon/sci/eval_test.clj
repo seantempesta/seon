@@ -110,6 +110,20 @@
     (is (int? (:seon.eval/allocated-bytes record))
         "-1 is honest when the platform cannot measure; nil is not")))
 
+(deftest the-evaluator-remains-live-after-its-namespace-reloads
+  (let [request {:seon.cluster.run.form/source "(+ 1 2)"
+                 :seon.sci.admit/caps caps
+                 :seon.sci.eval/time-limit-ms 10000
+                 :seon.config/on-core-error :panic}
+        before (eval/evaluate request)]
+    (is (= 3 (:seon.sci.admit/value before))
+        "the first evaluation realizes the process guard")
+    (require 'seon.sci.eval :reload)
+    (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
+      (is (= 3 (:seon.sci.admit/value after))
+          "ordinary arm data has no reload-sensitive class identity")
+      (is (nil? (:seon.cluster.eval/error after))))))
+
 (deftest a-fork-per-evaluation-means-no-leakage
   (run "(def leaked 1)")
   (let [evaluation (run "leaked")]

@@ -262,34 +262,28 @@
 ;;; body and its cost is the interpreter's cost. The time flag is read
 ;;; every time — that one is the limit and may not be sampled.
 
-(deftype ^:private EvaluationArm
-  [^longs entries
-   ^longs sampled
-   ^AtomicBoolean reached
-   outcome
-   ^long started-at
-   ^long allocated-at-start
-   ^boolean measurable])
-
 (defn- interrupt-guard
   "A stable hook whose armed evaluation state is thread-scoped."
   []
   (let [thread-arm (ThreadLocal.)
         interrupt-fn
         (fn []
-          (when-let [^EvaluationArm armed
-                     (.get ^ThreadLocal thread-arm)]
-            (let [^longs entries (.-entries armed)
+          (when-let [armed (.get ^ThreadLocal thread-arm)]
+            (let [^longs entries (::entries armed)
+                  ^longs sampled (::sampled armed)
+                  ^AtomicBoolean reached (::reached armed)
+                  outcome (::outcome armed)
+                  ^long allocated-at-start (::allocated-at-start armed)
                   entrance-count (unchecked-inc (aget entries 0))]
               (aset entries 0 (long entrance-count))
-              (when (.get ^AtomicBoolean (.-reached armed))
-                (vreset! (.-outcome armed) :time)
+              (when (.get reached)
+                (vreset! outcome :time)
                 (sci.interrupt/interrupt! "time-limit"))
-              (when (and (.-measurable armed)
+              (when (and (::measurable armed)
                          (zero? (bit-and entrance-count 1023)))
-                (aset ^longs (.-sampled armed) 0
+                (aset sampled 0
                       (long (- (allocated-bytes)
-                               (.-allocated-at-start armed))))))))]
+                               allocated-at-start)))))))]
     {::thread-arm thread-arm
      ::interrupt-fn interrupt-fn}))
 
@@ -326,8 +320,13 @@
             started-at (System/nanoTime)
             allocated-at-start (allocated-bytes)
             measurable (not (neg? allocated-at-start))
-            armed (EvaluationArm. entries sampled reached outcome
-                                  started-at allocated-at-start measurable)]
+            armed {::entries entries
+                   ::sampled sampled
+                   ::reached reached
+                   ::outcome outcome
+                   ::started-at started-at
+                   ::allocated-at-start allocated-at-start
+                   ::measurable measurable}]
         (.set thread-arm armed)
         (try
           (let [task (.schedule deadline-timer
