@@ -1742,6 +1742,29 @@ may reintroduce a shadow build into the dev feedback path.
   invariant is what makes cycles unrepresentable). pprint is NEVER in
   the text sink (measured 107× cost for +2.3% bytes) — line breaking
   is a sink concern driven by the declared width option.
+  **Ruling 2026-08-01 #27 (owner): ONE LIVE PROGRAM GRAPH PER CLUSTER —
+  shared inside it, never across it.** An agent making a GLOBAL change
+  is intended: the benefit agent A creates must be IMMEDIATELY
+  available to agent B in the same cluster (this is why sci's
+  shared-Var fork behavior is the propagation mechanism, not a defect —
+  the isolation issue raised against it was overruled and archived).
+  The boundary is the CLUSTER, matching the database boundary that
+  already exists: no cross-cluster sharing, ever. Today's base ctx is a
+  process `defonce` and one JVM hosts many clusters, so the boundary is
+  currently violated — filed as
+  `issues/one-program-graph-is-shared-across-clusters.md`, and it
+  blocks parked hot ctxs. Agents stay in their own NAMESPACE LANES;
+  enforcing that (a write to a namespace you do not own is refused) is
+  an open design question, and `:seon.cluster.agent/namespace` already
+  carries the ownership fact.
+  **Ruling 2026-08-01 #28 (owner): STATELESS RESUME is the target, hot
+  ctx is only an optimization.** An agent's session state must be
+  restorable from the database or disk in a fresh JVM — better and
+  simpler than replay-with-safety-analysis. Interpreted fns are already
+  program-row facts; data defs become facts too (small inline, large as
+  content-addressed blobs, so branch and dedup come free); anything
+  genuinely not restorable is STATED by the REPL, never faked. Design
+  lane: `plan/stateless-resume-design-2026-08-01.md`.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
