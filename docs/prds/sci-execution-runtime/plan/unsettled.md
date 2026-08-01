@@ -16,6 +16,28 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM 4 — 2026-08-01 night, RESTART BOUNDARY.** 1A ACCEPTANCE
+BANKED on the fresh substrate: agent A defined a contracted fn, agent B
+called it next turn through the live ctx; turn-path `acquire!` count
+ZERO (cold comparison 269.97 ms); crash-walk rows 1-4 passed under
+`kill -9` — receipt interrupted, ctx rebuilt from facts, no form
+replayed. Print 3B partial banked (`9acc78cd9` floor migration,
+`cbd6bd5a3` table face); its remainder resumes by name. 1C BLOCKED at a
+real boundary and AUTHORIZED FORWARD (orchestrator, consistent with
+rulings #32 + the coupled-interop constraint): sci's public API has no
+analysis-time host-interop observation, so the purity proof cannot see
+`(do (.toUpperCase "x") (fn [] 1))` touch the host — the fix is the
+lane's option 1, a NARROW evaluation-scoped host-interop observer in
+our maintained sci fork (`reference-code/sci`), carried onto the eval
+record beside `fn-entries` — this IS the coupled-wave interop fact,
+built early because 1C needs it. BOTH LANES STOPPED at coherent
+commits for the owner's app restart; resume each with
+`bin/codex-agent resume hot-ctx-lane1 | print-path-lane3` (session
+state persists by name). First moves for the restarted session: read
+this block, resume Lane 1 with the option-1 authorization (sci-fork
+observer → 1C → 1C′), resume Lane 3 (finish 3B), then the frozen full
+gate on the quiet tree → 3C.
+
 **ADDENDUM 3 — 2026-08-01 night, HANDOFF STATE (owner restarting the
 app for the MCP server fixes).** SYSTEM RESET owner-ordered and done:
 store wiped (old test data discarded deliberately), current-src
