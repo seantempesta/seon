@@ -16,6 +16,20 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM 2 — 2026-08-01 night.** Rulings #31 and #32 recorded (gate
+untouched + contracts-as-safety; the SEALED restore rule +
+forms-then-values order + coupled interop wave + atom protocol CLOSED).
+The durable-env research returned decisive
+(`research/durable-env-structural-sharing-2026-08-01.md`): no atom
+protocol — Datahike's psset indexes already are the structural-sharing
+substrate; hybrid restore proven 11.3 ms/50 defs. Lane `hot-ctx-lane1`
+running: slice 1.0 LANDED (`88ebbde51`, reload-safe arms), 1A in
+flight, corrected mid-run with the env-blind-to-redefinition hazard
+(diff by dereferenced values per name, never env identity). Resume
+slices 1C/1C′ queue behind 1A in the same lane. NEXT after 1A: the
+lane's discovery-step surprises reviewed → 1C forms → 1C′ values →
+Lane 3 print path (independent, dispatchable when a slot frees).
+
 **ADDENDUM — 2026-08-01 late evening.** The in-flight wave LANDED (all
 six caps-blob-print steps through `67190f050`; the lane summary
 claiming step 6 uncommitted was stale). Full `bin/test` exited 0 on the

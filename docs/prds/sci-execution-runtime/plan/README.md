@@ -1863,6 +1863,38 @@ may reintroduce a shadow build into the dev feedback path.
   closure detection with re-eval against the restored ctx) is a
   commissioned research lane, source-read from reference-code and
   REPL-probed, never guessed.
+  **Ruling 2026-08-01 #32 (owner, night): THE RESTORE RULE IS SEALED,
+  the resume order is set, the interop wave is coupled, and the atom
+  protocol is closed.** (1) RESTORE RULE (amends
+  `plan/stateless-resume-design-2026-08-01.md`): on restore, re-evaluate
+  ONLY forms provably pure — derived, never tagged: no host touch at
+  sci analysis (sci resolves every interop call at `:phase analysis`,
+  proven live), no capability-leaf reachability over `:seon.fn/calls`
+  (the workload-classification precedent: leaves annotated at their own
+  definition site with reasons, chains derived), and no effect-door
+  receipt once the door exists (effectfulness is OBSERVATIONAL — a
+  recorded crossing, not an analysis). Everything unproven restores
+  from its stored value; a value is storable iff it passes the COMPUTED
+  `store-faithful?` round trip (class + metadata + value — never an
+  enumeration of types); restore order is intern-all → bind values →
+  re-eval pure forms in ordinal order; unrestorable names are interned
+  and STATED. Fail-closed: nothing effectful can ever re-execute; the
+  worst miss is a pure form restored by value. (2) RESUME ORDER: forms
+  first, values immediately after — two slices, one lane, two reviews,
+  no rework; the value tier is REQUIRED by rule (effectful-but-data
+  defs), not a cache option. The resume slices queue behind Lane 1A in
+  the same lane (shared `seon.sci.eval` ownership). (3) INTEROP:
+  default-allow expansion lands ONLY together with the per-eval
+  "touched host interop" fact on the eval record (constraint recorded
+  on `issues/unlogged-findings-2026-08-01.md` §1) — purity must stay
+  knowable. (4) ATOM PROTOCOL CLOSED per
+  `research/durable-env-structural-sharing-2026-08-01.md`: the env atom
+  is blind to redefinition (bindRoot mutates in place; env value
+  `identical?` across a redef), a durable ref costs 81× on the eval hot
+  path, konserve rewrites whole values — while the wanted
+  structural-sharing substrate already exists as Datahike's
+  persistent-sorted-set indexes. Session-image-as-facts IS the design;
+  nothing to extend.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits

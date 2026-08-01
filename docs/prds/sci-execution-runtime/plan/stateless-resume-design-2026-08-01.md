@@ -441,6 +441,36 @@ optimization, not the mechanism), capability-crossing facts (no door
 exists), and the grader's branch-fork resume (it composes for free once
 slice 1 lands).
 
+## 7b. SEALED AMENDMENT — the restore rule (owner ruling #32, 2026-08-01 night)
+
+Supersedes the open decisions below where they conflict. On restore:
+
+- **Re-evaluate ONLY forms provably pure.** Derived three ways, never
+  tagged: no host touch at sci analysis (sci resolves every interop
+  call at `:phase analysis` — live-proven), no capability-leaf
+  reachability over `:seon.fn/calls` (leaves annotated at their own
+  definition site, chains derived — the workload precedent), and no
+  effect-door receipt once `seon.effect` exists (effectfulness is a
+  recorded fact, not an inference). Fail-closed: unproven ⇒ not
+  re-evaluated.
+- **Everything unproven restores from its stored value**, gated by the
+  COMPUTED `store-faithful?` round trip — serialize, read back, compare
+  class + metadata + value. No type enumeration anywhere; unknown types
+  fail the trip automatically. (This replaces closure-class detection:
+  `research/durable-env-structural-sharing-2026-08-01.md` proved class
+  predicates wrong and insufficient.)
+- **Order: intern every name unbound → bind every value-restored def →
+  re-evaluate pure forms in ordinal order.** Restore never executes an
+  effect; nothing ever re-fires.
+- **Unrestorable defs** (runtime-only value AND unproven form) are
+  interned and STATED in the session, never faked.
+- **Sequencing:** forms slice first, the value/blob tier immediately
+  after in the same lane — the value tier is REQUIRED by this rule
+  (effectful-but-data defs), not an optional cache. Both queue behind
+  Lane 1A (shared `seon.sci.eval` ownership). Interop expansion is
+  COUPLED to the per-eval interop-touch fact
+  (`issues/unlogged-findings-2026-08-01.md` §1).
+
 ## 8. Open owner decisions
 
 1. **Does the image belong to the agent, or to the namespace?** The entries
