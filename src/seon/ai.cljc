@@ -342,9 +342,7 @@
   document. A body that does not carry the expected shape returns
   `::unparseable-body` with what was actually there — never nil, which
   would read downstream as an empty reply."
-  {:malli/schema [:=> [:cat :any]
-                  [:or [:map {:closed true} [:seon.ai/text :seon.ai/text]]
-                   :seon.error/value]]}
+  {:malli/schema [:=> [:cat :any] :seon.ai/completion]}
   [body]
   (let [choice (when (map? body) (some-> (get body "choices") first))
         content (some-> choice (get "message") (get "content"))

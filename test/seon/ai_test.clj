@@ -303,6 +303,7 @@
     (is (= "stop" (:seon.ai/finish-reason completion)))
     (is (= 42 (:seon.ai/tokens completion)))
     (is (= thinking-usage (:seon.ai/usage completion)))
+    (is (schema/valid-candidate-value? :seon.ai/completion completion))
     (is (not (contains? completion :seon.ai/reasoning-content))
         "reasoning is not reply text and no unsupported continuation is implied")))
 
