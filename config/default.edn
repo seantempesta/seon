@@ -139,7 +139,7 @@
  ; concurrency at ~1/3 the output price of v4-pro. Thinking/max-token
  ; dials are being calibrated by the flash-bench lane; this row is the
  ; model selection only.
- :seon.config.ai/model "deepseek-v4-flash"
+ :seon.config.ai/model "DeepSeek-V4-Flash-0731"
 
  ; Unit: maximum provider completion tokens, including reasoning tokens.
  ; Provenance: the 2026-07-29 real thinking-model calibration exhausted
