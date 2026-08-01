@@ -1846,11 +1846,17 @@ may reintroduce a shadow build into the dev feedback path.
   forms-only lean.
   **Ruling 2026-08-01 #33 (owner, evening): FUNCTION CONTRACTS PERSIST
   PARSED, AND AGENT CONTRACTS ENFORCE.** (1) `:seon.fn/spec` as one
-  opaque EDN string is insufficient: the contract also persists as
-  `:seon.fn/input-schema` and `:seon.fn/output-schema` REFS to the
-  `:seon.schema` entities, plus a parsed representation of ALL parts of
-  the malli metadata as separate queryable facts — "which functions
-  accept X / produce X" must be a trivial query. The parser is MALLI'S
+  opaque EDN string is insufficient: the contract also persists PARSED,
+  with input/output components as REFS to the `:seon.schema` entities,
+  plus a parsed representation of ALL parts of the malli metadata as
+  separate queryable facts — "which functions accept X / produce X"
+  must be a trivial query. AMENDED same evening: the fact decomposition
+  MIRRORS whatever splits malli's own parser produces, with malli's own
+  leaf names ("do whatever splits the parser does, don't be dogmatic
+  about my names") — e.g. if `-function-info` yields
+  `:input`/`:output`/`:arity`/`:min`/`:max`, those are the facts;
+  arity explicitly wanted; multi-arity `:function` schemas fully
+  represented. The parser is MALLI'S
   OWN machinery found by reading `reference-code/malli` (research lane
   commissioned) — we never hand-write a schema parser. Parsed rows are
   derived in the same transaction as the spec by the one producer
