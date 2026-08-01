@@ -54,8 +54,9 @@
           (let [properties (attr-form-properties definition)
                 entity-attributes
                 (when (and (map-shape? definition)
-                           (true? (:seon.db/entity
-                                   (schema-properties definition))))
+                           (let [properties (schema-properties definition)]
+                             (or (true? (:seon.db/entity properties))
+                                 (true? (:seon.db/attributes properties)))))
                   (into #{}
                         (keep (fn [entry]
                                 (let [attribute

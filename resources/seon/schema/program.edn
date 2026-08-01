@@ -9,6 +9,92 @@
  :seon.fn/private? :boolean
  :seon.fn/spec :string
  :seon.fn/calls [:set :seon.db/ref]
+ :seon.fn/arities
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn/ast
+ [:and {:seon.db/component true} :seon.db/ref]
+
+ :seon.fn.arity/order :int
+ ; Malli returns an integer or :varargs; canonical EDN keeps one Datahike type.
+ :seon.fn.arity/arity :string
+ :seon.fn.arity/min :int
+ :seon.fn.arity/max :int
+ :seon.fn.arity/input :seon.db/ref
+ :seon.fn.arity/output :seon.db/ref
+ :seon.fn.arity/guard :seon.db/ref
+ ; Membership only; ordering is irrelevant and cardinality-many is honest.
+ :seon.fn.arity/input-refs [:set :seon.db/ref]
+ :seon.fn.arity/output-refs [:set :seon.db/ref]
+ :seon.fn.arity/guard-refs [:set :seon.db/ref]
+ :seon.fn.arity/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.fn.arity/arity :seon.fn.arity/arity]
+  [:seon.fn.arity/min :seon.fn.arity/min]
+  [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]
+  [:seon.fn.arity/input :seon.fn.arity/input]
+  [:seon.fn.arity/output :seon.fn.arity/output]
+  [:seon.fn.arity/guard {:optional true} :seon.fn.arity/guard]
+  [:seon.fn.arity/input-refs {:optional true} :seon.fn.arity/input-refs]
+  [:seon.fn.arity/output-refs {:optional true} :seon.fn.arity/output-refs]
+  [:seon.fn.arity/guard-refs {:optional true} :seon.fn.arity/guard-refs]]
+
+ ; Every collection-valued AST leaf points through entry components because
+ ; Datahike cardinality-many is a set. The entry order is Malli's order.
+ ; Malli also overloads :value between scalar data and a schema-valued child,
+ ; so the singular value leaf uses the same scalar-or-child entry shape.
+ :seon.fn.ast/type :string
+ :seon.fn.ast/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/input [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/output [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/guard [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/child [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/key [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/ref :seon.db/ref
+ :seon.fn.ast/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/children
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/keys
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/registry
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/values
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/node
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast/type :seon.fn.ast/type]
+  [:seon.fn.ast/value {:optional true} :seon.fn.ast/value]
+  [:seon.fn.ast/input {:optional true} :seon.fn.ast/input]
+  [:seon.fn.ast/output {:optional true} :seon.fn.ast/output]
+  [:seon.fn.ast/guard {:optional true} :seon.fn.ast/guard]
+  [:seon.fn.ast/child {:optional true} :seon.fn.ast/child]
+  [:seon.fn.ast/key {:optional true} :seon.fn.ast/key]
+  [:seon.fn.ast/ref {:optional true} :seon.fn.ast/ref]
+  [:seon.fn.ast/properties {:optional true} :seon.fn.ast/properties]
+  [:seon.fn.ast/children {:optional true} :seon.fn.ast/children]
+  [:seon.fn.ast/keys {:optional true} :seon.fn.ast/keys]
+  [:seon.fn.ast/registry {:optional true} :seon.fn.ast/registry]
+  [:seon.fn.ast/values {:optional true} :seon.fn.ast/values]]
+
+ ; One ordered child, keyed map/registry entry, property, enum member, or
+ ; singular AST value. A schema-valued value uses `value`; scalar data uses
+ ; canonical `value-edn`.
+ :seon.fn.ast.entry/order :int
+ :seon.fn.ast.entry/key :string
+ :seon.fn.ast.entry/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/value-edn :string
+ :seon.fn.ast.entry/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast.entry/order {:optional true} :seon.fn.ast.entry/order]
+  [:seon.fn.ast.entry/key {:optional true} :seon.fn.ast.entry/key]
+  [:seon.fn.ast.entry/value {:optional true} :seon.fn.ast.entry/value]
+  [:seon.fn.ast.entry/value-edn {:optional true}
+   :seon.fn.ast.entry/value-edn]
+  [:seon.fn.ast.entry/properties {:optional true}
+   :seon.fn.ast.entry/properties]]
  ; Explicit only on capability leaves. All other workload classification is
  ; derived by reachability over the program graph.
  :seon.fn/workload [:enum :io :compute]
@@ -22,7 +108,9 @@
   [:seon.fn/private? {:optional true} :seon.fn/private?]
   [:seon.fn/spec {:optional true} :seon.fn/spec]
   [:seon.fn/calls {:optional true} :seon.fn/calls]
- [:seon.fn/workload {:optional true} :seon.fn/workload]]
+  [:seon.fn/arities {:optional true} :seon.fn/arities]
+  [:seon.fn/ast {:optional true} :seon.fn/ast]
+  [:seon.fn/workload {:optional true} :seon.fn/workload]]
 
  :seon.schema/schema
  [:map {:seon.db/entity true}
