@@ -830,6 +830,11 @@ Do not infer anonymous ownership indefinitely from `git status`, and do not add
 a `COORDINATION.md` status diary; the active PRD roadmap remains the durable
 ledger while thread messages handle ephemeral ownership.
 
+The orchestrator pushes the shared branch to its remote at every coherent
+checkpoint — a wave landing, a design sealing, an end of session. Committed
+work that exists on one disk is one failure from gone (found 2026-07-31:
+4,665 unpushed commits); lanes never push the shared branch themselves.
+
 Branch switches, history changes, file discards, resets, and other destructive
 Git operations require user coordination. Never run `git reset --hard` or
 `git checkout --` to clean a shared tree. Commit coherent gains frequently
