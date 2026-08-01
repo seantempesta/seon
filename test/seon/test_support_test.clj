@@ -10,19 +10,23 @@
             [seon.config :as config]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (deftest a-canonical-database-is-the-production-source-population
   (test-support/with-database
     (fn [connection]
       (let [database @connection
+            packaged-forms (schema.edn/packaged-forms)
             installed
             (into #{} (filter keyword?) (keys (:schema database)))
             expected-schema-keys
             (into
              (into #{}
                    (map :seon.schema/key)
-                   (schema/canonical-schema-rows (java.util.Date.)))
+                   (schema/canonical-schema-rows
+                    packaged-forms
+                    (java.util.Date.)))
              (keep :seon.schema/key)
              (seon.fn/rows {:seon.fn/roots seon.fn/source-roots}))
             actual-schema-keys
@@ -31,7 +35,8 @@
                :where
                [_ :seon.schema/key ?key]]
              database)]
-        (is (every? installed (schema/canonical-database-attributes)))
+        (is (every? installed
+                    (schema/canonical-database-attributes packaged-forms)))
         (is (= expected-schema-keys (set actual-schema-keys)))
         (is (= #{cluster/boot-process-identity
                  config/managing-process-identity}
