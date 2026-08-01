@@ -117,12 +117,23 @@
 
 (defn- close-frame
   [{::keys [node children]}]
-  [:details
-   {:class (str "seon-print-node " (face-class (::kind node)))
-    :data-seon-path (pr-str (::path node))}
-   [:summary {:class "seon-print-summary"
-              :data-seon-summary (::summary node)}]
-   (into [:span {:class "seon-print-content"}] children)])
+  (if-let [{::keys [columns rows]} (::table node)]
+    [:div
+     {:class "seon-print-node seon-print-table"
+      :data-seon-path (pr-str (::path node))}
+     (into [:span {:class "seon-print-content" :hidden "hidden"}] children)
+     [:table {:class "seon-print-visual"}
+      [:thead [:tr (mapv (fn [column] [:th column]) columns)]]
+      [:tbody
+       (mapv (fn [row]
+               [:tr (mapv (fn [cell] [:td cell]) row)])
+             rows)]]]
+    [:details
+     {:class (str "seon-print-node " (face-class (::kind node)))
+      :data-seon-path (pr-str (::path node))}
+     [:summary {:class "seon-print-summary"
+                :data-seon-summary (::summary node)}]
+     (into [:span {:class "seon-print-content"}] children)]))
 
 (deftype ^:private HiccupSink [state]
   Sink
@@ -223,7 +234,74 @@
    ::separator separator
    ::summary summary})
 
-(declare emit-node)
+(declare emit-node emit-text)
+
+(def ^:private scalar-faces
+  #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
+    ::inst ::uuid ::var ::type ::class ::object ::truncated-string
+    ::failed ::elided ::pruned})
+
+(defn- table-row
+  [node]
+  (when (and (= ::map (::face node))
+             (every? vector? (::entries node)))
+    (into {} (::entries node))))
+
+(defn- table-data
+  [node options]
+  (let [choice (::table? options)
+        row-maps (mapv table-row (::items node))
+        maps? (every? some? row-maps)
+        columns (when maps? (mapv first (::entries (first (::items node)))))
+        same-columns? (and maps?
+                           (every? #(= (set columns) (set (keys %))) row-maps))
+        scalar-values? (and maps?
+                            (every? #(every? (comp scalar-faces ::face val) %)
+                                    row-maps))
+        eligible? (case choice
+                    false false
+                    true (and (seq row-maps) maps? scalar-values?)
+                    :derived (and (<= 2 (count row-maps))
+                                  same-columns? scalar-values?)
+                    false)]
+    (when eligible?
+      (let [render #(emit-text % (assoc options ::width 0 ::table? false))]
+        {::columns (mapv render columns)
+         ::rows (mapv (fn [row]
+                        (mapv #(render (get row % {::face ::nil ::value nil}))
+                              columns))
+                      row-maps)}))))
+
+(defn- pad-left
+  [width text]
+  (str (apply str (repeat (- width (count text)) " ")) text))
+
+(defn- table-text
+  [{::keys [columns rows]}]
+  (let [widths (mapv (fn [index]
+                       (apply max
+                              (count (nth columns index))
+                              (map #(count (nth % index)) rows)))
+                     (range (count columns)))
+        line (fn [cells]
+               (str "| "
+                    (str/join " | "
+                              (mapv pad-left widths cells))
+                    " |\n"))]
+    (str "\n"
+         (line columns)
+         "|" (str/join "+" (map #(apply str (repeat (+ % 2) "-")) widths))
+         "|\n"
+         (apply str (map line rows)))))
+
+(defn- emit-table
+  [node table sink path]
+  (let [descriptor (assoc (node-description node path "" "" "" "table")
+                          ::kind ::table
+                          ::table table)]
+    (-open sink descriptor)
+    (-token sink ::table (table-text table))
+    (-close sink descriptor)))
 
 (defn- emit-separated
   [children sink options depth path separator child-emitter]
@@ -412,7 +490,12 @@
 
 (defn- emit-node
   [node sink options depth path]
-  (emit node sink options depth path)
+  (if (and (contains? #{::vector ::list} (::face node))
+           (not (structural-cut? options depth)))
+    (if-let [table (table-data node options)]
+      (emit-table node table sink path)
+      (emit node sink options depth path))
+    (emit node sink options depth path))
   sink)
 
 (defn emit-text

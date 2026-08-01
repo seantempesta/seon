@@ -27,12 +27,13 @@
   (gen/let [length (gen/one-of [(gen/return nil) (gen/choose 0 8)])
             level (gen/one-of [(gen/return nil) (gen/choose 0 8)])
             width (gen/choose 0 80)
-            namespace-maps? gen/boolean]
+            namespace-maps? gen/boolean
+            table? (gen/elements [:derived true false])]
     {:seon.print/length length
      :seon.print/level level
      :seon.print/width width
      :seon.print/namespace-maps? namespace-maps?
-     :seon.print/table? false}))
+     :seon.print/table? table?}))
 
 (def ^:private admission-caps
   (config/result-caps (config/defaults)))
@@ -63,8 +64,10 @@
     (string? hiccup) hiccup
     (sequential? hiccup)
     (let [[tag & body] hiccup
-          body (if (map? (first body)) (next body) body)]
-      (if (= :summary tag)
+          attributes (when (map? (first body)) (first body))
+          body (if attributes (next body) body)]
+      (if (or (= :summary tag)
+              (= "seon-print-visual" (:class attributes)))
         ""
         (apply str (map lexical-hiccup-text body))))
     :else ""))
@@ -242,3 +245,12 @@
     (is (str/starts-with? text "#error "))
     (is (= (Throwable->map failure)
            (edn/read-string {:readers {'error identity}} text)))))
+
+(deftest derived-table-is-one-text-and-html-face
+  (let [node (admitted-node [{:a 1 :b 'x} {:a 22 :b 'yy}])
+        options (assoc no-cuts :seon.print/table? :derived)
+        {:seon.print/keys [text hiccup]} (print/emit-both node options)]
+    (is (= "\n| :a | :b |\n|----+----|\n|  1 |  x |\n| 22 | yy |\n"
+           text))
+    (is (= text (lexical-hiccup-text hiccup)))
+    (is (= :table (-> hiccup (get-in [3 0]))))))
