@@ -1354,6 +1354,17 @@
                    {:seon.schema.admission/source :agent})
                   (assoc raw-row :seon.schema/form (pr-str definition))))
               raw-row)
+            base-declared-row
+            (if (:seon.fn/spec base-declared-row)
+              (program/with-contract-facts
+               {:seon.program/row base-declared-row
+                :seon.program/compile-options
+                (:seon.schema.projection/compile-options projection)
+                :seon.program/predicate-functions
+                (:seon.schema.projection/predicate-functions projection)
+                :seon.program/schema-keys
+                (set (keys (:seon.schema.projection/forms projection)))})
+              base-declared-row)
             evaluated-value
             (if base-declared-row
               (do

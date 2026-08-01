@@ -196,6 +196,18 @@
                    [:seon.sci.eval/program-row :seon.ns/requires]))
         "SCI symbols become canonical lookup refs only at persistence")))
 
+(deftest runtime-function-rows-carry-parsed-contract-facts
+  (let [ctx (eval/build-base-ctx)
+        evaluation
+        (run-in ctx
+                (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                     "parsed-at-runtime [x] x)")
+                2000)
+        row (:seon.sci.eval/program-row evaluation)]
+    (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
+    (is (= 1 (count (:seon.fn/arities row))))
+    (is (map? (:seon.fn/ast row)))))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))
