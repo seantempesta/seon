@@ -360,31 +360,6 @@
         :seon.dev.mcp/state :unreadable
         :seon.dev.mcp/error (ex-message throwable)}])))
 
-(defn- old-writer-port-file
-  [cluster]
-  (let [override (when (= cluster own-cluster)
-                   (System/getenv "SEON_WRITER_REPL_PORT_FILE"))
-        file (io/file
-              (or override
-                  (str "tmp/seon-writer-repl-port-" cluster)))]
-    (if (.isAbsolute file)
-      file
-      (io/file project-root (.getPath file)))))
-
-(defn- old-writer-endpoint
-  [cluster]
-  (let [file (old-writer-port-file cluster)]
-    (try
-      (when (.isFile file)
-        (let [port (some-> (slurp file) str/trim parse-long)]
-          (when (and port (<= 1 port 65535))
-            {:host "127.0.0.1"
-             :port port
-             :seon.dev.mcp/source :old-writer-port-file
-             :seon.dev.mcp/path (.getPath file)})))
-      (catch Throwable _
-        nil))))
-
 (defn- start-remedy
   [cluster]
   (str "Start the cluster with: bin/seon start " cluster "."))
@@ -423,10 +398,6 @@
        :pid (:seon.boot/pid advertisement)
        :start-instant (:seon.boot/start-instant advertisement)
        :seon.dev.mcp/source :fresh-advertisement}
-
-      :missing
-      (or (old-writer-endpoint cluster)
-          (throw (endpoint-error row)))
 
       (throw (endpoint-error row)))))
 
@@ -899,25 +870,28 @@
                               :seon.dev.mcp/error (ex-message throwable)}
                              (ex-data throwable))))))))
 
-(def parent-pid
+(def parent-handle
   (let [parent (.parent (java.lang.ProcessHandle/current))]
     (when (.isPresent parent)
-      (.pid (.get parent)))))
+      (.get parent))))
 
 (defn- start-parent-watchdog!
   []
-  (when parent-pid
-    (future
-      (try
-        (loop []
-          (Thread/sleep 5000)
-          (let [handle (java.lang.ProcessHandle/of parent-pid)]
-            (if (and (.isPresent handle)
-                     (.isAlive (.get handle)))
-              (recur)
-              (System/exit 0))))
-        (catch Throwable throwable
-          (log-error "watchdog failed:" (ex-message throwable)))))))
+  (when parent-handle
+    (try
+      (let [exit
+            (.thenRun
+             (.onExit ^java.lang.ProcessHandle parent-handle)
+             (reify Runnable
+               (run [_] (System/exit 0))))]
+        (.exceptionally
+         exit
+         (reify java.util.function.Function
+           (apply [_ throwable]
+             (log-error "watchdog failed:" (ex-message throwable))
+             nil))))
+      (catch Throwable throwable
+        (log-error "watchdog failed:" (ex-message throwable))))))
 
 (defn -main
   "Serve newline-delimited MCP JSON-RPC on standard I/O."

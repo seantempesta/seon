@@ -319,6 +319,36 @@
     (is (= "invalid-form" (:seon.dev.mcp/failure data)))
     (is (str/includes? (:seon.dev.mcp/reader-error data) "EOF while reading"))))
 
+(deftest missing-advertisements-never-consult-old-writer-port-files
+  (let [fixture-root (io/file project-root "tmp"
+                              (str "mcp-endpoint-" (random-uuid)))
+        data-dir (io/file fixture-root "data")
+        clusters-dir (io/file data-dir "clusters")
+        cluster-dir (io/file clusters-dir "fixture")
+        tmp-dir (io/file fixture-root "tmp")
+        old-port-file (io/file tmp-dir "seon-writer-repl-port-fixture")
+        known-paths [fixture-root data-dir clusters-dir cluster-dir
+                     tmp-dir old-port-file]]
+    (try
+      (is (.mkdirs cluster-dir))
+      (is (.mkdirs tmp-dir))
+      (spit old-port-file "31337\n")
+      (let [outcome
+            (with-redefs-fn {(bridge-var 'project-root)
+                             (.getCanonicalPath fixture-root)}
+              #(try
+                 ((bridge-var 'read-clj-endpoint) "fixture")
+                 (catch clojure.lang.ExceptionInfo error error)))]
+        (is (instance? clojure.lang.ExceptionInfo outcome) (pr-str outcome))
+        (is (= :repl-unavailable
+               (:seon.dev.mcp/failure (ex-data outcome))))
+        (is (= :missing
+               (:seon.dev.mcp/advertisement-state (ex-data outcome))))
+        (is (= "Start the cluster with: bin/seon start fixture."
+               (:seon.dev.mcp/remedy (ex-data outcome)))))
+      (finally
+        (delete-known-files! known-paths)))))
+
 (deftest runtime-status-leads-with-live-and-collapses-dormant-clusters
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-status-" (random-uuid)))
@@ -408,3 +438,101 @@
     (is (true? (:isError result)))
     (is (str/includes? (get-in result [:content 0 :text])
                        "Unknown tool: eval_cljs"))))
+
+(deftest parent-watchdog-observes-the-captured-parent-exit
+  (let [fixture-root (io/file project-root "tmp"
+                              (str "mcp-parent-" (random-uuid)))
+        fifo (io/file fixture-root "mcp-input.fifo")
+        child-error (io/file fixture-root "mcp-error.log")
+        parent-error (io/file fixture-root "parent-error.log")
+        known-paths [fixture-root fifo child-error parent-error]
+        child-handle* (atom nil)
+        fifo-output* (atom nil)
+        parent* (atom nil)]
+    (try
+      (is (.mkdirs fixture-root))
+      (let [mkfifo (.start
+                    (doto (ProcessBuilder.
+                           ^java.util.List ["mkfifo" (.getPath fifo)])
+                      (.directory project-root)))
+            completed? (.waitFor mkfifo 5 TimeUnit/SECONDS)]
+        (when-not completed? (.destroyForcibly mkfifo))
+        (is completed? "mkfifo did not complete.")
+        (is (= 0 (when completed? (.exitValue mkfifo)))))
+      (let [fifo-output-future (future (io/output-stream fifo))
+            helper-form
+            (str
+             "(require '[clojure.java.io :as io]) "
+             "(let [builder (doto (ProcessBuilder. ^java.util.List ["
+             (pr-str (.getPath launcher)) "]) "
+             "(.directory (java.io.File. "
+             (pr-str (.getPath project-root)) ")) "
+             "(.redirectInput (java.io.File. " (pr-str (.getPath fifo)) ")) "
+             "(.redirectError (java.io.File. "
+             (pr-str (.getPath child-error)) "))) "
+             "child (.start builder) "
+             "reader (io/reader (.getInputStream child))] "
+             "(println (.pid child)) (flush) "
+             "(println (.readLine reader)) (flush) "
+             "(deref (promise)))")
+            parent (.start
+                    (doto (ProcessBuilder.
+                           ^java.util.List
+                           ["clojure" "-M:dev:test" "-e" helper-form])
+                      (.directory project-root)
+                      (.redirectError parent-error)))
+            _ (reset! parent* parent)
+            parent-reader (io/reader (.getInputStream parent))
+            pid-line-future (future (.readLine parent-reader))
+            pid-line (deref pid-line-future 10000 ::timeout)
+            _ (is (not= ::timeout pid-line)
+                  (str "The helper did not report the MCP child pid: "
+                       (when (.isFile parent-error) (slurp parent-error))))
+            child-pid (when (string? pid-line) (parse-long pid-line))
+            child-optional (when child-pid
+                             (java.lang.ProcessHandle/of child-pid))
+            child-handle (when (and child-optional
+                                    (.isPresent child-optional))
+                           (.get child-optional))
+            fifo-output (deref fifo-output-future 5000 ::timeout)]
+        (reset! child-handle* child-handle)
+        (is child-handle (str "No child ProcessHandle for " pid-line))
+        (is (not= ::timeout fifo-output) "FIFO writer did not attach.")
+        (reset! fifo-output* fifo-output)
+        (when (and child-handle (not= ::timeout fifo-output))
+          (let [fifo-writer (io/writer fifo-output)
+                request {:jsonrpc "2.0" :id 1
+                         :method "initialize" :params {}}]
+            (.write fifo-writer (json/write-str request))
+            (.write fifo-writer "\n")
+            (.flush fifo-writer)
+            (let [response-line-future (future (.readLine parent-reader))
+                  response-line (deref response-line-future 5000 ::timeout)]
+              (is (not= ::timeout response-line)
+                  (str "MCP child did not become ready; log="
+                       (when (.isFile child-error) (slurp child-error))))
+              (when (string? response-line)
+                (is (= "seon"
+                       (get-in (json/read-str response-line :key-fn keyword)
+                               [:result :serverInfo :name]))))))
+          (is (.isAlive parent))
+          (is (.isAlive ^java.lang.ProcessHandle child-handle))
+          (let [observed-parent (.parent ^java.lang.ProcessHandle child-handle)]
+            (is (.isPresent observed-parent))
+            (is (= (.pid parent) (.pid (.get observed-parent)))))
+          (.destroyForcibly parent)
+          (is (.waitFor parent 3 TimeUnit/SECONDS)
+              "The helper parent did not exit.")
+          (.get (.onExit ^java.lang.ProcessHandle child-handle)
+                3 TimeUnit/SECONDS)
+          (is (not (.isAlive ^java.lang.ProcessHandle child-handle)))))
+      (finally
+        (when-let [parent @parent*]
+          (when (.isAlive ^Process parent) (.destroyForcibly ^Process parent)))
+        (when-let [child-handle @child-handle*]
+          (when (.isAlive ^java.lang.ProcessHandle child-handle)
+            (.destroyForcibly ^java.lang.ProcessHandle child-handle)))
+        (when-let [fifo-output @fifo-output*]
+          (when-not (= ::timeout fifo-output)
+            (.close ^java.io.OutputStream fifo-output)))
+        (delete-known-files! known-paths)))))
