@@ -107,10 +107,10 @@
   ;; the shape that makes a PARTIAL backup unrepresentable: `model`
   ;; decides, everything else is an override
   (let [targets (ai/targets (assoc @dials :seon.config.ai.backup/model
-                                   "DeepSeek-V4-Pro"))
+                                   "deepseek-v4-pro"))
         {:seon.ai/keys [primary backup]} targets]
     (is (schema/valid-candidate-value? :seon.ai/targets targets))
-    (is (.equals "DeepSeek-V4-Pro" (:seon.ai/model backup)))
+    (is (.equals "deepseek-v4-pro" (:seon.ai/model backup)))
     (is (= (dissoc primary :seon.ai/model) (dissoc backup :seon.ai/model))
         "same provider, same credential, same deadline — one dial said
          everything that differs, so nothing was copied to drift")))

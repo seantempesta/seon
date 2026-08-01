@@ -640,7 +640,7 @@ def run_typeahead(arms: tuple[str, ...] = ARMS,
         os_execs, os_summary = oneshot_reference(
             corpus, name="arm0b_deepseek_oneshot",
             base_url="https://api.deepseek.com/v1",
-            model="DeepSeek-V4-Flash-0731",
+            model="deepseek-v4-flash",
             api_key=os.environ["DEEPSEEK_API_KEY"])
         (out_dir / "arm0b_deepseek_oneshot.jsonl").write_text(
             "".join(json.dumps(e, ensure_ascii=False) + "\n"

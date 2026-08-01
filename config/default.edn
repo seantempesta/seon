@@ -134,12 +134,12 @@
  :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
 
  ; Unit: the provider's own model name. Provenance: owner ruling
- ; 2026-08-01 — DeepSeek-V4-Flash-0731 (released 2026-07-31) is the
+ ; 2026-08-01 — deepseek-v4-flash (version DeepSeek-V4-Flash-0731, released 2026-07-31) is the
  ; default: 1M context, 384K max output, thinking default-on, 5x the
  ; concurrency at ~1/3 the output price of v4-pro. Thinking/max-token
  ; dials are being calibrated by the flash-bench lane; this row is the
  ; model selection only.
- :seon.config.ai/model "DeepSeek-V4-Flash-0731"
+ :seon.config.ai/model "deepseek-v4-flash"
 
  ; Unit: maximum provider completion tokens, including reasoning tokens.
  ; Provenance: the 2026-07-29 real thinking-model calibration exhausted

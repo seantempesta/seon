@@ -127,7 +127,7 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 
 | | `:deepseek` | `:anthropic` |
 |---|---|---|
-| model | `DeepSeek-V4-Flash-0731` | `claude-opus-4-8` |
+| model | `deepseek-v4-flash` | `claude-opus-4-8` |
 | endpoint | `https://api.deepseek.com/v1` | `https://api.anthropic.com/v1/messages` (SDK-owned) |
 | temperature | `0.7` | n/a (never sent) |
 | max_tokens | `4096` | `16000` |
@@ -232,8 +232,8 @@ hits where the provider publishes a separate rate.
 
 | Model | Cache hit in | Cache miss in | Output | Context | Max output | Evidence | Seon role |
 |---|---:|---:|---:|---:|---:|---|---|
-| `DeepSeek-V4-Flash-0731` | $0.0028 | $0.14 | $0.28 | 1M | 384K | Vendor price/limits; Seon ~68 tok/s (pre-0731 flash) | THE DEFAULT (owner ruling 2026-08-01): all Seon turns |
-| `DeepSeek-V4-Pro` | $0.003625 | $0.435 | $0.87 | 1M | 384K | Vendor price/limits; Seon ~43 tok/s | Quality comparison reference only |
+| `deepseek-v4-flash` (version DeepSeek-V4-Flash-0731) | $0.0028 | $0.14 | $0.28 | 1M | 384K | Vendor price/limits; Seon ~68 tok/s (pre-0731) | THE DEFAULT (owner ruling 2026-08-01): all Seon turns |
+| `deepseek-v4-pro` | $0.003625 | $0.435 | $0.87 | 1M | 384K | Vendor price/limits; Seon ~43 tok/s | Quality comparison reference only |
 | `muse-spark-1.1` | unpublished | $1.25* | $4.25* | 1M | unpublished | Vendor existence/context; Seon transport | Experimental fast specialist pending task-success evaluation |
 | `kimi-k3` | $0.30 | $3.00 | $15.00 | 1M | 1,048,576 | Vendor price/limits; three paid Seon calls | Selective long-horizon planning escalation |
 | `claude-haiku-4-5` | $0.10 | $1.00 | $5.00 | 200K | see vendor | Vendor; not live in Seon | Quick specialist when Anthropic behavior matters |
@@ -261,18 +261,18 @@ checked 2026-07-19.
 
 | Model | In/out $/M (cache-hit in) | Notes |
 |---|---|---|
-| ✔ `DeepSeek-V4-Flash-0731` (default, owner ruling 2026-08-01) | $0.14 / $0.28 ($0.0028) | 1M context, 384K maximum output, thinking DEFAULT-ON (released 2026-07-31; calibration in `research/deepseek-v4-flash-calibration-2026-08-01.md`). |
-| `DeepSeek-V4-Pro` | $0.435 / $0.87 ($0.0036) | 1M context, 384K maximum output. Comparison reference only — not a Seon default. |
+| ✔ `deepseek-v4-flash` (default, owner ruling 2026-08-01; version DeepSeek-V4-Flash-0731) | $0.14 / $0.28 ($0.0028) | 1M context, 384K maximum output, thinking DEFAULT-ON (version 0731 released 2026-07-31; calibration in `research/deepseek-v4-flash-calibration-2026-08-01.md`). |
+| `deepseek-v4-pro` | $0.435 / $0.87 ($0.0036) | 1M context, 384K maximum output. Comparison reference only — not a Seon default. |
 
 ```bash
 SEON_AI_PROVIDER=deepseek        # endpoint + DEEPSEEK_API_KEY defaults apply
 DEEPSEEK_API_KEY=<key>
-# SEON_AI_MODEL=DeepSeek-V4-Pro   # optional comparison override; omit -> DeepSeek-V4-Flash-0731
+# SEON_AI_MODEL=deepseek-v4-pro   # optional comparison override; omit -> deepseek-v4-flash
 ```
 
-- **Retired legacy slugs (gone since 2026-07-24):** `deepseek-chat`,
-  `deepseek-reasoner`, and the old `deepseek-v4-flash`/`deepseek-v4-pro`
-  aliases. Exact identifiers only: `DeepSeek-V4-Flash-0731` / `DeepSeek-V4-Pro`.
+- **Retired legacy slugs (gone since 2026-07-24):** `deepseek-chat` and
+  `deepseek-reasoner`. Current identifiers, verified against the live
+  `/models` endpoint 2026-08-01: `deepseek-v4-flash` / `deepseek-v4-pro`.
 - DeepSeek thinking-mode tool continuation requires replaying the complete
   assistant message, including `reasoning_content`, before the tool result.
   Seon's one-shot visible-text path is verified; provider-native multi-turn
@@ -433,7 +433,7 @@ reused:
             :seon.ai/agent-timeout-ms 300000
             :seon.ai/agent-attempt-timeout-ms 360000}
  :execution {:seon.ai/agent-provider :deepseek
-             :seon.ai/agent-model "DeepSeek-V4-Flash-0731"
+             :seon.ai/agent-model "deepseek-v4-flash"
              :seon.ai/agent-thinking "false"}}
 ```
 

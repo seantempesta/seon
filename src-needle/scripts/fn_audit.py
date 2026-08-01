@@ -70,7 +70,7 @@ ARMS = {
 JUDGES = {
     "deepseek": {
         "url": "https://api.deepseek.com/chat/completions",
-        "model": "DeepSeek-V4-Flash-0731",
+        "model": "deepseek-v4-flash",
         "key_env": "DEEPSEEK_API_KEY",
         "price_in": 0.435, "price_out": 0.87,
         # thinking ENABLED (the audit spec): no disable flag, generous cap

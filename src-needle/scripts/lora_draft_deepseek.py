@@ -41,7 +41,7 @@ INSTRUCTION = (
 
 PROV = {
     "url": "https://api.deepseek.com/chat/completions",
-    "model": "DeepSeek-V4-Flash-0731",
+    "model": "deepseek-v4-flash",
     "key_env": "DEEPSEEK_API_KEY",
     "price_in": 0.435, "price_out": 0.87,  # $/M (llm-adapters.md catalog)
     "extra": {"thinking": {"type": "disabled"}},

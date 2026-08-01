@@ -64,7 +64,7 @@ REGRESSION_WINDOW = 7
 # whose run predates the surface, and it says so.
 MODEL_PROVENANCE: dict[str, Any] = {
     "model": "deepseek",
-    "model_id": "DeepSeek-V4-Flash-0731",
+    "model_id": "deepseek-v4-flash",
     "model_thinking": "disabled",
     "model_temperature": 0.7,
     "model_config_source": (
