@@ -33,7 +33,6 @@ sci's own `clojure.repl/demunge`. The parity GATE is one namespace
 `test/seon/repl_parity_test.clj` under `bin/test`, fed by a
 `repl-session` shim through the production door.
 
-
 Ruling #24's open crux: *"how does a REPL print, and can we print
 composable HTML the same way? Closer to the metal — mirror how Clojure's
 printer actually works, don't invent a parallel one."*
@@ -567,6 +566,36 @@ a freshly forked cluster whose reply contains `(def x 41)`, `(map inc
 transcript whose result lines are byte-identical to the same five forms
 typed into `clojure -M -r`, except for the honest `sci.lang.*` class names
 and the absent atom rep.
+
+## Amendment 3 — implementation-boundary repairs (orchestrator, 2026-08-01 night)
+
+Lane 3 stopped honestly before edits: six frictions between this sealed
+contract and current source. Repairs adopted (option 1 of its report),
+none touching an owner-level guarantee (P-TOTAL, P-TEE, no pprint in
+the text sink, agent `print-method` refused, atoms undereffed,
+result-edn stays):
+
+1. **The grammar nodes ride an unambiguous tagged envelope** instead of
+   bare `::elided`/`::pruned` keyword markers — authored data containing
+   those keywords must be printable AS data, and totality (P-TOTAL) is
+   the falsifier that proves the envelope cannot collide.
+2. **A Throwable node joins the closed grammar** (the `#error {…}` face
+   the sealed dispatch table already requires but the grammar never
+   declared).
+3. **Print options are their own family** (supporting stock Clojure's
+   nil/zero semantics for `*print-length*`/`*print-level*` and width),
+   registered in `resources/seon/schema/print.edn` (ownership granted
+   to Lane 3); obsolete render-value options they supersede are DELETED
+   in the same slice; `max-collection`'s page-size duty stays a
+   separate, positive dial.
+4. **`max-map-visits`/`shape-sample` get sealed semantics or die** —
+   the lane reads the consumers and either defines them in the emitter
+   or deletes the dead dials; no unsealed option survives.
+5. **The print-var capture seam belongs to Lane 1** (`eval.clj` — the
+   agent's sci print vars must be read before bindings unwind). The
+   emitter takes options as an argument; 3B wires shipped defaults now,
+   and the F3/F4 divergences (agent-set print vars through the door)
+   move their acceptance to the Lane 1 follow-up that lands the seam.
 
 ## Known follow-ons this design does NOT cover
 
