@@ -158,7 +158,10 @@
       (zero? @(:nodes state)) (elide! state)
       :else
       (let [after (next remaining)
-            cut-for-width? (and after (>= (inc taken) width))
+            ;; width means WIDTH: cut only once `width` items are shown and
+            ;; more remain (the 2026-08-01 off-by-one class — a marker that
+            ;; replaces the last item is strictly less informative than it)
+            cut-for-width? (and after (>= taken width))
             cut-for-nodes? (and after (= 1 @(:nodes state)))]
         (if (or cut-for-width? cut-for-nodes?)
           (append-elision! state accumulated emit)
@@ -191,8 +194,8 @@
       (< @(:nodes state) 2) (elide! state)
       :else
       (let [after (next remaining)
-            cut-for-width? (or (>= taken width)
-                               (and after (>= (inc taken) width)))
+            ;; same width-means-width rule as project-entries above
+            cut-for-width? (and after (>= taken width))
             cut-for-nodes? (and after (< @(:nodes state) 3))]
         (if (or cut-for-width? cut-for-nodes?)
           (mark-map-cut! state accumulated)

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 tags: [issue, sci, render]
 ---
@@ -66,3 +66,10 @@ modality (`deepseek-v4-flash`, thinking OFF, 10.9 s, one call), then
 REPL-confirmed. In the same response the model also claimed `max-nodes` 1 on
 `42` elides the value — **falsified**, it projects `42` correctly. Evidence:
 `docs/prds/sci-execution-runtime/research/flash-quality-interrogation-2026-08-01.md`.
+
+Resolved same-night at the orchestrator level: both `cut-for-width?`
+sites (sequences and maps) now cut only once `width` items are shown
+and more remain; the last-item guard stays (a marker replacing the
+final item is strictly less informative than the item). Admit suite
+green. Found by the model-interrogation lane — the same off-by-one
+class as `opened-window`, in the sibling that fix missed.

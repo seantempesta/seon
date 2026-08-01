@@ -32,8 +32,9 @@
  ; payloads to the content-addressed blob path.
  :seon.config.eval.result/blob-threshold 65536
 
- ; Unit: retained entries in one routed `/data` window, including its
- ; navigation elision marker. Provenance: the 2026-08-01 cap measurements
+ ; Unit: retained entries in one routed `/data` window; the navigation
+ ; elision marker rides beside them, never inside the count (the
+ ; 2026-08-01 off-by-one repair). Provenance: the 2026-08-01 cap measurements
  ; raised admission width to runaway-query scale; presentation remains at the
  ; structural renderer's proven readable default and must not inherit it.
  :seon.render.value/max-collection 8
