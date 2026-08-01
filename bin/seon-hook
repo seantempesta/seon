@@ -846,7 +846,7 @@
 (def pod-log-path (root-file "logs/pod.log"))
 
 (defn- core-fault-dial []
-  (let [configured (or (System/getenv "SEON_CONFIG") "config/system.edn")
+  (let [configured (or (System/getenv "SEON_CONFIG") "config/default.edn")
         configured-file (io/file configured)
         manifest (if (.isAbsolute configured-file)
                    configured-file

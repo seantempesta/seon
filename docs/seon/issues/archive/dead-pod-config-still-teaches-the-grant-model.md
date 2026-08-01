@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, config, agent]
 ---
 
@@ -30,3 +30,23 @@ delete the dead manifests. Git is the archive.
 Acceptance: `config/` contains only live manifests; `rg home-requires`
 returns nothing outside `src-old/` and dated research; the hook and dev
 config path still work.
+
+## Closed 2026-08-01 — deleted
+
+`bin/seon-hook`'s `core-fault-dial` now defaults to
+`config/default.edn` (which owns `:seon.config/on-core-error`), and the
+dead manifests are gone: `config/system.edn` plus the five
+`config/minimal*.edn` variants. `config/` now holds exactly the live
+three: `default.edn`, `acme.edn`, `test.edn`.
+
+The sweep also removed the OLD POD OPERATOR under `script/seon/dev/`,
+whose `config.clj` was the other reader. `bin/seon` runs
+`seon.fresh-operator`, whose live dev closure is exactly eight files
+(`clj_kondo`, `docstring`, `issues`, `markdown`, `mcp`, `changed_test`,
+`state`, `test_roots`); the other fourteen — `apply_release_config`,
+`artifact`, `branch`, `cluster`, `config`, `config_manifest`,
+`live_render_proof`, `process`, `program_artifact`, `program_indexer`,
+`program_inventory`, `release`, `restore_state`, `test_artifact` — were
+pod-era and are deleted. Verified after: `bin/seon status` works, the
+edit hook returns `{"continue":true}`, and all five live dev namespaces
+load under bb. Git is the archive.
