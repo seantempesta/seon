@@ -138,7 +138,13 @@ The bound is config: a per-model default calibrated to the model,
 overridable per agent. Compaction ELIDES earlier work from the
 window; elided entries keep their receipt identities visible so
 anything remains one re-query away — nothing is unreachable, only
-un-rendered. The policy that derives per-entry options at compaction
+un-rendered. AMENDED (owner, same evening): **the bootstrap is
+PINNED — it never slides out.** Its content is effectively the new
+system message: it teaches the basics, and the working hypothesis is
+that a bare tail without that core degrades the agent. Held as a
+TESTABLE assumption, not dogma — a pinned-vs-unpinned comparison is a
+cheap simulation experiment once the harness exists. The sliding
+window applies to the transcript tail behind the pinned bootstrap. The policy that derives per-entry options at compaction
 (age, size, relevance, budget) is the same seam the context-budget
 layer already owns.
 

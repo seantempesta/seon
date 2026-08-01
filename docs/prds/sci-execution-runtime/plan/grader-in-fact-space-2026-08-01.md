@@ -70,6 +70,20 @@ seon.test.runner.
    grading forks per generation — branch lifecycle (retire-branch!) and
    store growth need a measured answer, not an assumption.
 
+## The oversight loop (owner refinement, 2026-08-01 evening)
+
+NOT blind RL. The bootstrap is generated and refined by an OVERSEER
+AGENT running many simulations with FULL UNDERSTANDING of every prior
+attempt: it reads earlier generations' branches, transcripts, and
+scores — all database facts, so the overseer's experimental memory is
+simply queries — forms a hypothesis ("agents get confused here, they
+expect this"), tweaks the bootstrap forms or the surface, re-runs the
+simulation, and compares. Iterative comprehension-driven tweaking,
+watchable in the same debug display as any other session. First
+planned experiment once the harness exists: pinned-bootstrap vs
+bare-tail (the owner's testable hypothesis that losing the core
+degrades the agent).
+
 ## Sequencing
 
 Held behind the audit-and-planning stage (owner: nothing launches until
