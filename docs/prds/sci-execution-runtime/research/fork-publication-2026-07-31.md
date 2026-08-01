@@ -125,3 +125,41 @@ fresh GitHub API read exactly matched the local tip.
 | Submodule | Owner repository | Branch | Previous tip | Verified remote tip |
 |---|---|---|---|---|
 | `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` |
+
+## GitHub Actions disabled on every owner fork — 2026-07-31
+
+Owner-authorized: the twelve owner fork repositories inherited upstream CI
+workflows, which ran (and emailed failures) on every push to a Seon maintained
+branch. Actions is now disabled at the repository level on all twelve, so no
+inherited workflow can run. Nothing else was touched — no workflow file was
+edited, no branch moved, no other repository setting changed.
+
+The change and its verification for each repository were:
+
+```
+gh api -X PUT repos/seantempesta/<repo>/actions/permissions -F enabled=false
+gh api repos/seantempesta/<repo>/actions/permissions
+```
+
+`-F` is required: `-f enabled=false` sends the string `"false"` and the API
+rejects it with HTTP 422, leaving the repository unchanged.
+
+Every repository below returned `{"enabled":false,"sha_pinning_required":false}`
+on the verification read. No repository 404'd or refused.
+
+| Owner repository | Verified `enabled` |
+|---|---|
+| `seantempesta/datahike` | false |
+| `seantempesta/konserve` | false |
+| `seantempesta/proximum` | false |
+| `seantempesta/sci` | false |
+| `seantempesta/clj-kondo` | false |
+| `seantempesta/core.async.flow-monitor` | false |
+| `seantempesta/superv.async` | false |
+| `seantempesta/partial-cps` | false |
+| `seantempesta/http-kit` | false |
+| `seantempesta/shadow-cljs` | false |
+| `seantempesta/bun` | false |
+| `seantempesta/claude-agent-sdk-typescript` | false |
+
+Re-enabling is the same call with `-F enabled=true`, per repository.
