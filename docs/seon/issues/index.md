@@ -30,10 +30,11 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make REPL parity fail when an expected row disappears](parity-gate-has-no-row-cardinality-sentinel.md) | blocker | adversarial-audit fix wave |
 
-## Friction (39)
+## Friction (40)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
 | [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
