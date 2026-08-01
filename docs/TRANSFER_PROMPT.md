@@ -283,6 +283,64 @@ disagreement.
 - **Read the actual output an agent sees**, not a summary of it. Prose that
   reads fine to you often reads badly to a model.
 
+### Added 2026-08-01, from a day that kept finding rot
+
+- **ASK WHAT THE DEPENDENCY ALREADY DOES BEFORE YOU BUILD ANYTHING.** The
+  owner's recurring, justified complaint: *"how is it that we are computing
+  this over and over when sci already offers a way to resume and keep
+  evaluating?"* We were rebuilding every agent's entire program graph from
+  database rows on EVERY TURN — 283 ms and 78 KB per turn — because a
+  cold-start mechanism had quietly become the hot path. Nobody chose that; it
+  accreted. Before designing any mechanism, read the vendored source in
+  `reference-code/` for the thing you are about to reimplement. sci keeps a
+  live env; konserve has GC and content-addressed blobs; Datahike branches are
+  head pointers, not copies. If your design recomputes something a dependency
+  already maintains, the design is wrong.
+- **A SYMPTOM THAT IS EXPENSIVE TO FIX IS USUALLY THE WRONG TARGET.** One bad
+  program row bricked an entire branch, and the obvious fix was per-row
+  containment. The real defect was that the rebuild ran per turn at all — fix
+  that and the blast radius collapses on its own. When a fix feels like
+  hardening a mechanism against its own normal operation, stop and ask whether
+  the mechanism belongs on that path.
+- **ROT POISONS AGENTS INTO CONFIDENT WRONG ANSWERS.** This is not
+  housekeeping. Today: four architecture documents still described per-agent
+  capability GRANTS ("ordinary agents do not inherit those grants") long after
+  the ruling that every agent may call every function; a deleted pod's config
+  and a 14-file dead operator sat in live-looking paths teaching that same
+  model; a root-authority sentence about effects read as a restricted toolkit.
+  An agent reading any of it builds an elaborate, coherent, WRONG solution and
+  cites the document while doing it. When you find a claim the code has
+  outgrown, fix it in that turn — and check whether it left ammunition
+  elsewhere (the doc was the claim; the dead config was the ammunition).
+- **CHASE THE READERS OF ANYTHING DEAD.** Deleting one dead config surfaced
+  two readers; one of them was a whole dead operator. `rg` for every reference
+  before and after, verify the live entry points still work, and delete the
+  transitive closure — not the one file you noticed.
+- **SURFACE SMELLS THE MOMENT YOU SMELL THEM.** Not at the end of the task,
+  not in a summary — the owner wants them raised at once so they can be
+  addressed together. A finding that lives only in conversation is a finding
+  that did not happen. Every defect, contradiction, and open question becomes
+  an issue note in the same turn, with evidence and an owner. Being asked
+  "is there anything we found that is not logged?" means it is already late.
+- **VERIFY THE THING YOU ARE ABOUT TO CLAIM, ESPECIALLY WHEN IT IS YOUR OWN
+  EARLIER CLAIM.** Today three separate measured findings overturned things
+  recorded hours earlier: `sci/fork` is not the sharing mechanism; the
+  "489 ms substrate" was `acquire!`, not `sci/init`; blob rehydration is
+  slower than recomputation. Every one had already been written into a
+  ruling. Re-derive before you repeat.
+- **COUNT WHAT YOU CITE.** A mined checklist was reported as 59 rows and
+  actually contained 88 — the summary silently dropped a whole category. If
+  you are about to state a number, count it.
+- **A LANE'S HEARTBEAT IS ITS COMMITS, NOT ITS PROCESS.** A finished lane can
+  leave its wrapper running for an hour. Read `git log` for its owned paths;
+  reap it when the deliverable has landed. And a lane reporting "another lane
+  is editing my files" is usually seeing itself.
+- **PROTECTED PATHS MAKE LANES STOP CORRECTLY — EXPECT IT AND FINISH THE
+  WORK.** Two lanes stopped honestly at boundaries today (a loud cap line that
+  needed a protected file; obsolete assertions in a protected test). That is
+  the system working. The orchestrator finishes those edges itself rather than
+  letting them sit.
+
 ## If you are coordinating work
 
 Codex orchestrators use the native collaboration/subagent tools; they do not
