@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, repl, sci]
 ---
@@ -42,3 +42,10 @@ The REPL-parity recurring gate in `test/seon/repl_parity_test.clj`.
   not merely a printed total.
 - Removing either an executable row or a pending row makes the focused test
   command fail.
+
+Resolved by `050fff5c7`. `test/seon/repl_parity_test.clj:174-206` derives the
+expected 88 identities from the nine family cardinalities and asserts total
+count, exact identity set, and per-family counts. The once fixture invokes the
+sentinel before running rows (`:218-234`). Deleting any executable or pending
+row now fails at least the total and identity assertions; substituting a
+duplicate still fails the identity assertion.

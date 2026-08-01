@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (10)
+## Blocker (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [State live definitions left behind by a failed evaluation](failed-eval-definitions-have-no-session-image-delta.md) | blocker | stateless-resume repair wave |
+| [Prove SCI built-ins are deterministic before replaying session forms](session-replay-treats-effectful-sci-builtins-as-pure.md) | blocker | stateless-resume repair wave |
 | [Enforce agent-authored contracts in the live ctx](agent-authored-contracts-do-not-enforce-in-the-live-ctx.md) | blocker | live-ctx contract slice |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
@@ -29,12 +31,13 @@ See `README.md` for the convention.
 | [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
-| [Make REPL parity fail when an expected row disappears](parity-gate-has-no-row-cardinality-sentinel.md) | blocker | adversarial-audit fix wave |
 
-## Friction (38)
+## Friction (39)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
+| [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |
 | [Point the surviving writer-port consumers at fresh advertisements](old-writer-port-consumers-survive-outside-mcp.md) | friction | adversarial-audit fix wave |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |

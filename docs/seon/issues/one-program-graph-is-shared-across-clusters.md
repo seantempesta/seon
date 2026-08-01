@@ -62,3 +62,15 @@ Two findings that change this issue's framing:
   `clojure.lang` interface entries. None carry `:sci/built-in`. Closing
   them is a metadata edit in our sci fork
   (`sci/impl/namespaces.cljc:2450`, `sci/impl/utils.cljc:322,374`).
+
+## Independent recheck 2026-08-01
+
+The per-cluster context half landed, but the issue remains a blocker. An
+independent fresh-JVM probe constructed two base contexts and selected every
+identical SCI Var lacking `:sci/built-in`; the count was still 17. Rebinding
+`clojure.walk/macroexpand-all` through context A changed the value observed
+through context B to `:crossed`. `src/seon/cluster.clj:1339-1344` now correctly
+constructs one context per cluster and `src/seon/cluster/loop.cljc:1139-1168`
+uses it directly, so this residue is the only reproduced cross-cluster path in
+the audited turn mechanism. No source after `b114ac29d` applies the queued SCI
+metadata fix.
