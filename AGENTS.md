@@ -3,7 +3,7 @@
 This is the one maintained repository instruction authority. Codex reads
 `AGENTS.md` directly; Claude reads the same bytes through the same-directory
 `CLAUDE.md -> AGENTS.md` compatibility link. The thin delegated-lane adapter
-lives in `AGENT.md`; `ORCHESTRATOR.md` is a superseded historical stub.
+lives in `AGENT.md`.
 
 If you were spawned as a subagent, execute the assigned task directly. Do not
 spawn or delegate again. If the task is too broad, report that to the top-level

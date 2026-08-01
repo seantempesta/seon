@@ -84,16 +84,27 @@ publication. Resume when the tree is quiet.
 
 ## 6. Pod-era rot still tracked at the repository root
 
-Verified dead or contradictory, not yet removed: `docker/` (a pod
-entrypoint that referenced the now-deleted `config/system.edn`),
-`specs/` (three pod-era spec files), `externs/`, `examples/
-third-party-override` (CLJS), `bin/fix-bootstrap-macros` (CLJS
-bootstrap), and root `shadow-cljs.edn` + `package.json` presenting a
-live CLJS build although CLJS is OFF (owner ruling 2026-07-27). Also
-`evals/runs/` holds ~700 dated pod-era transcript files — archive
-material rather than rot, but it dominates the tree. `ORCHESTRATOR.md`
-is already self-marked superseded.
-
+PARTIALLY RESOLVED and PARTIALLY FALSIFIED by the pod-rot-cleanup lane
+(2026-08-01, commits `00407f402`…`d10dbd583`). Deleted with readers
+chased: `docker/Dockerfile` + `.dockerignore`, `specs/`,
+`bin/fix-bootstrap-macros`, `ORCHESTRATOR.md`, the nested
+`.clj-kondo/.clj-kondo` link. STILL LIVE — the original "verified dead"
+claim was wrong for these, each has a named current reader:
+`docker/seon-entrypoint` (executed by `src-inspect-ai` adapters
+`tb_agent.py`/`tb2_agent.py`/`swebench_arm.py`, tested),
+`package.json` (`bin/css` Tailwind), `shadow-cljs.edn` (component docs
+and the evaluation source-admission lock/test), `externs/`
+(`shadow-cljs.edn` reads `externs/node_fs.js`),
+`examples/third-party-override` (advertised by
+`docs/seon/reference/third-party-integration.md`), and the `deps.edn`
+`:cljs` alias (`docs/seon/components/extra-src.md` instructs
+`clj -M:cljs`, disproving the alias comment that nothing invokes it).
+Remaining question is upstream of deletion: whether those READERS
+(`bin/css`, the CLJS component docs, extra-src.md) are themselves
+current under CLJS-off — an owner call, not a mechanical cut. Also
+left: one non-executing CLJS audit comment at
+`src-needle/audit/seon/needle_lora_audit_test.cljs:27`; `evals/runs/`
+stays as archive material.
 
 ## 7. `:seon.render.value/max-collection` now has TWO defaults authorities
 
