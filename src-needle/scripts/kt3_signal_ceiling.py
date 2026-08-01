@@ -43,7 +43,7 @@ INSTRUCTION = (
 PROVIDERS = {
     "deepseek": {
         "url": "https://api.deepseek.com/chat/completions",
-        "model": "deepseek-v4-pro",
+        "model": "DeepSeek-V4-Flash-0731",
         "key_env": "DEEPSEEK_API_KEY",
         "price_in": 0.435, "price_out": 0.87,  # $/M (llm-adapters.md catalog)
         # DeepSeek's API defaults thinking ON (reasoning burns the token cap

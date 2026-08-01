@@ -97,7 +97,7 @@ INSTR_CAP = 2048  # KT3 parity
 PROVIDERS = {
     "deepseek": {
         "url": "https://api.deepseek.com/chat/completions",
-        "model": "deepseek-v4-pro",
+        "model": "DeepSeek-V4-Flash-0731",
         "key_env": "DEEPSEEK_API_KEY",
         "price_in": 0.435, "price_out": 0.87,  # $/M (llm-adapters.md catalog)
         # the API defaults thinking ON — same disable the shipped adapter sends
