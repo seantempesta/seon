@@ -76,6 +76,16 @@
    :parity/expected expected
    :parity/actual actual})
 
+(defn- location-data
+  [result]
+  (some
+   (fn [value]
+     (when (and (map? value)
+                (some? (:line value))
+                (some? (:column value)))
+       value))
+   (tree-seq coll? seq (get-in result [:value :seon.error/data]))))
+
 (defn- check-row!
   [row-id expected-state check]
   (let [outcome
@@ -582,12 +592,15 @@
              (str/starts-with? (:printed result) "#error {"))))
 
 (defparity "E6" :passing
-  (let [result
+  (let [namespace-name (symbol (str "parity.e6." (gensym)))
+        function-name (symbol (str namespace-name) "arity-probe")
+        result
         (peek
          (repl-session
-          ["(defn parity_arity [x] x)"
-           "(parity_arity)"]))]
-    (compared "Wrong number of args (0) passed to: user/parity_arity"
+          [(str "(ns " namespace-name ")")
+           "(defn arity-probe [x] x)"
+           "(arity-probe)"]))]
+    (compared (str "Wrong number of args (0) passed to: " function-name)
               (:err result))))
 
 (defparity "E7" :passing
@@ -606,15 +619,15 @@
               (get-in result [:value :seon.error/data]))))
 
 (defparity "E11" :passing
-  (let [result
+  (let [function-name (symbol (str "parity_loop_" (gensym)))
+        result
         (peek
          (repl-session
-          [(str "(defn parity_loop []\n"
+          [(str "(defn " function-name " []\n"
                 "  (loop [i 0]\n"
                 "    (subs nil 0)))")
-           "(parity_loop)"]))
-        data (get-in result
-                     [:value :seon.error/data :seon.sci.eval/data])]
+           (str "(" function-name ")")]))
+        data (location-data result)]
     (checked "a located loop frame"
              data
              (and (some? (:line data))
@@ -636,9 +649,7 @@
   (let [actual
         (mapv
          (fn [[source _]]
-           (let [data
-                 (get-in (first (repl-session [source]))
-                         [:value :seon.error/data :seon.sci.eval/data])]
+           (let [data (location-data (first (repl-session [source])))]
              [(:line data) (:column data)]))
          destructuring-location-cases)]
     (compared (mapv second destructuring-location-cases) actual)))
@@ -658,9 +669,7 @@
         (mapv
          (fn [[source _]]
            (let [result (first (repl-session [source]))
-                 data (get-in result
-                              [:value :seon.error/data
-                               :seon.sci.eval/data])]
+                 data (location-data result)]
              [(:err result) [(:line data) (:column data)]]))
          let-like-arity-cases)]
     (compared
