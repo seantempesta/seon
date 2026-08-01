@@ -347,3 +347,6 @@
 [submodule "reference-code/core.async.flow-monitor"]
 	path = reference-code/core.async.flow-monitor
 	url = https://github.com/seantempesta/core.async.flow-monitor.git
+[submodule "reference-code/edamame"]
+	path = reference-code/edamame
+	url = https://github.com/borkdude/edamame.git
