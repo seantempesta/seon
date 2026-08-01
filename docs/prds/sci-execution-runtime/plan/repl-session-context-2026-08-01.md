@@ -97,6 +97,40 @@ html from ONE traversal (the general renderer already is that traversal)
 serialization leaves. "Closer to the metal" — mirror how Clojure's
 printer actually works, don't invent a parallel one.
 
+## The dynamic transcript (owner, 2026-08-01 evening)
+
+The transcript re-renders VALUES at varying detail per render: the PDF
+the agent read at turn 1 matters less by turn 10, so its entry prints
+small with age while the recent tail prints full. The mechanics are the
+pieces already landing, composed:
+
+- the transcript is a DERIVED print of facts — nothing stored, so
+  re-rendering old entries smaller is just the printer choosing
+  per-entry presentation options (`:seon.render.value/options`, the
+  declared-and-now-wired layer) from an age/relevance policy;
+- ruling #25's blob tier is what makes aging HONEST: the full generous
+  projection survives (result-blob + result-size), so detail is a
+  render-time choice, never destroyed at commit (the old caps destroyed
+  it — that is why aging could not work before);
+- **re-query restores detail**: every receipt already has an identity
+  (`:seon.cluster.eval/id`); the agent re-queries any prior result to
+  bring it back at full output — the capped/aged print names the
+  identity it would query. THE TUTORIAL MUST DEMONSTRATE THIS BEAT
+  (read something big → see it age → re-query one part). Needs the
+  small agent-facing read (blob-backed full projection by receipt
+  identity) — the `result/<id>` idea reborn on the JVM.
+- **one config dial pins detail constant → the transcript is STATIC**:
+  same output at every age, fully deterministic, and the prompt-cache
+  prefix never changes. Dynamic mode trades cache-prefix stability for
+  context economy.
+
+Open decision (owner): aging granularity. Continuous re-aging breaks
+the prompt-cache prefix every turn; STEPPED aging (entries re-render
+only at discrete boundaries, e.g. leaving the recent-tail window)
+keeps the prefix stable between steps; STATIC pins everything. The
+policy that derives per-entry options (age, size, relevance, budget)
+is the same seam the context-budget layer already owns.
+
 ## Columns / tables
 
 Canonical REPL answer = `clojure.pprint/print-table` — emits pipe+dash
