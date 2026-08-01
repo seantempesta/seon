@@ -204,7 +204,11 @@
   {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
   (schema.edn/load! {})
-  (schema/activate! (schema/snapshot))
+  (let [candidates (schema/snapshot)
+        active (some-> (schema/current-projection)
+                       :seon.schema.projection/forms)]
+    (when-not (= active candidates)
+      (schema/activate! candidates)))
   (let [registered (count (mi/clj-collect! {:ns (all-ns)}))]
     (case mode
       :panic
