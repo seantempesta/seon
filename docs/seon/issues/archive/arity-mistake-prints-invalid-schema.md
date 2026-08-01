@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, sci, eval, error, context]
 ---
 
@@ -35,3 +35,13 @@ class (any instrumented multi-arity fn, wrong arity).
 
 Blocks: the ruling-#24 owner-agent turn-3 mockup (error-recovery
 history beat needs legible arity bytes).
+
+## Closed 2026-08-01
+
+Fixed in commit c6db32f56 ("Make the eval door REPL-native"). Live
+proof through the real door in the default cluster JVM:
+`(my.message/send)` now returns a flat error whose message is
+`Wrong number of args (0) passed to: my.message/send` with
+`:seon.instrument/arglists [[to content] [to content about]]` in the
+data. Class regression: `an-instrumented-multi-arity-miss-reads-like-clojure`
+in `test/seon/sci/eval_test.clj`.
