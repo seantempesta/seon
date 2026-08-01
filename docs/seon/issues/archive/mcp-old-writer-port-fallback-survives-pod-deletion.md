@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, mcp, deletion]
 ---
@@ -36,3 +36,7 @@ The source-independent MCP endpoint discovery in `script/seon/dev/mcp.clj`.
   guiding fresh-operator error; none falls back to pod-era files.
 - A stale old writer-port file cannot affect endpoint selection.
 - Current advertisement discovery and session replacement tests remain green.
+
+Resolved by `727e436b9`. MCP endpoint discovery now accepts only fresh
+advertisements. Missing advertisements ignore pod-era writer files and
+return the fresh-operator refusal.

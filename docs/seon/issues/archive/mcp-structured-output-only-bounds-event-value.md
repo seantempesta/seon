@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, mcp, repl]
 ---
@@ -41,3 +41,7 @@ The source-independent MCP response projection in `script/seon/dev/mcp.clj`.
   evidence.
 - A regression uses an oversized `:form` and asserts the complete encoded
   response stays within the declared bound.
+
+Resolved by `5a83efc2e`. Structured MCP encoding now bounds all string
+fields while retaining the terminal envelope and retained/total
+evidence. The oversized terminal-field regression passes.

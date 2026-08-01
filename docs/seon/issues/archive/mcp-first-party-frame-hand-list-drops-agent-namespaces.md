@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, mcp, repl]
 ---
@@ -40,3 +40,7 @@ inventory that defines first-party code.
   frames.
 - Dependency/JDK frames remain omitted and the bounded-frame contract remains
   intact.
+
+Resolved by `5a83efc2e`. Exception frame membership is derived from
+first-party source provenance and the current prepl namespace. A
+compiled agent-owned namespace regression passes.

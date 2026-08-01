@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, tooling, operator]
 ---
@@ -34,3 +34,7 @@ The source-independent MCP process lifecycle.
 - There is no periodic sleep or tuned liveness interval.
 - A child-process test proves the bridge exits after its parent and stays alive
   while that exact parent remains alive.
+
+Resolved by `727e436b9`. MCP lifecycle now observes the captured
+parent's `onExit` completion. The three-process regression proves
+exact-parent identity, continued liveness, and event-driven child exit.

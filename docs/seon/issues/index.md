@@ -31,10 +31,11 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make REPL parity fail when an expected row disappears](parity-gate-has-no-row-cardinality-sentinel.md) | blocker | adversarial-audit fix wave |
 
-## Friction (40)
+## Friction (38)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Point the surviving writer-port consumers at fresh advertisements](old-writer-port-consumers-survive-outside-mcp.md) | friction | adversarial-audit fix wave |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
@@ -69,13 +70,10 @@ See `README.md` for the convention.
 | [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | context MVP harness wave |
 | [Give the work launcher's control read SPI priority or rebuild it as a var-process](work-launcher-control-alts-lacks-priority.md) | friction | flow-protocol wave |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
-| [Bound every string in an MCP structured response](mcp-structured-output-only-bounds-event-value.md) | friction | adversarial-audit fix wave |
-| [Derive MCP first-party exception frames instead of prefix-listing them](mcp-first-party-frame-hand-list-drops-agent-namespaces.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
-| [Delete MCP's old writer-port endpoint fallback](mcp-old-writer-port-fallback-survives-pod-deletion.md) | friction | adversarial-audit fix wave |
 | [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (8)
+## Cleanup (7)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -86,4 +84,3 @@ See `README.md` for the convention.
 | [Delete the konserve LRU our fork allocates and never reads](datahike-allocates-a-konserve-cache-it-never-reads.md) | cleanup | store/perf fix lane |
 | [Read the symbol SCI already puts in analysis ex-data](sci-analysis-ex-data-carries-a-symbol-nothing-reads.md) | cleanup | SCI eval-context owner design gate |
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
-| [Observe MCP parent exit instead of polling it](mcp-parent-watchdog-polls-processhandle.md) | cleanup | adversarial-audit fix wave |
