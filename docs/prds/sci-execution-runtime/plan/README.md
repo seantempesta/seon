@@ -1844,6 +1844,18 @@ may reintroduce a shadow build into the dev feedback path.
   deliberately unsettled — the owner wants design agreement before
   sequencing; do not dispatch resume implementation on the recorded
   forms-only lean.
+  **Ruling 2026-08-01 #34 addendum (owner, late night): THE THINKING
+  TOPOLOGY.** Per-turn agents run thinking OFF ("per turn agents I
+  would want no thinking on" — the bench: non-thinking flash turns are
+  9.8 s vs 21.3 s median). When `seon.ai/generate-code` is implemented,
+  the PLANNER agent has thinking ENABLED while the namespace agents run
+  non-thinking turns — expressed as ordinary per-agent setting
+  overrides under this ruling's model (one attribute on the planner's
+  agent entity, nothing new). ADAPTIVE mode is under empirical
+  evaluation (does it genuinely modulate reasoning by task difficulty,
+  or always-think, or miscalibrate); if it genuinely modulates, it
+  becomes the planner default instead of always-high — evidence
+  pending in the flash quality interrogation.
   **Ruling 2026-08-01 #34 (owner, night): THE AI SETTINGS MODEL IS
   SEALED** per `plan/ai-settings-design-2026-08-01.md`. (1) UNIFORM
   overridability — "ideally everything so we don't have two systems":
