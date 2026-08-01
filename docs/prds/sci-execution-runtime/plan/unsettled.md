@@ -16,6 +16,38 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM 6 — 2026-08-01, 1C CHECKPOINT.** Stateless resume and its
+required value/blob tier are landed at `92d2e39be`, `78b1e6eca`,
+`c4002a83a`, and `319fc6ccb`: intern-all → bind faithful values → re-evaluate
+only proven-pure forms; SCI analysis records host interop; oversized faithful
+values use content-addressed blobs; schema-derived history reachability keeps
+their konserve keys live. A fresh private operator root at
+`tmp/session-1c-live-root` published current source and booted PID 30071.
+The supplied phase A recorded the 200,000-element `big` value as a 1,288,891
+character blob and `scale` as source; phase B returned
+`[200000 40 "Ada, Grace"]` cross-agent. The focused gate passed 39 tests / 168
+assertions. `a1100e9e1` adds the missing function-inside-a-map falsifier: the
+value tier refuses the nested closure and cold restore reconstructs it from
+the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
+another resume mechanism.
+
+**ADDENDUM 6 — print path COMPLETE (3A+3B+3C), 1C at checkpoint.**
+Lane 3 finished: sealed grammar + sinks + floor migration + options
+(52/220 focused, P-TOTAL/P-TEE standing) and 3C promotion `050fff5c7`
+— 10 rows promoted (A1 A9 B1 B4 B9 B10 E4 H1 H4 H6), cardinality
+sentinel added (exact identities + family counts), predicted-vs-actual
+honest (8 misses with reasons: A2 float-inf admission, B2/3/5/6 print
+bindings reset per form, B7 struct unresolved, B11 sci fn-name face,
+D11 print-table unresolved). Tally: 88 rows, 45 passing executable,
+24 known divergences, 23 pending Lane 1. Parity gate 69/72/0. Lane 3
+RETIRED. 1C at checkpoint (78b1e6eca value-first restore, c4002a83a
+fresh-JVM proof, 319f6ccb fail-closed calls; focused suites green);
+its two-agent live proof TIMED OUT on the stale reset-era JVM —
+diagnosis stale-JVM trap, being falsified by the fresh
+`session-proof-1c` lane (fresh session = working MCP binding, own
+operator root = current code), which then continues into 1C′. Fork
+merge to seantempesta/sci main + pointer bump executes when 1C′ lands.
+
 **ADDENDUM 5 — post-restart.** MCP fixes CONFIRMED live (bounded
 structured envelope with retained/total evidence; alive-first
 discovery). Owner instruction for the sci-fork observer (already
