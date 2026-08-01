@@ -414,6 +414,22 @@
         (assert-violation (eval/cluster-ctx @connection)
                           "cold crash recovery")))))
 
+(deftest acquisition-uses-the-effective-config-projection-when-instrumented
+  (test-support/with-database
+    (fn [connection]
+      (d/transact
+       connection
+       [(merge {:seon.config/cluster "instrumented-acquire"
+                :seon.config/on-core-error :panic
+                :seon.config/applied-manifest-digest "live-proof"}
+               caps)])
+      (instrument/apply! {:seon.config/on-core-error :panic})
+      (try
+        (is (map? (eval/acquire! {:seon.sci.eval/ctx (eval/build-base-ctx)
+                                  :seon.db/db @connection})))
+        (finally
+          (instrument/apply! {:seon.config/on-core-error :record}))))))
+
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
     (fn [connection]

@@ -750,11 +750,13 @@
 (defn- instrumentation-config
   "Read the contract dial and admission caps from this database value."
   [db]
-  (let [config-entity
-        (d/q '[:find ?config .
-               :where [?config :seon.config/on-core-error _]]
+  (let [cluster-name
+        (d/q '[:find ?cluster .
+               :where
+               [?config :seon.config/cluster ?cluster]
+               [?config :seon.config/on-core-error _]]
              db)
-        effective (when config-entity (d/pull db '[*] config-entity))]
+        effective (when cluster-name (config/effective db cluster-name))]
     {:seon.config/on-core-error
      (or (:seon.config/on-core-error effective) :record)
      :seon.sci.admit/caps (config/result-caps effective)}))
