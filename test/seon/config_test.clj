@@ -61,7 +61,7 @@
         "explicit environment wins over the selected sparse overlay")
     (is (= :record (:seon.config/on-core-error effective))
         "the sparse overlay wins over shipped defaults")
-    (is (= 4096 (:seon.config.eval.result/max-nodes effective))
+    (is (= 65536 (:seon.config.eval.result/max-nodes effective))
         "an unmentioned entry inherits its shipped decision")
     (is (= "alpha"
            (:seon.config/cluster (:seon.config/desired-row compiled))))))

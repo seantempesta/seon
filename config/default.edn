@@ -13,17 +13,18 @@
 
  ; The eval result caps: how much of an agent value `seon.sci.admit`
  ; projects into a receipt's result-edn. Units below; provenance: the
- ; 2026-07-27 admission probes (tmp/n3-admission-probe/) — a naive
- ; recursive walk dies at ~5000 depth and pr-str at ~20000, so the node
- ; budget is the real bound and depth/width merely shape it.
+ ; 2026-08-01 measurements in tmp/admission-caps-2026-08-01/. Wide values
+ ; cross 10 ms around 7k nodes, the recursive walk overflows near depth
+ ; 5000, and string projection is effectively free; these decisions admit
+ ; useful query results while remaining far below the measured cliffs.
  ; Unit: nesting levels.
- :seon.config.eval.result/max-depth 12
+ :seon.config.eval.result/max-depth 64
  ; Unit: elements retained per collection.
- :seon.config.eval.result/max-collection 64
+ :seon.config.eval.result/max-collection 8192
  ; Unit: characters retained per string.
- :seon.config.eval.result/max-string 4096
+ :seon.config.eval.result/max-string 262144
  ; Unit: total nodes visited across the whole projection.
- :seon.config.eval.result/max-nodes 4096
+ :seon.config.eval.result/max-nodes 65536
 
  ; Unit: retained entries in one routed `/data` window, including its
  ; navigation elision marker. Provenance: the 2026-08-01 cap measurements

@@ -351,8 +351,8 @@
         (is (string? value))
         (is (re-find #"root=\[:seon\.cluster\.agent/id \"host-walker\"\]"
                      value))
-        (is (true? (:seon.sci.admit/capped? evaluation))
-            "the ordinary top-level result cap still applies to a host call")))))
+        (is (false? (:seon.sci.admit/capped? evaluation))
+            "the measured string cap admits the ordinary walk whole")))))
 
 (deftest one-context-arms-concurrent-threads-independently
   (let [ctx (eval/fork)
