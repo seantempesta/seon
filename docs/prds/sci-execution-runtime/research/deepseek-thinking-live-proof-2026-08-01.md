@@ -277,7 +277,7 @@ The safe contract remains: retain and replay the complete assistant message,
 including reasoning, whenever that message carries tool calls. Tests should
 pin the documented required shape, not the current server's permissiveness.
 
-## First-party defect implications
+## First-party defects found before repair
 
 1. **No request control reaches the wire.** `targets` projects endpoint,
    model, max tokens, timeout, and authentication only. `request-body` has no
@@ -328,6 +328,26 @@ pin the documented required shape, not the current server's permissiveness.
 - The real-door proof demonstrates one enabled turn with reasoning present,
   complete visible reply, and receipt usage, plus one disabled turn with no
   reasoning field or reasoning-token detail.
+
+## Integrated scratch-cluster proof after repair
+
+Commit `c1af16c89` was loaded into one operator process hosting three sovereign
+scratch clusters. Each cluster received its thinking choice through a sparse
+config manifest, committed an outside message to `root` through the web POST
+route, called `deepseek-v4-flash` through `seon.ai/complete`, evaluated the
+returned form where possible, and committed the model attempt as database
+facts. No credential or reasoning text was printed or retained.
+
+| Cluster | Config facts | Durable attempt | Terminal result |
+|---|---|---|---|
+| `codex-thinking-on` | thinking `:high`, max 512 | `stop`; 140 completion tokens, including 128 reasoning tokens | eval receipt completed with `THINKING_ON_OK`; run closed |
+| `codex-thinking-off` | thinking `:disabled`, max 128 | `stop`; 12 completion tokens and no `completion_tokens_details` | eval receipt completed with `THINKING_OFF_OK`; run closed |
+| `codex-thinking-starved` | thinking `:high`, max 1 | `length`; one completion token and one reasoning token; attempt points to `:seon.ai/token-starvation` | no eval receipt was invented; run closed with the starvation message |
+
+The usage map remained provider-owned EDN. `finish_reason` persisted separately
+as `:seon.ai.attempt/finish-reason`, including on the failed attempt. The
+starvation error fact retained the complete usage and finish evidence in its
+data while the attempt row provided the direct queryable receipt projection.
 
 ## Limitations
 
