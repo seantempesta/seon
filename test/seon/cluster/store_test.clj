@@ -82,6 +82,9 @@
         "the path is canonical: every spelling is the ONE store")
     (is (= configuration
            (store/datahike-configuration "./tmp/x/store")))
+    (is (true? (:fuse-index-roots? configuration)))
+    (is (= {:diff-buf-size 256} (:index-config configuration)))
+    (is (= {:backend :self} (:writer configuration)))
     (is (= :write (:schema-flexibility configuration)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -121,6 +124,42 @@
               (store/release-store! reopened)))))
       (finally
         (delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest create-settings-apply-only-to-fresh-stores
+  (testing "a legacy store reopens by adopting its stored configuration"
+    (let [dir (fresh-dir)
+          legacy-configuration
+          (dissoc (store/datahike-configuration dir)
+                  :fuse-index-roots? :index-config)]
+      (try
+        (d/create-database legacy-configuration)
+        (let [opened (store/open-store! {:seon.store/dir dir})]
+          (try
+            (is (false? (:seon.store/created? opened)))
+            (is (not (true? (get-in @(:seon.store/connection opened)
+                                    [:config :fuse-index-roots?]))))
+            (is (not= 256
+                      (get-in @(:seon.store/connection opened)
+                              [:config :index-config :diff-buf-size])))
+            (finally
+              (store/release-store! opened))))
+        (finally
+          (delete-recursively! (str (io/file dir) "/.."))))))
+  (testing "a fresh store persists fused roots and the diff buffer"
+    (let [dir (fresh-dir)]
+      (try
+        (let [opened (store/open-store! {:seon.store/dir dir})]
+          (try
+            (is (true? (:seon.store/created? opened)))
+            (is (true? (get-in @(:seon.store/connection opened)
+                               [:config :fuse-index-roots?])))
+            (is (= 256
+                   (get-in @(:seon.store/connection opened)
+                           [:config :index-config :diff-buf-size])))
+            (finally
+              (store/release-store! opened))))
+        (finally
+          (delete-recursively! (str (io/file dir) "/..")))))))
 
 (deftest transact-normalizes-only-jdk-integers
   (let [dir (fresh-dir)]

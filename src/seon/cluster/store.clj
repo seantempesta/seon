@@ -153,11 +153,13 @@
   (str (canonical-path store-dir) ".lock"))
 
 (defn datahike-configuration
-  "The one Datahike configuration for a cluster store.
+  "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
-  must be the ONE store), write-time schema flexibility. Pure data —
-  the single place the configuration shape lives."
+  must be the ONE store), fused persistent-set roots with a 256-entry
+  diff buffer, and write-time schema flexibility. Fusion and index
+  settings are creation-only; reopen configurations omit them so
+  Datahike adopts the stored values."
   {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
   [store-dir]
   (let [path (canonical-path store-dir)]
@@ -171,7 +173,14 @@
              :id (java.util.UUID/nameUUIDFromBytes
                   (.getBytes ^String path "UTF-8"))}
      :writer {:backend :self}
+     :fuse-index-roots? true
+     :index-config {:diff-buf-size 256}
      :schema-flexibility :write}))
+
+(defn- open-configuration
+  "A configuration that adopts the store's creation-time settings."
+  [creation-configuration]
+  (dissoc creation-configuration :fuse-index-roots? :index-config))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
@@ -277,8 +286,8 @@
   nil)
 
 (defn open-store!
-  "Open (creating if absent) the ONE physical store this process owns,
-  fenced, on its main branch. B2 revision: one closed map argument;
+  "Open the one fenced physical store this process owns.
+  Creates it when absent and opens its main branch. B2 revision: one closed map argument;
   under branch-per-cluster the store is PER PROCESS ROOT and every
   cluster is a branch of it.
   Order is the contract: acquire the non-blocking exclusive flock on
@@ -304,10 +313,10 @@
                                " is held by a live process")
                           {::dir dir ::lock-file lock-path}))]
     (try
-      (let [configuration (datahike-configuration dir)
+      (let [creation-configuration (datahike-configuration dir)
             created? (cond
-                       (not (d/database-exists? configuration))
-                       (do (create-store! dir configuration) true)
+                       (not (d/database-exists? creation-configuration))
+                       (do (create-store! dir creation-configuration) true)
 
                        (genesis-complete? dir)
                        false
@@ -315,8 +324,11 @@
                        ; :db without :branches — killed mid-genesis, so
                        ; nothing durable ever existed. Recreate.
                        :else
-                       (do (create-store! dir configuration) true))
-            connection (d/connect configuration)]
+                       (do (create-store! dir creation-configuration) true))
+            connection (d/connect (if created?
+                                    creation-configuration
+                                    (open-configuration
+                                     creation-configuration)))]
         ; readiness is a COMPLETE connection over a COMPLETE store: the
         ; main branch must be readable before this value escapes
         (try
@@ -367,8 +379,9 @@
   [store branch]
   (locking branch-open-monitor
     (let [main-connection (:seon.store/connection store)
-          configuration (assoc (datahike-configuration
-                                (:seon.store/dir store))
+          configuration (assoc (open-configuration
+                                (datahike-configuration
+                                 (:seon.store/dir store)))
                                :branch branch)
           connection-id (datahike.store/connection-id configuration)]
       (when-not (contains? (d/branches main-connection) branch)
