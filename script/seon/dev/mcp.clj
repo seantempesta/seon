@@ -7,6 +7,7 @@
   (:import [clojure.lang LineNumberingPushbackReader]
            [java.io BufferedReader PushbackReader]
            [java.net InetSocketAddress Socket SocketTimeoutException]
+           [java.nio.file FileVisitOption Files LinkOption]
            [java.time Instant]))
 
 ;; This process is deliberately below the application. It reads endpoint
@@ -30,7 +31,31 @@
 (def max-transport-events 256)
 (def max-exception-frames 3)
 (def max-form-preview-chars 60)
+(def first-party-source-directories ["src" "test"])
 (def server-info {:name "seon" :version "0.3.0"})
+(def minimum-identity-prefix-chars (quot max-form-preview-chars 2))
+
+;; The output-token estimate cannot be smaller than the bridge's required
+;; terminal identity plus explicit truncation evidence. Derive that structural
+;; floor from the encoded shape instead of tuning a second character constant.
+(def minimum-structured-transport-chars
+  (count
+   (json/generate-string
+    {:seon.dev.mcp/runtime "clj"
+     :seon.dev.mcp/cluster
+     (apply str (repeat minimum-identity-prefix-chars "c"))
+     :seon.dev.mcp/session-id
+     (apply str (repeat minimum-identity-prefix-chars "s"))
+     :seon.dev.mcp/events
+     [{:tag :ret
+       :val ""
+       :ns (apply str (repeat minimum-identity-prefix-chars "n"))
+       :ms Long/MAX_VALUE
+       :form (apply str (repeat minimum-identity-prefix-chars "f"))
+       :exception true
+       :seon.dev.mcp/truncated? true
+       :seon.dev.mcp/retained-chars 0
+       :seon.dev.mcp/total-chars (* 4 max-output-tokens)}]})))
 
 ;; [cluster session-id] -> one stateful io-prepl socket and its endpoint.
 (def clj-sessions (atom {}))
@@ -45,7 +70,8 @@
 
 (defn- transport-char-limit
   []
-  (* 4 (output-token-limit *requested-output-tokens*)))
+  (max minimum-structured-transport-chars
+       (* 4 (output-token-limit *requested-output-tokens*))))
 
 (defn- event-char-limit
   []
@@ -82,19 +108,79 @@
         (assoc-in (conj path :seon.dev.mcp/retained-chars) (count kept))
         (assoc-in (conj path :seon.dev.mcp/total-chars) total))))
 
-(defn- largest-event-value
+(defn- string-leaves
+  ([value]
+   (string-leaves [] value))
+  ([path value]
+   (cond
+     (string? value)
+     [{:seon.dev.mcp/path path
+       :seon.dev.mcp/raw-chars (count value)
+       :seon.dev.mcp/encoded-chars
+       (count (json/generate-string value))}]
+
+     (map? value)
+     (into []
+           (mapcat (fn [[field-key child]]
+                     (string-leaves (conj path field-key) child)))
+           value)
+
+     (vector? value)
+     (into []
+           (mapcat (fn [[index child]]
+                     (string-leaves (conj path index) child)))
+           (map-indexed vector value))
+
+     :else
+     [])))
+
+(defn- largest-string-value
   [value]
-  (->> (:seon.dev.mcp/events value)
-       (keep-indexed
-        (fn [index event]
-          (when (and (string? (:val event)) (seq (:val event)))
-            {:seon.dev.mcp/index index
-             :seon.dev.mcp/raw-chars (count (:val event))
-             :seon.dev.mcp/encoded-chars
-             (count (json/generate-string (:val event)))})))
+  (->> (string-leaves value)
+       (filter (comp pos? :seon.dev.mcp/raw-chars))
        (sort-by (juxt (comp - :seon.dev.mcp/encoded-chars)
-                      :seon.dev.mcp/index))
+                      (comp pr-str :seon.dev.mcp/path)))
        first))
+
+(defn- event-value-path?
+  [path]
+  (and (= 3 (count path))
+       (= :seon.dev.mcp/events (first path))
+       (integer? (second path))
+       (= :val (peek path))))
+
+(defn- trim-string-value
+  [value path retained]
+  (if (event-value-path? path)
+    (trim-event-value value (second path) retained)
+    (let [parent-path (pop path)
+          field (peek path)
+          original (get-in value path)
+          previous (get-in value
+                           (conj parent-path
+                                 :seon.dev.mcp/truncated-fields field))
+          total (or (second previous) (count original))
+          kept (safe-prefix original retained)
+          trimmed (assoc-in value path kept)]
+      (if (map? (get-in value parent-path))
+        (assoc-in trimmed
+                  (conj parent-path :seon.dev.mcp/truncated-fields field)
+                  [(count kept) total])
+        trimmed))))
+
+(defn- droppable-event-index
+  [value]
+  (first
+   (keep-indexed (fn [index event]
+                   (when (not= :ret (:tag event)) index))
+                 (:seon.dev.mcp/events value))))
+
+(defn- drop-event
+  [value index]
+  (-> value
+      (update :seon.dev.mcp/events
+              #(into (subvec % 0 index) (subvec % (inc index))))
+      (update :seon.dev.mcp/events-omitted (fnil inc 0))))
 
 (defn- encode-structured-content
   [value]
@@ -104,15 +190,17 @@
             overflow (- (count encoded) limit)]
         (if-not (pos? overflow)
           encoded
-          (if-let [{index :seon.dev.mcp/index
+          (if-let [{path :seon.dev.mcp/path
                     raw-chars :seon.dev.mcp/raw-chars}
-                   (largest-event-value value)]
-            (recur (trim-event-value value index
-                                     (- raw-chars (max 1 overflow))))
-            ;; At the minimum request, the envelope plus truncation metadata
-            ;; can exceed the estimate even with empty values. Structure is
-            ;; more important than pretending the payload fit.
-            encoded))))))
+                   (largest-string-value value)]
+            (recur (trim-string-value value path
+                                      (- raw-chars (max 1 overflow))))
+            (if-let [event-index (droppable-event-index value)]
+              (recur (drop-event value event-index))
+              ;; The bridge's fixed terminal envelope fits the advertised
+              ;; minimum. Reaching this arm means a future non-string shape
+              ;; grew without acquiring its own projection contract.
+              encoded)))))))
 
 (defn- content-text
   [value]
@@ -494,16 +582,65 @@
        (count kept)])
     [event 0]))
 
+(defn- source-files
+  [directory-name]
+  (let [directory (io/file project-root directory-name)]
+    (if-not (.isDirectory directory)
+      []
+      (with-open [paths (Files/walk (.toPath directory)
+                                    (make-array FileVisitOption 0))]
+        (->> (iterator-seq (.iterator paths))
+             (filter #(Files/isRegularFile
+                       % (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
+             (filter #(let [path (str %)]
+                        (or (str/ends-with? path ".clj")
+                            (str/ends-with? path ".cljc"))))
+             (mapv #(.toFile %)))))))
+
+(defn- source-namespace
+  [file]
+  (try
+    (with-open [reader (PushbackReader. (io/reader file))]
+      (binding [*read-eval* false]
+        (let [eof (Object.)]
+          (loop []
+            (let [form (read {:eof eof :read-cond :allow} reader)]
+              (cond
+                (identical? eof form) nil
+                (and (seq? form)
+                     (= 'ns (first form))
+                     (symbol? (second form)))
+                (second form)
+                :else (recur)))))))
+    (catch Throwable _
+      nil)))
+
+(defn- first-party-class-prefixes
+  []
+  (into #{}
+        (comp (mapcat source-files)
+              (keep source-namespace)
+              (map #(munge (str %))))
+        first-party-source-directories))
+
+(defn- class-owned-by-prefix?
+  [prefixes class-name]
+  (some #(or (= % class-name)
+             (str/starts-with? class-name (str % "$")))
+        prefixes))
+
 (defn- first-party-frame?
-  [frame]
-  (let [class-name (str (first frame))]
-    (or (str/starts-with? class-name "seon.")
-        (str/starts-with? class-name "user$eval")
-        (str/starts-with? class-name "repl_context$eval")
-        (str/starts-with? class-name "repl-context$eval"))))
+  [source-prefixes event-namespace frame]
+  (let [class-name (str (first frame))
+        event-prefix (when (and (string? event-namespace)
+                                (not (str/blank? event-namespace)))
+                       (munge event-namespace))]
+    (or (class-owned-by-prefix? source-prefixes class-name)
+        (and event-prefix
+             (class-owned-by-prefix? [event-prefix] class-name)))))
 
 (defn- project-exception-value
-  [value]
+  [value event-namespace]
   (let [throwable-map
         (try
           (if (string? value)
@@ -515,8 +652,10 @@
     (if-not (map? throwable-map)
       value
       (let [trace (vec (:trace throwable-map))
+            source-prefixes (first-party-class-prefixes)
             frames (into []
-                         (comp (filter first-party-frame?)
+                         (comp (filter #(first-party-frame?
+                                        source-prefixes event-namespace %))
                                (take max-exception-frames))
                          trace)]
         (pr-str
@@ -532,7 +671,7 @@
 (defn- project-exception-event
   [event]
   (if (:exception event)
-    (update event :val project-exception-value)
+    (update event :val project-exception-value (:ns event))
     event))
 
 (defn- collect-prepl-response!

@@ -127,10 +127,13 @@
                             {:type 'java.lang.IllegalStateException
                              :message "The root cause."}]
                       :trace [['clojure.lang.Compiler 'eval "Compiler.java" 1]
-                              ['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
+                              ['seon.dev.mcp_bridge_test$fail
+                               'invokeStatic "mcp_bridge_test.clj" 20]
                               ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-                              ['repl_context$eval9 'invokeStatic "prototype.clj" 44]
-                              ['seon.omega$outer 'invokeStatic "omega.clj" 50]]})
+                              ['seon.dev.mcp_bridge_test$outer
+                               'invokeStatic "mcp_bridge_test.clj" 44]
+                              ['seon.dev.mcp_bridge_test$fourth
+                               'invokeStatic "mcp_bridge_test.clj" 50]]})
                :ns "user"
                :ms 7
                :form "(fail)"
@@ -145,12 +148,55 @@
             {:type 'java.lang.IllegalStateException
              :message "The root cause."}]
            (:via value)))
-    (is (= [['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
+    (is (= [['seon.dev.mcp_bridge_test$fail
+             'invokeStatic "mcp_bridge_test.clj" 20]
             ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-            ['repl_context$eval9 'invokeStatic "prototype.clj" 44]]
+            ['seon.dev.mcp_bridge_test$outer
+             'invokeStatic "mcp_bridge_test.clj" 44]]
            (:trace value)))
     (is (= 2 (:seon.dev.mcp/frames-omitted value)))
     (is (not (str/includes? (:val projected) "java.lang.Object")))))
+
+(deftest compiled-agent-namespace-frames-derive-from-source-provenance
+  (let [fixture-root (io/file project-root "tmp"
+                              (str "mcp-frame-" (random-uuid)))
+        source-root (io/file fixture-root "src")
+        my-root (io/file source-root "my")
+        agents-root (io/file my-root "agents")
+        source (io/file agents-root "mcp_frame_fixture.clj")
+        known-paths [fixture-root source-root my-root agents-root source]
+        namespace-symbol 'my.agents.mcp-frame-fixture]
+    (try
+      (is (.mkdirs agents-root))
+      (spit source
+            (str "(ns my.agents.mcp-frame-fixture)\n"
+                 "(defn explode [] (throw (ex-info \"agent boom\" {})))\n"))
+      (load-file (.getPath source))
+      (let [throwable (try
+                        ((ns-resolve namespace-symbol 'explode))
+                        nil
+                        (catch Throwable error error))
+            event {:tag :ret
+                   :val (pr-str (Throwable->map throwable))
+                   :ns "user"
+                   :form "(my.agents.mcp-frame-fixture/explode)"
+                   :exception true}
+            projected
+            (with-redefs-fn {(bridge-var 'project-root)
+                             (.getCanonicalPath fixture-root)}
+              #((bridge-var 'project-exception-event) event))
+            trace (:trace (read-string (:val projected)))]
+        (is (some #(str/starts-with? (str (first %))
+                                     "my.agents.mcp_frame_fixture$")
+                  trace))
+        (is (every? #(or (str/starts-with? (str (first %))
+                                         "my.agents.mcp_frame_fixture$")
+                         (str/starts-with? (str (first %)) "user$"))
+                    trace)
+            (pr-str trace)))
+      (finally
+        (when (find-ns namespace-symbol) (remove-ns namespace-symbol))
+        (delete-known-files! known-paths)))))
 
 (deftest oversized-event-values-trim-in-place-largest-first
   (let [payload {:seon.dev.mcp/runtime "clj"
@@ -205,6 +251,37 @@
     (is (= (count (:val event))
            (:seon.dev.mcp/retained-chars event)))
     (is (not (contains? decoded :seon.dev.mcp/preview)))))
+
+(deftest oversized-terminal-fields-stay-inside-the-structured-budget
+  (let [huge-form (apply str (repeat 20000 "f"))
+        huge-error (apply str (repeat 20000 "e"))
+        payload {:seon.dev.mcp/runtime "clj"
+                 :seon.dev.mcp/cluster "default"
+                 :seon.dev.mcp/session-id "terminal-field-test"
+                 :seon.dev.mcp/error huge-error
+                 :seon.dev.mcp/events
+                 [{:tag :ret :val "refusal" :ns "user" :ms 4
+                   :form huge-form :exception true}]}
+        limit (* 4 128)
+        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 128}
+                  ((bridge-var 'content-text) payload))
+        decoded (json/read-str encoded :key-fn keyword)
+        terminal (first (:seon.dev.mcp/events decoded))]
+    (is (<= (count encoded) limit) (str (count encoded) " > " limit))
+    (is (= {:tag "ret" :ns "user" :ms 4 :exception true}
+           (select-keys terminal [:tag :ns :ms :exception])))
+    (is (contains? terminal :form))
+    (is (= (count (:form terminal))
+           (first (get-in terminal
+                          [:seon.dev.mcp/truncated-fields :form]))))
+    (is (= (count huge-form)
+           (second (get-in terminal
+                           [:seon.dev.mcp/truncated-fields :form]))))
+    (is (contains? decoded :seon.dev.mcp/error))
+    (is (= (count huge-error)
+           (second (get-in decoded
+                           [:seon.dev.mcp/truncated-fields
+                            :seon.dev.mcp/error]))))))
 
 (deftest multiple-form-refusals-name-the-second-form-position
   (let [code "(+ 1 2)\n(+ 3 4)"
