@@ -1812,6 +1812,38 @@ may reintroduce a shadow build into the dev feedback path.
   OWNER DECISION OPEN: whether slice 1 ships FORMS ONLY (smaller, strictly
   more faithful, still passes the 200k acceptance) with the value/blob
   path as a later accretion.
+  **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
+  PERSISTENCE — restrict nothing an agent can call; gate only what it
+  may persist.** The session is a faithful Clojure REPL first: a def an
+  eval made stays live in the cluster ctx even when its terminal
+  transaction is refused (a real REPL never rolls back a def). The
+  control point is a PERSISTENCE GATE — a designed mechanism deciding
+  what an agent may commit to the program graph and database ("I want a
+  mechanism where we can gate what is persisted in the future and yes
+  it'll be related to what we are storing in the db"). This reframes
+  the 2026-08-01 audit blocker (agent evals reach
+  `seon.cluster.store/transact!` and can commit arbitrary same-cluster
+  facts): the fix is the persistence gate, never a callability
+  restriction — ruling #20 stands untouched. BOOTSTRAP EVALS CONFIRMED
+  AND EXTENDED (verbatim-heavy): phase 1 — "getting the core system so
+  it's a rock solid REPL without many tools or batteries included",
+  faithful enough that "an agent's previous knowledge and examples of
+  Clojure will all work and behave like they expect"; agents "should
+  NOT be doing anything other than authoring plain functions that can
+  operate on the DB or via various libraries that we decide to share";
+  simulations across many clusters against objectively measurable
+  goals; an LLM judge determines success AND whether they CHEATED;
+  winning transcripts become the new bootstrap for that agent model —
+  "we don't have to come up with the ideal way to teach an agent, we
+  let it teach itself". Phase 2 — an LLM judge connects to a session
+  with ALL restrictions lifted and may author and improve the base and
+  core system itself; iterate and re-measure whether agents do better.
+  Same session: the stored session image is keyed to the NAMESPACE
+  (refactor-wave Q3), and slice 1D (the fourteen eval-layer REPL
+  divergences) belongs to this wave (Q4). Resume slice ORDER is
+  deliberately unsettled — the owner wants design agreement before
+  sequencing; do not dispatch resume implementation on the recorded
+  forms-only lean.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits

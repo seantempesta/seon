@@ -84,6 +84,22 @@ planned experiment once the harness exists: pinned-bootstrap vs
 bare-tail (the owner's testable hypothesis that losing the core
 degrades the agent).
 
+## The two phases (owner refinement, 2026-08-01 late evening — ruling #30)
+
+Phase 1 — the self-taught bootstrap. The core system is a rock-solid
+minimal-battery REPL, faithful enough that an agent's prior Clojure
+knowledge just works. During simulations agents author plain functions
+operating on the database or shared libraries; nothing they can CALL is
+restricted — only what they may PERSIST to the program graph (the
+persistence gate, ruling #30). The judge scores both objective success
+AND whether the agent CHEATED; winning transcripts become the new
+bootstrap for that agent model.
+
+Phase 2 — the unrestricted judge session. An LLM judge connects to a
+session with ALL restrictions lifted and may author and improve the
+base and core system itself. Then iterate: re-run the simulations and
+measure whether agents do better on the improved core.
+
 ## Sequencing
 
 Held behind the audit-and-planning stage (owner: nothing launches until

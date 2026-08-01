@@ -16,6 +16,28 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-01 late evening.** The in-flight wave LANDED (all
+six caps-blob-print steps through `67190f050`; the lane summary
+claiming step 6 uncommitted was stale). Full `bin/test` exited 0 on the
+quiet tree (counts not captured — orchestrator truncated its own
+output; next frozen checkpoint re-produces them). The standing
+adversarial audit RAN (`b114ac29d`,
+`research/adversarial-audit-2026-08-01.md`): two blockers (agent evals
+commit arbitrary facts via `store/transact!` — reframed by ruling #30
+as the persistence gate's job; the 88-row parity gate silently passes
+if a row disappears), a real-store GC proof that history-only blobs
+are DELETED, eight issues filed, and calibration naming caps/blob,
+`seon.db` reads, reader policy, and the parity mechanism genuinely
+sound. Pod-rot cleanup landed five cuts and FALSIFIED five "verified
+dead" claims (live readers named in
+`issues/unlogged-findings-2026-08-01.md` §6). The refactor wave plan is
+authored (`plan/refactor-wave-2026-08-01.md`: three lanes, crash walk,
+the 20/14 print-vs-eval divergence split, seven frictions vs the design
+docs). Ruling #30 recorded (faithful session, gated persistence, the
+two-phase bootstrap evals). RESUME SLICE ORDER DELIBERATELY UNSETTLED —
+owner wants design agreement first; nothing dispatches on the
+forms-only lean.
+
 **WORKING EDGE — 2026-08-01: THE REPL SESSION IS THE CONTEXT, AND THE
 FLOOR IS BEING MADE HONEST.** The day's frame: an agent lives in a real
 Clojure REPL rendered from facts; the debug page and the context are one
