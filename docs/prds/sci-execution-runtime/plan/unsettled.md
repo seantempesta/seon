@@ -16,9 +16,30 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**WORKING EDGE — 2026-07-31, the context/render design day. This block and
-the 2026-07-30 block below are both current; this one owns the
-context/render redesign.** The owner ruled the one-system redesign in seven
+**WORKING EDGE — 2026-07-31 END OF DAY: THE ONE-SYSTEM CONVERGENCE IS
+LIVE.** `default` serves at 7994 on the walk architecture: namespace
+pages (`/ns/{namespace}`, reitit, reverse routing, 404-writes-nothing),
+the two-pane debug (`/agent/{id}/debug` — exact AI bytes beside
+everything-walked), context = one visible walk (nursery 1,288 tokens,
+own entity line 4, capture quine dead, elisions one line, seon.flow
+owner sees 48/48 sources), agents call any function (ruling #20 live —
+a real agent eval called `seon.render/walk`), refusal continuation
+(ruling #22) landed, boot repaired twice over (roster-authority
+existence + candidate-generation activation before instrumentation).
+Twenty-three ruling batches recorded (README "Ruling(s) 2026-07-31"
+#1–#23); the sealed spec + budget/W4-html/cache plans + graduation eval
+in plan/; ~30 dated research reports; all forks published to
+seantempesta/* (Actions disabled), the repo pushed with tracking (the
+push-at-checkpoints law added after finding 4,665 unpushed commits).
+IN FLIGHT at write time: the DeepSeek exit drive (refusal-continuation
+lane), graduation-eval-impl, konserve-multi-assoc. NEXT: the drive's
+exit verdict → the post-wave adversarial audit → the queued waves
+(:my/* rename, schema-EDN consolidation, fusion+GC store config,
+interpreted-corpus substrate unit 3, cache/invalidation program,
+context budget implementation, Datahike query-fix cherry-picks).
+
+**HISTORICAL — 2026-07-31 morning block (the design day's opening
+state), superseded by the end-of-day block above:** The owner ruled the one-system redesign in seven
 recorded batches (README "Rulings 2026-07-31" #1–#7): blocks are the one
 render unit in both projections with NO static scaffold path; walk =
 discovery over schema'd data; per-function-call render caching; attribute
