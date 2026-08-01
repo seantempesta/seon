@@ -1,10 +1,10 @@
 ---
 type: issue
-status: open
+status: closed
 tags: [issue, sci, eval, agent]
 ---
 
-# `sci/fork` does not isolate redefinition of an ALREADY-INTERNED var
+# CLOSED not-a-bug: shared Vars across forks are the INTENDED model
 
 Measured 2026-08-01 (`tmp/sci-session/probe5_isolation.clj`, and
 `probe4_surface.clj` reproducing it through the real door):
@@ -58,34 +58,28 @@ isolation for pre-existing vars AND correct free-name resolution for
 pre-existing interpreted fns. Whichever is chosen, a regression pins the
 parent-isolation behavior so the next design does not rediscover it.
 
-## Orchestrator escalation, 2026-08-01: this is CROSS-AGENT CONTAMINATION today
 
-Falsified live against the running `default` cluster by the
-orchestrator (not a fixture):
+## Owner ruling, 2026-08-01: this is the design, not a defect
 
-```clojure
-(let [base (se/base)                      ; the process-shared base ctx
-      fork-a (se/fork)]
-  (sci.core/eval-string* fork-a "(in-ns 'my.message) (def send \"CLOBBERED-BY-A\")")
-  {:base-after      @(sci.core/resolve base 'my.message/send)   ; => "CLOBBERED-BY-A"
-   :fresh-fork-sees @(sci.core/resolve (se/fork) 'my.message/send)}) ; => "CLOBBERED-BY-A"
-```
+The orchestrator escalated the shared-Var behavior as cross-agent
+contamination. **The owner overruled it:** an agent making a GLOBAL
+change is intended, and the benefit agent A creates must be
+IMMEDIATELY AVAILABLE to agent B. One live program graph, shared by
+every agent in the cluster — the same reason the corpus is database
+facts rather than per-agent copies.
 
-The base ctx every agent forks from is MUTATED, so one agent redefining
-any corpus name silently changes that name for every other agent in the
-process and for every agent created afterwards, across clusters. Today
-`acquire!` reinstalls program rows per run, which MASKS this for corpus
-functions (the reinstall overwrites the poisoned Var) — that mask is
-accidental, and it disappears exactly when we park a hot ctx per agent
-(the session-persistence slice 1) or skip a redundant acquire.
+The mechanics recorded above are still accurate and worth keeping:
+`sci/fork` copies the env map but shares `sci.lang.Var` objects, so a
+`def` of an existing name `bindRoot`s through to the parent and every
+sibling. That IS the propagation mechanism for shared improvement.
 
-Severity: this is the one thing in the fresh tree that lets an agent
-mistake escape its own session. It blocks parked-ctx work and must be
-fixed at the sci fork seam (we own the fork:
-`reference-code/sci`) — the candidate is a per-fork Var copy-on-write
-for names inherited from the parent, so a fork's `def` interns a NEW
-Var in the fork's env rather than `bindRoot`ing the shared one.
+What remains open is not isolation but OWNERSHIP: agents stay in their
+own namespace lanes, and the owner is open to ENFORCING that (a write
+to a namespace you do not own is refused). `:seon.cluster.agent/namespace`
+is already unique per agent, so the ownership fact exists; the
+enforcement seam does not. Tracked as its own question in the grader /
+program-graph design, not as a sci defect.
 
-Acceptance: the probe above shows the base unchanged and a fresh fork
-seeing the original definition; a regression covers the class; parked
-hot ctxs are safe to enable afterwards.
+Consequence for parked hot ctxs: no blocker. Shared Vars mean a parked
+ctx sees other agents' improvements without any refresh, which is the
+behavior we want.
