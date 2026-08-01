@@ -971,7 +971,8 @@
                            (when agent-id (agent-namespace agent-id))
                            'user)
         namespace-object (sci/create-ns namespace-name)
-        ending-namespace (volatile! namespace-name)]
+        ending-namespace (volatile! namespace-name)
+        print-options (volatile! {})]
     (try
       (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
@@ -990,10 +991,21 @@
             (fn []
               (sci/binding [sci/ns namespace-object
                             sci/out printed
-                            sci/err printed]
-                (let [value (sci/eval-form execution-ctx form)]
-                  (vreset! ending-namespace (sci/ns-name @sci/ns))
-                  value)))
+                            sci/err printed
+                            sci/print-length @sci/print-length
+                            sci/print-level @sci/print-level]
+                (try
+                  (let [value (sci/eval-form execution-ctx form)]
+                    (vreset! ending-namespace (sci/ns-name @sci/ns))
+                    value)
+                  (finally
+                    ;; `set!` mutates SCI's current dynamic print binding.
+                    ;; Capture it while that binding is still installed;
+                    ;; after `sci/binding` unwinds only the host/default face
+                    ;; remains and the agent's choice is unrecoverable.
+                    (vreset! print-options
+                             {:seon.print/length @sci/print-length
+                              :seon.print/level @sci/print-level})))))
             projection
             (or (context-projection evaluation-ctx)
                 (schema/current-projection)
@@ -1108,6 +1120,7 @@
           (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn admitted)
+                   :seon.print/options @print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns @ending-namespace
                    :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
@@ -1129,6 +1142,7 @@
             (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
                      :seon.cluster.eval/result-edn
                      (:seon.cluster.eval/result-edn admitted)
+                     :seon.print/options @print-options
                      :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                      :seon.sci.eval/ending-ns namespace-name
                      :seon.cluster.eval/error (:seon.error/message value)

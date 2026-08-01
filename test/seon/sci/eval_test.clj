@@ -110,6 +110,15 @@
     (is (int? (:seon.eval/allocated-bytes record))
         "-1 is honest when the platform cannot measure; nil is not")))
 
+(deftest agent-print-vars-are-captured-before-sci-bindings-unwind
+  (let [evaluation
+        (run (str "(do (set! *print-length* 3) "
+                  "(set! *print-level* 2) :captured)"))]
+    (is (ok? evaluation))
+    (is (= {:seon.print/length 3
+            :seon.print/level 2}
+           (:seon.print/options evaluation)))))
+
 (deftest the-evaluator-remains-live-after-its-namespace-reloads
   (let [request {:seon.cluster.run.form/source "(+ 1 2)"
                  :seon.sci.admit/caps caps
