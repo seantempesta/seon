@@ -399,6 +399,7 @@
       (let [composites
             [:seon.config/manifest
              :seon.config/effective
+             :seon.config/agent-overlay
              :seon.config/entity]
             changed
             (into {}
@@ -409,7 +410,7 @@
                        [composite (get forms composite)])))
                   composites)]
         (when (seq changed)
-          ;; Contribute the leaf and all three projections in one atom update.
+          ;; Contribute the leaf and all four projections in one atom update.
           ;; `schema/register!`'s following leaf assoc is then idempotent; no
           ;; observer can see either half of the registration on its own.
           (schema/contribute-candidate-forms!
