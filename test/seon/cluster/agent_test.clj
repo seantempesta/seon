@@ -28,6 +28,7 @@
             [seon.problems :as problems]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -94,15 +95,16 @@
         (d/transact connection
                     (schema.datahike/malli->datahike-schema
                      (schema/canonical-database-attributes)))
-        (body connection)
+        (body connection (sci.eval/cluster-ctx @connection))
         (finally
           (seon.flow/stop-installed-work-launcher!)
           (d/release connection)
           (d/delete-database configuration))))))
 
 (defn- handle
-  [connection]
+  [connection ctx]
   {:seon.store/branch-connection connection
+   :seon.sci.eval/ctx ctx
    :seon.cluster.run/process process
    ;; replaced per agent by arm! — present so the handle validates
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
@@ -137,8 +139,8 @@
     routing))
 
 (defn- arm-one!
-  [connection routing agent-id]
-  (agent/arm! {:seon.cluster.loop/cluster (handle connection)
+  [connection ctx routing agent-id]
+  (agent/arm! {:seon.cluster.loop/cluster (handle connection ctx)
                :seon.cluster.agent/id agent-id
                :seon.cluster.agent/routing routing}))
 
@@ -280,7 +282,7 @@
         completed-source "(my.run/complete \"corrected\")"]
     (testing "an all-refused turn opens the next turn with its finding"
       (with-connection
-        (fn [connection]
+        (fn [connection ctx]
           (let [routing (armory)
                 ledger (atom [])
                 calls (async/chan 4)
@@ -294,7 +296,7 @@
                             (scripted-completer
                              ledger calls
                              [refused-source completed-source])]
-                (let [entry (arm-one! connection routing "all-refused")]
+                (let [entry (arm-one! connection ctx routing "all-refused")]
                   (outside-trigger! connection "all-refused"
                                     "r22-all-message" "do the work")
                   (async/offer! (:seon.cluster.wake/channel entry) ::wake)
@@ -335,7 +337,7 @@
 
     (testing "one successful form does not hide a refusal"
       (with-connection
-        (fn [connection]
+        (fn [connection ctx]
           (let [routing (armory)
                 ledger (atom [])
                 calls (async/chan 4)
@@ -350,7 +352,7 @@
                              ledger calls
                              [(str "(+ 1 1)\n" refused-source)
                               completed-source])]
-                (let [entry (arm-one! connection routing "mixed-refusal")]
+                (let [entry (arm-one! connection ctx routing "mixed-refusal")]
                   (outside-trigger! connection "mixed-refusal"
                                     "r22-mixed-message" "do both forms")
                   (async/offer! (:seon.cluster.wake/channel entry) ::wake)
@@ -385,7 +387,7 @@
 
     (testing "the existing episode cap remains the only bound"
       (with-connection
-        (fn [connection]
+        (fn [connection ctx]
           (let [routing (armory)
                 ledger (atom [])
                 calls (async/chan 4)
@@ -402,7 +404,7 @@
                             (scripted-completer
                              ledger calls
                              [refused-source completed-source])]
-                (let [entry (arm-one! connection routing "capped-refusal")]
+                (let [entry (arm-one! connection ctx routing "capped-refusal")]
                   (outside-trigger! connection "capped-refusal"
                                     "r22-capped-message" "do the work")
                   (async/offer! (:seon.cluster.wake/channel entry) ::wake)
@@ -431,7 +433,7 @@
   says WHICH oracle broke."
   [n-agents triggers-per-agent]
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [agent-ids (mapv #(str "agent-" %) (range n-agents))
             triggers (vec (for [[index agent-id]
                                 (map-indexed vector agent-ids)
@@ -451,7 +453,7 @@
                         (recording-completer
                          ledger (fn [_] "(my.run/complete \"done\")"))]
             (doseq [agent-id agent-ids]
-              (arm-one! connection routing agent-id))
+              (arm-one! connection ctx routing agent-id))
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
@@ -537,13 +539,13 @@
 
 (deftest fenced-is-the-derived-quarantine-state
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)]
         (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
         (try
           (is (false? (agent/fenced? routing "agent-a"))
               "an unarmed agent has no fence")
-          (let [entry (arm-one! connection routing "agent-a")
+          (let [entry (arm-one! connection ctx routing "agent-a")
                 eid (:seon.cluster.agent/eid entry)
                 mailbox (:seon.cluster.wake/channel entry)
                 stale (async/chan)]
@@ -564,10 +566,10 @@
 
 (deftest disarm-drops-the-route-before-closing-it
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)
             _ (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
-            entry (arm-one! connection routing "agent-a")
+            entry (arm-one! connection ctx routing "agent-a")
             eid (:seon.cluster.agent/eid entry)
             channel (:seon.cluster.wake/channel entry)
             observed (atom nil)
@@ -588,7 +590,7 @@
 
 (deftest park-wake-test
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
         (d/transact connection [{:seon.cluster.agent/id "parked"}
@@ -598,7 +600,7 @@
           (with-redefs [ai/complete
                         (recording-completer
                          ledger (fn [_] "(my.run/complete \"done\")"))]
-            (let [entry (arm-one! connection routing "parked")]
+            (let [entry (arm-one! connection ctx routing "parked")]
               (testing "armed and idle: the arm prime's pass ran and
               spent nothing — the window is bounded by ping counts,
               never a sleep standing for proof"
@@ -638,7 +640,7 @@
 
 (deftest pause-during-in-flight-call-test
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])
             latch (promise)
@@ -653,7 +655,7 @@
                           (deliver in-flight true)
                           @latch
                           {:seon.ai/text "(my.run/complete \"done\")"})]
-            (let [entry (arm-one! connection routing "pausable")
+            (let [entry (arm-one! connection ctx routing "pausable")
                   graph (:seon.flow/graph entry)]
               (outside-trigger! connection "pausable"
                                 "m-2026072813-a" "slow work")
@@ -733,7 +735,7 @@
   ;; query), because the refusal's whole contract is that no consumer
   ;; ever sees a decision: the work simply does not derive.
   (with-connection
-    (fn [connection]
+    (fn [connection _ctx]
       (let [request {:seon.cluster.agent/id "alice"
                      :seon.cluster.run/process process
                      :seon.cluster.work/now (Date.)}]
@@ -823,10 +825,10 @@
   ;; VALUE keeps running v1. The v2 evidence is an atom only v2 bumps —
   ;; a pass that increments it ran v2, and a pass that does not ran v1.
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [original @#'agent/turn-step
             routing (armory)
-            base (handle connection)
+            base (handle connection ctx)
             v2-ran (atom 0)
             wrap (fn [step]
                    (fn
@@ -840,7 +842,7 @@
                                 {:seon.config/cluster "hot-2026072815"
                                  :seon.config.run/max-episode-runs 100}])
         (try
-          (let [entry (arm-one! connection routing "reloaded")
+          (let [entry (arm-one! connection ctx routing "reloaded")
                 ;; the CONTROL: an identically-shaped graph whose turn
                 ;; proc is built from the captured fn VALUE — hot
                 ;; reload must NOT reach it
@@ -917,19 +919,13 @@
   ;; boot shape: recover → re-stamp → prime. The real process-death
   ;; kill -9 proof stays owned by F4.
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [dead "99999-1"
             routing (armory)
             ledger (atom [])
             evaluation-sources (atom [])
             evaluate fake-evaluate]
-        (d/transact connection [{:seon.cluster.agent/id "midfold"
-                                 :seon.cluster.agent/blocks
-                                 [{:seon.render.block/name :namespace
-                                   :seon.render.block/band :dynamic
-                                   :seon.render.block/priority 80
-                                   :seon.render/ai
-                                   'seon.render.agent/namespace-ai}]}
+        (d/transact connection [{:seon.cluster.agent/id "midfold"}
                                 {:seon.cluster.agent/id "waiting"}
                                 {:seon.config/cluster "restamp-2026072816"
                                  :seon.config.run/max-episode-runs 100}])
@@ -998,7 +994,7 @@
                           :seon.cluster.run/live-processes #{process}
                           :seon.cluster.run/now (Date.)}))
             (doseq [agent-id ["midfold" "waiting"]]
-              (arm-one! connection routing agent-id))
+              (arm-one! connection ctx routing agent-id))
             (is (await-until #(quiescent? @connection
                                           ["midfold" "waiting"])))
             (let [db @connection
@@ -1107,7 +1103,7 @@
   ;; agent here: this process derives no work for it and dispatches
   ;; nothing. With leases deleted, P2's scenario is a custody mismatch.
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [other "77777-1"
             routing (armory)
             ledger (atom [])]
@@ -1139,7 +1135,7 @@
           (with-redefs [ai/complete
                         (recording-completer
                          ledger (fn [_] "(my.run/complete \"done\")"))]
-            (arm-one! connection routing "held")
+            (arm-one! connection ctx routing "held")
             (let [entry (agent/armed routing "held")]
               ;; the arm prime plus an explicit rewake both pass over
               ;; the held run without touching it
@@ -1168,10 +1164,10 @@
   pre-armed; the armer does all arming."
   [operations]
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
-            armer-handle (assoc (handle connection)
+            armer-handle (assoc (handle connection ctx)
                                 :seon.cluster.wake/channel armer-channel
                                 :seon.cluster.loop/completion
                                 (async/promise-chan))
@@ -1289,7 +1285,7 @@
   ;; unheld-open-planned intermediate state — the P1 feeder — exists at
   ;; NO basis; the agent's next trigger opens a NEW run.
   (with-connection
-    (fn [connection]
+    (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
         (d/transact connection [{:seon.cluster.agent/id "waiter"}
@@ -1299,7 +1295,7 @@
           (with-redefs [ai/complete
                         (recording-completer
                          ledger (fn [_] "(my.run/wait \"need input\")"))]
-            (arm-one! connection routing "waiter")
+            (arm-one! connection ctx routing "waiter")
             (outside-trigger! connection "waiter" "m-wait" "hold on")
             (let [entry (agent/armed routing "waiter")]
               (async/offer! (:seon.cluster.wake/channel entry) ::wake))
