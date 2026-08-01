@@ -71,6 +71,7 @@
   projection's own contract; the ones this repository ships are."
   (:require [datahike.api :as d]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -102,7 +103,10 @@
      [:seon.render.walk/body [:fn clojure.core/ifn?]]]
     :any]}
   [context body]
-  (binding [*walk-context* context]
+  (binding [*walk-context* context
+            db/*conn*
+            (or (:seon.store/branch-connection context)
+                db/*conn*)]
     (body)))
 
 (defn- walk-error
@@ -112,7 +116,7 @@
 (defn- ambient-database-value
   []
   (or (:seon.db/db *walk-context*)
-      (some-> (:seon.store/branch-connection *walk-context*) deref)))
+      (some-> db/*conn* d/db)))
 
 (defn- custody-cluster-name
   [db agent-id]

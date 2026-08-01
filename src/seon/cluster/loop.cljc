@@ -974,8 +974,9 @@
             ;; The closure runs on the actual compute worker, so JVM dynamic
             ;; custody encloses compiled host calls made by SCI. Binding around
             ;; `submit-evaluation!!` would rely on executor thread propagation.
-            ;; The public walk dereferences this exact live branch connection;
-            ;; no database value is injected into the interpreter context.
+            ;; `call-with-walk-context` binds this exact live branch connection
+            ;; through seon.db custody; no database value is injected into the
+            ;; interpreter context.
             evaluate
             (fn [request]
               (render/call-with-walk-context
