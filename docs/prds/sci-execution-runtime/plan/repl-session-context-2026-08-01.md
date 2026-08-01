@@ -124,12 +124,23 @@ pieces already landing, composed:
   prefix never changes. Dynamic mode trades cache-prefix stability for
   context economy.
 
-Open decision (owner): aging granularity. Continuous re-aging breaks
-the prompt-cache prefix every turn; STEPPED aging (entries re-render
-only at discrete boundaries, e.g. leaving the recent-tail window)
-keeps the prefix stable between steps; STATIC pins everything. The
-policy that derives per-entry options (age, size, relevance, budget)
-is the same seam the context-budget layer already owns.
+RULED (owner, 2026-08-01 evening): **COMPACTION, not per-turn
+re-aging.** The transcript regenerates at discrete compaction
+boundaries — pay the prompt-cache bust ONCE per compaction, stable
+prefix between. The stated cadence "every 25 turns" is an explicit
+placeholder, not a constant to hardcode: the goal is the BOUND, not
+the count — bootstrap + transcript become a SLIDING WINDOW with a
+roughly bounded max-token size, so the honest trigger is the budget
+itself (compact when the rendered window exceeds its bound — an
+observable derived from the render, per the no-tuned-constants
+ruling), with any turn-count cadence at most a secondary backstop.
+The bound is config: a per-model default calibrated to the model,
+overridable per agent. Compaction ELIDES earlier work from the
+window; elided entries keep their receipt identities visible so
+anything remains one re-query away — nothing is unreachable, only
+un-rendered. The policy that derives per-entry options at compaction
+(age, size, relevance, budget) is the same seam the context-budget
+layer already owns.
 
 ## Columns / tables
 
