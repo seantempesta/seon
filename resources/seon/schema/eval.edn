@@ -29,6 +29,12 @@
  [:map {:closed true}
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.db/db :seon.db/database-value]]
+ :seon.sci.eval/session-install-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true}
+   :seon.store/branch-connection]]
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.

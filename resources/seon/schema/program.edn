@@ -103,6 +103,9 @@
  :seon.code.def/id [:string {:min 1 :seon.db/identity true}]
  :seon.code.def/ns :seon.db/ref
  :seon.code.def/name :symbol
+ :seon.code.def/value-edn :string
+ :seon.code.def/blob :seon.blob/digest
+ :seon.code.def/size [:int {:min 0}]
  :seon.code.def/source [:string {:min 1}]
  :seon.code.def/unrestorable [:string {:min 1}]
  :seon.code.def/ordinal [:int {:min 0}]
@@ -111,6 +114,9 @@
   [:seon.code.def/id :seon.code.def/id]
   [:seon.code.def/ns :seon.code.def/ns]
   [:seon.code.def/name :seon.code.def/name]
+  [:seon.code.def/value-edn {:optional true} :seon.code.def/value-edn]
+  [:seon.code.def/blob {:optional true} :seon.code.def/blob]
+  [:seon.code.def/size {:optional true} :seon.code.def/size]
   [:seon.code.def/source {:optional true} :seon.code.def/source]
   [:seon.code.def/unrestorable {:optional true}
    :seon.code.def/unrestorable]

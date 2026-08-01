@@ -35,6 +35,7 @@
     :seon.program/source-attribute :seon.code.def/source
     :seon.program/owned-attributes
     [:seon.code.def/id :seon.code.def/ns :seon.code.def/name
+     :seon.code.def/value-edn :seon.code.def/blob :seon.code.def/size
      :seon.code.def/source :seon.code.def/unrestorable
      :seon.code.def/ordinal]}})
 

@@ -61,7 +61,8 @@
   - mid concurrent `branch!` from two connections: covered by the fork
     fix above. Without it this row was NOT DETECTABLE — the caller was
     told `:ok` and the branch was gone (b2-plan §0.3)."
-  (:require [datahike.api :as d]
+  (:require [clojure.edn :as edn]
+            [datahike.api :as d]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
@@ -283,23 +284,41 @@
 
 (defonce ^:private collect-monitor (Object.))
 
-(defn- branch-result-blobs
+(defn- blob-digest-attributes
+  [db]
+  (into []
+        (keep (fn [[attribute serialized-form]]
+                (when (= :seon.blob/digest
+                         (edn/read-string serialized-form))
+                  attribute)))
+        (d/q '[:find ?attribute ?form
+               :where
+               [?schema :seon.schema/key ?attribute]
+               [?schema :seon.schema/form ?form]]
+             db)))
+
+(defn- branch-blobs
   [store branch]
   (let [db (d/branch-as-db (:seon.store/connection store) branch)]
     (try
-      (if (contains? (:schema db) :seon.cluster.eval/result-blob)
-        (set
-         (d/q '[:find [?digest ...]
-                :where [_ :seon.cluster.eval/result-blob ?digest]]
-              db))
-        #{})
+      (let [digest-attributes (blob-digest-attributes db)
+            history-db (try (d/history db)
+                            (catch Throwable _ db))]
+        (into #{}
+              (mapcat
+               (fn [attribute]
+                 (d/q '[:find [?digest ...]
+                        :in $ ?attribute
+                        :where [_ ?attribute ?digest]]
+                      history-db attribute)))
+              digest-attributes))
       (finally
         (d/release-materialized-db db)))))
 
-(defn- referenced-result-blobs
+(defn- referenced-blobs
   [store]
   (into #{}
-        (mapcat #(branch-result-blobs store %))
+        (mapcat #(branch-blobs store %))
         (roster store)))
 
 (defn collect!
@@ -313,7 +332,7 @@
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]}
   [store]
   (locking collect-monitor
-    (let [blob-keys (referenced-result-blobs store)
+    (let [blob-keys (referenced-blobs store)
           sweep! konserve.gc/sweep!]
       ;; Datahike refers this exact Var. Rebinding it keeps Datahike's one
       ;; safe-point mark/sweep operation intact while extending the mark by

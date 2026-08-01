@@ -4,12 +4,35 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.cluster.loop :as loop]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
+
+(defn- with-file-database
+  [body]
+  (let [root (str "tmp/session-image-test/" (random-uuid))
+        configuration {:store {:backend :file
+                               :path root
+                               :id (random-uuid)}
+                       :schema-flexibility :write
+                       :keep-history? true}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (cluster/populate-source!
+       {:seon.store/branch-connection connection})
+      (d/transact connection
+                  {:tx-data [{:seon.source/digest
+                              (apply str (repeat 64 "0"))}]})
+      (body connection)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)
+        (test-support/delete-recursively! root)))))
 
 (defn- evaluate!
   [ctx namespace-name source]
@@ -23,25 +46,30 @@
 
 (defn- commit-evaluation!
   [connection evaluation ordinal]
-  (d/transact
-   connection
-   {:tx-data (#'loop/session-image-tx @connection evaluation ordinal)}))
+  (let [stored (#'loop/store-session-values! connection evaluation)]
+    (d/transact
+     connection
+     {:tx-data (#'loop/session-image-tx @connection stored ordinal)})))
 
 (deftest fresh-context-restores-the-forms-session-image
-  (test-support/with-database
+  (with-file-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-image
            _ (d/transact connection
-                         {:tx-data [{:seon.ns/name namespace-name
+                         {:tx-data [{:seon.config.eval.result/blob-threshold
+                                     32768}
+                                    {:seon.ns/name namespace-name
                                      :seon.ns/source
                                      "(ns my.agents.session-image)"}]})
-           live (eval/cluster-ctx @connection)
+           live (eval/cluster-ctx @connection connection)
            sources ["(def big (vec (range 200000)))"
                     "(def names [\"Ada\" \"Grace\"])"
                     "(def limit 10)"
                     "(def scale (fn [v] (* v limit)))"
                     "(def ordered (into (sorted-set) [2 1]))"
                     "(def tagged (with-meta [1 2] {:session true}))"
+                    (str "(def effectful-data (do (.toUpperCase \"x\") "
+                         "{:answer 42}))")
                     (str "(def dropped (do (.toUpperCase \"x\") "
                          "(fn [] 1)))")]
            evaluations (mapv #(evaluate! live namespace-name %) sources)]
@@ -52,8 +80,8 @@
            (is (= ["my.agents.session-image/limit"]
                   (mapv :seon.code.def/id
                         (:seon.sci.eval/session-defs redefinition))))
-           (commit-evaluation! connection redefinition 7)))
-       (let [fresh (eval/cluster-ctx @connection)
+           (commit-evaluation! connection redefinition 8)))
+       (let [fresh (eval/cluster-ctx @connection connection)
              resolved #(some-> (sci/resolve fresh %) deref)]
          (is (= 200000 (count (resolved 'my.agents.session-image/big))))
          (is (= 44 ((resolved 'my.agents.session-image/scale) 4)))
@@ -64,6 +92,26 @@
                 (class (resolved 'my.agents.session-image/ordered))))
          (is (= {:session true}
                 (meta (resolved 'my.agents.session-image/tagged))))
+         (is (= {:answer 42}
+                (resolved 'my.agents.session-image/effectful-data))
+             "a faithful value touched host interop but is bound, never replayed")
+         (is (some? (:seon.code.def/blob
+                     (d/pull @connection
+                             [:seon.code.def/blob]
+                             [:seon.code.def/id
+                              "my.agents.session-image/big"])))
+             "the 200k value takes the database-configured blob path")
+         (is (some? (:seon.code.def/value-edn
+                     (d/pull @connection
+                             [:seon.code.def/value-edn]
+                             [:seon.code.def/id
+                              "my.agents.session-image/tagged"])))
+             "metadata-faithful small values bind before forms")
+         (is (some? (:seon.code.def/value-edn
+                     (d/pull @connection
+                             [:seon.code.def/value-edn]
+                             [:seon.code.def/id
+                              "my.agents.session-image/effectful-data"]))))
          (is (contains? (get (sci/namespace-interns fresh) namespace-name)
                         'dropped)
              "an unrestorable name is pre-interned, never marker-bound")
@@ -101,3 +149,28 @@
        (is (< elapsed-ms 50.0)
            (str "200-form session install took " elapsed-ms " ms"))
        (is (= 199 @(sci/resolve ctx 'my.agents.session-cost/n199)))))))
+
+(deftest equal-large-values-share-the-content-addressed-blob
+  (with-file-database
+   (fn [connection]
+     (d/transact connection
+                 [{:seon.config.eval.result/blob-threshold 16}])
+     (let [value (vec (range 1000))
+           evaluation
+           (fn [id]
+             {:seon.sci.eval/session-defs
+              [{:seon.code.def/id id
+                :seon.code.def/ns [:seon.ns/name 'my.agents.dedup]
+                :seon.code.def/name (symbol (last (str/split id #"/")))
+                :seon.code.def/source "(def ignored nil)"
+                :seon.sci.eval/value value
+                :seon.sci.eval/referenced-vars #{}}]})
+           left (#'loop/store-session-values!
+                 connection (evaluation "my.agents.dedup/left"))
+           right (#'loop/store-session-values!
+                  connection (evaluation "my.agents.dedup/right"))]
+       (is (= (get-in left [:seon.sci.eval/session-defs 0
+                            :seon.code.def/blob])
+              (get-in right [:seon.sci.eval/session-defs 0
+                             :seon.code.def/blob]))
+           "two agents' equal serialized values address one blob key")))))

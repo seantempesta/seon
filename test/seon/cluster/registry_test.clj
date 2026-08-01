@@ -40,6 +40,16 @@
     :db/unique :db.unique/identity}
    {:db/ident :seon.cluster.eval/result-blob
     :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.code.def/blob
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.schema/key
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.schema/form
+    :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
 (def ^:private source-branch :current-src)
@@ -77,6 +87,11 @@
     (let [opened (store/open-store! {:seon.store/dir dir})]
       (try
         (d/transact (:seon.store/connection opened) probe-schema)
+        (d/transact (:seon.store/connection opened)
+                    [{:seon.schema/key :seon.cluster.eval/result-blob
+                      :seon.schema/form ":seon.blob/digest"}
+                     {:seon.schema/key :seon.code.def/blob
+                      :seon.schema/form ":seon.blob/digest"}])
         (write-marker! (:seon.store/connection opened) "ancestral")
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
@@ -93,7 +108,7 @@
    (registry/branch-commit-id {:seon.store/store store
                                :seon.store/branch source-branch})})
 
-(deftest result-blob-lifetime-follows-live-branch-datoms
+(deftest blob-lifetime-follows-schema-derived-history-reachability
   (with-source-store
     (fn [opened]
       (registry/ensure-cluster! (cluster-request opened "blob-owner"))
@@ -102,14 +117,21 @@
             content "the complete settled result"
             digest (blob/put! connection content)]
         (try
-          (d/transact connection
-                      [{:seon.registry.test/marker "blob receipt"
-                        :seon.cluster.eval/result-blob digest}])
+          (let [report
+                (d/transact connection
+                            [{:seon.registry.test/marker "session def"
+                              :seon.code.def/blob digest}])
+                entity-id
+                (:db/id
+                 (d/pull (:db-after report) [:db/id]
+                         [:seon.registry.test/marker "session def"]))]
+            (d/transact connection
+                        [[:db/retract entity-id :seon.code.def/blob digest]]))
           (finally
             (d/release connection)))
         (registry/collect! opened)
         (is (= content (blob/get (:seon.store/connection opened) digest))
-            "a digest referenced from a live branch extends the GC mark")
+            "a digest reachable only through a declared blob attribute's history extends the GC mark")
         (registry/retire-branch! {:seon.store/store opened
                                   :seon.store/branch branch})
         (registry/collect! opened)

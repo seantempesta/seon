@@ -125,6 +125,19 @@
                       :seon.eval/host-interop-count]))
         "the fact follows SCI macro expansion rather than source syntax")))
 
+(deftest store-faithful-is-class-metadata-and-value-exact
+  (let [tagged (with-meta [1 2] {:session true})
+        ordered (sorted-set-by > 1 2 3)
+        lazy-value (map inc [1 2])]
+    (is (eval/store-faithful? tagged))
+    (is (= tagged (edn/read-string (eval/store-faithful-edn tagged))))
+    (is (not (eval/store-faithful? ordered))
+        "a comparator-losing set is = but its restored class differs")
+    (is (not (eval/store-faithful? lazy-value))
+        "a lazy sequence must not silently become a list")
+    (is (not (eval/store-faithful? (fn [] 1)))
+        "an opaque closure has no faithful stored representation")))
+
 (deftest agent-print-vars-are-captured-before-sci-bindings-unwind
   (let [evaluation
         (run (str "(do (set! *print-length* 3) "

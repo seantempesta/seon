@@ -341,16 +341,34 @@
         rows
         (map
          (fn [candidate]
-           (let [pure? (and host-clean?
+           (let [stored? (or (:seon.code.def/value-edn candidate)
+                             (:seon.code.def/blob candidate))
+                 pure? (and host-clean?
                             (capability-free-references?
                              db (:seon.sci.eval/referenced-vars candidate)))]
-             (cond-> (-> candidate
-                         (dissoc :seon.sci.eval/value
-                                 :seon.sci.eval/referenced-vars)
-                         (assoc :seon.code.def/ordinal ordinal))
-               (not pure?)
-               (-> (dissoc :seon.code.def/source)
-                   (assoc :seon.code.def/unrestorable
+             (cond
+               stored?
+               (-> candidate
+                   (dissoc :seon.sci.eval/value
+                           :seon.sci.eval/referenced-vars
+                           :seon.code.def/source
+                           :seon.code.def/unrestorable)
+                   (assoc :seon.code.def/ordinal ordinal))
+
+               pure?
+               (-> candidate
+                   (dissoc :seon.sci.eval/value
+                           :seon.sci.eval/referenced-vars
+                           :seon.code.def/unrestorable)
+                   (assoc :seon.code.def/ordinal ordinal))
+
+               :else
+               (-> candidate
+                   (dissoc :seon.sci.eval/value
+                           :seon.sci.eval/referenced-vars
+                           :seon.code.def/source)
+                   (assoc :seon.code.def/ordinal ordinal
+                          :seon.code.def/unrestorable
                           (if host-clean?
                             "Defining form reaches a capability leaf."
                             "Defining form touched host interop."))))))
@@ -373,6 +391,28 @@
   (d/q '[:find ?threshold .
          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
        db))
+
+(defn- store-session-values!
+  [connection evaluation]
+  (let [threshold (result-blob-threshold @connection)]
+    (update
+     evaluation :seon.sci.eval/session-defs
+     (fn [candidates]
+       (mapv
+        (fn [candidate]
+          (if-let [serialized
+                   (sci.eval/store-faithful-edn
+                    (:seon.sci.eval/value candidate))]
+            (let [size (long (count serialized))]
+              (cond-> (assoc candidate :seon.code.def/size size)
+                (and threshold (> size threshold))
+                (assoc :seon.code.def/blob
+                       (blob/put! connection serialized))
+
+                (or (nil? threshold) (<= size threshold))
+                (assoc :seon.code.def/value-edn serialized)))
+            candidate))
+        candidates)))))
 
 (defn- result-window-page-size
   [db]
@@ -1278,6 +1318,8 @@
                              (:seon.sci.eval/program-row evaluation))
                       settled
                       (assoc :my.run/value settled))
+                    session-evaluation
+                    (store-session-values! connection evaluation)
                     outcome
                     (store/transact!
                      connection
@@ -1287,7 +1329,9 @@
                              (concat rows
                                      refusals
                                      (session-image-tx
-                                      @connection evaluation ordinal)))}
+                                      @connection
+                                      session-evaluation
+                                      ordinal)))}
                        ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
                        ;; A delivering transaction names the message
                        ;; being answered, exactly as the opening one

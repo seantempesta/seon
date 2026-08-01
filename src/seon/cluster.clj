@@ -1341,7 +1341,7 @@
         ;; close operation; dropping the instance drops the derived context.
         instance (publish!
                   (assoc instance :seon.sci.eval/ctx
-                         (sci.eval/cluster-ctx @connection)))
+                         (sci.eval/cluster-ctx @connection connection)))
         ;; INSTRUMENTATION IS NOT WIRED HERE, and the reason is
         ;; evidence rather than taste. Wiring `seon.instrument/apply!`
         ;; into boot was tried: every test that boots a cluster then

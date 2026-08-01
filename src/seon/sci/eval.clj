@@ -108,6 +108,7 @@
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
+            [seon.blob :as blob]
             [seon.error :as error]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -443,6 +444,25 @@
         before))
 
 (def ^:private absent-intern (Object.))
+
+(defn store-faithful-edn
+  "Serialized value exactly when EDN preserves value, class, and metadata."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [value]
+  (try
+    (let [serialized (binding [*print-meta* true] (pr-str value))
+          restored (edn/read-string serialized)]
+      (when (and (= value restored)
+                 (= (class value) (class restored))
+                 (= (meta value) (meta restored)))
+        serialized))
+    (catch Throwable _ nil)))
+
+(defn store-faithful?
+  "True exactly when the real EDN round trip preserves all fidelity axes."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (boolean (store-faithful-edn value)))
 
 (defn- intern-values
   "Dereferenced SCI intern roots keyed by qualified name.
@@ -1006,13 +1026,17 @@
   evaluates only rows whose source presence records the terminal transaction's
   purity proof, in deterministic ordinal/id order. Unrestorable rows remain
   unbound; their durable fact is the statement of what is absent."
-  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
-  [{ctx :seon.sci.eval/ctx db :seon.db/db}]
-  (let [rows
-        (->> (d/q '[:find [?entry ...]
-                    :where [?entry :seon.code.def/id _]]
-                  db)
-             (map #(d/pull db '[* {:seon.code.def/ns [:seon.ns/name]}] %))
+  {:malli/schema [:=> [:cat :seon.sci.eval/session-install-request] :map]}
+  [{ctx :seon.sci.eval/ctx
+    db :seon.db/db
+    connection :seon.store/branch-connection}]
+  (let [entry-ids (d/q '[:find [?entry ...]
+                         :where [?entry :seon.code.def/id _]]
+                       db)
+        rows
+        (->> (d/pull-many db
+                          '[* {:seon.code.def/ns [:seon.ns/name]}]
+                          entry-ids)
              (remove
               (fn [row]
                 (some? (d/pull db [:db/id]
@@ -1026,12 +1050,27 @@
           (sci/add-namespace! ctx namespace-name {}))
         (sci/intern ctx namespace-name intern-name)))
     (doseq [{namespace-ref :seon.code.def/ns
+             intern-name :seon.code.def/name
+             value-edn :seon.code.def/value-edn
+             digest :seon.code.def/blob}
+            (filter #(or (:seon.code.def/value-edn %)
+                         (:seon.code.def/blob %))
+                    rows)]
+      (let [serialized
+            (or value-edn
+                (when connection (blob/get connection digest))
+                (throw
+                 (ex-info "Session value blob is unavailable during restore."
+                          {:seon.error/kind ::session-blob-unavailable
+                           :seon.blob/digest digest})))
+            value (edn/read-string serialized)]
+        (sci/intern ctx (:seon.ns/name namespace-ref) intern-name value)))
+    (doseq [{namespace-ref :seon.code.def/ns
              source :seon.code.def/source}
             (filter :seon.code.def/source rows)]
       (let [namespace-name (:seon.ns/name namespace-ref)
             namespace-object (sci/create-ns namespace-name)
-            form (:seon.sci.reader/form
-                  (one-event source namespace-name ctx))]
+            form (sci/parse-string ctx source)]
         (sci/binding [sci/ns namespace-object]
           (sci/eval-form ctx form))))
     {:seon.sci.eval/ctx ctx
@@ -1045,21 +1084,28 @@
 
 (defn cluster-ctx
   "Build and cold-acquire one cluster's live SCI program context."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  :seon.sci.eval/ctx]}
-  [db]
-  (let [ctx (build-base-ctx)
-        acquired (acquire! {:seon.sci.eval/ctx ctx
-                            :seon.db/db db})
-        projection (:seon.schema/projection acquired)
-        ctx (assoc ctx
-                   :seon.schema/projection projection
-                   ::projection-state
-                   (atom {::basis-transaction (long (:max-tx db))
-                          :seon.schema/projection projection}))]
-    (install-session-image! {:seon.sci.eval/ctx ctx
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
+    [:=> [:cat :seon.db/database-value :seon.store/branch-connection]
+     :seon.sci.eval/ctx]]}
+  ([db]
+   (cluster-ctx db nil))
+  ([db connection]
+   (let [ctx (build-base-ctx)
+         acquired (acquire! {:seon.sci.eval/ctx ctx
                              :seon.db/db db})
-    ctx))
+         projection (:seon.schema/projection acquired)
+         ctx (assoc ctx
+                    :seon.schema/projection projection
+                    ::projection-state
+                    (atom {::basis-transaction (long (:max-tx db))
+                           :seon.schema/projection projection}))]
+     (install-session-image!
+      (cond-> {:seon.sci.eval/ctx ctx
+               :seon.db/db db}
+        connection (assoc :seon.store/branch-connection connection)))
+     ctx)))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
