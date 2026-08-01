@@ -62,6 +62,8 @@
    :seon.cluster.eval/at
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/result-edn
+   :seon.cluster.eval/result-blob
+   :seon.cluster.eval/result-size
    :seon.cluster.eval/error
    :seon.error/kind])
 
@@ -281,7 +283,10 @@
                        :seon.cluster.eval/at t0}
                 settle {::run/id "receipts"
                         :seon.cluster.eval/ordinal 0
-                        :seon.cluster.eval/result-edn "42"}]
+                        :seon.cluster.eval/result-edn "42"
+                        :seon.cluster.eval/result-blob
+                        (apply str (repeat 64 "a"))
+                        :seon.cluster.eval/result-size 100}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
@@ -310,6 +315,9 @@
                                    (pr-str ["receipts" 0])])]
               (is (= "42" (:seon.cluster.eval/result-edn receipt))
                   "the first terminal outcome is preserved")
+              (is (= 100 (:seon.cluster.eval/result-size receipt)))
+              (is (= (apply str (repeat 64 "a"))
+                     (:seon.cluster.eval/result-blob receipt)))
               (is (nil? (:seon.cluster.eval/error receipt))
                   "and the refused re-settle changed nothing")))
           ;; the takeover interleaving, re-expressed from the epoch era:

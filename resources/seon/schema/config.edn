@@ -15,6 +15,11 @@
  :seon.config.eval/time-limit-ms
  [:int {:min 1}]
 
+ ; Serialized receipt text larger than this moves to `seon.blob`; the
+ ; receipt retains a bounded presentation projection plus digest and size.
+ :seon.config.eval.result/blob-threshold
+ [:int {:min 1 :seon.config/dial true}]
+
  ; WHO hears a fault nobody else can be told about. It names an agent
  ; id, and boot seeds `"root"` so the shipped default names something
  ; that really exists. Still OPTIONAL: a manifest may drop it, and

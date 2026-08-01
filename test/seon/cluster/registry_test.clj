@@ -22,6 +22,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.schema]
@@ -36,7 +37,10 @@
   [{:db/ident :seon.registry.test/marker
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}])
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.cluster.eval/result-blob
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
 
 (def ^:private source-branch :current-src)
 
@@ -88,6 +92,29 @@
    :seon.source/commit-id
    (registry/branch-commit-id {:seon.store/store store
                                :seon.store/branch source-branch})})
+
+(deftest result-blob-lifetime-follows-live-branch-datoms
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "blob-owner"))
+      (let [branch (registry/cluster-branch "blob-owner")
+            connection (store/open-branch! opened branch)
+            content "the complete settled result"
+            digest (blob/put! connection content)]
+        (try
+          (d/transact connection
+                      [{:seon.registry.test/marker "blob receipt"
+                        :seon.cluster.eval/result-blob digest}])
+          (finally
+            (d/release connection)))
+        (registry/collect! opened)
+        (is (= content (blob/get (:seon.store/connection opened) digest))
+            "a digest referenced from a live branch extends the GC mark")
+        (registry/retire-branch! {:seon.store/store opened
+                                  :seon.store/branch branch})
+        (registry/collect! opened)
+        (is (nil? (blob/get (:seon.store/connection opened) digest))
+            "retiring the last referencing branch makes the blob collectible")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivation

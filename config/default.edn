@@ -26,6 +26,12 @@
  ; Unit: total nodes visited across the whole projection.
  :seon.config.eval.result/max-nodes 65536
 
+ ; Unit: serialized result-edn characters. Provenance: the 2026-08-01
+ ; file-store probe found the inline transaction knee between 10 KB and
+ ; 100 KB; 65,536 keeps ordinary results inline while moving amplified
+ ; payloads to the content-addressed blob path.
+ :seon.config.eval.result/blob-threshold 65536
+
  ; Unit: retained entries in one routed `/data` window, including its
  ; navigation elision marker. Provenance: the 2026-08-01 cap measurements
  ; raised admission width to runaway-query scale; presentation remains at the

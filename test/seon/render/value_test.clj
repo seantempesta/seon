@@ -26,10 +26,14 @@
     :seon.sci.admit/caps caps}))
 
 (defn- rendered-twins
-  [raw bounded-caps]
-  (let [bounded-unit (assoc (unit raw) :seon.sci.admit/caps bounded-caps)]
-    [(value/render-ai bounded-unit)
-     (hiccup/->string (value/render-html bounded-unit))]))
+  ([raw bounded-caps]
+   (rendered-twins raw bounded-caps {}))
+  ([raw bounded-caps options]
+   (let [bounded-unit (assoc (unit raw)
+                             :seon.sci.admit/caps bounded-caps
+                             :seon.render.value/options options)]
+     [(value/render-ai bounded-unit)
+      (hiccup/->string (value/render-html bounded-unit))])))
 
 (defn- cut-marker?
   [projection]
@@ -43,22 +47,30 @@
     :else false))
 
 (defn- loud-twins?
-  [raw bounded-caps]
-  (and (cut-marker?
-        (:seon.render.value/tree
-         (value/prepare
-          (assoc (unit raw) :seon.sci.admit/caps bounded-caps))))
-       (every? #(str/includes? % "elided")
-               (rendered-twins raw bounded-caps))))
+  ([raw bounded-caps]
+   (loud-twins? raw bounded-caps {}))
+  ([raw bounded-caps options]
+   (and (cut-marker?
+         (:seon.render.value/tree
+          (value/prepare
+           (assoc (unit raw)
+                  :seon.sci.admit/caps bounded-caps
+                  :seon.render.value/options options))))
+        (every? #(str/includes? % "elided")
+                (rendered-twins raw bounded-caps options)))))
 
 (defn- quiet-twins?
-  [raw bounded-caps]
-  (and (not (cut-marker?
-             (:seon.render.value/tree
-              (value/prepare
-               (assoc (unit raw) :seon.sci.admit/caps bounded-caps)))))
-       (every? #(not (str/includes? % "elided"))
-               (rendered-twins raw bounded-caps))))
+  ([raw bounded-caps]
+   (quiet-twins? raw bounded-caps {}))
+  ([raw bounded-caps options]
+   (and (not (cut-marker?
+              (:seon.render.value/tree
+               (value/prepare
+                (assoc (unit raw)
+                       :seon.sci.admit/caps bounded-caps
+                       :seon.render.value/options options)))))
+        (every? #(not (str/includes? % "elided"))
+                (rendered-twins raw bounded-caps options)))))
 
 (defn- assert-cap-property!
   [seed property label]
@@ -101,8 +113,10 @@
                                :seon.config.eval.result/max-depth limit)
            nested (fn [depth]
                     (reduce (fn [value _] [value]) :leaf (range depth)))]
-       (and (loud-twins? (nested (inc limit)) bounded-caps)
-            (quiet-twins? (nested limit) bounded-caps))))
+       (and (loud-twins? (nested (inc limit)) bounded-caps
+                         {:seon.render.value/max-depth limit})
+            (quiet-twins? (nested limit) bounded-caps
+                          {:seon.render.value/max-depth limit}))))
    "depth cuts must be in band"))
 
 (deftest collection-cuts-are-in-band-in-both-twins
@@ -297,3 +311,14 @@
         "an explicit options map widens the routed window")
     (is (str/includes? safety-html "showing 1–3 of 40")
         "the admission cap remains the outer safety bound")))
+
+(deftest stored-result-windows-consume-the-presentation-options
+  (let [large-string (pr-str (apply str (repeat 10000 "x")))
+        string-window (value/result-window-edn (unit :unused) large-string)
+        collection-window
+        (value/result-window-edn (unit :unused) (pr-str (vec (range 40))))]
+    (is (< (count string-window) (count large-string))
+        "a large scalar cannot be stored whole beside its blob")
+    (is (str/includes? string-window "truncated-string"))
+    (is (str/includes? collection-window "elided"))
+    (is (< (count collection-window) 200))))

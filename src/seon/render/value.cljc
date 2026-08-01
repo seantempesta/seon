@@ -14,6 +14,8 @@
   O(1) count/length summaries and for the already-bounded set of retained path
   identities; presentation never recursively walks an unadmitted tail."
   (:require [clojure.string :as str]
+            #?(:clj [clojure.edn :as edn]
+               :cljs [cljs.reader :as edn])
             [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
@@ -97,6 +99,19 @@
   (merge (option-defaults)
          (:seon.render.value/options unit)))
 
+(defn- presentation-caps
+  [caps options]
+  (assoc caps
+         :seon.config.eval.result/max-depth
+         (min (:seon.config.eval.result/max-depth caps)
+              (:seon.render.value/max-depth options))
+         :seon.config.eval.result/max-collection
+         (min (:seon.config.eval.result/max-collection caps)
+              (:seon.render.value/max-collection options))
+         :seon.config.eval.result/max-string
+         (min (:seon.config.eval.result/max-string caps)
+              (:seon.render.value/max-string options))))
+
 (defn- stable-entries
   [value]
   (cond
@@ -159,6 +174,26 @@
        :seon.render.value/total nil
        :seon.render.value/more? false})))
 
+(defn result-window-edn
+  "Bound serialized result text to the render presentation options."
+  {:malli/schema
+   [:=> [:cat :seon.render/unit :seon.cluster.eval/result-edn]
+    :seon.cluster.eval/result-edn]}
+  [unit result-edn]
+  (let [caps (:seon.sci.admit/caps unit)
+        options (effective-options unit)
+        size (long (min (:seon.render.value/max-collection options)
+                        (:seon.config.eval.result/max-collection caps)))
+        raw (edn/read-string result-edn)
+        window (opened-window raw 0 size)
+        admitted
+        (admit/admit
+         {:seon.sci.admit/value (:seon.render.value/window window)
+          :seon.sci.admit/caps (presentation-caps caps options)
+          :seon.sci.admit/interrupt-fn (fn [])
+          :seon.config/on-core-error :record})]
+    (:seon.cluster.eval/result-edn admitted)))
+
 (defn- display-value
   [unit raw caps options window?]
   (if (and window?
@@ -196,7 +231,7 @@
           admitted
           (admit/admit
            {:seon.sci.admit/value (:seon.render.value/window window)
-            :seon.sci.admit/caps caps
+            :seon.sci.admit/caps (presentation-caps caps options)
             :seon.sci.admit/interrupt-fn (fn [])
             :seon.config/on-core-error :record})]
       (assoc window

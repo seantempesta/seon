@@ -1,0 +1,51 @@
+(ns seon.blob-settlement-test
+  "The terminal result seam over a real file-backed branch."
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is]]
+            [datahike.api :as d]
+            [seon.blob :as blob]
+            [seon.cluster.loop :as loop]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
+            [seon.config :as config]
+            [seon.test-support :as support]))
+
+(deftest oversized-results-become-a-blob-and-a-presentation-window
+  (let [root (str "tmp/blob-settlement-test/" (random-uuid))
+        opened (store/open-store! {:seon.store/dir (str root "/store")})]
+    (try
+      (d/transact
+       (:seon.store/connection opened)
+       [{:db/ident :seon.config.eval.result/blob-threshold
+         :db/valueType :db.type/long
+         :db/cardinality :db.cardinality/one}])
+      (registry/branch! {:seon.store/store opened
+                         :seon.cluster.registry/from :db
+                         :seon.store/branch :settlement-test})
+      (let [connection (store/open-branch! opened :settlement-test)]
+        (try
+          (d/transact connection
+                      [{:seon.config.eval.result/blob-threshold 65536}])
+          (let [caps (config/result-caps (config/defaults))
+                full (pr-str (vec (range 20000)))
+                large (#'loop/settlement-result
+                       {:seon.store/branch-connection connection
+                        :seon.sci.admit/caps caps}
+                       {:seon.cluster.eval/result-edn full})
+                small (#'loop/settlement-result
+                       {:seon.store/branch-connection connection
+                        :seon.sci.admit/caps caps}
+                       {:seon.cluster.eval/result-edn "42"})]
+            (is (= (count full) (:seon.cluster.eval/result-size large)))
+            (is (< (count (:seon.cluster.eval/result-edn large)) (count full)))
+            (is (= full
+                   (blob/get connection
+                             (:seon.cluster.eval/result-blob large))))
+            (is (= {:seon.cluster.eval/result-edn "42"
+                    :seon.cluster.eval/result-size 2}
+                   small)))
+          (finally
+            (d/release connection))))
+      (finally
+        (store/release-store! opened)
+        (support/delete-recursively! (io/file root))))))

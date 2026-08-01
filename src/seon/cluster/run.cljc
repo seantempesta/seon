@@ -522,6 +522,10 @@
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [:seon.cluster.eval/result-edn {:optional true}
            :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/result-blob {:optional true}
+           :seon.cluster.eval/result-blob]
+          [:seon.cluster.eval/result-size {:optional true}
+           :seon.cluster.eval/result-size]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
           [:seon.cluster.eval/interrupted-at {:optional true}
@@ -534,7 +538,13 @@
            :seon.sci.eval/program-row]]]
     [:vector :some]]}
   [request]
-  [[:db.fn/call #'receipt-settle-call request]])
+  [[:db.fn/call
+    #'receipt-settle-call
+    (if (and (:seon.cluster.eval/result-edn request)
+             (not (contains? request :seon.cluster.eval/result-size)))
+      (assoc request :seon.cluster.eval/result-size
+             (long (count (:seon.cluster.eval/result-edn request))))
+      request)]])
 
 (defn receipt-refusal-tx
   "Transaction data terminalizing a receipt after its settlement refused.
@@ -552,11 +562,20 @@
           [::closed-at ::closed-at]
           [:seon.cluster.eval/result-edn
            :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/result-blob {:optional true}
+           :seon.cluster.eval/result-blob]
+          [:seon.cluster.eval/result-size {:optional true}
+           :seon.cluster.eval/result-size]
           [:seon.cluster.eval/error :seon.cluster.eval/error]
           [:seon.error/kind :seon.error/kind]]]
     [:vector :some]]}
   [request]
-  [[:db.fn/call #'receipt-refusal-call request]])
+  [[:db.fn/call
+    #'receipt-refusal-call
+    (if (not (contains? request :seon.cluster.eval/result-size))
+      (assoc request :seon.cluster.eval/result-size
+             (long (count (:seon.cluster.eval/result-edn request))))
+      request)]])
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
@@ -730,6 +749,8 @@
 
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn
+   :seon.cluster.eval/result-blob
+   :seon.cluster.eval/result-size
    :seon.cluster.eval/error
    :seon.cluster.eval/interrupted-at
    :seon.error/kind
@@ -760,6 +781,10 @@
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [:seon.cluster.eval/result-edn {:optional true}
            :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/result-blob {:optional true}
+           :seon.cluster.eval/result-blob]
+          [:seon.cluster.eval/result-size {:optional true}
+           :seon.cluster.eval/result-size]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
           [:seon.cluster.eval/interrupted-at {:optional true}
@@ -815,6 +840,10 @@
           [::closed-at ::closed-at]
           [:seon.cluster.eval/result-edn
            :seon.cluster.eval/result-edn]
+          [:seon.cluster.eval/result-blob {:optional true}
+           :seon.cluster.eval/result-blob]
+          [:seon.cluster.eval/result-size {:optional true}
+           :seon.cluster.eval/result-size]
           [:seon.cluster.eval/error :seon.cluster.eval/error]
           [:seon.error/kind :seon.error/kind]]]
     [:vector :some]]}

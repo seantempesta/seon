@@ -65,6 +65,7 @@
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
+            [konserve.gc :as konserve.gc]
             [seon.cluster.store :as store]
             [seon.schema.edn :as schema.edn]))
 
@@ -280,6 +281,27 @@
           (throw failure)))))
   nil)
 
+(defonce ^:private collect-monitor (Object.))
+
+(defn- branch-result-blobs
+  [store branch]
+  (let [db (d/branch-as-db (:seon.store/connection store) branch)]
+    (try
+      (if (contains? (:schema db) :seon.cluster.eval/result-blob)
+        (set
+         (d/q '[:find [?digest ...]
+                :where [_ :seon.cluster.eval/result-blob ?digest]]
+              db))
+        #{})
+      (finally
+        (d/release-materialized-db db)))))
+
+(defn- referenced-result-blobs
+  [store]
+  (into #{}
+        (mapcat #(branch-result-blobs store %))
+        (roster store)))
+
 (defn collect!
   "Collect this store's unreachable objects; returns how many were swept.
   One owner per store — the process, never a cluster (§0.6 condition
@@ -290,4 +312,20 @@
   state sweeps zero (proven, b2-plan §0.7)."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]}
   [store]
-  (count @(d/gc-storage (:seon.store/connection store))))
+  (locking collect-monitor
+    (let [blob-keys (referenced-result-blobs store)
+          sweep! konserve.gc/sweep!]
+      ;; Datahike refers this exact Var. Rebinding it keeps Datahike's one
+      ;; safe-point mark/sweep operation intact while extending the mark by
+      ;; one fact-derived hop. `collect-monitor` serializes Seon's sole GC
+      ;; entry point so no store observes another store's derived set.
+      (with-redefs [konserve.gc/sweep!
+                    (fn
+                      ([konserve reachable cutoff]
+                       (sweep! konserve (into reachable blob-keys) cutoff))
+                      ([konserve reachable cutoff batch-size]
+                       (sweep! konserve
+                               (into reachable blob-keys)
+                               cutoff
+                               batch-size)))]
+        (count @(d/gc-storage (:seon.store/connection store)))))))

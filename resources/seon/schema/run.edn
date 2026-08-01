@@ -31,6 +31,11 @@
  :seon.cluster.eval/ordinal [:int {:min 0}]
  :seon.cluster.eval/ns :seon.db/ref
  :seon.cluster.eval/result-edn :string
+ ; Full result text moves to a content-addressed blob once it crosses the
+ ; configured threshold. The receipt retains a presentation projection and
+ ; these primitive facts; capped state is derived at render time.
+ :seon.cluster.eval/result-blob [:re "^[0-9a-f]{64}$"]
+ :seon.cluster.eval/result-size [:int {:min 0}]
  :seon.cluster.eval/run :seon.db/ref
  ; When this eval was cut instead of settling: the time limit fired, or
  ; boot recovery found the receipt dangling after its process died.
@@ -91,6 +96,10 @@
   [:seon.cluster.eval/at :seon.cluster.eval/at]
   [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
   [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
+  [:seon.cluster.eval/result-blob {:optional true}
+   :seon.cluster.eval/result-blob]
+  [:seon.cluster.eval/result-size {:optional true}
+   :seon.cluster.eval/result-size]
   [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
   [:seon.cluster.eval/interrupted-at {:optional true}
    :seon.cluster.eval/interrupted-at]
@@ -100,6 +109,9 @@
   [:seon.problems/id {:optional true} :seon.problems/id]
   [:seon.error/kind {:optional true} :seon.error/kind]
   [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
+
+ :seon.blob/content :string
+ :seon.blob/digest :seon.cluster.eval/result-blob
 
  :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]
  :seon.cluster.run.form/ns :seon.db/ref

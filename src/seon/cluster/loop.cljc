@@ -39,6 +39,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.blob :as blob]
             [seon.context :as context]
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
@@ -52,6 +53,7 @@
             [seon.fn.analyzer :as fn.analyzer]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
@@ -249,7 +251,8 @@
                   [:vector :some]]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run.form/ordinal
-           :seon.cluster.eval/result-edn :seon.cluster.eval/error
+           :seon.cluster.eval/result-edn :seon.cluster.eval/result-blob
+           :seon.cluster.eval/result-size :seon.cluster.eval/error
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.cluster.eval/ns
            :seon.sci.eval/program-row :seon.error/kind
@@ -258,6 +261,8 @@
   (let [receipt (cond-> {:seon.cluster.run/id id
                          :seon.cluster.eval/ordinal ordinal}
                   result-edn (assoc :seon.cluster.eval/result-edn result-edn)
+                  result-blob (assoc :seon.cluster.eval/result-blob result-blob)
+                  result-size (assoc :seon.cluster.eval/result-size result-size)
                   error (assoc :seon.cluster.eval/error error)
                   ;; the cut instant, present exactly when the time
                   ;; limit fired — its presence IS the interrupted state
@@ -286,6 +291,30 @@
                            :seon.cluster.run/process process
                            :seon.cluster.run/closed-at now})
             nil))))
+
+(defn- result-blob-threshold
+  [db]
+  (d/q '[:find ?threshold .
+         :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
+       db))
+
+(defn- settlement-result
+  [cluster evaluation]
+  (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
+    (let [connection (:seon.store/branch-connection cluster)
+          result-size (long (count result-edn))
+          threshold (result-blob-threshold @connection)]
+      (if (and threshold (> result-size threshold))
+        (assoc evaluation
+               :seon.cluster.eval/result-edn
+               (render.value/result-window-edn
+                {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+                result-edn)
+               :seon.cluster.eval/result-blob
+               (blob/put! connection result-edn)
+               :seon.cluster.eval/result-size result-size)
+        (assoc evaluation :seon.cluster.eval/result-size result-size)))
+    evaluation))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
@@ -475,6 +504,7 @@
                  (:seon.sci.admit/value admitted)})))
            fact (first recording)
            failure (error/value fact)
+           failure-edn (pr-str failure)
            valid?
            (and
             (schema/valid-candidate-value?
@@ -490,7 +520,8 @@
                :seon.cluster.eval/ordinal
                (:seon.cluster.run.form/ordinal receipt)
                :seon.cluster.run/closed-at now
-               :seon.cluster.eval/result-edn (pr-str failure)
+               :seon.cluster.eval/result-edn failure-edn
+               :seon.cluster.eval/result-size (long (count failure-edn))
                :seon.cluster.eval/error (:seon.error/message failure)
                :seon.error/kind (:seon.error/kind failure)}))]
        (when-not valid?
@@ -1121,13 +1152,24 @@
                                        {:seon.cluster.agent/id agent-id
                                         :seon.cluster.run/id run-id})))
                           (:seon.error/values delivery))
+                    settlement-evaluation
+                    (settlement-result cluster evaluation)
                     receipt
                     (cond-> {:seon.cluster.run/id run-id
                              :seon.cluster.run/process process
                              :seon.cluster.run.form/ordinal ordinal}
-                      (:seon.cluster.eval/result-edn evaluation)
+                      (:seon.cluster.eval/result-edn settlement-evaluation)
                       (assoc :seon.cluster.eval/result-edn
-                             (:seon.cluster.eval/result-edn evaluation))
+                             (:seon.cluster.eval/result-edn
+                              settlement-evaluation))
+                      (:seon.cluster.eval/result-blob settlement-evaluation)
+                      (assoc :seon.cluster.eval/result-blob
+                             (:seon.cluster.eval/result-blob
+                              settlement-evaluation))
+                      (:seon.cluster.eval/result-size settlement-evaluation)
+                      (assoc :seon.cluster.eval/result-size
+                             (:seon.cluster.eval/result-size
+                              settlement-evaluation))
                       (or (:seon.cluster.eval/error evaluation)
                           (:seon.cluster.eval/error problem))
                       (assoc :seon.cluster.eval/error
