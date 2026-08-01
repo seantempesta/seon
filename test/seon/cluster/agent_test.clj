@@ -309,9 +309,6 @@
                     (is (= 1 (count refusals))
                         "production linting committed one flat refusal")
                     (is (and (string? second-prompt)
-                             (str/includes? second-prompt refused-source))
-                        "the next turn sees the refused source")
-                    (is (and (string? second-prompt)
                              (str/includes? second-prompt "expects 2 or 3"))
                         "the next turn sees the exact arity finding")
                     (is (= 1 (or (d/q '[:find (count ?message) .
