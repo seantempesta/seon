@@ -198,6 +198,50 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
 - **Long-running work dies sometimes** (upstream API errors, machine load).
   Commit in small coherent slices so churn costs minutes, not hours.
 
+## Start here, 2026-08-01: the open work and how to approach it
+
+Read `plan/state-of-the-design-2026-08-01.md` first — it is the one
+synthesis of where the design stands, what is BUILT versus designed,
+and what genuinely needs experiment rather than more planning. Then
+`plan/unsettled.md` for the operational edge and `plan/README.md`
+rulings #24-#29.
+
+**Before you touch any of the queued work, ground yourself in the
+running system.** Boot your own cluster, drive a real form through the
+door, read what an agent actually sees. Several of today's rulings were
+overturned within hours by one measurement; assume yours will be too
+unless you have run it.
+
+The open work, and the trap in each:
+
+- **The live per-cluster program graph** (`plan/per-cluster-base-context-
+  2026-08-01.md`, ruling #29). Removes 283 ms from every turn. Trap:
+  this is the change that makes several accidental behaviors visible —
+  today's per-turn reinstall MASKS things. Expect surprises and welcome
+  them.
+- **Stateless resume** (`plan/stateless-resume-design-2026-08-01.md`,
+  ruling #28) — proven end to end. Owner decision open: forms-only
+  slice 1 versus forms plus the value/blob cache. Trap: "the defining
+  form is the truth, the stored value is a cache" is load-bearing;
+  serializing values looks easier and is wrong for sorted colls, lazy
+  seqs, and metadata.
+- **The print path** (`plan/print-path-design-2026-08-01.md`, ruling
+  #26, SEALED). Its acceptance evidence already exists:
+  `test/seon/repl_parity_test.clj` has 34 proven divergences waiting to
+  be promoted as they are fixed. Trap: the gate FAILS if a divergence
+  starts passing without promotion — that is deliberate.
+- **The agent write surface** — the largest real design hole. Agents can
+  read the graph but cannot record their own facts, and after `seon.db`
+  publishes they can reach the raw store door with no ownership rule.
+  See `issues/unlogged-findings-2026-08-01.md`.
+- **`acquire!` per-row containment**, the remaining `seon.db` slices,
+  the interop policy (default-allow, deny at the site with a reason),
+  and the pod-era rot inventory — all in `docs/seon/issues/`.
+
+**The standing adversarial audit has NOT been run on the 2026-08-01
+tree.** It is due: a big landing day, several lanes, a large deletion
+wave. Trust none of the lane reports; falsify at the REPL.
+
 ## How to establish what is broken right now
 
 Do not preserve a second issue list in this orientation. It went stale within
