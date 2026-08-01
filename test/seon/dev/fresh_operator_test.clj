@@ -52,6 +52,26 @@
           "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
           "signal.pause()\n")])))
 
+(defn- start-sigterm-resistant-process!
+  []
+  (let [process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["/usr/bin/python3" "-c"
+            (str "import signal\n"
+                 "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                 "print('ready',flush=True)\n"
+                 "signal.pause()\n")])
+          (.redirectErrorStream true)))]
+    (when-not (= "ready"
+                 (.readLine ^java.io.BufferedReader
+                            (io/reader (.getInputStream process))))
+      (throw (ex-info "The SIGTERM-resistant child did not become ready."
+                      {})))
+    process))
+
 (defn- start-disposable-process-tree!
   []
   (.start
@@ -73,6 +93,17 @@
     (when-not (.isPresent optional)
       (throw (ex-info "The test child has no start instant." {})))
     (Date/from (.get optional))))
+
+(defn- child-process-record
+  [root ^Process child]
+  {:seon.dev.process/generation (random-uuid)
+   :seon.dev.process/pid (.pid child)
+   :seon.dev.process/start-instant
+   (str (.toInstant (process-start-date child)))
+   :seon.dev.process/root (.getCanonicalPath (io/file root))
+   :seon.dev.process/log
+   (str (io/file root "data" "clusters" "logs"
+                 (str (.pid child) ".log")))})
 
 (defn- advertisement-process-identity
   [root name]
@@ -219,11 +250,15 @@
          `(do
             (require 'seon.fresh-operator)
             (let [calls# (atom [])
+                  start-instant# (java.util.Date. 1000)
+                  generation# (random-uuid)
                   operator-var#
                   (fn [name#]
                     (ns-resolve 'seon.fresh-operator name#))
                   advertisement#
                   {:seon.boot/cluster-name "cold-start"
+                   :seon.boot/pid 42
+                   :seon.boot/start-instant start-instant#
                    :seon.render.web/url "http://127.0.0.1:7994"
                    :seon.boot/prepl-port 7993}]
               (with-redefs-fn
@@ -240,6 +275,14 @@
                  (fn [_root# name# _manifest# _ready-port#]
                    (swap! calls# conj [:launch name#])
                    {:seon.fresh-operator/pid 42})
+                 (operator-var# (symbol "record-launched-process!"))
+                 (fn [_root# _launch-result#]
+                   {:seon.dev.process/generation generation#
+                    :seon.dev.process/pid 42
+                    :seon.dev.process/start-instant
+                    (str (.toInstant start-instant#))
+                    :seon.dev.process/root ~(str root)
+                    :seon.dev.process/log "test.log"})
                  (operator-var# (symbol "await-advertisement!"))
                  (fn [_root# _name# _pid# _ready-server#]
                    advertisement#)
@@ -344,6 +387,55 @@
         (operator-private-outcome 'parse-init-arguments ["--changed"]))
        "init --changed PATH")))
 
+(deftest down-is-the-unambiguous-all-processes-command
+  (is (= {:seon.fresh-operator/force? false}
+         (operator-private-value 'parse-down-arguments [])))
+  (is (= {:seon.fresh-operator/force? true}
+         (operator-private-value 'parse-down-arguments ["--force"])))
+  (doseq [arguments [["alpha"] ["--force" "alpha"] ["--unknown"]]]
+    (let [outcome
+          (operator-private-outcome 'parse-down-arguments arguments)]
+      (is (str/includes?
+           (:seon.dev.fresh-operator-test/message outcome)
+           "down [--force]")
+          (pr-str outcome)))))
+
+(deftest child-process-records-round-trip-and-fence-pid-reuse
+  (let [root (fresh-root)
+        child (start-disposable-process!)
+        record (child-process-record root child)
+        mismatched
+        (update record :seon.dev.process/start-instant
+                (fn [value]
+                  (str (.plusMillis (java.time.Instant/parse value) 1))))]
+    (try
+      (is (= record
+             (operator-private-value
+              'write-process-record! (str root) record)))
+      (is (= {:seon.fresh-operator/process-records [record]
+              :seon.fresh-operator/process-record-errors []}
+             (operator-private-value 'read-process-records (str root))))
+      (is (true? (operator-private-value 'record-alive? record)))
+      (is (false? (operator-private-value 'record-alive? mismatched))
+          "a reused PID is not the recorded process generation")
+      (is (= :pid-reused
+             (operator-private-value
+              'terminate-recorded-process! mismatched))
+          "the destructive seam refuses a live PID from another generation")
+      (is (= true (.isAlive child))
+          "the mismatched PID was never signaled")
+      (is (true?
+           (operator-private-value
+            'clear-process-record! (str root) record)))
+      (is (= {:seon.fresh-operator/process-records []
+              :seon.fresh-operator/process-record-errors []}
+             (operator-private-value 'read-process-records (str root))))
+      (finally
+        (when (.isAlive child)
+          (.destroyForcibly child)
+          (.waitFor child 10 TimeUnit/SECONDS))
+        (delete-recursively! root)))))
+
 (deftest failed-launch-cleanup-terminates-the-whole-process-tree
   (let [parent (start-disposable-process-tree!)
         child-pid (parse-long (.readLine (io/reader (.getInputStream parent))))]
@@ -362,6 +454,19 @@
         (when (.isAlive parent)
           (terminate-process-tree! parent))))))
 
+(deftest failed-launch-cleanup-escalates-after-bounded-term-grace
+  (let [process (start-sigterm-resistant-process!)]
+    (try
+      (is (nil?
+           (operator-private-value 'terminate-process-tree! (.pid process))))
+      (is (true? (.waitFor process 10 TimeUnit/SECONDS)))
+      (is (not (.isAlive process))
+          "the SIGTERM-resistant generation was forcibly reaped")
+      (finally
+        (when (.isAlive process)
+          (.destroyForcibly process)
+          (.waitFor process 10 TimeUnit/SECONDS))))))
+
 (defn- run-operator
   [root & arguments]
   (let [process
@@ -373,6 +478,60 @@
            (.redirectErrorStream true)))
         output-future (process-output process)]
     (await-process! process output-future "The fresh operator")))
+
+(deftest down-without-a-name-stops-every-recorded-child
+  (let [root (fresh-root)
+        children [(start-disposable-process!)
+                  (start-disposable-process!)]
+        records (mapv #(child-process-record root %) children)]
+    (try
+      (doseq [record records]
+        (is (= record
+               (operator-private-value
+                'write-process-record! (str root) record))))
+      (let [outcome (run-operator root "down")]
+        (is (::completed? outcome) (::output outcome))
+        (is (= 0 (::exit outcome)) (::output outcome))
+        (is (not (str/includes? (::output outcome) "ambiguous"))
+            (::output outcome))
+        (doseq [child children]
+          (is (str/includes? (::output outcome) (str "JVM pid " (.pid child)))
+              (::output outcome))
+          (is (true? (.waitFor child 10 TimeUnit/SECONDS))
+              (str "down left recorded PID " (.pid child) " alive"))))
+      (is (= {:seon.fresh-operator/process-records []
+              :seon.fresh-operator/process-record-errors []}
+             (operator-private-value 'read-process-records (str root))))
+      (finally
+        (doseq [child children
+                :when (.isAlive child)]
+          (.destroyForcibly child)
+          (.waitFor child 10 TimeUnit/SECONDS))
+        (delete-recursively! root)))))
+
+(deftest reset-deletion-does-not-follow-links-outside-the-cluster-root
+  (let [root (fresh-root)
+        sentinel-root (fresh-root)
+        cluster-root (io/file root "data" "clusters")
+        ordinary (io/file cluster-root "store" "ordinary.edn")
+        sentinel (io/file sentinel-root "sentinel.txt")
+        escape (io/file cluster-root "store" "escape")]
+    (try
+      (.mkdirs (.getParentFile ordinary))
+      (spit ordinary "delete me")
+      (spit sentinel "survives")
+      (Files/createSymbolicLink
+       (.toPath escape)
+       (.toPath sentinel-root)
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (operator-private-value
+       'delete-cluster-root-no-follow! (str root))
+      (is (not (.exists cluster-root)))
+      (is (= "survives" (slurp sentinel))
+          "recursive reset never followed the symlinked sentinel")
+      (finally
+        (delete-recursively! root)
+        (delete-recursively! sentinel-root)))))
 
 (defn- await-child-readiness!
   [^ServerSocket ready-server ^Process child child-output]
@@ -555,7 +714,8 @@
   (let [row
         (fn [name]
           {:seon.fresh-operator/name name
-           :seon.fresh-operator/operator-root? true})]
+           :seon.fresh-operator/operator-root? true
+           :seon.fresh-operator/persisted? true})]
     (is (= "only"
            (operator-private-value
             'select-destructive-name [(row "only")] nil "stop")))
@@ -840,18 +1000,25 @@
         received (promise)
         served
         (future
-          (with-open [socket (.accept server)
-                      reader (io/reader socket)
-                      writer (io/writer socket)]
-            (deliver received (.readLine ^java.io.BufferedReader reader))
-            (.write writer
-                    (str (pr-str {:tag :ret
-                                  :val "nil"
-                                  :exception true})
-                         "\n"))
-            (.flush writer)))]
+          (loop []
+            (let [form
+                  (with-open [socket (.accept server)
+                              reader (io/reader socket)
+                              writer (io/writer socket)]
+                    (let [form (.readLine ^java.io.BufferedReader reader)]
+                      (.write writer
+                              (str (pr-str {:tag :ret
+                                            :val "nil"
+                                            :exception true})
+                                   "\n"))
+                      (.flush writer)
+                      form))]
+              (if (str/includes? form "seon.cluster/stop!")
+                (deliver received form)
+                (recur)))))]
     (try
       (let [directory (io/file root "data" "clusters" name)
+            record (child-process-record root child)
             advertisement
             {:seon.boot/cluster-name name
              :seon.boot/pid (.pid child)
@@ -859,6 +1026,8 @@
              :seon.boot/prepl-host "127.0.0.1"
              :seon.boot/prepl-port (.getLocalPort server)}
             _ (.mkdirs directory)
+            _ (operator-private-value
+               'write-process-record! (str root) record)
             _ (spit (io/file directory "prepl.edn")
                     (pr-str advertisement))
             process
@@ -867,13 +1036,15 @@
                     ^java.util.List (operator-command root "stop" name))
                (.directory project-root)
                (.redirectErrorStream true)))
-            completed? (.waitFor process 10 TimeUnit/SECONDS)
+            output-future (process-output process)
+            completed? (.waitFor process 20 TimeUnit/SECONDS)
             _ (when-not completed? (.destroyForcibly process))
-            output (slurp (.getInputStream process))
+            output (deref output-future 10000
+                          "The stopped operator output did not close.")
             stop-form (deref received 10000 ::timeout)
             child-stopped? (.waitFor child 10 TimeUnit/SECONDS)]
         (testing "the remote eval exception is a named, loud fallback"
-          (is completed? "The operator exceeded ten seconds.")
+          (is completed? "The operator exceeded twenty seconds.")
           (is (= 0 (when completed? (.exitValue process))) output)
           (is (str/includes?
                output
@@ -892,7 +1063,9 @@
           (is child-stopped? "The fallback did not stop the advertised PID.")))
       (finally
         (.close server)
-        (deref served 1000 nil)
+        (try
+          (deref served 1000 nil)
+          (catch Throwable _ nil))
         (when (.isAlive child)
           (.destroyForcibly child)
           (.waitFor child 10 TimeUnit/SECONDS))
@@ -908,18 +1081,25 @@
         received (promise)
         served
         (future
-          (with-open [socket (.accept server)
-                      reader (io/reader socket)
-                      writer (io/writer socket)]
-            (deliver received (.readLine ^java.io.BufferedReader reader))
-            (.write writer
-                    (str (pr-str {:tag :ret
-                                  :val "nil"
-                                  :exception true})
-                         "\n"))
-            (.flush writer)))]
+          (loop []
+            (let [form
+                  (with-open [socket (.accept server)
+                              reader (io/reader socket)
+                              writer (io/writer socket)]
+                    (let [form (.readLine ^java.io.BufferedReader reader)]
+                      (.write writer
+                              (str (pr-str {:tag :ret
+                                            :val "nil"
+                                            :exception true})
+                                   "\n"))
+                      (.flush writer)
+                      form))]
+              (if (str/includes? form "seon.cluster/stop!")
+                (deliver received form)
+                (recur)))))]
     (try
       (let [start-instant (process-start-date child)
+            record (child-process-record root child)
             target-advertisement
             {:seon.boot/cluster-name name
              :seon.boot/pid (.pid child)
@@ -930,6 +1110,8 @@
             (assoc target-advertisement
                    :seon.boot/cluster-name sibling
                    :seon.boot/prepl-port (inc (.getLocalPort server)))]
+        (operator-private-value
+         'write-process-record! (str root) record)
         (doseq [[cluster advertisement]
                 [[name target-advertisement]
                  [sibling sibling-advertisement]]]
@@ -944,11 +1126,13 @@
                  ^java.util.List (operator-command root "stop" name))
                  (.directory project-root)
                  (.redirectErrorStream true)))
-              completed? (.waitFor process 10 TimeUnit/SECONDS)
+              output-future (process-output process)
+              completed? (.waitFor process 20 TimeUnit/SECONDS)
               _ (when-not completed? (.destroyForcibly process))
-              output (slurp (.getInputStream process))
+              output (deref output-future 10000
+                            "The refused operator output did not close.")
               stop-form (deref received 10000 ::timeout)]
-          (is completed? "the refusal exceeded ten seconds")
+          (is completed? "the refusal exceeded twenty seconds")
           (is (= 1 (when completed? (.exitValue process))) output)
           (is (str/includes? output "Refusing SIGTERM for shared JVM")
               output)
@@ -960,7 +1144,9 @@
           (is (str/includes? stop-form "seon.cluster/stop!"))))
       (finally
         (.close server)
-        (deref served 1000 nil)
+        (try
+          (deref served 1000 nil)
+          (catch Throwable _ nil))
         (when (.isAlive child)
           (.destroyForcibly child)
           (.waitFor child 10 TimeUnit/SECONDS))
