@@ -22,7 +22,7 @@ mechanism behind it is legible. See [[#Recommendation]].
 This document supplies the evidence that **ruling #34 addendum** (plan
 `README.md`) recorded as pending for adaptive mode. Verdict: adaptive does
 NOT genuinely modulate, so it does **not** become the planner default;
-always-high stays. See [[#Can we just leave it on adaptive No verdict b always-thinks]].
+always-high stays. Evidence in the adaptive section below.
 
 ## Blocker found first: the configured model identifier does not exist
 
@@ -158,10 +158,212 @@ The latency point stands on its own: on the transducer task adaptive spent
 non-thinking reached in **1.6 s and 121 tokens** — 285x the wall time for an
 identical graded result.
 
+## The ask-the-model bug-hunting modality
+
+Separate from the synthetic tasks: paste a real Seon namespace with line
+numbers, demand claims in a fixed `CLAIM/LINES/FN/KIND/MECHANISM/REPRO`
+shape, and grade every claim by execution. This is the modality that matters
+for Seon, because it is what an agent reading its own program graph would do.
+
+**It found two real bugs on its first outing, both with thinking OFF.**
+
+| claim | verdict | evidence |
+|---|---|---|
+| `admit/project-entries` cuts at `width - 1` | **CONFIRMED — filed** | `max-collection` 2→1 item, 3→2, 5→4 |
+| `opened-window` size 0 shows nothing, `more? true` | **CONFIRMED** | residual degenerate case after the size-1 fix |
+| `project-map` starves the cut marker at 2–3 nodes | CONFIRMED in substance | predicted symptom imprecise, mechanism right |
+| `admit` with `max-nodes` 1 elides `42` | **FALSIFIED** | projects `42` correctly |
+| `submit-evaluation!!` flow limit is 2x the eval limit | **FALSIFIED as a defect** | reading is correct; the 2x is the intentional outer backstop |
+| `CountedDroppingBuffer.full?` always false is a contract mismatch | **FALSIFIED as a defect** | core.async's own `DroppingBuffer` returns `false` identically (`buffers.clj:41`) |
+
+Confirm rate on the six claims checked: **3 confirmed / 3 falsified**, from
+non-thinking calls costing 10–15 s each (four namespaces: `value.cljc`,
+`admit.clj`, `loop.cljc`, `flow.clj`; `schema.cljc` at 2548 lines was cut
+when it exceeded four minutes on one call).
+
+[[admit-projects-one-fewer-item-than-max-collection]] is the significant
+one: the identical off-by-one class as the `value.cljc` bug fixed earlier the
+same day, surviving in the sibling that fix missed — and `admit` is the more
+consequential owner, because it bounds what every agent sees of its own
+evaluation results.
+
+The failure mode is legible and worth planning around: **the model reads the
+code accurately and then misjudges intent.** Not one falsified claim
+hallucinated code that was not there. Two of the three described the source
+correctly and drew the wrong conclusion because they lacked a surrounding
+contract — the 2x flow limit is Seon's deliberate last-resort backstop, and
+`full? = false` is core.async's own dropping-buffer contract, faithfully
+implemented. The third simply mispredicted a boundary.
+
+That is a good failure mode to design around, and it sets the supervision
+requirement precisely: **claims are cheap and must be verified, never
+applied.** A reviewer holding the architecture triages these in seconds; an
+agent acting on them unsupervised would "fix" two deliberate designs. The
+modality earns its place as a *lead generator* feeding execution-based
+verification — which is exactly how the confirmed `admit` bug was caught.
+
 ## Result matrix
 
-<!-- FILLED IN BELOW -->
+Correctness is the hard gate: code answers were executed, value answers
+compared to an answer fixed in advance. `EMPTY` means the response finished
+with `finish_reason: length` having spent the whole budget on reasoning and
+emitted **no content at all** — graded as a failure, because a turn that
+returns nothing is a failed turn.
+
+| task | gate | flash-nothink | flash-think (high) | pro |
+|---|---|---|---|---|
+| t1 transducer | executed | **PASS** 1.6 s | EMPTY 148.7 s | **PASS** 22.2 s |
+| t2 chunking (value) | `32` | **8 — WRONG** 1.3 s | EMPTY | **32** 34.8 s |
+| t2 chunking (code) | executed | **PASS** | EMPTY | **FAIL** (NPE) |
+| t3 CAS reduce | executed | **PASS** 1.6 s | **PASS** 36.0 s | **PASS** 7.4 s |
+| t4 datalog + malli | executed | FAIL 2.0 s | EMPTY 122.2 s | FAIL 40.8 s |
+| t5 debug | executed | **PASS** 2.1 s | EMPTY 123.8 s | EMPTY 240.4 s |
+| t6 puzzle | `31254` | **PASS** 5.3 s | **PASS** 5.0 s | **PASS** 15.9 s |
+| t7 trace real source | 6 values | **WRONG** 1.2 s | **PASS** 11.0 s | **PASS** 24.0 s |
+
+**Tally (8 gates): flash-nothink 5 correct, flash-think 2, pro 5.**
+
+Non-thinking flash matches pro on correctness while being 10–100x faster,
+and *beats* thinking-high outright — because thinking-high failed four gates
+by never producing an answer.
+
+Notes on the two shared failures, which are honest and not thinking-related:
+
+- **t4** — both non-thinking and pro wrote `:long` in the Malli schema.
+  `:long` is not a Malli schema (`:int` is; Seon's own EDN uses `:int` 100
+  times, `:long` zero). Both also got the Datalog query exactly right. This
+  discriminates nothing between modes; it is a real shared knowledge gap.
+- **t2 code** — pro used `(rest s)` where `(next s)` is required: `(rest s)`
+  returns a truthy empty seq, so `(and s …)` stays true, `(first ())` is
+  `nil`, and `f` is called on `nil` → NPE when `n` exceeds the collection.
+  Non-thinking used `next` and passed. Pro reasoned its way to the right
+  *prose* answer on t2 and then shipped the broken *code*.
+
+## Two verbatim excerpts
+
+**Where thinking earned its cost — t7, tracing real `value.cljc` source.**
+Non-thinking answered in 35 tokens, entirely from intuition, and was wrong:
+
+```text
+WINDOW: [:a]      <- wrong
+STEPS: [0]        <- wrong
+SHOWN: 1          <- wrong
+TOTAL: 3
+MORE: true
+TRUNCATED: true
+```
+
+Thinking substituted the actual arithmetic instead of pattern-matching
+"page size 1 means one item", and got all six right:
+
+```text
+available = max 0 (dec size) = dec 1 = 0, max 0 => 0.
+head = (into [] (comp (drop offset) (take (inc available))) entries).
+(inc available) = 1 ... head = [[0 :a]].
+more? (> (count head) available) = (> 1 0) => true.
+page = subvec [[0 :a]] 0 (min 0 1) = subvec vector 0 0 => [] (empty vector).
+```
+
+This is the entire value of thinking mode in one paragraph: it is worth
+paying for when the answer depends on evaluating code precisely rather than
+recognising it. (The `(dec size)` it correctly traced *was* the live
+off-by-one, fixed later the same day; t7 grades against the pre-fix source
+pasted into the prompt.)
+
+**Where thinking was pure latency — t1, the transducer.** Non-thinking
+produced a fully correct stateful transducer, including the reusability trap
+(fresh `volatile!` per `(fn [rf] …)` invocation, not captured once), in
+**1.6 s / 121 tokens**, passing all seven checks:
+
+```clojure
+(defn dedupe-by
+  ([f]
+   (fn [rf]
+     (let [prev (volatile! ::none)]      ; per-reduction state: correct
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input] ...))))))
+```
+
+Thinking-high, on the same task, had the correct approach in its first
+paragraph — "each call to xform creates fresh state in its closure" — and
+then spent **64,739 characters** of reasoning re-deriving it, exhausted the
+budget, and returned an empty string. Its reasoning tail is still
+second-guessing sentinel representation:
+
+```text
+This creates a new Object per reduction by calling xf; fine. It keeps
+sentinel inside stateful closure. Since prev volatile initial value is an
+Object. No need separate `none` variable? We need compare `(identical?
+@prev sentinel)`. We can store initial sentinel separately: ...
+```
+
+## Cost
+
+Outside the 2x peak window (UTC 01:00–04:00) — these runs were 22:13 UTC
+onward, i.e. **standard price**; the same matrix inside the peak window costs
+double. Since `completion_tokens` includes reasoning tokens and reasoning is
+billed as output, the runaway is a direct cost multiplier: one transducer
+answer cost 121 output tokens non-thinking and 47,025 under adaptive — **388x
+the output spend for an identical graded result.**
 
 ## Recommendation
 
-<!-- FILLED IN BELOW -->
+**Thinking OFF as the agent-loop default on flash.** This confirms the
+shipped default recorded in ruling #34 addendum, on independent evidence.
+
+The evidence, in order of weight:
+
+1. **Thinking-high does not reliably terminate on code generation.** Four of
+   seven tasks returned *nothing* at 16K max-tokens, spending 100% of the
+   budget on reasoning. Pro did it too (t5, 240 s). An agent loop whose turns
+   silently return empty is worse than one that is occasionally wrong.
+   The `config/default.edn` provenance comment claiming 8192 "completed three
+   consecutive ordinary Seon task shapes while preserving thinking" does not
+   generalise: 16384 was insufficient for over half of this task set.
+2. **Non-thinking is not the weaker model on code.** 5/8 gates vs pro's 5/8,
+   at 1–2 s per turn against 20–40 s. On the transducer it produced the same
+   correct answer pro did, and on t2 it shipped working code where pro shipped
+   an NPE.
+3. **The latency ratio where both succeed is 10–100x** (t3: 1.6 s vs 36.0 s;
+   t1: 1.6 s vs adaptive's 455.2 s).
+
+**Adaptive: do not adopt.** Verdict (b) — it never stands down (27 reasoning
+tokens mean on trivial tasks vs thinking-high's 24), and it is undocumented.
+Ruling #34's condition for promoting it to the planner default is not met.
+
+**The one task class where the answer differs — keep a thinking
+configuration for code *reading*.** t7 is the only gate where non-thinking
+lost to thinking, and it is precisely the shape Seon cares about: tracing
+exact behaviour through real source. Non-thinking failed it the intuitive
+way, asserting what the code obviously *should* do. So:
+
+| path | setting | why |
+|---|---|---|
+| per-turn namespace agents | thinking **off** | code generation; 1–2 s turns, no correctness loss |
+| planner agents | thinking **on, effort high** | multi-step derivation; t6/t7 shape |
+| code comprehension / audit | thinking **on** | the one measured class where off is wrong |
+| bug-hunting over real source | thinking **off** | 3/3 confirmed-vs-falsified at 10–15 s per namespace |
+
+**If thinking is on anywhere, `max_tokens` must be ≥ 32768** and the request
+builder must treat `finish_reason: length` with empty content as a hard
+failure to retry non-thinking, not as an empty reply. That single guard is
+what stands between the runaway and a silently dead turn.
+
+## Falsifiable gaps in this evidence
+
+Honest limits, so nobody over-reads the table:
+
+- One sample per cell. The correctness gates are executed, not sampled, but
+  a borderline cell could flip on a re-run.
+- `temperature: 0` was sent on all main-matrix calls and is silently ignored
+  in thinking mode, so thinking cells are one draw from a default-temperature
+  distribution while non-thinking cells are deterministic.
+- `reasoning_effort: "low"` was not measured. Flash maps `low`→`low` (only
+  pro collapses it), so it is a real dial and plausibly the setting that
+  keeps t7's win without t1's runaway. **This is the highest-value follow-up**
+  and the one number this document is missing.
+- `schema.cljc` (2548 lines) was cut from the interrogation after exceeding
+  four minutes on a single non-thinking call; the interrogation covers four
+  namespaces, and the thinking arm of that comparison was not run.
