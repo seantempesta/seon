@@ -1,0 +1,48 @@
+---
+type: issue
+status: open
+tags: [issue, sci, schema, eval]
+---
+
+# Every contracted `defn` rebuilds the whole schema projection (~21-30 ms)
+
+Measured 2026-08-01 (`tmp/sci-session/probe3_defn_cost.clj`,
+`probe2_replay.clj`, `probe6_scale.clj`, fresh `clojure -M:dev` JVM, own
+store root — no live cluster touched):
+
+| Form through `seon.sci.eval/evaluate` | Median |
+|---|---|
+| `(def q1 42)` | 0.13 ms |
+| `(defn p9 [x] (inc x))` (no contract) | 0.32 ms |
+| `(defn h1 {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))` | **21.6-30.5 ms** |
+| `seon.sci.reader/read` of that same source | 0.31 ms |
+| `seon.program/declaration-row` | 0.004 ms |
+| `seon.schema/projection-with-function-contract` | **44.6 ms** |
+
+The whole cost is `projection-with-function-contract`
+(`src/seon/schema.cljc:1965-1991`), which calls `build-projection` over
+**every registered schema form** to admit one function contract. It is
+O(registry) per agent `defn`, paid inside the armed boundary on the
+`:compute` workload.
+
+Consequences:
+
+- the one persistence rule we teach agents (`defn` + `:malli/schema`
+  persists) is ~90x more expensive than any other form an agent writes;
+- 20 contracted defns cost 610 ms while 200 ordinary forms cost 68 ms;
+- it dominates any replay-on-wake design
+  (`docs/prds/sci-execution-runtime/research/sci-session-persistence-2026-08-01.md`)
+  and it will dominate the grader's surface-preparation runs, which are
+  contracted defns almost exclusively.
+
+Expected owner: `seon.schema`. The projection is a derived value built
+from forms + function contracts; adding one contract should be an
+incremental validation of that contract against the existing projection,
+not a whole-registry rebuild.
+
+Acceptance: a contracted `defn` through the door costs the same order as
+an uncontracted one (target < 2 ms at the current registry size), the
+admission semantics are unchanged (a bad contract is still refused with
+the same error), and a recurring test pins the cost class (e.g. the
+per-form cost of a contracted defn stays within a small multiple of an
+uncontracted one at a registry size the test constructs).
