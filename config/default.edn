@@ -142,14 +142,29 @@
  :seon.config.ai/model "deepseek-v4-flash"
 
  ; Unit: maximum provider completion tokens, including reasoning tokens.
- ; Provenance: thinking default-on interim; flash-bench calibration pending.
+ ; Provenance: interim 65,536 while flash-bench calibration settles the
+ ; optimized non-thinking parameter set required by owner ruling #34.
  ; The former 8,192 default retained the same starvation class already seen
  ; at 4,096, so the live default must carry ample reasoning + reply headroom.
  :seon.config.ai/max-tokens 65536
 
- ; Absence is intentional: DeepSeek v4 Flash defaults thinking ON at effort
- ; high. A sparse overlay may set :disabled or an explicit :low/:high/:max.
- :seon.config.ai/thinking :seon.config/absent
+ ; Explicitly disabled by owner ruling #34: ordinary per-turn agents optimize
+ ; for reasonably smart, fast, and cheap work; planners opt into thinking with
+ ; an agent-entity override. The flash-quality-interrogation-2026-08-01 bench
+ ; measured 9.8 s non-thinking versus 21.3 s thinking-high median ($0.0003
+ ; versus $0.0007 off-peak).
+ :seon.config.ai/thinking :disabled
+
+ ; The optional request controls inherit provider behavior until the flash
+ ; calibration provides an evidence-backed shipped value. Explicit absence is
+ ; a decision and never becomes a stored nil.
+ :seon.config.ai/temperature :seon.config/absent
+ :seon.config.ai/top-p :seon.config/absent
+ :seon.config.ai/frequency-penalty :seon.config/absent
+ :seon.config.ai/presence-penalty :seon.config/absent
+ :seon.config.ai/stop :seon.config/absent
+ :seon.config.ai/response-format :seon.config/absent
+ :seon.config.ai/extra-body-edn :seon.config/absent
 
  ; Unit: the NAME of an environment variable. Never the credential —
  ; the key is read at the leaf, never becomes a datom, never enters Git.

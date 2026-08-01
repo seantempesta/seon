@@ -74,9 +74,13 @@
           (when (config-dial? identity definition)
             (let [optional?
                   (true? (:seon.config/optional
+                          (schema.form/attr-form-properties definition)))
+                  per-agent?
+                  (true? (:seon.config/per-agent
                           (schema.form/attr-form-properties definition)))]
               {:seon.schema.edn/identity identity
-               :seon.schema.edn/optional? optional?}))))
+               :seon.schema.edn/optional? optional?
+               :seon.schema.edn/per-agent? per-agent?}))))
        (sort-by (comp str :seon.schema.edn/identity))
        vec))
 
@@ -96,17 +100,27 @@
   [forms]
   (let [dials (config-dial-entries forms)
         manifest-entries (mapv #(config-map-entry % true) dials)
-        effective-entries (mapv #(config-map-entry % false) dials)]
+        effective-entries (mapv #(config-map-entry % false) dials)
+        agent-overlay-entries
+        (into []
+              (comp
+               (filter :seon.schema.edn/per-agent?)
+               (map (fn [{::keys [identity]}]
+                      [identity {:optional true} identity])))
+              dials)]
     (if (or (seq dials)
             (some #(contains? forms %)
                   [:seon.config/manifest
                    :seon.config/effective
+                   :seon.config/agent-overlay
                    :seon.config/entity]))
       (assoc forms
              :seon.config/manifest
              (into [:map {:closed true}] manifest-entries)
              :seon.config/effective
              (into [:map {:closed true}] effective-entries)
+             :seon.config/agent-overlay
+             (into [:map {:closed true}] agent-overlay-entries)
              :seon.config/entity
              (into
               [:map {:closed true :seon.db/entity true}

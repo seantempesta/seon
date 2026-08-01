@@ -82,16 +82,18 @@
  ; environment variable that holds it, which is what keeps a key out of
  ; the database and out of Git.
  :seon.config.ai/endpoint
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/per-agent true}]
 
  :seon.config.ai/model
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/per-agent true}]
 
  ; The positive output budget sent to the provider. It bounds thinking
  ; and visible completion together; the HTTP deadline remains only the
  ; backstop for genuinely unobservable remote state.
  :seon.config.ai/max-tokens
- :seon.ai/max-tokens
+ [:and {:seon.config/per-agent true
+        :seon.ai/wire [["max_tokens" clojure.core/identity]]}
+  :seon.ai/max-tokens]
 
  ; Optional by design: absence sends no thinking field, so the provider owns
  ; its documented default (DeepSeek v4 Flash is default-on/high). :disabled
@@ -102,16 +104,73 @@
  ; early-August mapping update. Seon exposes low/high/max and lets the provider
  ; perform its model-specific mapping; there is no model-name branch here.
  :seon.config.ai/thinking
- [:and {:seon.config/optional true} :seon.ai/thinking]
+ [:and {:seon.config/optional true
+        :seon.config/per-agent true
+        :seon.ai/wire
+        [["thinking" seon.ai/thinking-wire-value]
+         ["reasoning_effort" seon.ai/reasoning-effort-wire-value]]}
+  :seon.ai/thinking]
+
+ ; OpenAI-compatible request settings are optional so absence leaves the
+ ; provider untouched. Every one is uniformly overridable on an agent entity;
+ ; the one derived overlay follows these registrations without a dial roster.
+ :seon.config.ai/temperature
+ [:double {:min 0.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["temperature" clojure.core/identity]]}]
+
+ :seon.config.ai/top-p
+ [:double {:min 0.0 :max 1.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["top_p" clojure.core/identity]]}]
+
+ :seon.config.ai/frequency-penalty
+ [:double {:min -2.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire
+           [["frequency_penalty" clojure.core/identity]]}]
+
+ :seon.config.ai/presence-penalty
+ [:double {:min -2.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire
+           [["presence_penalty" clojure.core/identity]]}]
+
+ :seon.config.ai/stop
+ [:vector {:min 1 :max 4
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["stop" clojure.core/identity]]}
+  [:string {:min 1}]]
+
+ :seon.config.ai/response-format
+ [:enum {:seon.config/optional true
+         :seon.config/per-agent true
+         :seon.ai/wire
+         [["response_format" seon.ai/response-format-wire-value]]}
+  :json-object]
+
+ ; An EDN map string is the escape hatch for vendor request parameters whose
+ ; first-class dial has not landed yet. The request builder validates its map
+ ; shape and protected keys before any paid call.
+ :seon.config.ai/extra-body-edn
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/extra-body true}]
 
  :seon.config.ai/api-key-variable
- [:string {:min 1}]
+ [:string {:min 1 :seon.config/per-agent true}]
 
  ; The deadline on a genuinely unobservable external call — the one
  ; place a clock is the honest mechanism rather than a stand-in for an
  ; event we could have watched.
  :seon.config.ai/timeout-ms
- [:int {:min 1}]
+ [:int {:min 1 :seon.config/per-agent true}]
 
  ; ---------------------------------------------------------------------
  ; THE BACKUP DESCRIPTOR ROW — the four dials above, a second time, for
@@ -133,16 +192,24 @@
  ; role or per-agent overrides arrive, THAT is the change that earns the
  ; entity rows.
  :seon.config.ai.backup/model
- [:string {:min 1 :seon.config/optional true}]
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
 
  :seon.config.ai.backup/endpoint
- [:string {:min 1 :seon.config/optional true}]
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
 
  :seon.config.ai.backup/api-key-variable
- [:string {:min 1 :seon.config/optional true}]
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
 
  :seon.config.ai.backup/timeout-ms
- [:int {:min 1 :seon.config/optional true}]
+ [:int {:min 1
+        :seon.config/optional true
+        :seon.config/per-agent true}]
 
  ; ---------------------------------------------------------------------
  ; THE BACKOFF STRATEGY. It runs on exactly ONE path — an unpaid,
@@ -150,22 +217,23 @@
  ; the schedule is a value a seeded property pins rather than a constant
  ; in a call site.
  :seon.config.ai.retry/base-delay-ms
- :seon.ai.retry/base-delay-ms
+ [:and {:seon.config/per-agent true} :seon.ai.retry/base-delay-ms]
 
  :seon.config.ai.retry/multiplier
- :seon.ai.retry/multiplier
+ [:and {:seon.config/per-agent true} :seon.ai.retry/multiplier]
 
  :seon.config.ai.retry/jitter-fraction
- :seon.ai.retry/jitter-fraction
+ [:and {:seon.config/per-agent true} :seon.ai.retry/jitter-fraction]
 
  :seon.config.ai.retry/maximum-delay-ms
- :seon.ai.retry/maximum-delay-ms
+ [:and {:seon.config/per-agent true} :seon.ai.retry/maximum-delay-ms]
 
  :seon.config.ai.retry/maximum-retries
- :seon.ai.retry/maximum-retries
+ [:and {:seon.config/per-agent true} :seon.ai.retry/maximum-retries]
 
  :seon.config.ai.retry/maximum-total-delay-ms
- :seon.ai.retry/maximum-total-delay-ms
+ [:and {:seon.config/per-agent true}
+  :seon.ai.retry/maximum-total-delay-ms]
 
  :seon.config/apply-request
  [:map {:closed true}

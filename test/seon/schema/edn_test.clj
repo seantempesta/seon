@@ -178,10 +178,12 @@
     (try
       (schema/register!
        scratch
-       [:boolean {:seon.config/default false}])
+       [:boolean {:seon.config/default false
+                  :seon.config/per-agent true}])
       (testing "the public registration producer derives every contract"
         (is (contains? (entries :seon.config/manifest) scratch))
         (is (contains? (entries :seon.config/effective) scratch))
+        (is (contains? (entries :seon.config/agent-overlay) scratch))
         (is (contains? (entries :seon.config/entity) scratch))
         (is (contains? (set (schema/canonical-database-attributes)) scratch))
         (is (= [scratch
@@ -189,6 +191,9 @@
                 [:or scratch [:= :seon.config/absent]]]
                (get (entries :seon.config/manifest) scratch))
             "manifest derivation retains both optionality and explicit absence")
+        (is (= [scratch {:optional true} scratch]
+               (get (entries :seon.config/agent-overlay) scratch))
+            "agent absence inherits through one derived optional entry")
         (is (= false (get (config/default-decisions) scratch))
             "the same registration is defaults-checkable"))
       (testing "structural config attributes never become manifest entries"
@@ -200,3 +205,33 @@
         (schema/restore-state! state)))
     (is (not (schema/registered? scratch))
         "the scratch registration is removed")))
+
+(deftest per-agent-config-overlay-is-one-derived-optional-surface
+  (let [forms (schema/registered-schemas)
+        per-agent-identities
+        (into #{}
+              (keep (fn [[identity definition]]
+                      (when (true? (:seon.config/per-agent
+                                    (schema.form/attr-form-properties
+                                     definition)))
+                        identity)))
+              forms)
+        overlay-entries
+        (schema.form/map-entries
+         (schema/schema-definition :seon.config/agent-overlay))
+        overlay-identities (into #{} (map first) overlay-entries)
+        ai-dial-identities
+        (into #{}
+              (filter #(str/starts-with? (namespace %)
+                                         "seon.config.ai"))
+              (map first
+                   (schema.form/map-entries
+                    (schema/schema-definition :seon.config/manifest))))]
+    (is (= per-agent-identities overlay-identities)
+        "the overlay is derived from per-agent registrations without a list")
+    (is (= ai-dial-identities per-agent-identities)
+        "every registered AI dial is uniformly per-agent overridable")
+    (is (every? (fn [[_ properties _]]
+                  (= {:optional true} properties))
+                overlay-entries)
+        "agent absence means inheritance for every override")))

@@ -45,7 +45,11 @@
            (:seon.config.flow.compute/concurrency effective)))
     (is (not (contains? effective :seon.config.web/port))
         "an explicit absence decision resolves without storing nil")
-    (is (not (contains? effective :seon.config.ai.backup/model)))))
+    (is (not (contains? effective :seon.config.ai.backup/model)))
+    (is (= :disabled (:seon.config.ai/thinking effective))
+        "the shipped Flash posture explicitly disables thinking")
+    (is (not (contains? effective :seon.config.ai/temperature))
+        "optional request dials resolve absence without storing markers")))
 
 (deftest one-compiler-applies-default-overlay-environment-precedence
   (let [compiled
