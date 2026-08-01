@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: blocker
 tags: [issue, sci, eval, agent]
 ---
 

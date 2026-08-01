@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: friction
 tags: [issue, sci, eval]
 ---
 

@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (6)
+## Blocker (8)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
+| [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Make the agent page's live feed paint the page a GET already renders](agent-page-live-feed-paints-nothing.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
@@ -27,10 +29,15 @@ See `README.md` for the convention.
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (28)
+## Friction (33)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
+| [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
+| [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
+| [Make `seon.sci.eval` hot-reloadable](sci-eval-namespace-is-not-hot-reloadable.md) | friction | Core |
+| [Wire `:seon.render.value/options` so presentation decouples from admission caps](render-value-options-declared-but-unwired.md) | friction | caps-blob-print wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Derive the reachable blob set from the schema and include history](blob-reachability-names-one-attribute-by-hand.md) | friction | store/GC fix lane |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
