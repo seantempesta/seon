@@ -1789,6 +1789,29 @@ may reintroduce a shadow build into the dev feedback path.
   containment (`issues/acquire-has-no-per-row-containment.md`) is still
   required, but as cold-path robustness rather than the fix for a
   per-turn hazard.
+  **Finding 2026-08-01 (stateless resume, PROVEN — owner decision open):**
+  `plan/stateless-resume-design-2026-08-01.md` demonstrated a fresh JVM
+  restoring a session end to end — turn-10 forms evaluating against a
+  turn-1 blob-backed 200,000-element vector, with nothing from the
+  writing process surviving. Fact model: one `:seon.code.def` entry per
+  live `[namespace name]` (a fifth `seon.program/shapes` family, not a
+  second mechanism) carrying exactly one of `/value-edn`, `/blob`+`/size`,
+  `/source` (the pure defining form), or `/unrestorable` with an honest
+  reason. THE DEFINING FORM IS THE TRUTH AND A STORED VALUE IS A CACHE —
+  falsified: "storable iff the admitted projection has no opaque marker"
+  wrongly admits lists, lazy-seqs, sorted colls, queues and
+  metadata-carrying values that do not round-trip, while re-evaluating
+  `(def s (sorted-set 3 1 2))` is exact. Interning every image name as an
+  unbound Var FIRST makes install order irrelevant — no dependency graph
+  needed. Corrects the prior lane: end-to-end blob rehydration is 45-60 ms
+  (bget + read-string) versus 9.5 ms to recompute that vector, so the blob
+  decision is a DERIVED comparison of the receipt's recorded eval duration
+  against the read cost, never a tuned threshold. Also found: a `def`
+  records NOTHING today (the receipt stores the Var, not the value), so
+  the current transcript cannot restore a session even in principle.
+  OWNER DECISION OPEN: whether slice 1 ships FORMS ONLY (smaller, strictly
+  more faithful, still passes the 200k acceptance) with the value/blob
+  path as a later accretion.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits

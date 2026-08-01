@@ -40,9 +40,27 @@ LANDED TODAY (all committed, branch pushed at checkpoints):
 
 IN FLIGHT at write time: the caps-blob-print wave (steps 2-6: options
 wiring, cap raise, `seon.blob` + receipt accretion with the konserve-GC
-reachability union, derived `capped?`, print-floor wiring); the seon.db
-remaining slices; three design lanes (stateless resume, per-cluster base
-contexts, and the already-returned print-path/parity/grader research).
+reachability union, derived `capped?`, print-floor wiring); the REPL
+parity gate (writing the 59-row mined checklist as tests that assert
+STOCK behavior, so our failings show as named divergences); `seon.db`
+slices (`pull-many` landed 6b5acdcce; `entity`/`datoms`/migration
+paused until the wave frees the shared schema/config paths).
+
+THE THREE DESIGN LANES RETURNED — all measured, all with slice 1s ready:
+- `plan/per-cluster-base-context-2026-08-01.md`: per-cluster `sci/init`
+  costs 0.1 ms / 20 KB (20 in one JVM = 2 ms), so ruling #27's boundary
+  is nearly free. Corrected two recorded claims: `sci/fork` is NOT the
+  sharing mechanism (host Vars do not propagate — the live per-cluster
+  ctx is), and the "489 ms substrate" was `acquire!` (283 ms, 74% of it
+  rebuilding the schema projection), not `sci/init`. NOTHING in
+  `acquire!` is genuinely per-turn state ⇒ ruling #29's payoff is
+  283 ms leaving EVERY turn for ~215 ms once at boot. A 17-var writable
+  residue still crosses independent inits (metadata fix in our sci fork).
+- `plan/stateless-resume-design-2026-08-01.md`: proven end to end in a
+  fresh JVM; the `:seon.code.def` fact family; forms-are-truth; order
+  irrelevance via pre-interning; the blob decision derived, not tuned.
+- `plan/print-path-design-2026-08-01.md`: SEALED (ruling #26) and
+  amended by the parity mining.
 
 THE RESEARCH CORPUS FROM TODAY (read these before touching their seams):
 `research/sci-repl-realism-audit-2026-08-01.md` (21 divergences),
