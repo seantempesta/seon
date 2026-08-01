@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, runtime]
 ---
@@ -40,3 +40,26 @@ occurs if something re-wakes the agent, and a refusal is not a wake.
 One recurring test: a turn of all-refused forms is followed (under the
 chosen rule) by a turn whose context contains the refusal, without any
 external message; episode cap still bounds the loop.
+
+## Resolution — 2026-07-31
+
+Ruling #22 selected presence-derived continuation for **any** turn containing
+at least one lint-refused form, including a mixed successful/refused turn.
+`02cc0b2ec` derives the next situation from the latest closed run's committed
+receipt values at `seon.cluster.work`; it reuses the original trigger identity
+and introduces no state, timer, message, or new cap. `3f29a6aff` proves the
+per-agent graph self-wakes, and `37c31dba1` keeps that proof behavioral under
+the compact walk.
+
+Recurring evidence is green: the exact graph falsifier passed 1 test / 15
+assertions, while work derivation plus the repaired restart proof passed 10
+tests / 89 assertions. `dee80767b` also removed the restart test's obsolete
+prompt marker and observes the corrective run from database facts.
+
+The DeepSeek drive in
+[[refusal-continuation-notes-2026-07-31]] supplies live proof. Three consecutive
+`context-mvp` runs reused trigger entity `4315`; the second and third contexts
+rendered the preceding `:seon.cluster.loop/lint-rejected` findings with no
+intervening message. The broader self-message MVP remained red because the
+model sent to `root`; that separate harness/exit defect does not reopen the
+refusal-continuation contract.
