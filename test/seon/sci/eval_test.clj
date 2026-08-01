@@ -105,10 +105,25 @@
     (is (= 125250 (:seon.sci.admit/value evaluation)))
     (testing "fn-entries counted the interpreted work"
       (is (pos? (:seon.eval/fn-entries record))))
+    (is (zero? (:seon.eval/host-interop-count record)))
     (is (= :ok (:seon.eval/outcome record)))
     (is (int? (:seon.eval/duration-ms record)))
     (is (int? (:seon.eval/allocated-bytes record))
         "-1 is honest when the platform cannot measure; nil is not")))
+
+(deftest host-interop-is-observed-during-analysis
+  (let [plain (run "(.toUpperCase \"x\")" 10000)
+        macro-expanded
+        (run "(do (defmacro host-call [x] (list '.toUpperCase x))
+                  (def f (fn [] (host-call \"x\"))))"
+             10000)]
+    (is (= 1 (get-in plain
+                     [:seon.sci.admit/record
+                      :seon.eval/host-interop-count])))
+    (is (= 1 (get-in macro-expanded
+                     [:seon.sci.admit/record
+                      :seon.eval/host-interop-count]))
+        "the fact follows SCI macro expansion rather than source syntax")))
 
 (deftest agent-print-vars-are-captured-before-sci-bindings-unwind
   (let [evaluation

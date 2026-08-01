@@ -15,12 +15,13 @@
  :seon.eval/allocated-bytes :int
  :seon.eval/duration-ms :int
  :seon.eval/fn-entries :int
+ :seon.eval/host-interop-count [:int {:min 0}]
  :seon.eval/outcome [:enum :ok :time :error]
 
  :seon.sci.admit/caps [:map {:closed true} [:seon.config.eval.result/max-depth :seon.config.eval.result/max-depth] [:seon.config.eval.result/max-collection :seon.config.eval.result/max-collection] [:seon.config.eval.result/max-string :seon.config.eval.result/max-string] [:seon.config.eval.result/max-nodes :seon.config.eval.result/max-nodes]]
  :seon.sci.admit/capped? :boolean
  :seon.sci.admit/interrupt-fn [:fn {:gen/gen seon.sci.admit/interrupt-fn-generator} seon.sci.admit/interrupt-fn?]
- :seon.sci.admit/record [:map {:closed true} [:seon.eval/fn-entries :seon.eval/fn-entries] [:seon.eval/duration-ms :seon.eval/duration-ms] [:seon.eval/allocated-bytes :seon.eval/allocated-bytes] [:seon.eval/outcome :seon.eval/outcome]]
+ :seon.sci.admit/record [:map {:closed true} [:seon.eval/fn-entries :seon.eval/fn-entries] [:seon.eval/host-interop-count :seon.eval/host-interop-count] [:seon.eval/duration-ms :seon.eval/duration-ms] [:seon.eval/allocated-bytes :seon.eval/allocated-bytes] [:seon.eval/outcome :seon.eval/outcome]]
  ; :any twice, both at the one genuine third-party boundary: IN, whatever
  ; object a sci evaluation produced; OUT, the projection, whose grammar is
  ; the admit docstring's and is deliberately NOT a second predicate

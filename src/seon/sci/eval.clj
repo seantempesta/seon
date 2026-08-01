@@ -159,6 +159,7 @@
         ctx
         (sci/init
         {:interrupt-fn (::interrupt-fn guard)
+         :host-interop-observer (::host-interop-observer guard)
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -280,9 +281,16 @@
                          (zero? (bit-and entrance-count 1023)))
                 (aset sampled 0
                       (long (- (allocated-bytes)
-                               allocated-at-start)))))))]
+                               allocated-at-start)))))))
+        host-interop-observer
+        (fn []
+          (when-let [armed (.get ^ThreadLocal thread-arm)]
+            (let [^longs observations (::host-interop-observations armed)]
+              (aset observations 0
+                    (long (unchecked-inc (aget observations 0)))))))]
     {::thread-arm thread-arm
-     ::interrupt-fn interrupt-fn}))
+     ::interrupt-fn interrupt-fn
+     ::host-interop-observer host-interop-observer}))
 
 (defonce ^:private process-interrupt-guard
   (delay (interrupt-guard)))
@@ -306,6 +314,7 @@
                   {:seon.error/kind ::already-armed})))
       (let [entries (long-array 1)
             sampled (long-array 1)
+            host-interop-observations (long-array 1)
             reached (AtomicBoolean. false)
             outcome (volatile! nil)
             started-at (System/nanoTime)
@@ -313,6 +322,7 @@
             measurable (not (neg? allocated-at-start))
             armed {::entries entries
                    ::sampled sampled
+                   ::host-interop-observations host-interop-observations
                    ::reached reached
                    ::outcome outcome
                    ::started-at started-at
@@ -334,6 +344,8 @@
              ::record
              (fn [final-outcome]
                {:seon.eval/fn-entries (aget entries 0)
+                :seon.eval/host-interop-count
+                (aget host-interop-observations 0)
                 :seon.eval/duration-ms
                 (quot (- (System/nanoTime) started-at) 1000000)
                 :seon.eval/allocated-bytes
