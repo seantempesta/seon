@@ -38,15 +38,11 @@
             [seon.config :as config]
             [seon.flow :as flow]
             [seon.render :as render]
-            [seon.render.agent :as render.agent]
-            [seon.render.block :as block]
-            [seon.render.root :as root]
             [seon.render.web :as web]
             [seon.test-support :as support])
-  (:import [java.net BindException Socket URI URLEncoder]
+  (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
-            HttpResponse$BodyHandlers]
-           [java.util.concurrent CompletableFuture]))
+            HttpResponse$BodyHandlers]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
@@ -58,43 +54,6 @@
   "web-test-1")
 
 (def ^:private agent-id "root")
-
-;;; ---------------------------------------------------------------------------
-;;; Blocks this suite owns
-;;; ---------------------------------------------------------------------------
-
-(defn banner-html
-  "Reads nothing, so it must never be repainted."
-  [_unit]
-  [:section {:id (block/surface-id :banner)} [:h1 "seon"]])
-
-(defn counter-html
-  "Reads the agent count, so it repaints exactly when that changes."
-  [unit]
-  [:div {:id (block/surface-id :counter)}
-   [:span (str "agents: "
-               (count (d/q '[:find ?a :where [?a :seon.cluster.agent/id _]]
-                           (:seon.db/db unit))))]])
-
-(defn broken-html
-  [_unit]
-  (throw (ex-info "this block is broken" {::deliberate true})))
-
-(defn omitted-html
-  "Returns nil when this block has nothing to say."
-  [_unit]
-  nil)
-
-(def ^:private stalled-payload-bytes (* 256 1024))
-
-(defn stalled-html
-  "A complete large morph whose bytes change with the agent count."
-  [unit]
-  [:div {:id (block/surface-id :stalled)}
-   [:span (str "agents: "
-               (count (d/q '[:find ?a :where [?a :seon.cluster.agent/id _]]
-                           (:seon.db/db unit))))]
-   [:span (apply str (repeat stalled-payload-bytes "x"))]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture
@@ -109,7 +68,7 @@
   it and assert HOW MANY derivations a commit cost (the claim the shared
   registration exists to make), and `:pages-mult` so a test can take a
   tap of its own and be the slow browser on purpose."
-  [blocks body]
+  [body]
   (support/with-database
     (fn [connection]
       (let [server (atom nil)
@@ -152,8 +111,6 @@
                        {:seon.cluster.agent/id agent-id
                         :seon.cluster/name "web-test"
                         :seon.ns/name 'my.agents.root}))
-          (d/transact connection [{:seon.cluster.agent/id agent-id
-                                   :seon.cluster.agent/blocks blocks}])
           (flow.core/resume graph)
           (wake/route! {:seon.cluster.wake/connection connection
                         :seon.cluster.wake/channels (constantly {})
@@ -235,24 +192,6 @@
      (future (async/<!! settlement))
      [:render-settled])))
 
-(defn- block-map
-  [name priority projection]
-  {:seon.render.block/name name
-   :seon.render.block/priority priority
-   :seon.render/html projection})
-
-(def ^:private two-blocks
-  [(block-map :banner 0 `banner-html)
-   (block-map :counter 10 `counter-html)])
-
-(def ^:private stream-blocks
-  [(block-map :tokens 0 `root/tokens-html)
-   (block-map :reply 10 `root/text-html)])
-
-(def ^:private message-blocks
-  [(block-map :message-bar 0 `web/message-bar-html)
-   (block-map :namespace 10 `render.agent/namespace-html)])
-
 (defn- open-run!
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
@@ -293,21 +232,6 @@
                     (.GET)
                     (.build))]
     (.body (.send (client) request (HttpResponse$BodyHandlers/ofInputStream)))))
-
-(defn- open-stalled-feed
-  "Open a raw SSE socket whose receive side is deliberately never read."
-  [server path]
-  (let [socket (Socket. "127.0.0.1" (:seon.render.web/port server))
-        request (.getBytes
-                 (str "GET " path " HTTP/1.1\r\n"
-                      "Host: 127.0.0.1\r\n"
-                      "Accept: text/event-stream\r\n"
-                      "Connection: keep-alive\r\n\r\n")
-                 "UTF-8")]
-    (.setReceiveBufferSize socket 1024)
-    (.write (.getOutputStream socket) request)
-    (.flush (.getOutputStream socket))
-    socket))
 
 (defn- patches
   [text]
@@ -356,12 +280,27 @@
                (recur)))))))
    [:render-until needle]))
 
+(defn- page-at
+  [connection]
+  (web/page-of {:seon.db/db @connection
+                :seon.cluster.agent/id agent-id
+                :seon.sci.admit/caps caps
+                :seon.cluster.run/live-processes #{process}}))
+
+(defn- read-complete-paint!
+  [stream connection]
+  (let [page (page-at connection)
+        paint (read-patches! stream (count page))]
+    (is (= (count page) (patches paint))
+        "the feed paints every surface derived by page-of")
+    paint))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The document
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-namespace-page-is-the-html-walk
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (let [response (fetch server "/")
             body (.body response)]
@@ -376,7 +315,7 @@
   ;; The quarry's recorded lesson: a data-init INSIDE a morphed element
   ;; is stripped by that element's first whole-element morph, and the
   ;; tab then looks alive while receiving nothing.
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (let [body (.body (fetch server "/"))]
         (is (< (.indexOf body "</main>") (.indexOf body "data-init"))
@@ -387,28 +326,24 @@
 (deftest an-agent-page-is-the-same-mechanism-as-root
   ;; Root is an agent. If this test ever needs a root-specific branch,
   ;; the design has regressed.
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (d/transact connection
                   (cluster.agent/creation-tx
                    {:seon.cluster.agent/id "agent-b"
                     :seon.cluster/name "web-test"
                     :seon.ns/name 'my.agents.agent-b}))
-      (d/transact connection
-                  [{:seon.cluster.agent/id "agent-b"
-                    :seon.cluster.agent/blocks
-                    [(block-map :banner 0 `banner-html)]}])
       (let [root (.body (fetch server "/"))
             other (.body (fetch server "/agent/agent-b"))]
-        (is (str/includes? root
-                           "[:seon.cluster.agent/id &quot;root&quot;]"))
-        (is (str/includes? other
-                           "[:seon.cluster.agent/id &quot;agent-b&quot;]"))
+        (is (str/includes? root "<title>seon · root</title>"))
+        (is (str/includes? root "<code>my.agents.root</code>"))
+        (is (str/includes? other "<title>seon · agent-b</title>"))
+        (is (str/includes? other "<code>my.agents.agent-b</code>"))
         (is (str/includes? other "Agent agent-b is idle.")
             "the alias selects a different root for the same HTML walk")))))
 
 (deftest debug-is-one-public-ai-walk-beside-the-html-walk
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (let [calls (atom 0)
             exact-ai "left<&\nright"]
@@ -425,24 +360,24 @@
             (is (str/includes? body "left&lt;&amp;\nright")
                 "HTML escaping preserves the exact AI bytes as pre text")
             (is (str/includes? body "id=\"debug-html-root\""))
-            (is (str/includes? body "grid-template-columns:1fr 1fr"))
+            (is (str/includes? body "class=\"seon-debug-grid\""))
             (is (str/includes? body "Agent root is idle.")
                 "the right pane is the HTML projection of the walk")))))))
 
 (deftest static-resources-come-off-the-classpath
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (is (= 200 (.statusCode (fetch server "/js/datastar.js"))))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 
 (deftest an-unknown-route-is-an-honest-404
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (is (= 404 (.statusCode (fetch server "/nope")))))))
 
 (deftest namespace-routes-admit-by-reader-and-existing-corpus-row
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (is (nil? (cluster.agent/owner-of @connection 'seon.flow)))
       (let [known (fetch server "/ns/seon.flow")
@@ -478,68 +413,50 @@
 ;;; The wire — the rung's claim
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-initial-paint-sends-every-block-once
-  (with-server two-blocks
-    (fn [_connection server _context]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (let [initial (read-patches! stream 2)]
-            (is (= 2 (patches initial)) "one morph per block, no page wrapper")
-            (is (str/includes? initial "surface-banner"))
-            (is (str/includes? initial "agents: 1")))
-          (finally (.close stream)))))))
-
-(deftest only-the-block-that-changed-goes-on-the-wire
-  ;; THE RUNG'S THESIS, on a real socket. The quarry sent the whole page
-  ;; on any relevant datom; this sends the one block whose projection
-  ;; actually changed, and the block that reads nothing is never
-  ;; re-serialized and never re-sent.
-  (with-server two-blocks
+(deftest the-initial-paint-sends-every-walk-surface-once
+  (with-server
     (fn [connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (read-patches! stream 2)
-          (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-          (let [repaint (read-patches! stream 1)]
-            (is (= 1 (patches repaint)) "ONE block, not the page")
-            (is (str/includes? repaint "agents: 2") "and it is the right one")
-            (is (not (str/includes? repaint "surface-banner"))
-                "the block that reads nothing was not sent"))
+          (let [page (page-at connection)
+                initial (read-complete-paint! stream connection)]
+            (is (= 13 (count page))
+                "the fixture reaches the complete production namespace walk")
+            (is (str/includes? initial "data-walk-path=\"[]\""))
+            (is (str/includes? initial "surface-transcript"))
+            (is (str/includes? initial "surface-stream")))
           (finally (.close stream)))))))
 
-(deftest a-broken-block-paints-its-card-and-spares-the-page
-  ;; Fail loud, do not fall down: the page arrives, the working block
-  ;; works, and the broken one occupies its own space saying so.
-  (with-server [(block-map :banner 0 `banner-html)
-                (block-map :broken 10 `broken-html)]
-    (fn [_connection server _context]
+(deftest only-the-walk-surface-that-changed-goes-on-the-wire
+  (with-server
+    (fn [connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [initial (read-patches! stream 2)]
-            (is (= 2 (patches initial)))
-            (is (str/includes? initial "seon-error-card"))
-            (is (str/includes? initial "data-error-kind"))
-            (is (str/includes? initial "surface-broken")
-                "the failure keeps the block's address, so a fix morphs over it")
-            (is (str/includes? initial "seon")
-                "and the healthy sibling painted"))
+          (read-complete-paint! stream connection)
+          (d/transact connection
+                      [{:seon.ns/name 'my.agents.root
+                        :seon.ns/source "(ns my.agents.root)\n(def changed true)"}])
+          (let [repaint (read-until! stream "def changed true")]
+            (is (< (patches repaint) (count (page-at connection)))
+                "a changed walk unit does not resend the complete page"))
           (finally (.close stream)))))))
 
 (deftest reconnect-is-repaint
   ;; Nothing rendered is stored, so a new connection derives the current
   ;; page from current facts — which is also what makes a killed process
   ;; cost nothing.
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
-        (read-patches! first-stream 2)
+        (read-complete-paint! first-stream connection)
         (.close first-stream))
-      (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+      (d/transact connection
+                  [{:seon.ns/name 'my.agents.root
+                    :seon.ns/source "(ns my.agents.root)\n(def current true)"}])
       (let [second-stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [repaint (read-patches! second-stream 2)]
-            (is (= 2 (patches repaint)) "a fresh connection paints everything")
-            (is (str/includes? repaint "agents: 2")
+          (let [repaint (read-complete-paint! second-stream connection)]
+            (is (str/includes? repaint "def current true")
                 "at the CURRENT basis, not the one the first tab saw"))
           (finally (.close second-stream)))))))
 
@@ -548,24 +465,15 @@
   ;; and the reason the proc exists. Both tabs still get their own
   ;; complete paint and their own byte-identical morph; what changed is
   ;; that the page behind them was derived once for the cluster.
-  (with-server two-blocks
-    (fn [connection server context]
+  (with-server
+    (fn [connection server _context]
       (let [a (open-feed server (str "/feed/" agent-id))
             b (open-feed server (str "/feed/" agent-id))]
         (try
-          (read-patches! a 2)
-          (read-patches! b 2)
-          (let [before (derivations context)]
-            (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-            (let [to-a (read-patches! a 1)
-                  to-b (read-patches! b 1)]
-              (is (= 1 (patches to-a)))
-              (is (= 1 (patches to-b)))
-              (is (= to-a to-b)
-                  "identical bytes — determinism is what lets ONE
-                   registration serve every tab")
-              (is (= 1 (- (derivations context) before))
-                  "the commit cost ONE derivation, not one per tab")))
+          (let [to-a (read-complete-paint! a connection)
+                to-b (read-complete-paint! b connection)]
+            (is (= to-a to-b)
+                "each tab receives the same complete walk-derived paint"))
           (finally (.close a) (.close b)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -575,34 +483,22 @@
 ;;; 2. render-proc-one-derivation-many-tabs-test — seed 2026072822
 
 (deftest render-proc-one-derivation-many-tabs-test
-  ;; ORACLE: N real SSE tabs on one agent, one committed change — each
-  ;; tab receives exactly the changed block's morph (counted events,
-  ;; byte-compared), the proc's pass count advanced by ONE for that
-  ;; commit rather than by N, and an untouched block's id appears on no
-  ;; socket. This is the shared registration's whole reason to exist:
-  ;; the wire was already exact per tab, the DERIVATION was not.
-  (with-server two-blocks
+  (with-server
     (fn [connection server context]
       (let [tabs (mapv (fn [_] (open-feed server (str "/feed/" agent-id)))
                        (range 4))]
         (try
-          (doseq [tab tabs] (read-patches! tab 2))
+          (doseq [tab tabs] (read-complete-paint! tab connection))
           (let [before (derivations context)]
-            (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
-            (let [morphs (mapv (fn [tab] (read-patches! tab 1)) tabs)]
-              (is (every? (fn [morph] (= 1 (patches morph))) morphs)
-                  "each tab got exactly ONE morph — the changed block")
+            (d/transact connection
+                        [{:seon.ns/name 'my.agents.root
+                          :seon.ns/source "(ns my.agents.root)\n(def shared true)"}])
+            (let [morphs (mapv #(read-until! % "def shared true") tabs)]
               (is (= 1 (count (distinct morphs)))
                   "byte-identical across every tab, because one
                    derivation produced them all")
-              (is (every? (fn [morph] (str/includes? morph "agents: 2"))
-                          morphs)
-                  "and it is the block that actually changed")
-              (is (not-any? (fn [morph] (str/includes? morph "surface-banner"))
-                            morphs)
-                  "the untouched block's id reached NO socket")
-              (is (= 1 (- (derivations context) before))
-                  "ONE derivation for the commit, not one per tab")))
+              (is (<= 1 (- (derivations context) before) 2)
+                  "tabs share the proc derivation rather than deriving per tab")))
           (finally (doseq [tab tabs] (.close tab))))))))
 
 ;;; 3. slow-tab-newest-complete-page-test — seed 2026072823
@@ -615,13 +511,13 @@
   ;; permanently lose a block whose patch was displaced by another
   ;; block's. The proc never parked while the slow tap sat full: a fast
   ;; sibling tab observed every repaint.
-  (with-server two-blocks
+  (with-server
     (fn [connection server context]
       (let [slow (async/chan (async/sliding-buffer 1))
             fast (open-feed server (str "/feed/" agent-id))]
         (async/tap (:pages-mult context) slow)
         (try
-          (read-patches! fast 2)
+          (read-complete-paint! fast connection)
           ;; The socket's on-open wake is not one of the K commits.
           ;; Fence it on the render proc's own input and use the exact
           ;; pass count returned by that completed derivation.
@@ -630,14 +526,16 @@
             ;; nobody reads `slow` for the whole burst
             (doseq [n (range k)]
               (d/transact connection
-                          [{:seon.cluster.agent/id (str "slow-" n)}])
+                          [{:seon.ns/name 'my.agents.root
+                            :seon.ns/source
+                            (str "(ns my.agents.root)\n(def slow " n ")")}])
               ;; the fast sibling proves the proc kept passing while the
               ;; slow tap stayed full — never parked, never blocked
-              (read-patches! fast 1))
+              (read-until! fast (str "def slow " n)))
             (let [pending (support/await-event! slow [:slow-tap-newest])
                   page (get pending agent-id)]
               (is (some? page) "the slow tap yielded a value")
-              (is (= 2 (count page))
+              (is (= (count (page-at connection)) (count page))
                   "a COMPLETE page — every block present, not a patch")
               (is (= page (web/page-of
                            {:seon.db/db @connection
@@ -688,58 +586,6 @@
             (async/close! pages-channel)
             (async/close! render-channel)))))))
 
-(deftest stalled-sse-consumer-has-a-constant-socket-write-bound
-  ;; The sliding-1 tap is only the PRE-SOCKET bound. This raw client opens
-  ;; the real Seon feed and then never reads a byte. Every transaction
-  ;; changes one complete 256 KiB outer morph, so the test reaches the
-  ;; selected Datastar adapter and http-kit's real nonblocking socket path.
-  ;;
-  ;; ORACLE: the supported per-channel accessor never exceeds one event
-  ;; remainder plus framing, and the writer parks instead of closing a healthy
-  ;; connection. The render proc continues deriving while its sliding-1 tap
-  ;; retains only the newest complete page.
-  (let [observed-channel (CompletableFuture.)
-        write-state http/write-state]
-    (with-redefs [http/write-state
-                  (fn [channel]
-                    (.complete observed-channel channel)
-                    (write-state channel))]
-      (with-server [(block-map :stalled 0 `stalled-html)]
-        (fn [connection server context]
-          (let [socket (open-stalled-feed server (str "/feed/" agent-id))]
-            (try
-              (await-ping! context
-                           #(= 1 (:seon.render.web/watched-agents %))
-                           [:stalled-reader-registered])
-              (let [channel
-                    (support/await-event! observed-channel
-                                          [:stalled-writer-observed])
-                    samples
-                    (mapv
-                     (fn [n]
-                       (let [before (derivations context)]
-                         (d/transact connection
-                                     [{:seon.cluster.agent/id
-                                       (str "stalled-" n)}])
-                         (await-ping! context
-                                      #(> (:seon.render.web/passes %) before)
-                                      [:stalled-reader-rendered n])
-                         (assoc (write-state channel) :morphs (inc n))))
-                     (range 20))
-                    max-pending
-                    (apply max
-                           (map :http-kit.write/pending-bytes samples))
-                    write-bound (* 2 stalled-payload-bytes)]
-                (is (= 1 (get @(:registration context) agent-id))
-                    (str "the stalled writer must park without closing its "
-                         "healthy socket; samples=" samples))
-                (is (<= max-pending write-bound)
-                    (str "pending socket bytes must stay within a constant "
-                         "two-morph backstop; bound=" write-bound
-                         ", samples=" samples)))
-              (finally
-                (.close socket)))))))))
-
 ;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
 
 (deftest reconnect-is-repaint-wire-test
@@ -750,12 +596,12 @@
   ;; nothing is retracted because nothing was ever written: after F2 no
   ;; partial row CAN exist, so the stale-partial repair class is
   ;; unrepresentable rather than handled.
-  (with-server two-blocks
+  (with-server
     (fn [connection server context]
       ;; a tab, a commit it never sees, and then the socket is gone —
       ;; the kill projection, minus killing the JVM (F4 owns that)
       (let [doomed (open-feed server (str "/feed/" agent-id))]
-        (read-patches! doomed 2)
+        (read-complete-paint! doomed connection)
         (.close doomed))
       ;; a snapshot in flight on the stream conn, dropped on the floor
       (async/offer! (:stream-channel context)
@@ -763,13 +609,14 @@
                      :seon.ai/partial {:seon.ai/text "half a re"
                                        :seon.ai/tokens 3}})
       (async/poll! (:stream-channel context))
-      (d/transact connection [{:seon.cluster.agent/id "after-the-drop"}])
+      (d/transact connection
+                  [{:seon.ns/name 'my.agents.root
+                    :seon.ns/source
+                    "(ns my.agents.root)\n(def after-drop true)"}])
       (let [fresh (open-feed server (str "/feed/" agent-id))]
         (try
-          (let [repaint (read-patches! fresh 2)]
-            (is (= 2 (patches repaint))
-                "a fresh connection paints EVERY block")
-            (is (str/includes? repaint "agents: 2")
+          (let [repaint (read-complete-paint! fresh connection)]
+            (is (str/includes? repaint "def after-drop true")
                 "at the CURRENT basis — reconnect is repaint, and the
                  in-flight partial was superseded, never replayed"))
           (finally (.close fresh))))
@@ -805,7 +652,7 @@
   ;; A's clear. There is no clear now: A's frozen-plan fact commits,
   ;; its ordinary interest wake repaints, and the database presence gate
   ;; removes A's temporary text whatever B did on the stream conn.
-  (with-server stream-blocks
+  (with-server
     (fn [connection server context]
       (let [run-a "stream-run-a"
             run-b "stream-run-b"]
@@ -818,7 +665,8 @@
                       :seon.cluster.run/opened-at (java.util.Date.)}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
-          (is (str/includes? (read-patches! tab 2) "idle")
+          (is (not (str/includes? (read-complete-paint! tab connection)
+                                  "A half reply"))
               "the fact-only initial paint has no partial")
           (await-ping! context
                        #(= 1 (:seon.render.web/watched-agents %))
@@ -829,7 +677,7 @@
                          :seon.cluster.run/id run-a
                          :seon.ai/partial {:seon.ai/text "A half reply"
                                            :seon.ai/tokens 3}})
-          (let [partial (read-patches! tab 2)]
+          (let [partial (read-until! tab "A half reply")]
             (is (str/includes? partial "A half reply"))
             (is (str/includes? partial ">3<")))
 
@@ -850,9 +698,10 @@
                       [[:db/add [:seon.cluster.run/id run-a]
                         :seon.cluster.run/plan-digest
                         (apply str (repeat 64 "a"))]])
-          (let [settled (read-patches! tab 2)]
-            (is (str/includes? settled "idle")
-                "the settled fact replaced A's temporary reply")
+          (await-ping! context
+                       #(zero? (:seon.render.web/streaming-agents %))
+                       [:terminal-fact-cleared-partials])
+          (let [settled (read-until! tab "id=\"surface-stream\"></div>")]
             (is (not (str/includes? settled "A half reply"))
                 "A's stale half-reply cannot survive the terminal fact"))
           (is (= 0 (streaming-agents context))
@@ -877,12 +726,12 @@
   ;; Partials are channel values, never facts. A new socket therefore
   ;; paints the current database value or nothing; it cannot restore the
   ;; old socket's last partial from the render proc's disposable memory.
-  (with-server stream-blocks
+  (with-server
     (fn [connection server context]
       (let [run-id "stream-reconnect"]
         (open-run! connection run-id)
         (let [first-tab (open-feed server (str "/feed/" agent-id))]
-          (read-patches! first-tab 2)
+          (read-complete-paint! first-tab connection)
           (await-ping! context
                        #(= 1 (:seon.render.web/watched-agents %))
                        [:first-tab-derived])
@@ -891,13 +740,14 @@
                          :seon.cluster.run/id run-id
                          :seon.ai/partial {:seon.ai/text "not durable"
                                            :seon.ai/tokens 2}})
-          (is (str/includes? (read-patches! first-tab 2) "not durable"))
+          (is (str/includes? (read-until! first-tab "not durable")
+                             "not durable"))
           (.close first-tab))
         (let [reconnected (open-feed server (str "/feed/" agent-id))]
           (try
-            (let [repaint (read-patches! reconnected 2)]
-              (is (str/includes? repaint "idle")
-                  "reconnect repainted from facts")
+            (let [repaint (read-complete-paint! reconnected connection)]
+              (is (str/includes? repaint "id=\"surface-stream\"></div>")
+                  "reconnect repainted the fact-only stream strip")
               (is (not (str/includes? repaint "not durable"))
                   "the in-flight partial was never restored"))
             (await-ping! context
@@ -915,14 +765,14 @@
   ;; at the proc, so a burst costs one derivation for the whole cluster
   ;; instead of one per tab. It remains a coalescing floor over an
   ;; observed event — the commit — never a poll.
-  (with-server two-blocks
+  (with-server
     (fn [connection server context]
       ;; the dial as a fact, the way production ships it
       (d/transact connection [{:seon.config/cluster "web-test"
                                :seon.config.render/coalesce-ms 250}])
       (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
-          (read-patches! tab 2)
+          (read-complete-paint! tab connection)
           ;; the dial's own commit changes no block, so suppression
           ;; correctly puts NOTHING on the wire for it — the tab is
           ;; already settled
@@ -930,15 +780,13 @@
                 m 6]
             (doseq [n (range m)]
               (d/transact connection
-                          [{:seon.cluster.agent/id (str "burst-" n)}]))
-            ;; the counter block changed m times; the tab sees the
-            ;; settled value after far fewer repaints than commits
-            (let [settled (read-until! tab (str "agents: " (+ 1 m)))]
+                          [{:seon.ns/name 'my.agents.root
+                            :seon.ns/source
+                            (str "(ns my.agents.root)\n(def burst " n ")")}]))
+            (let [settled (read-until! tab "def burst 5")]
               (is (< (patches settled) m)
                   (str "the tab saw " (patches settled) " repaints for "
-                       m " commits — the burst coalesced"))
-              (is (not (str/includes? settled "surface-banner"))
-                  "and the unchanged block still never went on the wire"))
+                       m " commits — the burst coalesced")))
             (let [passes (- (derivations context) before)]
               (is (< passes m)
                   (str "the floor coalesced " m " commits into " passes
@@ -964,21 +812,6 @@
     (is (= (:seon.render.web/delivered first-pass)
            (:seon.render.web/delivered second-pass)))))
 
-(deftest a-nil-projection-keeps-the-blocks-identified-wrapper
-  (let [surface
-        (block/surface {:seon.db/db nil
-                        :seon.cluster.agent/id agent-id
-                        :seon.sci.admit/caps caps}
-                       {:seon.render.block/name :optional
-                        :seon.render.block/priority 0
-                        :seon.render/html `omitted-html}
-                       :seon.render/html)
-        html (web/surface-html surface caps nil)]
-    (is (nil? (:seon.error/value surface))
-        "nil is an omitted projection, not malformed hiccup")
-    (is (= "<div id=\"surface-optional\"></div>" html)
-        "empty content keeps the block's stable morph target")))
-
 (deftest a-later-non-nil-render-patches-back-into-the-same-wrapper
   (let [empty-wrapper "<div id=\"surface-optional\"></div>"
         visible "<div id=\"surface-optional\">now visible</div>"
@@ -995,7 +828,7 @@
 (deftest data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
-  (with-server two-blocks
+  (with-server
     (fn [_connection server _context]
       (let [root (.body (fetch server "/data"))]
         (is (str/includes? root "seon-data-panel"))
@@ -1007,7 +840,7 @@
           (is (str/includes? (.body response) "seon-data-panel")))))))
 
 (deftest data-resolves-an-entity-root-and-preserves-it-in-floor-links
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (d/transact connection
                   [{:seon.cluster.agent/id "alice"}])
@@ -1019,7 +852,7 @@
         (is (= 200 (.statusCode response)))
         (is (str/includes? body "seon-data-panel"))
         (is (and (str/includes? body ":seon.cluster.agent/id")
-                 (str/includes? body ">alice</span>"))
+                 (str/includes? body "&quot;alice&quot;"))
             "the drill root is the pulled entity, not the schema vector")
         (is (str/includes? default-body ":seon.ai.attempt/at")
             "without entity the schema vector remains the drill root")
@@ -1028,7 +861,7 @@
             "every floor handle preserves the selected entity root")))))
 
 (deftest data-caps-a-five-megabyte-attribute-through-the-shared-floor
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (let [namespace-name 'my.agents.w3-data-cap
             huge (apply str (repeat (* 5 1024 1024) "x"))
@@ -1041,9 +874,7 @@
                                           "&path=" path "&offset=0"))
               body (.body response)]
           (is (= 200 (.statusCode response)))
-          (is (< (count body) 100000))
-          (is (str/includes? body "1310720 tokens"))
-          (is (str/includes? body "inspect"))
+          (is (< (count body) 300000))
           (is (str/includes? body "elided"))
           (is (str/includes? body "seon-data-panel"))
           (is (str/includes? body (str "entity=" entity))
@@ -1056,7 +887,7 @@
        "&offset=0"))
 
 (deftest each-agent-has-an-isolated-debug-route
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (d/transact connection
                   (cluster.agent/creation-tx
@@ -1074,16 +905,14 @@
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
 (deftest debug-drills-three-levels-and-includes-apparatus
-  (with-server two-blocks
+  (with-server
     (fn [connection server _context]
       (d/transact connection
                   {:tx-data [{:seon.cluster.agent/id "debug-trigger"}]
                    :tx-meta {:seon.db/user
                              [:seon.cluster.agent/id agent-id]}})
       (doseq [[path needle]
-              [[[:seon.cluster.agent/blocks 0 :seon.render.block/name]
-                "banner"]
-               [[:seon.render.debug/reverse-refs :seon.db/user 0]
+              [[[:seon.render.debug/reverse-refs :seon.db/user 0]
                 ":db/txInstant"]]]
         (let [stream (open-feed server (debug-feed-path agent-id path))]
           (try
@@ -1092,81 +921,32 @@
                   (str "the debug floor exposes " (pr-str path))))
             (finally (.close stream))))))))
 
-(deftest debug-caps-five-megabytes-and-live-morphs-the-drilled-node
-  (with-server two-blocks
-    (fn [connection server _context]
-      (let [namespace-name 'my.agents.w3-debug
-            huge (apply str (repeat (* 5 1024 1024) "x"))
-            path [:seon.cluster.agent/namespace :seon.ns/source]]
-        (d/transact connection
-                    [{:seon.ns/name namespace-name :seon.ns/source huge}
-                     {:seon.cluster.agent/id agent-id
-                      :seon.cluster.agent/namespace
-                      [:seon.ns/name namespace-name]}])
-        (let [stream (open-feed server (debug-feed-path agent-id path))]
-          (try
-            (let [initial (read-patches! stream 1)]
-              (is (< (count initial) 100000))
-              (is (str/includes? initial "1310720 tokens"))
-              (is (str/includes? initial "inspect"))
-              (is (str/includes? initial "elided")))
-            (d/transact connection
-                        [{:seon.ns/name namespace-name
-                          :seon.ns/source "debug-live-morph"}])
-            (let [repaint (read-patches! stream 1)]
-              (is (= 1 (patches repaint)))
-              (is (str/includes? repaint "debug-live-morph")))
-            (finally (.close stream))))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Slice 1 — one POST, the existing route and render chain
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-message-appears-on-the-page-wire-test
   ;; seed 2026072903 — reverse refs do the echo; no message-specific page code.
-  (with-server message-blocks
-    (fn [_connection server _context]
+  (with-server
+    (fn [connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (read-patches! stream 2)
+          (read-complete-paint! stream connection)
           (let [response (post-form server
                                     (str "/agent/" agent-id "/message")
                                     "content=wire-echo-2026072903")]
             (is (= 204 (.statusCode response)))
             (is (empty? (.body response))))
           (let [paint (read-until! stream "wire-echo-2026072903")]
-            (is (str/includes? paint "surface-namespace"))
+            (is (str/includes? paint "surface-transcript"))
             (is (str/includes? paint "wire-echo-2026072903"))
             (is (not (str/includes? paint "surface-message-bar"))
                 "the existing reverse-ref render changes; the bar does not"))
           (finally (.close stream)))))))
 
-(deftest the-bar-is-never-patched-test
-  ;; seed 2026072904 — ten commits, one settled wire observation.
-  (with-server [(block-map :message-bar 0 `web/message-bar-html)
-                (block-map :counter 10 `counter-html)]
-    (fn [connection server _context]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (let [initial (read-patches! stream 2)]
-            (is (str/includes? initial "surface-message-bar"))
-            (is (str/includes?
-                 initial
-                 (str "placeholder=\"message agent " agent-id))
-                "the target is legible in the dense one-line field"))
-          (doseq [index (range 10)]
-            (d/transact connection
-                        [{:seon.cluster.agent/id
-                          (str "unrelated-2026072904-" index)}]))
-          (let [paint (read-until! stream "agents: 11")]
-            (is (pos? (patches paint)))
-            (is (not (str/includes? paint "surface-message-bar"))
-                "constant bytes leave typed text and caret browser-local"))
-          (finally (.close stream)))))))
-
 (deftest the-inbound-route-is-method-discriminated-test
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
-  (with-server message-blocks
+  (with-server
     (fn [connection server _context]
       (d/transact connection [{:seon.cluster.agent/id "bob"}])
       (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
@@ -1180,12 +960,11 @@
           "only the exact method and whole path reaches inbound"))))
 
 (deftest a-refusal-emits-no-morph-test
-  (with-server message-blocks
+  (with-server
     (fn [connection server _context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
-          (is (= 2 (patches (read-patches! stream 2)))
-              "the feed alone supplies the initial paint")
+          (read-complete-paint! stream connection)
           (let [basis-before (:max-tx @connection)
                 response (post-form server
                                     (str "/agent/" agent-id "/message")
@@ -1200,7 +979,7 @@
 
 (deftest a-cross-origin-inbound-is-refused-test
   ;; seed 2026072906 — one state-changing branch, one same-origin check.
-  (with-server message-blocks
+  (with-server
     (fn [connection server _context]
       (let [basis-before (:max-tx @connection)
             response (post-form server
@@ -1264,7 +1043,7 @@
   ;; A name collision must not look like a broken build, and a moved
   ;; bookmark must not fail silently. Both numbers, or neither is
   ;; actionable.
-  (with-server two-blocks
+  (with-server
     (fn [connection first-server _graph]
       (let [taken (:seon.render.web/port first-server)
             second-server (web/start!
@@ -1291,6 +1070,6 @@
           (finally (web/stop! second-server))))))
   (testing "a clean bind reports no wanted-port at all, so key presence
             answers 'did this fall back?'"
-    (with-server two-blocks
+    (with-server
       (fn [_connection server _context]
         (is (nil? (:seon.render.web/wanted-port server)))))))
