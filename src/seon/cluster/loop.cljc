@@ -351,26 +351,35 @@
                              (:seon.code.def/blob candidate))
                  unproven-called-vars
                  (:seon.sci.eval/unproven-called-vars candidate)
+                 nondeterministic-calls
+                 (:seon.sci.eval/nondeterministic-calls candidate)
+                 impure-calls (:seon.sci.eval/impure-calls candidate)
                  pure? (and host-clean?
+                            (empty? impure-calls)
                             (capability-free-references?
                              db
                              (:seon.sci.eval/referenced-vars candidate)
-                             unproven-called-vars))]
+                             unproven-called-vars))
+                 deterministic? (empty? nondeterministic-calls)]
              (cond
                stored?
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
                            :seon.sci.eval/unproven-called-vars
+                           :seon.sci.eval/nondeterministic-calls
+                           :seon.sci.eval/impure-calls
                            :seon.code.def/source
                            :seon.code.def/unrestorable)
                    (assoc :seon.code.def/ordinal ordinal))
 
-               pure?
+               (and pure? deterministic?)
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
                            :seon.sci.eval/unproven-called-vars
+                           :seon.sci.eval/nondeterministic-calls
+                           :seon.sci.eval/impure-calls
                            :seon.code.def/unrestorable)
                    (assoc :seon.code.def/ordinal ordinal))
 
@@ -379,12 +388,20 @@
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
                            :seon.sci.eval/unproven-called-vars
+                           :seon.sci.eval/nondeterministic-calls
+                           :seon.sci.eval/impure-calls
                            :seon.code.def/source)
                    (assoc :seon.code.def/ordinal ordinal
                           :seon.code.def/unrestorable
                           (cond
                             (not host-clean?)
                             "Defining form touched host interop."
+
+                            (seq impure-calls)
+                            "Defining form called an effectful SCI built-in."
+
+                            (seq nondeterministic-calls)
+                            "Defining form called a nondeterministic SCI built-in."
 
                             (seq unproven-called-vars)
                             "Defining form calls a Var absent from the program graph."

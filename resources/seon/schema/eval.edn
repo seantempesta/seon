@@ -12,6 +12,8 @@
  :seon.sci.eval/program-row :map
  :seon.sci.eval/referenced-vars [:set :symbol]
  :seon.sci.eval/unproven-called-vars [:set :symbol]
+ :seon.sci.eval/nondeterministic-calls [:set :symbol]
+ :seon.sci.eval/impure-calls [:set :symbol]
  :seon.sci.eval/session-def
  [:map {:closed true}
   [:seon.code.def/id :seon.code.def/id]
@@ -21,7 +23,10 @@
   [:seon.sci.eval/value :any]
   [:seon.sci.eval/referenced-vars :seon.sci.eval/referenced-vars]
   [:seon.sci.eval/unproven-called-vars
-   :seon.sci.eval/unproven-called-vars]]
+   :seon.sci.eval/unproven-called-vars]
+  [:seon.sci.eval/nondeterministic-calls
+   :seon.sci.eval/nondeterministic-calls]
+  [:seon.sci.eval/impure-calls :seon.sci.eval/impure-calls]]
  :seon.sci.eval/session-defs [:vector :seon.sci.eval/session-def]
  :seon.sci.eval/install-request
  [:map {:closed true}

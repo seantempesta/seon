@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [sci.impl.vars :as sci.vars]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.cluster.loop :as loop]
@@ -120,6 +121,63 @@
        (is (= "Defining form calls a Var absent from the program graph."
               (:seon.code.def/unrestorable row)))
        (is (not (contains? row :seon.sci.eval/unproven-called-vars)))))))
+
+(deftest executed-unsafe-built-ins-are-never-source-replayed
+  (with-file-database
+   (fn [connection]
+     (let [namespace-name 'my.agents.session-built-ins
+           _ (d/transact connection
+                         {:tx-data
+                          [{:seon.config.eval.result/blob-threshold 32768}
+                           {:seon.ns/name namespace-name
+                            :seon.ns/source
+                            "(ns my.agents.session-built-ins)"}]})
+           live (eval/cluster-ctx @connection connection)
+           nondeterministic
+           (evaluate! live namespace-name
+                      (str "(def replay-symbol "
+                           "(let [x (gensym \"x\")] (fn [] x)))"))
+           effectful
+           (evaluate! live namespace-name
+                      (str "(def replay-print "
+                           "(do (println \"SIDE-EFFECT\") (fn [] 1)))"))
+           faithful
+           (evaluate! live namespace-name "(def sampled (rand))")
+           sampled-live
+           @(sci/resolve live 'my.agents.session-built-ins/sampled)]
+       (is (= #{'clojure.core/gensym}
+              (get-in nondeterministic
+                      [:seon.sci.eval/session-defs 0
+                       :seon.sci.eval/nondeterministic-calls])))
+       (is (= #{'clojure.core/println}
+              (get-in effectful
+                      [:seon.sci.eval/session-defs 0
+                       :seon.sci.eval/impure-calls])))
+       (doseq [[ordinal evaluation]
+               (map-indexed vector [nondeterministic effectful faithful])]
+         (commit-evaluation! connection evaluation ordinal))
+       (let [fresh (eval/cluster-ctx @connection connection)
+             replay-symbol (sci/resolve fresh
+                                        'my.agents.session-built-ins/replay-symbol)
+             replay-print (sci/resolve fresh
+                                       'my.agents.session-built-ins/replay-print)]
+         (is (false? (sci.vars/hasRoot replay-symbol)))
+         (is (false? (sci.vars/hasRoot replay-print)))
+         (is (= "Defining form called a nondeterministic SCI built-in."
+                (:seon.code.def/unrestorable
+                 (d/pull @connection
+                         [:seon.code.def/unrestorable]
+                         [:seon.code.def/id
+                          "my.agents.session-built-ins/replay-symbol"]))))
+         (is (= "Defining form called an effectful SCI built-in."
+                (:seon.code.def/unrestorable
+                 (d/pull @connection
+                         [:seon.code.def/unrestorable]
+                         [:seon.code.def/id
+                          "my.agents.session-built-ins/replay-print"]))))
+         (is (= sampled-live
+                @(sci/resolve fresh 'my.agents.session-built-ins/sampled))
+             "a faithful random value restores as data, never by re-execution"))))))
 
 (deftest fresh-context-restores-the-forms-session-image
   (with-file-database

@@ -162,6 +162,7 @@
         (sci/init
         {:interrupt-fn (::interrupt-fn guard)
          :host-interop-observer (::host-interop-observer guard)
+         :built-in-call-observer (::built-in-call-observer guard)
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -289,10 +290,15 @@
           (when-let [armed (.get ^ThreadLocal thread-arm)]
             (let [^longs observations (::host-interop-observations armed)]
               (aset observations 0
-                    (long (unchecked-inc (aget observations 0)))))))]
+                    (long (unchecked-inc (aget observations 0)))))))
+        built-in-call-observer
+        (fn [qualified-symbol]
+          (when-let [armed (.get ^ThreadLocal thread-arm)]
+            (vswap! (::built-in-calls armed) conj qualified-symbol)))]
     {::thread-arm thread-arm
      ::interrupt-fn interrupt-fn
-     ::host-interop-observer host-interop-observer}))
+     ::host-interop-observer host-interop-observer
+     ::built-in-call-observer built-in-call-observer}))
 
 (defonce ^:private process-interrupt-guard
   (delay (interrupt-guard)))
@@ -317,6 +323,7 @@
       (let [entries (long-array 1)
             sampled (long-array 1)
             host-interop-observations (long-array 1)
+            built-in-calls (volatile! #{})
             reached (AtomicBoolean. false)
             outcome (volatile! nil)
             started-at (System/nanoTime)
@@ -325,6 +332,7 @@
             armed {::entries entries
                    ::sampled sampled
                    ::host-interop-observations host-interop-observations
+                   ::built-in-calls built-in-calls
                    ::reached reached
                    ::outcome outcome
                    ::started-at started-at
@@ -337,6 +345,7 @@
                                 (long time-limit-ms)
                                 TimeUnit/MILLISECONDS)]
             {:interrupt-fn (::interrupt-fn guard)
+             ::built-in-calls (fn [] @built-in-calls)
              ::stop!
              (fn []
                (.cancel ^Future task false)
@@ -534,9 +543,52 @@
                      (catch Throwable _ nil)))))))
           (tree-seq coll? seq form))))
 
+;; SCI marks built-ins but carries no purity or determinism provenance. These
+;; are therefore the small closed exception sets permitted by ruling #32,
+;; applied to calls SCI observed actually executing (not symbols merely present
+;; in a delayed function body). Clojure's sources establish the random/time/
+;; identity-hash reads: core.clj:606-613, 5056-5068, 5301-5337, 7008-7013,
+;; 7461-7468, 7548-7555, 7947-7954; SCI's system clock and `time` expansion are
+;; namespaces.cljc:1377-1417. SCI's io bindings at namespaces.cljc:1489-1525
+;; establish the mutable input/output calls.
+(def ^:private nondeterministic-built-in-calls
+  '#{clojure.core/gensym
+     clojure.core/hash
+     clojure.core/hash-ordered-coll
+     clojure.core/hash-unordered-coll
+     clojure.core/rand
+     clojure.core/rand-int
+     clojure.core/rand-nth
+     clojure.core/random-sample
+     clojure.core/random-uuid
+     clojure.core/shuffle
+     clojure.core/system-time})
+
+(def ^:private impure-built-in-calls
+  '#{clojure.core/flush
+     clojure.core/newline
+     clojure.core/pr
+     clojure.core/print
+     clojure.core/printf
+     clojure.core/prn
+     clojure.core/println
+     clojure.core/read
+     clojure.core/read-line})
+
+(defn- built-in-replay-risks
+  [observed-built-in-calls]
+  {:seon.sci.eval/nondeterministic-calls
+   (into #{} (filter nondeterministic-built-in-calls)
+         observed-built-in-calls)
+   :seon.sci.eval/impure-calls
+   (into #{} (filter impure-built-in-calls)
+         observed-built-in-calls)})
+
 (defn- changed-session-defs
-  [ctx namespace-name before source form contracted-function]
-  (let [after (intern-values ctx)]
+  [ctx namespace-name before source form contracted-function
+   observed-built-in-calls]
+  (let [after (intern-values ctx)
+        replay-risks (built-in-replay-risks observed-built-in-calls)]
     (into []
           (comp
            (remove (fn [[qualified value]]
@@ -545,16 +597,18 @@
                          (same-intern-value?
                           (get before qualified absent-intern) value))))
            (map (fn [[qualified value]]
-                  {:seon.code.def/id (str qualified)
-                   :seon.code.def/ns
-                   [:seon.ns/name (symbol (namespace qualified))]
-                   :seon.code.def/name (symbol (name qualified))
-                   :seon.code.def/source source
-                   :seon.sci.eval/value value
-                   :seon.sci.eval/referenced-vars
-                   (resolved-form-vars ctx namespace-name form)
-                   :seon.sci.eval/unproven-called-vars
-                   (unproven-called-vars ctx namespace-name form)})))
+                  (merge
+                   {:seon.code.def/id (str qualified)
+                    :seon.code.def/ns
+                    [:seon.ns/name (symbol (namespace qualified))]
+                    :seon.code.def/name (symbol (name qualified))
+                    :seon.code.def/source source
+                    :seon.sci.eval/value value
+                    :seon.sci.eval/referenced-vars
+                    (resolved-form-vars ctx namespace-name form)
+                    :seon.sci.eval/unproven-called-vars
+                    (unproven-called-vars ctx namespace-name form)}
+                   replay-risks))))
           after)))
 
 (defn- deleted-schema-key
@@ -1166,7 +1220,10 @@
         ;; discard the caller's accumulated defs, which is the bug this
         ;; contract exists to not repeat
         evaluation-ctx (or ctx (build-base-ctx))
-        {:keys [interrupt-fn] stop! ::stop! record ::record}
+        {:keys [interrupt-fn]
+         stop! ::stop!
+         record ::record
+         built-in-calls ::built-in-calls}
         (arm evaluation-ctx time-limit-ms)
         printed (java.io.StringWriter.)
         namespace-name (or (second namespace-ref)
@@ -1315,7 +1372,7 @@
               session-defs
               (changed-session-defs
                execution-ctx namespace-name before-intern-values source form
-               (:seon.fn/sym row))
+               (:seon.fn/sym row) (built-in-calls))
               admitted (admit/admit
                         {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn interrupt-fn
