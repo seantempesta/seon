@@ -953,7 +953,12 @@ The server discovers live clusters from their advertisements and resolves the
 selected cluster's prepl coordinate. A bare id present in several clusters
 must fail as ambiguous. After changing MCP code or client registration,
 restart the Codex or Claude task: already-running clients do not reload stdio
-server definitions or tool schemas.
+server definitions or tool schemas. This includes RESUMED codex lanes — a
+session binds its MCP servers at first launch and every resume keeps that
+binding, so a long-lived lane can permanently lack the seon tools. The tell
+is a lane hand-rolling its own prepl sender (e.g. `tmp/prepl-send.clj`)
+instead of calling `eval_clj`; the fix is a fresh lane launch, never a
+config change (probed 2026-08-01: fresh sessions see all three seon tools).
 
 The edit hook runs clj-kondo over prospective and resulting Clojure files,
 returns file/row/column findings, and publishes admitted `src/` and `test/`
