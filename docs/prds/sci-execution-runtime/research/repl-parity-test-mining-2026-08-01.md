@@ -439,3 +439,96 @@ differences and their tests already exist or belong to the caps/blob wave.
   whichever lands first must not contradict the other.
 - W1 (`seon.sci.eval` is not hot-reloadable; the `default` cluster's door
   is broken) still blocks live proof of any of this on that cluster.
+
+## Landing ledger — recurring gate (2026-08-01)
+
+Commits:
+
+- `6e33f4e95` — production-door `repl-session` shim plus Family B;
+- `64339dd13` — computed Edamame fallback for built-in reader tags; and
+- `9a74c52ab` — every remaining executable row plus the pending ledger.
+
+The recurring gate is `test/seon/repl_parity_test.clj`. Each executable
+row is one discovered `deftest` carrying `:parity/row`; known divergences
+also carry `:parity/known-divergence`. The runner derives the divergence
+roster from those test Vars, prints it once, expects each known divergence
+to fail its stock expectation, and fails if one begins passing before its
+metadata is promoted. An unmarked row fails normally when it regresses.
+
+The harness uses a fresh canonical in-memory database per row, applies an
+explicit `:record` config overlay, reads the effective time limit and
+`config/result-caps`, then performs `fork` → `acquire!` → ordered
+`evaluate` while threading `:seon.sci.eval/ending-ns`. Each result exposes
+captured output, admitted value, error, stored `result-edn` face, and ending
+namespace. It does not fabricate the unbuilt post-emitter face.
+
+### Corrected cardinality and result
+
+The headline's “59 rows” is false. The nine tables contain **88** row ids:
+A=10, B=11, C=8, D=11, E=16, F=6, G=10, H=8, I=8. Families A–H are 80
+stock-parity rows; Family I contributes eight Seon-specific rows. The
+advertised 59 equals the report's 53 route-(b) plus six route-(c) rows and
+accidentally omits all 21 route-(a) rows.
+
+Current exact gate accounting:
+
+- **69 tested** — 35 presently match the asserted behavior and 34 are
+  known divergences;
+- **34 known divergences** — A1, A2, A9, B1–B7, B9–B11, C1–C6, D5, D6,
+  D9, D11, E2–E4, E8, F3, F4, H1, H2, H4–H6; and
+- **19 pending with reasons** — A7, D10, E1, E5, E9, E10, E15, E16,
+  F5, F6, G5, G9, I1–I5, I7, I8. The exact per-row reasons live beside
+  the rows in the gate namespace.
+
+Focused evidence:
+
+```text
+REPL parity known divergences (34): A1, A2, A9, B1, B10, B11, B2, B3,
+B4, B5, B6, B7, B9, C1, C2, C3, C4, C5, C6, D11, D5, D6, D9, E2, E3,
+E4, E8, F3, F4, H1, H2, H4, H5, H6
+REPL parity pending rows (19): A7, D10, E1, E5, E9, E10, E15, E16,
+F5, F6, G5, G9, I1, I2, I3, I4, I5, I7, I8
+
+Ran 69 tests containing 69 assertions.
+0 failures, 0 errors.
+```
+
+### What execution corrected
+
+- A2 is a newly proven divergence: Double symbolic values print correctly,
+  but `(float ##Inf)` and `(float ##-Inf)` fail with “Value out of range for
+  float” instead of producing Float's `##Inf` / `##-Inf` faces.
+- H5 is a newly proven harness-level divergence: `ns-unmap` evaluates in
+  the isolated deletion fork, so a later form on the bare evaluate-only
+  session still finds the Var until the production terminal transaction
+  applies that program deletion.
+- A8 and G1 pass after the reader correction: custom handlers remain first,
+  tags in `clojure.core/default-data-readers` fall through to Edamame, and a
+  genuinely unknown tag still receives Seon's clean refusal.
+- C6 cannot observe separate streams because production currently binds
+  `sci/out` and `sci/err` to the same `StringWriter`; the executable row
+  proves that divergence directly.
+- C7 needs the production reply splitter before the eval fold. The gate now
+  runs `reply/sources` on one same-line reply and asserts all three resulting
+  forms' faces, instead of pretending `evaluate` accepts multiple events.
+- E1, E9, and E10 cannot run “nearly unchanged” through the required shim:
+  the door exposes neither `clojure.main/ex-triage` nor the raw Throwable
+  consumed by `sci/stacktrace` / `sci/format-stacktrace`.
+
+The source audit also found citation gaps: C2's cited Babashka tests never
+exercise `*3`; C7 checks only the final output substring; C5's SCI case passes
+an explicit throwable; B9's record face is at
+`defrecords_and_deftype_test.cljc:197-199,215-218`, not the cited range; H6
+does not have a cited complete metadata-map assertion; A4 cites character
+reading rather than printing; B11 cites stack-location demunging rather than
+function-object display; and F3/F4 cite explicit printed output rather than
+the stronger result-face contract.
+
+### Remaining reader-suite boundary
+
+The reader fix intentionally falsifies five obsolete assertions in
+`test/seon/sci/reader_test.clj:127-183`, which still require `#inst` and
+`#uuid` to be refused. That file was outside this lane's owned paths, so it
+was not edited. The focused reader namespace is therefore red until its owner
+promotes those assertions to the now-ruled built-in-tag behavior; unknown-tag
+and `#=` refusal assertions remain valid.
