@@ -158,6 +158,55 @@
                    :seon.ai.retry/strategy
                    (:seon.ai.retry/strategy handle))))))))))
 
+(deftest two-clusters-in-one-jvm-own-distinct-live-program-contexts
+  (let [root "tmp/armed-test/live-program-boundary"]
+    (doseq [file (reverse (file-seq (io/file root)))]
+      (.delete ^java.io.File file))
+    (cluster/refresh-source! root)
+    (let [left (cluster/start! {:seon.boot/cluster-name "live-left"
+                                :seon.boot/root root})
+          right (cluster/start! {:seon.boot/cluster-name "live-right"
+                                 :seon.boot/root root})]
+      (try
+        (let [left-handle (:seon.cluster.loop/cluster left)
+              right-handle (:seon.cluster.loop/cluster right)
+              left-ctx (:seon.sci.eval/ctx left-handle)
+              right-ctx (:seon.sci.eval/ctx right-handle)
+              request
+              (fn [handle agent-id source]
+                (sci.eval/evaluate
+                 {:seon.cluster.run.form/source source
+                  :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                  :seon.sci.eval/time-limit-ms
+                  (:seon.config.eval/time-limit-ms handle)
+                  :seon.config/on-core-error
+                  (:seon.config/on-core-error handle)
+                  :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                  :seon.cluster.agent/id agent-id}))
+              definition
+              (request left-handle "agent-a"
+                       (str
+                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                        "shared-live [x] (inc x))"))
+              shared-call
+              (request left-handle "agent-b"
+                       "(my.agents.agent-a/shared-live 41)")
+              isolated-call
+              (request right-handle "agent-b"
+                       "(my.agents.agent-a/shared-live 41)")]
+          (is (not (identical? (:env left-ctx) (:env right-ctx)))
+              "cluster construction allocates distinct SCI env atoms")
+          (is (nil? (:seon.cluster.eval/error definition)))
+          (is (= 42 (:seon.sci.admit/value shared-call))
+              "another agent in the left cluster sees the live definition")
+          (is (= :seon.sci.eval/evaluation-failed
+                 (:seon.error/kind
+                  (:seon.sci.admit/value isolated-call)))
+              "the right cluster cannot see the left cluster's definition"))
+        (finally
+          (cluster/stop! right)
+          (cluster/stop! left))))))
+
 (deftest booting-spends-nothing
   ;; owner-explicit: an armed loop must not cost tokens. It is armed and
   ;; IDLE — the wake channel is primed, and a wake only says "look".
@@ -269,9 +318,6 @@
             [ai/complete
              (fn [_]
                {:seon.ai/text "(identity 1)"})
-             ;; This regression owns the run/loop settlement seam, not
-             ;; acquisition. The evaluator remains an ordinary value.
-             sci.eval/acquire! (fn [_] nil)
              sci.eval/evaluate
              (fn [_]
                {:seon.sci.admit/value 1
@@ -377,7 +423,6 @@
        ;; the prior holder as dead.
        cluster/process-identity
        (fn [_] "terminal-refusal-recovery-process")
-       sci.eval/acquire! (fn [_] nil)
        sci.eval/evaluate
        (fn [_]
          {:seon.sci.admit/value 1

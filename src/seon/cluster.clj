@@ -38,6 +38,7 @@
             [seon.fn :as seon.fn]
             [seon.problems :as problems]
             [seon.render.web :as web]
+            [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -1035,7 +1036,7 @@
   Everything in it comes from the instance and the effective dials, so
   the assembly the live drives were doing by hand happens once, here,
   where production does it."
-  [connection cluster-name process wake-channel stream-channel completion]
+  [connection cluster-name process ctx wake-channel stream-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> (merge
              ;; MERGED WHOLE, never re-keyed: `seon.ai/targets` owns the
@@ -1046,6 +1047,7 @@
              (ai/targets dials)
              {:seon.store/branch-connection connection
               :seon.cluster.run/process process
+              :seon.sci.eval/ctx ctx
               :seon.cluster.wake/channel wake-channel
               ;; the cluster's ONE stream conn (F2 §2.1): sliding-1, so
               ;; the newest complete snapshot wins and the provider fold
@@ -1114,8 +1116,9 @@
         armer-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
-        handle (loop-handle connection cluster-name process armer-channel
-                            stream-channel completion)
+        handle (loop-handle connection cluster-name process
+                            (:seon.sci.eval/ctx instance)
+                            armer-channel stream-channel completion)
         routing (cluster.agent/routing)
         ;; the render pipeline's external ports (F2 §1): the wake
         ;; channel route! delivers into, the pages channel the proc's
@@ -1333,6 +1336,12 @@
         ;; escalation dial names, and BEFORE the loop is armed, because
         ;; an armed loop may need to address it on its first pass
         _ (seed-root-agent! connection cluster-name process)
+        ;; The cluster's one live SCI program graph is derived from facts once
+        ;; after schema accretion and before any agent graph can run. It has no
+        ;; close operation; dropping the instance drops the derived context.
+        instance (publish!
+                  (assoc instance :seon.sci.eval/ctx
+                         (sci.eval/cluster-ctx @connection)))
         ;; INSTRUMENTATION IS NOT WIRED HERE, and the reason is
         ;; evidence rather than taste. Wiring `seon.instrument/apply!`
         ;; into boot was tried: every test that boots a cluster then

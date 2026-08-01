@@ -991,10 +991,10 @@
                 ;; delivery machinery does the rest
                 :else (fail! failure))))))
 
-      ;; THE FOLD, in one turn, over ONE ctx. sci's fork copies the env,
-      ;; so a ctx per FORM would lose every def between forms — the
-      ;; State A defect. One fork per run is what makes a plan read like
-      ;; a REPL session: form 2 sees what form 1 defined.
+      ;; THE FOLD, in one turn, over the cluster's ONE live ctx. Every agent in
+      ;; this cluster shares the program graph immediately; another cluster
+      ;; owns another ctx. Rebuild from facts is boot and recovery work, never
+      ;; turn work.
       ;;
       ;; Boot recovery closes interrupted runs before any agent graph is
       ;; armed, so this branch is only the ordinary live fold over one
@@ -1020,14 +1020,9 @@
             ;; turn sends extends, and it cannot change while the run is
             ;; held
             trigger (message/trigger @connection run-id)
-            ctx (sci.eval/fork)
-            ;; First use of this run-local ctx materializes current program
-            ;; facts. Boot and cluster creation never index or replay.
-            acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
-                                         :seon.db/db @connection})]
+            ctx (:seon.sci.eval/ctx cluster)]
         (loop [ordinal (:seon.cluster.run.form/ordinal work)
                ran 0
-               projection (:seon.schema/projection acquired)
                namespace-name nil]
           (let [receipt-id (pr-str [run-id ordinal])
                 problem-id (work/problem-id run-id ordinal)
@@ -1083,8 +1078,7 @@
                        [:seon.ns/name evaluation-namespace]
                       :seon.sci.admit/caps
                       (:seon.sci.admit/caps cluster)
-                      :seon.sci.eval/ctx
-                      (assoc ctx :seon.schema/projection projection)
+                      :seon.sci.eval/ctx ctx
                       :seon.cluster.agent/id agent-id
                       :seon.sci.eval/time-limit-ms
                       (:seon.config.eval/time-limit-ms cluster)
@@ -1217,17 +1211,15 @@
                        (assoc :tx-meta
                               {:seon.db/trigger
                                [:seon.cluster.message/id trigger]})))
-                    program-state
+                    _
                     (if (and (:seon.sci.eval/program-row evaluation)
                              (not (:seon.error/kind outcome)))
                       (sci.eval/install-program-row!
-                       {:seon.sci.eval/ctx
-                        (assoc ctx :seon.schema/projection projection)
+                       {:seon.sci.eval/ctx ctx
                         :seon.db/db (:db-after outcome)
                         :seon.sci.eval/program-row
                         (:seon.sci.eval/program-row evaluation)})
-                      {:seon.schema/projection projection
-                       :seon.sci.eval/installed 0})
+                      nil)
                     ran (inc ran)
                     ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
                     ;; §5.2): asking the GLOBAL derivation here was the
@@ -1256,7 +1248,6 @@
                   settled (report :closed ran)
                   next-ordinal
                   (recur next-ordinal ran
-                         (:seon.schema/projection program-state)
                          (or (:seon.sci.eval/ending-ns evaluation)
                              evaluation-namespace))
                   :else (report :released ran)))))))

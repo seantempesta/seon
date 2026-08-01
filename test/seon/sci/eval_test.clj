@@ -124,7 +124,7 @@
           "ordinary arm data has no reload-sensitive class identity")
       (is (nil? (:seon.cluster.eval/error after))))))
 
-(deftest a-fork-per-evaluation-means-no-leakage
+(deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
   (let [evaluation (run "leaked")]
     (is (failed? evaluation)
@@ -132,8 +132,23 @@
     (is (= :seon.sci.eval/evaluation-failed
            (:seon.error/kind (:seon.sci.admit/value evaluation))))))
 
+(deftest a-live-context-preserves-definition-value-class-and-metadata
+  (let [ctx (eval/build-base-ctx)
+        definition
+        (run-in ctx
+                (str "(def kept "
+                     "(with-meta (sorted-set-by > 1 2) {:proof :kept}))")
+                2000)
+        value (sci.core/eval-string* ctx "kept")]
+    (is (ok? definition))
+    (is (instance? clojure.lang.PersistentTreeSet value)
+        "live sharing preserves the concrete sorted-set representation")
+    (is (= {:proof :kept} (meta value))
+        "live sharing preserves metadata rather than merely `=` values")
+    (is (= 2 (first value)))))
+
 (deftest require-context-rows-persist-namespace-lookup-refs
-  (let [ctx (eval/fork)
+  (let [ctx (eval/build-base-ctx)
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
     (is (ok? evaluation))
     (is (= #{[:seon.ns/name 'clojure.set]}
@@ -162,7 +177,7 @@
 (deftest an-instrumented-multi-arity-miss-reads-like-clojure
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/fork)
+      (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
                               :seon.db/db @connection})]
         (try
@@ -189,7 +204,7 @@
   (test-support/with-database
     (fn [connection]
       (let [db @connection
-            ctx (eval/fork)
+            ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
             directory (run-in ctx "(dir my.message)" 2000)
             documentation (run-in ctx "(doc my.message/send)" 2000)
@@ -257,7 +272,7 @@
     (is (not= :swallowed (:seon.sci.admit/value evaluation)))))
 
 (deftest a-previously-defined-function-uses-the-current-evaluation-limit
-  (let [ctx (eval/fork)
+  (let [ctx (eval/build-base-ctx)
         definition
         (run-in ctx
                 "(defn spin [] (loop [i 0] (recur (inc i))))"
@@ -277,13 +292,13 @@
   ;; capture the base's interrupt-fn when SCI creates them. Create this one on
   ;; the test thread, then invoke it through a fork on another thread: arming
   ;; must follow the invoking thread, not the thread that created the function.
-  (let [base (eval/base)
+  (let [base (eval/build-base-ctx)
         definition
         (sci/eval-string*
          base
          (str "(defn substrate-base-spin [] "
               "(loop [i 0] (recur (inc i))))"))
-        ctx (eval/fork)
+        ctx (sci/fork base)
         evaluation (deadlined-in ctx "(substrate-base-spin)" 300)]
     (is (ifn? definition))
     (is (identical? (:interrupt-fn base) (:interrupt-fn ctx))
@@ -311,7 +326,7 @@
          :seon.fn/arglists "([])"
          :seon.fn/private? false
          :seon.fn/spec "[:=> [:cat] :int]"}])
-      (let [ctx (eval/fork)
+      (let [ctx (eval/build-base-ctx)
             acquired (eval/acquire! {:seon.sci.eval/ctx ctx
                                      :seon.db/db @connection})
             evaluation
@@ -326,7 +341,7 @@
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/fork)
+      (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
                               :seon.db/db @connection})
             evaluation
@@ -351,7 +366,7 @@
                    {:seon.cluster.agent/id "host-walker"
                     :seon.cluster/name "host-walk"
                     :seon.ns/name 'my.agents.host-walker}))
-      (let [ctx (eval/fork)
+      (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
                               :seon.db/db @connection})
             evaluation
@@ -369,7 +384,7 @@
             "the measured string cap admits the ordinary walk whole")))))
 
 (deftest one-context-arms-concurrent-threads-independently
-  (let [ctx (eval/fork)
+  (let [ctx (eval/build-base-ctx)
         definition
         (run-in
          ctx
@@ -397,7 +412,7 @@
              (:seon.sci.admit/value complete-evaluation))))))
 
 (deftest disarm-clears-the-current-threads-flag-exactly
-  (let [ctx (eval/fork)
+  (let [ctx (eval/build-base-ctx)
         {stop! :seon.sci.eval/stop!} (#'eval/arm ctx 30)
         interrupt-fn (:interrupt-fn ctx)
         backstop (+ (System/nanoTime) 1000000000)

@@ -72,40 +72,13 @@
 ;;; papered over; this adapter supplies it so the injection can be
 ;;; proven against a real sci evaluation today.
 ;;; The seam needs no adapter any more: the cluster handle carries the
-;;; deadline dial and the error disposition, and `turn` forks ONE ctx
-;;; per run and threads it through the fold. This is the real evaluator,
-;;; injected exactly as production injects it.
-
-(def ^:private seed-blocks
-  "The intended core seed membership (context-blocks contract §3.5).
-  Owned by the seed-and-membership package in production; planted here
-  because a membership is the fixture's own data — the prompt derives
-  from the agent's blocks now, and an agent with no AI blocks has no
-  prompt."
-  [{:seon.render.block/name :identity :seon.render.block/band :anchor
-    :seon.render.block/priority 0
-    :seon.render/ai 'seon.context/identity-ai}
-   {:seon.render.block/name :execution :seon.render.block/band :anchor
-    :seon.render.block/priority 10
-    :seon.render/ai 'seon.context/execution-ai}
-   {:seon.render.block/name :peers :seon.render.block/band :anchor
-    :seon.render.block/priority 20
-    :seon.render/ai 'seon.context/peers-ai}
-   ;; the neighbourhood view, which retired `:interruption` and
-   ;; `:continuity` — their doctrine now lives in the run and receipt
-   ;; family lenses
-   {:seon.render.block/name :namespace :seon.render.block/band :dynamic
-    :seon.render.block/priority 80
-    :seon.render/ai 'seon.render.agent/namespace-ai}
-   {:seon.render.block/name :trigger :seon.render.block/band :dynamic
-    :seon.render.block/priority 90
-    :seon.render/ai 'seon.context/trigger-ai}])
+;;; deadline dial, the error disposition, and the cluster's ONE live ctx.
+;;; This is the real evaluator, injected exactly as production injects it.
 
 (defn- agent-row
-  "One agent with the core seed membership installed."
+  "One agent; prompt membership is derived by the namespace walk."
   [agent-id]
-  {:seon.cluster.agent/id agent-id
-   :seon.cluster.agent/blocks seed-blocks})
+  {:seon.cluster.agent/id agent-id})
 
 (defn- with-cluster [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -147,6 +120,7 @@
          (fn [{source :seon.cluster.loop/source}] source)]
         (body {:seon.store/branch-connection connection
                :seon.cluster.run/process process
+               :seon.sci.eval/ctx (sci.eval/build-base-ctx)
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
              ;; ONE target and NO backup: the default shape, where
@@ -567,9 +541,7 @@
           (drive! cluster 10)
           (is (nil? (d/pull @connection [:db/id]
                             [:seon.fn/sym function-sym])))
-          (let [fresh (sci.core/fork (sci.eval/base))]
-            (sci.eval/acquire! {:seon.sci.eval/ctx fresh
-                                :seon.db/db @connection})
+          (let [fresh (sci.eval/cluster-ctx @connection)]
             (is (nil? (sci.core/eval-string*
                        fresh
                        "(resolve 'my.agents.agent-a/dynamic-obsolete)"))
@@ -646,13 +618,10 @@
                 import-mask
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
                       (:seon.ns/imports namespace-row))
-                fresh (sci.core/fork (sci.eval/base))]
+                fresh (sci.eval/cluster-ctx @connection)]
             (is (= {:seon.ns.import/local 'String}
                    (dissoc import-mask :db/id))
                 "the database stores the import mask as ordinary data")
-            (sci.eval/acquire!
-             {:seon.sci.eval/ctx fresh
-              :seon.db/db @connection})
             (is (nil?
                  (:val
                   (sci.core/eval-string+
@@ -738,14 +707,11 @@
                 import-row
                 (some #(when (= 'String (:seon.ns.import/local %)) %)
                       (:seon.ns/imports namespace-row))
-                fresh (sci.core/fork (sci.eval/base))]
+                fresh (sci.eval/cluster-ctx @connection)]
             (is (= {:seon.ns.import/local 'String
                     :seon.ns.import/target-class 'java.lang.String}
                    (dissoc import-row :db/id))
                 "the database stores only symbols, never a Class object")
-            (sci.eval/acquire!
-             {:seon.sci.eval/ctx fresh
-              :seon.db/db @connection})
             (is (= 'java.lang.String
                    (get-in (sci.core/namespace-bindings
                             fresh 'my.agents.agent-a)
@@ -781,6 +747,12 @@
                :seon.fn/ns [:seon.ns/name 'seon.config]
                :seon.fn/source "(defn defaults [] {})"
                :seon.fn/spec "[:=> [:cat] :map]"}])
+            ;; This test plants a pre-existing program row directly rather
+            ;; than producing it through eval. Finish that cold fixture setup
+            ;; before the first turn; live turns never reacquire facts.
+            (sci.eval/acquire!
+             {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+              :seon.db/db @connection})
             (with-redefs
               [ai/complete
                (fn [request]
@@ -1403,9 +1375,7 @@
               (let [acquire
                     (fn [connection]
                       (:seon.schema/projection
-                       (sci.eval/acquire!
-                        {:seon.sci.eval/ctx (sci.core/fork (sci.eval/base))
-                         :seon.db/db @connection})))
+                       (sci.eval/cluster-ctx @connection)))
                     projection-a-1 (acquire connection-a)
                     projection-b (acquire connection-b)
                     projection-a-2 (acquire connection-a)
@@ -1433,7 +1403,7 @@
                                 (schema/current-projection))
                     "A-B-A acquisition never repoints the global registry")))))))))
 
-(deftest a-new-agent-ctx-acquires-and-calls-the-committed-definition
+(deftest another-agent-calls-the-live-cluster-definition-without-reinstall
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -1470,7 +1440,72 @@
                            :where
                            [_ :seon.cluster.eval/result-edn ?result]]
                          @connection))
-              "the second run's fresh ctx materialized current program facts"))))))
+              "the second agent used the same live cluster program graph"))))))
+
+(deftest a-refused-definition-stays-live-for-another-agent
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            function-sym "my.agents.agent-a/refused-live"
+            replies (atom
+                     [(str
+                       "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                       "refused-live [x] (inc x))")
+                      (str
+                       "(my.run/complete "
+                       "(str (my.agents.agent-a/refused-live 41)))")])
+            transact! store/transact!]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (let [reply (first @replies)]
+                (swap! replies subvec 1)
+                reply)})
+           store/transact!
+           (fn [target transaction]
+             (let [tx-data (if (map? transaction)
+                             (:tx-data transaction)
+                             transaction)
+                   refused-definition?
+                   (some
+                    (fn [operation]
+                      (and (vector? operation)
+                           (= :db.fn/call (first operation))
+                           (= #'run/receipt-settle-call (second operation))
+                           (= function-sym
+                              (get-in operation
+                                      [2 :seon.sci.eval/program-row
+                                       :seon.fn/sym]))))
+                    tx-data)]
+               (if refused-definition?
+                 {:seon.error/kind :seon.db/rejected
+                  :seon.error/message "injected definition refusal"
+                  :seon.error/data {:error :transact/program}}
+                 (transact! target transaction))))]
+          (drive! cluster 10)
+          (is (nil? (d/pull @connection [:db/id]
+                            [:seon.fn/sym function-sym]))
+              "the refused terminal transaction persists no function row")
+          (d/transact
+           connection
+           [{:seon.ns/name 'my.agents.agent-b}
+            (assoc (agent-row "agent-b")
+                   :seon.cluster.agent/namespace
+                   [:seon.ns/name 'my.agents.agent-b])
+            {:seon.cluster.message/id "m-agent-b-after-refusal"
+             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+             :seon.cluster.message/content "call the refused definition"
+             :seon.cluster.message/at now}])
+          (drive! cluster 10)
+          (is (some #(str/includes? % "42")
+                    (d/q '[:find [?result ...]
+                           :where
+                           [_ :seon.cluster.eval/result-edn ?result]]
+                         @connection))
+              "the refusal is session state; the live REPL definition remains"))))))
 
 (deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
@@ -1519,7 +1554,7 @@
          :seon.fn/arglists "([x])"
          :seon.fn/private? false
          :seon.fn/spec "[:=> [:cat :int] :int]"}])
-      (let [ctx (sci.core/fork (sci.eval/base))
+      (let [ctx (sci.eval/build-base-ctx)
             acquired
             (sci.eval/acquire!
              {:seon.sci.eval/ctx ctx

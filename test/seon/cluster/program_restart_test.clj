@@ -11,7 +11,6 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (defn- transact-inbound!
@@ -273,12 +272,8 @@
                     :seon.schema/ns))
               "the reopened global schema identity has no namespace owner")
           (let [receipts-before-acquire (receipt-count @connection)
-                ctx (sci/fork (sci.eval/base))
-                acquired
-                (sci.eval/acquire!
-                 {:seon.sci.eval/ctx ctx
-                  :seon.db/db @connection})
-                projection (:seon.schema/projection acquired)
+                ctx (:seon.sci.eval/ctx second-instance)
+                projection (:seon.schema/projection ctx)
                 validate-nonnegative
                 (schema/projection-validator
                  projection :my.agents.restart-a/nonnegative)]

@@ -5,8 +5,9 @@
  ; is never a limit — 271M entries in 500ms reads as a spin, 12 reads as
  ; blocked in a host call.
  :seon.sci.eval/time-limit-ms [:int {:min 1}]
- ; sci's own word for an interpreter context; forked per evaluation so
- ; one eval's defs cannot reach another's.
+ ; sci's own word for an interpreter context; one live context belongs to
+ ; each cluster, so every agent in that cluster shares definitions while
+ ; another cluster remains isolated.
  :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
  :seon.sci.eval/program-row :map
  :seon.sci.eval/install-request

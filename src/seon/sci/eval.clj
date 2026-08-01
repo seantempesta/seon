@@ -6,8 +6,8 @@
   FRESH from the quarry's mechanism rather than ported: the old
   namespace's Semaphore, cached compute pool, database-derived binding
   table and lifecycle bindings are all gone, and what survives is the
-  part that was right — one shared base ctx, one process-wide guard with
-  thread-scoped arming, and time as the only limit.
+  part that was right — one live ctx per cluster, one process-wide guard
+  with thread-scoped arming, and time as the only limit.
 
   THE ARMED BOUNDARY. `:interrupt-fn` is sci's own hook, called on
   every interpreted fn and `loop/recur` body entrance
@@ -68,25 +68,28 @@
   its own work; a sink would have made it disappear, and the drive
   showed exactly how expensive disappeared evidence is.
 
-  THE CALLER OWNS CTX LIFETIME, and that is not a detail: `sci/fork`
+  THE CLUSTER OWNS CTX LIFETIME, and that is not a detail: `sci/fork`
   copies the env into a NEW atom, so vars created in a fork are
   invisible to the original (`reference-code/sci/src/sci/core.cljc:318-323`).
   Forking per FORM would therefore make a `defn` in form 1 invisible to
   form 2 — which is exactly the State A defect the plan records as
   `construct 6 is broken three ways`. So a supplied ctx is used AS
-  GIVEN: the run loop forks ONE ctx per run and hands it to every form
-  of that plan, and the fold accumulates defs the way a REPL session
-  does. When no ctx is supplied a fresh fork of the base is made, which
-  is the isolated one-off case.
+  GIVEN: cluster boot builds and acquires it once, and every agent in
+  that cluster evaluates against the same live program graph. A def is
+  visible immediately, including when its terminal transaction is
+  refused; the refusal is durable session state, not a REPL rollback.
+  When no ctx is supplied a fresh base is made for an isolated one-off.
 
-  THE CTX IS SUPPLIED, NOT BUILT HERE. `base` is the minimum N3 needs —
+  THE CTX IS SUPPLIED, NOT BUILT HERE. `build-base-ctx` is the minimum
+  N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
   plus the two `my.run` dispositions and both `my.message` values — and a
   caller may pass its own. `acquire!` then intersects core-provenanced
   program namespaces with the JVM's loaded namespace set and binds their
   actual compiled Vars. The set is computed, never listed. Agent-authored
   program rows retain the interpreted installation path after those host
-  bindings are present.
+  bindings are present. `cluster-ctx` performs that fact-derived install
+  only at cluster boot or recovery; the turn path never reacquires it.
 
   Crash walk: this namespace owns no durable state. A kill during an
   evaluation leaves the loop's running receipt (one with no terminal
@@ -144,15 +147,17 @@
 
 (declare process-interrupt-guard)
 
-(defonce ^:private base-ctx
-  (delay
-    (let [guard @process-interrupt-guard
-          run-ns (sci/create-ns 'my.run)
-          message-ns (sci/create-ns 'my.message)
-          schema-ns (sci/create-ns 'seon.schema)
-          test-ns (sci/create-ns 'clojure.test)
-          ctx
-          (sci/init
+(defn build-base-ctx
+  "Build one independent SCI program context with the process guard."
+  {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
+  []
+  (let [guard @process-interrupt-guard
+        run-ns (sci/create-ns 'my.run)
+        message-ns (sci/create-ns 'my.message)
+        schema-ns (sci/create-ns 'seon.schema)
+        test-ns (sci/create-ns 'clojure.test)
+        ctx
+        (sci/init
         {:interrupt-fn (::interrupt-fn guard)
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
@@ -187,7 +192,7 @@
                        ;; routed problem has no third arm at all: the
                        ;; owner's only reachable answers are "fixed" —
                        ;; which no fact can confirm — and silence.
-                       'decline (sci/copy-var my.message/decline message-ns)}}
+                   'decline (sci/copy-var my.message/decline message-ns)}}
          ;; two broad roots rather than an enumeration of exception
          ;; subclasses — an agent needs to catch things, not to be given
          ;; a curated taxonomy
@@ -195,14 +200,14 @@
                    'java.lang.Throwable Throwable
                    'Error Error
                    'java.lang.Error Error}})]
-      ;; `dir` and `doc` are REPL operations, so every namespace resolves
-      ;; them bare through the same clojure.core refer it already receives.
-      ;; `acquire!` replaces only `doc` with its program-row-derived macro.
-      (sci/add-namespace!
-       ctx 'clojure.core
-       {'dir (sci/resolve ctx 'clojure.repl/dir)
-        'doc (sci/resolve ctx 'clojure.repl/doc)})
-      (assoc ctx ::interrupt-guard guard))))
+    ;; `dir` and `doc` are REPL operations, so every namespace resolves
+    ;; them bare through the same clojure.core refer it already receives.
+    ;; `acquire!` replaces only `doc` with its program-row-derived macro.
+    (sci/add-namespace!
+     ctx 'clojure.core
+     {'dir (sci/resolve ctx 'clojure.repl/dir)
+      'doc (sci/resolve ctx 'clojure.repl/doc)})
+    (assoc ctx ::interrupt-guard guard)))
 
 (defn agent-namespace
   "The ONE namespace name for an agent: `my.agents.<id>`.
@@ -212,14 +217,6 @@
   {:malli/schema [:=> [:cat :seon.cluster.agent/id] :symbol]}
   [agent-id]
   (symbol (str "my.agents." agent-id)))
-
-(defn base
-  "The process-shared base context and guard every evaluation forks.
-  One ctx and guard per process, not per evaluation: building the ctx is the
-  expensive part and forking it is cheap, which is why sci has `fork`."
-  {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
-  []
-  @base-ctx)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary
@@ -289,12 +286,6 @@
 
 (defonce ^:private process-interrupt-guard
   (delay (interrupt-guard)))
-
-(defn fork
-  "Fork the base context while sharing its process-wide interrupt guard."
-  {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
-  []
-  (sci/fork (base)))
 
 (defn- arm
   "Arm one guarded context on the current thread; return stop! and record.
@@ -548,6 +539,29 @@
       (binding-rows after))
      :contracted)))
 
+(defn- context-projection
+  "The latest schema projection held by one live cluster context."
+  [ctx]
+  (or (some-> (::projection-state ctx)
+              deref
+              :seon.schema/projection)
+      (:seon.schema/projection ctx)))
+
+(defn- advance-context-projection!
+  "Advance a live context's projection at the database's basis transaction."
+  [ctx db projection]
+  (when-let [state (::projection-state ctx)]
+    (let [basis-transaction (long (:max-tx db))]
+      (swap! state
+             (fn [current]
+               (if (<= (long (or (::basis-transaction current)
+                                  Long/MIN_VALUE))
+                       basis-transaction)
+                 {::basis-transaction basis-transaction
+                  :seon.schema/projection projection}
+                 current)))))
+  projection)
+
 (defn install-program-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
@@ -556,7 +570,7 @@
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     row :seon.sci.eval/program-row}]
-  (let [projection (or (:seon.schema/projection ctx)
+  (let [projection (or (context-projection ctx)
                        (schema/projection-from-database db))
         [identity value]
         (some (fn [attribute]
@@ -593,9 +607,12 @@
 
       :seon.fn/sym
       (let [namespace-name (second (:seon.fn/ns row))
-            event (one-event (:seon.fn/source committed) namespace-name ctx)]
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-          (sci/eval-form ctx (:seon.sci.reader/form event)))
+            event (when-not (::evaluated? row)
+                    (one-event (:seon.fn/source committed)
+                               namespace-name ctx))]
+        (when event
+          (sci/binding [sci/ns (sci/create-ns namespace-name)]
+            (sci/eval-form ctx (:seon.sci.reader/form event))))
         {:seon.schema/projection
          (schema/projection-from-database db projection)
          :seon.sci.eval/installed 1})
@@ -607,9 +624,12 @@
 
       :seon.test/sym
       (let [namespace-name (second (:seon.test/ns row))
-            event (one-event (:seon.test/source committed) namespace-name ctx)]
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-          (sci/eval-form ctx (:seon.sci.reader/form event)))
+            event (when-not (::evaluated? row)
+                    (one-event (:seon.test/source committed)
+                               namespace-name ctx))]
+        (when event
+          (sci/binding [sci/ns (sci/create-ns namespace-name)]
+            (sci/eval-form ctx (:seon.sci.reader/form event))))
         {:seon.schema/projection projection
          :seon.sci.eval/installed 1})
 
@@ -644,6 +664,8 @@
       ;; than program identities.
       (when-let [namespace-state (::namespace-state row)]
         (sci/install-namespace-state! ctx namespace-state))
+      (advance-context-projection!
+       ctx db (:seon.schema/projection installed))
       installed)))
 
 (defn- admission-source
@@ -663,12 +685,12 @@
   call, SCI's interrupt hook sees no interpreted function entrance. Runaway
   work inside that call is bounded by the submit-level wedge backstop, not the
   evaluation time-limit."
-  [ctx db namespace-assertions]
+  [ctx namespace-assertions source-for-transaction]
   (let [first-party-names
         (into #{}
               (comp
                (filter (fn [[_ _ source-tx]]
-                         (= :core (admission-source db source-tx))))
+                         (= :core (source-for-transaction source-tx))))
                (map first))
               namespace-assertions)
         loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))]
@@ -694,9 +716,9 @@
 
 (defn- program-doc-var
   "An SCI `doc` macro whose printed function facts came from acquisition."
-  [documentation]
+  [ctx documentation]
   (let [repl-ns (sci/create-ns 'clojure.repl)
-        fallback @(sci/resolve (base) 'clojure.repl/doc)]
+        fallback @(sci/resolve ctx 'clojure.repl/doc)]
     (sci/new-macro-var
      'doc
      (fn [form env function-symbol]
@@ -715,7 +737,7 @@
 (defn- install-program-doc!
   "Install one acquired program-doc projection without retaining the db."
   [ctx db]
-  (let [doc-var (program-doc-var (program-documentation db))]
+  (let [doc-var (program-doc-var ctx (program-documentation db))]
     ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
     ;; through every namespace's ordinary clojure.core refer.
     (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
@@ -733,6 +755,9 @@
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
   (let [projection (schema/projection-from-database db)
         ctx (assoc ctx :seon.schema/projection projection)
+        source-for-transaction
+        (memoize (fn [source-tx]
+                   (admission-source db source-tx)))
         namespace-assertions
         (d/q '[:find ?namespace-name ?source ?source-tx
                :where
@@ -741,9 +766,9 @@
              db)
         agent-authored?
         (fn [source-tx]
-          (= :agent (admission-source db source-tx)))
+          (= :agent (source-for-transaction source-tx)))
         _ (install-loaded-first-party-namespaces!
-           ctx db namespace-assertions)
+           ctx namespace-assertions source-for-transaction)
         _ (install-program-doc! ctx db)
         namespace-rows
         (into
@@ -888,6 +913,21 @@
        functions-installed
        namespace-order))))
 
+(defn cluster-ctx
+  "Build and cold-acquire one cluster's live SCI program context."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.sci.eval/ctx]}
+  [db]
+  (let [ctx (build-base-ctx)
+        acquired (acquire! {:seon.sci.eval/ctx ctx
+                            :seon.db/db db})
+        projection (:seon.schema/projection acquired)]
+    (assoc ctx
+           :seon.schema/projection projection
+           ::projection-state
+           (atom {::basis-transaction (long (:max-tx db))
+                  :seon.schema/projection projection}))))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs synchronously on the caller's `:compute` workload task — this
@@ -896,8 +936,8 @@
   caller's work launcher.
 
   Order is the contract:
-  1. use the SUPPLIED guarded ctx (the caller's per-run fork, so the
-     fold shares defs) or make a fresh guarded fork when none was given;
+  1. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
+     an isolated one-off when none was given;
   2. arm its stable interrupt-fn on the current thread with
      `::time-limit-ms`, the ONLY limit;
   3. consume THE ONE reader event; source is never reparsed;
@@ -923,7 +963,7 @@
   (let [;; a supplied ctx is used AS GIVEN — forking it here would
         ;; discard the caller's accumulated defs, which is the bug this
         ;; contract exists to not repeat
-        evaluation-ctx (or ctx (fork))
+        evaluation-ctx (or ctx (build-base-ctx))
         {:keys [interrupt-fn] stop! ::stop! record ::record}
         (arm evaluation-ctx time-limit-ms)
         printed (java.io.StringWriter.)
@@ -955,7 +995,7 @@
                   (vreset! ending-namespace (sci/ns-name @sci/ns))
                   value)))
             projection
-            (or (:seon.schema/projection evaluation-ctx)
+            (or (context-projection evaluation-ctx)
                 (schema/current-projection)
                 (schema/build-projection (schema/registered-schemas)))
             raw-row (program-row event projection)
@@ -968,6 +1008,8 @@
               (schema/call-with-registration-delta
                schema-delta
                eval-form!))
+            live-declaration?
+            (and raw-row (nil? schema-delta))
             base-declared-row
             (if schema-delta
               (if unregister-key
@@ -1005,6 +1047,11 @@
             evaluated-value
             (if base-declared-row
               (do
+                ;; A faithful REPL mutates the live cluster context during
+                ;; evaluation. Persistence is decided later by the terminal
+                ;; transaction; refusal never rolls this definition back.
+                (when live-declaration?
+                  (eval-form!))
                 (when-let [declared-ns (:seon.ns/name base-declared-row)]
                   (vreset! ending-namespace declared-ns))
                 (or (:seon.ns/name base-declared-row)
@@ -1040,6 +1087,8 @@
                (reader-context execution-ctx namespace-name)
                namespace-changed?))
             row (cond-> (or declared-row context-row)
+                  live-declaration?
+                  (assoc ::evaluated? true)
                   (and namespace-changed? (or declared-row context-row))
                   (assoc ::namespace-state after-namespace-state))
             ;; Durable declarations are installed only after the row commits.

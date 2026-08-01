@@ -33,14 +33,10 @@
      (:seon.config/on-core-error effective)}))
 
 (defn repl-session
-  "Evaluate forms through one acquired production fork and return each face."
+  "Evaluate forms through one live production context and return each face."
   [forms]
   (let [db *database*
-        ctx (sci.eval/fork)
-        acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx
-                                     :seon.db/db db})
-        ctx (assoc ctx :seon.schema/projection
-                   (:seon.schema/projection acquired))]
+        ctx (sci.eval/cluster-ctx db)]
     (second
      (reduce
       (fn [[namespace-name results] source]
