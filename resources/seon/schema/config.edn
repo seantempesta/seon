@@ -74,11 +74,10 @@
  :seon.config.message/max-chain
  [:int {:min 1}]
 
- ; THE MODEL SEAM, as four dials rather than a map hard-coded in a
- ; drive script. The run loop is installed at BOOT now, so the provider
- ; it calls has to be derivable from facts like everything else it
- ; carries; these are the descriptor row the loop's provider is built
- ; from. The credential is NEVER here — only the NAME of the
+ ; THE MODEL SEAM, as dials rather than a map hard-coded in a drive script.
+ ; The loop resolves the provider from current facts at each :call, so these
+ ; are the descriptor row the request is built from. The credential is NEVER
+ ; here — only the NAME of the
  ; environment variable that holds it, which is what keeps a key out of
  ; the database and out of Git.
  :seon.config.ai/endpoint
@@ -188,9 +187,9 @@
  ; key, and `:seon.db/ref` admits an eid, a tempid or a lookup ref —
  ; never an inline map — so entity rows would need the config gate, the
  ; reconciler's desired-row identity rule and the ref candidate form all
- ; changed at once. Two roles do not need a join table; when a third
- ; role or per-agent overrides arrive, THAT is the change that earns the
- ; entity rows.
+ ; changed at once. Two roles plus sparse same-ident agent overrides do not
+ ; need a join table; a third role or a changing descriptor relationship is
+ ; the evidence that would earn entity rows.
  :seon.config.ai.backup/model
  [:string {:min 1
            :seon.config/optional true

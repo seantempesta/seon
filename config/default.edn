@@ -126,10 +126,10 @@
  ; and a quiet cluster costs none.
  :seon.config.render/coalesce-ms 16
 
- ; THE MODEL SEAM. DeepSeek is the standing default provider; the loop
- ; is installed at boot, so the provider it would call has to be a fact
- ; rather than a literal in a drive script. Nothing here spends
- ; anything: an installed loop with no trigger makes no call.
+ ; THE MODEL SEAM. DeepSeek is the standing default provider; each :call
+ ; resolves current facts, so the provider is a fact rather than a literal in
+ ; a drive script. Nothing here spends anything: an installed loop with no
+ ; trigger makes no call.
  ; Unit: absolute URL of one OpenAI-compatible completions endpoint.
  :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
 
