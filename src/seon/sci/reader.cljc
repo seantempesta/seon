@@ -29,7 +29,9 @@
   [tags]
   (fn [tag]
     (or (get tags tag)
-        (refusal-handler tag))))
+        (when-not #?(:clj (contains? clojure.core/default-data-readers tag)
+                     :cljs false)
+          (refusal-handler tag)))))
 
 (defn- reject-read-eval
   [_]
