@@ -52,6 +52,18 @@ capture context. (The closed read-result wrapper the first report floated
 is REJECTED in this spec: it would force every call site to unwrap, and
 the pass — not the caller — owns evidence. Owner may override.)
 
+## Custody (ruled 2026-08-01)
+
+`seon.db` OWNS the current-connection custody: one dynamic var in
+`seon.db`, bound by the passes that already hold the cluster connection
+(the run loop around each evaluation, the render pass — replacing
+`seon.render`'s private `ambient-database-value`). The zero-db arity
+resolves `(d/db bound-connection)` once per call at the boundary.
+Unbound custody is a flat `:seon.error` value, never an NPE. Rationale:
+one JVM hosts many clusters, so "the" connection is contextual and the
+binder is the pass that knows its cluster; one custody owner, and it is
+the boundary namespace itself.
+
 ## Migration
 
 The 27 `datahike.api` call-site files route through the facade in owner
