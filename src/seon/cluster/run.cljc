@@ -684,8 +684,7 @@
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
-          existing (when identity (d/pull db '[*] [identity identity-value]))
-          changed (when existing (program/changed-attributes existing row))]
+          existing (when identity (d/pull db '[*] [identity identity-value]))]
       (when (and namespace-ref
                  (not (:db/id (d/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
@@ -737,15 +736,10 @@
               [])]
         (into
          schema-declarations
-         (concat
-          (if existing
-            (mapv (fn [attribute]
-                    [:db/retract (:db/id existing) attribute])
-                  (filter #(contains? existing %) changed))
-            [])
-          [(assoc row :db/id
-                  (or (:db/id existing)
-                      (str (name identity) ":" identity-value)))]))))))
+         (if existing
+           (program/exact-replacement-tx existing row)
+           [(assoc row :db/id
+                   (str (name identity) ":" identity-value))]))))))
 
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn
