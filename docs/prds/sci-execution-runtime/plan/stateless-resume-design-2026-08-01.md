@@ -443,7 +443,14 @@ slice 1 lands).
 
 ## 7b. SEALED AMENDMENT — the restore rule (owner ruling #32, 2026-08-01 night)
 
-Supersedes the open decisions below where they conflict. On restore:
+Supersedes the open decisions below where they conflict. The decision
+order per def is VALUE-FIRST (owner clarification, same night): restore
+from the stored value wherever the value is store-faithful — including
+effectful-but-data defs, which never run again; re-evaluation is the
+FORCED path only for values that cannot be stored at all (every `defn`:
+a closure has no storable representation, only its defining form), and
+purity is the safety condition that permits that forced path. On
+restore:
 
 - **Re-evaluate ONLY forms provably pure.** Derived three ways, never
   tagged: no host touch at sci analysis (sci resolves every interop
