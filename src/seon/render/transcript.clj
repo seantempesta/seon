@@ -290,12 +290,23 @@
 
 (defn- floor-text
   [unit value]
-  (let [rendered
+  (let [caps (:seon.sci.admit/caps unit)
+        rendered
         (render/render
          {:seon.render/unit
           {:seon.render/value value
            :seon.cluster.agent/id (:seon.cluster.agent/id unit)
-           :seon.sci.admit/caps (:seon.sci.admit/caps unit)}
+           :seon.sci.admit/caps caps
+           ;; Transcript owns its aggregate token budget. Its value leaves use
+           ;; the generous receipt bounds so presentation defaults cannot
+           ;; truncate headers and prose before that budget is applied.
+           :seon.render.value/options
+           {:seon.render.value/max-depth
+            (:seon.config.eval.result/max-depth caps)
+            :seon.render.value/max-collection
+            (:seon.config.eval.result/max-collection caps)
+            :seon.render.value/max-string
+            (:seon.config.eval.result/max-string caps)}}
           :seon.render/kind :seon.render/ai})]
     (or (:seon.render/output rendered)
         (pr-str rendered))))
@@ -390,7 +401,15 @@
         sentence (rendered-family unit entity 2)
         extra (receipt-extra entry)]
     (str (bounded-scalar unit (entry-header entry detail)) "\n"
-         (pr-str (list 'comment sentence (floor-value unit extra))))))
+         (pr-str (list 'comment sentence (floor-value unit extra)))
+         (when (::capped? entry)
+           (str "\n; CAPPED: showing " (count (::result entry))
+                " of " (::result-size entry)
+                " chars — full value "
+                (if-some [digest (::result-blob entry)]
+                  (str "result-blob " digest)
+                  "unavailable")
+                " (result-size " (::result-size entry) " chars)")))))
 
 (defn- projected-entry
   [unit entry detail]

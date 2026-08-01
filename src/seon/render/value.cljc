@@ -14,6 +14,8 @@
   O(1) count/length summaries and for the already-bounded set of retained path
   identities; presentation never recursively walks an unadmitted tail."
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
+            #?(:clj [clojure.pprint :as pprint])
             #?(:clj [clojure.edn :as edn]
                :cljs [cljs.reader :as edn])
             [seon.ai.tokens :as tokens]
@@ -105,9 +107,6 @@
          :seon.config.eval.result/max-depth
          (min (:seon.config.eval.result/max-depth caps)
               (:seon.render.value/max-depth options))
-         :seon.config.eval.result/max-collection
-         (min (:seon.config.eval.result/max-collection caps)
-              (:seon.render.value/max-collection options))
          :seon.config.eval.result/max-string
          (min (:seon.config.eval.result/max-string caps)
               (:seon.render.value/max-string options))))
@@ -125,6 +124,13 @@
   [value]
   (when (counted? value)
     (try (count value) (catch #?(:clj Throwable :cljs :default) _ nil))))
+
+(defn- shown-count
+  [value]
+  (cond
+    (and (map? value) (= true (::admit/elided value))) (dec (count value))
+    (coll? value) (count (remove #(= ::admit/elided %) value))
+    :else 0))
 
 (defn- opened-window
   [value offset size]
@@ -222,6 +228,8 @@
 ;;; One admitted projection
 ;;; ---------------------------------------------------------------------------
 
+(declare html-projection)
+
 (defn- admitted-view
   [unit window?]
   (when-let [caps (:seon.sci.admit/caps unit)]
@@ -271,22 +279,45 @@
      :seon.render.value/summary (summary (:seon.render.value/raw view))
      :seon.render.value/options (:seon.render.value/options view)
      :seon.render.value/truncated?
-     (:seon.render.value/truncated? view)}))
+     (:seon.render.value/truncated? view)
+     :seon.render.value/html (html-projection unit view)}))
 
 (defn render-html-data
-  "Return the admitted plain-data projection unchanged."
+  "Render HTML from one already admitted projection."
   {:malli/schema [:=> [:cat :seon.render.value/projection]
-                  :seon.render.value/projection]}
+                  :seon.render/hiccup]}
   [projection]
-  projection)
+  (:seon.render.value/html projection))
+
+(defn- repl-tree
+  [tree]
+  (walk/postwalk
+   (fn [value]
+     (cond
+       (= ::admit/elided value) '...
+       (and (map? value) (= true (get value '...)))
+       (assoc value '... '...)
+       :else value))
+   tree))
+
+(defn- repl-str
+  [tree width]
+  (let [compact (pr-str tree)
+        pretty #?(:clj (binding [pprint/*print-right-margin* width]
+                         (str/replace (with-out-str (pprint/pprint tree))
+                                      #"\n$" ""))
+                  :cljs (if (number? width) compact compact))]
+    (if (str/includes? pretty "\n") pretty compact)))
 
 (defn render-ai-data
   "Render AI text from one already admitted projection."
   {:malli/schema [:=> [:cat :seon.render.value/projection] :string]}
   [projection]
-  (str (pr-str (:seon.render.value/tree projection))
+  (str (repl-str (repl-tree (:seon.render.value/tree projection))
+                 (:seon.render.value/width
+                  (:seon.render.value/options projection)))
        (when (:seon.render.value/truncated? projection)
-         " (elided — this value is larger than the configured caps)")))
+         " ; elided — this value is larger than the configured caps")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTML presentation over finite admitted data
@@ -468,6 +499,42 @@
          (path-link unit path (+ offset shown)
                     "next →" "seon-data-page"))])))
 
+(defn- html-projection
+  [unit view]
+  (let [path (vec (get-in unit [:seon.render.data/cursor
+                                :seon.render.data/path] []))
+        offset (long (get-in unit [:seon.render.data/cursor
+                                   :seon.render.data/offset] 0))
+        size (long (min (:seon.render.value/max-collection
+                         (:seon.render.value/options view))
+                        (:seon.config.eval.result/max-collection
+                         (:seon.sci.admit/caps unit))))
+        window (-> (opened-window (:seon.render.value/tree view) offset size)
+                   (assoc :seon.render.value/size size
+                          :seon.render.value/total
+                          (:seon.render.value/total view)))
+        window (cond-> window
+                 (:seon.render.value/truncated? view)
+                 (assoc :seon.render.value/shown
+                        (shown-count (:seon.render.value/window window))
+                        :seon.render.value/more? true))
+        admitted (:seon.render.value/window window)]
+    [:div {:id (node-id unit path) :class "seon-data-panel"}
+     (breadcrumbs unit path)
+     [:div {:class "seon-value-summary"}
+      (summary (:seon.render.value/raw view))]
+     (pager unit path window)
+     (node-content unit admitted admitted path 0
+                   (:seon.render.value/steps window))
+     (when (or (:seon.render.value/truncated? view)
+               (:seon.render.value/more? window)
+               (pos? offset))
+       [:p {:class "seon-data-capped"}
+        "elided — this value is larger than the configured caps"
+        (when (:seon.render.value/route-base unit)
+          [:span " · " (path-link unit path 0 "inspect this path"
+                                   "seon-data-step")])])]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The floor twins
 ;;; ---------------------------------------------------------------------------
@@ -485,26 +552,8 @@
   "Render any floor unit as admitted, drillable structural HTML."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-let [view (admitted-view unit true)]
-    (let [path (vec (get-in unit [:seon.render.data/cursor
-                                  :seon.render.data/path] []))]
-      [:div {:id (node-id unit path) :class "seon-data-panel"}
-       (breadcrumbs unit path)
-       [:div {:class "seon-value-summary"}
-        (summary (:seon.render.value/raw view))]
-       (pager unit path view)
-       (node-content unit
-                     (:seon.render.value/tree view)
-                     (:seon.render.value/raw view)
-                     path
-                     0
-                     (:seon.render.value/steps view))
-       (when (:seon.render.value/truncated? view)
-         [:p {:class "seon-data-capped"}
-          "elided — this value is larger than the configured caps"
-          (when (:seon.render.value/route-base unit)
-            [:span " · " (path-link unit path 0 "inspect this path"
-                                     "seon-data-step")])])])
+  (if-let [projection (prepare unit)]
+    (render-html-data projection)
     [:div {:class "seon-error-card"}
      [:span {:class "seon-error-card-message"}
       (str "This panel needs :seon.sci.admit/caps on the unit; without "

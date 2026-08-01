@@ -308,9 +308,8 @@
         (let [ai (transcript/render-ai
                   (unit @connection 100000 narrow-caps))]
           (is (reader-valid? ai))
-          (is (str/includes? ai "#:seon.sci.admit"))
-          (is (str/includes? ai ":truncated-string"))
-          (is (str/includes? ai ":elided true"))
+          (is (str/includes? ai ":seon.sci.admit/truncated-string"))
+          (is (str/includes? ai "... ..."))
           (is (not (str/includes? ai ":audit/field-39"))))))))
 
 (deftest capped-state-is-derived-from-receipt-size-without-a-boolean
@@ -338,7 +337,12 @@
         (let [receipt (d/pull @connection '[*]
                               [:seon.cluster.eval/id "eval-blobbed"])]
           (is (transcript/capped-result? receipt))
-          (is (not (contains? receipt :seon.sci.admit/capped?))))))))
+          (is (not (contains? receipt :seon.sci.admit/capped?)))
+          (let [ai (transcript/render-ai (unit @connection 100000))]
+            (is (str/includes? ai "; CAPPED: showing"))
+            (is (str/includes? ai "of 189000 chars"))
+            (is (str/includes? ai (str "result-blob " digest)))
+            (is (reader-valid? ai))))))))
 
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
   (support/with-database

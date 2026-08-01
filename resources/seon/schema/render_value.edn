@@ -46,11 +46,13 @@
  :seon.render.value/tree :any
  :seon.render.value/summary :string
  :seon.render.value/truncated? :boolean
+ :seon.render.value/html :seon.render/hiccup
  :seon.render.value/projection
  [:map {:closed true}
   [:seon.render.value/tree :seon.render.value/tree]
   [:seon.render.value/summary :seon.render.value/summary]
   [:seon.render.value/truncated? :seon.render.value/truncated?]
+  [:seon.render.value/html :seon.render.value/html]
   [:seon.render.value/options :seon.render.value/options]
   [:seon.render.value/width {:optional true} :seon.render.value/width]
   [:seon.render.value/schemas {:optional true} [:vector :map]]]}

@@ -86,17 +86,36 @@
                                (original request))]
       (let [projection (value/prepare (unit {:a [1 2 3]}))]
         (is (= 1 @calls))
-        (is (identical? projection (value/render-html-data projection)))
+        (is (vector? (value/render-html-data projection)))
         (is (string? (value/render-ai-data projection)))))))
+
+(deftest ai-leaves-use-repl-printing-and-clojures-own-elision-idiom
+  (let [one-line (value/render-ai
+                  (assoc (unit [1 2 3])
+                         :seon.render.value/options
+                         {:seon.render.value/width 80}))
+        multi-line (value/render-ai
+                    (assoc (unit (vec (range 20)))
+                           :seon.render.value/options
+                           {:seon.render.value/width 20}))
+        elided (value/render-ai
+                (assoc-in (unit (vec (range 20)))
+                          [:seon.sci.admit/caps
+                           :seon.config.eval.result/max-collection]
+                          4))]
+    (is (= "[1 2 3]" one-line)
+        "pprint's trailing newline never changes one-line pr-str output")
+    (is (str/includes? multi-line "\n")
+        "pprint is selected only when its layout actually breaks")
+    (is (str/includes? elided "..."))
+    (is (not (str/includes? elided ":seon.sci.admit/elided")))))
 
 (deftest caps-are-loud-and-lazy-safe
   (let [realized (atom 0)
         raw (map (fn [number] (swap! realized inc) number) (range))
         html (hiccup/->string (value/render-html (unit raw)))]
     (is (<= @realized
-            (inc (:seon.render.value/max-collection
-                  (:seon.render.value/options
-                   (value/prepare (unit :probe)))))))
+            (inc (:seon.config.eval.result/max-collection caps))))
     (is (str/includes? html "elided")))
   (testing "a realization failure becomes visible data"
     (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
@@ -281,9 +300,8 @@
         right (array-map :b 2 :c 3 :a 1 :d 4)
         page-unit (fn [subject]
                     (assoc (unit subject)
-                           :seon.sci.admit/caps
-                           (assoc caps
-                                  :seon.config.eval.result/max-collection 2)))]
+                           :seon.render.value/options
+                           {:seon.render.value/max-collection 2}))]
     (is (= (hiccup/->string (value/render-html (page-unit left)))
            (hiccup/->string (value/render-html (page-unit right)))))))
 
