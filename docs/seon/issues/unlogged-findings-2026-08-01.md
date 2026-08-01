@@ -17,7 +17,14 @@ ordinary interop an agent would reach for — `java.time.Instant/now`,
 `java.util.UUID/randomUUID`, `java.io.File` — fails. Owner direction
 2026-08-01: NO hand-maintained interop allowlist; the policy must be
 COMPUTED (sci's `:classes` supports allow/deny structure — read
-`reference-code/sci` for the mechanism). Blocks "the agent can do
+`reference-code/sci` for the mechanism).
+
+OWNER DIRECTION 2026-08-01 (refinement): adding the useful Java packages
+that cannot crash the system to sci's own allow list is FINE — it just
+must not be THE main solution. So: a curated allow set is an acceptable
+floor for obviously-safe value classes, while the general mechanism
+stays computed (derive from what the corpus actually reaches, with the
+deny side owning genuinely dangerous surfaces). Blocks "the agent can do
 everything within reason".
 
 ## 2. Agents have no way to record their own facts
@@ -73,3 +80,27 @@ live CLJS build although CLJS is OFF (owner ruling 2026-07-27). Also
 `evals/runs/` holds ~700 dated pod-era transcript files — archive
 material rather than rot, but it dominates the tree. `ORCHESTRATOR.md`
 is already self-marked superseded.
+
+
+## 7. `:seon.render.value/max-collection` now has TWO defaults authorities
+
+The caps/blob wave added `:seon.render.value/max-collection 8` to
+`config/default.edn:39` while `resources/seon/schema/render_value.edn`
+still declares `:seon.render.value/default 8` for the same attribute —
+two places shipping the same number, which is the second-registry smell
+the repo forbids. The schema file's own comment argues against exactly
+this ("adding these as `seon.config.*` dials would create a second
+defaults authority outside config/default.edn"), so the comment and the
+code now contradict each other. One must own it; the rest reads it.
+
+Verified NOT a problem while auditing this: the printer is ONE mechanism
+and the REPL is not clipped. `seon.render.transcript` passes the
+admission caps AS the presentation options, and the floor takes
+`min(option, cap)`, so a transcript renders at full cap width — measured
+2026-08-01, a 500-element result renders all 500 elements with no
+elision marker. The small schema default applies only to the paged
+`/data` drill window, which is correct for a paged UI. The open question
+is the opposite of crippling: with presentation pinned to the safety
+ceiling, a genuinely huge result would flood the context, and the
+per-entry detail policy that should decide is the deliberately-unwritten
+compaction layer (ruling #24's dynamic transcript).
