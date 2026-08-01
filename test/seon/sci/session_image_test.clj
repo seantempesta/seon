@@ -179,6 +179,63 @@
                 @(sci/resolve fresh 'my.agents.session-built-ins/sampled))
              "a faithful random value restores as data, never by re-execution"))))))
 
+(deftest failed-evaluation-delta-restores-values-but-never-replays-source
+  (with-file-database
+   (fn [connection]
+     (let [namespace-name 'my.agents.failed-session
+           _ (d/transact connection
+                         {:tx-data
+                          [{:seon.config.eval.result/blob-threshold 32768}
+                           {:seon.ns/name namespace-name
+                            :seon.ns/source
+                            "(ns my.agents.failed-session)"}]})
+           live (eval/cluster-ctx @connection connection)
+           failed
+           (evaluate! live namespace-name
+                      (str "(do (def kept 9) (def lost (fn [] 7)) "
+                           "(throw (ex-info \"later\" {})))"))]
+       (is (= :error
+              (get-in failed
+                      [:seon.sci.admit/record :seon.eval/outcome])))
+       (is (= #{"my.agents.failed-session/kept"
+                "my.agents.failed-session/lost"}
+              (into #{} (map :seon.code.def/id)
+                    (:seon.sci.eval/session-defs failed))))
+       (is (= 9 @(sci/resolve live 'my.agents.failed-session/kept)))
+       (is (= 7 ((deref (sci/resolve live
+                                     'my.agents.failed-session/lost)))))
+       (commit-evaluation! connection failed 0)
+       (let [fresh (eval/cluster-ctx @connection connection)
+             lost (sci/resolve fresh 'my.agents.failed-session/lost)]
+         (is (= 9 @(sci/resolve fresh 'my.agents.failed-session/kept)))
+         (is (false? (sci.vars/hasRoot lost)))
+         (is (= "Defining evaluation did not complete successfully."
+                (:seon.code.def/unrestorable
+                 (d/pull @connection
+                         [:seon.code.def/unrestorable]
+                         [:seon.code.def/id
+                          "my.agents.failed-session/lost"])))))))))
+
+(deftest time-limited-evaluation-reports-its-earlier-def-delta
+  (let [namespace-name 'my.agents.cut-session
+        ctx (eval/build-base-ctx)
+        evaluation
+        (eval/evaluate
+         {:seon.cluster.run.form/source
+          "(do (def before-cut 7) (loop [] (recur)))"
+          :seon.cluster.run.form/ns [:seon.ns/name namespace-name]
+          :seon.sci.eval/ctx ctx
+          :seon.sci.admit/caps caps
+          :seon.sci.eval/time-limit-ms 25
+          :seon.config/on-core-error :panic})]
+    (is (= :time
+           (get-in evaluation
+                   [:seon.sci.admit/record :seon.eval/outcome])))
+    (is (= ["my.agents.cut-session/before-cut"]
+           (mapv :seon.code.def/id
+                 (:seon.sci.eval/session-defs evaluation))))
+    (is (= 7 @(sci/resolve ctx 'my.agents.cut-session/before-cut)))))
+
 (deftest fresh-context-restores-the-forms-session-image
   (with-file-database
    (fn [connection]

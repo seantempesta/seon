@@ -1231,7 +1231,8 @@
                            'user)
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
-        print-options (volatile! {})]
+        print-options (volatile! {})
+        session-observation (volatile! nil)]
     (try
       (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
@@ -1242,6 +1243,12 @@
                             (sci/fork evaluation-ctx)
                             evaluation-ctx)
             before-intern-values (intern-values execution-ctx)
+            _ (when-not namespace-unmap?
+                (vreset! session-observation
+                         {:seon.sci.eval/ctx execution-ctx
+                          :seon.sci.eval/before-intern-values
+                          before-intern-values
+                          :seon.sci.eval/form form}))
             before-namespace-state
             (when namespace-unmap?
               (sci/namespace-state execution-ctx))
@@ -1398,6 +1405,18 @@
                    (bounded-output printed caps))))
       (catch Throwable throwable
           (let [record (record (if (interrupted? throwable) :time :error))
+                session-defs
+                (when-let [{failed-ctx :seon.sci.eval/ctx
+                            before :seon.sci.eval/before-intern-values
+                            failed-form :seon.sci.eval/form}
+                           @session-observation]
+                  ;; A failed evaluation has no durable program row. Any def
+                  ;; it installed before the later throw/cut therefore belongs
+                  ;; to the session image, including a contracted def whose
+                  ;; declaration never reached the terminal transaction.
+                  (changed-session-defs
+                   failed-ctx namespace-name before source failed-form nil
+                   (built-in-calls)))
                 value (failure-value throwable record)
                 admitted
                 (admit/admit
@@ -1416,6 +1435,8 @@
                      :seon.sci.admit/capped?
                      (:seon.sci.admit/capped? admitted)
                      :seon.sci.admit/record record}
+              (seq session-defs)
+              (assoc :seon.sci.eval/session-defs session-defs)
               ;; the instant the interrupt was OBSERVED — the one
               ;; genuinely new fact a cut evaluation leaves. Its
               ;; presence IS the interrupted state; there is no label.

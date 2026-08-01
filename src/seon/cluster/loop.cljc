@@ -339,7 +339,10 @@
 (defn- session-image-tx
   "Exact session-image changes riding beside one terminal receipt."
   [db evaluation ordinal]
-  (let [host-clean?
+  (let [successful-evaluation?
+        (= :ok (get-in evaluation
+                       [:seon.sci.admit/record :seon.eval/outcome]))
+        host-clean?
         (zero? (get-in evaluation
                        [:seon.sci.admit/record
                         :seon.eval/host-interop-count]
@@ -373,7 +376,7 @@
                            :seon.code.def/unrestorable)
                    (assoc :seon.code.def/ordinal ordinal))
 
-               (and pure? deterministic?)
+               (and successful-evaluation? pure? deterministic?)
                (-> candidate
                    (dissoc :seon.sci.eval/value
                            :seon.sci.eval/referenced-vars
@@ -394,6 +397,9 @@
                    (assoc :seon.code.def/ordinal ordinal
                           :seon.code.def/unrestorable
                           (cond
+                            (not successful-evaluation?)
+                            "Defining evaluation did not complete successfully."
+
                             (not host-clean?)
                             "Defining form touched host interop."
 
