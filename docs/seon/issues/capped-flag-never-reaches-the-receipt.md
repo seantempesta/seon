@@ -21,6 +21,11 @@ not a stored flag — and the transcript prints the loud CAPPED line from
 it. Owning report:
 `research/admission-caps-and-blob-fallback-2026-08-01.md`.
 
+Step 5 now carries the blob digest and true size through the closed terminal
+request, and `seon.render.transcript/capped-result?` derives the state without
+a stored boolean. The visible print-floor proof remains for Step 6, so this
+issue stays open until that line lands.
+
 Acceptance: a capped result's receipt lets the renderer derive and
 print "N of M shown" without any stored boolean; regression covers the
 class.

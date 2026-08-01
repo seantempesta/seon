@@ -37,6 +37,8 @@
    :seon.cluster.eval/ordinal
    :seon.cluster.eval/at
    :seon.cluster.eval/result-edn
+   :seon.cluster.eval/result-blob
+   :seon.cluster.eval/result-size
    :seon.cluster.eval/error
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
@@ -217,6 +219,16 @@
      ::about-ref? (some? about-eid)
      ::reason (:my.message/reason message)}))
 
+(defn capped-result?
+  "True when a receipt stores less result text than its original size."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [receipt]
+  (let [result-edn (:seon.cluster.eval/result-edn receipt)
+        result-size (:seon.cluster.eval/result-size receipt)]
+    (and (string? result-edn)
+         (integer? result-size)
+         (> result-size (count result-edn)))))
+
 (defn- receipt-entry
   [sources receipt]
   (let [receipt-eid (:db/id receipt)
@@ -230,6 +242,9 @@
                                :seon.cluster.run/id])
      ::source (get sources receipt-eid)
      ::result (:seon.cluster.eval/result-edn receipt)
+     ::result-blob (:seon.cluster.eval/result-blob receipt)
+     ::result-size (:seon.cluster.eval/result-size receipt)
+     ::capped? (capped-result? receipt)
      ::error (:seon.cluster.eval/error receipt)
      ::error-kind (:seon.error/kind receipt)
      ::problem-id (:seon.problems/id receipt)

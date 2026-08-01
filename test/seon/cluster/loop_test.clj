@@ -156,13 +156,24 @@
   (let [base {:seon.cluster.run/id "run-1"
               :seon.cluster.run/process "process/one"
               :seon.cluster.run.form/ordinal 0
-              :seon.cluster.eval/result-edn "1"}
+              :seon.cluster.eval/result-edn "[1 :seon.sci.admit/elided]"
+              :seon.cluster.eval/result-blob (apply str (repeat 64 "a"))
+              :seon.cluster.eval/result-size 1000}
         without (cluster.loop/terminal-tx base now)
         with (cluster.loop/terminal-tx
               (assoc base :my.run/value (my.run/complete "all done"))
               now)]
     (is (vector? without))
     (is (seq without) "a receipt is always written")
+    (is (= (select-keys base
+                        [:seon.cluster.eval/result-edn
+                         :seon.cluster.eval/result-blob
+                         :seon.cluster.eval/result-size])
+           (select-keys (nth (first without) 2)
+                        [:seon.cluster.eval/result-edn
+                         :seon.cluster.eval/result-blob
+                         :seon.cluster.eval/result-size]))
+        "the closed terminal request carries both primitive blob facts")
     (testing "the disposition rides in the SAME tx-data, never a second one"
       (is (> (count with) (count without))
           "the completion's facts are in this vector, not a later commit")

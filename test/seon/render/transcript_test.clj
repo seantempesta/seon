@@ -313,6 +313,33 @@
           (is (str/includes? ai ":elided true"))
           (is (not (str/includes? ai ":audit/field-39"))))))))
 
+(deftest capped-state-is-derived-from-receipt-size-without-a-boolean
+  (support/with-database
+    (fn [connection]
+      (let [stored "[0 1 :seon.sci.admit/elided]"
+            digest (apply str (repeat 64 "b"))]
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.run/id "run-blobbed"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 0)}
+          {:seon.cluster.run.form/id "form-blobbed"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "run-blobbed"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(range 100000)"}
+          {:seon.cluster.eval/id "eval-blobbed"
+           :seon.cluster.eval/run [:seon.cluster.run/id "run-blobbed"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 1000)
+           :seon.cluster.eval/result-edn stored
+           :seon.cluster.eval/result-blob digest
+           :seon.cluster.eval/result-size 189000}])
+        (let [receipt (d/pull @connection '[*]
+                              [:seon.cluster.eval/id "eval-blobbed"])]
+          (is (transcript/capped-result? receipt))
+          (is (not (contains? receipt :seon.sci.admit/capped?))))))))
+
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
   (support/with-database
     (fn [connection]
