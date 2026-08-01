@@ -1147,9 +1147,9 @@
             (filter :seon.code.def/source rows)]
       (let [namespace-name (:seon.ns/name namespace-ref)
             namespace-object (sci/create-ns namespace-name)
-            form (sci/parse-string ctx source)]
+            event (one-event source namespace-name ctx)]
         (sci/binding [sci/ns namespace-object]
-          (sci/eval-form ctx form))))
+          (sci/eval-form ctx (:seon.sci.reader/form event)))))
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/unrestorable
      (into []
