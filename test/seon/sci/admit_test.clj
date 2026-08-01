@@ -187,8 +187,8 @@
   (let [{:keys [interrupt-fn]} (armed)
         input (request value interrupt-fn)
         admitted (admit/admit input)
-        projection (:seon.sci.admit/value admitted)
         printed (:seon.cluster.eval/result-edn admitted)
+        projection (edn/read-string printed)
         shape (measure projection)]
     (and
      (m/validate (compiled-node-schema) projection)
@@ -240,21 +240,20 @@
           (is (string? (:seon.cluster.eval/result-edn admitted)))
           (is (some? (edn/read-string
                       (:seon.cluster.eval/result-edn admitted))))
-          (is (m/validate (compiled-node-schema)
-                          (:seon.sci.admit/value admitted))))))))
+          (is (m/validate
+               (compiled-node-schema)
+               (edn/read-string (:seon.cluster.eval/result-edn admitted)))))))))
 
 (deftest inst-projection-keeps-common-and-exotic-inst-values-readable
   (let [date (java.util.Date. 41)
         instant (java.time.Instant/ofEpochMilli 42)
         exotic (reify clojure.core/Inst
                  (inst-ms* [_] 43))]
-    (is (= {::print/face ::print/inst ::print/value date}
+    (is (= date
            (:seon.sci.admit/value (admit/admit (request date)))))
-    (is (= {::print/face ::print/inst
-            ::print/value (java.util.Date. 42)}
+    (is (= (java.util.Date. 42)
            (:seon.sci.admit/value (admit/admit (request instant)))))
-    (is (= {::print/face ::print/inst
-            ::print/value (java.util.Date. 43)}
+    (is (= (java.util.Date. 43)
            (:seon.sci.admit/value (admit/admit (request exotic)))))))
 
 ;;; ---------------------------------------------------------------------------

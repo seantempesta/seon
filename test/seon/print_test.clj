@@ -39,11 +39,12 @@
 
 (defn- admitted-node
   [value]
-  (:seon.sci.admit/value
-   (admit/admit {:seon.sci.admit/value value
-                 :seon.sci.admit/interrupt-fn (fn [])
-                 :seon.sci.admit/caps admission-caps
-                 :seon.config/on-core-error :record})))
+  (edn/read-string
+   (:seon.cluster.eval/result-edn
+    (admit/admit {:seon.sci.admit/value value
+                  :seon.sci.admit/interrupt-fn (fn [])
+                  :seon.sci.admit/caps admission-caps
+                  :seon.config/on-core-error :record}))))
 
 (defn- sci-value
   [source]

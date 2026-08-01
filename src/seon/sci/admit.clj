@@ -371,6 +371,50 @@
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
 
+(declare semantic-value)
+
+(defn- semantic-entry
+  [entry]
+  (when (vector? entry)
+    [(semantic-value (first entry))
+     (semantic-value (second entry))]))
+
+(defn- semantic-value
+  "The bounded value consumed by runtime semantics, derived from the finite
+  print node without touching the dangerous source a second time."
+  [print-node]
+  (case (::print/face print-node)
+    (::print/nil ::print/boolean ::print/number ::print/keyword
+     ::print/symbol ::print/char ::print/string ::print/inst ::print/uuid)
+    (::print/value print-node)
+
+    ::print/vector (mapv semantic-value (::print/items print-node))
+    ::print/list (apply list (map semantic-value (::print/items print-node)))
+    ::print/set (set (map semantic-value (::print/items print-node)))
+
+    ::print/map
+    (let [entries (::print/entries print-node)
+          projected (into {} (keep semantic-entry) entries)]
+      (if (some #(not (vector? %)) entries)
+        (assoc projected ::elided true)
+        projected))
+
+    ::print/record
+    (assoc (into {} (keep semantic-entry) (::print/entries print-node))
+           ::type (::print/name print-node))
+
+    ::print/var {::reference "sci.lang.Var"
+                 ::name (str "#'" (::print/name print-node))}
+    ::print/type {::opaque "sci.lang.Type" ::name (::print/name print-node)}
+    ::print/class {::opaque "java.lang.Class" ::name (::print/name print-node)}
+    ::print/object {::opaque (::print/class print-node)}
+    ::print/truncated-string {::truncated-string (::print/value print-node)
+                              ::elided true}
+    ::print/failed {::opaque (::print/class print-node)
+                    ::projection-error (::print/message print-node)}
+    ::print/throwable (semantic-value (::print/value print-node))
+    (::print/elided ::print/pruned) ::elided))
+
 (defn admit
   "Realize and bound one value leaving a sci evaluation. ONE pass.
   Call this INSIDE the armed boundary, before disarm — that placement
@@ -413,12 +457,12 @@
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))
                :capped? (volatile! false)}
-        projection (project value 0 state)]
-    (cond-> {::value projection
+        print-node (project value 0 state)]
+    (cond-> {::value (semantic-value print-node)
              ;; finite by construction: the projection is depth-bounded,
              ;; width-bounded, deref-free and cycle-free, so this print
              ;; cannot run away and cannot overflow the stack
-             :seon.cluster.eval/result-edn (pr-str projection)
+             :seon.cluster.eval/result-edn (pr-str print-node)
              ::capped? @(:capped? state)}
       ;; absent in, absent out — never a stored nil
       record (assoc ::record record))))
