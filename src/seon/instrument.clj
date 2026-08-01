@@ -131,36 +131,49 @@
   ;; schema instead — the first thing this reporter did — humanizes to
   ;; the useless "should be a valid function".
   [caps kind data]
-  (let [[offended value] (if (= :malli.core/invalid-output kind)
-                           [(:output data) (:value data)]
-                           [(:input data) (:args data)])
-        schema-form (m/form offended)
-        expected (if (and (= :malli.core/invalid-input kind)
-                          (= :cat (first schema-form))
-                          (= 2 (count schema-form)))
-                   (second schema-form)
-                   schema-form)]
-    (cond-> {:seon.error/kind ::contract-violated
-             :seon.error/message
-             (str (:fn-name data) " violated its contract ("
-                  (name kind) "): "
-                  (pr-str (me/humanize (m/explain offended value))))
-             :seon.error/data
-             (cond-> {::malli kind
-                      ::arm (if (= :malli.core/invalid-output kind)
-                              :output
-                              :input)
-                      ::schema (pr-str expected)}
-               (:fn-name data) (assoc ::fn (str (:fn-name data))))}
-      caps
-      (update :seon.error/data assoc ::args
-              (:seon.cluster.eval/result-edn
-               (admit/admit {:seon.sci.admit/value value
-                             :seon.sci.admit/interrupt-fn (constantly nil)
-                             :seon.sci.admit/caps caps
-                             ;; the reporter may not panic on the way to
-                             ;; reporting a panic
-                             :seon.config/on-core-error :record}))))))
+  (if (= :malli.core/invalid-arity kind)
+    (let [function-symbol (:fn-name data)
+          arglists (some-> function-symbol find-var meta :arglists)]
+      {:seon.error/kind ::contract-violated
+       :seon.error/message
+       (str "Wrong number of args (" (:arity data) ") passed to: "
+            function-symbol)
+       :seon.error/data
+       (cond-> {::malli kind
+                ::arm :input
+                ::arity (:arity data)
+                ::fn (str function-symbol)}
+         arglists (assoc ::arglists arglists))})
+    (let [[offended value] (if (= :malli.core/invalid-output kind)
+                             [(:output data) (:value data)]
+                             [(:input data) (:args data)])
+          schema-form (m/form offended)
+          expected (if (and (= :malli.core/invalid-input kind)
+                            (= :cat (first schema-form))
+                            (= 2 (count schema-form)))
+                     (second schema-form)
+                     schema-form)]
+      (cond-> {:seon.error/kind ::contract-violated
+               :seon.error/message
+               (str (:fn-name data) " violated its contract ("
+                    (name kind) "): "
+                    (pr-str (me/humanize (m/explain offended value))))
+               :seon.error/data
+               (cond-> {::malli kind
+                        ::arm (if (= :malli.core/invalid-output kind)
+                                :output
+                                :input)
+                        ::schema (pr-str expected)}
+                 (:fn-name data) (assoc ::fn (str (:fn-name data))))}
+        caps
+        (update :seon.error/data assoc ::args
+                (:seon.cluster.eval/result-edn
+                 (admit/admit {:seon.sci.admit/value value
+                               :seon.sci.admit/interrupt-fn (constantly nil)
+                               :seon.sci.admit/caps caps
+                               ;; the reporter may not panic on the way to
+                               ;; reporting a panic
+                               :seon.config/on-core-error :record})))))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.

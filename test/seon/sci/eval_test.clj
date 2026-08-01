@@ -10,6 +10,7 @@
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -18,6 +19,7 @@
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
+            [seon.instrument :as instrument]
             [sci.core :as sci]
             [seon.render :as render]
             [seon.schema]
@@ -142,6 +144,72 @@
     (is (work/unbound-value? admitted))
     (is (nil? (:seon.cluster.eval/error evaluation))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
+
+(deftest an-instrumented-multi-arity-miss-reads-like-clojure
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/fork)
+            _ (eval/acquire! {:seon.sci.eval/ctx ctx
+                              :seon.db/db @connection})]
+        (try
+          (instrument/apply! {:seon.config/on-core-error :panic
+                              :seon.sci.admit/caps caps})
+          (let [evaluation (run-in ctx "(my.message/send)" 2000)
+                failure (:seon.sci.admit/value evaluation)]
+            (is (= "Wrong number of args (0) passed to: my.message/send"
+                   (:seon.error/message failure)
+                   (:seon.cluster.eval/error evaluation)))
+            (is (= :seon.instrument/contract-violated
+                   (:seon.error/kind failure)))
+            (is (= 0 (get-in failure
+                             [:seon.error/data :seon.instrument/arity])))
+            (is (= '[[to content] [to content about]]
+                   (get-in failure
+                           [:seon.error/data :seon.instrument/arglists])))
+            (is (not (str/includes? (:seon.cluster.eval/result-edn evaluation)
+                                    ":malli.core/invalid-schema"))))
+          (finally
+            (instrument/remove!)))))))
+
+(deftest bare-dir-and-program-derived-doc-are-repl-native
+  (test-support/with-database
+    (fn [connection]
+      (let [db @connection
+            ctx (eval/fork)
+            _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
+            directory (run-in ctx "(dir my.message)" 2000)
+            documentation (run-in ctx "(doc my.message/send)" 2000)
+            row (d/pull db '[:seon.fn/sym :seon.fn/doc
+                             :seon.fn/arglists]
+                        [:seon.fn/sym "my.message/send"])
+            expected-output
+            (str "-------------------------\n"
+                 (:seon.fn/sym row) "\n"
+                 (:seon.fn/arglists row) "\n"
+                 (str/join "\n"
+                           (map #(str "; " %)
+                                (str/split-lines (:seon.fn/doc row))))
+                 "\n")
+            read-forms
+            (with-open [reader (java.io.PushbackReader.
+                                (java.io.StringReader.
+                                 (:seon.cluster.eval/output documentation)))]
+              (loop [forms []]
+                (let [form (edn/read {:eof ::eof} reader)]
+                  (if (= ::eof form)
+                    forms
+                    (recur (conj forms form))))))]
+        (is (= "decline\nsend\n"
+               (:seon.cluster.eval/output directory)))
+        (is (nil? (:seon.sci.admit/value directory)))
+        (is (= expected-output (:seon.cluster.eval/output documentation))
+            "doc prints the acquired program-row facts, not SCI Var metadata")
+        (is (nil? (:seon.sci.admit/value documentation)))
+        (is (= [(symbol "-------------------------")
+                'my.message/send
+                '([to content] [to content about])]
+               read-forms)
+            "the complete printed bytes read as ordinary Clojure")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit

@@ -95,6 +95,7 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
@@ -103,6 +104,7 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
+            [seon.error :as error]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -148,9 +150,9 @@
           run-ns (sci/create-ns 'my.run)
           message-ns (sci/create-ns 'my.message)
           schema-ns (sci/create-ns 'seon.schema)
-          test-ns (sci/create-ns 'clojure.test)]
-      (assoc
-       (sci/init
+          test-ns (sci/create-ns 'clojure.test)
+          ctx
+          (sci/init
         {:interrupt-fn (::interrupt-fn guard)
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
@@ -192,8 +194,15 @@
          :classes {'Throwable Throwable
                    'java.lang.Throwable Throwable
                    'Error Error
-                   'java.lang.Error Error}})
-       ::interrupt-guard guard))))
+                   'java.lang.Error Error}})]
+      ;; `dir` and `doc` are REPL operations, so every namespace resolves
+      ;; them bare through the same clojure.core refer it already receives.
+      ;; `acquire!` replaces only `doc` with its program-row-derived macro.
+      (sci/add-namespace!
+       ctx 'clojure.core
+       {'dir (sci/resolve ctx 'clojure.repl/dir)
+        'doc (sci/resolve ctx 'clojure.repl/doc)})
+      (assoc ctx ::interrupt-guard guard))))
 
 (defn agent-namespace
   "The ONE namespace name for an agent: `my.agents.<id>`.
@@ -371,15 +380,20 @@
 (defn- failure-value
   "The flat error value an agent sees for a failed evaluation."
   [throwable record]
-  {:seon.error/kind (if (= :time (:seon.eval/outcome record))
-                      ::time-limit
-                      ::evaluation-failed)
-   :seon.error/message (diagnosis throwable record)
-   :seon.error/data (cond-> {:seon.sci.eval/throwable
-                             (.getName (class throwable))
-                             :seon.sci.admit/record record}
-                      (ex-data throwable)
-                      (assoc :seon.sci.eval/data (ex-data throwable)))})
+  (let [refusal (error/refusal throwable)
+        evidence {:seon.sci.eval/throwable (.getName (class throwable))
+                  :seon.sci.admit/record record}]
+    (if (= :seon.instrument/contract-violated
+           (:seon.error/kind refusal))
+      (update refusal :seon.error/data merge evidence)
+      {:seon.error/kind (if (= :time (:seon.eval/outcome record))
+                          ::time-limit
+                          ::evaluation-failed)
+       :seon.error/message (diagnosis throwable record)
+       :seon.error/data (cond-> evidence
+                          (ex-data throwable)
+                          (assoc :seon.sci.eval/data
+                                 (ex-data throwable)))})))
 
 (declare deleted-schema-key)
 
@@ -664,6 +678,51 @@
             :when host-namespace]
       (sci/add-namespace! ctx namespace-name (ns-interns host-namespace)))))
 
+(defn- program-documentation
+  "Public function documentation derived from one database value."
+  [db]
+  (into {}
+        (map (fn [[function-symbol doc arglists]]
+               [function-symbol
+                {:seon.fn/doc doc :seon.fn/arglists arglists}]))
+        (d/q '[:find ?function-symbol ?doc ?arglists
+               :where
+               [?function :seon.fn/sym ?function-symbol]
+               [?function :seon.fn/doc ?doc]
+               [?function :seon.fn/arglists ?arglists]
+               [?function :seon.fn/private? false]]
+             db)))
+
+(defn- program-doc-var
+  "An SCI `doc` macro whose printed function facts came from acquisition."
+  [documentation]
+  (let [repl-ns (sci/create-ns 'clojure.repl)
+        fallback @(sci/resolve (base) 'clojure.repl/doc)]
+    (sci/new-macro-var
+     'doc
+     (fn [form env function-symbol]
+       (if-let [{:seon.fn/keys [doc arglists]}
+                (get documentation (str function-symbol))]
+         (let [lines (concat ["-------------------------"
+                              (str function-symbol)
+                              arglists]
+                             (map #(str "; " %) (str/split-lines doc)))]
+           (cons 'do
+                 (concat (map #(list 'clojure.core/println %) lines)
+                         [nil])))
+         (fallback form env function-symbol)))
+     {:ns repl-ns})))
+
+(defn- install-program-doc!
+  "Install one acquired program-doc projection without retaining the db."
+  [ctx db]
+  (let [doc-var (program-doc-var (program-documentation db))]
+    ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
+    ;; through every namespace's ordinary clojure.core refer.
+    (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
+    (sci/add-namespace! ctx 'clojure.core {'doc doc-var})
+    ctx))
+
 (defn acquire!
   "Install compiled first-party and interpreted agent program into one ctx.
 
@@ -686,6 +745,7 @@
           (= :agent (admission-source db source-tx)))
         _ (install-loaded-first-party-namespaces!
            ctx db namespace-assertions)
+        _ (install-program-doc! ctx db)
         namespace-rows
         (into
          []
