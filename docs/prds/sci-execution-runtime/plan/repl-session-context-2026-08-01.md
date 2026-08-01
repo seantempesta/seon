@@ -148,6 +148,34 @@ window applies to the transcript tail behind the pinned bootstrap. The policy th
 (age, size, relevance, budget) is the same seam the context-budget
 layer already owns.
 
+## Owner directions, 2026-08-01 midday batch
+
+- **Sliding window: SIMPLE FIRST.** Render the full transcript for now
+  — no aging variables until the floor is proven. Prepare compaction's
+  inputs (blob-backed values, per-entry options, receipt identities)
+  but do NOT write compaction yet.
+- **The bootstrap is the highest-leverage artifact.** Get the tutorial
+  right by hand first (we need evidence agents can work at all before
+  they can fix our attempted bootstrap), then optimize: bootstrap
+  ordering/instructions first, the whole code graph later. Target:
+  PER-MODEL CALIBRATED bootstraps (each model's Clojure/REPL knowledge
+  differs) plus one GENERIC bootstrap tested acceptable across models —
+  more educational forms and higher token cost are acceptable for the
+  generic one.
+- **REPL parity gets a comprehensive checklist mined from real REPL
+  test suites** (sci's own tests, Clojure's test_clojure/repl,
+  babashka's parity suite) — vendored as reference-code submodules;
+  adapt tests to verify our REPL rather than inventing a hand list.
+- **Replay-on-wake is acceptable to the owner** if safety is handled:
+  the few genuinely unsafe operations marked do-not-replay, agents
+  taught to write effect-safe/idempotent functions. Investigate
+  DERIVING replay safety from capability receipts (a form whose
+  receipts record no capability crossing is replay-safe by
+  construction) before any hand decoration. Also investigate CACHING
+  the sci eval state (we control the sci fork): can the per-agent ctx
+  be parked/snapshotted so `(def x)` from turn 1 is simply present in
+  turn 10 without replay?
+
 ## Columns / tables
 
 Canonical REPL answer = `clojure.pprint/print-table` — emits pipe+dash

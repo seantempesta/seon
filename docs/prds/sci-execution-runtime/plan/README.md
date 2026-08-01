@@ -1725,6 +1725,23 @@ may reintroduce a shadow build into the dev feedback path.
   prints the loud "N of M shown" line from it. Preconditions: the
   admit `inst?` hotspot fix and decoupling render page size from
   max-collection (issues filed 2026-08-01).
+  **Ruling 2026-08-01 #26 (owner): THE PRINT PATH CONTRACT IS SEALED**
+  (`plan/print-path-design-2026-08-01.md`). Admission emits a closed
+  node grammar preserving list-vs-vector, records, vars, classes,
+  object identity, and cut reasons; `seon.print` is a
+  print-method-shaped dispatch over that grammar writing to SINKS —
+  text for the transcript, hiccup for the debug page, tee for both in
+  one pass (P-TEE: the twins cannot disagree; P-TOTAL: generative
+  round-trip). `result-edn` STAYS the data projection — REPL text is
+  emitted at render, so one stored fact yields either face and the
+  dynamic transcript re-renders freely. Agent `print-method` stays
+  REFUSED (live-falsified: mapping the host var let an agent defmethod
+  poison the host JVM); presentation customization is the
+  `:seon.render/ai` renderer path. Honest faces: true
+  `sci.lang.Namespace` class, atoms print without deref (the no-deref
+  invariant is what makes cycles unrepresentable). pprint is NEVER in
+  the text sink (measured 107× cost for +2.3% bytes) — line breaking
+  is a sink concern driven by the declared width option.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
