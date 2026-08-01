@@ -1765,6 +1765,23 @@ may reintroduce a shadow build into the dev feedback path.
   content-addressed blobs, so branch and dedup come free); anything
   genuinely not restorable is STATED by the REPL, never faked. Design
   lane: `plan/stateless-resume-design-2026-08-01.md`.
+  **Ruling 2026-08-01 #29 (owner): THE PROGRAM GRAPH IS LIVE, NOT
+  REBUILT PER TURN.** `acquire!` today runs at the start of EVERY turn
+  (fork base + install every program row from facts: measured 183 ms /
+  78 KB per turn) — that is a cold-start rebuild being used as the hot
+  path, and it is why one bad row bricks a branch (it re-throws every
+  turn). Correct shape: the cluster's ctx IS the live program graph
+  (ruling #27), built ONCE at cluster start and kept live; an agent's
+  own `defn` is already IN it the moment the eval defines it (that is
+  the intended shared-Var propagation), so no reinstall is needed to
+  see it. Rebuild-from-facts becomes what it should always have been:
+  the COLD path — cluster boot, crash recovery, and stateless resume
+  (ruling #28) — never per turn. Changes published from outside the
+  cluster (`bin/seon init`) apply as a targeted, event-driven
+  incremental update, never a per-turn full rebuild. Per-row
+  containment (`issues/acquire-has-no-per-row-containment.md`) is still
+  required, but as cold-path robustness rather than the fix for a
+  per-turn hazard.
   **Ruling 2026-07-31 #23 (owner): `keep-history` becomes an explicit
   config option** — a manifest entry consumed at ancestor build/init
   (creation-fixed, so per-store today; every forked cluster inherits
