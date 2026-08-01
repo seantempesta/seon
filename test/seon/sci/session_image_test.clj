@@ -1,6 +1,7 @@
 (ns seon.sci.session-image-test
   "Recurring acceptance for the database-backed SCI session image."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [sci.core :as sci]
@@ -8,7 +9,9 @@
             [seon.config :as config]
             [seon.cluster.loop :as loop]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.io File]
+           [java.util.concurrent TimeUnit]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
 
@@ -34,6 +37,29 @@
         (d/delete-database configuration)
         (test-support/delete-recursively! root)))))
 
+(defn- run-child!
+  [mode database-path store-id output-path]
+  (let [java-command (.getPath
+                      (File. (System/getProperty "java.home") "bin/java"))
+        process (-> (ProcessBuilder.
+                     ^java.util.List
+                     [java-command
+                      "-cp" (System/getProperty "java.class.path")
+                      "clojure.main" "-m" "seon.sci.session-image-child"
+                      mode database-path (str store-id) output-path])
+                    (.redirectErrorStream true)
+                    (.start))]
+    (when-not (.waitFor process 90 TimeUnit/SECONDS)
+      (.destroyForcibly process)
+      (throw (ex-info "Session-image child exceeded its backstop."
+                      {:mode mode})))
+    (when-not (zero? (.exitValue process))
+      (throw (ex-info "Session-image child failed."
+                      {:mode mode
+                       :exit (.exitValue process)
+                       :output (slurp (.getInputStream process))})))
+    nil))
+
 (defn- evaluate!
   [ctx namespace-name source]
   (eval/evaluate
@@ -43,6 +69,24 @@
     :seon.sci.admit/caps caps
     :seon.sci.eval/time-limit-ms 30000
     :seon.config/on-core-error :panic}))
+
+(deftest two-fresh-jvms-round-trip-the-owner-session
+  (let [root (str "tmp/session-fresh-jvm/" (random-uuid))
+        database-path (str root "/database")
+        store-id (random-uuid)
+        write-output (str root "/written.edn")
+        read-output (str root "/restored.edn")]
+    (.mkdirs (File. root))
+    (try
+      (run-child! "write" database-path store-id write-output)
+      (is (= :written (edn/read-string (slurp write-output))))
+      (run-child! "read" database-path store-id read-output)
+      (is (= {:count 200000
+              :scaled 40
+              :names ["Ada" "Grace"]}
+             (edn/read-string (slurp read-output))))
+      (finally
+        (test-support/delete-recursively! root)))))
 
 (defn- commit-evaluation!
   [connection evaluation ordinal]
