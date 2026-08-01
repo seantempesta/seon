@@ -28,10 +28,12 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [malli.core :as m]
             [sci.core :as sci]
             [seon.config :as config]
+            [seon.print :as print]
             [seon.sci.admit :as admit]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
@@ -78,48 +80,45 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- measure
-  "Depth, node count, widest collection, longest string, and whether the
-  projection still holds anything that must never survive admission."
-  [value]
+  "Semantic depth, node count, width, and longest admitted string."
+  [root]
   (let [nodes (atom 0)
         widest (atom 0)
         longest (atom 0)
-        forbidden (atom #{})
         deepest (atom 0)]
-    (letfn [(walk [value depth]
+    (letfn [(walk [node depth]
               (swap! nodes inc)
               (swap! deepest max depth)
-              (cond
-                (instance? clojure.lang.IDeref value)
-                (swap! forbidden conj :reference)
+              (case (::print/face node)
+                (::print/vector ::print/list ::print/set)
+                (let [items (::print/items node)]
+                  (swap! widest max (count items))
+                  (doseq [child items] (walk child (inc depth))))
 
-                (some-> value class .isArray)
-                (swap! forbidden conj :array)
+                (::print/map ::print/record)
+                (let [entries (::print/entries node)]
+                  (swap! widest max (count entries))
+                  (doseq [entry entries
+                          :when (vector? entry)
+                          child entry]
+                    (walk child (inc depth))))
 
-                (instance? clojure.lang.LazySeq value)
-                (swap! forbidden conj :lazy)
+                ::print/throwable
+                (walk (::print/value node) (inc depth))
 
-                (map? value)
-                (do (swap! widest max (count value))
-                    (doseq [[k v] value] (walk k (inc depth)) (walk v (inc depth))))
+                (::print/string ::print/truncated-string)
+                (swap! longest max (count (::print/value node)))
 
-                (coll? value)
-                (do (swap! widest max (count value))
-                    (doseq [child value] (walk child (inc depth))))
-
-                (string? value)
-                (swap! longest max (count value))
-
-                (or (nil? value) (boolean? value) (number? value)
-                    (keyword? value) (symbol? value) (char? value)
-                    (inst? value) (uuid? value))
-                nil
-
-                :else
-                (swap! forbidden conj (class value))))]
-      (walk value 0))
+                nil))]
+      (walk root 0))
     {:nodes @nodes :depth @deepest :widest @widest
-     :longest @longest :forbidden @forbidden}))
+     :longest @longest}))
+
+(defn- compiled-node-schema
+  []
+  (let [registry (:seon.schema.projection/registry
+                  (schema/current-projection))]
+    (m/schema :seon.print/node {:registry registry})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Real sci values — one context, inert values, never mutated
@@ -192,9 +191,9 @@
         printed (:seon.cluster.eval/result-edn admitted)
         shape (measure projection)]
     (and
+     (m/validate (compiled-node-schema) projection)
      (string? printed)
      (do (edn/read-string printed) true)
-     (empty? (:forbidden shape))
      (<= (:depth shape)
          (:seon.config.eval.result/max-depth caps))
      (<= (:nodes shape)
@@ -241,19 +240,21 @@
           (is (string? (:seon.cluster.eval/result-edn admitted)))
           (is (some? (edn/read-string
                       (:seon.cluster.eval/result-edn admitted))))
-          (is (empty? (:forbidden
-                       (measure (:seon.sci.admit/value admitted))))))))))
+          (is (m/validate (compiled-node-schema)
+                          (:seon.sci.admit/value admitted))))))))
 
 (deftest inst-projection-keeps-common-and-exotic-inst-values-readable
   (let [date (java.util.Date. 41)
         instant (java.time.Instant/ofEpochMilli 42)
         exotic (reify clojure.core/Inst
                  (inst-ms* [_] 43))]
-    (is (= date
+    (is (= {::print/face ::print/inst ::print/value date}
            (:seon.sci.admit/value (admit/admit (request date)))))
-    (is (= (java.util.Date. 42)
+    (is (= {::print/face ::print/inst
+            ::print/value (java.util.Date. 42)}
            (:seon.sci.admit/value (admit/admit (request instant)))))
-    (is (= (java.util.Date. 43)
+    (is (= {::print/face ::print/inst
+            ::print/value (java.util.Date. 43)}
            (:seon.sci.admit/value (admit/admit (request exotic)))))))
 
 ;;; ---------------------------------------------------------------------------
