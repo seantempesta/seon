@@ -193,9 +193,13 @@ never start. Recovery never fabricates success, resumes a suffix, or infers a
 result from process memory.
 
 Provider calls have their own attempt facts. Each row records the chosen
-descriptor, role, non-secret request projection, transport-phase evidence,
-outcome, response identity, usage, and present error fact. There is no
-in-memory attempt ledger and no generic turn-phase machine beside these facts.
+descriptor, role, the turn's canonical effective AI settings, transport-phase
+evidence, finish reason, open provider usage document, and present error fact.
+The loop resolves settings once from current cluster and agent facts before the
+call and reuses that value through failover and backoff; a config apply or agent
+override takes effect on the next turn without rebuilding the graph. There is
+no in-memory attempt ledger and no generic turn-phase machine beside these
+facts.
 
 ### Provider failover stops at the no-retry boundary
 

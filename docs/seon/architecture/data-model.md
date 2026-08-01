@@ -667,45 +667,38 @@ schedule/internal turns omit it. This is a fact about the runtime's assignment,
 not provenance copied onto arbitrary transactions and not safely inferable from
 the run opener.
 
-**Model config is DERIVED, never stored.** Configuration intent is a pure
-function of the db: `seon.ai/resolved-config` takes
-`{:seon.db/db db :seon.agent/id id}` and resolves the material behavioral and
-transport keys—provider, model, sampling, output cap, thinking, adapter timeout,
-endpoint, credential-source name, diffusion backend, and effective extra-body
-digest—through the ONE chain: the agent's own override datom → the global
-`{:seon.ai/id "config"}` row → `seon.ai/shipped-defaults`. It returns the
-`:seon.ai/resolved-config` value
-PLUS `:seon.ai/provenance` (per-key `:agent-override`/`:config-row`/
-`:default`, derived by re-walking the chain, not stored). No per-turn
-resolved-config snapshot exists. Datahike is bitemporal, so intent at a past
-database value is the same function over an immutable value constructed
-`as-of` the turn's rendered transaction:
-`(ai/resolved-config {:seon.db/db historical-db
-                      :seon.agent/id id})`.
+**Model settings resolve once per turn.** Every AI dial is declared once in the
+config schema with `:seon.config/per-agent true`. The cluster config entity and
+an agent entity carry the same attribute idents; absence on the agent means
+inherit. `seon.schema.edn/derive-config-forms` derives the closed
+`:seon.config/agent-overlay` from those registrations beside the manifest and
+effective config composites. At the model-call seam, `seon.ai/agent-overlay`
+reads one agent's present override datoms and `seon.ai/settings` performs the
+one pure merge over the effective cluster row. The shipped defaults are already
+compiled into that cluster row, so runtime precedence is agent facts over
+cluster facts over the shipped decisions, with no sentinel or third request
+layer. One immutable database value supplies both reads. The resolved value is
+reused by every failover or backoff attempt in that turn; a later fact change
+applies on the next turn without rebuilding the agent graph.
 
 Intent at the prompt or final-run database value does not prove a provider call.
-Every retry attempt therefore records its ordinal, normalized non-secret
-endpoint/config projection, timeout layers, outcome, and present response
-identity as component facts connected to the turn. Request fields remain
-derivable at the parent turn's rendered transaction; response
-identity and outcome are non-derivable evidence. `POST /agents/run` projects
-those ordered bounded facts. A compatibility `model_config` may be derived only
-when all attempts agree; drift or missing attempt evidence rejects formal
-capability scoring.
+Every attempt therefore records its ordinal, endpoint/model observations, the
+canonical EDN of that turn's effective settings, transport-phase evidence,
+finish reason, open provider usage document, and present error fact. The
+settings snapshot is required observation of what the unobservable remote call
+used; it is never placed inside the provider usage map and authorizes no replay.
+Provider-specific cache detail and inert-setting warnings derive at read from
+the open usage document and recorded settings.
 
-**Per-agent config = intent, one chain.** The agent entity carries optional
-`:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`/
-`-timeout-ms`/`-base-url`/`-api-key-env`/`-dg-backend`/`-extra-body-edn`
-override attrs (absence = inherit; each attr is its ordinary native
-value — there is no stored sentinel). The credential attribute stores
-only an environment-variable name; its secret remains process-local.
-`seon.ai/current` lays the
-CALLING agent's overrides over the global row per call: **explicit call opts
-→ the agent's own attrs → the cluster config row → shipped defaults**. This
-resolution shape is the general pattern for every agent-related config
-family (skills, render caps, ctx blocks, capability sets): agent attrs are
-the override point, one chain, absent = inherit — new families add an attr
-pair to the resolver's data map, never a second mechanism.
+**Per-agent AI config is uniform intent.** The agent entity carries any
+registered `:seon.config.ai*` dial under that same ident, including endpoint,
+credential-variable name, backup, retry, thinking, sampling, output budget,
+and extra-body settings. Absence means inherit; every present value is its
+ordinary native value, never nil or an absence marker. The credential attribute
+stores only an environment-variable name; its secret remains process-local.
+There is no curated subset and no explicit per-call settings layer. Adding an
+AI dial to the registration automatically adds it to the derived agent overlay;
+no resolver roster changes with it.
 
 **Providers are descriptor rows, not code branches.** Hosted provider identity
 lives in `:seon.config/provider-descriptors` — component rows under the
