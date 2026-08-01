@@ -40,3 +40,24 @@ the original; a regression covers the class. Related open question
 (owner, same session): enforcing namespace-lane ownership so an agent
 only writes namespaces it owns (`:seon.cluster.agent/namespace` is
 already unique).
+
+## Design landed 2026-08-01
+
+`plan/per-cluster-base-context-2026-08-01.md` answers this with
+measurements. Per-cluster `sci/init` costs **0.1 ms / 20 KB** (20 in one
+JVM: 2.0 ms / 0.31 MB), so it is the recommended fix and no sci
+fork-scope change is needed for the boundary.
+
+Two findings that change this issue's framing:
+
+- **`sci/fork` is not the intra-cluster sharing mechanism.** Measured, it
+  propagates a `def` only when the base entry is already a `sci.lang.Var`;
+  a brand-new name and a name bound to a host `clojure.lang.Var` (what
+  `acquire!` installs) do not propagate at all. Ruling #29's single live
+  ctx per cluster is what makes the sharing half true.
+- **A residue of 17 writable Vars survives independent `sci/init` calls**
+  and would still cross clusters: 11 `clojure.core` dynamic vars,
+  `clojure.core/unquote`, `clojure.walk/macroexpand-all`, and 4
+  `clojure.lang` interface entries. None carry `:sci/built-in`. Closing
+  them is a metadata edit in our sci fork
+  (`sci/impl/namespaces.cljc:2450`, `sci/impl/utils.cljc:322,374`).
