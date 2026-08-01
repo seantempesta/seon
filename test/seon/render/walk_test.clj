@@ -343,6 +343,43 @@
           (walk-agent @connection "caps-agent" base-caps 1))
         (is (= base-caps @observed))))))
 
+(deftest transcript-is-the-single-rendering-of-its-facts
+  (support/with-database
+    (fn [connection]
+      (seed-agents! connection "transcript-dedupe" ["speaker"])
+      (let [message-text "UNIQUE-MESSAGE-CONTENT"
+            form-source "(identity \"UNIQUE-FORM-SOURCE\")"
+            result-edn "\"UNIQUE-EVAL-RESULT\""
+            instant (java.util.Date. 1)]
+        (d/transact
+         connection
+         [{:seon.cluster.message/id "one-message"
+           :seon.cluster.message/from [:seon.cluster.agent/id "speaker"]
+           :seon.cluster.message/to [:seon.cluster.agent/id "speaker"]
+           :seon.cluster.message/content message-text
+           :seon.cluster.message/at instant}
+          {:seon.cluster.run/id "one-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id "speaker"]
+           :seon.cluster.run/opened-at instant
+           :seon.cluster.run/forms
+           [{:seon.cluster.run.form/id "one-form"
+             :seon.cluster.run.form/run [:seon.cluster.run/id "one-run"]
+             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.run.form/source form-source}]}
+          {:seon.cluster.eval/id "one-receipt"
+           :seon.cluster.eval/run [:seon.cluster.run/id "one-run"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at instant
+           :seon.cluster.eval/result-edn result-edn}])
+        (let [text (walk/prose
+                    @connection
+                    (walk-agent @connection "speaker" base-caps 2))]
+          (doseq [sentinel [message-text
+                            "UNIQUE-FORM-SOURCE"
+                            "UNIQUE-EVAL-RESULT"]]
+            (is (= 1 (count (re-seq (re-pattern sentinel) text)))
+                (str sentinel " is rendered once by the transcript"))))))))
+
 (deftest reverse-reads-never-match-equal-non-ref-longs
   (support/with-database
     (fn [connection]

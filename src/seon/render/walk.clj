@@ -371,7 +371,7 @@
     0))
 
 (defn- transcript-entity-ids
-  "The durable message/run/eval entities summarized by one transcript branch."
+  "The agent, message, run, eval, and matched form entities used by a transcript."
   [db agent-eid]
   (into #{agent-eid}
         (map first)
@@ -393,12 +393,42 @@
                 :where
                 [?run :seon.cluster.run/agent ?agent]
                 [?receipt :seon.cluster.eval/run ?run]]
+              db agent-eid)
+         (d/q '[:find ?form
+                :in $ ?agent
+                :where
+                [?run :seon.cluster.run/agent ?agent]
+                [?form :seon.cluster.run.form/run ?run]
+                [?form :seon.cluster.run.form/ordinal ?ordinal]
+                [?receipt :seon.cluster.eval/run ?run]
+                [?receipt :seon.cluster.eval/ordinal ?ordinal]]
               db agent-eid))))
 
+(defn- transcript-member-eids
+  "Entities whose agent-facing facts are represented by the transcript block.
+
+  Runs remain ordinary walk units: the transcript uses their identity only to
+  find receipts. Messages, receipts, and the matching source forms are the
+  facts the transcript actually projects, so their ordinary units would be a
+  second rendering of the same facts."
+  [db entity-ids]
+  (into #{}
+        (keep (fn [entity]
+                (when (or (:seon.cluster.message/id entity)
+                          (:seon.cluster.eval/id entity)
+                          (:seon.cluster.run.form/id entity))
+                  (:db/id entity))))
+        (d/pull-many db
+                     [:db/id
+                      :seon.cluster.message/id
+                      :seon.cluster.eval/id
+                      :seon.cluster.run.form/id]
+                     entity-ids)))
+
 (defn- transcript-last-changed
-  [db agent-eid]
+  [db entity-ids]
   (reduce max 0 (map #(entity-last-changed db %)
-                     (transcript-entity-ids db agent-eid))))
+                     entity-ids)))
 
 (defn- assigned-namespace-eid
   [db root-eid]
@@ -490,7 +520,8 @@
                         {:seon.error/kind ::elided
                          :seon.error/message
                          "elided transcript at the configured node cap"})
-                (let [unit (cond-> {:seon.db/db db
+                (let [transcript-eids (transcript-entity-ids db agent-eid)
+                      unit (cond-> {:seon.db/db db
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps caps
                             :seon.render.transcript/token-budget
@@ -507,13 +538,25 @@
                    :seon.cluster.agent/transcript
                    :seon.render/distance hops
                    :seon.render.walk/changed-at
-                   (transcript-last-changed db agent-eid)
+                   (transcript-last-changed db transcript-eids)
                    :seon.render/projection declaration
                    :seon.render/output
                    ((if (= kind :seon.render/html)
                       transcript/render-html
                       transcript/render-ai)
-                    unit)})))
+                    unit)
+                   ;; Structural membership lets the one assembly sorter
+                   ;; suppress the ordinary projection of facts this block
+                   ;; already rendered. These nodes intentionally have no
+                   ;; output and therefore cost no context of their own.
+                   :seon.render.walk/neighbours
+                   (mapv (fn [eid]
+                           {:seon.render.walk/lookup eid
+                            :seon.render/distance hops
+                            :seon.render.walk/changed-at
+                            (entity-last-changed db eid)
+                            :seon.render.walk/back-reference? true})
+                         (sort (transcript-member-eids db transcript-eids)))})))
             (child [connection hops]
               (let [{:seon.render.walk/keys [attribute target lookup]
                      failure :seon.error/value} connection]
@@ -689,7 +732,11 @@
                                         (or branch child-path))))
                      (map-indexed vector
                                   (:seon.render.walk/neighbours node))))))]
-    (letfn [(transcript-unit? [unit]
+    (letfn [(transcript-node? [node]
+              (let [lookup (:seon.render.walk/lookup node)]
+                (and (vector? lookup)
+                     (= ::transcript (first lookup)))))
+            (transcript-unit? [unit]
               (let [lookup (get-in unit [:seon.render.walk/node
                                          :seon.render.walk/lookup])]
                 (and (vector? lookup)
@@ -709,20 +756,36 @@
                              (:seon.render/projection node))
                   [:seon.render.walk/lookup
                    (:seon.render.walk/lookup node)])))]
-      (->> (flatten-units node [] 0 nil)
-           (remove (comp :seon.render.walk/back-reference?
-                         :seon.render.walk/node))
-           (sort-by sort-key)
-           (reduce (fn [{seen-values :seen accumulated :units :as state} unit]
-                     (let [logical-value (logical-key unit)]
-                       (if (and logical-value
-                                (contains? seen-values logical-value))
-                         state
-                         {:seen (cond-> seen-values
-                                  logical-value (conj logical-value))
-                          :units (conj accumulated unit)})))
-                   {:seen #{} :units []})
-           :units))))
+      (let [transcript-members
+            (into #{}
+                  (mapcat (fn [transcript]
+                            (map :seon.render.walk/lookup
+                                 (:seon.render.walk/neighbours transcript))))
+                  (filter transcript-node?
+                          (tree-seq
+                           #(seq (:seon.render.walk/neighbours %))
+                           :seon.render.walk/neighbours
+                           node)))]
+        (->> (flatten-units node [] 0 nil)
+             (remove (fn [unit]
+                       (let [unit-node (:seon.render.walk/node unit)]
+                         (or (:seon.render.walk/back-reference? unit-node)
+                             (and (not (transcript-unit? unit))
+                                  (contains?
+                                   transcript-members
+                                   (:seon.render.walk/lookup unit-node)))))))
+             (sort-by sort-key)
+             (reduce
+              (fn [{seen-values :seen accumulated :units :as state} unit]
+                (let [logical-value (logical-key unit)]
+                  (if (and logical-value
+                           (contains? seen-values logical-value))
+                    state
+                    {:seen (cond-> seen-values
+                             logical-value (conj logical-value))
+                     :units (conj accumulated unit)})))
+              {:seen #{} :units []})
+             :units)))))
 
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
