@@ -1,7 +1,6 @@
 (ns seon.cluster.instruction-test
   "Computed cluster context membership and idempotent entity initialization."
-  (:require [clojure.edn :as edn]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [clojure.tools.reader :as reader]
             [clojure.tools.reader.reader-types :as reader-types]
             [datahike.api :as d]
@@ -43,31 +42,26 @@
                  :seon.cluster.instruction/arity (dec (count form))})))
         (code-spans text)))
 
-(defn- function-branches
-  [spec]
-  (if (= :function (first spec)) (rest spec) [spec]))
-
-(defn- fixed-input-arity
-  [function-branch]
-  (let [input (second function-branch)
-        children (cond-> (rest input) (map? (second input)) rest)]
-    (when (contains? #{:cat :catn} (first input))
-      (count children))))
-
 (defn- call-resolution
   [db call]
   (let [function-symbol (:seon.cluster.instruction/symbol call)
-        function (d/pull db [:seon.fn/spec]
+        function (d/pull db
+                         [{:seon.fn/arities
+                           [:seon.fn.arity/order
+                            :seon.fn.arity/min
+                            :seon.fn.arity/max]}]
                          [:seon.fn/sym function-symbol])
-        spec (some-> (:seon.fn/spec function) edn/read-string)
-        arities (into #{} (keep fixed-input-arity) (function-branches spec))]
+        arities (sort-by :seon.fn.arity/order (:seon.fn/arities function))
+        call-arity (:seon.cluster.instruction/arity call)]
     (assoc call
-           :seon.cluster.instruction/spec spec
            :seon.cluster.instruction/accepted-arities arities
            :seon.cluster.instruction/resolved?
-           (and spec
-                (contains? arities
-                           (:seon.cluster.instruction/arity call))))))
+           (boolean
+            (some (fn [{minimum :seon.fn.arity/min
+                        maximum :seon.fn.arity/max}]
+                    (and (<= minimum call-arity)
+                         (or (nil? maximum) (<= call-arity maximum))))
+                  arities)))))
 
 (defn- cluster-toolkit
   [db cluster-name]

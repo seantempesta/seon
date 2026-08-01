@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.cluster.run :as run]
             [seon.program :as program]
+            [seon.schema :as schema]
             [seon.sci.reader :as reader]
             [seon.test-support :as test-support]))
 
@@ -22,6 +23,133 @@
     nil
     (catch clojure.lang.ExceptionInfo error
       (ex-data error))))
+
+(defn- parsed-contract
+  [function-symbol spec forms]
+  (let [projection (schema/build-projection forms
+                                            {(symbol function-symbol) spec})]
+    (program/contract-facts
+     {:seon.program/function-symbol function-symbol
+      :seon.program/spec (pr-str spec)
+      :seon.program/compile-options
+      (:seon.schema.projection/compile-options projection)
+      :seon.program/predicate-functions
+      (:seon.schema.projection/predicate-functions projection)
+      :seon.program/schema-keys (set (keys forms))})))
+
+(defn- nested-maps
+  [value]
+  (filter map? (tree-seq coll? seq value)))
+
+(deftest function-contracts-compile-once-into-complete-query-facts
+  (let [forms {:sample/key :keyword
+               :sample/value :int
+               :sample/enum-value :string}
+        spec
+        [:function
+         [:=> [:cat [:map-of :sample/key :sample/value]] :sample/value]
+         [:=> [:cat [:repeat {:min 1 :max 2} :sample/value]]
+          [:enum :sample/enum-value :other]]]
+        facts (parsed-contract "sample/complete" spec forms)
+        arities (:seon.fn/arities facts)
+        nodes (nested-maps (:seon.fn/ast facts))
+        map-of-node (first (filter #(= ":map-of"
+                                      (:seon.fn.ast/type %))
+                                   nodes))
+        enum-node (first (filter #(= ":enum" (:seon.fn.ast/type %))
+                                 nodes))]
+    (testing "one compiled contract yields Malli's exact ordered arities"
+      (is (= [{:seon.fn.arity/order 0
+               :seon.fn.arity/arity "1"
+               :seon.fn.arity/min 1
+               :seon.fn.arity/max 1}
+              {:seon.fn.arity/order 1
+               :seon.fn.arity/arity ":varargs"
+               :seon.fn.arity/min 1
+               :seon.fn.arity/max 2}]
+             (mapv #(select-keys %
+                                 [:seon.fn.arity/order
+                                  :seon.fn.arity/arity
+                                  :seon.fn.arity/min
+                                  :seon.fn.arity/max])
+                   arities))))
+    (testing "the complete Malli AST vocabulary preserves key and enum values"
+      (is (= {:seon.fn.ast/type ":malli.core/schema"
+              :seon.fn.ast/ref [:seon.schema/key :sample/key]}
+             (select-keys (:seon.fn.ast/key map-of-node)
+                          [:seon.fn.ast/type :seon.fn.ast/ref])))
+      (is (= [":sample/enum-value" ":other"]
+             (mapv :seon.fn.ast.entry/value-edn
+                   (sort-by :seon.fn.ast.entry/order
+                            (:seon.fn.ast/values enum-node))))))
+    (testing "role refs come only from RefSchema observations"
+      (is (= #{[:seon.schema/key :sample/key]
+               [:seon.schema/key :sample/value]}
+             (:seon.fn.arity/input-refs (first arities))))
+      (is (= #{[:seon.schema/key :sample/value]}
+             (:seon.fn.arity/output-refs (first arities))))
+      (is (= #{[:seon.schema/key :sample/value]}
+             (:seon.fn.arity/input-refs (second arities))))
+      (is (nil? (:seon.fn.arity/output-refs (second arities)))
+          "an enum scalar equal to a schema key is not a reference"))
+    (testing "the expansion is deterministic"
+      (is (= facts (parsed-contract "sample/complete" spec forms))))))
+
+(deftest function-contract-role-refs-follow-local-registries
+  (let [forms {:sample/value :int}
+        spec [:=> {:registry {:local/value :sample/value}}
+              [:cat :local/value]
+              :sample/value]
+        facts (parsed-contract "sample/local-registry" spec forms)
+        arity (first (:seon.fn/arities facts))
+        direct-ref-nodes
+        (filter :seon.fn.ast/ref (nested-maps (:seon.fn/ast facts)))]
+    (is (= #{[:seon.schema/key :sample/value]}
+           (:seon.fn.arity/input-refs arity)))
+    (is (= #{[:seon.schema/key :sample/value]}
+           (:seon.fn.arity/output-refs arity)))
+    (is (= #{[:seon.schema/key :sample/value]}
+           (into #{} (map :seon.fn.ast/ref) direct-ref-nodes)))))
+
+(deftest function-contract-redefinition-replaces-component-facts-exactly
+  (test-support/with-database
+    (fn [connection]
+      (let [function-symbol "sample/redefined"
+            old-spec [:function
+                      [:=> [:cat :int] :int]
+                      [:=> [:cat :int :int] :int]]
+            new-spec [:=> [:cat :string] :string]
+            old-row
+            (merge {:seon.fn/sym function-symbol
+                    :seon.fn/spec (pr-str old-spec)}
+                   (parsed-contract function-symbol old-spec {}))
+            new-row
+            (merge {:seon.fn/sym function-symbol
+                    :seon.fn/spec (pr-str new-spec)}
+                   (parsed-contract function-symbol new-spec {}))]
+        (d/transact connection [old-row])
+        (let [current (d/pull @connection '[*]
+                              [:seon.fn/sym function-symbol])
+              old-components
+              (into #{(get-in current [:seon.fn/ast :db/id])}
+                    (map :db/id)
+                    (:seon.fn/arities current))]
+          (d/transact connection
+                      (program/exact-replacement-tx current new-row))
+          (let [redefined
+                (d/pull @connection
+                        [:seon.fn/spec
+                         {:seon.fn/arities
+                          [:seon.fn.arity/order :seon.fn.arity/min
+                           :seon.fn.arity/max]}]
+                        [:seon.fn/sym function-symbol])]
+            (is (= (pr-str new-spec) (:seon.fn/spec redefined)))
+            (is (= [{:seon.fn.arity/order 0
+                     :seon.fn.arity/min 1
+                     :seon.fn.arity/max 1}]
+                   (:seon.fn/arities redefined)))
+            (is (every? #(empty? (d/datoms @connection :eavt %))
+                        old-components))))))))
 
 (deftest reader-events-have-one-canonical-declaration-row
   (let [cases

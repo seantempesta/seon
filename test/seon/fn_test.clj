@@ -138,6 +138,102 @@
                     (not [?required :seon.ns/name])]
                   db)))))))
 
+(deftest contracted-program-rows-carry-queryable-facts-in-their-spec-transaction
+  (test-support/with-database
+    (fn [connection]
+      (let [db @connection
+            contracted
+            (d/q '[:find [?function ...]
+                   :where [?function :seon.fn/spec]]
+                 db)
+            complete
+            (d/q '[:find [?function ...]
+                   :where
+                   [?function :seon.fn/spec]
+                   [?function :seon.fn/arities]
+                   [?function :seon.fn/ast]]
+                 db)
+            assertion-transactions
+            (d/q '[:find ?function ?spec-tx ?arities-tx ?ast-tx
+                   :where
+                   [?function :seon.fn/spec _ ?spec-tx]
+                   [?function :seon.fn/arities _ ?arities-tx]
+                   [?function :seon.fn/ast _ ?ast-tx]]
+                 db)
+            functions-by-role
+            (d/q '[:find ?role ?function-symbol
+                   :in $ ?schema-key
+                   :where
+                   [?schema :seon.schema/key ?schema-key]
+                   (or-join [?schema ?arity ?role]
+                     (and [?arity :seon.fn.arity/input-refs ?schema]
+                          [(ground :input) ?role])
+                     (and [?arity :seon.fn.arity/output-refs ?schema]
+                          [(ground :output) ?role]))
+                   [?function :seon.fn/arities ?arity]
+                   [?function :seon.fn/sym ?function-symbol]]
+                 db :seon.schema/value)]
+        (testing "the complete contracted population is backfilled"
+          (is (seq contracted))
+          (is (= (set contracted) (set complete))))
+        (testing "spec and every parsed root assert atomically"
+          (is (= (count contracted) (count assertion-transactions)))
+          (is (every? (fn [[_ spec-tx arities-tx ast-tx]]
+                        (= spec-tx arities-tx ast-tx))
+                      assertion-transactions)))
+        (testing "one query answers both directions for a given schema"
+          (is (seq (filter (comp #{:input} first) functions-by-role)))
+          (is (seq (filter (comp #{:output} first) functions-by-role))))))))
+
+(deftest parsed-contract-backfill-is-one-transaction-and-idempotent
+  (test-support/with-database
+    (fn [connection]
+      (let [functions
+            (take 2
+                  (sort
+                   (d/q '[:find [?function ...]
+                          :where
+                          [?function :seon.fn/spec]
+                          [?function :seon.fn/arities]
+                          [?function :seon.fn/ast]]
+                        @connection)))]
+        (is (= 2 (count functions)))
+        (d/transact
+         connection
+         (into []
+               (mapcat (fn [function]
+                         [[:db.fn/retractAttribute function :seon.fn/arities]
+                          [:db.fn/retractAttribute function :seon.fn/ast]]))
+               functions))
+        (let [before (:max-tx @connection)
+              first-result
+              (seon.fn/backfill-contract-facts!
+               {:seon.store/branch-connection connection
+                :seon.db/process boot-process})
+              after-first (:max-tx @connection)
+              second-result
+              (seon.fn/backfill-contract-facts!
+               {:seon.store/branch-connection connection
+                :seon.db/process boot-process})
+              after-second (:max-tx @connection)]
+          (is (= {:seon.reconcile/converged? false
+                  :seon.reconcile/operations 2}
+                 first-result))
+          (is (= (inc before) after-first)
+              "all missing graphs commit in one transaction")
+          (is (= {:seon.reconcile/converged? true
+                  :seon.reconcile/operations 0}
+                 second-result))
+          (is (= after-first after-second)
+              "the converged second run writes nothing")
+          (is (empty?
+               (d/q '[:find ?function
+                      :where
+                      [?function :seon.fn/spec]
+                      (or (not [?function :seon.fn/arities])
+                          (not [?function :seon.fn/ast]))]
+                    @connection))))))))
+
 (deftest publication-refuses-every-error-level-analyzer-finding
   (let [root (fixture-root)]
     (write-source! root "audit/unresolved.clj"
