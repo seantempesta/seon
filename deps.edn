@@ -30,7 +30,7 @@
                       org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
-         :git/sha "b5c99bc02a7175652a610324215288b78551801f"
+         :git/sha "737697d9205e5e8f0bc08a666e4c97dad55e9dbe"
          :exclusions [org.clojure/clojurescript
                       org.clojars.mmb90/cljs-cache
                       com.github.pkpkpk/cljs-node-io
@@ -121,7 +121,7 @@
                   org.replikativ/konserve]}
     org.replikativ/konserve
     {:git/url "https://github.com/seantempesta/konserve"
-     :git/sha "b5c99bc02a7175652a610324215288b78551801f"
+     :git/sha "737697d9205e5e8f0bc08a666e4c97dad55e9dbe"
      :exclusions [org.clojure/clojurescript
                   org.clojars.mmb90/cljs-cache
                   com.github.pkpkpk/cljs-node-io
@@ -201,7 +201,7 @@
                          {:local/root "reference-code/datahike"}
                          org.replikativ/konserve
                          {:git/url "https://github.com/seantempesta/konserve"
-                          :git/sha "b5c99bc02a7175652a610324215288b78551801f"}
+                          :git/sha "737697d9205e5e8f0bc08a666e4c97dad55e9dbe"}
                          org.replikativ/superv.async
                          {:git/url "https://github.com/seantempesta/superv.async"
                           :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}

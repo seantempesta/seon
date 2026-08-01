@@ -16,6 +16,7 @@
             [datahike.api :as d]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
+            [konserve.utils :as konserve.utils]
             [seon.cluster.store :as store]
             [seon.schema])
   (:import [java.io File]
@@ -86,6 +87,19 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle — live against the :file backend
 ;;; ---------------------------------------------------------------------------
+
+(deftest file-store-executes-ordered-multi-key-operations
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})]
+        (try
+          (is (true? (konserve.utils/multi-key-capable?
+                      (:store @(:seon.store/connection opened))))
+              "the application pin exposes the filestore batch Datahike builds")
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest open-write-release-reopen-preserves-data
   (let [dir (fresh-dir)]
