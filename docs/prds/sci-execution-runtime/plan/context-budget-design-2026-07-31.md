@@ -28,7 +28,7 @@ floor-rendered units there by default.
   50k budget on anything useful.
 - Historically no whole-context budget has ever existed in either generation.
   The one 50k target that was named was blown by 11%.
-- The nursery case is fine: birth d1 = 236 tokens, birth d2 = 1,805
+- The fresh-agent case is fine: birth d1 = 236 tokens, birth d2 = 1,805
   (`mvp-seams-notes` measurements). The namespace-owner case is the forcing
   function, and it is the case the distributed-ownership protocol makes normal.
 - The two landed budget seams are private dials with no producer —
@@ -182,7 +182,7 @@ branch 40%, everything else 20%.
 
 - Benefit: trivially implementable, and each branch is guaranteed a floor.
 - Cost: it is four hand-tuned numbers with no derivation, which the standing
-  rule forbids on sight. It is also wrong by construction — the nursery agent
+  rule forbids on sight. It is also wrong by construction — the fresh agent
   has no namespace worth 40% and the owner agent has no transcript worth 40%,
   and neither can borrow from the other.
 - **Reject.**
@@ -194,7 +194,7 @@ spent, then stop. This is `budgeted-ai`'s proven shape
 one card" to "one unit at a time across the whole walk".
 
 - Benefit: no per-branch numbers at all. Distribution is an OUTCOME of one
-  ranking, so a nursery agent's budget flows to its instructions and an owner
+  ranking, so a fresh agent's budget flows to its instructions and an owner
   agent's flows to its namespace, with nothing configured. It degrades
   monotonically: a smaller budget yields a strict prefix of the same ranking,
   which makes the behaviour explainable in one sentence.
@@ -465,7 +465,7 @@ Recurring proof, as properties beside P1–P8 rather than point tests:
 ## 10. Open for the owner
 
 1. **The shipped dial value.** The measured d2 range is 20–22k for a realistic
-   owner agent and 1.8k for a nursery agent. A 30k dial admits today's owner
+   owner agent and 1.8k for a fresh agent. A 30k dial admits today's owner
    walk nearly whole and leaves headroom; a 12k dial forces the mechanism to
    work from day one and surfaces ranking defects immediately. Recommendation:
    ship **12k** deliberately, so the budget is exercised rather than dormant,

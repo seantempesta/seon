@@ -100,7 +100,7 @@ support it and heals when they don't. No notification queue.
 
 ## 5. The graduation pipeline (code earns compilation)
 
-- Tier 0 (nursery): sci interprets agent code. Instant, sandboxed,
+- Tier 0 (interpreted): sci interprets agent code. Instant, sandboxed,
   per-context. Fast enough for orchestration (12 ms p50 turns).
 - Tier 1 (graduated): native compilation is admitted only after the P4/R33
   transitive call graph proves the exact source pure, capability-free, and
@@ -111,11 +111,11 @@ support it and heals when they don't. No notification queue.
   but they cannot substitute for the computed P4/R33 proof.
 - Until that proof exists, `graduate!` refuses with the flat R48/P4 error and
   performs no compilation or tier transaction. Stored `:graduated` rows from
-  the retired tests-pass gate derive an effective `:nursery` tier and rebuild
+  the retired tests-pass gate derive an effective `:interpreted` tier and rebuild
   through SCI. The invocation deadline remains the runaway backstop after
   native admission eventually opens.
 - The compiled artifact is a derived, fingerprinted projection of the
-  corpus: source edit → fingerprint change → tier drops back to nursery
+  corpus: source edit → fingerprint change → tier drops back to interpreted
   until re-graduation. Derive-don't-store, applied to compilation.
 - Anti-churn dial: a fn re-edited within its cooling window waits.
 
@@ -175,7 +175,7 @@ R-B tier-0/tier-1 semantic drift — differential tests are permanent.
 R-C correlated in-flight loss within a cluster host — drills + recycle
 policy; two hosts per cluster remains the escape hatch.
 R-D sci JIT youth (Bun tier only) — pinned, fuzz-backed, fallback path.
-R-E nursery bounce churn — cooling-window dial.
+R-E interpreted-tier bounce churn — cooling-window dial.
 R-F context guidance drift during migration — step 5 is not optional.
 
 ## Build order (first three units)
@@ -233,13 +233,13 @@ U2 section of [[roadmap]].
 U3 graduation gate walking skeleton: fingerprint → both-tier test run →
 JVM eval install → epoch re-link, for ONE real corpus fn end-to-end.
 **DONE (2026-07-20)** — every recorded agent `defn` receives the exact
-UTF-8 source fingerprint and nursery tier; the pure gate requires a
+UTF-8 source fingerprint and interpreted tier; the pure gate requires a
 valid recorded schema, an inline recorded test, fingerprint equality,
 and equal green SCI/JVM outcomes. Passing source is compiled with plain
 `clojure.core/eval`, installed by altering the U2 registry's shared var,
 and persisted only as fingerprint + graduated tier. Replay-then-link
 lets a source edit rebind that same var to SCI immediately and transact
-the new fingerprint/nursery tier; host restart derives compiled roots
+the new fingerprint/interpreted tier; host restart derives compiled roots
 from matching facts. One real function measured 1.661x faster over
 10,000 same-context calls; edit invalidation, re-graduation, fresh-host
 rebuild, both full suites, and the 20-agent zero-loss kill drill pass.

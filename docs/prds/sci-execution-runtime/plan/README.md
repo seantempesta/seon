@@ -1498,10 +1498,10 @@ may reintroduce a shadow build into the dev feedback path.
   (`:my/*` candidate) awaits the owner's explicit ruling — nothing
   renames until then.
   CLARIFICATIONS (owner, same conversation): (1) `my.agents.<id>` is
-  ONLY the nursery for TEMP/undifferentiated agents — real agents own
+  ONLY the default home for TEMP/undifferentiated agents — real agents own
   namespaces anywhere in the tree, including seon core (the
   distributed-ownership protocol's owner agents ARE assigned those
-  namespaces). The seeded curriculum requires apply to blank nursery
+  namespaces). The seeded curriculum requires apply to blank default
   namespaces; a namespace-owner agent's curriculum is its real
   namespace's own requires, no seeding needed — acquaintance falls
   out of the code graph. Nothing may assume agent namespace =
@@ -1513,7 +1513,7 @@ may reintroduce a shadow build into the dev feedback path.
   agent sees as compact cards at d2; membership COMPUTED from the
   corpus's agent-facing surface, never a hand list) + the shared
   schema attributes' good default renderers. This supersedes 12(a)'s
-  seed-requires-into-the-nursery shape: nothing fakes requires into
+  seed-requires-into-the-default-namespace shape: nothing fakes requires into
   any namespace; every agent's context = the uniform base set (via
   its cluster ref) + its own namespace's real world. (2) Peer rendering is depth-aware by construction:
   agent B found in agent A's walk renders through B's family lens at

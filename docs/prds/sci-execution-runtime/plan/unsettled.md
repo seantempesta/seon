@@ -20,7 +20,7 @@ dated blocks stay as the record of what was believed when.]
 LIVE.** `default` serves at 7994 on the walk architecture: namespace
 pages (`/ns/{namespace}`, reitit, reverse routing, 404-writes-nothing),
 the two-pane debug (`/agent/{id}/debug` — exact AI bytes beside
-everything-walked), context = one visible walk (nursery 1,288 tokens,
+everything-walked), context = one visible walk (fresh agent 1,288 tokens,
 own entity line 4, capture quine dead, elisions one line, seon.flow
 owner sees 48/48 sources), agents call any function (ruling #20 live —
 a real agent eval called `seon.render/walk`), refusal continuation

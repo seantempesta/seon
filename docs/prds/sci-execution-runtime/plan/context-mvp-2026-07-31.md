@@ -49,7 +49,7 @@ Contract authority: `context-render-data-model-spec.md` + README rulings
    `context.clj` projections) — dies in the same commit assembly
    converts; tests pinning them die with them.
 8. **The drive harness**: a tmp/ REPL script (committed) that creates
-   a nursery agent in a scratch cluster, sends it messages, and prints
+   a fresh agent in a scratch cluster, sends it messages, and prints
    each turn's exact context + reply — the experiment surface. Local
    Ollama first, DeepSeek for real runs (both pre-authorized).
 
@@ -70,7 +70,7 @@ Contract authority: `context-render-data-model-spec.md` + README rulings
 
 ## Exit measure
 
-A fresh nursery agent, told ONE SENTENCE by message, completes a real
+A fresh agent, told ONE SENTENCE by message, completes a real
 multi-turn task that requires: writing a contracted defn, calling a
 toolkit function, and reading something from its own walk (e.g. answer
 "what schemas does my.message use?"). Judged as an agent eval on the

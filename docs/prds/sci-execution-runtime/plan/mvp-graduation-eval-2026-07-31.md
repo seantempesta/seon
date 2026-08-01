@@ -399,7 +399,7 @@ A failure here is a SYSTEM defect and gets an issue note, not a retry.
 
 ### F. The exit measure — one sentence, cold start, all three claims
 
-This is the graduation gate itself. A fresh nursery agent, no prior turns, one
+This is the graduation gate itself. A fresh agent, no prior turns, one
 message.
 
 **Task.**

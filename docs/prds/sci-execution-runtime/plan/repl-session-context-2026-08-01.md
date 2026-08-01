@@ -55,7 +55,7 @@ mechanics stand; their PRESENTATION is replaced by this).
    narrating WHY forms batch, then the batch. help states this
    explicitly. The creation run MODELS it before the agent ever speaks.
 
-6. **THE EXAM IS THE TUTORIAL.** The nursery's seed task (root asks
+6. **THE EXAM IS THE TUTORIAL.** The creation run's seed task (root asks
    "how many schema keys does my.message use?") is answerable ONLY by
    querying the graph — so discovering the database-is-a-graph is
    forced by the work, and the agent's own history holds the exact
@@ -133,7 +133,7 @@ whether an entry fn is named at all (owner wants LESS magic — prefer
 teaching via real forms `(dir …)`/`(doc …)`/`(seon.db/q …)` over a
 `(my/self)` convenience), and legend-in-banner vs first-key.
 
-## The story beats (nursery creation), with teaching intent
+## The story beats (the creation run), with teaching intent
 
 S1 minimal banner — credibility by restraint.
 S2 `(help)` — the ONLY prose: world-model + batching economics +
@@ -175,7 +175,7 @@ production renderers land. v2 runs every runnable form through the
 REAL door (`seon.sci.eval` fork → acquire! → evaluate) and captures
 the true outputs; only the unbuilt fns' outputs are authored, each
 named in `authored-targets` in the file. Artifacts:
-`tmp/repl-context-nursery.{ai.txt,md}` (570 tokens) and
+`tmp/repl-context-bootstrap.{ai.txt,md}` (570 tokens) and
 `tmp/repl-context-root-real.{ai.txt,md}` (192 tokens — root's actual
 stored turn, zero authored bytes).
 
@@ -188,7 +188,7 @@ stored turn, zero authored bytes).
   (2) opaque admitted values print as the admitted projection map
   (`#:seon.sci.admit{:opaque "sci.lang.Namespace", :name …}`) — honest
   (it is what the driver stores) and reader-clean. A nicer face is the
-  print-method crux. With both, P9 passes: nursery reads as 38 forms,
+  print-method crux. With both, P9 passes: the bootstrap session reads as 38 forms,
   root-real as 14, zero failures.
 - **The door today**: `(in-ns …)` works (admitted as opaque map);
   `clojure.repl/dir` WORKS and prints exactly the installed public fns

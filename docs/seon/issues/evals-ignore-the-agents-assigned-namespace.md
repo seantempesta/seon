@@ -14,7 +14,7 @@ derives `my.agents.<id>` from the agent ID. An agent assigned to an existing
 namespace such as `seon.flow` therefore evaluates in a different namespace and
 cannot exercise namespace-owner workflows under its durable assignment.
 
-This does not block the nursery MVP, whose temporary agents are deliberately
+This does not block the context MVP, whose temporary agents are deliberately
 assigned `my.agents.<id>`. It blocks the broader owner-agent model in which a
 real agent may own any namespace in the program graph.
 
@@ -45,7 +45,7 @@ the guarantees and the capability boundary.
 
 ## Acceptance
 
-- A nursery agent assigned `my.agents.<id>` still parses, freezes, and evaluates
+- A fresh agent assigned `my.agents.<id>` still parses, freezes, and evaluates
   its forms in that namespace.
 - An owner agent assigned `seon.flow` parses, freezes, and evaluates ordinary
   forms in `seon.flow`; durable form namespace refs and runtime evaluation
@@ -55,5 +55,5 @@ the guarantees and the capability boundary.
 - The owner ruling settles namespace attribution together with callable
   core-function binding and current-database injection, without a second
   binding path or an eval-specific database side channel.
-- Recurring run-loop and direct-evaluation proofs cover both nursery and
-  non-nursery assignments.
+- Recurring run-loop and direct-evaluation proofs cover both default-namespace and
+  assigned-namespace agents.
