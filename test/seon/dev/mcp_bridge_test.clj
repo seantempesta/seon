@@ -118,14 +118,14 @@
                       :phase :execution
                       :via [{:type 'clojure.lang.ExceptionInfo
                              :message "The wrapper."
-                             :data {:large "not projected"}
+                             :data {:opaque (Object.)}
                              :at ['clojure.lang.Compiler 'eval "Compiler.java" 1]}
                             {:type 'java.lang.IllegalStateException
                              :message "The root cause."}]
                       :trace [['clojure.lang.Compiler 'eval "Compiler.java" 1]
                               ['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
                               ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-                              ['repl_context_prototype$door 'invoke "prototype.clj" 44]
+                              ['repl_context$eval9 'invokeStatic "prototype.clj" 44]
                               ['seon.omega$outer 'invokeStatic "omega.clj" 50]]})
                :ns "user"
                :ms 7
@@ -143,10 +143,64 @@
            (:via value)))
     (is (= [['seon.alpha$fail 'invokeStatic "alpha.clj" 20]
             ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-            ['repl_context_prototype$door 'invoke "prototype.clj" 44]]
+            ['repl_context$eval9 'invokeStatic "prototype.clj" 44]]
            (:trace value)))
     (is (= 2 (:seon.dev.mcp/frames-omitted value)))
-    (is (not (str/includes? (:val projected) "not projected")))))
+    (is (not (str/includes? (:val projected) "java.lang.Object")))))
+
+(deftest oversized-event-values-trim-in-place-largest-first
+  (let [payload {:seon.dev.mcp/runtime "clj"
+                 :seon.dev.mcp/cluster "default"
+                 :seon.dev.mcp/session-id "trim-test"
+                 :seon.dev.mcp/events
+                 [{:tag :out :val (apply str (repeat 700 "x"))}
+                  {:tag :ret :val (apply str (repeat 100 "y"))
+                   :ns "user" :ms 3 :form "(large-value)"}]}
+        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 128}
+                  ((bridge-var 'content-text) payload))
+        decoded (json/read-str encoded :key-fn keyword)
+        [large terminal] (:seon.dev.mcp/events decoded)]
+    (is (= "clj" (:seon.dev.mcp/runtime decoded)))
+    (is (= "default" (:seon.dev.mcp/cluster decoded)))
+    (is (= "trim-test" (:seon.dev.mcp/session-id decoded)))
+    (is (= {:tag "ret" :ns "user" :ms 3 :form "(large-value)"}
+           (select-keys terminal [:tag :ns :ms :form])))
+    (is (= (apply str (repeat 100 "y")) (:val terminal))
+        "The smaller member survives byte-for-byte.")
+    (is (true? (:seon.dev.mcp/truncated? large)))
+    (is (= 700 (:seon.dev.mcp/total-chars large)))
+    (is (= (count (:val large))
+           (:seon.dev.mcp/retained-chars large)))
+    (is (not (contains? decoded :seon.dev.mcp/preview)))
+    (is (<= (count encoded) (* 4 128)))))
+
+(deftest minimum-output-budget-preserves-the-envelope
+  (let [prefix "quoted=\" slash=\\ newline=\n "
+        payload {:seon.dev.mcp/runtime "clj"
+                 :seon.dev.mcp/cluster "default"
+                 :seon.dev.mcp/session-id "minimum-test"
+                 :seon.dev.mcp/events
+                 [{:tag :ret
+                   :val (str prefix (apply str (repeat 1000 "z")))
+                   :ns "user" :ms 9 :form "(large-value)"
+                   :exception true}]}
+        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 64}
+                  ((bridge-var 'content-text) payload))
+        decoded (json/read-str encoded :key-fn keyword)
+        event (first (:seon.dev.mcp/events decoded))]
+    (is (= "clj" (:seon.dev.mcp/runtime decoded)))
+    (is (= "default" (:seon.dev.mcp/cluster decoded)))
+    (is (= "minimum-test" (:seon.dev.mcp/session-id decoded)))
+    (is (= {:tag "ret" :ns "user" :ms 9 :form "(large-value)"
+            :exception true}
+           (select-keys event [:tag :ns :ms :form :exception])))
+    (is (string? (:val event)))
+    (is (true? (:seon.dev.mcp/truncated? event)))
+    (is (= (+ (count prefix) 1000)
+           (:seon.dev.mcp/total-chars event)))
+    (is (= (count (:val event))
+           (:seon.dev.mcp/retained-chars event)))
+    (is (not (contains? decoded :seon.dev.mcp/preview)))))
 
 (deftest runtime-status-leads-with-live-and-collapses-dormant-clusters
   (let [fixture-root (io/file project-root "tmp"
@@ -215,10 +269,16 @@
   (let [[initialized listed]
         (rpc-responses
          [{:jsonrpc "2.0" :id 1 :method "initialize" :params {}}
-          {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}}])]
+          {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}}])
+        eval-tool (some #(when (= "eval_clj" (:name %)) %)
+                        (get-in listed [:result :tools]))]
     (is (= "seon" (get-in initialized [:result :serverInfo :name])))
     (is (= #{"eval_clj" "list_sessions" "runtime_status"}
-           (into #{} (map :name) (get-in listed [:result :tools]))))))
+           (into #{} (map :name) (get-in listed [:result :tools]))))
+    (is (str/includes? (:description eval-tool) "max_output_tokens"))
+    (is (str/includes? (get-in eval-tool [:inputSchema :properties :code
+                                          :description])
+                       "Exactly one Clojure form"))))
 
 (deftest deleted-tool-name-is-an-unknown-tool
   (let [[response]

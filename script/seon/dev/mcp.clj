@@ -45,6 +45,10 @@
   []
   (* 4 (output-token-limit *requested-output-tokens*)))
 
+(defn- event-char-limit
+  []
+  (max 1 (quot (transport-char-limit) 2)))
+
 (defn- bounded-text
   [value]
   (let [value (str value)
@@ -53,16 +57,66 @@
       value
       (str (subs value 0 limit) "\n… output truncated by MCP bridge"))))
 
+(defn- safe-prefix
+  [value retained]
+  (let [retained (min (count value) (max 0 retained))
+        retained (if (and (pos? retained)
+                          (Character/isHighSurrogate
+                           (.charAt ^String value (dec retained))))
+                   (dec retained)
+                   retained)]
+    (subs value 0 retained)))
+
+(defn- trim-event-value
+  [value event-index retained]
+  (let [path [:seon.dev.mcp/events event-index]
+        event (get-in value path)
+        original (:val event)
+        total (or (:seon.dev.mcp/total-chars event) (count original))
+        kept (safe-prefix original retained)]
+    (-> value
+        (assoc-in (conj path :val) kept)
+        (assoc-in (conj path :seon.dev.mcp/truncated?) true)
+        (assoc-in (conj path :seon.dev.mcp/retained-chars) (count kept))
+        (assoc-in (conj path :seon.dev.mcp/total-chars) total))))
+
+(defn- largest-event-value
+  [value]
+  (->> (:seon.dev.mcp/events value)
+       (keep-indexed
+        (fn [index event]
+          (when (and (string? (:val event)) (seq (:val event)))
+            {:seon.dev.mcp/index index
+             :seon.dev.mcp/raw-chars (count (:val event))
+             :seon.dev.mcp/encoded-chars
+             (count (json/generate-string (:val event)))})))
+       (sort-by (juxt (comp - :seon.dev.mcp/encoded-chars)
+                      :seon.dev.mcp/index))
+       first))
+
+(defn- encode-structured-content
+  [value]
+  (let [limit (transport-char-limit)]
+    (loop [value value]
+      (let [encoded (json/generate-string value)
+            overflow (- (count encoded) limit)]
+        (if-not (pos? overflow)
+          encoded
+          (if-let [{index :seon.dev.mcp/index
+                    raw-chars :seon.dev.mcp/raw-chars}
+                   (largest-event-value value)]
+            (recur (trim-event-value value index
+                                     (- raw-chars (max 1 overflow))))
+            ;; At the minimum request, the envelope plus truncation metadata
+            ;; can exceed the estimate even with empty values. Structure is
+            ;; more important than pretending the payload fit.
+            encoded))))))
+
 (defn- content-text
   [value]
   (if (string? value)
     (bounded-text value)
-    (let [encoded (json/generate-string value)]
-      (if (<= (count encoded) (transport-char-limit))
-        encoded
-        (json/generate-string
-         {:seon.dev.mcp/truncated? true
-          :seon.dev.mcp/preview (bounded-text encoded)})))))
+    (encode-structured-content value)))
 
 (defn- log-info
   [& arguments]
@@ -375,12 +429,14 @@
                       throwable)))))
 
 (defn- bounded-event
-  [event remaining]
+  [event limit]
   (if-let [value (when (string? (:val event)) (:val event))]
-    (let [kept (subs value 0 (min remaining (count value)))]
+    (let [kept (safe-prefix value (min limit (count value)))]
       [(cond-> (assoc event :val kept)
          (< (count kept) (count value))
-         (assoc :seon.dev.mcp/truncated? true))
+         (assoc :seon.dev.mcp/truncated? true
+                :seon.dev.mcp/retained-chars (count kept)
+                :seon.dev.mcp/total-chars (count value)))
        (count kept)])
     [event 0]))
 
@@ -388,16 +444,19 @@
   [frame]
   (let [class-name (str (first frame))]
     (or (str/starts-with? class-name "seon.")
-        (= "user" class-name)
-        (str/starts-with? class-name "user$")
-        (str/starts-with? class-name "repl_context")
-        (str/starts-with? class-name "repl-context"))))
+        (str/starts-with? class-name "user$eval")
+        (str/starts-with? class-name "repl_context$eval")
+        (str/starts-with? class-name "repl-context$eval"))))
 
 (defn- project-exception-value
   [value]
   (let [throwable-map
         (try
-          (if (string? value) (edn/read-string value) value)
+          (if (string? value)
+            (edn/read-string {:default (fn [tag tagged-value]
+                                         [tag tagged-value])}
+                             value)
+            value)
           (catch Throwable _ nil))]
     (if-not (map? throwable-map)
       value
@@ -426,7 +485,6 @@
   [{:keys [socket reader]} timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
     (loop [events []
-           retained-chars 0
            dropped 0]
       (let [remaining-ms (- deadline (System/currentTimeMillis))]
         (when-not (pos? remaining-ms)
@@ -447,9 +505,7 @@
                              :seon.dev.mcp/value (pr-str event)}))
 
             :else
-            (let [available (max 0 (- (transport-char-limit)
-                                      retained-chars))
-                  [event used] (bounded-event event available)
+            (let [[event _] (bounded-event event (event-char-limit))
                   terminal? (= :ret (:tag event))
                   retain? (or terminal?
                               (< (count events) (dec max-transport-events)))
@@ -460,7 +516,7 @@
                   (pos? dropped)
                   (conj {:tag :seon.dev.mcp/dropped-events
                          :count dropped}))
-                (recur events (+ retained-chars used) dropped)))))))))
+                (recur events dropped)))))))))
 
 (defn- execute-clj-eval
   [{:keys [code cluster session_id timeout_ms]}]
@@ -565,9 +621,9 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate one Clojure form through the selected cluster's advertised io-prepl. Discovery runs on every call; the default session reconnects after cluster restart."
+    :description "Evaluate exactly one Clojure form through the selected cluster's advertised io-prepl. The session retains *1/*2; narrow oversized results or raise max_output_tokens up to 16000. Discovery runs on every call; the default session reconnects after cluster restart."
     :inputSchema {:type "object"
-                  :properties {:code {:type "string"}
+                  :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
                                :cluster {:type "string" :description "Cluster name. Fresh discovery reads data/clusters/<name>/prepl.edn; defaults to this MCP server's own cluster."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}

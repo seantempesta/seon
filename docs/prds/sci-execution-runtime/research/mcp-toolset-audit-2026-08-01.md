@@ -343,3 +343,7 @@ folding `list_sessions` into `runtime_status`; no new tool is justified.
   the alive row leads, the process-root store is absent, and 16 dormant
   cluster directories occupy one named summary line. Stale, invalid, and
   unreadable advertisements remain individual rows.
+- **Fix 4 landed.** At `max_output_tokens: 64`, the 371-character preview-only
+  fallback became a 304-character structured envelope retaining runtime,
+  cluster, session, `tag`, `ns`, `ms`, and `form`. Its 1,002-character `:val`
+  reports zero retained / 1,002 total rather than double-escaped preview text.
