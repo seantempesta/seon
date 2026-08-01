@@ -1,9 +1,11 @@
 (ns seon.repl-parity-test
   "Stock-Clojure behavior checks exercised through Seon's production door."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.cluster.reply :as reply]
             [seon.config :as config]
+            [seon.print :as print]
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
             [seon.test-support :as test-support]))
@@ -50,10 +52,16 @@
                :value (:seon.sci.admit/value evaluation)
                :err error
                :ending-ns (:seon.sci.eval/ending-ns evaluation)
-               ;; Keep the sealed print tree visible to rows that characterize
-               ;; presentation divergences. Passing stock-value rows compare
-               ;; the finite semantic projection admitted from that same tree.
-               :printed result-edn
+               ;; The receipt stores the closed print tree; presentation is a
+               ;; render-time projection through the text sink.
+               :print-node result-edn
+               :printed
+               (print/emit-text (edn/read-string result-edn)
+                                (:seon.print/options evaluation))
+               ;; This is the face recoverable from today's stored receipt,
+               ;; which does not yet persist the captured SCI print options.
+               :stored-printed
+               (print/emit-text (edn/read-string result-edn) {})
                :semantic-printed
                (pr-str (:seon.sci.admit/value evaluation))}]
           [(or (:seon.sci.eval/ending-ns evaluation) namespace-name)
@@ -145,15 +153,15 @@
    {:parity/row "I1"
     :parity/reason "Already owned by seon.sci.admit-test, not a stock-parity behavior."}
    {:parity/row "I2"
-    :parity/reason "P-TOTAL needs the unbuilt closed print grammar."}
+    :parity/reason "P-TOTAL runs in seon.print-test; this gate has no second production-door assertion."}
    {:parity/row "I3"
-    :parity/reason "P-TEE needs the unbuilt text and hiccup sinks."}
+    :parity/reason "P-TEE runs in seon.print-test; this gate has no second production-door assertion."}
    {:parity/row "I4"
-    :parity/reason "Stored result re-render needs the unbuilt print path."}
+    :parity/reason "Stored result re-render is owned by seon.render.value-test."}
    {:parity/row "I5"
     :parity/reason "Capability reachability belongs to the seon.effect security owner."}
    {:parity/row "I7"
-    :parity/reason "The loud capped-result line needs the unbuilt render print path."}
+    :parity/reason "The capped-result line is owned by seon.render.transcript-test."}
    {:parity/row "I8"
     :parity/reason "Duplicates E16 and is already owned by SCI's interrupt suite."}])
 
@@ -162,6 +170,40 @@
   (->> (ns-interns (the-ns 'seon.repl-parity-test))
        vals
        (filter (comp :parity/row meta))))
+
+(def ^:private expected-family-row-counts
+  [["A" 10] ["B" 11] ["C" 8] ["D" 11] ["E" 16]
+   ["F" 6] ["G" 10] ["H" 8] ["I" 8]])
+
+(def ^:private expected-row-ids
+  (into #{}
+        (mapcat (fn [[family row-count]]
+                  (map #(str family %) (range 1 (inc row-count)))))
+        expected-family-row-counts))
+
+(defn- current-row-ids
+  []
+  (concat (map (comp :parity/row meta) (parity-vars))
+          (map :parity/row pending-rows)))
+
+(defn- family-row-counts
+  [row-ids]
+  (mapv (fn [[family _]]
+          [family (count (filter #(str/starts-with? % family) row-ids))])
+        expected-family-row-counts))
+
+(defn- assert-complete-row-inventory!
+  []
+  (let [row-ids (vec (current-row-ids))]
+    (is (= (count expected-row-ids) (count row-ids))
+        (str "REPL parity row cardinality changed: " (sort row-ids)))
+    (is (= expected-row-ids (set row-ids))
+        (str "REPL parity row identities changed: "
+             {::missing (sort (remove (set row-ids) expected-row-ids))
+              ::unexpected (sort (remove expected-row-ids row-ids))}))
+    (is (= expected-family-row-counts (family-row-counts row-ids))
+        (str "REPL parity family cardinalities changed: "
+             (family-row-counts row-ids)))))
 
 (defn- database-fixture
   [run-tests]
@@ -175,6 +217,7 @@
 
 (defn- report-fixture
   [run-tests]
+  (assert-complete-row-inventory!)
   (reset! observations {})
   (run-tests)
   (let [known (->> (parity-vars)
@@ -194,7 +237,7 @@
 ;; Ported from Clojure's printer tables at
 ;; reference-code/clojure/test/clojure/test_clojure/printer.clj:17-186.
 
-(defparity "B1" :known-divergence
+(defparity "B1" :passing
   (compared ["(1 2 3)" "[1 2 3]"]
             (mapv :printed
                   (repl-session ["'(1 2 3)" "[1 2 3]"]))))
@@ -208,6 +251,7 @@
    [5 "(0 1 2 3 4)"]])
 
 (defparity "B2" :known-divergence
+  ;; Pending Lane 1: *print-length* does not survive into the next form.
   (let [actual
         (mapv (fn [[length _]]
                 (:printed
@@ -227,6 +271,7 @@
    [5 "[0 1 2 3 4]"]])
 
 (defparity "B3" :known-divergence
+  ;; Pending Lane 1: vector printing sees the reset *print-length* binding.
   (let [actual
         (mapv (fn [[length _]]
                 (:printed
@@ -237,7 +282,7 @@
               print-length-vector-cases)]
     (compared (mapv second print-length-vector-cases) actual)))
 
-(defparity "B4" :known-divergence
+(defparity "B4" :passing
   (let [list-results
         (repl-session ["(set! *print-length* 0)" "()"
                        "(set! *print-length* 1)" "()"])
@@ -260,6 +305,7 @@
    [5 "(0 (1 (2 (3 (4)))))"]])
 
 (defparity "B5" :known-divergence
+  ;; Pending Lane 1: *print-level* does not survive into the next form.
   (let [actual
         (mapv (fn [[level _]]
                 (:printed
@@ -285,6 +331,7 @@
    [3 5 "(if (member x y) (+ (first x) 3) (foo (a b c d Baz)))"]])
 
 (defparity "B6" :known-divergence
+  ;; Pending Lane 1: neither print binding survives across these forms.
   (let [actual
         (mapv (fn [[level length _]]
                 (:printed
@@ -319,6 +366,7 @@
     "#:k{:i 9, :h 8, :g 7, :f 6, :e 5, :d 4, :c 3, :b 2, :a 1}"]])
 
 (defparity "B7" :known-divergence
+  ;; Pending Lane 1: `struct` remains absent from the agent context.
   (let [actual
         (mapv (fn [[source _]]
                 (:printed
@@ -333,14 +381,14 @@
             (:semantic-printed
              (first (repl-session ["(first {:a 1})"])))))
 
-(defparity "B9" :known-divergence
+(defparity "B9" :passing
   (compared ["user.ParityRecord" "#user.ParityRecord{:a 1, :b 2}"]
             (mapv :printed
                   (repl-session
                    ["(defrecord ParityRecord [a b])"
                     "(->ParityRecord 1 2)"]))))
 
-(defparity "B10" :known-divergence
+(defparity "B10" :passing
   (let [printed (:printed (first (repl-session ["(atom 1)"])))]
     (checked "#object[clojure.lang.Atom 0x…]"
              printed
@@ -349,6 +397,7 @@
                           printed)))))
 
 (defparity "B11" :known-divergence
+  ;; Print-path residual: the emitted name still exposes sci.impl.fns/fun.
   (let [printed (:printed (first (repl-session ["(fn [] 1)"])))]
     (checked "a #object face with a demunged function name"
              printed
@@ -358,12 +407,13 @@
 
 ;;; Family A — scalar print faces
 
-(defparity "A1" :known-divergence
+(defparity "A1" :passing
   (compared "#'user/parity_scalar"
             (:printed
              (first (repl-session ["(def parity_scalar 1)"])))))
 
 (defparity "A2" :known-divergence
+  ;; Pending Lane 1: SCI rejects Float +/-Infinity before it reaches printing.
   (compared ["##Inf" "##-Inf" "##NaN" "##Inf" "##-Inf" "##NaN"]
             (mapv :printed
                   (repl-session
@@ -400,7 +450,7 @@
           ["#inst \"2020-01-01T00:00:00.000-00:00\""
            "#uuid \"550e8400-e29b-41d4-a716-446655440000\""]))))
 
-(defparity "A9" :known-divergence
+(defparity "A9" :passing
   (let [source (str "(try (throw (ex-info \"parity\" {:a 1}))\n"
                     "     (catch Throwable failure failure))")
         printed (:printed (first (repl-session [source])))
@@ -422,15 +472,18 @@
 
 ;;; Family C — REPL session vars
 
+;; Pending Lane 1: the durable session image must restore *1 across a restart.
 (defparity "C1" :known-divergence
   (compared 1
             (:value (peek (repl-session ["1" "*1"])))))
 
+;; Pending Lane 1: the durable session image must restore *1/*2/*3 ordering.
 (defparity "C2" :known-divergence
   (compared [3 2 1]
             (:value
              (peek (repl-session ["1" "2" "3" "[*1 *2 *3]"])))))
 
+;; Pending Lane 1: the durable session image must restore the last error in *e.
 (defparity "C3" :known-divergence
   (let [results
         (repl-session
@@ -438,6 +491,7 @@
           "(some? *e)"])]
     (compared true (:value (peek results)))))
 
+;; Pending Lane 1: restored *e must retain the caught error's ex-data.
 (defparity "C4" :known-divergence
   (let [results
         (repl-session
@@ -445,6 +499,7 @@
           "(ex-data *e)"])]
     (compared {:a 6} (:value (peek results)))))
 
+;; Pending Lane 1: pst depends on the durable session image's restored *e.
 (defparity "C5" :known-divergence
   (let [results
         (repl-session
@@ -454,6 +509,7 @@
              (str/includes? (:out (peek results)) "Divide by zero"))))
 
 (defparity "C6" :known-divergence
+  ;; Pending Lane 1: the production door still binds *out* and *err* together.
   (compared false
             (:value
              (first (repl-session ["(identical? *out* *err*)"])))))
@@ -508,6 +564,7 @@
     (compared "" (:out result))))
 
 (defparity "D5" :known-divergence
+  ;; Pending Lane 1: find-doc has not been admitted over program-graph facts.
   (let [result (first (repl-session ["(find-doc #\"map\")"]))]
     (checked "multiple matching documentation entries"
              result
@@ -515,6 +572,7 @@
                   (str/includes? (:out result) "clojure.core/map")))))
 
 (defparity "D6" :known-divergence
+  ;; Pending Lane 1: apropos has not been admitted over program-graph facts.
   (let [results
         (repl-session
          ["(apropos \"defmacro\")"
@@ -539,6 +597,7 @@
              (str/includes? error "No namespace: parity.no-such-ns found"))))
 
 (defparity "D9" :known-divergence
+  ;; Pending Lane 1: source does not yet read exact program-graph source.
   (let [result
         (first (repl-session ["(source my.message/send)"]))]
     (checked "the exact :seon.fn/source bytes"
@@ -547,6 +606,7 @@
                   (str/includes? (:out result) "(defn send")))))
 
 (defparity "D11" :known-divergence
+  ;; Pending Lane 1: the table face exists, but print-table is unresolved.
   (let [result
         (first
          (repl-session
@@ -561,6 +621,7 @@
 ;;; Family E — error faces and triage
 
 (defparity "E2" :known-divergence
+  ;; Pending Lane 1: the production error report does not use SCI's formatter.
   (let [error
         (:err
          (first
@@ -573,13 +634,14 @@
                error)))))
 
 (defparity "E3" :known-divergence
+  ;; Pending Lane 1: compile errors do not yet use SCI's formatter.
   (let [error (:err (first (repl-session ["parity_missing_symbol"])))]
     (checked "Syntax error compiling at (REPL:1:1)"
              error
              (str/starts-with? error
                                "Syntax error compiling at (REPL:1:1)"))))
 
-(defparity "E4" :known-divergence
+(defparity "E4" :passing
   (let [result
         (first
          (repl-session
@@ -609,6 +671,7 @@
               (:err result))))
 
 (defparity "E8" :known-divergence
+  ;; Pending Lane 1: the cause-side ex-data is not exposed on the error value.
   (let [result
         (first
          (repl-session
@@ -703,18 +766,20 @@
                ["(with-out-str (println \"hello\"))"])))))
 
 (defparity "F3" :known-divergence
+  ;; Pending Lane 1: captured *print-length* is not persisted on the receipt.
   (let [result
         (peek
          (repl-session
           ["(set! *print-length* 3)" "(range 10)"]))]
-    (compared "(0 1 2 ...)" (:printed result))))
+    (compared "(0 1 2 ...)" (:stored-printed result))))
 
 (defparity "F4" :known-divergence
+  ;; Pending Lane 1: captured *print-level* is not persisted on the receipt.
   (let [result
         (peek
          (repl-session
           ["(set! *print-level* 1)" "[:a [:b [:c]]]"]))]
-    (compared "[:a #]" (:printed result))))
+    (compared "[:a #]" (:stored-printed result))))
 
 ;;; Family G — reader behavior
 
@@ -803,12 +868,13 @@
 
 ;;; Family H — namespaces and vars
 
-(defparity "H1" :known-divergence
+(defparity "H1" :passing
   (compared "#'user/parity_h1"
             (:printed
              (first (repl-session ["(def parity_h1 1)"])))))
 
 (defparity "H2" :known-divergence
+  ;; Pending Lane 1: ns/require return values still differ from stock.
   (compared ["nil" "nil"]
             (mapv :printed
                   (repl-session
@@ -822,7 +888,7 @@
     (compared ['parity.h3 'parity.h3]
               (mapv :ending-ns results))))
 
-(defparity "H4" :known-divergence
+(defparity "H4" :passing
   (let [result
         (peek
          (repl-session
@@ -836,6 +902,7 @@
                                       "seon.sci.admit"))))))
 
 (defparity "H5" :known-divergence
+  ;; Pending Lane 1: namespace mutations are still masked by ctx handling.
   (let [results
         (repl-session
          ["(ns parity.h5 (:require [clojure.string :as string]))"
@@ -850,7 +917,7 @@
              (and (nil? (:value (nth results 4)))
                   (nil? (:value (peek results)))))))
 
-(defparity "H6" :known-divergence
+(defparity "H6" :passing
   (let [result
         (peek
          (repl-session
