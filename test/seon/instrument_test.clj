@@ -24,7 +24,7 @@
             [seon.error :as error]
             [seon.flow :as flow]
             [seon.instrument :as instrument]
-            [seon.schema]))
+            [seon.schema :as schema]))
 
 (defn- instrumented!
   "Run `body` with instrumentation on, and always take it back off."
@@ -89,6 +89,33 @@
               (:seon.instrument/schema (:seon.error/data data)))
            "the single positional input is identified, not Malli's cat wrapper")
        (is (re-find #"invalid-input" (ex-message failure)))))))
+
+(deftest interpreted-contracts-use-the-active-registry-and-core-error-dial
+  (let [projection (or (schema/current-projection)
+                       (schema/build-projection (schema/snapshot)))
+        caps {:seon.config.eval.result/max-depth 4
+              :seon.config.eval.result/max-collection 8
+              :seon.config.eval.result/max-string 256
+              :seon.config.eval.result/max-nodes 64}
+        original identity
+        wrapped
+        (instrument/wrap-interpreted
+         'my.agents.contract/value
+         "[:=> [:cat [:fn clojure.core/int?]] :int]"
+         projection :panic caps original)
+        failure (try (wrapped "wrong")
+                     (catch Exception thrown thrown))]
+    (is (= :seon.instrument/contract-violated
+           (:seon.error/kind (ex-data failure))))
+    (is (= "my.agents.contract/value"
+           (get-in (ex-data failure)
+                   [:seon.error/data :seon.instrument/fn])))
+    (is (= original
+           (instrument/wrap-interpreted
+            'my.agents.contract/value
+            "[:=> [:cat [:fn clojure.core/int?]] :int]"
+            projection :record caps wrapped))
+        ":record removes an already-installed interpreted wrapper")))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   (let [caps {:seon.config.eval.result/max-depth 4

@@ -80,7 +80,9 @@
   the first one found this way was real (`loop.cljc` passing a
   transaction argument map where the contract said vector — see
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`)."
-  (:require [malli.core :as m]
+  (:require [clojure.edn :as edn]
+            [clojure.walk :as walk]
+            [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]
             [seon.schema :as schema]
@@ -197,6 +199,73 @@
   (fn [kind data]
     (let [value (violation caps kind data)]
       (throw (ex-info (:seon.error/message value) value)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Interpreted function contracts
+;;; ---------------------------------------------------------------------------
+
+(def ^:private interpreted-original ::interpreted-original)
+
+(defn- original-interpreted
+  [f]
+  (or (some-> f meta interpreted-original) f))
+
+(defn- predicate-callable
+  [projection predicate]
+  (or (get (:seon.schema.projection/predicate-functions projection)
+           predicate)
+      (when (qualified-symbol? predicate)
+        (some-> predicate requiring-resolve deref))))
+
+(defn- bind-contract-predicates
+  "Bind named Malli predicates without opening Malli's code evaluator."
+  [projection contract]
+  (walk/postwalk
+   (fn [value]
+     (if (and (vector? value) (= :fn (first value)))
+       (let [predicate-index (if (map? (second value)) 2 1)
+             predicate (get value predicate-index)
+             callable (when (symbol? predicate)
+                        (predicate-callable projection predicate))]
+         (cond
+           (and (ifn? predicate) (not (symbol? predicate))) value
+           (ifn? callable) (assoc value predicate-index callable)
+           :else
+           (throw
+            (ex-info
+             (str "Contract predicate " (pr-str predicate)
+                  " has no active callable.")
+             {:seon.error/kind :seon.schema/unresolved-predicate
+              :seon.schema/predicate predicate}))))
+       value))
+   contract))
+
+(defn wrap-interpreted
+  "Apply one committed agent function contract under the core-error dial."
+  {:malli/schema
+   [:=>
+    [:cat :symbol :string :map :seon.config/on-core-error
+     :seon.sci.admit/caps [:fn clojure.core/ifn?]]
+    [:fn clojure.core/ifn?]]}
+  [function-symbol spec-edn projection mode caps f]
+  (let [original (original-interpreted f)]
+    (case mode
+      :panic
+      (let [contract (->> (edn/read-string spec-edn)
+                          (bind-contract-predicates projection))
+            report (throwing-report caps)
+            wrapped
+            (m/-instrument
+             {:schema contract
+              :scope #{:input :output}
+              :report (fn [kind data]
+                        (report kind (assoc data :fn-name function-symbol)))}
+             original
+             (:seon.schema.projection/compile-options projection))]
+        (with-meta wrapped
+          (assoc (meta wrapped) interpreted-original original)))
+
+      :record original)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation

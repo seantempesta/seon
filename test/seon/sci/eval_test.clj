@@ -378,6 +378,42 @@
                (:seon.eval/outcome
                 (:seon.sci.admit/record evaluation))))))))
 
+(deftest agent-contracts-apply-on-acquire-and-cold-recovery
+  (test-support/with-database
+    (fn [connection]
+      (d/transact
+       connection
+       [(merge {:seon.config/cluster "contract-acquire"
+                :seon.config/on-core-error :panic}
+               caps)
+        {:seon.ns/name 'authored.contract
+         :seon.ns/source "(ns authored.contract)"}
+        {:seon.fn/sym "authored.contract/accept"
+         :seon.fn/ns [:seon.ns/name 'authored.contract]
+         :seon.fn/source
+         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+              "accept [x] x)")
+         :seon.fn/arglists "([x])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat :int] :int]"}])
+      (let [assert-violation
+            (fn [ctx moment]
+              (let [evaluation
+                    (run-in ctx "(authored.contract/accept \"wrong\")" 2000)
+                    failure (:seon.sci.admit/value evaluation)]
+                (is (= :seon.instrument/contract-violated
+                       (:seon.error/kind failure)) moment)
+                (is (= "authored.contract/accept"
+                       (get-in failure
+                               [:seon.error/data :seon.instrument/fn]))
+                    moment)))
+            acquired-ctx (eval/build-base-ctx)]
+        (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
+                        :seon.db/db @connection})
+        (assert-violation acquired-ctx "boot acquire!")
+        (assert-violation (eval/cluster-ctx @connection)
+                          "cold crash recovery")))))
+
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
     (fn [connection]

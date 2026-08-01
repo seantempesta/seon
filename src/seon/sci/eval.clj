@@ -109,7 +109,9 @@
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.blob :as blob]
+            [seon.config :as config]
             [seon.error :as error]
+            [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -745,6 +747,31 @@
                  current)))))
   projection)
 
+(defn- instrumentation-config
+  "Read the contract dial and admission caps from this database value."
+  [db]
+  (let [config-entity
+        (d/q '[:find ?config .
+               :where [?config :seon.config/on-core-error _]]
+             db)
+        effective (when config-entity (d/pull db '[*] config-entity))]
+    {:seon.config/on-core-error
+     (or (:seon.config/on-core-error effective) :record)
+     :seon.sci.admit/caps (config/result-caps effective)}))
+
+(defn- install-function-contract!
+  [ctx committed projection db]
+  (when-let [spec-edn (:seon.fn/spec committed)]
+    (let [function-symbol (symbol (:seon.fn/sym committed))
+          sci-var (sci/resolve ctx function-symbol)
+          {:keys [:seon.config/on-core-error :seon.sci.admit/caps]}
+          (instrumentation-config db)]
+      (sci.vars/bindRoot
+       sci-var
+       (instrument/wrap-interpreted
+        function-symbol spec-edn projection on-core-error caps @sci-var))))
+  nil)
+
 (defn install-program-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
@@ -792,12 +819,14 @@
       (let [namespace-name (second (:seon.fn/ns row))
             event (when-not (::evaluated? row)
                     (one-event (:seon.fn/source committed)
-                               namespace-name ctx))]
+                               namespace-name ctx))
+            next-projection
+            (schema/projection-from-database db projection)]
         (when event
           (sci/binding [sci/ns (sci/create-ns namespace-name)]
             (sci/eval-form ctx (:seon.sci.reader/form event))))
-        {:seon.schema/projection
-         (schema/projection-from-database db projection)
+        (install-function-contract! ctx committed next-projection db)
+        {:seon.schema/projection next-projection
          :seon.sci.eval/installed 1})
 
       :seon.schema/key

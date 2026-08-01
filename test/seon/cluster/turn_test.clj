@@ -1442,6 +1442,72 @@
                          @connection))
               "the second agent used the same live cluster program graph"))))))
 
+(deftest another-agent-sees-a-flat-contract-violation-after-live-install
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster
+                           :seon.cluster/name "turn-test"
+                           :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.store/branch-connection cluster)
+            replies
+            (atom
+             [(str
+               "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+               "strict [x] x)\n"
+               "(my.run/complete \"published\")")
+              "(my.agents.agent-a/strict \"wrong\")"])]
+        (d/transact
+         connection
+         [(merge {:seon.config/cluster "turn-test"
+                  :seon.config/on-core-error :panic
+                  :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
+                  :seon.config.ai/model "probe"
+                  :seon.config.ai/max-tokens 32
+                  :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
+                  :seon.config.ai/timeout-ms 200
+                  :seon.config.ai.retry/base-delay-ms 1
+                  :seon.config.ai.retry/multiplier 2.0
+                  :seon.config.ai.retry/jitter-fraction 0.0
+                  :seon.config.ai.retry/maximum-delay-ms 1
+                  :seon.config.ai.retry/maximum-retries 0
+                  :seon.config.ai.retry/maximum-total-delay-ms 0}
+                 (:seon.sci.admit/caps cluster))])
+        (with-redefs [ai/complete
+                      (fn [_]
+                        (let [[before _]
+                              (swap-vals! replies
+                                          #(if (seq %) (subvec % 1) %))]
+                          {:seon.ai/text
+                           (or (first before)
+                               "(my.run/complete \"recovered\")")}))]
+          (drive-agent! cluster "agent-a" 10)
+          (d/transact
+           connection
+           [{:seon.ns/name 'my.agents.agent-b}
+            (assoc (agent-row "agent-b")
+                   :seon.cluster.agent/namespace
+                   [:seon.ns/name 'my.agents.agent-b])
+            {:seon.cluster.message/id "m-contract-agent-b"
+             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+             :seon.cluster.message/content "violate the published contract"
+             :seon.cluster.message/at now}])
+          (drive-agent! cluster "agent-b" 10)
+          (let [receipts
+                (d/q '[:find [(pull ?receipt
+                                   [:seon.error/kind
+                                    :seon.cluster.eval/result-edn]) ...]
+                       :where
+                       [?receipt :seon.cluster.eval/id _]
+                       [?receipt :seon.error/kind
+                        :seon.instrument/contract-violated]]
+                     @connection)]
+            (is (= 1 (count receipts)))
+            (is (str/includes?
+                 (:seon.cluster.eval/result-edn (first receipts))
+                               "my.agents.agent-a/strict")
+                "the second agent crossed the one live context-install seam")))))))
+
 (deftest a-refused-definition-stays-live-for-another-agent
   (with-cluster
     (fn [cluster]
