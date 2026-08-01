@@ -2,8 +2,10 @@
   "Stock-Clojure behavior checks exercised through Seon's production door."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [seon.cluster.reply :as reply]
             [seon.config :as config]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.reader :as sci.reader]
             [seon.test-support :as test-support]))
 
 ;; Upstream corpus pins (2026-08-01):
@@ -51,6 +53,7 @@
               {:out (or (:seon.cluster.eval/output evaluation) "")
                :value (:seon.sci.admit/value evaluation)
                :err error
+               :ending-ns (:seon.sci.eval/ending-ns evaluation)
                ;; Until the sealed print path lands, result-edn is the exact
                ;; value face the production transcript has available. Keeping
                ;; this seam explicit makes every print-path repair promote a
@@ -108,7 +111,44 @@
 
 (def pending-rows
   "Checklist rows with no honest executable production-door assertion yet."
-  [])
+  [{:parity/row "A7"
+    :parity/reason "Route c: Seon's reader intentionally refuses #= input."}
+   {:parity/row "D10"
+    :parity/reason "Route c: the door never enables outer read-eval."}
+   {:parity/row "E1"
+    :parity/reason "The door exposes neither clojure.main/ex-triage nor a raw Throwable."}
+   {:parity/row "E5"
+    :parity/reason "The guarded context cannot construct a Throwable with a replaced stack."}
+   {:parity/row "E9"
+    :parity/reason "evaluate catches the raw Throwable before sci/stacktrace is observable."}
+   {:parity/row "E10"
+    :parity/reason "evaluate catches the raw Throwable before sci/format-stacktrace is observable."}
+   {:parity/row "E15"
+    :parity/reason "Route c: Babashka's richer error block is deliberately rejected."}
+   {:parity/row "E16"
+    :parity/reason "Route c: the explicit time-limit face is genuinely Seon's."}
+   {:parity/row "F5"
+    :parity/reason "Route c: StringWriter capture has no terminal flush behavior."}
+   {:parity/row "F6"
+    :parity/reason "Route c: the production door is the input and exposes no stdin."}
+   {:parity/row "G5"
+    :parity/reason "The production reader fixes features and exposes no :read-cond :preserve option."}
+   {:parity/row "G9"
+    :parity/reason "The production reader returns events and does not expose its private EOF sentinel."}
+   {:parity/row "I1"
+    :parity/reason "Already owned by seon.sci.admit-test, not a stock-parity behavior."}
+   {:parity/row "I2"
+    :parity/reason "P-TOTAL needs the unbuilt closed print grammar."}
+   {:parity/row "I3"
+    :parity/reason "P-TEE needs the unbuilt text and hiccup sinks."}
+   {:parity/row "I4"
+    :parity/reason "Stored result re-render needs the unbuilt print path."}
+   {:parity/row "I5"
+    :parity/reason "Capability reachability belongs to the seon.effect security owner."}
+   {:parity/row "I7"
+    :parity/reason "The loud capped-result line needs the unbuilt render print path."}
+   {:parity/row "I8"
+    :parity/reason "Duplicates E16 and is already owned by SCI's interrupt suite."}])
 
 (defn- parity-vars
   []
@@ -308,3 +348,541 @@
              (and (str/starts-with? printed "#object[")
                   (not (str/includes? printed "$"))
                   (not (str/includes? printed "sci.impl"))))))
+
+;;; Family A — scalar print faces
+
+(defparity "A1" :known-divergence
+  (compared "#'user/parity_scalar"
+            (:printed
+             (first (repl-session ["(def parity_scalar 1)"])))))
+
+(defparity "A2" :known-divergence
+  (compared ["##Inf" "##-Inf" "##NaN" "##Inf" "##-Inf" "##NaN"]
+            (mapv :printed
+                  (repl-session
+                   ["##Inf" "##-Inf" "##NaN"
+                    "(float ##Inf)" "(float ##-Inf)" "(float ##NaN)"]))))
+
+(defparity "A3" :passing
+  (compared ["1N" "1M"]
+            (mapv :printed (repl-session ["1N" "1M"]))))
+
+(defparity "A4" :passing
+  (compared ["\\a" "\\newline"]
+            (mapv :printed
+                  (repl-session ["\\a" "\\newline"]))))
+
+(defparity "A5" :passing
+  (compared "\"a\\n\\\"\\\\b\""
+            (:printed
+             (first (repl-session ["\"a\\n\\\"\\\\b\""])))))
+
+(defparity "A6" :passing
+  (let [result
+        (first
+         (repl-session
+          ["(binding [*print-readably* nil] (pr-str \"hello\"))"]))]
+    (compared "hello" (:value result))))
+
+(defparity "A8" :passing
+  (compared
+   ["#inst \"2020-01-01T00:00:00.000-00:00\""
+    "#uuid \"550e8400-e29b-41d4-a716-446655440000\""]
+   (mapv :printed
+         (repl-session
+          ["#inst \"2020-01-01T00:00:00.000-00:00\""
+           "#uuid \"550e8400-e29b-41d4-a716-446655440000\""]))))
+
+(defparity "A9" :known-divergence
+  (let [source (str "(try (throw (ex-info \"parity\" {:a 1}))\n"
+                    "     (catch Throwable failure failure))")
+        printed (:printed (first (repl-session [source])))
+        ;; The exact trace is JVM-dependent. Stock's stable contract is the
+        ;; readable #error tag whose map round-trips to Throwable->map.
+        stock-face? (str/starts-with? printed "#error {")]
+    (checked "#error {:cause … :via […] :trace […]}"
+             printed stock-face?)))
+
+(defparity "A10" :passing
+  (let [result
+        (first
+         (repl-session
+          ["(binding [*print-meta* true] (prn ^{:a true} []))"]))]
+    (checked "metadata prefix followed by [] and newline"
+             (:out result)
+             (and (str/starts-with? (:out result) "^{:a true}")
+                  (str/ends-with? (:out result) "[]\n")))))
+
+;;; Family C — REPL session vars
+
+(defparity "C1" :known-divergence
+  (compared 1
+            (:value (peek (repl-session ["1" "*1"])))))
+
+(defparity "C2" :known-divergence
+  (compared [3 2 1]
+            (:value
+             (peek (repl-session ["1" "2" "3" "[*1 *2 *3]"])))))
+
+(defparity "C3" :known-divergence
+  (let [results
+        (repl-session
+         ["(throw (ex-info \"parity\" {:a 6}))"
+          "(some? *e)"])]
+    (compared true (:value (peek results)))))
+
+(defparity "C4" :known-divergence
+  (let [results
+        (repl-session
+         ["(throw (ex-info \"parity\" {:a 6}))"
+          "(ex-data *e)"])]
+    (compared {:a 6} (:value (peek results)))))
+
+(defparity "C5" :known-divergence
+  (let [results
+        (repl-session
+         ["(/ 1 0)" "(pst 1)"])]
+    (checked "pst reads *e and prints Divide by zero"
+             (peek results)
+             (str/includes? (:out (peek results)) "Divide by zero"))))
+
+(defparity "C6" :known-divergence
+  (compared false
+            (:value
+             (first (repl-session ["(identical? *out* *err*)"])))))
+
+(defparity "C7" :passing
+  (let [plan (reply/sources "[] [] [999]" 'user)
+        sources (mapv :seon.cluster.run.form/source plan)
+        results (repl-session sources)]
+    (compared ["[]" "[]" "[999]"] (mapv :printed results))))
+
+(defparity "C8" :passing
+  (let [results
+        (repl-session
+         ["(def parity_atom (atom 0))"
+          "(swap! parity_atom inc)"
+          "@parity_atom"])]
+    (compared 1 (:value (peek results)))))
+
+;;; Family D — doc, source, dir, apropos, and find-doc
+
+(defparity "D1" :passing
+  (let [results
+        (repl-session
+         ["(defmacro parity_doc \"foodoc\" ([x]) ([x y]))"
+          "(doc parity_doc)"])
+        expected
+        (str "-------------------------\n"
+             "user/parity_doc\n"
+             "([x] [x y])\n"
+             "Macro\n"
+             "  foodoc\n")]
+    (compared expected (:out (peek results)))))
+
+(defparity "D2" :passing
+  (let [results
+        (repl-session
+         ["(ns parity.doc \"foodoc\")"
+          "(doc parity.doc)"])]
+    (checked "namespace documentation includes its name and docstring"
+             (:out (peek results))
+             (and (str/includes? (:out (peek results)) "parity.doc")
+                  (str/includes? (:out (peek results)) "foodoc")))))
+
+(defparity "D3" :passing
+  (let [results (repl-session ["(doc catch)" "(doc try)"])]
+    (compared (:out (first results)) (:out (second results)))))
+
+(defparity "D4" :passing
+  (let [result
+        (first (repl-session ["(let [x 1] (doc x))"]))]
+    (compared "" (:out result))))
+
+(defparity "D5" :known-divergence
+  (let [result (first (repl-session ["(find-doc #\"map\")"]))]
+    (checked "multiple matching documentation entries"
+             result
+             (and (nil? (:err result))
+                  (str/includes? (:out result) "clojure.core/map")))))
+
+(defparity "D6" :known-divergence
+  (let [results
+        (repl-session
+         ["(apropos \"defmacro\")"
+          "(apropos #\"nothing-has-this-name\")"])]
+    (compared [true []]
+              [(some? (some #{'clojure.core/defmacro}
+                            (:value (first results))))
+               (:value (second results))])))
+
+(defparity "D7" :passing
+  (let [output (:out (first (repl-session ["(dir clojure.string)"])))
+        lines (str/split-lines output)]
+    (checked "sorted clojure.string publics"
+             lines
+             (and (= lines (sort lines))
+                  (some #{"includes?"} lines)))))
+
+(defparity "D8" :passing
+  (let [error (:err (first (repl-session ["(dir parity.no-such-ns)"])))]
+    (checked "No namespace: parity.no-such-ns found"
+             error
+             (str/includes? error "No namespace: parity.no-such-ns found"))))
+
+(defparity "D9" :known-divergence
+  (let [result
+        (first (repl-session ["(source my.message/send)"]))]
+    (checked "the exact :seon.fn/source bytes"
+             result
+             (and (nil? (:err result))
+                  (str/includes? (:out result) "(defn send")))))
+
+(defparity "D11" :known-divergence
+  (let [result
+        (first
+         (repl-session
+          ["(print-table [{:a 1 :b \"x\"} {:a 22 :b \"yy\"}])"]))]
+    (compared
+     (str "\n| :a | :b |\n"
+          "|----+----|\n"
+          "|  1 |  x |\n"
+          "| 22 | yy |\n")
+     (:out result))))
+
+;;; Family E — error faces and triage
+
+(defparity "E2" :known-divergence
+  (let [error
+        (:err
+         (first
+          (repl-session ["(throw (Error. \"xyz\"))"])))]
+    (checked "Execution error (Error) at (REPL:1).\nxyz\n"
+             error
+             (boolean
+              (re-find
+               #"^Execution error \(Error\) at .*\(REPL:1\)\.\nxyz\n?$"
+               error)))))
+
+(defparity "E3" :known-divergence
+  (let [error (:err (first (repl-session ["parity_missing_symbol"])))]
+    (checked "Syntax error compiling at (REPL:1:1)"
+             error
+             (str/starts-with? error
+                               "Syntax error compiling at (REPL:1:1)"))))
+
+(defparity "E4" :known-divergence
+  (let [result
+        (first
+         (repl-session
+          [(str "(try (throw (ex-info \"inner\" {:a 1}))\n"
+                "     (catch Throwable failure failure))")]))]
+    (checked "a Throwable value whose #error map carries root cause and data"
+             result
+             (str/starts-with? (:printed result) "#error {"))))
+
+(defparity "E6" :passing
+  (let [result
+        (peek
+         (repl-session
+          ["(defn parity_arity [x] x)"
+           "(parity_arity)"]))]
+    (compared "Wrong number of args (0) passed to: user/parity_arity"
+              (:err result))))
+
+(defparity "E7" :passing
+  (let [result
+        (first
+         (repl-session ["(apply (fn []) [1])"]))]
+    (compared "Wrong number of args (1) passed to: function of arity 0"
+              (:err result))))
+
+(defparity "E8" :known-divergence
+  (let [result
+        (first
+         (repl-session
+          ["(throw (ex-info \"parity\" {:parity/user-data true}))"]))]
+    (compared {:parity/user-data true}
+              (get-in result [:value :seon.error/data]))))
+
+(defparity "E11" :passing
+  (let [result
+        (peek
+         (repl-session
+          [(str "(defn parity_loop []\n"
+                "  (loop [i 0]\n"
+                "    (subs nil 0)))")
+           "(parity_loop)"]))
+        data (get-in result
+                     [:value :seon.error/data :seon.sci.eval/data])]
+    (checked "a located loop frame"
+             data
+             (and (some? (:line data))
+                  (some? (:column data))))))
+
+(def ^:private destructuring-location-cases
+  [["(str (let [[a] 1] a))" [1 6]]
+   ["(str (for [[a] [0]] :foo))" [1 6]]
+   ["(str (for [[a] 1] (/ 1 a)))" [1 6]]
+   ["(str (map (fn [[a]] a) [0]))" [1 11]]
+   ["(str (if-let [[a] 0] a))" [1 6]]
+   ["(str (when-let [[a] 0] a))" [1 6]]
+   ["(str (if-some [[a] 0] a))" [1 6]]
+   ["(str (when-some [[a] 0] a))" [1 6]]
+   ["(str (doseq [a 0] a))" [1 6]]
+   ["(str (doseq [[a] [0]] a))" [1 6]]])
+
+(defparity "E12" :passing
+  (let [actual
+        (mapv
+         (fn [[source _]]
+           (let [data
+                 (get-in (first (repl-session [source]))
+                         [:value :seon.error/data :seon.sci.eval/data])]
+             [(:line data) (:column data)]))
+         destructuring-location-cases)]
+    (compared (mapv second destructuring-location-cases) actual)))
+
+(def ^:private let-like-arity-cases
+  [["(str (if-let [x 0 y 1] x))"
+    "if-let requires exactly 2 forms in binding vector"]
+   ["(str (when-let [x 0 y 1] x))"
+    "when-let requires exactly 2 forms in binding vector"]
+   ["(str (if-some [x 0 y 1] x))"
+    "if-some requires exactly 2 forms in binding vector"]
+   ["(str (when-some [x 0 y 1] x))"
+    "when-some requires exactly 2 forms in binding vector"]])
+
+(defparity "E13" :passing
+  (let [actual
+        (mapv
+         (fn [[source _]]
+           (let [result (first (repl-session [source]))
+                 data (get-in result
+                              [:value :seon.error/data
+                               :seon.sci.eval/data])]
+             [(:err result) [(:line data) (:column data)]]))
+         let-like-arity-cases)]
+    (compared
+     (mapv (fn [[_ message]] [message [1 6]]) let-like-arity-cases)
+     actual)))
+
+(defparity "E14" :passing
+  (let [result
+        (first
+         (repl-session
+          [(str "(try (throw (ex-info \"parity\" nil))\n"
+                "     (catch Throwable failure (ex-data failure)))")]))]
+    (compared {} (:value result))))
+
+;;; Family F — output capture and print vars
+
+(defparity "F1" :passing
+  (let [results
+        (repl-session
+         ["(println \"hello\")"
+          "(print \"hello\")"
+          "(prn \"hello\")"
+          "(pr \"hello\")"
+          "(newline)"])]
+    (compared ["hello\n" "hello" "\"hello\"\n" "\"hello\"" "\n"]
+              (mapv :out results))))
+
+(defparity "F2" :passing
+  (compared "hello\n"
+            (:value
+             (first
+              (repl-session
+               ["(with-out-str (println \"hello\"))"])))))
+
+(defparity "F3" :known-divergence
+  (let [result
+        (peek
+         (repl-session
+          ["(set! *print-length* 3)" "(range 10)"]))]
+    (compared "(0 1 2 ...)" (:printed result))))
+
+(defparity "F4" :known-divergence
+  (let [result
+        (peek
+         (repl-session
+          ["(set! *print-level* 1)" "[:a [:b [:c]]]"]))]
+    (compared "[:a #]" (:printed result))))
+
+;;; Family G — reader behavior
+
+(defn- read-events
+  [text]
+  (sci.reader/read
+   {:seon.sci.reader/text text
+    :seon.sci.reader/ns 'user
+    :seon.sci.reader/aliases {}
+    :seon.sci.reader/refers {}
+    :seon.sci.reader/features #{:clj}
+    :seon.sci.reader/tags {}
+    :seon.sci.reader/max-chars 1048576}))
+
+(defparity "G1" :passing
+  (let [results
+        (repl-session
+         ["#inst \"2020-01-01T00:00:00.000-00:00\""
+          "#uuid \"550e8400-e29b-41d4-a716-446655440000\""])]
+    (checked "built-in inst and uuid literals"
+             results
+             (every? #(and (nil? (:err %))
+                           (or (inst? (:value %))
+                               (uuid? (:value %))))
+                     results))))
+
+(defparity "G2" :passing
+  (let [result (first (repl-session ["#parity/unknown [1]"]))]
+    (checked "Reader tag is not accepted: parity/unknown"
+             (:err result)
+             (str/includes? (:err result)
+                            "Reader tag is not accepted: parity/unknown"))))
+
+(defparity "G3" :passing
+  (let [result (first (repl-session ["#=(+ 20 22)"]))]
+    (checked "Reader evaluation is not accepted: #="
+             (:err result)
+             (str/includes? (:err result)
+                            "Reader evaluation is not accepted: #="))))
+
+(defparity "G4" :passing
+  (let [results
+        (repl-session
+         ["(ns parity.reader (:require [clojure.string :as string]))"
+          "#::string{:a 1 :other/b 2}"
+          "#::{:a 1 :other/b 2}"])]
+    (compared [{:clojure.string/a 1 :other/b 2}
+               {:parity.reader/a 1 :other/b 2}]
+              (mapv :value (rest results)))))
+
+(defparity "G6" :passing
+  (let [events (read-events "\n\n  (inc 1)")
+        event (first events)]
+    (compared [3 3]
+              [(:seon.sci.reader/line event)
+               (:seon.sci.reader/column event)])))
+
+(defparity "G7" :passing
+  (let [results
+        (repl-session
+         ["(def parity_reader_atom (atom 41))"
+          "#'parity_reader_atom"
+          "@parity_reader_atom"
+          "(#(+ % 1) 41)"
+          "`parity_reader_atom"])]
+    (compared [41 42 'user/parity_reader_atom]
+              [(:value (nth results 2))
+               (:value (nth results 3))
+               (:value (nth results 4))])))
+
+(defparity "G8" :passing
+  (let [results
+        (repl-session
+         ["1/2" "3.14M" "100N" "\"\\7\"" "0" "-0" "+0"])]
+    (compared [1/2 3.14M 100N (str (char 7)) 0 0 0]
+              (mapv :value results))))
+
+(defparity "G10" :passing
+  (let [invalid-symbol (read-events "foo/bar/baz")
+        invalid-value (read-events "##Foo")]
+    (checked "invalid symbols and symbolic values are clean reader errors"
+             [invalid-symbol invalid-value]
+             (every? #(= :seon.sci.reader/unreadable
+                          (:seon.error/kind %))
+                     [invalid-symbol invalid-value]))))
+
+;;; Family H — namespaces and vars
+
+(defparity "H1" :known-divergence
+  (compared "#'user/parity_h1"
+            (:printed
+             (first (repl-session ["(def parity_h1 1)"])))))
+
+(defparity "H2" :known-divergence
+  (compared ["nil" "nil"]
+            (mapv :printed
+                  (repl-session
+                   ["(ns parity.h2)"
+                    "(require 'clojure.set)"]))))
+
+(defparity "H3" :passing
+  (let [results
+        (repl-session
+         ["(in-ns 'parity.h3)" "*ns*"])]
+    (compared ['parity.h3 'parity.h3]
+              (mapv :ending-ns results))))
+
+(defparity "H4" :known-divergence
+  (let [result
+        (peek
+         (repl-session
+          ["(ns parity.h4)"
+           "(def x 1)"
+           "(ns-publics 'parity.h4)"]))]
+    (checked "{x #'parity.h4/x}"
+             (:printed result)
+             (and (str/includes? (:printed result) "#'parity.h4/x")
+                  (not (str/includes? (:printed result)
+                                      "seon.sci.admit"))))))
+
+(defparity "H5" :known-divergence
+  (let [results
+        (repl-session
+         ["(ns parity.h5 (:require [clojure.string :as string]))"
+          "(def x 1)"
+          "(ns-unmap 'parity.h5 'x)"
+          "(ns-unalias 'parity.h5 'string)"
+          "(find-var 'parity.h5/x)"
+          "(remove-ns 'parity.h5)"
+          "(find-ns 'parity.h5)"])]
+    (checked "namespace mutations are visible to find-var/find-ns"
+             results
+             (and (nil? (:value (nth results 4)))
+                  (nil? (:value (peek results)))))))
+
+(defparity "H6" :known-divergence
+  (let [result
+        (peek
+         (repl-session
+          ["(defn parity_meta \"doc\" [x] x)"
+           "(meta #'parity_meta)"]))
+        printed (:printed result)]
+    (checked "metadata with arglists, doc, name, and #object namespace"
+             printed
+             (and (str/includes? printed ":arglists ([x])")
+                  (str/includes? printed ":doc \"doc\"")
+                  (str/includes? printed "#object[sci.lang.Namespace")
+                  (not (str/includes? printed "seon.sci.admit"))))))
+
+(defparity "H7" :passing
+  (let [result
+        (peek
+         (repl-session
+          ["(def ^:dynamic *parity_dynamic* 1)"
+           (str "[(binding [*parity_dynamic* 2] *parity_dynamic*)\n"
+                " (do (with-redefs [*parity_dynamic* 3] *parity_dynamic*))\n"
+                " (alter-var-root #'*parity_dynamic* inc)]")]))]
+    (compared [2 3 2] (:value result))))
+
+(defparity "H8" :passing
+  (let [result
+        (first
+         (repl-session
+          ["(alter-var-root #'clojure.core/inc (constantly dec))"]))]
+    (checked "built-in var is read-only"
+             (:err result)
+             (str/includes? (:err result) "read-only"))))
+
+;;; Family I — genuinely Seon-specific behavior
+
+(defparity "I6" :passing
+  (let [first-session
+        (repl-session ["(def parity_scratch 41)" "(inc parity_scratch)"])
+        second-session (repl-session ["parity_scratch"])]
+    (checked "scratch defs persist within a session and not across sessions"
+             {:within (peek first-session) :across (first second-session)}
+             (and (= 42 (:value (peek first-session)))
+                  (some? (:err (first second-session)))))))
