@@ -4,7 +4,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
-  (:import [java.io BufferedReader PushbackReader]
+  (:import [clojure.lang LineNumberingPushbackReader]
+           [java.io BufferedReader PushbackReader]
            [java.net InetSocketAddress Socket SocketTimeoutException]
            [java.time Instant]))
 
@@ -28,6 +29,7 @@
 (def min-output-tokens 64)
 (def max-transport-events 256)
 (def max-exception-frames 3)
+(def max-form-preview-chars 60)
 (def server-info {:name "seon" :version "0.3.0"})
 
 ;; [cluster session-id] -> one stateful io-prepl socket and its endpoint.
@@ -397,6 +399,45 @@
       :else
       (open-clj-session! cluster session-id endpoint))))
 
+(defn- reader-whitespace?
+  [character]
+  (or (= (int \,) character)
+      (Character/isWhitespace (char character))))
+
+(defn- skip-comment!
+  [^LineNumberingPushbackReader reader]
+  (loop []
+    (let [character (.read reader)]
+      (when-not (or (= -1 character) (= (int \newline) character))
+        (recur)))))
+
+(defn- next-form-position!
+  [^LineNumberingPushbackReader reader]
+  (loop []
+    (let [character (.read reader)]
+      (cond
+        (= -1 character)
+        nil
+
+        (reader-whitespace? character)
+        (recur)
+
+        (= (int \;) character)
+        (do (skip-comment! reader) (recur))
+
+        :else
+        (do
+          (.unread reader character)
+          {:seon.dev.mcp/line (.getLineNumber reader)
+           :seon.dev.mcp/column (.getColumnNumber reader)})))))
+
+(defn- form-preview
+  [source]
+  (let [normalized (-> source str/trim (str/replace #"\s+" " "))]
+    (if (<= (count normalized) max-form-preview-chars)
+      normalized
+      (str (subs normalized 0 (dec max-form-preview-chars)) "…"))))
+
 (defn- require-single-clj-form!
   [code]
   (when-not (string? code)
@@ -404,28 +445,41 @@
                     {:seon.dev.mcp/failure :invalid-form})))
   (try
     (let [eof (Object.)
-          reader (PushbackReader. (java.io.StringReader. code))]
+          reader (LineNumberingPushbackReader.
+                  (java.io.StringReader. code))]
       (binding [*read-eval* false]
-        (let [first-form (read {:eof eof :read-cond :allow} reader)
-              second-form (read {:eof eof :read-cond :allow} reader)]
+        (let [first-form (read {:eof eof :read-cond :allow} reader)]
           (when (identical? eof first-form)
             (throw (ex-info "CLJ evaluation requires one form."
                             {:seon.dev.mcp/failure :empty-form})))
-          (when-not (identical? eof second-form)
-            (throw
-             (ex-info
-              "CLJ evaluation accepts exactly one form; wrap sequences in `(do ...)`."
-              {:seon.dev.mcp/failure :multiple-forms})))
+          (when-let [{line :seon.dev.mcp/line
+                      column :seon.dev.mcp/column
+                      :as position}
+                     (next-form-position! reader)]
+            (.captureString reader)
+            (let [second-form (read {:eof eof :read-cond :allow} reader)
+                  preview (form-preview (.getString reader))]
+              (when-not (identical? eof second-form)
+                (throw
+                 (ex-info
+                  (str "CLJ evaluation accepts exactly one form; the second "
+                       "form starts at line " line ", column " column ": "
+                       preview ". Wrap sequences in `(do ...)`.")
+                  (assoc position
+                         :seon.dev.mcp/failure :multiple-forms
+                         :seon.dev.mcp/preview preview))))))
           code)))
     (catch clojure.lang.ExceptionInfo exception
       (if (:seon.dev.mcp/failure (ex-data exception))
         (throw exception)
         (throw (ex-info "CLJ evaluation form is unreadable."
-                        {:seon.dev.mcp/failure :invalid-form}
+                        {:seon.dev.mcp/failure :invalid-form
+                         :seon.dev.mcp/reader-error (ex-message exception)}
                         exception))))
     (catch Throwable throwable
       (throw (ex-info "CLJ evaluation form is unreadable."
-                      {:seon.dev.mcp/failure :invalid-form}
+                      {:seon.dev.mcp/failure :invalid-form
+                       :seon.dev.mcp/reader-error (ex-message throwable)}
                       throwable)))))
 
 (defn- bounded-event

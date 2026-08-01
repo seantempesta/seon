@@ -347,3 +347,7 @@ folding `list_sessions` into `runtime_status`; no new tool is justified.
   fallback became a 304-character structured envelope retaining runtime,
   cluster, session, `tag`, `ns`, `ms`, and `form`. Its 1,002-character `:val`
   reports zero retained / 1,002 total rather than double-escaped preview text.
+- **Fix 5 landed.** The newline-separated two-form refusal grew from 233
+  positionless characters to 365 useful characters naming line 2, column 1,
+  and preview `(+ 3 4)` while retaining the `(do ...)` remedy. The same
+  handler path passed in both the JVM and the Babashka server process.

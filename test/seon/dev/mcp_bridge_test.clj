@@ -25,6 +25,10 @@
       (throw (ex-info "The MCP bridge var did not resolve."
                       {:seon.dev.mcp-test/symbol var-symbol}))))
 
+(defn- result-data
+  [result]
+  (json/read-str (get-in result [:content 0 :text]) :key-fn keyword))
+
 (defn- current-process-start-date
   []
   (java.util.Date/from
@@ -201,6 +205,42 @@
     (is (= (count (:val event))
            (:seon.dev.mcp/retained-chars event)))
     (is (not (contains? decoded :seon.dev.mcp/preview)))))
+
+(deftest multiple-form-refusals-name-the-second-form-position
+  (let [code "(+ 1 2)\n(+ 3 4)"
+        direct-result ((bridge-var 'execute-clj-eval)
+                       {:code code :cluster "fixture"})
+        [rpc-response]
+        (rpc-responses
+         [{:jsonrpc "2.0" :id 1 :method "tools/call"
+           :params {:name "eval_clj" :arguments {:code code}}}])
+        results [direct-result (:result rpc-response)]]
+    (doseq [result results
+            :let [data (result-data result)]]
+      (is (true? (:isError result)))
+      (is (= "multiple-forms" (:seon.dev.mcp/failure data)))
+      (is (= 2 (:seon.dev.mcp/line data)))
+      (is (= 1 (:seon.dev.mcp/column data)))
+      (is (= "(+ 3 4)" (:seon.dev.mcp/preview data)))
+      (is (str/includes? (:seon.dev.mcp/error data) "line 2, column 1"))
+      (is (str/includes? (:seon.dev.mcp/error data) "(+ 3 4)"))
+      (is (str/includes? (:seon.dev.mcp/error data) "(do ...)")))))
+
+(deftest reader-position-does-not-depend-on-form-metadata
+  (let [result ((bridge-var 'execute-clj-eval)
+                {:code "(+ 1 2)\r\n  {:a 1}" :cluster "fixture"})
+        data (result-data result)]
+    (is (= "multiple-forms" (:seon.dev.mcp/failure data)))
+    (is (= 2 (:seon.dev.mcp/line data)))
+    (is (= 3 (:seon.dev.mcp/column data)))
+    (is (= "{:a 1}" (:seon.dev.mcp/preview data)))))
+
+(deftest invalid-forms-retain-the-reader-error
+  (let [result ((bridge-var 'execute-clj-eval)
+                {:code "(+ 1 2" :cluster "fixture"})
+        data (result-data result)]
+    (is (= "invalid-form" (:seon.dev.mcp/failure data)))
+    (is (str/includes? (:seon.dev.mcp/reader-error data) "EOF while reading"))))
 
 (deftest runtime-status-leads-with-live-and-collapses-dormant-clusters
   (let [fixture-root (io/file project-root "tmp"
