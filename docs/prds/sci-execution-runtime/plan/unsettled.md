@@ -16,7 +16,7 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**ADDENDUM 6 — 2026-08-01, 1C CHECKPOINT.** Stateless resume and its
+**ADDENDUM 7 — 2026-08-01, 1C CHECKPOINT.** Stateless resume and its
 required value/blob tier are landed at `92d2e39be`, `78b1e6eca`,
 `c4002a83a`, and `319fc6ccb`: intern-all → bind faithful values → re-evaluate
 only proven-pure forms; SCI analysis records host interop; oversized faithful
