@@ -6,7 +6,9 @@
   query the current database value on each pass; `:mixed` has both paths."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.flow :as flow]
@@ -42,39 +44,53 @@
    :seon.config.render/coalesce-ms
    {:mode :live :consumer 'seon.render.web/coalesce-floor}
    :seon.config.ai/endpoint
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/model
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/max-tokens
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/thinking
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/temperature
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/top-p
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/frequency-penalty
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/presence-penalty
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/stop
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/response-format
+   {:mode :live :consumer 'seon.cluster.loop/turn}
+   :seon.config.ai/extra-body-edn
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/api-key-variable
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/no-auth
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/timeout-ms
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.backup/model
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.backup/endpoint
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.backup/api-key-variable
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.backup/timeout-ms
-   {:mode :arm-time :consumer 'seon.ai/targets}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/base-delay-ms
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/multiplier
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/jitter-fraction
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/maximum-delay-ms
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/maximum-retries
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}
+   {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai.retry/maximum-total-delay-ms
-   {:mode :arm-time :consumer 'seon.ai/retry-strategy}})
+   {:mode :live :consumer 'seon.cluster.loop/turn}})
 
 (def ^:private applied
   {:seon.config.flow.compute/queue-depth 3
@@ -95,6 +111,13 @@
    :seon.config.ai/model "application-proof"
    :seon.config.ai/max-tokens 123
    :seon.config.ai/thinking :high
+   :seon.config.ai/temperature 0.5
+   :seon.config.ai/top-p 0.75
+   :seon.config.ai/frequency-penalty -0.25
+   :seon.config.ai/presence-penalty 0.25
+   :seon.config.ai/stop ["END"]
+   :seon.config.ai/response-format :json-object
+   :seon.config.ai/extra-body-edn "{\"vendor_probe\" true}"
    :seon.config.ai/api-key-variable "SEON_APPLICATION_PROOF_KEY"
    :seon.config.ai/timeout-ms 222
    :seon.config.ai.backup/model "application-proof-backup"
@@ -159,33 +182,21 @@
                      :seon.config.error/escalate-to
                      :seon.config/on-core-error
                      :seon.config.message/max-chain]))))
-          (testing "provider descriptors and retry strategy are armed values"
-            (is (= {:seon.ai/endpoint "http://127.0.0.1:1/primary"
-                    :seon.ai/model "application-proof"
-                    :seon.ai/max-tokens 123
-                    :seon.ai/thinking :high
-                    :seon.ai/api-key-variable "SEON_APPLICATION_PROOF_KEY"
-                    :seon.ai/timeout-ms 222}
-                   (:seon.ai/primary handle)))
-            (is (= {:seon.ai/endpoint "http://127.0.0.1:1/backup"
-                    :seon.ai/model "application-proof-backup"
-                    :seon.ai/max-tokens 123
-                    :seon.ai/thinking :high
-                    :seon.ai/api-key-variable
-                    "SEON_APPLICATION_PROOF_BACKUP_KEY"
-                    :seon.ai/timeout-ms 333}
-                   (:seon.ai/backup handle)))
-            (is (= :high
-                   (:seon.config.ai/thinking
-                    (config/effective @connection name)))
-                "the descriptor value came back through the database fact")
-            (is (= {:seon.ai.retry/base-delay-ms 11
-                    :seon.ai.retry/multiplier 1.5
-                    :seon.ai.retry/jitter-fraction 0.1
-                    :seon.ai.retry/maximum-delay-ms 99
-                    :seon.ai.retry/maximum-retries 1
-                    :seon.ai.retry/maximum-total-delay-ms 100}
-                   (:seon.ai.retry/strategy handle))))
+          (testing "AI settings remain live facts rather than armed values"
+            (is (= (select-keys applied
+                                (filter #(str/starts-with? (namespace %)
+                                                           "seon.config.ai")
+                                        (keys applied)))
+                   (select-keys (config/effective @connection name)
+                                (filter #(str/starts-with? (namespace %)
+                                                           "seon.config.ai")
+                                        (keys applied)))))
+            (is (= name (:seon.cluster/name handle)))
+            (is (empty? (select-keys handle
+                                     [:seon.ai/primary
+                                      :seon.ai/backup
+                                      :seon.ai.retry/strategy]))
+                "the loop cannot retain a boot-captured AI projection"))
           (testing "the selected web port reaches the armed server"
             (let [url (get-in instance
                               [:seon.render.web/served
@@ -228,9 +239,11 @@
                           :seon.config.ai.backup/endpoint
                           :seon.config.ai.backup/api-key-variable
                           :seon.config.ai.backup/timeout-ms))})
+            connection (:seon.boot/cluster-connection instance)
             primary
-            (get-in instance
-                    [:seon.cluster.loop/cluster :seon.ai/primary])]
+            (-> (config/effective @connection "application-no-auth")
+                ai/targets
+                :seon.ai/primary)]
         (try
           (is (true? (:seon.config.ai/no-auth primary)))
           (is (not (contains? primary :seon.ai/api-key-variable)))
