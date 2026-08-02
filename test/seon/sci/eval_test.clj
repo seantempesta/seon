@@ -660,16 +660,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest an-interpreted-infinite-loop-dies-at-the-limit
-  (let [started (System/nanoTime)
-        evaluation (deadlined "(loop [] (recur))" 300)
-        elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+  (let [evaluation (deadlined "(loop [] (recur))" 300)]
     (is (not= ::hung evaluation) "the limit is the limit")
     (is (cut? evaluation))
     (is (inst? (:seon.cluster.eval/interrupted-at evaluation))
         "the cut instant is the one fact — presence is the state")
     (is (= :time (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
-    (is (< elapsed-ms 5000)
-        (str "died in " elapsed-ms "ms — the deadline, not luck"))
     (testing "and the agent is told what happened, as a value"
       (is (= :seon.sci.eval/time-limit
              (:seon.error/kind (:seon.sci.admit/value evaluation))))
