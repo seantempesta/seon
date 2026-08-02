@@ -4,10 +4,41 @@ Load this reference when the owner is code inside
 `reference-code/datahike/`, not merely a Seon query or transaction caller.
 The fork is a maintained first-party dependency: when its implementation is
 wrong, fix it there and pin the behavior from Seon. The branch-roster repair
-`357ffc87` and the planner repair `19f5cdd9` are the precedents; the latter is
-recorded and pinned in
+`357ffc87` and the planner repair `19f5cdd9` are historical precedents; the
+planner repair is recorded in
 `docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
 “Resolution”.
+
+## Contents
+
+- [Dependency ledger](#dependency-ledger)
+- [Planner entry point](#planner-entry-point)
+- [Cache evidence and clean measurements](#cache-evidence-and-clean-measurements)
+- [Reload and repeat the same probe](#reload-and-repeat-the-same-probe)
+- [Run both ownership gates](#run-both-ownership-gates)
+
+## Dependency ledger
+
+Verify the root gitlink and checkout before reading or editing the fork:
+
+```bash
+git ls-tree HEAD reference-code/datahike
+git -C reference-code/datahike rev-parse HEAD
+```
+
+Both currently select
+`256b714d97a0e8f952b01a47c693eff2976ccee7`. Treat `357ffc87` and
+`19f5cdd9` only as repair provenance; neither is the selected revision.
+
+| Mechanism | Selected-revision source | Seon acceptance |
+|---|---|---|
+| Planner | `reference-code/datahike/src/datahike/query.cljc:3377-3383,3448-3471`; `reference-code/datahike/src/datahike/query/lower.cljc:1050-1059`; `reference-code/datahike/src/datahike/query/plan.cljc:1524-1663` | `test/seon/datahike_fork_test.clj:12-50` |
+| Result and plan caches | `reference-code/datahike/src/datahike/query.cljc:72-75,129-164,2413-2418,2505-2510,2636-2656,4597-4612,4735-4754` | `reference-code/datahike/test/datahike/test/query_cache_test.cljc:44-82` |
+| Writer and ordered persistence | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`; `reference-code/datahike/src/datahike/writer.cljc:85-220,363-387`; `reference-code/datahike/src/datahike/writing.cljc:497-552,862-879` | `test/seon/cluster/store_test.clj:94-126,164-203` |
+| Store create/reopen | `reference-code/datahike/src/datahike/connector.cljc:183-237,275-365` | `src/seon/cluster/store.clj:155-183,266-398`; `test/seon/cluster/store_test.clj:94-162,248-266,380-390` |
+| Branch identity and roster | `reference-code/datahike/src/datahike/store.cljc:50-61`; `reference-code/datahike/src/datahike/versioning.cljc:179-203,207-214,237-321` | `src/seon/cluster/store.clj:288-398`; `test/seon/cluster/store_test.clj:107-162,380-390` |
+| Schema removal | `reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305` | `src/seon/cluster/run.cljc:580-742`; `test/seon/schema_usage_guard_test.clj:80-397` |
+| Test launchers | `reference-code/datahike/bb.edn:46-51`; `reference-code/datahike/bb/src/tools/test.clj:8-13`; `reference-code/datahike/tests.edn:1-30` | `bin/test`; `test/seon/datahike_fork_test.clj:1-50` |
 
 ## Planner entry point
 
@@ -40,7 +71,7 @@ Drive the planner directly when the plan itself is the subject:
 
 `create-plan-via-ir` is private, so invoke its Var with `#'`; Seon's retained
 alpha-renaming property uses this exact call shape
-(`test/seon/datahike_fork_test.clj:12-49`). Calling it directly bypasses
+(`test/seon/datahike_fork_test.clj:12-50`). Calling it directly bypasses
 `get-or-create-plan` and therefore the plan cache. Keep the clauses in a
 vector when source order is part of the contract; the tied-plan repair
 preserves that vector through greedy selection
@@ -66,10 +97,10 @@ surface:
 ```
 
 - `q-with-evidence` returns result, dependency, cache, and resource evidence
-  (`reference-code/datahike/src/datahike/query.cljc:129-164`).
+  (`reference-code/datahike/src/datahike/query.cljc:129-164,4735-4754`).
 - Binding `*query-result-cache?*` false marks the call `:uncacheable` and
   bypasses result-cache reads and writes
-  (`reference-code/datahike/src/datahike/query.cljc:72-75,4576-4613`).
+  (`reference-code/datahike/src/datahike/query.cljc:72-75,4597-4612`).
 - `clear-query-cache!` replaces the result-cache LRU, while
   `query-cache-metrics` and `query-cache-evidence` report bounded occupancy and
   single-flight state

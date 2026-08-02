@@ -48,7 +48,7 @@ example: use `:with` whenever duplicate projected values must remain distinct.
 
 Seon's maintained Datahike accepts a query map with `:query`, `:args`,
 `:order-by`, `:offset`, and `:limit`
-(`reference-code/datahike/src/datahike/query.cljc:98-121,3475-3505`):
+(`reference-code/datahike/src/datahike/query.cljc:98-121,3475-3560`):
 
 ```clojure
 (d/q {:query '[:find ?name ?score

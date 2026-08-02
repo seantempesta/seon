@@ -22,7 +22,7 @@ provenance, discovery, and history.
 
 When the defect is inside `reference-code/datahike/`, that fork is ours to
 fix; do not work around it in Seon. The branch-roster repair `357ffc87` and the
-planner repair `19f5cdd9` are the standing precedents, recorded in
+planner repair `19f5cdd9` are historical precedents, recorded in
 `docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
 “Resolution”.
 
@@ -36,8 +36,11 @@ Read `references/fork-maintenance.md` before editing the fork. It maps:
 - the fork's own Kaocha focus command plus Seon's separate
   `seon.datahike-fork-test` acceptance gate.
 
-Those mechanics are grounded in the current fork at `19f5cdd9` and its Seon
-pin `4dc963e2e`; do not derive them from upstream memory.
+The root gitlink currently selects
+`256b714d97a0e8f952b01a47c693eff2976ccee7`. Verify both the gitlink and the
+submodule checkout before every fork edit; the dependency ledger and source
+map are in `references/fork-maintenance.md`. Never treat a historical repair
+commit as current provenance.
 
 ## The runtime: co-located, synchronous, one connection per branch
 
@@ -47,10 +50,18 @@ on the database path.
 - **One process holds one physical store lock and may open many branches.**
   Each cluster is a distinct branch in that store
   (`src/seon/cluster/registry.clj:1-38`;
-  `src/seon/cluster/store.clj:279-385`). A self-writer connection identity is
+  `src/seon/cluster/store.clj:288-398`). A self-writer connection identity is
   `[store-id branch]`, and Seon refuses a second open connection to the same
   branch (`reference-code/datahike/src/datahike/store.cljc:50-61`;
-  `src/seon/cluster/store.clj:336-385`).
+  `src/seon/cluster/store.clj:369-398`).
+- **Creation settings and reopen settings are different.** Fresh creation
+  supplies fused index roots and the selected diff buffer; reopen and
+  `open-branch!` omit those creation-only keys so Datahike adopts the stored
+  values. An incomplete genesis is recreated; a complete store is reopened
+  without rewriting its configuration
+  (`src/seon/cluster/store.clj:155-183,266-346,369-398`;
+  `reference-code/datahike/src/datahike/connector.cljc:183-237,343-362`;
+  `test/seon/cluster/store_test.clj:94-162,248-266`).
 - **Reads are synchronous and local.** `d/q` / `d/pull` / `d/entity` resolve
   against an immutable database value — a pointer, not a fetch. Compose reads
   in straight-line code.
@@ -194,39 +205,57 @@ A config attribute is declared once in `resources/seon/schema/*.edn`.
 three composite maps or a second dial roster. `config/default.edn` is the
 complete shipped decision document; it is data, not another schema list.
 
-### Source indexing and runtime publication have explicit admission
+### Program rows, live context, and the session image are distinct
 
-Build indexing statically analyzes the JVM projection of first-party `src/`
-and `test/` through clj-kondo and exact source locations. It records every
-function/test definition—including private and uncontracted helpers—without
-evaluating application forms. Classpath caches are resolution context only;
-external definitions never become Seon rows. Global schema rows come from the
-admitted schema EDN population, not namespace ownership
-(`src/seon/fn/analyzer.clj`; `src/seon/fn.clj`). Runtime publication remains
-stricter: it admits only fully contracted agent-authored functions plus
-admitted schema and test declarations, with schema changes isolated until the
-terminal commit (`src/seon/sci/eval.clj:320-345,793-825`). Arbitrary evals,
-scratch defs, and atoms remain process-local. Receipts preserve history but
-never reconstruct code.
+Keep four states separate; the checked semantic source is
+`../data-oriented-clojure/references/program-state.md`.
+
+1. **Static build indexing** analyzes first-party `src/` and `test/` without
+   evaluating application forms, then publishes canonical namespace,
+   function, schema, and test rows (`src/seon/fn/analyzer.clj:107-151`;
+   `src/seon/fn.clj:199-310,403-423,687-773`).
+2. **Runtime program-row publication** remains stricter: only a complete
+   contracted function, admitted schema, test, or namespace-context row can
+   reach the terminal transaction. An uncontracted function never becomes a
+   `:seon.fn` row (`src/seon/sci/eval.clj:427-450,789-850,1323-1456`;
+   `src/seon/cluster/run.cljc:645-742`).
+3. **The process-live cluster SCI ctx** is one mutable interpreter context per
+   cluster, shared by that cluster's agents and absent from other clusters
+   (`src/seon/cluster.clj:1337-1363`;
+   `src/seon/sci/eval.clj:1205-1228`).
+4. **The durable session image** records non-program-row definitions as
+   `:seon.code.def` facts. Each changed row is exact-reconciled beside the
+   terminal receipt as a metadata-faithful EDN value, blob-backed faithful
+   value, proven deterministic pure source form, or explicit unrestorable row;
+   cold cluster acquisition installs that image into the new ctx
+   (`resources/seon/schema/program.edn:188-211`;
+   `src/seon/cluster/loop.cljc:325-458,1411-1424`;
+   `src/seon/sci/eval.clj:1142-1228`;
+   `test/seon/sci/session_image_test.clj:99-217,239-323`).
+
+The session image preserves REPL state; it does not weaken program-row contract
+admission or publish scratch definitions as `:seon.fn` program rows
+(`src/seon/sci/eval.clj:427-450`;
+`resources/seon/schema/program.edn:188-211`).
 
 ### Global schema replacement and removal
 
 Schemas are globally identified by `:seon.schema/key`, never owned by the
 namespace where registration happened. Runtime `schema/unregister!` only
 stages removal inside the current evaluation delta
-(`src/seon/schema.cljc:1089-1108`). Seon's terminal transaction refuses
+(`src/seon/schema.cljc:1110-1127`). Seon's terminal transaction refuses
 replacement or removal while any directly or transitively affected Datahike
 attribute—including an entity schema's child attributes—has current datoms.
 Removal also refuses while another schema or function contract depends on the
 key. After current datoms and dependencies are retracted, the operation may
 commit atomically with the program row and derived Datahike declarations
-(`src/seon/schema.cljc:1907-1935`;
-`src/seon/cluster/run.cljc:562-730`;
+(`src/seon/schema.cljc:1929-1958`;
+`src/seon/cluster/run.cljc:580-742`;
 `test/seon/schema_usage_guard_test.clj:80-397`).
 
-The maintained Datahike fork independently refuses indexed schema-attribute
+The maintained Datahike fork independently refuses schema-attribute
 removal while its current AEVT is nonempty
-(`reference-code/datahike/src/datahike/db/transaction.cljc:195-315`). With
+(`reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305`). With
 history enabled, later retraction and schema removal preserve ordinary temporal
 datoms. Historical simulation pairs an `as-of` database value with Seon's
 historical global schema rows at that same basis to rebuild the Malli
@@ -324,7 +353,7 @@ chain with no classifiable data as an unknown core failure, not as a refusal.
 The strongest fence is not a fence at all: put the decision where the state
 is. `[:db.fn/call f & args]` applies `f` to the **mid-transaction database
 value** followed by `args`, and splices the returned tx-data into the same
-transaction (`reference-code/datahike/src/datahike/db/transaction.cljc:1142`).
+transaction (`reference-code/datahike/src/datahike/db/transaction.cljc:1152-1165`).
 So one pure function can read current state, REFUSE an ineligible request by
 throwing — aborting the whole transaction atomically — and return plain tx-data
 otherwise. No caller pre-reads, no observed-* request fields, no window between
@@ -358,7 +387,7 @@ atomically iff the assertion holds; otherwise it aborts with a
 exactly once. On a cardinality-many attribute the assertion is "some current
 value equals `old`". CAS is pure transaction data, unlike a
 `:db.fn/call` carrying a resolved function. Source:
-`reference-code/datahike/src/datahike/db/transaction.cljc:963` (`compare-and-swap`);
+`reference-code/datahike/src/datahike/db/transaction.cljc:973-990` (`compare-and-swap`);
 `:db/cas` is an accepted alias.
 
 ## Read path — Datalog, synchronous
@@ -450,8 +479,7 @@ entity. Datahike turns `:tx-meta` into datoms on that entity and stamps
 - `:seon.db/process` — a ref to a stable `:seon.db.process/id` such as
   `:seon.db.process/repl`, `/boot`, or `/config`.
 
-Turn, eval, test, replay, and other execution values remain process-local
-unless they are real domain facts. Who/process/when wrote a datom is therefore a join:
+Who/process/when wrote a datom is therefore a join:
 
 ```clojure
 ;; which database user and process wrote this title?
@@ -506,6 +534,9 @@ sanctioned alternative to polling or a tuned timeout.
 | `test/seon/cluster/run_test.clj` | the fixture + how to assert commit and refusal |
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
+| `src/seon/cluster/loop.cljc` | terminal receipt plus exact `:seon.code.def` reconciliation |
+| `resources/seon/schema/program.edn` | program rows and durable session-image schemas |
+| `test/seon/sci/session_image_test.clj` | cold session-image restoration acceptance |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 
