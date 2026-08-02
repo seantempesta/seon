@@ -175,10 +175,12 @@
  ; literal no-auth fact is explicitly absent.
  :seon.config.ai/no-auth :seon.config/absent
 
- ; Unit: milliseconds. Provenance: the live drives measured a real plan
- ; reply at 2.7 s; sixty seconds is the deadline on an unobservable
- ; remote call, not a target.
- :seon.config.ai/timeout-ms 60000
+ ; Unit: milliseconds. Provenance: DeepSeek V4 Flash calibration report
+ ; (commit a73d928bf): Flash thinking-high reached 103.817 s and Pro reached
+ ; 108.783 s, so 60,000 rejects successful calls and 120,000 leaves little
+ ; stochastic headroom. This is a deadline on unobservable remote HTTP state,
+ ; not an internal readiness clock.
+ :seon.config.ai/timeout-ms 180000
 
  ; THE BACKUP DESCRIPTOR ROW IS EXPLICITLY ABSENT. A shipped backup
  ; would be a second provider this repository picked for everybody, and
