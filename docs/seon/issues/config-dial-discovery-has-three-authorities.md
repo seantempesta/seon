@@ -25,16 +25,18 @@ A direct probe classified the nonexistent
 repeat many of the same keys in `applied`. These lists test one another rather
 than deriving admission and consumer evidence from the schema/program graph.
 
-The rosters have already drifted on the current tree. Commit `be37aac87`
-added the admitted and shipped
-`:seon.config.eval.result/blob-threshold` dial at
-`resources/seon/schema/config.edn:20-21` and `config/default.edn:33`, with a
-live reader at `src/seon/cluster/loop.cljc:432-472`, but did not add it to
-`application-ledger` or `applied`. The test's exact key-set assertion at
-`test/seon/config_application_test.clj:144-148` must therefore fail before it
-can prove any runtime application behavior. This is the predicted three-
-authority failure, not a separate missing-consumer issue: the dial is real and
-consumed; only the copied test authorities are stale.
+The rosters have already drifted on the current tree. Commits `be37aac87` and
+`ebfaa4900` added the admitted and shipped
+`:seon.config.eval.result/blob-threshold` and
+`:seon.render.value/max-collection` dials. Their live readers are the loop's
+blob-threshold query and the web/value page-size path, but neither key appears
+in `application-ledger` or `applied`. A focused
+`bin/test seon.config-application-test` run failed
+`every-config-entry-has-an-honest-application-contract` with exactly those two
+missing ledger keys. The derived schema/default dial sets themselves were
+exactly 40 = 40. This is the predicted three-authority failure, not a separate
+missing-consumer issue: both dials are real and consumed; only the copied test
+authorities are stale.
 
 ## Owner
 
