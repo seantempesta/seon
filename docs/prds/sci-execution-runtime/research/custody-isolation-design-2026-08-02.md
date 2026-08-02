@@ -49,7 +49,12 @@ round trip.
    `seon.db/*conn*` are unrelated objects. Probe 4:
    `(binding [seon.db/*conn* :SCI-VALUE] (host/peek))` where `host/peek` is a
    compiled fn reading the compiled var → **nil** (§3.1).
-4. **But the owner's stated GOAL — "they can't reference anything outside of this
+4. **§9 is the SCI-fork section (ruling #42).** §1–§8 are the no-fork-change
+   baseline. With the fork open, generation-stamped copy-on-write at `eval-def`
+   removes the candidate-context blocker cleanly, and `sci/fork` measures **67 ns**
+   (probe 8) — candidate contexts become effectively free. A non-swappable env holder
+   is defence in depth, not a substitute for reachability.
+5. **But the owner's stated GOAL — "they can't reference anything outside of this
    context" — is achievable, by a smaller change than any new custody mechanism.**
    The goal is a *reachability* property, and the hole is entirely in our own install
    seam (`src/seon/sci/eval.clj:932` installs `ns-interns`, private vars included),
@@ -857,3 +862,238 @@ check (`src/seon/cluster/store.clj:464-470`), and `seon.cluster.registry/reset-c
 destroys one. The ambient custody Var is consulted on none of those paths, so no
 improvement to custody *binding* alone touches this. It is one line to close the
 reference and one `if` to close the write.
+
+## 9. SCI-fork options (ruling #42 — SCI internals are designable surface)
+
+Everything in §1–§8 is the **no-fork-change baseline** and stands unmodified: it is
+what to do if we buy no SCI maintenance cost. This section is what becomes available
+when we spend it. The fork is `seantempesta/sci` at
+`6de15683b7520cc973bc9c136aec7ad3f9b3788c`, and the precedent is real — HEAD is
+"Mark shared stock Vars read-only", under it "Add executed built-in call observation"
+and "Observe host interop during SCI analysis", which are exactly what
+`build-base-ctx` consumes (`src/seon/sci/eval.clj:167-170`).
+
+The read-only commit matters beyond precedent: it establishes the **pattern** both
+designs below reuse. It stamps `:sci/built-in true` into Var metadata and consults
+that stamp at the mutation site through one macro, `with-writeable-var`
+(`reference-code/sci/src/sci/impl/vars.cljc:283-293`), which throws
+`Built-in var #'ns/name is read-only.` unless `:unrestricted` is set. Both options
+below are the same shape: *stamp identity into metadata at creation, consult it at
+the one mutation site.*
+
+Evidence for this section is `research/scripts/custody-probe8-2026-08-02.clj`.
+
+### 9.1 Candidate contexts for accretion testing (owner priority 1)
+
+#### The blocker, measured exactly
+
+Probe 8 reproduces the coordinator's finding and adds the mechanism:
+
+| observation | result |
+|---|---|
+| parent after fork redefines `f` | **`:CHANGED-IN-FORK`** — the redefinition leaks |
+| parent sees a fork-only `(defn brand-new …)` | `ABSENT: Unable to resolve symbol` |
+| `(identical? parent-var fork-var)` | **`true`** — one Var object, two envs |
+| `sci.vars/bindRoot` on a fork's var, parent then reads it | **`:BINDROOT-IN-FORK`** — leaks too |
+
+The cause is one form. `eval-def` is the single place a `def` lands
+(`reference-code/sci/src/sci/impl/evaluator.cljc:25-47`):
+
+```clojure
+prev (get the-current-ns var-name)
+prev (if-not (utils/var? prev)
+       (lang/->Var prev var-name m false false nil (:ns m))   ; new Var
+       prev)                                                   ; reuse
+v    (do (when-not (identical? utils/var-unbound init)
+           (vars/bindRoot prev init))                          ; <-- THE LEAK
+         (utils/reset-meta!* prev m)
+         prev)
+```
+
+`sci/fork` copies the env map into a new atom (`core.cljc:326-331`) but the map's
+values are the same Var objects, and `bindRoot` mutates the object's `root` field
+(`sci/lang.cljc:71-90` — `root` and `meta` are `^:volatile-mutable`). New names are
+isolated because they are new map keys; redefinitions are not, because they are
+in-place object mutation.
+
+#### RECOMMENDED — generation-stamped copy-on-write at `eval-def`
+
+Give each env a generation and stamp each Var with the generation that created it;
+at `eval-def`, mutate in place only when the Var belongs to this generation, and
+otherwise create a fresh Var. Three touch points:
+
+1. **`sci/fork`** — `(update ctx :env (fn [env] (atom (assoc @env :sci/generation (next-generation)))))`.
+   One `assoc` on a persistent map.
+2. **`eval-def`** (`evaluator.cljc:32-44`) — one clause added to the existing `prev`
+   decision:
+
+   ```clojure
+   prev (cond
+          (not (utils/var? prev))
+          (lang/->Var prev var-name m false false nil (:ns m))   ; unchanged
+          (not= (:sci/generation (meta prev)) (:sci/generation env))
+          (lang/->Var @prev var-name (assoc m :sci/generation (:sci/generation env))
+                      false false nil (:ns m))                   ; NEW: copy-on-write
+          :else prev)                                            ; unchanged
+   ```
+
+3. **`vars/bindRoot`** — the same ownership check, because probe 8 proves `bindRoot`
+   bypasses `eval-def` entirely and Seon calls it directly at
+   `install-function-contract!` (`src/seon/sci/eval.clj:790`). Without this, contract
+   installation inside a candidate context corrupts the parent cluster — the exact
+   failure the candidate context exists to prevent. This is the non-obvious half of
+   the change and it must land with the other two.
+
+**Does this remove the blocker cleanly? Yes — unambiguously.** With generation-stamped
+COW, `sci/fork` becomes a correct candidate context: a redefinition inside it creates
+a private Var, the parent is untouched, and everything not redefined reads through
+the shared structure. A candidate that passes is discarded and the real definition is
+installed into the cluster ctx by the normal path; a candidate that fails is
+discarded with nothing to undo. No `build-base-ctx` → `acquire!` →
+`install-session-image!` per definition event.
+
+**Cost estimate, defensible.** `sci/fork` measured at **67 ns per call** on an env
+with 13 namespaces and 401 user interns (probe 8, 100k iterations). It is
+`(atom @env)` on a persistent map, so it is O(1) in program size, and the COW change
+adds one `assoc`. Against `cluster-ctx`, whose `acquire!` runs four Datalog queries,
+a topological sort, and an interpreted install per agent-authored function
+(`src/seon/sci/eval.clj:979-1146`) — I did not measure it and will not guess a
+figure, but the difference is between one atom allocation and a full cold acquire.
+Steady-state memory per candidate is one atom plus the Vars the candidate actually
+redefined; everything else is structurally shared.
+
+**What I would measure to confirm it**, in this order:
+
+1. `cluster-ctx` wall time on `default` — the baseline the design claims to
+   eliminate. This is the number the whole case rests on and it is currently
+   unmeasured.
+2. Fork cost on `default`'s real env rather than a synthetic 401-intern one, since
+   `sci/fork` should be O(1) in program size but that deserves demonstration.
+3. Retained heap for N live candidate contexts, to confirm structural sharing holds
+   and a supervisor running many candidates does not accumulate.
+4. An end-to-end definition event: fork → install candidate → run affected tests →
+   discard, versus the same through `cluster-ctx`.
+
+**What breaks.**
+
+- **`sci/fork`'s current semantics change.** Redefinition-visible-to-parent stops.
+  Seon uses `sci/fork` in exactly one place, the `ns-unmap` path
+  (`src/seon/sci/eval.clj:1452-1454`), which forks *specifically so the unmap does not
+  hit the parent* — so COW makes it more correct, not less. UNVERIFIED that no
+  upstream sci consumer depends on the leak; it is our fork, so this is our call.
+- **Compiled first-party Vars must NOT be copied — and they already are not.**
+  Probe 8: `utils/var?` returns **false** for a `clojure.lang.Var`, so `eval-def`
+  already takes the `(lang/->Var prev …)` branch and never mutates the host Var
+  (verified: the env entry before the def is `identical?` to `#'seon.db/q`, and the
+  host Var is still a working fn afterwards). The COW clause must sit *after* that
+  branch, exactly as written above, so host Vars keep their current behavior and hot
+  reload is unaffected.
+  **A separate finding worth recording:** a `def` over an installed host Var replaces
+  the env entry `clojure.lang.Var` → `sci.lang.Var` (probe 8, 3c), permanently
+  severing that one symbol from hot reload in that context. True today, unchanged by
+  COW, and a real footgun for an agent that shadows a core name.
+- **`install-session-image!`** interns directly (`sci/intern`,
+  `src/seon/sci/eval.clj:1177,1193`). In a candidate context those interns become
+  generation-owned by the candidate, which is correct. The one thing to check is that
+  `sci/intern` routes through the same ownership decision as `eval-def` rather than
+  becoming a fourth mutation site.
+- **cljs.** `evaluator.cljc` and `vars.cljc` are `.cljc` and the change is portable;
+  CLJS is off in Seon (owner, 2026-07-27), so this is not a gate.
+- **Maintenance.** `eval-def` is hot, core, and upstream-active — the recurring cost
+  is rebase conflict surface there, not the code itself.
+
+**Composition with the read-only work: direct.** Both consult Var metadata at the
+mutation site. `with-writeable-var` already wraps mutations to ask "may I write
+this?"; COW adds "and whose is it?" at the same place. One predicate over `(meta v)`
+answers both, and a built-in Var is simply one never owned by any generation.
+
+#### Alternative — genuine deep fork
+
+Copy every Var object at fork time.
+
+- **Guarantee.** Same isolation, no `eval-def` change.
+- **Cost.** O(program size) per candidate instead of O(1), and it would copy the
+  installed compiled `clojure.lang.Var`s too — breaking hot reload for every candidate
+  and requiring a rule to exclude them, which is the same metadata check COW needs
+  anyway, minus COW's benefit.
+- **Verdict.** Strictly worse. Recorded for completeness.
+
+#### Alternative — no fork change: build candidates via `cluster-ctx`
+
+The baseline. Correct today, and the cost is a full cold acquire per definition
+event. Viable if definition events are rare; the owner's framing ("test every
+redefinition") says they will not be.
+
+### 9.2 A non-swappable env holder (owner priority 2)
+
+Probe 8 confirms the env atom is swappable from interpreted code
+(`(swap! holder/e identity)` → `:ok`, and deref returns the namespace table).
+
+#### Option — `EnvBox`: deref-able, not `IAtom`
+
+Replace the env atom with a `deftype` implementing `IDeref` but **not** `IAtom` /
+`IAtom2`. Interpreted `swap!`/`reset!` dispatch through `core-protocols/swap-protocol`
+and `iatom2-protocol` — which the read-only commit already touched and marked
+`:sci/built-in` (`reference-code/sci/src/sci/impl/namespaces.cljc:849-873`) — so an
+interpreted `swap!` on an `EnvBox` fails the same way `alter-var-root` on a
+`clojure.lang.Var` fails today (probe 6: `No implementation of method :getRawRoot of
+protocol IVar`). Host code inside `sci.impl` mutates through a direct function, never
+the protocol.
+
+- **Which internal call sites change.** ~87 matches across 15 files. `(:env ctx)`
+  deref sites are unaffected if `EnvBox` implements `IDeref`, but every `swap!`/
+  `reset!` on the env becomes `env/alter!`. Concentrated in `impl/load.cljc`
+  (11 sites), `impl/evaluator.cljc`, `impl/namespaces.cljc`, `impl/vars.cljc`,
+  `impl/utils.cljc`. Mechanical, broad, and the largest rebase surface of anything
+  proposed here.
+- **What breaks.** `fork` becomes `(update ctx :env (fn [b] (->EnvBox @b)))` — fine,
+  and it composes with 9.1's generation. `bindRoot` is unaffected (it mutates the Var,
+  not the env). Namespace mutation moves to `env/alter!`. cljs is portable but
+  untested by us. Anything outside sci reaching `(:env ctx)` and swapping it breaks —
+  in Seon, nothing does.
+- **Composition with read-only Vars.** Complementary rather than overlapping:
+  read-only protects individual built-in Vars; `EnvBox` protects the namespace
+  *table*. Together they close in-place Var mutation and wholesale table replacement.
+
+**Does this make reachability containment unnecessary? No — defence in depth, and I
+want to be unambiguous.** A read-only env still hands an agent that reaches another
+cluster's instance:
+
+- the live `datahike/Connection` — and `(d/transact conn …)` is not an env mutation,
+  so `EnvBox` never sees it;
+- the store `FileLockImpl` and `release-store!`;
+- the flow graph, the routing atom, and the prepl `ServerSocket`;
+- every Var object in the other cluster's namespaces, on which `alter-meta!` still
+  succeeds process-wide (§2.2).
+
+`EnvBox` closes exactly one escalation — wholesale program substitution via `swap!`
+(§2.1) — and leaves the rest of §1.4 untouched. Reachability (2B plus the root
+relocation) is the primary control because it removes the *reference*, after which
+there is nothing to protect. `EnvBox` is worth buying as the second layer for the
+same reason the read-only commit was worth buying: it converts a silent success into
+a loud failure if the first layer is ever breached or regressed.
+**Recommend: adopt reachability first and independently; adopt `EnvBox` only bundled
+with 9.1, since 9.1 touches the same files and pays most of the rebase cost once.**
+
+### 9.3 Cross-agent visibility within a cluster is a feature — and stays one
+
+Recorded so nothing here is read as an argument against it. One SCI context per
+cluster means every agent in a cluster already sees every other agent's namespaces,
+definitions, and session state, so a cluster supervisor agent that reads all of them
+needs no new mechanism. **Nothing in §5 touches that.** `ns-publics` filters
+*first-party compiled* namespaces by the program graph's own `:seon.fn/private?`
+fact; it does not touch agent-authored namespaces, which install through
+`install-program-row!`, a different path. The write-door custody check compares a
+target connection against the caller's cluster and is a no-op for same-cluster work.
+
+**Deliberate cross-cluster supervision is not foreclosed — it is made
+implementable.** Today cross-cluster reach is ambient: everyone has it, nobody is
+accountable for using it, and no fact records that it happened. After the
+recommendations it becomes a named capability with exactly the shape the effect-door
+model wants: one first-party function that takes a cluster name explicitly, is the
+one thing able to resolve the roster (because the roster moved to an operator-owned
+namespace), and commits a durable fact for each crossing. The custody check at the
+write door compares against the caller's cluster, so a supervisor path that
+*declares* its target passes by construction rather than by exemption. The root
+relocation is what makes supervision attributable instead of ambient — a prerequisite
+for the feature, not an obstacle to it.
