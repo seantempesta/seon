@@ -28,8 +28,8 @@ from seon_inspect.tool_scorers import fixture_answer_scorer, workspace_scorer
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_WORKSPACES_ROOT = REPO_ROOT / "tmp" / "inspect-tool-rows"
-TOOL_ROWS = ("shell_use", "file_edit", "web_fetch")
-WORKSPACE_ROWS = ("shell_use", "file_edit")
+TOOL_ROWS = ("shell_use", "web_fetch")
+WORKSPACE_ROWS = ("shell_use",)
 
 
 def _bench_identity(row: str) -> dict[str, str]:

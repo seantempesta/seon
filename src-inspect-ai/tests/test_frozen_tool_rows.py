@@ -162,7 +162,7 @@ def _run(monkeypatch, tmp_path, row, position, *, touch_workspace=True,
 
 @pytest.mark.parametrize(
     "row,position",
-    [("shell_use", 1), ("file_edit", 0), ("web_fetch", 0)],
+    [("shell_use", 1), ("web_fetch", 0)],
 )
 def test_each_row_scores_through_native_inspect(
     monkeypatch, tmp_path, row, position
@@ -181,22 +181,6 @@ def test_each_row_scores_through_native_inspect(
     rendered_messages = "\n".join(message.text for message in sample.messages)
     assert "{workspace}" not in rendered_messages
     assert "{fixture_url}" not in rendered_messages
-    assert next(iter(sample.scores.values())).value == "C"
-    assert not Path(sample.metadata["workspace"]).exists()
-
-
-@pytest.mark.parametrize(
-    "position,expected_id",
-    [(8, "file_edit-seed1-008"), (9, "file_edit-seed1-009")],
-)
-def test_filesystem_candidates_use_native_task_and_workspace_scorer(
-    monkeypatch, tmp_path, position, expected_id
-):
-    log = _run(monkeypatch, tmp_path, "file_edit", position)
-    assert log.status == "success", log.error
-    sample = log.samples[0]
-    assert sample.id == expected_id
-    assert sample.metadata["row"] == "file_edit"
     assert next(iter(sample.scores.values())).value == "C"
     assert not Path(sample.metadata["workspace"]).exists()
 
@@ -271,15 +255,10 @@ def test_selection_is_an_exact_projection_without_generator_drift():
         rows_jsonl_bytes(generated)
 
 
-def test_filesystem_comparison_positions_reuse_one_generator_projection():
-    generated = generate_rows("file_edit", 1, 10)
-    selected = tasks.selected_rows("file_edit", 1, "8,1,9,4")
-    assert selected == [
-        generated[8],  # F1 experimental candidate
-        generated[1],  # F2 existing frozen development row
-        generated[9],  # F3 experimental candidate
-        generated[4],  # F4 existing frozen development row
-    ]
+def test_position_selection_reuses_one_generator_projection():
+    generated = generate_rows("shell_use", 1, 8)
+    selected = tasks.selected_rows("shell_use", 1, "7,1,6,4")
+    assert selected == [generated[position] for position in (7, 1, 6, 4)]
 
 
 @pytest.mark.parametrize("positions", ["", "-1", "1,1", "wat"])

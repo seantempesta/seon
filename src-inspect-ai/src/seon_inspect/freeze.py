@@ -148,7 +148,6 @@ BESPOKE_ROWS: dict[str, dict[str, Any]] = {
     "clojure_codegen_specs": {"dev_n": 10, "epochs": 4},
     "shell_use": {"dev_n": 8, "epochs": 4},
     "web_fetch": {"dev_n": 8, "epochs": 4},
-    "file_edit": {"dev_n": 8, "epochs": 4},
     "ui_tiles": {"dev_n": 5, "epochs": 2},
 }
 

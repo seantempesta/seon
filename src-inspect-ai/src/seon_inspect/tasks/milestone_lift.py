@@ -7,9 +7,9 @@ contracts and seeded generated variants share the capability oracle in
 `seon_inspect.milestone`. The `plan`
 milestone is `seon_inspect.planning` (already first-class) and the code-fix
 `repl` milestone (poker / two-bucket) is covered by the existing `shell_use` /
-`file_edit` tool rows — neither is re-created here.
+tool rows — neither is re-created here.
 
-Two solver modes (arm switch, like `ladder_lift`):
+Two solver modes:
   - `endpoint="mock:<good|bad>"` — OFFLINE proof: the sample's frozen golden
     `(reply, eval_rows)` fixtures drive the scorer, so the harness's
     DISCRIMINATION is provable with no pod and no LLM (`mock:good` scores

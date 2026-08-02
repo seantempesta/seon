@@ -41,7 +41,7 @@ from typing import Any, Callable
 # ---------------------------------------------------------------------------
 # The milestone contracts (goal-stated task text — the same wording the drives
 # used, MINUS the run-canary comment: fixed-dataset bench tasks like this one
-# and `ladder_lift` do not carry freeze test-tier canaries, and a lock canary
+# do not carry freeze test-tier canaries, and a lock canary
 # in package source would (rightly) trip tests/test_canary_guard.py).
 # ---------------------------------------------------------------------------
 

@@ -495,11 +495,7 @@
    "src/seon/schema.cljc"
    "Schema candidate encoding is an ordinary EDN codec."
    "src/seon/cluster/run.cljc"
-   "Run values use an ordinary EDN result codec."
-   "bin/seon-server-call"
-   "The operator receiver decodes trusted EDN protocol data."
-   "bin/oracle-server"
-   "The oracle deliberately reads code upstream of acceptance."})
+   "Run values use an ordinary EDN result codec."})
 
 (def ^:private accepted-source-reader-pattern
   #"\((?:sci/(?:parse-string|parse-next\+string)|edamame/parse-string-all|read(?:\+string)?\s+\{|clojure\.core/read-string)")

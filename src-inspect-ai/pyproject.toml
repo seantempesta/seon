@@ -1,7 +1,7 @@
 [project]
 name = "seon-inspect"
 version = "0.1.0"
-description = "Seon benchmarks on the inspect-ai standard harness: cluster pod solver (POST /agents/run), oracle-backed scorers, diffusion measurement tasks"
+description = "Source-admitted Seon benchmarks on the Inspect AI standard harness"
 requires-python = ">=3.11"
 # Inspect and Inspect Evals are selected by root Gitlinks and installed from
 # those source paths. `evaluation-sources.lock.json` plus pre-task admission
