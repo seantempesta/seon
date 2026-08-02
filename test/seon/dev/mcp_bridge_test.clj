@@ -1,5 +1,6 @@
 (ns seon.dev.mcp-bridge-test
   (:require [clojure.data.json :as json]
+            [clojure.core.server :as core.server]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
@@ -334,73 +335,223 @@
       (is (.mkdirs tmp-dir))
       (spit old-port-file "31337\n")
       (let [outcome
-            (with-redefs-fn {(bridge-var 'project-root)
-                             (.getCanonicalPath fixture-root)}
+            (with-redefs-fn {(bridge-var 'operator-private)
+                             (fn [& _]
+                               {:seon.fresh-operator/advertisements []
+                                :seon.fresh-operator/jvms []
+                                :seon.fresh-operator/process-records []
+                                :seon.fresh-operator/process-record-errors []})}
               #(try
-                 ((bridge-var 'read-clj-endpoint) "fixture")
+                 ((bridge-var 'read-clj-endpoint)
+                  (.getCanonicalPath fixture-root) "fixture")
                  (catch clojure.lang.ExceptionInfo error error)))]
         (is (instance? clojure.lang.ExceptionInfo outcome) (pr-str outcome))
         (is (= :repl-unavailable
                (:seon.dev.mcp/failure (ex-data outcome))))
         (is (= :missing
                (:seon.dev.mcp/advertisement-state (ex-data outcome))))
-        (is (= "Start the cluster with: bin/seon start fixture."
+        (is (= (str "Start the cluster with: bin/seon --root "
+                    (.getCanonicalPath fixture-root)
+                    " start fixture.")
                (:seon.dev.mcp/remedy (ex-data outcome)))))
       (finally
         (delete-known-files! known-paths)))))
 
-(deftest runtime-status-leads-with-live-and-collapses-dormant-clusters
+(deftest runtime-status-derives-live-stale-invalid-and-degraded-rows
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-status-" (random-uuid)))
-        clusters-root (io/file fixture-root "data" "clusters")
-        alive-dir (io/file clusters-root "alive")
-        stale-dir (io/file clusters-root "stale")
-        invalid-dir (io/file clusters-root "invalid")
-        unreadable-dir (io/file clusters-root "unreadable")
-        dormant-a-dir (io/file clusters-root "dormant-a")
-        dormant-b-dir (io/file clusters-root "dormant-b")
-        store-dir (io/file clusters-root "physical-data")
-        alive-ad (io/file alive-dir "prepl.edn")
-        stale-ad (io/file stale-dir "prepl.edn")
-        invalid-ad (io/file invalid-dir "prepl.edn")
-        unreadable-ad (io/file unreadable-dir "prepl.edn")
-        store-entry (io/file store-dir "00000000.ksv")
-        store-lock (io/file (str (.getPath store-dir) ".lock"))
-        known-paths [fixture-root (io/file fixture-root "data") clusters-root
-                     alive-dir stale-dir invalid-dir unreadable-dir
-                     dormant-a-dir dormant-b-dir store-dir
-                     alive-ad stale-ad invalid-ad unreadable-ad
-                     store-entry store-lock]
-        pid (.pid (java.lang.ProcessHandle/current))]
+        root (.getCanonicalPath fixture-root)
+        pid (.pid (java.lang.ProcessHandle/current))
+        started (current-process-start-date)
+        alive (advertisement "alive" pid started)
+        stale (advertisement "stale" pid (java.util.Date. 0))
+        degraded (advertisement "degraded" pid started)
+        observations
+        {:seon.fresh-operator/advertisements
+         [{:seon.fresh-operator/name "alive"
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/alive/prepl.edn")
+           :seon.fresh-operator/process-alive? true
+           :seon.fresh-operator/advertisement alive}
+          {:seon.fresh-operator/name "stale"
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/stale/prepl.edn")
+           :seon.fresh-operator/process-alive? false
+           :seon.fresh-operator/advertisement stale}
+          {:seon.fresh-operator/name "invalid"
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/invalid/prepl.edn")
+           :seon.fresh-operator/process-alive? true
+           :seon.fresh-operator/advertisement {:not :an-advertisement}}
+          {:seon.fresh-operator/name "degraded"
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/degraded/prepl.edn")
+           :seon.fresh-operator/process-alive? true
+           :seon.fresh-operator/advertisement degraded}]
+         :seon.fresh-operator/jvms
+         [{:seon.fresh-operator/root root
+           :seon.fresh-operator/reachable? true
+           :seon.fresh-operator/probe-advertisement alive
+           :seon.fresh-operator/registrations
+           [{:seon.fresh-operator/name "degraded"
+             :seon.fresh-operator/root root
+             :seon.fresh-operator/advertisement degraded}]}]
+         :seon.fresh-operator/process-records []
+         :seon.fresh-operator/process-record-errors []}
+        result
+        (with-redefs-fn {(bridge-var 'operator-private)
+                         (fn [var-symbol & _]
+                           (case var-symbol
+                             source-observations observations
+                             prepl-value! {"alive" true
+                                           "degraded" false}))}
+          #((bridge-var 'execute-runtime-status) {:root root}))
+        text (get-in result [:content 0 :text])
+        lines (str/split-lines text)]
+    (is (str/includes? (second lines) "alive state=alive") text)
+    (is (str/includes? text "degraded state=degraded") text)
+    (is (str/includes? text "cluster-layer=degraded") text)
+    (is (str/includes? text "stale state=stale") text)
+    (is (str/includes? text "invalid state=invalid") text)
+    (is (str/includes? text (str "under " root)) text)))
+
+(deftest endpoint-selection-is-root-scoped-and-reaches-degraded-registrations
+  (let [fixture-root (io/file project-root "tmp"
+                              (str "mcp-root-" (random-uuid)))
+        root (.getCanonicalPath fixture-root)
+        pid (.pid (java.lang.ProcessHandle/current))
+        degraded (advertisement "partial" pid (current-process-start-date))
+        observed-root (atom nil)
+        observations
+        {:seon.fresh-operator/advertisements []
+         :seon.fresh-operator/jvms
+         [{:seon.fresh-operator/root root
+           :seon.fresh-operator/reachable? true
+           :seon.fresh-operator/registrations
+           [{:seon.fresh-operator/name "partial"
+             :seon.fresh-operator/root root
+             :seon.fresh-operator/advertisement degraded}]}]
+         :seon.fresh-operator/process-records
+         [{:seon.dev.process/pid pid}]
+         :seon.fresh-operator/process-record-errors []}
+        endpoint
+        (with-redefs-fn
+          {(bridge-var 'operator-private)
+           (fn [_ requested-root _]
+             (reset! observed-root requested-root)
+             observations)}
+          #((bridge-var 'read-clj-endpoint) root "partial"))]
+    (is (= root @observed-root))
+    (is (= root (:seon.dev.mcp/root endpoint)))
+    (is (= :degraded (:seon.dev.mcp/cluster-state endpoint)))
+    (is (= :operator-process-record (:seon.dev.mcp/source endpoint)))
+    (is (= 31337 (:port endpoint)))))
+
+(deftest duplicate-live-cluster-identities-fail-with-candidates
+  (let [root (.getCanonicalPath
+              (io/file project-root "tmp" (str "mcp-ambiguous-"
+                                                (random-uuid))))
+        pid (.pid (java.lang.ProcessHandle/current))
+        started (current-process-start-date)
+        candidate (advertisement "same" pid started)
+        observations
+        {:seon.fresh-operator/advertisements []
+         :seon.fresh-operator/jvms
+         [{:seon.fresh-operator/root root
+           :seon.fresh-operator/reachable? true
+           :seon.fresh-operator/registrations
+           [{:seon.fresh-operator/name "same"
+             :seon.fresh-operator/root root
+             :seon.fresh-operator/advertisement candidate}]}
+          {:seon.fresh-operator/root root
+           :seon.fresh-operator/reachable? true
+           :seon.fresh-operator/registrations
+           [{:seon.fresh-operator/name "same"
+             :seon.fresh-operator/root root
+             :seon.fresh-operator/advertisement
+             (assoc candidate :seon.boot/pid (inc pid))}]}]
+         :seon.fresh-operator/process-records []
+         :seon.fresh-operator/process-record-errors []}
+        outcome
+        (with-redefs-fn {(bridge-var 'operator-private)
+                         (fn [& _] observations)}
+          #(try
+             ((bridge-var 'read-clj-endpoint) root "same")
+             (catch clojure.lang.ExceptionInfo error error)))]
+    (is (= :ambiguous-cluster
+           (:seon.dev.mcp/failure (ex-data outcome))))
+    (is (= 2 (count (:seon.dev.mcp/candidates (ex-data outcome)))))))
+
+(deftest namespace-coordinate-shapes-both-evaluation-modes
+  (let [namespace-symbol 'mcp.chosen.namespace
+        original-namespace (ns-name *ns*)
+        evaluation ((bridge-var 'require-single-clj-form!)
+                    "(do (def answer 41) [(inc answer) (ns-name *ns*)])")
+        jvm-form ((bridge-var 'remote-evaluation-form)
+                  evaluation "jvm" "fixture" namespace-symbol)
+        door-form ((bridge-var 'remote-evaluation-form)
+                   evaluation "door" "fixture" namespace-symbol)]
     (try
-      (doseq [directory [alive-dir stale-dir invalid-dir unreadable-dir
-                         dormant-a-dir dormant-b-dir store-dir]]
-        (is (.mkdirs directory)))
-      (spit alive-ad (pr-str (advertisement "alive" pid
-                                           (current-process-start-date))))
-      (spit stale-ad (pr-str (advertisement "stale" pid
-                                           (java.util.Date. 0))))
-      (spit invalid-ad (pr-str {:not :an-advertisement}))
-      (spit unreadable-ad "{")
-      (spit store-entry "store data")
-      (spit store-lock "")
-      (let [result
-            (with-redefs-fn {(bridge-var 'project-root)
-                             (.getCanonicalPath fixture-root)}
-              #((bridge-var 'execute-runtime-status) {}))
-            text (get-in result [:content 0 :text])
-            lines (str/split-lines text)]
-        (is (str/includes? (second lines) "alive state=alive") text)
-        (is (str/includes? text "stale state=stale") text)
-        (is (str/includes? text "invalid state=invalid") text)
-        (is (str/includes? text "unreadable state=unreadable") text)
-        (is (str/includes? text
-                           "2 clusters with no advertisement: dormant-a, dormant-b")
-            text)
-        (is (not (str/includes? text "state=missing")) text)
-        (is (not (str/includes? text "physical-data")) text))
+      (is (= [42 namespace-symbol] (eval (read-string jvm-form))))
+      (is (= 41 (var-get (ns-resolve namespace-symbol 'answer))))
+      (is (str/includes? door-form
+                         "[:seon.ns/name (quote mcp.chosen.namespace)]"))
+      (is (str/includes? door-form "seon.sci.eval/evaluate"))
       (finally
-        (delete-known-files! known-paths)))))
+        (in-ns original-namespace)
+        (when (find-ns namespace-symbol)
+          (remove-ns namespace-symbol))))))
+
+(deftest root-and-namespace-coordinates-cross-a-real-io-prepl
+  (let [root (.getCanonicalPath
+              (io/file project-root "tmp" (str "mcp-live-root-"
+                                                (random-uuid))))
+        cluster "live"
+        server-name (symbol (str "mcp-live-" (random-uuid)))
+        server (core.server/start-server
+                {:name server-name
+                 :accept 'clojure.core.server/io-prepl
+                 :address "127.0.0.1"
+                 :port 0})
+        live-advertisement
+        (assoc (advertisement cluster
+                              (.pid (java.lang.ProcessHandle/current))
+                              (current-process-start-date))
+               :seon.boot/prepl-port (.getLocalPort server))
+        observations
+        {:seon.fresh-operator/advertisements
+         [{:seon.fresh-operator/name cluster
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/live/prepl.edn")
+           :seon.fresh-operator/process-alive? true
+           :seon.fresh-operator/advertisement live-advertisement}]
+         :seon.fresh-operator/jvms []
+         :seon.fresh-operator/process-records []
+         :seon.fresh-operator/process-record-errors []}
+        session-key [root cluster "default"]]
+    (try
+      (let [result
+            (with-redefs-fn {(bridge-var 'operator-private)
+                             (fn [& _] observations)}
+              #((bridge-var 'execute-clj-eval)
+                {:root root
+                 :cluster cluster
+                 :namespace "mcp.live.chosen"
+                 :mode "jvm"
+                 :code "[(ns-name *ns*) (+ 40 2)]"}))
+            data (result-data result)]
+        (is (not (:isError result)) (pr-str data))
+        (is (= root (:seon.dev.mcp/root data)))
+        (is (= "mcp.live.chosen" (:seon.dev.mcp/namespace data)))
+        (is (= "[mcp.live.chosen 42]"
+               (get-in data [:seon.dev.mcp/events 0 :val])))
+        (is (= "mcp.live.chosen"
+               (get-in data [:seon.dev.mcp/events 0 :ns]))))
+      (finally
+        ((bridge-var 'close-clj-session!) session-key)
+        (core.server/stop-server server-name)
+        (when (find-ns 'mcp.live.chosen)
+          (remove-ns 'mcp.live.chosen))))))
 
 (deftest registrations-use-one-jvm-neutral-server-name
   (let [claude-registration (slurp (io/file project-root ".mcp.json"))
@@ -423,6 +574,16 @@
     (is (= #{"eval_clj" "list_sessions" "runtime_status"}
            (into #{} (map :name) (get-in listed [:result :tools]))))
     (is (str/includes? (:description eval-tool) "max_output_tokens"))
+    (is (str/includes? (:description eval-tool)
+                       "MUTATES that shared per-cluster ctx"))
+    (is (str/includes? (:description eval-tool)
+                       "creates NO run or receipts"))
+    (is (str/includes? (:description eval-tool)
+                       "agent/orchestrator context"))
+    (is (= ["jvm" "door"]
+           (get-in eval-tool [:inputSchema :properties :mode :enum])))
+    (is (contains? (get-in eval-tool [:inputSchema :properties]) :root))
+    (is (contains? (get-in eval-tool [:inputSchema :properties]) :namespace))
     (is (str/includes? (get-in eval-tool [:inputSchema :properties :code
                                           :description])
                        "Exactly one Clojure form"))))
