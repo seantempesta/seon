@@ -43,6 +43,42 @@ owner is `script/seon/dev/mcp.clj`; its evaluation expansion landed in
 already present rather than create an MCP-only discovery, health registry, or
 Flow monitor.
 
+## Implementation status — 2026-08-02
+
+The first ratified implementation slice landed in `debe583d0`. A reachable
+advertisement with no cluster-layer reply now reports `unknown`, remains
+addressable by the raw prepl, and is never promoted to `alive`. Evaluation
+transport and timeout errors now echo the attempted mode and namespace. The
+focused gate passed 21 tests / 152 assertions / 0 failures / 0 errors.
+
+The next slices are blocked at owners outside the MCP lane, not at the bridge:
+
+- Raw JVM value projection must be installed as the cluster io-prepl `valf`.
+  Clojure `prepl` assigns the raw return to `*1` before emitting it, while
+  `io-prepl` applies `valf` afterward
+  (`reference-code/clojure/src/clj/clojure/core/server.clj:239-253,270-281`).
+  Wrapping the submitted form would replace `*1` with the projection and break
+  stateful session semantics. The live server is started by protected owner
+  `src/seon/cluster.clj`; this lane did not edit it.
+- The `/data` route already exists in `src/seon/render/route.clj`; its actual
+  root selection is private `data-response` in unowned
+  `src/seon/render/web.clj`. Blob-digest selection cannot be implemented by
+  changing the route table alone. A new named artifact/reference contract may
+  also require the unowned global `resources/seon/schema.edn` authority.
+- Complete inventory must come from a public read-only value in
+  `script/seon/fresh_operator.clj`. Its current `source-observations`,
+  `derive-cluster-truth`, `cluster-truth`, and `status!` functions are private,
+  so the bridge cannot consume the complete roster/branch/error truth without
+  violating this PRD's owner rule.
+- The ratified Flow ping window has no config leaf or shipped decision yet.
+  Adding the fact and its consumer crosses `resources/seon/schema.edn`,
+  `config/default.edn`, and protected Flow/cluster owners.
+
+`list_sessions` therefore remains temporarily present: ruling #44 requires its
+atomic deletion only after the session data has moved into the completed
+status value. Deleting it before those owner seams land would lose the data
+rather than consolidate the mechanism.
+
 ## Grounding ledger
 
 - Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`: io-prepl reads,

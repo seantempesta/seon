@@ -73,3 +73,23 @@ none of it and loses the data instead.
 
 Blocks the output-bounds row of `docs/prds/mcp-surface/README.md`,
 which currently proposes keeping the MCP-only budget.
+
+## 2026-08-02 implementation boundary
+
+The prerequisite honest-health slice landed in `debe583d0` and passed the
+focused MCP gate at 21 tests / 152 assertions. Removing the bridge chop is now
+blocked at the protected io-prepl owner, not by uncertainty in the value
+chain. Clojure `prepl` assigns the raw evaluated object to `*1` before its
+output event, and `io-prepl` applies `valf` afterward
+(`reference-code/clojure/src/clj/clojure/core/server.clj:239-253,270-281`). A
+bridge-generated wrapper that projects the object before stringification would
+therefore put the projection, not the raw result, in `*1` and break the
+ratified stateful-session contract. The fix must install the shared projector
+as the live server's `valf` in protected `src/seon/cluster.clj`; this MCP lane
+stopped without editing that owner or removing the existing chop.
+
+The browser half crosses a second unowned seam: `/data` is already present in
+`src/seon/render/route.clj`, but digest/entity/schema selection is implemented
+by private `data-response` in `src/seon/render/web.clj`. A route-table edit
+cannot add blob retrieval. The shared artifact/reference contracts may also
+need declarations in the unowned `resources/seon/schema.edn` authority.

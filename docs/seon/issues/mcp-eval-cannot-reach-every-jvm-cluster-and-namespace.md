@@ -108,6 +108,14 @@ Ran 20 tests containing 144 assertions.
 0 failures, 0 errors.
 ```
 
+Follow-up `debe583d0` closes the remaining coordinate-echo gap for attempted
+evaluations: timeout and transport errors now carry both mode and namespace,
+and an absent cluster-layer observation is `unknown` rather than `alive`.
+Focused proof after that slice: 21 tests / 152 assertions / 0 failures / 0
+errors. The issue remains open until the shared raw-value projection is
+installed at the protected io-prepl owner and the complete ratified surface is
+reviewed.
+
 The suite includes a real `clojure.core.server/io-prepl` crossing proving that
 an explicit non-default root and namespace return
 `[mcp.live.chosen 42]`; function-level regressions cover operator-root
