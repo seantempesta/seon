@@ -1073,23 +1073,41 @@ drill it is.
 `bin/seon` is the one development operator:
 
 ```bash
-bin/seon start [CLUSTER]
-bin/seon status
+bin/seon [--root PATH] COMMAND   # --root = an ISOLATED operator root:
+                                 # its process records, advertisements,
+                                 # logs, and store are separate
+bin/seon start [CLUSTER] [--config PATH]
+bin/seon config apply [CLUSTER] PATH
+bin/seon status                # reconcile + list this root's clusters
+bin/seon open [NAME]           # open the advertised web URL
 bin/seon init                  # completely publish current-src
 bin/seon init --changed PATH   # incremental when safe; complete fallback
-bin/seon init default --force  # destructive: refork this branch
-bin/seon logs default
-bin/seon stop default
-bin/seon down
+bin/seon init NAME [--force]   # fork a dormant cluster; --force destroys
+bin/seon stop [--force] [NAME] # force = shared-JVM SIGTERM after prepl fails
+bin/seon down [--force]        # stop EVERY recorded JVM in this root
+bin/seon reset --force         # down all, destroy the cluster root,
+                               # republish, refork default — works from
+                               # any wreckage, never opens the old store
 ```
 
 An absent cluster argument means `default` for `start` and `config apply`.
-For `stop` and `down`, omission is accepted only when exactly one cluster
-exists. Bare `init` always means the published `current-src`, never `default`.
+For `stop`, omission is accepted only when exactly one cluster exists; bare
+`down` deliberately means EVERYTHING in the root (2026-08-01 owner ruling —
+it prints the full pid/start-instant/generation census BEFORE acting).
+Bare `init` always means the published `current-src`, never `default`.
 `init NAME` refuses an existing branch; `--force` explicitly destroys and
-reforks it. Existing clusters receive no source synchronization. The operator
-owns process identity, locking, readiness, logs, and shutdown; do not launch
-its internals separately or kill children blindly.
+reforks it. Existing clusters receive no source synchronization. Stop/down
+act on exact recorded process identity (pid + start-instant + generation):
+graceful prepl first, TERM grace on the recorded handle, exact-rematched
+KILL only under `--force` — a reused pid can never be killed by mistake.
+`status` degrades from records and advertisements when the store or a
+prepl is unreachable rather than wedging; a failed flock boot exits
+nonzero with no success-shaped output. The operator owns process identity,
+locking, readiness, logs, and shutdown; do not launch its internals
+separately or kill children blindly. DESTRUCTIVE DRILLS AND SECOND
+DEPLOYMENTS USE `--root` — root-scoped discovery makes the shared root
+unreachable by construction (the 2026-08-01 shared-drill incident is the
+provenance).
 
 NEVER USE A SESSION SCRATCHPAD OR SYSTEM TEMP DIRECTORY (owner ruling
 2026-07-25). Some harnesses hand an agent a private scratchpad under
