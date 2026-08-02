@@ -6,15 +6,16 @@ tags: [prd, mcp, repl, flow, runtime]
 
 # Seon MCP Surface
 
-Seon should expose two primary MCP tools: one evaluation interface that can
-address either the unrestricted JVM io-prepl or the selected cluster's shared
-SCI context, and one structured observation interface for root-scoped cluster
-inventory, core readiness, current problems, and bounded Flow state. Commit
-`816cbac0f` already built most of the evaluation contract; this PRD preserves
-that work and concentrates new design on honest status. The central rule is
-that every response carries the exact root, cluster, namespace, and evaluation
-mode or observation scope that actually ran, while a missing observation is
-reported as unknown rather than promoted to health.
+Seon should expose one evaluation interface that addresses either the
+unrestricted JVM io-prepl or a selected cluster's shared SCI context, one
+structured observation interface for root-scoped inventory, health, and Flow
+state, and one producer-neutral value drill shared by both. Commit `816cbac0f`
+already built most of the evaluation addressing contract; this PRD preserves
+it and concentrates new design on honest status and one result path. Every
+response carries the coordinates and target that actually ran, absence of an
+observation is never promoted to health, and every large value goes through
+Seon's existing admission, print, render-value, and blob owners rather than an
+MCP-only string budget.
 
 | Capability | BUILT | MISSING | PROPOSED |
 |---|---|---|---|
@@ -24,7 +25,7 @@ reported as unknown rather than promoted to health.
 | Inventory | `runtime_status` uses the operator's root-scoped `source-observations` census and reports advertisement/process-record registrations as text. | It omits the operator's full cluster-truth/roster projection, stopped branches, and observation failures. A process record alone has no prepl endpoint, so missing-advertisement recovery still needs another live advertisement for that JVM. | One public, read-only operator observation value feeds both `bin/seon status` rendering and structured MCP inventory. |
 | Core health | A reachable JVM can expose the partial instance, and a ready instance has `seon.cluster/readiness` plus `seon.problems/problems`. | MCP does not compose them; prepl refusal can currently leave no layer signal and still print `alive`. | Report process, prepl, boot readiness, roster/database observation, and problem counts separately; never synthesize health from silence. |
 | Flow state | Flow supports `datafy`, `ping`, and per-proc ping; Seon retains the cluster graph, per-agent graphs, work launcher, fault fan-out, and bounded `:ping-map-fn` projections. | MCP exposes none of it; the existing fleet render pings every armed agent and is not a bounded MCP response. | Add opt-in cluster Flow summary and an optional one-agent drill using Flow's own maps and vocabulary. |
-| Output bounds | Eval defaults to 4,000 estimated tokens, caps at 16,000, retains the terminal event, records truncation, limits transport events to 256, and retains at most three first-party exception frames. | Status is prose-only, has no declared output-budget input, and the exception-frame source-root roster is duplicated. | Return structured status under the same budget, page cluster rows, preserve explicit truncation, and consume the program graph's source-root authority. |
+| Output and drill | SCI door results already pass through `seon.sci.admit` and `seon.print`; eval receipts already move admitted results above `:seon.config.eval.result/blob-threshold` to `seon.blob`. | MCP still chops strings irretrievably; raw io-prepl serializes before MCP can admit the value; status bypasses the value system; `node-id` is an address hash rather than a blob lookup; `/data` cannot select a blob; unreferenced MCP blobs can be swept by explicit store collection. | Delete MCP token/character/event/frame cutoffs. Project eval and status through one value artifact, return its useful window plus caps evidence and `{root, cluster, digest, size, node-id}`, and expose `get_value` for `get-in` path/offset drill. Use only the selected cluster's effective admission caps, render window, and existing blob threshold; refuse a value result when those owners have not stood. |
 
 ## Origin and scope
 
@@ -74,6 +75,23 @@ Flow monitor.
   `docs/seon/issues/mcp-eval-cannot-reach-every-jvm-cluster-and-namespace.md`,
   `mcp-parent-watchdog-can-follow-a-reused-pid.md`, and
   `mcp-frame-provenance-duplicates-the-program-source-root-roster.md`.
+- The output defect is
+  `docs/seon/issues/mcp-truncates-instead-of-using-the-value-system.md`.
+  Admission returns a bounded semantic value, tagged print data, and explicit
+  capped evidence (`src/seon/sci/admit.clj:421-471`); `seon.print/emit-both`
+  derives text and hiccup from that print data (`src/seon/print.cljc:522-535`).
+  `seon.render.value` supplies windows, path/offset links, and stable node ids
+  (`src/seon/render/value.clj:19-203`), while `seon.blob` stores and verifies
+  UTF-8 content by SHA-256 in an already-open Datahike connection's Konserve
+  store (`src/seon/blob.clj:11-54`).
+- The current chain has two material limits. `node-id` hashes
+  `[agent-id, root-selector, get-in-path]`, not content, and stores no reverse
+  mapping (`src/seon/render/value.clj:19-33`). `/data` selects only the schema
+  or an entity and returns HTML; it cannot select a result blob
+  (`src/seon/render/web.clj:1188-1211`). The existing oversized-result blob
+  contains admitted tagged print data, not an independently navigable raw JVM
+  object (`src/seon/cluster/loop.clj:501-524`). This PRD extends those owners;
+  it does not claim the complete MCP drill already exists.
 
 A read-only live probe of `default` on 2026-08-02 observed one ready cluster at
 PID 4717, one agent, and two responsive cluster procs (`armer` and `render`),
@@ -100,8 +118,9 @@ The terse common case remains:
 ```
 
 It means the default root, selected/default cluster, namespace `user`, JVM
-mode, default stateful session, 30-second bridge wait, and 4,000-token output
-budget.
+mode, default stateful session, and 30-second bridge wait. Output size is not a
+caller dial; the selected cluster's effective value-system configuration is
+the authority.
 
 Trade-off: JVM-by-default preserves the boot-first debugging path but makes the
 most powerful target the shortest call. The response echo and tool description
@@ -109,20 +128,25 @@ must therefore say `jvm` and “unrestricted” plainly. Requiring mode every ti
 would make the danger more visible but would directly reject the owner's
 low-friction default.
 
-## Decision 2 — two primary tools, not one tool per target
+## Decision 2 — two task tools plus one shared value drill
 
-**OWNER DECISION. Recommendation: expose `eval_clj` and `runtime_status` as
-the two primary tools.** Keep JVM and door evaluation as modes of `eval_clj`.
-Inventory, health, and Flow observation belong to `runtime_status` because they
-are one read-only observation task over the same root/cluster selection.
+**OWNER DECISION. Recommendation: expose `eval_clj`, `runtime_status`, and
+`get_value`.** Keep JVM and door evaluation as modes of `eval_clj`. Inventory,
+health, and Flow observation belong to `runtime_status` because they are one
+read-only observation task over the same root/cluster selection. `get_value`
+is the one generic read of a value reference returned by either producer.
 
 Separate `eval_jvm` and `eval_sci` tools would make blast radius more visible,
 but they would duplicate root, cluster, namespace, session, timeout, output,
 transport, and error behavior. That is exactly the drift `816cbac0f` removed.
 Putting status into `eval_clj`, conversely, would force agents to author
-privileged code for a routine read and would leave no bounded status contract.
+privileged code for a routine read. Making drill a parameter on `eval_clj`
+would falsely imply re-evaluation and would not naturally serve status values;
+making it a status mode would make evaluation results depend on the status
+tool. A small third tool is the honest separation: two producers, one shared
+value reader, and no second value mechanism.
 
-`list_sessions` is bridge diagnostics, not a third system capability. Fold its
+`list_sessions` is bridge diagnostics, not a fourth system capability. Fold its
 count and optional identifiers into `runtime_status`, then delete the separate
 tool in the same slice. The trade-off is an immediate small caller migration in
 exchange for avoiding a compatibility path and keeping the surface aligned
@@ -154,6 +178,15 @@ private Vars and does not maintain its own `alive` classifier. Operator repair
 may retain `bin/seon status`'s existing reconciliation step before rendering;
 MCP consumes the shared read-only truth and must not delete or rewrite an
 advertisement merely because a caller asked for status.
+
+For root-wide inventory, omission of `cluster` still means every row. The
+selected/default cluster in that root is separately the value host whose
+effective caps, render window, connection, and blob threshold project the
+response; the envelope echoes it as `value_cluster`. MCP never silently borrows
+a ready sibling when that host is unavailable. For cluster-scoped health/Flow,
+the selected cluster is both subject and value host. This keeps one config
+authority without making root inventory silently adopt whichever cluster
+happened to answer first.
 
 Trade-off: one cumulative status tool keeps discovery and drill-down coherent,
 but its schema has more conditional parameters than separate inventory,
@@ -223,38 +256,129 @@ registry, or an MCP copy of `core.async.flow-monitor`. The dependency monitor's
 one-second polling loop and pause/resume/inject UI are the wrong lifecycle and
 blast radius for an on-demand read surface.
 
-## Decision 5 — output and context budget
+## Decision 5 — one value path, with retrievable overflow
 
-**OWNER DECISION. Recommendation: keep eval's existing encoder and apply the
-same declared `max_output_tokens` range (default 4,000; maximum 16,000) to
-status.**
+**OWNER DECISION. Recommendation: delete MCP's output-token, character,
+transport-event, and exception-frame caps. Both producer tools return one
+shared value projection, and `get_value` drills it.** The only size decisions
+are the selected cluster's effective `:seon.sci.admit/caps`,
+`:seon.render.value/max-collection`, and
+`:seon.config.eval.result/blob-threshold`. Those are already one configured
+family; MCP adds no constants and accepts no `max_output_tokens`, `limit`, or
+`after` parameter.
 
-Eval's current policy is right: retain the terminal event, cap individual event
-text, drop surplus nonterminal events with a count, and emit explicit retained
-versus total character metadata. Door mode may first cap the SCI value under
-its own admission contract; the bridge cap is a second presentation bound, not
-a replacement.
+The result path is:
 
-Status adds three structural bounds:
+1. Admit the complete producer result once. The semantic projection and tagged
+   print data retain `:seon.print/elided` markers and
+   `:seon.sci.admit/capped?` evidence. Admission caps are the outer safety
+   boundary: content elided there is deliberately not retained, but its absence
+   is explicit.
+2. Serialize one value artifact containing the admitted semantic projection,
+   tagged print data, and capped evidence. This small owning-format addition is
+   necessary because today's result blob stores only tagged print data, which
+   can be rendered but cannot honestly support a semantic `get-in` path.
+3. Compare that artifact with the existing blob-threshold fact. Inline values
+   return the print text directly. Oversized values go through `seon.blob` and
+   return a render-value window plus digest, serialized size, capped evidence,
+   and node id. The window is structurally reduced with tagged elision until
+   its serialized value payload is at or below that *same* threshold; a single
+   huge scalar may therefore yield only its face/size plus the reference.
+   Bytes omitted from the inline MCP response remain in the blob.
+4. `get_value` loads and verifies the artifact by digest, applies
+   `seon.render.data/at` to the requested `get-in` path, windows at `offset`
+   using `:seon.render.value/max-collection`, and emits text through the same
+   print grammar. Missing paths and missing blobs are flat error values.
 
-- cluster rows sort by the concrete tuple `[cluster, pid, start-instant]` and
-  page with `limit` (default 50, maximum 200) plus an `after` tuple;
-- health returns problem-family counts, not every problem fact; raw details
-  remain available through explicit JVM eval, the database, and web UI; and
-- Flow returns process/cluster/fault graphs plus at most one selected agent
-  graph, never every agent graph.
+This distinguishes two claims that must not be conflated: the entire *admitted
+projection* beyond the inline window is retrievable; content intentionally
+elided by admission caps is not. The latter is safe, recorded elision rather
+than MCP data loss.
 
-Every result includes `truncated?`, returned/total counts when known, and the
-next `after` tuple when another page exists. The encoded response never exceeds
-the requested bridge budget. The trade-off is extra calls for a very large
-root or a per-agent fleet audit; the alternative is silently consuming the
-calling agent's context with operational detail.
+With today's configured threshold of 4,096 serialized characters, either tool
+returns at most that much inline value payload plus a fixed coordinate/reference
+envelope. Changing that bound means changing the existing config fact for the
+cluster, not an MCP schema. Status and eval therefore have the same answer to
+“too big.”
 
-Exception projection must close
-`mcp-frame-provenance-duplicates-the-program-source-root-roster.md`: the MCP
-bridge consumes the program graph's one source-root authority without loading
-the application runtime. Retaining `max-exception-frames = 3` is otherwise the
-right default.
+### Smallest honest owner adaptations
+
+- **`seon.render.value`:** add the closed value-artifact and a pure projection
+  operation used by renderers and non-agent callers. MCP supplies a normal
+  `:seon.render/unit` with the configured caps/options and
+  `:seon.render.value/root [:seon.blob/digest digest]`. No agent id is needed:
+  `node-id` already admits an absent id, and rooting the address at the content
+  digest makes the resulting `seon-value-*` stable for the same content and
+  path. The returned reference still includes the full digest because the
+  current 24-character node id is one-way and cannot retrieve anything.
+- **`seon.render.data`:** retain `parse-cursor` and `at` as the one `get-in`
+  vocabulary. Add no MCP cursor implementation.
+- **`seon.blob`:** continue to own content-addressed put/get and digest
+  verification. Its implementation needs a live Datahike connection only to
+  reach the already-open Konserve store; if callers need the process-root main
+  connection rather than a branch connection, broaden that contract here, not
+  in MCP. It does not acquire a store, invent a cache, or open around the
+  process-root flock.
+- **`seon.render.web` and `/data`:** add a blob-digest root selector and pass
+  the loaded value artifact through the same data/value floor. The browser URL
+  remains `/data?value=<digest>&path=<EDN>&offset=N`; it is a second consumer
+  of the same operation, not the implementation behind MCP.
+- **`seon.cluster`:** raw io-prepl currently applies `pr-str` before MCP sees a
+  return or tap value, and `:out`/`:err` bypass io-prepl's `valf`. Replace only
+  that output adapter with a Seon accept function which delegates reading,
+  evaluation, namespace, `*1/*2/*3`, and exception semantics to
+  `clojure.core.server/prepl`, then hands its event value to the shared
+  projector while the raw object still exists. This is necessary; the bridge
+  cannot reconstruct a chopped or already-stringified host object. The prepl
+  client thread may perform the blob I/O; SCI `:compute` evaluation and
+  `seon.sci.admit` remain free of blocking writes.
+
+Raw `:out`/`:err` can produce arbitrarily many chunks before the terminal
+event. If a finite event envelope cannot be formed with today's one-shot
+admission walk, the smallest required extension is an incremental collector in
+`seon.sci.admit` that stops retaining at the same node/collection caps and
+emits the same tagged elision/capped evidence. It must not be recreated in the
+prepl adapter or MCP bridge.
+
+Status remains structurally selective before projection: health returns
+problem-family counts rather than every fact, and Flow returns the shared
+graphs plus at most one explicitly selected agent graph. That is semantic
+query shape, not a competing output budget. The complete resulting map then
+uses the same value path as eval.
+
+Exception projection closes
+`mcp-frame-provenance-duplicates-the-program-source-root-roster.md` by deriving
+first-party provenance from the program graph. It does not retain the current
+independent three-frame cap; the shared admission projection records any
+elision.
+
+### When the value system has not stood
+
+A REPL-first JVM may have neither a cluster effective config nor a live store
+connection. In that state there is no truthful threshold, admission-cap set,
+or blob tier. MCP must not read a config file as a shadow runtime authority,
+open the flocked store, retain values in a bridge atom, or restore the string
+chop. Raw JVM code still executes and io-prepl still installs its raw return in
+`*1`; the tool returns a small flat `:seon.dev.mcp/value-system-unavailable`
+control error with the exact missing layers and session id instead of the
+value. A later call in that same session may deliberately evaluate a smaller
+diagnostic after the cluster value system stands. Door mode is already
+unavailable in this state. Status returns only operator observations that fit
+its fixed control envelope and marks runtime enrichment unobserved; it does
+not claim a retrievable status value.
+
+Trade-off: this preserves the owner's REPL-first escape hatch and never loses a
+suffix while claiming success, but a cluster that failed before config/store
+cannot return arbitrary values through MCP. Making that case feature-complete
+would require a second bootstrap budget and storage mechanism, exactly the
+parallel system this ruling rejects.
+
+An MCP-created blob currently has no receipt or other database fact referencing
+it, so an explicit whole-store `collect!` may sweep it. Recommendation: do not
+invent a durable MCP receipt or pin registry in this surface; document the
+reference as valid until explicit collection and return a loud missing-blob
+error afterward. A stronger lifetime guarantee is an owner decision because it
+would make read-only status persist facts and requires a retention policy.
 
 ## Security and blast radius
 
@@ -269,6 +393,8 @@ It must never silently:
 - choose another root, cluster, or namespace after selection fails;
 - treat an unreachable prepl or missing pong as health;
 - claim that closing the MCP socket session cancelled raw JVM evaluation; or
+- return a chopped success when the selected cluster's value system is
+  unavailable; or
 - omit the executed root, cluster, mode, namespace, and session from any
   success, evaluation error, timeout, or transport error.
 
@@ -317,15 +443,14 @@ reach.
 The response identifies `mode=door`, states that the shared ctx was the target,
 and carries no run or receipt identity.
 
-### Named stateful JVM session and larger output budget
+### Named stateful JVM session
 
 ```json
 {
   "code": "*1",
   "cluster": "default",
   "mode": "jvm",
-  "session_id": "investigation-7",
-  "max_output_tokens": 8000
+  "session_id": "investigation-7"
 }
 ```
 
@@ -335,24 +460,13 @@ and carries no run or receipt identity.
 {"view":"inventory"}
 ```
 
-### Continue a large inventory
-
-```json
-{
-  "view": "inventory",
-  "limit": 50,
-  "after": ["cluster-049", 4812, "2026-08-02T14:11:12.123Z"]
-}
-```
-
 ### Selected-cluster health
 
 ```json
 {
   "view": "health",
   "root": "/srv/seon-a",
-  "cluster": "acme",
-  "max_output_tokens": 4000
+  "cluster": "acme"
 }
 ```
 
@@ -395,7 +509,53 @@ schema commitment:
     :seon.dev.mcp/replies
     {:seon.cluster.agent/armer
      #:clojure.core.async.flow{:status :running :count 0}}}}]
- :seon.dev.mcp/truncated? false}
+ :seon.sci.admit/capped? false}
+```
+
+### Drill an oversized eval or status value
+
+Both producer tools return the same reference shape:
+
+```clojure
+{:seon.render.value/node-id "seon-value-30b842f0a086b7480f62a7ab"
+ :seon.blob/digest "8b4c...64-hex-characters...f271"
+ :seon.render.value/size 184221
+ :seon.dev.mcp/root "/srv/seon-a"
+ :seon.dev.mcp/cluster "acme"}
+```
+
+The client passes those coordinates back to the generic reader. `path` is an
+EDN vector so keyword, string, and integer `get-in` steps retain their types:
+
+```json
+{
+  "root": "/srv/seon-a",
+  "cluster": "acme",
+  "digest": "8b4c...64-hex-characters...f271",
+  "path": "[:seon.dev.mcp/clusters 3 :seon.dev.mcp/flow]",
+  "offset": 8
+}
+```
+
+`get_value` returns the same value envelope and may return the same digest with
+a different path-derived node id and next offset. It never evaluates code.
+
+The browser equivalent is:
+
+```text
+/data?value=8b4c...f271&path=%5B%3Aseon.dev.mcp%2Fclusters%203%5D&offset=8
+```
+
+### REPL-first value-system refusal
+
+```clojure
+{:seon.error/kind :seon.dev.mcp/value-system-unavailable
+ :seon.error/message "The form ran, but no configured value/blob path stood."
+ :seon.dev.mcp/root "/srv/seon-a"
+ :seon.dev.mcp/cluster "acme"
+ :seon.dev.mcp/session-id "default"
+ :seon.dev.mcp/missing [:seon.sci.admit/caps
+                        :seon.store/branch-connection]}
 ```
 
 The currently built bridge-only session call remains `list_sessions {}` until
@@ -406,29 +566,44 @@ the owner rules on its deprecation.
 Each slice is independently landable and must retain the previous slice's
 surface.
 
-1. **Seal evaluation identity and provenance.** Preserve `eval_clj`; state raw
-   capability and non-cancellation plainly; echo mode/namespace on every error;
-   add exact default/no-fallback regressions; replace the duplicated source-root
-   roster to close the frame-provenance issue.
-2. **Unify read-only inventory.** Extract one public operator observation value
+1. **Land the shared value artifact and drill.** In the existing value owners,
+   add one admitted artifact carrying semantic projection, tagged print data,
+   and capped evidence; root render units at the blob digest; teach `/data` the
+   digest selector; add `get_value` over root, cluster, digest, EDN path, and
+   offset. Prove inline and blob-backed values render identically, drill by
+   keyword/string/index, survive MCP response bounding, and fail loudly after
+   a missing blob. No MCP bridge chop is removed until its replacement exists.
+2. **Move evaluation output onto the value path.** Preserve `eval_clj` and
+   io-prepl's evaluator/session behavior, but project raw JVM events before
+   serialization and door results through the same artifact. Remove
+   `max_output_tokens`, raw string chopping, event-count dropping, and the
+   independent exception-frame cap together. Preserve explicit capped
+   evidence; prove `*1/*2/*3`, namespace changes, door ctx mutation, no door
+   run/receipts, and the REPL-first value-system refusal.
+3. **Seal evaluation identity and provenance.** State raw capability and
+   non-cancellation plainly; echo mode/namespace on every error; add exact
+   default/no-fallback regressions; replace the duplicated source-root roster
+   to close the frame-provenance issue.
+4. **Unify read-only inventory.** Extract one public operator observation value
    used by `bin/seon status` and MCP; return structured, root-scoped inventory;
    distinguish refused/unobserved from ready; cover unreachable store, refused
    prepl, stale advertisement, degraded boot, stopped branch, unreadable process
-   record, orphan JVM, and duplicate identity. This slice removes the current
-   nil-means-`alive` defect.
-3. **Compose bounded health.** For reachable instances, add boot readiness and
+   record, orphan JVM, and duplicate identity. Project it through the shared
+   artifact with the explicitly echoed value host. This slice removes the
+   current nil-means-`alive` defect.
+5. **Compose bounded health.** For reachable instances, add boot readiness and
    problem-family counts. Every failed sub-observation becomes a bounded flat
    error value while the rest of the row survives. No aggregate `healthy?` flag
    and no stored status facts.
-4. **Add bounded Flow observation.** Use `datafy` plus `ping` for the process
+6. **Add bounded Flow observation.** Use `datafy` plus `ping` for the process
    work launcher, selected cluster graph, fault committer graph, and optionally
    one selected agent graph. Pair expected proc ids with replies, project only
    ordinary bounded values, and prove a busy/non-answering proc returns unknown
    without delaying the response beyond its declared ping window.
-5. **Consolidate the public tool list.** Fold bridge session diagnostics into
+7. **Consolidate the public tool list.** Fold bridge session diagnostics into
    status, delete `list_sessions` in the same slice, and update MCP schemas and
    examples together.
-6. **Harden bridge lifetime before graduation.** Close
+8. **Harden bridge lifetime before graduation.** Close
    `mcp-parent-watchdog-can-follow-a-reused-pid.md` with a launcher identity or
    transport-lifetime event that cannot follow PID reuse. This is deliberately
    separate from surface semantics and may land in parallel, but the
@@ -445,15 +620,23 @@ health.
 
 1. Ratify the current defaults: repository operator root, selected/default
    cluster, `user`, and unrestricted `jvm` mode?
-2. Ratify two primary tools (`eval_clj`, `runtime_status`) and eventual
-   deletion of standalone `list_sessions` in the same consolidation slice?
+2. Ratify two producer tools (`eval_clj`, `runtime_status`), one generic
+   `get_value` drill, and eventual deletion of standalone `list_sessions`?
 3. Ratify one cumulative status `view` enum (`inventory`, `health`, `flow`),
    with `flow` requiring a cluster and an explicit agent id for agent detail?
 4. Ratify the existing measured 20 ms Flow ping window as the default, with
    missing replies reported only as unknown and a caller override available?
 5. Ratify the shared operator observation value as read-only for MCP, while
    `bin/seon status` may retain its existing reconciliation before rendering?
-6. Must the PID-reuse watchdog fix precede the surface's graduation, as
+6. Ratify the selected/default cluster as the explicit `value_cluster` for a
+   root-wide status response, with no silent borrowing from a ready sibling?
+7. Ratify refusal of arbitrary result delivery when a REPL-first JVM has no
+   effective admission caps or live store connection, while preserving the raw
+   result in that io-prepl session's `*1`?
+8. Is an MCP blob reference valid-until-explicit-collection sufficient, as
+   recommended, or should a later design persist generic value-reference facts
+   and accept their retention/write cost even for read-only status?
+9. Must the PID-reuse watchdog fix precede the surface's graduation, as
    recommended, or may it remain a separately tracked post-surface defect?
 
 ## Non-goals
@@ -462,12 +645,15 @@ health.
 - No MCP lifecycle controls: no start, stop, pause, resume, inject, restart,
   reset, refork, transact, or repair tool.
 - No replacement for `bin/seon`, the web UI, `/data`, database queries, logs,
-  run/receipt forensics, or raw REPL access.
+  run/receipt forensics, or raw REPL access; `/data` is only extended with the
+  shared blob-digest root selector.
 - No background health polling, heartbeat, status fact, metrics history,
   snapshot fact, second discovery roster, or MCP-specific Flow registry.
 - No flow-monitor web server and no draining report/error channels for history.
 - No implicit ping of every agent graph and no unbounded stack, problem, graph,
   channel, or session payload.
+- No MCP-only token/character/event/frame budget, output suffix chop, value
+  cache, pin registry, or alternate print grammar.
 - No automatic search across arbitrary operator roots; `root` omission means
   the configured repository root only.
 - No security hardening that weakens the owner's intentional unrestricted JVM
