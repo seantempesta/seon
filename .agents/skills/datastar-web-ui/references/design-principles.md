@@ -1,11 +1,7 @@
 # Frontend design principles
 
-Read this when changing the current JVM web UI's visual hierarchy, spacing,
-typography, or theme tokens.
-
-Seon uses a Phosphor Terminal aesthetic: warm blacks, cream text, amber
-accents, monospace type, and information-dense layouts. Think Lisp machine,
-not a generic dashboard.
+Read this before changing the current JVM web UI's visual hierarchy, spacing,
+typography, namespace-page layout, or debug layout.
 
 ## Contents
 
@@ -18,24 +14,26 @@ not a generic dashboard.
 
 ## Maintained source
 
-`resources/public/css/input.css` owns the theme tokens, source scan, utility
-safelist, and component CSS. It currently scans fresh `.clj`/`.cljc` sources
-and retains some stale CLJS/`my.canvas` comments and safelist entries from the
-deleted UI. Treat those comments as quarry; do not infer that the pod or
-canvas API exists.
+`resources/public/css/input.css` owns source scanning, the utility safelist,
+theme tokens, and semantic component CSS. Its `.cljs`, pod, and `my.canvas`
+comments are stale residue beside the live `.clj` scan; do not infer a current
+pod or canvas API from those comments
+(`resources/public/css/input.css:1-52`).
 
-Build local Tailwind with the repository scripts:
+Build Tailwind through the maintained package scripts
+(`package.json:10-12`):
 
 ```bash
 npm run css:build
 npm run css:watch
 ```
 
-Never introduce a CDN build.
+Do not introduce a CDN build.
 
 ## Palette
 
-Use the maintained token names:
+Use the maintained token values from
+`resources/public/css/input.css:54-103`:
 
 ```css
 /* warm base */
@@ -60,16 +58,20 @@ Use the maintained token names:
 --color-info: #60a5fa;
 ```
 
-Do not use `bg-white`, `text-white`, `text-zinc-*`, or `text-gray-*`.
+Do not use white, zinc, or gray utility palettes in place of these tokens.
 
 ## Typography and density
 
-- Use JetBrains Mono/the maintained monospace stack everywhere.
-- Use `text-xs` as the primary dense size and `text-2xs` for metadata.
-- Keep page titles at or below `text-lg`.
-- Prefer `p-3`, `py-2`, and `gap-4` over spacious marketing-page rhythm.
-- Use one-pixel base borders and compact cards.
-- Use dot plus text for status, never pill badges.
+The maintained font and dense-size tokens are the monospace stack and
+`text-2xs` definitions at `resources/public/css/input.css:57-64`; the fixed
+message form demonstrates the compact border, spacing, and type rhythm at
+`resources/public/css/input.css:732-773`.
+
+- Use the maintained monospace stack.
+- Use `text-xs` for dense body text and `text-2xs` for metadata.
+- Keep headings compact.
+- Prefer tight padding and one-pixel borders over marketing-page whitespace.
+- Use dot plus text for status rather than pill badges.
 
 ```clojure
 [:span {:class "flex items-center gap-1 text-xs font-mono"}
@@ -79,36 +81,59 @@ Do not use `bg-white`, `text-white`, `text-zinc-*`, or `text-gray-*`.
 
 ## Current rendering boundary
 
-Current UI hiccup is JVM Clojure and serializes through
-`src/seon/render/hiccup.clj`. Page blocks and surfaces are derived by
-`src/seon/render/block.clj`; delivery is owned by
-`src/seon/render/web.clj`.
+Current UI hiccup is JVM Clojure serialized through
+`src/seon/render/hiccup.clj:470-500`; HTML walk units receive stable wrappers in
+`src/seon/render/web.clj:241-350`. `seon.render.block/surface-id` is the one
+stable DOM-ID derivation (`src/seon/render/block.clj:72-107`), and delivery is
+owned by `src/seon/render/web.clj:497-804`.
 
-Build semantic hiccup with stable element IDs. Let server-side rendering
-produce markdown/data/source presentation through the existing block owners;
-do not restore old `seon.ui.*` CLJS namespaces or `seon.render/block` call
-signatures from `src-old/`.
+Build semantic hiccup with stable element IDs. Let the existing walk and block
+owners produce source, transcript, problem, and data presentation; the shared
+walk membership/order seam is `src/seon/render/walk.clj:693-876`. Do not
+restore old `seon.ui.*` CLJS namespaces or quarry-era block call signatures.
 
-The current generalized value renderer lives under `src/seon/render/`. Inspect
-the owning function before choosing a data shape; do not assume the deleted
-tagged renderer's accepted values survived unchanged.
+Design within the live page shapes:
+
+- namespace pages use a primary/rail walk-unit layout and a local
+  `showEverything` signal (`src/seon/render/web.clj:1011-1039`,
+  `resources/public/css/input.css:1237-1312`);
+- debug pages use two panes for `:seon.render/ai` and `:seon.render/html`
+  (`src/seon/render/web.clj:1041-1072`,
+  `resources/public/css/input.css:1314-1389`); and
+- the exact live URLs come from the one route table
+  (`src/seon/render/route.clj:5-27`).
+
+Inspect the owning renderer before choosing a data shape. Do not assume a
+deleted tagged renderer's accepted values survived unchanged.
 
 ## Anti-patterns
 
-| bad | why | use |
-|---|---|---|
-| white/zinc/gray palette | fights the warm terminal palette | `base-*`, `text-*`, semantic tokens |
-| pill badges | generic dashboard language | dot plus status text |
-| `p-6` everywhere | destroys information density | `p-3` |
-| large body type | reduces scan density | `text-xs` |
-| decorative gradients/shadows | obscures structure | borders and tone steps |
-| arbitrary runtime utilities | Tailwind may not emit them | maintained source/safelist or semantic class |
-| old canvas control classes | no fresh canvas API exists | tabled UI design |
+| bad | use |
+|---|---|
+| white/zinc/gray palette | `base-*`, `text-*`, semantic tokens |
+| pill badges | dot plus status text |
+| spacious padding everywhere | dense spacing consistent with the live shell |
+| large body type | `text-xs` and `text-2xs` |
+| decorative gradients or shadows | borders and tone steps |
+| arbitrary runtime utilities | maintained source/safelist or semantic CSS |
+| old canvas control classes | no executable control API; mark proposals **[TARGET]** |
 
 ## Target caution
 
-Broader UI restoration is tabled at
-`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`. Read
-`docs/seon/architecture/ui.md` as target design, not current implementation.
-Keep visual work inside the routes and block surfaces that
-`src/seon/render/web.clj:734-840` actually serves.
+Do not use visual work to imply that target runtime mechanisms already exist.
+The following remain **[TARGET]**:
+
+- generalized `my.canvas` controls and `/call`: neither appears in the exact
+  live route table (`src/seon/render/route.clj:5-27`), while current input is
+  the fixed message form and page-local floor checkbox
+  (`src/seon/render/web.clj:132-169,1027-1037`);
+- agent-owned `::renders`: the live blueprint contains only mailbox and turn
+  (`src/seon/cluster/agent.clj:240-264`); and
+- revisioned packages and reconnect keyframes: current delivery is complete
+  snapshots plus per-tab comparison, and the replacement protocol is marked
+  **[TARGET]** at
+  `.agents/skills/seon-flow-architecture/references/render-delivery.md:55-94`.
+
+Canonical namespace pages, root/agent aliases, and both debug variants are
+current routes (`src/seon/render/route.clj:5-16`). Keep visual work inside those
+current boundaries unless the owner explicitly resumes a named target.

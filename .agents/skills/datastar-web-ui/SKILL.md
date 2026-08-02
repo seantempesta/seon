@@ -1,120 +1,153 @@
 ---
 name: datastar-web-ui
-description: "Work on Seon's current JVM Datastar web renderer and its narrow live routes. Load this when editing seon.render.web or seon.render.*, diagnosing /, /agent/{id}, /data, /feed/{id}, message submission, block morphs, SSE backpressure, or render cost. Also load it before proposing broader UI work so you do not mistake the deleted CLJS pod or the tabled restoration design for a usable surface."
+description: "Work on Seon's Datastar web renderer, route table, namespace pages, debug pages, SSE feeds, message submission, block morphs, backpressure, layout, or render cost. Load before changing seon.render.web, seon.render.route, or another seon.render.* web owner, and before proposing a broader canvas or control surface."
 ---
 
 # Datastar web UI
 
-The active web UI is the cluster JVM renderer in `src/seon/render/web.clj`.
-It is not the deleted CLJS pod, and it does not use a fixed port.
-
-Discover the URL from the cluster advertisement:
+Work on the cluster JVM renderer in `src/seon/render/web.clj`; do not restore
+the deleted CLJS pod (`AGENTS.md:20-31`). Discover the selected cluster's bound
+URL with the one operator:
 
 ```text
 bin/seon status
 bin/seon open NAME
 ```
 
-Boot writes the actual bound URL and port into the advertisement at
-`src/seon/cluster.clj:900-922`. The server derives a preferred port from the
-cluster name, falls back to an ephemeral port on collision, and reports the
-bound result (`src/seon/render/web.clj:850-953`). Never hard-code 7890.
+The operator commands are defined at `AGENTS.md:1071-1091`. Boot writes the
+server's actual URL and port into the cluster advertisement
+(`src/seon/cluster.clj:1364-1386`). The server derives a preferred port from
+the cluster name, falls back to an ephemeral port on collision, and returns the
+bound result (`src/seon/render/web.clj:1271-1330`). Do not hard-code a port.
 
-## What is built now
+## Ground the route owner
 
-The one Ring dispatcher currently serves:
+The selected HTTP dependency is `metosin/reitit-ring` 0.10.1
+(`deps.edn:56-67`). `seon.render.route/routes` is the one live route table and
+`seon.render.web/handler` binds every symbolic handler into one Reitit Ring
+handler (`src/seon/render/route.clj:5-34`,
+`src/seon/render/web.clj:1176-1220`). Route facts are Clojure data in that Var,
+not database facts.
 
-| method/path | behavior |
+| method/path | live handler behavior |
 |---|---|
-| `GET /` | the selected cluster agent page |
-| `GET /agent/{id}` | one agent page |
-| `GET /feed/{id}` | that agent's Datastar SSE feed |
-| `POST /agent/{id}/message` | commit one inbound message |
-| `GET /data` | database/schema drill page |
-| `GET /css/*`, `GET /js/*` | packaged resources |
+| `GET /` | alias to the configured root agent's namespace page |
+| `GET /ns/{namespace}` | canonical namespace page |
+| `GET /ns/{namespace}/debug` | canonical namespace debug page |
+| `GET /agent/{id}` | alias to that agent's namespace page |
+| `GET /agent/{id}/debug` | alias to that agent's debug page |
+| `POST /agent/{id}/message` | same-origin inbound-message commit |
+| `GET /feed/{id}` | that agent's Datastar SSE feed; debug pages use `?debug=true` |
+| `GET /data` | schema/entity drill page |
+| `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
 
-Verify these exact branches at `src/seon/render/web.clj:734-840`. Reitit,
-database-backed route facts, debug pages/feeds, `/call`, agent creation,
-stop/resume controls, and a generalized action system are not current routes.
+Verify the exact methods and paths at `src/seon/render/route.clj:5-27`, the
+namespace/root/agent alias behavior at `src/seon/render/web.clj:931-1102`, and
+the message/feed/data/static bindings at `src/seon/render/web.clj:1104-1220`.
+Do not invent an agent-creation route, stop/resume route, `/call`, or a
+generalized action endpoint: none appears in the one route table
+(`src/seon/render/route.clj:5-27`).
 
-## The one live render path
+## Keep the namespace page on the one walk
 
-The cluster graph owns one `:io` render proc. It consumes database transaction
-reports and streamed partials, derives complete page snapshots, suppresses
-unchanged bytes, and publishes through a `mult`
-(`src/seon/render/web.clj:1-45,360-480`).
+Resolve a canonical namespace route through its namespace owner. An absent
+owner is ensured through the existing agent-creation transaction; an unknown
+or malformed namespace returns 404 (`src/seon/render/web.clj:931-983,1074-1087`).
+The `/agent/{id}` forms are aliases and return 404 when the agent has no
+assigned namespace (`src/seon/render/web.clj:1089-1102`).
 
-Each tab:
+Keep AI context and HTML pages on the same visible walk. HTML `page-of` calls
+`seon.render.walk/neighborhood` and `units`; the AI boundary calls
+`seon.render/walk`, which calls the same neighborhood and assembles it through
+`prose` (`src/seon/render/web.clj:300-350,988-1009`,
+`src/seon/render.clj:147-226`, `src/seon/render/walk.clj:693-876`). The debug
+page derives both projections from the same database value and shows AI on the
+left and every walked HTML unit on the right
+(`src/seon/render/web.clj:428-441,1041-1072`). Do not add a parallel page
+renderer or a debug-only traversal.
 
-1. receives a full initial paint;
-2. owns a `(sliding-buffer 1)` tap;
-3. compares the newest complete snapshot with what that tab last delivered;
-4. sends one Datastar patch per changed block; and
-5. parks on http-kit's real write-drain state.
+## Preserve the live delivery path
 
-Read `src/seon/render/web.clj:229-285,502-608`. Complete snapshots make
-sliding-1 loss safe: a displaced snapshot is superseded by a newer complete
-answer.
+The cluster graph owns one `:io` render proc. It derives complete snapshots for
+watched agents, suppresses unchanged complete pages, and publishes through a
+`mult` (`src/seon/render/web.clj:497-671`). The cluster's one Datahike listener
+offers one payload-free render wake for every transaction report
+(`src/seon/cluster/wake.cljc:163-228`). Equality suppression, not computed
+query interest, currently filters unchanged pages.
 
-The cluster's one Datahike listener offers render wakes
-(`src/seon/cluster/wake.cljc:156-217`). The current renderer receives every
-transaction report; equality suppression, not query-interest derivation,
-filters unchanged pages.
+For each tab, preserve this sequence:
+
+1. Register interest, tap the `mult` with `(sliding-buffer 1)`, and paint every
+   block from the current database value.
+2. Consume the newest complete page snapshot.
+3. Compare it with that tab's last delivered map.
+4. Send one Datastar patch for each changed block.
+5. Park the connection-owned virtual thread on http-kit's drain-or-close
+   completion before the next event.
+
+The implementation is `src/seon/render/web.clj:692-804`. Complete snapshots
+make sliding-1 loss safe: a displaced snapshot is superseded by the newer
+complete answer. The maintained http-kit fork exposes pending bytes and the
+drain-or-close completion at
+`reference-code/http-kit/src/org/httpkit/server.clj:321-326`; do not infer
+drain from `send!` alone.
 
 ## Keep human input stable
 
-The message bar and hidden feed opener are stable surfaces in the page shell
-(`src/seon/render/web.clj:119-180`). The POST returns no paint; committing the
-message wakes the ordinary render path (`src/seon/render/web.clj:687-717`).
+Keep the fixed message form and hidden feed opener stable. Transient text,
+request progress, and refusal prose live in Datastar signals; a successful POST
+commits the admitted message and returns 204 without painting
+(`src/seon/render/web.clj:132-218,883-913`). The commit wakes the ordinary
+render path. Use Datastar's colon-form attributes such as `data-on:submit`; do
+not add an action-specific refresh channel.
 
-Use Datastar's colon-form event attributes such as `data-on:submit`. Keep
-transient input in signals and durable messages in the database. Do not add an
-action-specific refresh channel.
+## Verify the page and feed
 
-## Verify the stream and socket
+Use a browser for layout, stable IDs, form behavior, and console errors. If a
+browser bridge does not hold the SSE connection, verify `/feed/{id}` with a
+server-side HTTP client and inspect the selected cluster log through the
+operator commands in `AGENTS.md:1071-1091`.
 
-A browser-control bridge may return 503 or fail to hold a long-lived SSE
-connection. Use the browser for layout, stable IDs, form behavior, and console
-errors. If liveness is ambiguous, verify `/feed/{id}` with a server-side HTTP
-client and inspect the selected cluster log with:
+## Separate current behavior from target work
 
-```text
-bin/seon logs NAME
-```
+These mechanisms are current:
 
-The maintained http-kit fork exposes pending bytes plus drained/closed
-completion at
-`reference-code/http-kit/src/org/httpkit/server.clj:321-326`. The writer reads
-that state at `src/seon/render/web.clj:502-528`; do not infer drain from
-`send!` returning an open channel.
+- canonical namespace pages plus root and agent aliases
+  (`src/seon/render/route.clj:5-16`);
+- namespace and agent debug variants over the AI/HTML walk
+  (`src/seon/render/web.clj:1041-1102`);
+- one cluster render proc publishing complete snapshots and per-tab changed
+  blocks (`src/seon/render/web.clj:497-804`); and
+- the fixed message form, `/data`, feed, and static-resource handlers
+  (`src/seon/render/web.clj:1104-1220`).
 
-## Mark target UI explicitly
+Keep these distinct and explicitly **[TARGET]**:
 
-The broader UI restoration is **TABLED** by ruling 12 until context rendering
-is understood (`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`).
+- agent-owned `::renders`: the live agent blueprint still contains only
+  mailbox and turn (`src/seon/cluster/agent.clj:240-264`);
+- a generalized `my.canvas`/control API and guarded `/call` action route: the
+  current fixed controls and the complete route table provide neither
+  (`src/seon/render/web.clj:132-169,1027-1037`,
+  `src/seon/render/route.clj:5-27`);
+- database-derived route trees: the live table is the `route/routes` Var
+  (`src/seon/render/route.clj:5-34`); and
+- revisioned packages, deltas, gap detection, and reconnect keyframes: the
+  current implementation is complete snapshots plus per-tab comparison, while
+  the package/keyframe contract remains **[TARGET]**
+  (`.agents/skills/seon-flow-architecture/references/render-delivery.md:55-94`).
 
-Treat these as design inputs, not current APIs:
-
-- agent-owned `::renders`;
-- generalized surfaces/canvas controls;
-- pure handler values and a `/call` boundary;
-- database-derived route trees;
-- revisioned packages, deltas, and keyframes; and
-- historical/as-of feeds and debug pages.
-
-Read `docs/seon/architecture/ui.md` for the target and
-`docs/prds/sci-execution-runtime/plan/ui-conversion-plan-2026-07-29.md` for the
-falsified conversion plan before proposing work. The architecture document is
-target-written; confirm current source before using any named mechanism.
+Do not bolt a target mechanism beside the live owner. Convert the existing
+owner in place only after its target contract is settled.
 
 ## Design and measurement
 
-Keep stable block IDs, semantic hiccup, server-rendered content, and the
-Phosphor theme. The maintained tokens are in
-`resources/public/css/input.css`; deeper visual rules remain in
-`references/design-principles.md`.
+Preserve stable block IDs, semantic hiccup, server-rendered content, and the
+maintained Phosphor tokens. `seon.render.block/surface-id` owns stable DOM IDs
+(`src/seon/render/block.clj:72-107`); `resources/public/css/input.css:54-103`
+owns the palette and typography tokens. Read
+`references/design-principles.md` before visual changes.
 
-For protocol and performance work, load
+For protocol or performance work, also load
 `seon-flow-architecture/references/render-delivery.md`. It separates the live
-snapshot/per-tab-delta implementation from the target package/keyframe design
-and records the 60 fps probe conditions.
+snapshot/per-tab comparison from the **[TARGET]** package/keyframe design and
+records the measured delivery probes.
