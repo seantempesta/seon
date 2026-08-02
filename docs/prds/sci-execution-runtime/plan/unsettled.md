@@ -55,6 +55,44 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 8 — THE COMPLETE FIX QUEUE (owner: "queue ALL fixes, don't
+drop anything").** The issues index is the authority; this is the
+ordered projection at write time. IN FLIGHT: bootstrap-impl (pinning +
+harness + smoke drive), no-follow-deletion-fix (BLOCKER — the July
+symlink class back in store.clj/export.clj), doc-rot-fix (arch commits
+pending), skill-verify-independent (fixing clojure-testing +datahike
+residue), config-ledger-census-fix (blob-threshold + max-collection
+ledger rows), interrogator replication (t7 variance + instruction
+variants). QUEUED NEXT, in order: (1) reasoning + skill lanes' deferred
+live proofs once bootstrap-impl quiets; (2) final index reconciliation
+and commit of the rot-audit report; (3) THE FROZEN FULL GATE; (4) the rot
+DELETION wave from the audit's chains — old writer artifact in live
+build aliases, inspect adapters launching the deleted pod, dead
+parser/oracle tools + their downstream readers, and the refused-chain
+owner calls (bin/css/package.json, shadow-cljs/externs, extra-src.md +
+:cljs alias, third-party example); (5) the quality sweep's 10 filed
+frictions — render failures collapsing to absence/silence FIRST (the
+absence-as-health class), the 20 ms fleet ping clock,
+session-image stored-derived prose, duplicate namespace-context state,
+turn/evaluate kernel splits, + the report's other five; (6) the malli
+lane's LAST handoff never yet assigned: render/ns.clj role-ref
+conversion; (7) elided-marker count/identity (print follow-up);
+(8) blob get callback shape (984fb4a38 note); (9) stale AI retry lease
+proof (18f029dd1); (10) negative-import-masks admission note; (11) the
+two MCP audit repairs (reused-pid fence, frame provenance source-root
+authority) + old-writer-port consumers (seon-server-call/acme/
+inspect); (12) acquire! per-row containment (cold path) + the 17-var
+sci residue; (13) terminal-refusal settlement fix; (14) seon.db
+remaining slices (entity/datoms/27-file migration); (15) the coupled
+interop EXPANSION (observation landed — the wave is unblocked);
+(16) option C model registry (upstream LiteLLM JSON as facts) then the
+max-tokens floor; (17) gen.loop-test residue; (18) konserve multi-key
+branch review + Datahike 28-commit upstream delta; (19) the
+pre-existing index blockers (visual-QA wave, eval-attribution owner
+gate, armed-agent platform thread — re-verify against the executor
+fix). Refill lanes from this list top-down as slots free; nothing
+leaves the list without an archived note or a landed commit.
+
 **ADDENDUM 7 — gate + audit verdicts, repair lanes dispatched.** Frozen
 full gate: 753 tests / 3,547 assertions / 8 RED — six render.web async
 timeouts (one suspected cause: the floor migration meeting the full web
