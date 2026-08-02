@@ -6,121 +6,90 @@ tags: [reference, agent, web, database]
 
 # Seon integration guide
 
-How a downstream deployment runs Seon and supplies configuration. Seon is one
-application with a supervised ClojureScript pod and JVM database writer; use
-`bin/seon` for their lifecycle rather than starting either process directly.
+Fresh Seon is one JVM process that can host multiple sovereign clusters. Each
+agent owns its own `core.async.flow` graph; the process also hosts the
+cluster-specific database connections, web renderer, and shared root
+executors. There is no ClojureScript pod, separate writer process, preload
+door, or downstream source-injection environment variable.
+
+## Run a cluster
 
 ```sh
-bin/seon up
+bin/seon start
 bin/seon status
-bin/seon restart
-bin/seon down
+bin/seon open default
+bin/seon stop default
 ```
 
-The current web entry points are `/`, `POST /agents`, and `/agent/{id}`.
-Agent availability is derived from runs and lifecycle facts; there is no
-mutable `:seon.agent/state` recovery knob.
-
-## 1. Configuration ownership
-
-An explicitly selected `SEON_CONFIG` manifest reconciles its declared subset
-into database facts. Runtime code reads the database, not the manifest or
-environment. Reopening an existing database does not require the original
-manifest; explicitly applying one later repairs drift and writes nothing when
-the database already agrees.
-
-Use `config/system.edn` as the complete example. A downstream manifest may
-compose it with Aero `#include` and `#merge`, as `config/acme.edn` does. Keep
-credentials out of manifests and Git.
-
-## 2. Models, providers, and credentials
-
-[[llm-adapters]] is the single maintained model catalog and configuration
-reference. It records each provider's exact environment variables, endpoint
-shape, named per-agent model variants, measured behavior, dated pricing,
-recommendations, and primary refresh links. Prices are snapshots; refresh the
-linked vendor page before a material run.
-
-The cluster-wide fallback is the `:seon.ai/config` database entity. Named
-sparse maps under `:seon.config/model-variants` provide launch roles such as
-`:planning` and `:execution`. Passing
-`:seon.config/model-variant` to `create!`, `mint!`, `start!`, or `delegate!`
-copies that variant's ordinary non-secret provider attributes onto the new
-agent atomically. Existing agents are not silently retuned.
-
-Keys are read from the process environment at request time and never stored in
-the database. OpenAI-compatible agents store only the name of the environment
-variable in `:seon.ai/agent-api-key-env`. For example, Kimi K3 uses
-`MOONSHOT_API_KEY`; DeepSeek uses `DEEPSEEK_API_KEY` by default. Do not put the
-credential value in an agent entity or config manifest.
-
-## 3. Overriding a core function at build time ("no more hooks")
-
-To change the **code behavior** of a core function, ship a build-time override.
-It is per-function and surgical — no forking core, no hooks.
-
-**Mechanism.** A preload namespace under **your own prefix** that `(:require)`s
-the core namespace and `set!`s the var to your implementation. The build emits
-in dependency order (your override loads after core), and the dev build's late
-binding routes **every existing caller** to your version with no recompile.
-
-**Reference example:** `examples/third-party-override/` in the repo — a
-`deps.edn`, `src/example/overrides.cljs`, and a README. Copy it and rename
-`example.*` to your prefix (must not start with `seon.` or `my.`).
-
-```clojure
-(ns yourco.overrides
-  (:require [seon.some.core-ns]))
-(set! seon.some.core-ns/the-fn (fn [...] ...your version...))
-```
-
-**Enable it:**
+`start` defaults to the `default` cluster. A running JVM may host another named
+cluster:
 
 ```sh
-export SEON_EXTRA_SRC="$(pwd)/path/to/your-override-project"
-export SEON_EXTRA_PRELOAD=yourco.overrides
-bin/seon restart
+bin/seon start research --config config/research.edn
 ```
 
-**Gating:** with these env vars unset, the override directory is **not on the
-classpath and is never compiled** — it costs nothing until you enable it. So it
-can live in your deployment permanently and you turn it on per environment.
+Use `bin/seon --root PATH ...` for a deployment or destructive proof that must
+be isolated from the shared operator root. The selected root owns its process
+records, advertisements, logs, and Datahike store.
 
-**Caveats:**
-- Validate an optimized downstream artifact separately; development
-  late-binding evidence does not prove every Closure optimization mode.
-- **Config is not an override** — use §2 for LLM settings.
-- **Agents cannot override core.** An agent that tries to redefine a compiled
-  core function is dropped + warned; build-time overrides (this mechanism) are
-  the supported way to change core behavior. Agents only define in their own
-  namespaces.
+## Supply configuration
 
-The maintained runnable consumer is `acme/`; use `bin/acme` to exercise an
-isolated downstream database and artifact without forking Seon. See
-[[components/extra-src]] for source registration and optimized-entry details.
+`config/default.edn` is the complete shipped decision map. A supplied plain-EDN
+manifest is a sparse overlay over those defaults:
 
-## 4. The model (context)
+```sh
+bin/seon start research --config config/research.edn
+bin/seon config apply research config/research.edn
+```
 
-- **Compiled package** = kernel + core + your build-time overrides — the base
-  image, compiled into the bundle.
-- **Database layer** = agent-authored namespaces plus configuration facts,
-  plans, messages, runs, and evidence. It is the runtime authority.
-- You (the downstream) customize **code** via build-time overrides (§3) and
-  **configuration** via manifest/database data (§1–2). Agents operate within their own
-  namespaces and cannot change core.
+Runtime code reads the reconciled `:seon.config/cluster` database entity, not
+the manifest. An omitted overlay key inherits the shipped decision;
+`:seon.config/absent` explicitly removes an optional dial. See
+[[config-operations]] for the maintained configuration contract and
+[[llm-adapters]] for the current AI dials.
 
-## 5. Persona / soul
+## Publish and fork program source
 
-`SOUL.md` and `AGENTS.md` are live file-backed context blocks, not stored
-persona entities and not the model system message. Set `SEON_SOUL_FILE` to a
-different repo-relative identity file or set `SEON_SOUL=false` to omit the
-soul block. Repository instructions remain in `AGENTS.md`.
+`bin/seon init` publishes the current `src/`, `test/`, and schema resources to
+the non-executing `current-src` branch. `bin/seon init --changed PATH...`
+publishes safe same-identity edits incrementally and falls back to a complete
+publication when necessary. A new cluster forks the published commit:
 
-## 6. Operating and proving a downstream
+```sh
+bin/seon init research
+bin/seon start research
+```
 
-- `bin/seon status` reports the default cluster and endpoint.
-- `bin/seon logs pod --follow` follows pod activity.
-- `bin/acme up|status|restart|down` operates the maintained isolated downstream
-  harness.
-- Verify changes through the database facts and user-visible route they affect;
-  a successful build alone is not runtime proof.
+An existing cluster remains on its own program commit. Refork it only through
+the explicitly destructive `bin/seon init research --force` path.
+
+Downstream product source and domain models stay in their own repository. They
+do not join Seon's classpath through `SEON_EXTRA_SRC`, `SEON_EXTRA_PRELOAD`, or
+a ClojureScript build. Extend the program through published program-graph
+facts and ordinary agent-authored functions; every agent may call every
+function in its cluster's program graph.
+
+## Web boundary
+
+The current web UI is served in-process by `seon.render.web`. Database
+transactions wake one Flow render proc; that proc derives complete page
+snapshots from one database value, suppresses equal snapshots, and fans the
+latest complete snapshot to per-tab `(sliding-buffer 1)` taps. Each tab sends
+Datastar element morphs over one SSE connection. There is no
+`seon.web.sse/refresh-all!` API or atom-watch refresh path.
+
+Canonical namespace pages use `/ns/{namespace}`. `/` is the root namespace
+page; `/agent/{id}` and `/agent/{id}/debug` resolve agent-owned pages. Route
+truth lives in `seon.render.route` and `seon.render.web`, so integrations must
+derive links through the route owner rather than copy a route list from this
+page.
+
+## Sources checked
+
+- `bin/seon` and `script/seon/fresh_operator.clj` — lifecycle and publication
+  commands.
+- `src/seon/cluster.clj`, `src/seon/cluster/agent.clj`, and `src/seon/flow.clj`
+  — process, cluster, and per-agent Flow topology.
+- `src/seon/config.cljc` and `config/default.edn` — configuration ownership.
+- `src/seon/render/route.clj` and `src/seon/render/web.clj` — routes and SSE
+  delivery.

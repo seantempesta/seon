@@ -13,11 +13,11 @@ This project uses a layered linting approach with two complementary tools:
 ## Quick Start
 
 ```bash
-# Run both linters on src/, src-old/, test/, and test-old/
+# Run both linters on the fresh src/ and test/ trees
 ./bin/lint
 
 # Run only on specific paths
-./bin/lint src-old/seon/dev
+./bin/lint src/seon/render
 
 # Auto-fix safe issues
 ./bin/lint --fix
@@ -72,13 +72,13 @@ Located at `.clj-kondo/config.edn`. Key settings:
 
 ```bash
 # Lint all project roots
-clj-kondo --lint src src-old test test-old
+clj-kondo --lint src test
 
 # Output as EDN for programmatic use
-clj-kondo --lint src src-old test test-old --config '{:output {:format :edn}}'
+clj-kondo --lint src test --config '{:output {:format :edn}}'
 
 # Get analysis data
-clj-kondo --lint src src-old test test-old --config '{:output {:analysis true}}'
+clj-kondo --lint src test --config '{:output {:analysis true}}'
 
 ```
 
@@ -138,19 +138,19 @@ Located at `.splint.edn`. Key settings:
 ```bash
 # Via Babashka (recommended, faster)
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint src src-old test test-old
+   -m noahtheduke.splint src test
 
 # With auto-fix
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint --autocorrect src src-old test test-old
+   -m noahtheduke.splint --autocorrect src test
 
 # Only check metrics
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint --only metrics src src-old test test-old
+   -m noahtheduke.splint --only metrics src test
 
 # Output as clj-kondo compatible format
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
-   -m noahtheduke.splint -o clj-kondo src src-old test test-old
+   -m noahtheduke.splint -o clj-kondo src test
 
 ```
 
@@ -222,7 +222,7 @@ This happens when running Splint via `clj` instead of `bb`. Splint requires Baba
 **Solution**: Always use Babashka:
 
 ```bash
-bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src src-old test test-old
+bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src test
 
 ```
 
