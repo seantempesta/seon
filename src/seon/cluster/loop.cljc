@@ -1091,6 +1091,539 @@
                                    :seon.cluster.run/closed-at now}))]
         (not (:seon.error/kind closed))))))
 
+(defn- open-turn
+  "Open and claim one run before any paid provider call."
+  [{cluster ::cluster work ::work now ::now report ::report}]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)]
+    ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
+    ;; before the expensive part, and the trigger rides as tx-meta so
+    ;; answeredness needs no flag.
+    (let [id (str (random-uuid))
+          outcome (store/transact!
+                   connection
+                   {:tx-data
+                    (into (run/open-tx {:seon.cluster.run/id id
+                                        :seon.cluster.run/agent
+                                        [:seon.cluster.agent/id agent-id]
+                                        :seon.cluster.run/opened-at now})
+                          (run/claim-tx {:seon.cluster.run/id id
+                                         :seon.cluster.run/process process
+                                         :seon.cluster.run/live-processes
+                                         #{process}
+                                         :seon.cluster.run/now now}))
+                    :tx-meta {:seon.db/trigger
+                              [:seon.cluster.message/id
+                               (:seon.cluster.message/id work)]}})]
+      ;; a REFUSED open has no run to attribute to — the run is what
+      ;; failed to exist
+      (report (if (refused! cluster outcome now
+                            {:seon.cluster.agent/id agent-id})
+                :error
+                :released)
+              0))))
+
+(defn- call-turn
+  "Call the provider and freeze the returned plan."
+  [{cluster ::cluster work ::work now ::now report ::report}]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)
+        run-id (:seon.cluster.run/id work)]
+    ;; THE PAID CALL, and the ONE place a second one is ever made.
+    ;;
+    ;; NOTHING RE-CALLS A REQUEST THAT MAY HAVE BEEN TRANSMITTED. That
+    ;; is not a rule this branch remembers to follow — `ai/disposition`
+    ;; is the choke point, computed from the phase evidence the leaf
+    ;; recorded, and every path out of a failure here goes through it.
+    ;; The branch itself only reduces over its three ordinary values:
+    ;;
+    ;; - `:failover-now` — a conclusively unpaid failure WITH a backup
+    ;;   configured. The primary's error fact commits FIRST, and the
+    ;;   backup's system segment is the notice's `:seon.render/ai`
+    ;;   projection through the one router over that committed fact;
+    ;; - `:backoff` — a conclusively unpaid TRANSIENT failure with no
+    ;;   backup. The schedule is derived once, is EMPTY whenever a
+    ;;   backup exists, and each wait is one more attempt row;
+    ;;   the no-backup path is therefore the backoff path by
+    ;;   construction rather than by a second condition;
+    ;; - `:fail` — the run closes with the error, and the step-2
+    ;;   delivery machinery does the rest.
+    ;;
+    ;; Every attempt, successful or not, leaves one `:seon.ai/attempt`
+    ;; row. That is what makes "exactly two calls" and "exactly one
+    ;; call" queryable facts rather than claims.
+    (let [;; ONE TURN, ONE RESOLUTION. Both reads use this immutable
+          ;; database value, and resolution stays outside the attempt
+          ;; reduce so failover/backoff cannot change settings halfway
+          ;; through a turn. Applying config or retracting/asserting an
+          ;; agent override therefore changes the NEXT turn, without a
+          ;; graph rebuild or a cached derived projection.
+          db @connection
+          providers (provider-targets
+                     {:seon.db/db db
+                      :seon.cluster/name (:seon.cluster/name cluster)
+                      :seon.cluster.agent/id agent-id})
+          settings (:seon.ai/settings providers)
+          primary (:seon.ai/primary providers)
+          backup (:seon.ai/backup providers)
+          schedule (::schedule providers)
+          ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
+          ;; one `offer!` of the run id plus the complete
+          ;; `:seon.ai/partial` snapshot
+          ;; onto the cluster's ONE sliding-1 stream conn — newest
+          ;; wins, a slow render pass can never backpressure the
+          ;; provider fold, and a streamed call and a one-shot call
+          ;; return the same completion value. There is no dial; a
+          ;; handle with no stream channel simply calls one-shot.
+          stream-channel (:seon.cluster.loop/stream-channel cluster)
+          sink (when stream-channel
+                 (fn [snapshot]
+                   (async/offer! stream-channel
+                                 {:seon.cluster.agent/id agent-id
+                                  :seon.cluster.run/id run-id
+                                  :seon.ai/partial snapshot})))
+          fail! (fn [failure]
+                  ;; ONE transaction: the run closes and WHY it closed
+                  ;; lands with it. This terminal FACT is also the
+                  ;; stream terminal: its render wake replaces any
+                  ;; transient partial. Before this the error value
+                  ;; evaporated — the drive sat claimed-with-no-plan
+                  ;; for two minutes and the operator had to reproduce
+                  ;; the call by hand to learn it was a missing key.
+                  (store/transact!
+                   connection
+                   (into [[:db/add [:seon.cluster.run/id run-id]
+                           :seon.cluster.run/error
+                           (:seon.error/message failure)]]
+                         (run/close-tx
+                          {:seon.cluster.run/id run-id
+                           :seon.cluster.run/process process
+                           :seon.cluster.run/closed-at now})))
+                  (report :error 0))
+          freeze!
+          (fn [completion]
+            ;; Freeze the reply's exact ordered source. Static admission is
+            ;; part of the REPL reduce below because an earlier form may
+            ;; change the resolver state that makes the next form valid.
+            ;; The frozen plan FACT is the stream terminal; no lossy channel
+            ;; value carries "done".
+            (let [namespace-name (sci.eval/agent-namespace agent-id)
+                  sources
+                  (reply/sources (:seon.ai/text completion)
+                                 namespace-name)]
+              (if (:seon.error/kind sources)
+                (fail! sources)
+                (let [outcome (store/transact!
+                               connection
+                               (run/plan-tx
+                                {:seon.cluster.run/id run-id
+                                 :seon.cluster.run/process process
+                                 :seon.cluster.run/plan-digest
+                                 (digest sources)
+                                 :seon.cluster.run/sources
+                                 sources}))]
+                  (report (if (refused! cluster outcome now
+                                        {:seon.cluster.agent/id agent-id
+                                         :seon.cluster.run/id run-id})
+                            :error
+                            :released)
+                          0)))))
+          ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
+          ;; the trigger from the run's own creating transaction
+          ;; (`message/trigger`), never a re-asked queue: the recorded
+          ;; cause is the prompt's cause. One derivation, one owner.
+          ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
+          ;; refuses by throwing (`::no-trigger`, `::missing-input`),
+          ;; and this one call site turns that refusal into the flat
+          ;; error value the loop already records — the same shape a
+          ;; refused transaction takes through `store/transact!`.
+          rendered (try
+                     (prompt/prompt @connection
+                                    {:seon.cluster.run/id run-id
+                                     :seon.cluster.agent/id agent-id
+                                     :seon.sci.admit/caps
+                                     (:seon.sci.admit/caps cluster)})
+                     (catch #?(:clj Exception :cljs :default) failure
+                       ;; the kind fallback keeps this total: an
+                       ;; exception carrying no flat error data still
+                       ;; ends the turn as a recorded value rather
+                       ;; than falling through to a nil-prompt call
+                       (merge {:seon.error/kind ::prompt-failed
+                               :seon.error/message (ex-message failure)}
+                              (error/refusal failure))))
+          ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
+          ;; exact prompt text, the rendered basis and the ordered
+          ;; contribution records commit in ONE turn-owned transaction
+          ;; BEFORE the unobservable remote call. Writer ordering then
+          ;; guarantees: no capture → the prompt was never derived;
+          ;; capture with no attempt row → the call may never have
+          ;; fired. Failover/backoff attempts inside this same pass
+          ;; REUSE this one capture — the same prompt bytes go out,
+          ;; and the backup's system segment is re-derivable from the
+          ;; committed primary error fact, never re-captured.
+          captured (if (:seon.error/kind rendered)
+                     ;; a refused prompt derivation IS the turn's
+                     ;; outcome — there is nothing to capture and no
+                     ;; provider call to make
+                     rendered
+                     (store/transact!
+                      connection
+                      (context/capture-tx
+                       {:seon.cluster.run/id run-id
+                        :seon.cluster.prompt/rendered-context rendered})))
+          ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
+          ;; text and alone places that string in `:seon.ai/prompt` —
+          ;; the bytes the capture recorded are the bytes sent.
+          text (:seon.cluster.prompt/text rendered)]
+      (if (refused! cluster captured now
+                    {:seon.cluster.agent/id agent-id
+                     :seon.cluster.run/id run-id})
+        ;; a refused capture ends the turn exactly as a refused plan
+        ;; freeze does — NO provider call without its durable evidence
+        (report :error 0)
+        (loop [target primary
+               ordinal (attempts @connection run-id)
+               ;; ABSENT on the primary and on every backoff retry;
+               ;; present only on the backup, where it is both the role
+               ;; and the proof of which failure supplied its context
+               failover-from nil
+               delay-ms nil
+               waits schedule
+               system nil]
+          (let [completion (ai/complete
+                            (cond-> (assoc target :seon.ai/prompt text)
+                              system (assoc :seon.ai/system system)
+                              sink (assoc :seon.ai/stream? true
+                                          :seon.ai/sink sink)))
+                failure (when (:seon.error/kind completion) completion)
+                evidence (attempt-evidence {:seon.ai/completion completion})
+                ;; a backup is only ever a target ONCE: the attempt that
+                ;; already failed over cannot fail over again, and that
+                ;; is what bounds a failover at exactly two calls
+                disposition (when failure
+                              (ai/disposition
+                               {:seon.error/value failure
+                                :seon.ai/backup? (and (some? backup)
+                                                      (nil? failover-from))}))
+                fact (record-attempt! cluster
+                                      (attempt-request
+                                       (cond->
+                                        {:seon.ai/target target
+                                         :seon.ai/settings settings
+                                         :seon.cluster.run/id run-id
+                                         :seon.cluster.agent/id agent-id
+                                         :seon.ai.attempt/ordinal ordinal
+                                         ::attempt-evidence evidence}
+                                         failure
+                                         (assoc :seon.error/value failure)
+                                         failover-from
+                                         (assoc :seon.ai.attempt/failover-from
+                                                failover-from)
+                                         delay-ms
+                                         (assoc :seon.ai.attempt/delay-ms
+                                                delay-ms)))
+                                      now)]
+            (cond
+              (nil? failure) (freeze! completion)
+
+              ;; THE RECORD REFUSED. Nothing else here is safe: a second
+              ;; paid call whose reason could not be committed is a call
+              ;; nobody could explain afterwards, and the backup's own
+              ;; context would have no fact to project.
+              (nil? fact) (fail! failure)
+
+              (= :failover-now disposition)
+              (recur backup
+                     (inc ordinal)
+                     (attempt-id run-id ordinal)
+                     nil
+                     waits
+                     ;; THE PROJECTION, over the fact that is now
+                     ;; durable — never a notice written at this call
+                     ;; site. The backup reads exactly what the agent,
+                     ;; the escalation owner and the log read.
+                     (:seon.render/output
+                      (render/render
+                       {:seon.render/unit
+                        (error/notice {:seon.error/fact fact
+                                       :seon.error/reason :failover})
+                        :seon.render/kind :seon.render/ai})))
+
+              (and (= :backoff disposition) (seq waits))
+              (do
+                ;; `:workload :io` is load-bearing here as well as at
+                ;; the model call: this proc may block, and the wait is
+                ;; bounded by a finite schedule rather than a loop
+                ;; condition
+                (Thread/sleep (long (first waits)))
+                (recur target
+                       (inc ordinal)
+                       nil
+                       (first waits)
+                       (rest waits)
+                       system))
+
+              ;; `:fail`, and an exhausted schedule reaches the same
+              ;; place: the run closes with the error, and step 2's
+              ;; delivery machinery does the rest
+              :else (fail! failure))))))))
+
+(defn- resume-turn
+  "Reduce one held run over its remaining admitted forms."
+  [{cluster ::cluster work ::work now ::now report ::report}]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)
+        run-id (:seon.cluster.run/id work)]
+    ;; THE FOLD, in one turn, over the cluster's ONE live ctx. Every agent in
+    ;; this cluster shares the program graph immediately; another cluster
+    ;; owns another ctx. Rebuild from facts is boot and recovery work, never
+    ;; turn work.
+    ;;
+    ;; Boot recovery closes interrupted runs before any agent graph is
+    ;; armed, so this branch is only the ordinary live fold over one
+    ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
+    (let [compiled-evaluate
+          (requiring-resolve (:seon.cluster.loop/evaluate cluster))
+          ;; The closure runs on the actual compute worker, so JVM dynamic
+          ;; custody encloses compiled host calls made by SCI. Binding around
+          ;; `submit-evaluation!!` would rely on executor thread propagation.
+          ;; `call-with-walk-context` binds this exact live branch connection
+          ;; through seon.db custody; no database value is injected into the
+          ;; interpreter context.
+          evaluate
+          (fn [request]
+            (render/call-with-walk-context
+             {:seon.store/branch-connection connection
+              :seon.cluster.agent/id agent-id
+              :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+             #(compiled-evaluate request)))
+          ;; the message this run is answering, read ONCE per turn: it
+          ;; is the head of the conversation chain every message this
+          ;; turn sends extends, and it cannot change while the run is
+          ;; held
+          trigger (message/trigger @connection run-id)
+          ctx (:seon.sci.eval/ctx cluster)]
+      (loop [ordinal (:seon.cluster.run.form/ordinal work)
+             ran 0
+             namespace-name nil]
+        (let [receipt-id (pr-str [run-id ordinal])
+              problem-id (work/problem-id run-id ordinal)
+              started
+              (store/transact!
+               connection
+               (conj
+                (run/receipt-start-tx
+                 {:seon.cluster.run/id run-id
+                  :seon.cluster.eval/ordinal ordinal
+                  :seon.cluster.eval/at now})
+                [:db/add [:seon.cluster.eval/id receipt-id]
+                 :seon.problems/id problem-id]))]
+          (if (refused! cluster started now
+                        {:seon.cluster.agent/id agent-id
+                         :seon.cluster.run/id run-id})
+            (report :error ran)
+            (let [db-before-evaluation @connection
+                  form
+                  (admitted-form
+                   {:seon.db/db db-before-evaluation
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run.form/ordinal ordinal
+                    :seon.sci.eval/ctx ctx
+                    ::current-namespace namespace-name
+                    ::fallback-namespace
+                    (sci.eval/agent-namespace agent-id)})
+                  evaluation-namespace
+                  (second (:seon.cluster.run.form/ns form))
+                  evaluation
+                  (submit-evaluation!!
+                   evaluate
+                   receipt-id
+                   (evaluation-request
+                    {::admitted-form form
+                     ::evaluation-namespace evaluation-namespace
+                     ::cluster cluster
+                     :seon.sci.eval/ctx ctx
+                     :seon.cluster.agent/id agent-id}))
+                  problem
+                  (problems/form-problem
+                   @connection
+                   {:seon.cluster.run/id run-id
+                    :seon.cluster.run.form/ordinal ordinal
+                    :seon.sci.eval/evaluation evaluation})
+                  settled (disposition (:seon.sci.admit/value evaluation))
+                  ;; THE SECOND AGENT-FACING VALUE, resolved against
+                  ;; the same database value this receipt is about.
+                  ;; Rows and refusal facts BOTH ride the terminal
+                  ;; transaction: a message that exists without the
+                  ;; receipt explaining where it came from is the torn
+                  ;; window this loop has closed everywhere else.
+                  ;; WHAT THIS FORM ASKS TO SEND — explicitly, or by
+                  ;; completing a run somebody else asked for. The
+                  ;; second is derived from the trigger rather than
+                  ;; remembered by the agent: bob computed the right
+                  ;; answer on the first live drive and called
+                  ;; `complete`, which addressed nobody, and alice
+                  ;; waited forever for a number that already existed.
+                  ;; The reply is an ordinary `my.message` value, so
+                  ;; it goes through the same bound, the same
+                  ;; recipient check and the same derived id.
+                  db-after-evaluation @connection
+                  asked
+                  (asked-value
+                   (cond-> {:seon.db/db db-after-evaluation
+                            :seon.sci.eval/evaluation evaluation
+                            ::settled settled
+                            :seon.cluster.agent/id agent-id}
+                     problem (assoc :seon.problems/form-problem problem)
+                     trigger (assoc :seon.cluster.message/trigger trigger)))
+                  ;; an undeliverable message is a durable fact, never
+                  ;; a drop — and `error/commit-tx` composes with
+                  ;; itself now that its tempid derives from the
+                  ;; error's own id rather than being a constant
+                  delivery
+                  (delivery-rows
+                   (cond-> {:seon.db/db db-after-evaluation
+                            ::cluster cluster
+                            ::asked asked
+                            :seon.cluster.agent/id agent-id
+                            :seon.cluster.run/id run-id
+                            :seon.cluster.run.form/ordinal ordinal
+                            ::now now}
+                     trigger (assoc :seon.cluster.message/trigger trigger)))
+                  rows (:seon.cluster.message/rows delivery)
+                  refusals (:seon.error/values-tx delivery)
+                  settlement-evaluation
+                  (settlement-result cluster evaluation)
+                  receipt
+                  (receipt-request
+                   (cond-> {:seon.cluster.run/id run-id
+                            :seon.cluster.run/process process
+                            :seon.cluster.run.form/ordinal ordinal
+                            :seon.sci.eval/evaluation evaluation
+                            ::settlement-evaluation settlement-evaluation}
+                     problem (assoc :seon.problems/form-problem problem)
+                     settled (assoc :my.run/value settled)))
+                  session-evaluation
+                  (store-session-values! connection evaluation)
+                  outcome
+                  (store/transact!
+                   connection
+                   (cond->
+                    {:tx-data
+                     (into (terminal-tx receipt now)
+                           (concat rows
+                                   refusals
+                                   (session-image-tx
+                                    @connection
+                                    session-evaluation
+                                    ordinal)))}
+                     ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
+                     ;; A delivering transaction names the message
+                     ;; being answered, exactly as the opening one
+                     ;; does — so conversation depth is a walk over
+                     ;; metadata already committed and no message
+                     ;; carries a hop counter. Absent when nothing is
+                     ;; delivered: an ordinary receipt has no cause to
+                     ;; restate, and answeredness is existential, so
+                     ;; naming the trigger twice changes nothing that
+                     ;; `unanswered-triggers` asks.
+                     (and trigger (seq rows))
+                     (assoc :tx-meta
+                            {:seon.db/trigger
+                             [:seon.cluster.message/id trigger]})))
+                  _
+                  (if (and (:seon.sci.eval/program-row evaluation)
+                           (not (:seon.error/kind outcome)))
+                    (sci.eval/install-program-row!
+                     {:seon.sci.eval/ctx ctx
+                      :seon.db/db (:db-after outcome)
+                      :seon.sci.eval/program-row
+                      (:seon.sci.eval/program-row evaluation)})
+                    nil)
+                  ran (inc ran)
+                  ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
+                  ;; §5.2): asking the GLOBAL derivation here was the
+                  ;; conservation audit's verified defect — wrong the
+                  ;; moment two agents run, because another agent's
+                  ;; earlier work would answer this run's question.
+                  next-ordinal
+                  (when-not (or settled (:seon.error/kind outcome))
+                    (:seon.cluster.run.form/ordinal
+                     (work/next-agent-work
+                      @connection
+                      {:seon.cluster.agent/id agent-id
+                       :seon.cluster.run/process process
+                       :seon.cluster.work/now now})))]
+              (cond
+                (terminal-refused!
+                 cluster outcome now
+                 {:seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id}
+                 receipt)
+                (report :error ran)
+
+                ;; both dispositions CLOSE the run in the terminal
+                ;; transaction now, so a settled fold always reports
+                ;; the run closed
+                settled (report :closed ran)
+                next-ordinal
+                (recur next-ordinal ran
+                       (or (:seon.sci.eval/ending-ns evaluation)
+                           evaluation-namespace))
+                :else (report :released ran)))))))))
+
+(defn- close-turn
+  "Claim when needed and close one fully settled run."
+  [{cluster ::cluster work ::work now ::now report ::report}]
+  (let [connection (:seon.store/branch-connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)
+        run-id (:seon.cluster.run/id work)]
+    ;; the fold is done and nothing said otherwise: close it, so the
+    ;; agent stops being busy.
+    ;;
+    ;; CLAIM FIRST WHEN WE DO NOT HOLD IT, and this is a fix, not a
+    ;; flourish: `next-agent-work` derives `:close` for any open planned run
+    ;; whose forms are all settled, INCLUDING one nobody holds — a run
+    ;; released by `my.run/wait`, or one whose holder died after the
+    ;; last receipt. `close-call` refuses a run it is not the holder
+    ;; of (`::not-the-holder`), so those closes failed, the derivation
+    ;; kept returning `:close`, and the self-rewake kept firing:
+    ;; a HOT LIVELOCK committing one error fact per pass. Measured on
+    ;; the wait path — twelve passes, nine error facts, `next-agent-work`
+    ;; still saying `:close`. Taking custody first is the same
+    ;; takeover `settle-interruption!` already uses, and it is what
+    ;; makes "only the holder may close a run" a rule the loop can
+    ;; keep rather than one it repeatedly breaks.
+    (let [held (d/pull @connection [:seon.cluster.run/process]
+                       [:seon.cluster.run/id run-id])
+          claimed (when-not (= process (:seon.cluster.run/process held))
+                    (store/transact!
+                     connection
+                     (run/claim-tx {:seon.cluster.run/id run-id
+                                    :seon.cluster.run/process process
+                                    :seon.cluster.run/live-processes
+                                    #{process}
+                                    :seon.cluster.run/now now})))
+          outcome (if (:seon.error/kind claimed)
+                    ;; somebody else holds it: not ours to close, and
+                    ;; not an error of ours either
+                    claimed
+                    (store/transact!
+                     connection
+                     (run/close-tx {:seon.cluster.run/id run-id
+                                    :seon.cluster.run/process process
+                                    :seon.cluster.run/closed-at now})))]
+      (report (if (refused! cluster outcome now
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-id})
+                :error
+                :closed)
+              0))))
+
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
   The sequence is the contract: claim → derive prompt → model (`:io`)
@@ -1104,9 +1637,7 @@
                   :seon.cluster.loop/turn-report]}
   [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}
    now]
-  (let [connection (:seon.store/branch-connection cluster)
-        process (:seon.cluster.run/process cluster)
-        agent-id (:seon.cluster.agent/id work)
+  (let [agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)
         report (fn [outcome forms-run]
                  (cond-> {:seon.cluster.agent/id agent-id
@@ -1114,514 +1645,13 @@
                           (:seon.cluster.work/situation work)
                           :seon.cluster.loop/forms-run forms-run
                           :seon.cluster.loop/outcome outcome}
-                   run-id (assoc :seon.cluster.run/id run-id)))]
+                   run-id (assoc :seon.cluster.run/id run-id)))
+        request {::cluster cluster
+                 ::work work
+                 ::now now
+                 ::report report}]
     (case (:seon.cluster.work/situation work)
-      ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
-      ;; before the expensive part, and the trigger rides as tx-meta so
-      ;; answeredness needs no flag.
-      :open
-      (let [id (str (random-uuid))
-            outcome (store/transact!
-                     connection
-                     {:tx-data
-                      (into (run/open-tx {:seon.cluster.run/id id
-                                          :seon.cluster.run/agent
-                                          [:seon.cluster.agent/id agent-id]
-                                          :seon.cluster.run/opened-at now})
-                            (run/claim-tx {:seon.cluster.run/id id
-                                           :seon.cluster.run/process process
-                                           :seon.cluster.run/live-processes
-                                           #{process}
-                                           :seon.cluster.run/now now}))
-                      :tx-meta {:seon.db/trigger
-                                [:seon.cluster.message/id
-                                 (:seon.cluster.message/id work)]}})]
-        ;; a REFUSED open has no run to attribute to — the run is what
-        ;; failed to exist
-        (report (if (refused! cluster outcome now
-                              {:seon.cluster.agent/id agent-id})
-                  :error
-                  :released)
-                0))
-
-      ;; THE PAID CALL, and the ONE place a second one is ever made.
-      ;;
-      ;; NOTHING RE-CALLS A REQUEST THAT MAY HAVE BEEN TRANSMITTED. That
-      ;; is not a rule this branch remembers to follow — `ai/disposition`
-      ;; is the choke point, computed from the phase evidence the leaf
-      ;; recorded, and every path out of a failure here goes through it.
-      ;; The branch itself only reduces over its three ordinary values:
-      ;;
-      ;; - `:failover-now` — a conclusively unpaid failure WITH a backup
-      ;;   configured. The primary's error fact commits FIRST, and the
-      ;;   backup's system segment is the notice's `:seon.render/ai`
-      ;;   projection through the one router over that committed fact;
-      ;; - `:backoff` — a conclusively unpaid TRANSIENT failure with no
-      ;;   backup. The schedule is derived once, is EMPTY whenever a
-      ;;   backup exists, and each wait is one more attempt row;
-      ;;   the no-backup path is therefore the backoff path by
-      ;;   construction rather than by a second condition;
-      ;; - `:fail` — the run closes with the error, and the step-2
-      ;;   delivery machinery does the rest.
-      ;;
-      ;; Every attempt, successful or not, leaves one `:seon.ai/attempt`
-      ;; row. That is what makes "exactly two calls" and "exactly one
-      ;; call" queryable facts rather than claims.
-      :call
-      (let [;; ONE TURN, ONE RESOLUTION. Both reads use this immutable
-            ;; database value, and resolution stays outside the attempt
-            ;; reduce so failover/backoff cannot change settings halfway
-            ;; through a turn. Applying config or retracting/asserting an
-            ;; agent override therefore changes the NEXT turn, without a
-            ;; graph rebuild or a cached derived projection.
-            db @connection
-            providers (provider-targets
-                       {:seon.db/db db
-                        :seon.cluster/name (:seon.cluster/name cluster)
-                        :seon.cluster.agent/id agent-id})
-            settings (:seon.ai/settings providers)
-            primary (:seon.ai/primary providers)
-            backup (:seon.ai/backup providers)
-            schedule (::schedule providers)
-            ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
-            ;; one `offer!` of the run id plus the complete
-            ;; `:seon.ai/partial` snapshot
-            ;; onto the cluster's ONE sliding-1 stream conn — newest
-            ;; wins, a slow render pass can never backpressure the
-            ;; provider fold, and a streamed call and a one-shot call
-            ;; return the same completion value. There is no dial; a
-            ;; handle with no stream channel simply calls one-shot.
-            stream-channel (:seon.cluster.loop/stream-channel cluster)
-            sink (when stream-channel
-                   (fn [snapshot]
-                     (async/offer! stream-channel
-                                   {:seon.cluster.agent/id agent-id
-                                    :seon.cluster.run/id run-id
-                                    :seon.ai/partial snapshot})))
-            fail! (fn [failure]
-                    ;; ONE transaction: the run closes and WHY it closed
-                    ;; lands with it. This terminal FACT is also the
-                    ;; stream terminal: its render wake replaces any
-                    ;; transient partial. Before this the error value
-                    ;; evaporated — the drive sat claimed-with-no-plan
-                    ;; for two minutes and the operator had to reproduce
-                    ;; the call by hand to learn it was a missing key.
-                    (store/transact!
-                     connection
-                     (into [[:db/add [:seon.cluster.run/id run-id]
-                             :seon.cluster.run/error
-                             (:seon.error/message failure)]]
-                           (run/close-tx
-                            {:seon.cluster.run/id run-id
-                             :seon.cluster.run/process process
-                             :seon.cluster.run/closed-at now})))
-                    (report :error 0))
-            freeze!
-            (fn [completion]
-              ;; Freeze the reply's exact ordered source. Static admission is
-              ;; part of the REPL reduce below because an earlier form may
-              ;; change the resolver state that makes the next form valid.
-              ;; The frozen plan FACT is the stream terminal; no lossy channel
-              ;; value carries "done".
-              (let [namespace-name (sci.eval/agent-namespace agent-id)
-                    sources
-                    (reply/sources (:seon.ai/text completion)
-                                   namespace-name)]
-                (if (:seon.error/kind sources)
-                  (fail! sources)
-                  (let [outcome (store/transact!
-                                 connection
-                                 (run/plan-tx
-                                  {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/process process
-                                   :seon.cluster.run/plan-digest
-                                   (digest sources)
-                                   :seon.cluster.run/sources
-                                   sources}))]
-                    (report (if (refused! cluster outcome now
-                                          {:seon.cluster.agent/id agent-id
-                                           :seon.cluster.run/id run-id})
-                              :error
-                              :released)
-                            0)))))
-            ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
-            ;; the trigger from the run's own creating transaction
-            ;; (`message/trigger`), never a re-asked queue: the recorded
-            ;; cause is the prompt's cause. One derivation, one owner.
-            ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
-            ;; refuses by throwing (`::no-trigger`, `::missing-input`),
-            ;; and this one call site turns that refusal into the flat
-            ;; error value the loop already records — the same shape a
-            ;; refused transaction takes through `store/transact!`.
-            rendered (try
-                       (prompt/prompt @connection
-                                      {:seon.cluster.run/id run-id
-                                       :seon.cluster.agent/id agent-id
-                                       :seon.sci.admit/caps
-                                       (:seon.sci.admit/caps cluster)})
-                       (catch #?(:clj Exception :cljs :default) failure
-                         ;; the kind fallback keeps this total: an
-                         ;; exception carrying no flat error data still
-                         ;; ends the turn as a recorded value rather
-                         ;; than falling through to a nil-prompt call
-                         (merge {:seon.error/kind ::prompt-failed
-                                 :seon.error/message (ex-message failure)}
-                                (error/refusal failure))))
-            ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
-            ;; exact prompt text, the rendered basis and the ordered
-            ;; contribution records commit in ONE turn-owned transaction
-            ;; BEFORE the unobservable remote call. Writer ordering then
-            ;; guarantees: no capture → the prompt was never derived;
-            ;; capture with no attempt row → the call may never have
-            ;; fired. Failover/backoff attempts inside this same pass
-            ;; REUSE this one capture — the same prompt bytes go out,
-            ;; and the backup's system segment is re-derivable from the
-            ;; committed primary error fact, never re-captured.
-            captured (if (:seon.error/kind rendered)
-                       ;; a refused prompt derivation IS the turn's
-                       ;; outcome — there is nothing to capture and no
-                       ;; provider call to make
-                       rendered
-                       (store/transact!
-                        connection
-                        (context/capture-tx
-                         {:seon.cluster.run/id run-id
-                          :seon.cluster.prompt/rendered-context rendered})))
-            ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
-            ;; text and alone places that string in `:seon.ai/prompt` —
-            ;; the bytes the capture recorded are the bytes sent.
-            text (:seon.cluster.prompt/text rendered)]
-        (if (refused! cluster captured now
-                      {:seon.cluster.agent/id agent-id
-                       :seon.cluster.run/id run-id})
-          ;; a refused capture ends the turn exactly as a refused plan
-          ;; freeze does — NO provider call without its durable evidence
-          (report :error 0)
-          (loop [target primary
-                 ordinal (attempts @connection run-id)
-                 ;; ABSENT on the primary and on every backoff retry;
-                 ;; present only on the backup, where it is both the role
-                 ;; and the proof of which failure supplied its context
-                 failover-from nil
-                 delay-ms nil
-                 waits schedule
-                 system nil]
-            (let [completion (ai/complete
-                              (cond-> (assoc target :seon.ai/prompt text)
-                                system (assoc :seon.ai/system system)
-                                sink (assoc :seon.ai/stream? true
-                                            :seon.ai/sink sink)))
-                  failure (when (:seon.error/kind completion) completion)
-                  evidence (attempt-evidence {:seon.ai/completion completion})
-                  ;; a backup is only ever a target ONCE: the attempt that
-                  ;; already failed over cannot fail over again, and that
-                  ;; is what bounds a failover at exactly two calls
-                  disposition (when failure
-                                (ai/disposition
-                                 {:seon.error/value failure
-                                  :seon.ai/backup? (and (some? backup)
-                                                        (nil? failover-from))}))
-                  fact (record-attempt! cluster
-                                        (attempt-request
-                                         (cond->
-                                          {:seon.ai/target target
-                                           :seon.ai/settings settings
-                                           :seon.cluster.run/id run-id
-                                           :seon.cluster.agent/id agent-id
-                                           :seon.ai.attempt/ordinal ordinal
-                                           ::attempt-evidence evidence}
-                                           failure
-                                           (assoc :seon.error/value failure)
-                                           failover-from
-                                           (assoc :seon.ai.attempt/failover-from
-                                                  failover-from)
-                                           delay-ms
-                                           (assoc :seon.ai.attempt/delay-ms
-                                                  delay-ms)))
-                                        now)]
-              (cond
-                (nil? failure) (freeze! completion)
-
-                ;; THE RECORD REFUSED. Nothing else here is safe: a second
-                ;; paid call whose reason could not be committed is a call
-                ;; nobody could explain afterwards, and the backup's own
-                ;; context would have no fact to project.
-                (nil? fact) (fail! failure)
-
-                (= :failover-now disposition)
-                (recur backup
-                       (inc ordinal)
-                       (attempt-id run-id ordinal)
-                       nil
-                       waits
-                       ;; THE PROJECTION, over the fact that is now
-                       ;; durable — never a notice written at this call
-                       ;; site. The backup reads exactly what the agent,
-                       ;; the escalation owner and the log read.
-                       (:seon.render/output
-                        (render/render
-                         {:seon.render/unit
-                          (error/notice {:seon.error/fact fact
-                                         :seon.error/reason :failover})
-                          :seon.render/kind :seon.render/ai})))
-
-                (and (= :backoff disposition) (seq waits))
-                (do
-                  ;; `:workload :io` is load-bearing here as well as at
-                  ;; the model call: this proc may block, and the wait is
-                  ;; bounded by a finite schedule rather than a loop
-                  ;; condition
-                  (Thread/sleep (long (first waits)))
-                  (recur target
-                         (inc ordinal)
-                         nil
-                         (first waits)
-                         (rest waits)
-                         system))
-
-                ;; `:fail`, and an exhausted schedule reaches the same
-                ;; place: the run closes with the error, and step 2's
-                ;; delivery machinery does the rest
-                :else (fail! failure))))))
-
-      ;; THE FOLD, in one turn, over the cluster's ONE live ctx. Every agent in
-      ;; this cluster shares the program graph immediately; another cluster
-      ;; owns another ctx. Rebuild from facts is boot and recovery work, never
-      ;; turn work.
-      ;;
-      ;; Boot recovery closes interrupted runs before any agent graph is
-      ;; armed, so this branch is only the ordinary live fold over one
-      ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
-      :resume
-      (let [compiled-evaluate
-            (requiring-resolve (:seon.cluster.loop/evaluate cluster))
-            ;; The closure runs on the actual compute worker, so JVM dynamic
-            ;; custody encloses compiled host calls made by SCI. Binding around
-            ;; `submit-evaluation!!` would rely on executor thread propagation.
-            ;; `call-with-walk-context` binds this exact live branch connection
-            ;; through seon.db custody; no database value is injected into the
-            ;; interpreter context.
-            evaluate
-            (fn [request]
-              (render/call-with-walk-context
-               {:seon.store/branch-connection connection
-                :seon.cluster.agent/id agent-id
-                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
-               #(compiled-evaluate request)))
-            ;; the message this run is answering, read ONCE per turn: it
-            ;; is the head of the conversation chain every message this
-            ;; turn sends extends, and it cannot change while the run is
-            ;; held
-            trigger (message/trigger @connection run-id)
-            ctx (:seon.sci.eval/ctx cluster)]
-        (loop [ordinal (:seon.cluster.run.form/ordinal work)
-               ran 0
-               namespace-name nil]
-          (let [receipt-id (pr-str [run-id ordinal])
-                problem-id (work/problem-id run-id ordinal)
-                started
-                (store/transact!
-                 connection
-                 (conj
-                  (run/receipt-start-tx
-                   {:seon.cluster.run/id run-id
-                    :seon.cluster.eval/ordinal ordinal
-                    :seon.cluster.eval/at now})
-                  [:db/add [:seon.cluster.eval/id receipt-id]
-                   :seon.problems/id problem-id]))]
-            (if (refused! cluster started now
-                          {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/id run-id})
-              (report :error ran)
-              (let [db-before-evaluation @connection
-                    form
-                    (admitted-form
-                     {:seon.db/db db-before-evaluation
-                      :seon.cluster.run/id run-id
-                      :seon.cluster.run.form/ordinal ordinal
-                      :seon.sci.eval/ctx ctx
-                      ::current-namespace namespace-name
-                      ::fallback-namespace
-                      (sci.eval/agent-namespace agent-id)})
-                    evaluation-namespace
-                    (second (:seon.cluster.run.form/ns form))
-                    evaluation
-                    (submit-evaluation!!
-                     evaluate
-                     receipt-id
-                     (evaluation-request
-                      {::admitted-form form
-                       ::evaluation-namespace evaluation-namespace
-                       ::cluster cluster
-                       :seon.sci.eval/ctx ctx
-                       :seon.cluster.agent/id agent-id}))
-                    problem
-                    (problems/form-problem
-                     @connection
-                     {:seon.cluster.run/id run-id
-                      :seon.cluster.run.form/ordinal ordinal
-                      :seon.sci.eval/evaluation evaluation})
-                    settled (disposition (:seon.sci.admit/value evaluation))
-                    ;; THE SECOND AGENT-FACING VALUE, resolved against
-                    ;; the same database value this receipt is about.
-                    ;; Rows and refusal facts BOTH ride the terminal
-                    ;; transaction: a message that exists without the
-                    ;; receipt explaining where it came from is the torn
-                    ;; window this loop has closed everywhere else.
-                    ;; WHAT THIS FORM ASKS TO SEND — explicitly, or by
-                    ;; completing a run somebody else asked for. The
-                    ;; second is derived from the trigger rather than
-                    ;; remembered by the agent: bob computed the right
-                    ;; answer on the first live drive and called
-                    ;; `complete`, which addressed nobody, and alice
-                    ;; waited forever for a number that already existed.
-                    ;; The reply is an ordinary `my.message` value, so
-                    ;; it goes through the same bound, the same
-                    ;; recipient check and the same derived id.
-                    db-after-evaluation @connection
-                    asked
-                    (asked-value
-                     (cond-> {:seon.db/db db-after-evaluation
-                              :seon.sci.eval/evaluation evaluation
-                              ::settled settled
-                              :seon.cluster.agent/id agent-id}
-                       problem (assoc :seon.problems/form-problem problem)
-                       trigger (assoc :seon.cluster.message/trigger trigger)))
-                    ;; an undeliverable message is a durable fact, never
-                    ;; a drop — and `error/commit-tx` composes with
-                    ;; itself now that its tempid derives from the
-                    ;; error's own id rather than being a constant
-                    delivery
-                    (delivery-rows
-                     (cond-> {:seon.db/db db-after-evaluation
-                              ::cluster cluster
-                              ::asked asked
-                              :seon.cluster.agent/id agent-id
-                              :seon.cluster.run/id run-id
-                              :seon.cluster.run.form/ordinal ordinal
-                              ::now now}
-                       trigger (assoc :seon.cluster.message/trigger trigger)))
-                    rows (:seon.cluster.message/rows delivery)
-                    refusals (:seon.error/values-tx delivery)
-                    settlement-evaluation
-                    (settlement-result cluster evaluation)
-                    receipt
-                    (receipt-request
-                     (cond-> {:seon.cluster.run/id run-id
-                              :seon.cluster.run/process process
-                              :seon.cluster.run.form/ordinal ordinal
-                              :seon.sci.eval/evaluation evaluation
-                              ::settlement-evaluation settlement-evaluation}
-                       problem (assoc :seon.problems/form-problem problem)
-                       settled (assoc :my.run/value settled)))
-                    session-evaluation
-                    (store-session-values! connection evaluation)
-                    outcome
-                    (store/transact!
-                     connection
-                     (cond->
-                      {:tx-data
-                       (into (terminal-tx receipt now)
-                             (concat rows
-                                     refusals
-                                     (session-image-tx
-                                      @connection
-                                      session-evaluation
-                                      ordinal)))}
-                       ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
-                       ;; A delivering transaction names the message
-                       ;; being answered, exactly as the opening one
-                       ;; does — so conversation depth is a walk over
-                       ;; metadata already committed and no message
-                       ;; carries a hop counter. Absent when nothing is
-                       ;; delivered: an ordinary receipt has no cause to
-                       ;; restate, and answeredness is existential, so
-                       ;; naming the trigger twice changes nothing that
-                       ;; `unanswered-triggers` asks.
-                       (and trigger (seq rows))
-                       (assoc :tx-meta
-                              {:seon.db/trigger
-                               [:seon.cluster.message/id trigger]})))
-                    _
-                    (if (and (:seon.sci.eval/program-row evaluation)
-                             (not (:seon.error/kind outcome)))
-                      (sci.eval/install-program-row!
-                       {:seon.sci.eval/ctx ctx
-                        :seon.db/db (:db-after outcome)
-                        :seon.sci.eval/program-row
-                        (:seon.sci.eval/program-row evaluation)})
-                      nil)
-                    ran (inc ran)
-                    ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
-                    ;; §5.2): asking the GLOBAL derivation here was the
-                    ;; conservation audit's verified defect — wrong the
-                    ;; moment two agents run, because another agent's
-                    ;; earlier work would answer this run's question.
-                    next-ordinal
-                    (when-not (or settled (:seon.error/kind outcome))
-                      (:seon.cluster.run.form/ordinal
-                       (work/next-agent-work
-                        @connection
-                        {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/process process
-                         :seon.cluster.work/now now})))]
-                (cond
-                  (terminal-refused!
-                   cluster outcome now
-                   {:seon.cluster.agent/id agent-id
-                    :seon.cluster.run/id run-id}
-                   receipt)
-                  (report :error ran)
-
-                  ;; both dispositions CLOSE the run in the terminal
-                  ;; transaction now, so a settled fold always reports
-                  ;; the run closed
-                  settled (report :closed ran)
-                  next-ordinal
-                  (recur next-ordinal ran
-                         (or (:seon.sci.eval/ending-ns evaluation)
-                             evaluation-namespace))
-                  :else (report :released ran)))))))
-
-      ;; the fold is done and nothing said otherwise: close it, so the
-      ;; agent stops being busy.
-      ;;
-      ;; CLAIM FIRST WHEN WE DO NOT HOLD IT, and this is a fix, not a
-      ;; flourish: `next-agent-work` derives `:close` for any open planned run
-      ;; whose forms are all settled, INCLUDING one nobody holds — a run
-      ;; released by `my.run/wait`, or one whose holder died after the
-      ;; last receipt. `close-call` refuses a run it is not the holder
-      ;; of (`::not-the-holder`), so those closes failed, the derivation
-      ;; kept returning `:close`, and the self-rewake kept firing:
-      ;; a HOT LIVELOCK committing one error fact per pass. Measured on
-      ;; the wait path — twelve passes, nine error facts, `next-agent-work`
-      ;; still saying `:close`. Taking custody first is the same
-      ;; takeover `settle-interruption!` already uses, and it is what
-      ;; makes "only the holder may close a run" a rule the loop can
-      ;; keep rather than one it repeatedly breaks.
-      :close
-      (let [held (d/pull @connection [:seon.cluster.run/process]
-                         [:seon.cluster.run/id run-id])
-            claimed (when-not (= process (:seon.cluster.run/process held))
-                      (store/transact!
-                       connection
-                       (run/claim-tx {:seon.cluster.run/id run-id
-                                      :seon.cluster.run/process process
-                                      :seon.cluster.run/live-processes
-                                      #{process}
-                                      :seon.cluster.run/now now})))
-            outcome (if (:seon.error/kind claimed)
-                      ;; somebody else holds it: not ours to close, and
-                      ;; not an error of ours either
-                      claimed
-                      (store/transact!
-                       connection
-                       (run/close-tx {:seon.cluster.run/id run-id
-                                      :seon.cluster.run/process process
-                                      :seon.cluster.run/closed-at now})))]
-        (report (if (refused! cluster outcome now
-                              {:seon.cluster.agent/id agent-id
-                               :seon.cluster.run/id run-id})
-                  :error
-                  :closed)
-                0)))))
+      :open (open-turn request)
+      :call (call-turn request)
+      :resume (resume-turn request)
+      :close (close-turn request))))
