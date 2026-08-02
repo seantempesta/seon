@@ -55,6 +55,27 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 9 — THE GATE IS GREEN: 804 tests / 4,003 assertions / 0
+failures / 0 errors (frozen tree, 2026-08-02, commits `feb1c30d9`…
+`40617bc43`).** The red's root causes, all real: `page-of` had DROPPED
+the owner-ruled root fleet caller in the one-walk conversion (the
+triage lane initially tried to DELETE oversight for this — reverted by
+the orchestrator; the diagnosis proved the mechanism was regressed,
+not superseded); the print floor produced malformed table Hiccup
+(fixed at the owner); width-minus-one fixtures converted to
+width-means-width; boot tests converted to event-driven bootstrap
+completion; two real caller bugs (ensure-entity-call's closed-input
+violation, the program-restart fixture bypassing ensure-entity!).
+Rulings #36 (Inspect + tests-as-grading) and #37 (the provider seam
+with anti-washing guardrails) sealed; the three eval designs landed
+(inspect-ai-adaptation, benchmark-mapping — 53% of inspect-evals
+runnable today, runtime-impacted-tests — agent fns are graph islands,
+31 ms reverse closure); the owner review brief is
+`plan/inspect-review-brief-2026-08-02.md`. NEXT: doc-residue landing →
+Inspect slice 1 (gpqa_diamond) + graph-edges slice 1 + the bootstrap
+matrix, all owner-gated on his walkthrough; the fix queue below
+continues draining.
+
 **ADDENDUM 8 — THE COMPLETE FIX QUEUE (owner: "queue ALL fixes, don't
 drop anything").** The issues index is the authority; this is the
 ordered projection at write time. IN FLIGHT: bootstrap-impl (pinning +
