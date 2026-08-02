@@ -24,9 +24,7 @@
             (into
              (into #{}
                    (map :seon.schema/key)
-                   (schema/canonical-schema-rows
-                    packaged-forms
-                    (java.util.Date.)))
+                   (schema/canonical-schema-rows packaged-forms))
              (keep :seon.schema/key)
              (seon.fn/rows {:seon.fn/roots seon.fn/source-roots}))
             actual-schema-keys
@@ -37,6 +35,9 @@
              database)]
         (is (every? installed
                     (schema/canonical-database-attributes packaged-forms)))
+        (is (not (contains? installed :seon.schema/created-at)))
+        (is (every? #(not (contains? % :seon.schema/created-at))
+                    (schema/canonical-schema-rows packaged-forms)))
         (is (= expected-schema-keys (set actual-schema-keys)))
         (is (= #{cluster/boot-process-identity
                  config/managing-process-identity}
@@ -45,7 +46,12 @@
                  '[:find [?process-id ...]
                    :where
                    [?process :seon.db.process/id ?process-id]]
-                 database))))))))
+                 database))))
+        (let [before (:max-tx @connection)]
+          ((ns-resolve 'seon.cluster 'accrete-schema-population!)
+           connection nil)
+          (is (= before (:max-tx @connection))
+              "clock-free schema reconciliation is idempotent"))))))
 
 (deftest config-reconciliation-cannot-retract-the-schema-population
   (test-support/with-database

@@ -2079,7 +2079,6 @@
  [:map {:seon.db/entity true}
   [:seon.schema/key :seon.schema/key]
   [:seon.schema/form :seon.schema/form]
-  [:seon.schema/created-at {:optional true} :seon.schema/created-at]
   [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
 
  :seon.db.id/generator

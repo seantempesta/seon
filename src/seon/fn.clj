@@ -688,8 +688,7 @@
   [request]
   (let [source-rows (rows request)
         canonical-schemas
-        (schema/canonical-schema-rows (schema.edn/packaged-forms)
-                                      (java.util.Date. 0))
+        (schema/canonical-schema-rows (schema.edn/packaged-forms))
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
         (remove (fn [row]

@@ -717,8 +717,7 @@
   (update-candidate-forms!
    merge
    {:seon.schema/key [:keyword {:seon.db/identity true}]
-    :seon.schema/form :string
-    :seon.schema/created-at :inst}))
+    :seon.schema/form :string}))
 
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
@@ -2178,15 +2177,14 @@
   (candidate-forms))
 
 (defn canonical-schema-rows
-  "Build the complete canonical schema-row population at one instant."
+  "Build the complete canonical schema-row population."
   {:malli/schema
    [:function
-    [:=> [:catn [:seon.schema/created-at :inst]] [:vector :map]]
-    [:=> [:catn [::forms :map] [:seon.schema/created-at :inst]]
-     [:vector :map]]]}
-  ([created-at]
-   (canonical-schema-rows (registered-schemas) created-at))
-  ([forms created-at]
+    [:=> [:cat] [:vector :map]]
+    [:=> [:catn [::forms :map]] [:vector :map]]]}
+  ([]
+   (canonical-schema-rows (registered-schemas)))
+  ([forms]
    (into
     []
     (keep
@@ -2194,8 +2192,7 @@
        (when (keyword? schema-key)
          (let [properties (form/attr-form-properties definition)]
            (cond-> {:seon.schema/key schema-key
-                    :seon.schema/form (pr-str definition)
-                    :seon.schema/created-at created-at}
+                    :seon.schema/form (pr-str definition)}
              (contains? properties :seon.db.id/generator)
              (assoc :seon.db.id/generator
                     (:seon.db.id/generator properties))))))

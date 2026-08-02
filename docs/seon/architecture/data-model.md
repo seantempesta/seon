@@ -266,7 +266,7 @@ normalization and retry disposition derive at read.
 | Entity schema | Persisted attributes |
 |---|---|
 | `:seon.fn/fn` | `:seon.fn/sym`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload` |
-| `:seon.schema/schema` | `:seon.schema/key`, `/form`, optional `/created-at`, optional `:seon.db.id/generator` |
+| `:seon.schema/schema` | `:seon.schema/key`, `/form`, optional `:seon.db.id/generator` |
 | `:seon.ns/ns` | `:seon.ns/name`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
 | `:seon.test/test` | `:seon.test/sym`, `/ns`, `/source` |
 | `:seon.code.def/def` | `:seon.code.def/id`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |

@@ -259,7 +259,6 @@
 (def ^:private schema-row-pattern
   [:seon.schema/key
    :seon.schema/form
-   :seon.schema/created-at
    :seon.db.id/generator])
 
 (defn- incompatible-declaration-message
@@ -313,7 +312,7 @@
      [boot-process-identity config/managing-process-identity])))
 
 (defn- schema-row-changes
-  [db forms now]
+  [db forms]
   (into
    []
    (keep
@@ -321,16 +320,10 @@
       (let [current
             (some-> (d/pull db schema-row-pattern
                             [:seon.schema/key schema-key])
-                    (dissoc :db/id))
-            current-created-at (:seon.schema/created-at current)
-            desired
-            (cond-> desired
-              current-created-at
-              (assoc :seon.schema/created-at
-                     current-created-at))]
+                    (dissoc :db/id))]
         (when-not (= desired (select-keys current (keys desired)))
           desired))))
-   (schema/canonical-schema-rows forms now)))
+   (schema/canonical-schema-rows forms)))
 
 (defn- instruction-row-changes
   [db rows]
@@ -377,7 +370,7 @@
     (let [process-rows (missing-process-rows @connection)]
       (when (seq process-rows)
         (d/transact connection {:tx-data process-rows})))
-    (let [schema-rows (schema-row-changes @connection forms (java.util.Date.))]
+    (let [schema-rows (schema-row-changes @connection forms)]
       (when (seq schema-rows)
         (d/transact connection
                     {:tx-data schema-rows
