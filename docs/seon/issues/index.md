@@ -31,7 +31,7 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (68)
+## Friction (69)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -103,6 +103,7 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
 | [Delete schema-row creation clocks from retained snapshots](schema-created-at-multiplies-nonsemantic-provenance.md) | friction | eval-scale economics wave |
+| [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 
 ## Cleanup (12)
 

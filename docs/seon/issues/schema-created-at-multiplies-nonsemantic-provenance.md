@@ -32,10 +32,26 @@ This is inherited fork-parent data, not agent-authored payload, but it is the
 largest contributor to the physical per-sample delta because fused roots carry
 it forward.
 
+The 2026-08-02 reader census found exactly eight fresh-source literals: four in
+`src/seon/schema.clj`, three in `src/seon/cluster.clj`, and one in
+`resources/seon/schema.edn`. No Datalog query reads the attribute and no fresh
+test names it. The only database read is reconciliation preserving the first
+value. Runtime projection, provenance, namespace rendering, and program-row
+replacement use key/form/asserting-transaction facts instead. The complete
+evidence and a physical deletion cell are in
+`docs/prds/sci-execution-runtime/research/store-census-reductions-2026-08-02.md`.
+
+That cell removed 5,018,204 B / 31.533% from its controlled retained-snapshot
+workload. This proves the deletion mechanism; the eval-scale target remains
+the census's exact 187,360,394 B allocation until a fresh 198-sample replay.
+
 ## Owner
 
 `seon.schema/canonical-schema-rows` owns the row shape;
 `seon.cluster/schema-row-changes` owns source-population reconciliation.
+The coordinated deletion also removes the epoch argument at
+`src/seon/fn.clj:687-723`. Removing only the schema EDN field is invalid because
+the two surviving writers would transact an uninstalled attribute.
 
 ## Acceptance
 

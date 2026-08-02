@@ -29,6 +29,12 @@ per-sample physical delta. Content-addressed child nodes are shared, but the
 fused roots embedded in each retained database record contain inherited datoms
 again. The validated snapshot model predicts exactly this.
 
+The reduction follow-up is [[store-census-reductions-2026-08-02]]. It lands
+the seven measured no-history declarations, explains why unfusing roots does
+not remove changed-node retention, proves the production result splitter at
+4,096 against 65,536, and records the coordinated owner boundary for deleting
+`:seon.schema/created-at`.
+
 ## Scope and dependency ledger
 
 This census applies, rather than re-derives, the model validated in
@@ -240,7 +246,7 @@ evidence, but store its content-addressed digest and size on the capture. Debug
 and forensic readers should resolve the blob. Repair `seon.context`; do not add
 a second splitter.
 
-### 3. Mark measured append-once payload attributes `:db/noHistory`
+### 3. Mark measured append-once payload attributes `:db/noHistory` — applied
 
 These values are current facts whose old values have no independent meaning.
 Datahike keeps their current datoms while omitting temporal datoms
@@ -262,7 +268,12 @@ reclaims old immutable commits; acceptance needs a fresh eval root plus the
 existing cutoff-GC plan. Identity/ref attributes are excluded because
 historical topology and routing depend on them.
 
-### 4. Restore 65,536 until the real splitter is swept
+Commit `041540fb8` applies all seven declarations. The selected-198 exact
+census counterfactual is now 1,827,000,597 B / 9.227 MB per sample. A
+controlled physical replay and focused 81-test gate are recorded in
+[[store-census-reductions-2026-08-02]].
+
+### 4. Keep 4,096 after the production splitter sweep
 
 The validated model has no 4,096-character knee. If payload `P` were replaced
 only by a 64-character digest across the run's average 66.69 commits, the
@@ -270,16 +281,16 @@ shallow model's average repetition coefficient is about 139.37 and the
 storage-only break-even is approximately
 `139.37 * 64 / (139.37 - 1) = 64.46` characters. That is only a mathematical
 lower bound: the real path also persists a bounded result window and size,
-writes and reads a blob, and crosses deeper index nodes. The model implies no
-defensible universal 4,096 value; the threshold depends on remaining commits
-and the window/digest representation.
+writes and reads a blob, and crosses deeper index nodes.
 
-Restore **65,536**, the last threshold backed by the separate admission-cost
-probe, until a controlled replay sweeps the actual result/window/blob path and
-reports total store bytes plus read latency. This run shows that 65,536 leaves
-all results inline, but does not prove it storage-optimal. The corrected anatomy
-removes the rationale for 4,096 without proving 4,096 harmful. Prompt capture
-must be fixed independently because no threshold reaches it.
+The committed follow-up now sweeps the production result splitter at the
+measured 67-commit/sample shape. With the census's observed split proportion,
+4,096 grew 1,277,558 B and split six results; 65,536 grew 1,572,238 B and split
+none. The 4,096 cell saved 294,680 B / 18.743%. Thresholds 64 through 4,096
+split the same six values and differed by only 401 B, so lowering further would
+widen blob use without measured benefit. Keep **4,096**, replacing its
+disproved 86× provenance with this result. Prompt capture must still be fixed
+independently because no threshold reaches it.
 
 ### 5. Reduce commits and retain fewer snapshots
 

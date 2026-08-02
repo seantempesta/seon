@@ -93,7 +93,16 @@ The zero-byte blob result is now explained. All 198 archived attempts used
 threshold 65,536 and disabled reasoning; no split-eligible result exceeded
 65,536 characters. Prompts never consult the result/reasoning splitter:
 `seon.context/capture-tx` writes the exact string inline. The current 4,096
-threshold landed after this run and remains unjustified, not proven wrong.
+threshold landed after this run and was unjustified rather than proven wrong
+until the follow-up below.
+
+The committed follow-up in
+`docs/prds/sci-execution-runtime/research/store-census-reductions-2026-08-02.md`
+now supplies that missing production-splitter measurement. At the measured
+67-commit/sample shape, 4,096 grew 1,277,558 B versus 1,572,238 B at 65,536,
+saving 294,680 B / 18.743% while splitting six observed-shape results. Keep
+4,096; replace `config/default.edn`'s disproved 86× provenance at its config
+owner.
 
 Measured `:db/noHistory` candidates account for 111,931,217 temporal bytes:
 result EDN, prompt capture until its blob cutover, frozen form source, captured
@@ -101,6 +110,12 @@ output, message content, attempt settings, and attempt usage. New owner notes
 track the two largest structural removals:
 [[schema-created-at-multiplies-nonsemantic-provenance]] and
 [[context-capture-prompts-bypass-the-blob-splitter]].
+
+Commit `041540fb8` applies all seven measured declarations. The exact selected
+counterfactual is 1,827,000,597 B / 9.227 MB per sample, a 111,931,217 B /
+5.773% reduction. This is an exact subtraction from the validated physical
+census plus a controlled before/after mechanism proof, not a fresh external-
+model replay.
 
 The roots report five completions beyond the selected archive. Selected plus
 those extras leaves a 41,494,099 B / 2.03% whole-growth reconciliation
