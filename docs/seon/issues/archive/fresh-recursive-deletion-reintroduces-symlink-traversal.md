@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, testing, tooling, deletion]
 ---
@@ -58,3 +58,9 @@ use `seon.test-support/delete-recursively!` rather than local copies.
   a symlink to an external sentinel and proves the sentinel survives.
 - The existing shared test-support sentinel remains green, and a repository-
   wide search finds no new private recursive-delete implementation.
+
+Resolved by `a4f739333`: `seon.fs` is the one no-follow deletion owner
+(refuses escape from its own root, deletes link entries without
+traversal); store/export and every unsafe test walker converted with
+local copies deleted; sentinel regressions recur at the owner. Safety
+gate 26/87/0.
