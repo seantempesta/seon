@@ -909,9 +909,10 @@
   "Bind loaded first-party namespaces as their actual compiled JVM Vars.
 
   Namespace membership is the intersection of core-provenanced program rows
-  and Clojure's loaded namespace set. `ns-interns` supplies the namespace's
-  real Vars, not copied roots, so a re-evaluated `defn` changes the next host
-  call without reacquisition.
+  and Clojure's loaded namespace set. `ns-publics` supplies the namespace's
+  public real Vars, not copied roots, so a re-evaluated `defn` changes the next
+  host call without reacquisition. Private implementation Vars are excluded in
+  agreement with every program-graph projection of the agent-facing surface.
 
   Safety residual from ruling #20: once execution enters one compiled host
   call, SCI's interrupt hook sees no interpreted function entrance. Runaway
@@ -929,7 +930,7 @@
     (doseq [namespace-name (sort-by str first-party-names)
             :let [host-namespace (get loaded-by-name namespace-name)]
             :when host-namespace]
-      (sci/add-namespace! ctx namespace-name (ns-interns host-namespace)))))
+      (sci/add-namespace! ctx namespace-name (ns-publics host-namespace)))))
 
 (defn- program-documentation
   "Public function documentation derived from one database value."
