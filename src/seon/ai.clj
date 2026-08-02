@@ -395,6 +395,56 @@
           ;; with the builder's ACTUAL emitted keys have been refused.
           (merge builder-body extra))))))
 
+(defn- invalid-optional-string?
+  [document field]
+  (and (map? document)
+       (contains? document field)
+       (some? (get document field))
+       (not (string? (get document field)))))
+
+(defn- unreadable-stream-data
+  [payload reason]
+  {:seon.error/kind ::unparseable-body
+   :seon.error/message
+   (str "The provider stream carried unreadable data: " reason ".")
+   :seon.error/data
+   {::body (subs payload 0 (min 500 (count payload)))}})
+
+(defn- stream-chunk-error
+  [payload document]
+  (let [choices (when (map? document) (get document "choices"))
+        choice (when (sequential? choices) (first choices))
+        delta (when (map? choice) (get choice "delta"))
+        usage (when (map? document) (get document "usage"))
+        reason
+        (cond
+          (not (map? document)) "the JSON value was not an object"
+          (some? (get document "error"))
+          "the provider returned an error document"
+          (and (contains? document "choices")
+               (some? choices)
+               (not (sequential? choices)))
+          "the choices field was not an array"
+          (and (seq choices) (not (map? choice)))
+          "the first choice was not an object"
+          (and (map? choice)
+               (contains? choice "delta")
+               (some? delta)
+               (not (map? delta)))
+          "the choice delta was not an object"
+          (invalid-optional-string? delta "content")
+          "the content delta was not text"
+          (invalid-optional-string? delta "reasoning_content")
+          "the reasoning delta was not text"
+          (invalid-optional-string? choice "finish_reason")
+          "the finish reason was not text"
+          (and (contains? document "usage")
+               (some? usage)
+               (not (map? usage)))
+          "the usage field was not an object")]
+    (when reason
+      (unreadable-stream-data payload reason))))
+
 (defn stream-event
   "One SSE line folded into the accumulating snapshot. PURE.
 
@@ -410,47 +460,58 @@
   as the NEWEST seen, independently of choices, and neither shape is
   assumed.
 
-  A line this cannot read is SKIPPED rather than fatal. A provider that
-  sends a keep-alive comment, a blank line, or one malformed chunk has
-  not failed the call, and turning presentation noise into a call
-  failure would be the streaming path breaking the invariant it exists
-  under."
-  {:malli/schema [:=> [:cat :seon.ai/partial :string] :seon.ai/partial]}
+  Content-free protocol lines are skipped: comments, blank lines,
+  `[DONE]`, and non-data SSE fields lose nothing. A nonblank `data:`
+  payload that is not readable provider JSON returns a flat error.
+  Dropping it would join text from either side into bytes the provider
+  never sent, so the fold must stop before another delta is accepted."
+  {:malli/schema [:=> [:cat :seon.ai/partial :string]
+                  [:or :seon.ai/partial :seon.error/value]]}
   [snapshot line]
   (let [payload (when (str/starts-with? line "data:")
                   (str/trim (subs line 5)))]
     (if (or (nil? payload) (= "[DONE]" payload) (str/blank? payload))
       snapshot
-      (let [chunk (try (json/read-str payload) (catch Throwable _ nil))
-            choice (some-> chunk (get "choices") first)
-            delta-document (some-> choice (get "delta"))
-            delta (some-> delta-document (get "content"))
-            reasoning-delta (some-> delta-document (get "reasoning_content"))
-            finish-reason (some-> choice (get "finish_reason"))
-            usage (get chunk "usage")
-            text (cond-> (:seon.ai/text snapshot)
-                   (string? delta) (str delta))
-            reasoning (when (or (contains? snapshot :seon.ai/reasoning-partial)
-                                (string? reasoning-delta))
-                        (str (:seon.ai/reasoning-partial snapshot)
-                             reasoning-delta))]
-        (cond-> (assoc snapshot :seon.ai/text text)
-          (some? reasoning)
-          (assoc :seon.ai/reasoning-partial reasoning)
-          ;; newest usage wins, and only when the provider sent one
-          (map? usage) (assoc :seon.ai/usage usage)
-          (string? finish-reason)
-          (assoc :seon.ai/finish-reason finish-reason)
-          ;; THE LIVE TOKEN COUNT, from the same fold rather than a
-          ;; second mechanism: the provider's own completion count when
-          ;; it has told us, and the chunk count until then — which is
-          ;; exactly one token per chunk for every provider we speak to,
-          ;; and is honestly an approximation rather than a promise.
-          true (assoc :seon.ai/tokens
-                      (or (some-> usage (get "completion_tokens"))
-                          (:seon.ai/tokens (update snapshot :seon.ai/tokens
-                                                   (fnil inc 0)))
-                          0)))))))
+      (let [document (try
+                       (json/read-str payload)
+                       (catch Throwable failure
+                         (unreadable-stream-data payload
+                                                 (ex-message failure))))]
+        (if (:seon.error/kind document)
+          document
+          (if-let [failure (stream-chunk-error payload document)]
+            failure
+            (let [choice (some-> document (get "choices") first)
+                  delta-document (some-> choice (get "delta"))
+                  delta (some-> delta-document (get "content"))
+                  reasoning-delta
+                  (some-> delta-document (get "reasoning_content"))
+                  finish-reason (some-> choice (get "finish_reason"))
+                  usage (get document "usage")
+                  text (cond-> (:seon.ai/text snapshot)
+                         (string? delta) (str delta))
+                  reasoning
+                  (when (or (contains? snapshot :seon.ai/reasoning-partial)
+                            (string? reasoning-delta))
+                    (str (:seon.ai/reasoning-partial snapshot)
+                         reasoning-delta))]
+              (cond-> (assoc snapshot :seon.ai/text text)
+                (some? reasoning)
+                (assoc :seon.ai/reasoning-partial reasoning)
+                ;; newest usage wins, and only when the provider sent one
+                (map? usage) (assoc :seon.ai/usage usage)
+                (string? finish-reason)
+                (assoc :seon.ai/finish-reason finish-reason)
+                ;; THE LIVE TOKEN COUNT, from the same fold rather than a
+                ;; second mechanism: the provider's own completion count when
+                ;; it has told us, and the chunk count until then — which is
+                ;; exactly one token per chunk for every provider we speak to,
+                ;; and is honestly an approximation rather than a promise.
+                true (assoc :seon.ai/tokens
+                            (or (some-> usage (get "completion_tokens"))
+                                (:seon.ai/tokens
+                                 (update snapshot :seon.ai/tokens (fnil inc 0)))
+                                0))))))))))
 
 (defn stream-fold
   "Fold SSE `lines` into one snapshot, publishing to `sink` as it goes.
@@ -462,20 +523,25 @@
   broken; it may never affect transport, parsing, usage, or evaluation,
   which is the invariant streaming lives under.
 
-  Returns the final snapshot. The caller turns it into a completion, so
-  a streamed call and a one-shot call are the same value downstream."
+  Returns the final snapshot or the first flat data error. The caller
+  turns that value into a completion, so a streamed call and a one-shot
+  call keep the same success/error boundary downstream."
   {:malli/schema [:=> [:cat [:sequential :string] [:maybe :seon.ai/sink]]
-                  :seon.ai/partial]}
+                  [:or :seon.ai/partial :seon.error/value]]}
   [lines sink]
   (reduce (fn [snapshot line]
             (let [next-snapshot (stream-event snapshot line)]
-              (when (and sink
-                         (or (not= (:seon.ai/text snapshot)
-                                   (:seon.ai/text next-snapshot))
-                             (not= (:seon.ai/reasoning-partial snapshot)
-                                   (:seon.ai/reasoning-partial next-snapshot))))
-                (try (sink next-snapshot) (catch Throwable _ nil)))
-              next-snapshot))
+              (if (:seon.error/kind next-snapshot)
+                (reduced next-snapshot)
+                (do
+                  (when (and sink
+                             (or (not= (:seon.ai/text snapshot)
+                                       (:seon.ai/text next-snapshot))
+                                 (not= (:seon.ai/reasoning-partial snapshot)
+                                       (:seon.ai/reasoning-partial
+                                        next-snapshot))))
+                    (try (sink next-snapshot) (catch Throwable _ nil)))
+                  next-snapshot))))
           {:seon.ai/text "" :seon.ai/tokens 0}
           lines))
 
@@ -488,6 +554,18 @@
                    (assoc ::finish-reason finish-reason)
                    (map? usage) (assoc ::usage usage))]
     (cond
+      (and (some? content) (not (string? content)))
+      {:seon.error/kind ::unparseable-body
+       :seon.error/message
+       "The provider's assistant content was not text."
+       :seon.error/data evidence}
+
+      (and (some? reasoning-content) (not (string? reasoning-content)))
+      {:seon.error/kind ::unparseable-body
+       :seon.error/message
+       "The provider's assistant reasoning was not text."
+       :seon.error/data evidence}
+
       (and (= "length" finish-reason) (str/blank? content))
       {:seon.error/kind ::token-starvation
        :seon.error/message
@@ -517,22 +595,27 @@
   would read downstream as an empty reply."
   {:malli/schema [:=> [:cat :any] :seon.ai/completion]}
   [body]
-  (let [choice (when (map? body) (some-> (get body "choices") first))
-        message (some-> choice (get "message"))
-        content (some-> message (get "content"))
-        reasoning-content (some-> message (get "reasoning_content"))
-        finish-reason (some-> choice (get "finish_reason"))
-        usage (when (map? body) (get body "usage"))]
-    (parsed-completion
-     content
-     reasoning-content
-     finish-reason
-     usage
-     (some-> usage (get "completion_tokens"))
-     (cond
-       (map? body) (vec (sort (keys body)))
-       (nil? body) ::nil
-       :else (str (class body))))))
+  (let [body-shape (cond
+                     (map? body) (vec (sort (keys body)))
+                     (nil? body) ::nil
+                     :else (str (class body)))]
+    (if (and (map? body) (some? (get body "error")))
+      {:seon.error/kind ::unparseable-body
+       :seon.error/message "The provider returned an error document."
+       :seon.error/data {::body-shape body-shape}}
+      (let [choice (when (map? body) (some-> (get body "choices") first))
+            message (some-> choice (get "message"))
+            content (some-> message (get "content"))
+            reasoning-content (some-> message (get "reasoning_content"))
+            finish-reason (some-> choice (get "finish_reason"))
+            usage (when (map? body) (get body "usage"))]
+        (parsed-completion
+         content
+         reasoning-content
+         finish-reason
+         usage
+         (some-> usage (get "completion_tokens"))
+         body-shape)))))
 
 (defn normalize-usage
   "Comparable token counts derived from one open provider usage document."
@@ -682,13 +765,15 @@
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
     (let [snapshot (stream-fold (line-seq reader) sink)]
-      (parsed-completion
-       (:seon.ai/text snapshot)
-       (:seon.ai/reasoning-partial snapshot)
-       (:seon.ai/finish-reason snapshot)
-       (:seon.ai/usage snapshot)
-       (:seon.ai/tokens snapshot)
-       ::empty-stream))))
+      (if (:seon.error/kind snapshot)
+        snapshot
+        (parsed-completion
+         (:seon.ai/text snapshot)
+         (:seon.ai/reasoning-partial snapshot)
+         (:seon.ai/finish-reason snapshot)
+         (:seon.ai/usage snapshot)
+         (:seon.ai/tokens snapshot)
+         ::empty-stream)))))
 
 (defn- http-request-data
   "Ordinary request data for the JDK leaf."

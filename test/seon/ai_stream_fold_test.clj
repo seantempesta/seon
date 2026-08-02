@@ -114,14 +114,38 @@
     (is (= "ab" (:seon.ai/text snapshot)))
     (is (= 2 (:seon.ai/tokens snapshot)))))
 
-(deftest unreadable-lines-are-skipped-and-never-fatal
-  ;; A keep-alive comment, a blank line, or one malformed chunk has not
-  ;; failed the call. Turning presentation noise into a call failure
-  ;; would be the streaming path breaking its own invariant.
-  (let [noisy (concat [":comment" "" "data: {not json" "garbage"]
-                      lines
-                      ["data: {\"choices\":[{\"delta\":{}}]}"])]
-    (is (= "Hello, world" (:seon.ai/text (ai/stream-fold noisy nil))))))
+(deftest presentation-noise-is-silent-but-malformed-data-refuses-the-stream
+  (testing "comments, blank lines, non-data fields, and [DONE] lose no content"
+    (let [noisy (concat [":comment" "" "garbage"]
+                        lines
+                        ["data: {\"choices\":[{\"delta\":{}}]}"])]
+      (is (= "Hello, world" (:seon.ai/text (ai/stream-fold noisy nil))))))
+  (testing "damaged content-bearing JSON cannot splice valid code around it"
+    (let [content-line (content-chunk " unsafe")
+          malformed-lines
+          [(str/replace-first content-line "\"choices\"" "\"choices")
+           "data: {not json"
+           (subs content-line 0 (- (count content-line) 2))
+           "data: {\"choices\":[{\"delta\":{\"content\":123}}]}"
+           "data: {\"error\":{\"message\":\"provider failed\"}}"]
+          prefix (content-chunk "(my.run/complete \"safe")
+          suffix (content-chunk "\")")]
+      (doseq [malformed malformed-lines]
+        (let [result (ai/stream-fold [prefix malformed suffix] nil)]
+          (is (= :seon.ai/unparseable-body (:seon.error/kind result))
+              (str "malformed data must refuse the stream: " malformed))
+          (is (= (subs malformed 6) (:seon.ai/body (:seon.error/data result))))
+          (is (not (contains? result :seon.ai/text))
+              "a partial reply must not retain the completion success shape")))))
+  (testing "the parallel reasoning-content path refuses at the same fold"
+    (let [result (ai/stream-fold [(reasoning-chunk "first")
+                                  (str "data: {\"choices\":[{\"delta\":"
+                                       "{\"reasoning_content\":123}}]}")
+                                  (reasoning-chunk "second")
+                                  (content-chunk "(my.run/complete :safe)")]
+                                 nil)]
+      (is (= :seon.ai/unparseable-body (:seon.error/kind result)))
+      (is (not (contains? result :seon.ai/reasoning-partial))))))
 
 (deftest the-fold-is-total-over-arbitrary-lines
   (support/assert-check!
@@ -131,6 +155,23 @@
       (map? (ai/stream-fold text nil)))
     :seed 202607280301)
    "fold totality failed:"))
+
+(deftest one-shot-replies-refuse-present-malformed-assistant-fields
+  (testing "a malformed reasoning field cannot hide behind valid executable text"
+    (let [completion
+          (ai/completion-text
+           {"choices"
+            [{"message" {"content" "(my.run/complete :safe)"
+                          "reasoning_content" 123}}]})]
+      (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+      (is (not (contains? completion :seon.ai/text)))))
+  (testing "a provider error document cannot hide behind a completion"
+    (let [completion
+          (ai/completion-text
+           {"error" {"message" "provider failed"}
+            "choices" [{"message" {"content" "(my.run/complete :safe)"}}]})]
+      (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+      (is (not (contains? completion :seon.ai/text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Presentation cannot affect the answer
@@ -194,6 +235,29 @@
           :seon.ai/prompt "hello"
           :seon.ai/timeout-ms 5000}
          extra))
+
+(deftest a-malformed-stream-settles-as-an-evidenced-flat-error
+  (let [prefix (content-chunk "(my.run/complete \"safe")
+        malformed "data: {not json"
+        suffix (content-chunk "\")")]
+    (with-provider {:body (str/join "\n" [prefix malformed suffix])}
+      (fn [endpoint]
+        (let [completion (ai/complete
+                          (request endpoint {:seon.ai/stream? true}))
+              evidence (:seon.error/data completion)]
+          (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
+          (is (not (contains? completion :seon.ai/text))
+              "the reconstructed program must never be a completion")
+          (is (= "{not json" (:seon.ai/body evidence)))
+          (is (= 200 (:seon.ai/http-status evidence)))
+          (is (= :response (:seon.ai/error-class evidence)))
+          (is (true? (:seon.ai/request-transmitted? evidence)))
+          (is (true? (:seon.ai/response-started? evidence)))
+          (is (true? (:seon.ai/output-observed? evidence)))
+          (is (= :fail
+                 (ai/disposition {:seon.error/value completion
+                                  :seon.ai/backup? true}))
+              "corrupted paid output never retries or fails over"))))))
 
 (deftest a-streamed-call-returns-the-same-shape-as-a-one-shot-call
   ;; Downstream — the disposition, the attempt facts, the loop — must
