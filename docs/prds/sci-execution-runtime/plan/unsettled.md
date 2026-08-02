@@ -102,6 +102,14 @@ orchestrator before acceptance:
 - STORE ANATOMY — see ADDENDUM 18. Both quoted figures disproven, the
   replacement model validated to 0.05%.
 
+FULL SUITE AT THIS CHECKPOINT: **840 tests / 4,164 assertions / 0
+failures / 0 errors** (previous known green: 823/4,062). Caveat stated
+honestly: this ran while five lanes were editing the tree, so it is a
+green at a moment, not a frozen-tree green — judge a release green only
+on a quiet tree. The run also demonstrates the liveness work: per-test
+BEGIN/END progress lines, and the isolated operator root removed on
+success.
+
 OPEN, IN PRIORITY ORDER, none blocked by another:
 1. The custody residue on
    `agent-evals-reach-every-cluster-and-the-runtime-roots.md`:
