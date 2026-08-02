@@ -16,13 +16,14 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Run agent renderers through the guarded SCI program context](agent-renderers-never-enter-the-sci-program-context.md) | blocker | SCI render-execution design gate |
+| [Stop installing private vars so agents cannot reach other clusters or the runtime roots](agent-evals-reach-every-cluster-and-the-runtime-roots.md) | blocker | custody/isolation wave |
 | [Make `seon.db` the one agent-first database namespace and route everything through it](seon-db-is-not-the-one-database-namespace.md) | blocker | seon.db wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
 | [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
