@@ -719,10 +719,18 @@ Register shared shapes once and reference them. If the Malli→Datahike bridge
 cannot express the required referenced shape, fix the bridge rather than
 inlining copies.
 
-`seon.db` is the synchronous application read facade (`q`, `pull`, and
-`pull-many`). Durable writes are co-located with the branch connection at
-`seon.cluster.store/transact!`; system transition owners call that seam or
-return transaction data. There is no pod, remote replica, or second writer.
+`seon.db` is the ONE database namespace (owner ruling 2026-08-02 #41):
+all of Datahike's core data functions, agent-first — optional explicit
+db/connection first argument, ambient cluster-connection default,
+errors-as-values, SCI-admit-clean returns. All first-party code calls
+`seon.db`, never `datahike.api` directly; only `seon.db` itself plus the
+store/registry custody owners (flock, open/release, branch management)
+require `datahike.api`. MIGRATION IN FLIGHT: until the facade wave lands
+(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`),
+`transact!` still lives at `seon.cluster.store/transact!` and today's
+`seon.db` exposes only `q`/`pull`/`pull-many` — new code targets the
+ruling's shape, never adds a new direct `datahike.api` call site. There
+is no pod, remote replica, or second writer.
 
 An explicitly selected config manifest reconciles its declared subset into
 database facts. Runtime reads the database, not environment variables or the

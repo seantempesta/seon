@@ -1815,6 +1815,42 @@ may reintroduce a shadow build into the dev feedback path.
   OWNER DECISION OPEN: whether slice 1 ships FORMS ONLY (smaller, strictly
   more faithful, still passes the 200k acceptance) with the value/blob
   path as a later accretion.
+  **Ruling 2026-08-02 #41 (owner, afternoon): SEON.DB IS THE ONE
+  DATABASE NAMESPACE, AGENT-FIRST, AND EVERYTHING GOES THROUGH IT.**
+  Owner verbatim: agents "are supposed to be able to use all datahike's
+  core functions and they were all supposed to be in seon.db", written
+  knowing "they are mostly being run by agents in SCI contexts"; the
+  seon.db functions "don't require a conn to be passed — it assumes the
+  current db, and it should be doing that for that agent's cluster";
+  and agents "should be able to transact ANY attribute as long as it's
+  valid and passes the schema validation". Decisions: (1) `transact!`
+  MOVES from `seon.cluster.store` into `seon.db`, keeping its
+  never-throw four-outcome contract, the Integer→Long walk, and the
+  schema encode; store retains only store/branch/flock custody and
+  registry retains branch management (connect/release/create-database/
+  branches/branch!/delete-branch!/gc-storage are custody, not core data
+  functions). (2) seon.db gains the missing core surface: `entity`,
+  `datoms`, `db`, and the time-travel reads `history`/`as-of`/`since`
+  ("I really want time travel features"); `listen!` stays system-side —
+  wakes own reactivity, and a listener registered inside an eval is
+  process-local state the crash model cannot recover. (3) Every
+  function: optional explicit db/connection first argument, ambient
+  cluster default (the per-eval `seon.db/*conn*` binding blocker makes
+  the default real for agents), errors-as-values, evidence capture, and
+  SCI-admit-clean returns — no lazy index seqs or opaque Entity objects
+  into agent context. (4) SWEEP SCOPE IS EVERYTHING: all first-party
+  code migrates to seon.db — one idiom, because core source renders
+  into agent context and must model the surface agents should use.
+  Measured drift at ruling time: seon.db was required by exactly ONE
+  namespace (render.clj); 34 namespaces call datahike.api directly (143
+  d/q, 48 d/pull); 16 d/transact sites bypass even store/transact!,
+  including runtime writes (render/web.clj message submission,
+  reconcile.cljc). Each write site is classified individually before
+  migration — boot-time installs have their own failure semantics —
+  never regex-swept. Sequencing: MCP probe-surface fix first (owner
+  order), then the ambient-connection blocker, then the facade
+  move+completion, then the call-site sweep after the consolidation
+  lane's in-flight files land.
   **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
   PERSISTENCE — restrict nothing an agent can call; gate only what it
   may persist.** The session is a faithful Clojure REPL first: a def an

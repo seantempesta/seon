@@ -16,11 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (8)
+## Blocker (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Bind the agent's cluster connection for ambient `seon.db` reads and writes](agent-evals-never-bind-the-ambient-cluster-connection.md) | blocker | ambient-connection fix lane |
+| [Make `seon.db` the one agent-first database namespace and route everything through it](seon-db-is-not-the-one-database-namespace.md) | blocker | seon.db facade wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
 | [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
