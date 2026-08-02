@@ -109,12 +109,12 @@ fi
 
 git_sha=$(git rev-parse HEAD)
 
-# A suite is a complete isolated operator root and working directory. The
-# checkout's tracked top-level entries are projected as symlinks so source and
-# dependency code remain live, while every relative mutable root is private to
-# this invocation. The shared dependency class cache is projected read-only in
-# practice: the test gate consumes it, while only the separate :dev-cache alias
-# writes it.
+# A suite is a complete isolated operator root and working directory. Fresh
+# first-party roots are copy-on-write clones so canonical-path analysis sees a
+# real checkout, not paths escaping through symlinks. Large dependencies and
+# documentation are projected read-only in practice; every relative mutable
+# root is private to this invocation. Only the separate :dev-cache alias writes
+# the shared dependency class cache.
 run_parent=${SEON_TEST_RUN_PARENT:-$source_root/tmp/test-runs}
 mkdir -p "$run_parent"
 run_parent=$(cd "$run_parent" && pwd -P)
@@ -124,6 +124,13 @@ mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
 while IFS= read -r entry; do
   case "$entry" in
     data|logs|target|tmp) ;;
+    bin|config|resources|script|src|test)
+      case "$(uname -s)" in
+        Darwin) cp -cR "$source_root/$entry" "$run_root/$entry" ;;
+        Linux) cp -a --reflink=auto "$source_root/$entry" "$run_root/$entry" ;;
+        *) cp -pR "$source_root/$entry" "$run_root/$entry" ;;
+      esac
+      ;;
     *) ln -s "$source_root/$entry" "$run_root/$entry" ;;
   esac
 done < <(git -C "$source_root" ls-files | awk -F/ '{print $1}' | sort -u)
