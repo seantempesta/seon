@@ -83,8 +83,8 @@
   THE CTX IS SUPPLIED, NOT BUILT HERE. `build-base-ctx` is the minimum
   N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus the two `my.run` dispositions and both `my.message` values — and a
-  caller may pass its own. `acquire!` then intersects core-provenanced
+  plus bare `help`, the two `my.run` dispositions, and both `my.message`
+  values — and a caller may pass its own. `acquire!` then intersects core-provenanced
   program namespaces with the JVM's loaded namespace set and binds their
   actual compiled Vars. The set is computed, never listed. Agent-authored
   program rows retain the interpreted installation path after those host
@@ -109,6 +109,7 @@
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.blob :as blob]
+            [seon.bootstrap :as bootstrap]
             [seon.config :as config]
             [seon.error :as error]
             [seon.instrument :as instrument]
@@ -158,6 +159,7 @@
   (let [guard @process-interrupt-guard
         run-ns (sci/create-ns 'my.run)
         message-ns (sci/create-ns 'my.message)
+        core-ns (sci/create-ns 'clojure.core)
         schema-ns (sci/create-ns 'seon.schema)
         test-ns (sci/create-ns 'clojure.test)
         ctx
@@ -205,14 +207,24 @@
          :classes {'Throwable Throwable
                    'java.lang.Throwable Throwable
                    'Error Error
-                   'java.lang.Error Error}})]
+                   'java.lang.Error Error}})
+        help-fn
+        (sci/binding [sci/ns core-ns]
+          (sci/eval-string*
+           ctx
+           (str "(fn help [] (print " (pr-str bootstrap/help-text) "))")))]
     ;; `dir` and `doc` are REPL operations, so every namespace resolves
     ;; them bare through the same clojure.core refer it already receives.
     ;; `acquire!` replaces only `doc` with its program-row-derived macro.
     (sci/add-namespace!
      ctx 'clojure.core
-     {'dir (sci/resolve ctx 'clojure.repl/dir)
-      'doc (sci/resolve ctx 'clojure.repl/doc)})
+      {'dir (sci/resolve ctx 'clojure.repl/dir)
+      'doc (sci/resolve ctx 'clojure.repl/doc)
+      'help (sci/new-var
+             'help help-fn
+             {:ns core-ns
+              :doc "Print the guide to this REPL and its run loop."
+              :arglists '([])})})
     (assoc ctx ::interrupt-guard guard)))
 
 (defn agent-namespace

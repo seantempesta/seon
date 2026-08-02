@@ -29,6 +29,7 @@
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -887,15 +888,21 @@
   "Create an absent agent inside the transaction; otherwise change nothing."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
+         :seon.cluster.run/process
+         :inst
          :seon.cluster.agent/creation-request]
     :seon.store/transaction-data]}
-  [db {agent-id :seon.cluster.agent/id :as request}]
+  [db process now {agent-id :seon.cluster.agent/id :as request}]
   (if (d/q '[:find ?agent .
              :in $ ?agent-id
              :where [?agent :seon.cluster.agent/id ?agent-id]]
            db agent-id)
     []
-    (cluster.agent/creation-tx request)))
+    (into (cluster.agent/creation-tx request)
+          (bootstrap/seed-tx
+           (assoc request
+                  :seon.cluster.run/process process
+                  :seon.cluster.run/opened-at now)))))
 
 (defn ensure-entity!
   "Create one absent agent atomically; an existing agent resumes untouched."
@@ -907,7 +914,8 @@
   [connection process request]
   (store/transact!
    connection
-   {:tx-data [[:db.fn/call #'ensure-entity-call request]]
+   {:tx-data [[:db.fn/call #'ensure-entity-call
+               process (java.util.Date.) request]]
     :tx-meta {:seon.db/process [:seon.db.process/id process]}}))
 
 (defn- seed-root-agent!

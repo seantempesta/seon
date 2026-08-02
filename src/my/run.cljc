@@ -68,16 +68,9 @@
 
 (defn complete
   "Finish this run with the reply the agent wants delivered.
-  The loop closes the run in the terminal transaction; the result is
-  durable there as the last form's `result-edn` (the disposition IS the
-  final value), so there is no `:seon.cluster.run/result` attribute and
-  no completion message — N3 has no addressable recipient, and delivery
-  to a human is the messaging rung's business (seal revision
-  2026-07-27: the earlier sentence promised a message ahead of any
-  mechanism that could carry one).
-  Blank text returns the ONE registered flat error value
-  (`:seon.error/value`) — something the agent can see and correct on its
-  next turn, never a throw. One error shape, one owner (error.edn)."
+
+  Returns a completion value the run loop records with the final receipt.
+  Blank text returns a flat error value the agent can inspect and repair."
   {:malli/schema [:=> [:cat :my.run/result]
                   [:or :my.run/completed :seon.error/value]]}
   [result]
