@@ -312,6 +312,11 @@
           (vreset! grading-branch*
                    (:seon.eval.drive/grading-branch report))
           (assoc report :seon.eval.drive/sample-id sample-id)))
+      (catch Throwable failure
+        (when-let [instance (:seon.boot/instance (ex-data failure))]
+          (vreset! instance* instance)
+          (vreset! store* (:seon.store/store instance)))
+        (throw failure))
       (finally
         (when-let [instance @instance*]
           (cluster/stop! instance))
