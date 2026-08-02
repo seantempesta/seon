@@ -532,4 +532,4 @@
     ;; MIGRATED 2026-07-29 (generate-code v0): the reply splitter reads
     ;; through this reader now, which is where its forms get the
     ;; parse-time namespace-in-effect they freeze with.
-    (is (not (contains? sites "src/seon/cluster/reply.cljc")))))
+    (is (not (contains? sites "src/seon/cluster/reply.clj")))))
