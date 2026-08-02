@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, evaluation, deletion, runtime]
 ---
@@ -63,3 +63,18 @@ stays downstream.
   real agent turn, and retains the resulting database facts and scorer output.
 - Mock-only command-shape tests are removed or demoted behind that behavioral
   proof; no test keeps an obsolete entrypoint alive by assertion.
+
+## Resolution
+
+Resolved by `691517def`. The obsolete entrypoint, TB/TB2/SWE-bench adapters,
+shared run-bounds helper, task/catalog registrations, frozen dataset rows and
+manifest, and mock-only tests were deleted as one reader closure. Historical
+run evidence under `evals/runs/` remains archival data, not an executable
+reader.
+
+The same cut removed the stale writer-port read-back functions and their live
+planning/cluster readers rather than translating them into another transport.
+A post-cut search over active evaluation source (excluding historical run and
+PRD evidence) found no adapter, entrypoint, frozen-row, or writer-port reader.
+Focused verification passed 126 tests across catalog, freeze, source admission,
+cluster, and planning.
