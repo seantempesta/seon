@@ -333,10 +333,10 @@
                     (#'loop/settlement-result
                      {:seon.store/branch-connection connection
                       :seon.sci.admit/caps
-                      {:seon.sci.admit/max-depth 64
-                       :seon.sci.admit/max-collection 8192
-                       :seon.sci.admit/max-string 262144
-                       :seon.sci.admit/max-nodes 65536}}
+                      {:seon.config.eval.result/max-depth 64
+                       :seon.config.eval.result/max-collection 8192
+                       :seon.config.eval.result/max-string 262144
+                       :seon.config.eval.result/max-nodes 65536}}
                      {:seon.cluster.eval/result-edn result-edn})
                     _ (when (:seon.cluster.eval/result-blob settlement)
                         (swap! blob-count inc))
