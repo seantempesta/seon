@@ -87,4 +87,4 @@ or environment-driven watchdog configuration path in fresh Seon.
 - `resources/seon/schema.edn` — the one admitted population, including all dials.
 - `config/default.edn` — shipped decisions and provenance.
 - `script/seon/fresh_operator.clj` — operator grammar and live apply path.
-- `src/seon/cluster/loop.cljc` and `src/seon/ai.cljc` — per-turn AI resolution.
+- `src/seon/cluster/loop.clj` and `src/seon/ai.clj` — per-turn AI resolution.

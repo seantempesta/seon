@@ -279,12 +279,7 @@
 
 (defn- coercion-function
   [coercion]
-  #?(:clj (requiring-resolve coercion)
-     :cljs (case coercion
-             clojure.core/identity identity
-             seon.ai/thinking-wire-value thinking-wire-value
-             seon.ai/reasoning-effort-wire-value reasoning-effort-wire-value
-             seon.ai/response-format-wire-value response-format-wire-value)))
+  (requiring-resolve coercion))
 
 ;; DeepSeek documents these controls as silently ignored whenever thinking is
 ;; enabled. This is the one accepted provider constant; a second provider with
@@ -345,7 +340,7 @@
            :seon.error/data {::request-transmitted? false
                              ::response-started? false
                              ::output-observed? false}}))
-      (catch #?(:clj Throwable :cljs :default) failure
+      (catch Throwable failure
         {:seon.error/kind ::invalid-extra-body
          :seon.error/message
          (str "The configured extra body is not readable EDN: "
@@ -574,8 +569,7 @@
   ;; would reach the loop as an unclassifiable failure instead of the
   ;; no-credential value the caller already knows how to read
   (when (string? variable)
-    #?(:clj (System/getenv variable)
-       :cljs (some-> js/process .-env (aget variable)))))
+    (System/getenv variable)))
 
 (defn- status-class
   "One HTTP status as a normalized class.

@@ -10,7 +10,7 @@
 
   NAMED ADOPT NOTE (context-blocks contract §9): the contract names the
   adopt as `seon.ai/estimate-tokens`; it lands here as
-  `seon.ai.tokens/estimate` instead because `src/seon/ai.cljc` is
+  `seon.ai.tokens/estimate` instead because `src/seon/ai.clj` is
   another lane's protected owner in this wave and the quarry namespace
   is already the standing name (`seon.ai.tokens/estimate` is the exact
   spelling CLAUDE.md's token rule uses). One estimator, one home, one

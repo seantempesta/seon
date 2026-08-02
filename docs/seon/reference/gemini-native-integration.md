@@ -10,7 +10,7 @@ tags: [reference, agent]
 > positional API, MCP comparison, and multi-namespace provider design are not
 > current or target Seon.
 
-Fresh Seon has one OpenAI-compatible model-call owner in `src/seon/ai.cljc`.
+Fresh Seon has one OpenAI-compatible model-call owner in `src/seon/ai.clj`.
 Current configuration, authentication, request, streaming, disposition, and
 attempt-fact guidance lives in [[llm-adapters]]. Git retains the removed Gemini
 proposal.

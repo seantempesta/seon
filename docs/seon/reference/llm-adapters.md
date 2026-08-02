@@ -6,7 +6,7 @@ tags: [reference, agent, config]
 
 # LLM providers and settings
 
-Fresh Seon has one AI implementation: `src/seon/ai.cljc`. It builds an
+Fresh Seon has one AI implementation: `src/seon/ai.clj`. It builds an
 OpenAI-compatible Chat Completions request, sends it with the JDK HTTP client,
 and returns either one completion value or one flat error value. There are no
 provider adapter namespaces, Node SDK leaves, provider registry, pod-local
@@ -173,9 +173,9 @@ deleted from this maintained reference.
 
 ## Sources checked
 
-- `src/seon/ai.cljc` — settings, target construction, wire mapping, JDK HTTP
+- `src/seon/ai.clj` — settings, target construction, wire mapping, JDK HTTP
   leaf, streaming fold, disposition, and usage normalization.
-- `src/seon/cluster/loop.cljc` — one-resolution-per-turn and durable attempt
+- `src/seon/cluster/loop.clj` — one-resolution-per-turn and durable attempt
   transactions.
 - The config and AI sections of `resources/seon/schema.edn` — provider dials,
   their per-agent metadata, and request/completion/attempt schemas.
