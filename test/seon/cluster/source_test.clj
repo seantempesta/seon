@@ -300,9 +300,13 @@
                         (refusal #(publish opened digest-b
                                            'seon.cluster.source-test/populate-blocked!)))]
             (is (.await entered 10 TimeUnit/SECONDS))
-            (let [c (publish opened digest-c)]
-              (.countDown release)
-              (is (= :stale-branch-head (:type @stale)))
+            (let [c (try
+                      (publish opened digest-c)
+                      (finally
+                        (.countDown release)))
+                  stale-result
+                  (test-support/await-event! stale "stale source publication")]
+              (is (= :stale-branch-head (:type stale-result)))
               (is (= (:seon.source/commit-id c)
                      (:seon.source/commit-id (source/current opened))))
               (is (empty? (scratch-branches opened))))))))))
