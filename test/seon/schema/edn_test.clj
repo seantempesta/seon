@@ -159,18 +159,22 @@
            'seon.schema.edn-test-fixture/late-instant?]}}))))
 
 (deftest register!-flows-through-the-same-gate
-  (testing "the agent producer meets the same honesty bar — one gate,
-            two producers"
-    (is (map? (test-support/refusal-data
-               #(schema/register!
-                 :seon.schema.edn.gate/agent-dishonest
-                 [:fn 'seon.schema.edn-test/fixture-instant?])))))
-  (testing "an honest agent registration still lands"
-    (schema/register!
-     :seon.schema.edn.gate/agent-honest
-     [:fn {:gen/schema :inst}
-      'seon.schema.edn-test/fixture-instant?])
-    (is (schema/registered? :seon.schema.edn.gate/agent-honest))))
+  (let [state (schema/snapshot-state)]
+    (try
+      (testing "the agent producer meets the same honesty bar — one gate,
+                two producers"
+        (is (map? (test-support/refusal-data
+                   #(schema/register!
+                     :seon.schema.edn.gate/agent-dishonest
+                     [:fn 'seon.schema.edn-test/fixture-instant?])))))
+      (testing "an honest agent registration still lands"
+        (schema/register!
+         :seon.schema.edn.gate/agent-honest
+         [:fn {:gen/schema :inst}
+          'seon.schema.edn-test/fixture-instant?])
+        (is (schema/registered? :seon.schema.edn.gate/agent-honest)))
+      (finally
+        (schema/restore-state! state)))))
 
 (deftest one-config-registration-derives-every-structural-contract
   (let [scratch :seon.config.scratch/enabled
