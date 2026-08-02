@@ -19,7 +19,14 @@ Feeds are appropriate for system-wide events: "config changed", "database schema
 
 ## Current Implementation
 
-The cast/signal mechanism exists in core.async.flow (see `reference-code/core.async/`). The `signal-select` pattern appears in the flow architecture docs (`docs/seon/reference/flow-foundation.md`) where a `status-aggregator-step` subscribes to `::agent-heartbeat` signals.
+The cast/signal mechanism exists in core.async.flow, but fresh Seon does not
+use it for fleet status. `seon.oversight` calls `flow/ping` on every armed
+agent graph and on the cluster plumbing graph, then joins the responsive proc
+replies with current database facts to derive run state, pass counts, and
+buffer occupancy. A missing reply means only that a proc did not answer within
+the ping budget; there is no `status-aggregator-step`, `::agent-heartbeat`, or
+stored live-status fact (`src/seon/oversight.clj:87-156` and
+`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:135-155`).
 
 However, `:seon.ns/feeds` as a namespace-level declaration is not yet implemented. Today, namespace metadata contains `:seon.ns/dynamic?` (for ctx) and input/output specs (for [[concepts/renderer-discovery]]), but not feed declarations. The scanner (`seon.graph.extract`) would need to extract feed metadata, and the topology builder would need to wire `:signal-select` from feed declarations.
 

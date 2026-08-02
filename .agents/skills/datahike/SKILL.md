@@ -519,11 +519,13 @@ Do not register provenance projections such as `created-by`, `created-at`,
 custom transaction fact such as an import batch may be written on
 `:db/current-tx`; it is not another Seon provenance mechanism.
 
-**The one exception:** a PRE-event snapshot coordinate — an application fact
-about a db value observed BEFORE the entity's own tx (canonical example:
-`:seon.agent.turn/rendered-as-of`, the frozen basis-t a prompt rendered from;
-other agents' txs interleave, so the entity's creation-tx is NOT that
-coordinate). Genuinely underivable → a real domain attr.
+**The one exception:** a pre-event basis transaction — an application fact
+about a database value observed before the entity's own transaction. The
+current example is `:seon.context.capture/basis-t`, the `:max-tx` of the
+database value used to render the prompt; intervening transactions mean the
+capture entity's creation transaction cannot derive that earlier basis
+(`resources/seon/schema/context.edn:18-29`;
+`src/seon/context.clj:121-140`). Genuinely underivable → a real domain attr.
 
 ## Temporal, listeners, triggers (brief)
 

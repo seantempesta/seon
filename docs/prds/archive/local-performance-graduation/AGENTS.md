@@ -1,6 +1,6 @@
 ---
 type: orchestrator
-status: active
+status: archived
 tags: [orchestrator, prd, flow, database, web, agent]
 ---
 

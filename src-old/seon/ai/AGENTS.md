@@ -49,9 +49,7 @@ LLM call sits in the turn), `observability.md` (what of the request/response
   provider change that reorders or re-flows prompt parts silently destroys
   the cache hit rate; check `llm-usage` cached-token counts after changes.
 
-**Model catalog** (recommended models + working configs per provider):
-`docs/seon/reference/llm-adapters.md` §"Model catalog" — update it when a
-provider ships/deprecates a model.
+**Historical model catalog:** the former `llm-adapters.md` catalog was deleted; the maintained reference's §“Provider scope” explicitly has no provider-name catalog.
 
 `dispatch.cljs` owns the one process-local provider registry, provider
 selection, and planning dispatch. Core provider namespaces are loaded by

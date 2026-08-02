@@ -37,7 +37,7 @@ option below is weighted by who maintains that vocabulary going forward.
 | `src/seon/cluster/loop.cljc:1065-1110` | the `:call` branch | the one place a target becomes a request |
 | `resources/seon/schema/agent.edn:1-55` | agent attributes | an agent is attributes + connections; no kind stamp |
 | `research/deepseek-thinking-mode-api-2026-08-01.md` | vendor capture | thinking toggle, effort mapping, **silently ignored sampling params** |
-| `docs/seon/reference/llm-adapters.md:16-41,151-156` | descriptor-row model | hosted providers are DATA rows selecting one of two wire cores |
+| `docs/seon/reference/llm-adapters.md` §§“Configuration authority”, “Provider scope” | fresh provider boundary | one OpenAI-compatible core consumes schema-declared settings; descriptor rows are historical quarry |
 | `docs/seon/issues/archive/per-agent-model-transport-overrides.md` | the quarry | State A already solved this once: per-agent overrides + `:seon.config/model-variant` named sparse maps |
 | `reference-code/litellm-clj` @ `14bcdd9` (2026-06-21) | src/ read in full for chat path | see the steal/reject table |
 
@@ -84,9 +84,9 @@ exists to prevent, arriving pre-installed.
 | **Protected keys refused, not silently overridden** | `openai_compatible.clj:11-29` | **STEAL** | The escape hatch must not be able to rewrite `model`, `messages`, `stream`, or auth. Refusal is loud; ours becomes a flat error value, not a throw. |
 | **One canonical kebab param map → per-wire snake_case emission** | `deepseek.clj:55-67` (`optional-field-mappings`) | **STEAL the shape, not the table** | A declarative `[canonical wire coercion]` triple beats a `cond->` chain. Ours is derived from the dial registry rather than typed out per provider. |
 | **`reasoning_content` is a sibling of `content`** on message and delta | `openai_compatible.clj:144-148,196-201` | **STEAL** | Confirms the vendor capture independently; our parser must retain it, not drop it (needed for tool-call continuations). |
-| **Usage keeps cache detail** (`prompt_tokens_details.cached_tokens`) | `openai_compatible.clj:164-175` | **STEAL as a read-time derivation** | We already store `usage-edn` open; the normalization belongs at read, which is what `llm-adapters.md:151-156` also says. |
+| **Usage keeps cache detail** (`prompt_tokens_details.cached_tokens`) | `openai_compatible.clj:164-175` | **STEAL as a read-time derivation** | We already store `usage-edn` open; the normalization belongs at read, which `llm-adapters.md` §“Durable attempt facts” documents. |
 | **`thinking` config shape validated as one value** | `specs.clj:87-98` | Already ours, better | The landed `:seon.ai/thinking` enum makes contradictory toggle/effort pairs *unrepresentable*; litellm's map lets you say `{:type "disabled"}` plus `reasoning_effort "max"`. |
-| Per-provider multimethod fan-out (10 arms × 12 multimethods) | `providers/core.clj:25-467` | **REJECT** | 120 hand-written dispatch arms to express "these providers speak OpenAI". `llm-adapters.md:16-41` already ruled: two wire cores, providers are DATA rows. |
+| Per-provider multimethod fan-out (10 arms × 12 multimethods) | `providers/core.clj:25-467` | **REJECT** | 120 hand-written dispatch arms to express "these providers speak OpenAI". `llm-adapters.md` §“Provider scope” keeps one OpenAI-compatible core and no provider-name catalog. |
 | Exceptions as the error model | `providers/core.clj:477-493`, `openai_compatible.clj:223-242` | **REJECT** | Directly violates errors-as-values. We would wrap every call in a translating try/catch — i.e. re-implement `disposition`'s evidence capture anyway, from a lossier input. |
 | `router.clj` + `wrappers.clj:11,61` (`with-fallback`, `with-retry`) | — | **REJECT, and it is dangerous** | It retries model calls generically. The owner's ruling forbids re-calling a model that may have done paid work; `seon.ai/disposition` decides that from transport-phase evidence. Adopting litellm's retry would silently reinstate paid retries. |
 | Hard-coded cost + rate-limit tables per provider | `deepseek.clj:10-15,132-136` | **REJECT** | Hand lists, and the rate limits are invented ("conservative defaults"). |
@@ -405,7 +405,8 @@ not from a log nobody reads.
 cited at the one site that uses it — the same status as `status-class`'s HTTP
 mapping (`ai.cljc:338-352`). It becomes a genuine hand list the moment a second
 provider needs a different answer; that is the trigger to move it into the
-descriptor row as data (`llm-adapters.md:16-41`), and Q2 asks the owner whether
+provider-specific settings data (`llm-adapters.md` §§“Current dials”,
+“Provider scope”), and Q2 asks the owner whether
 to pay for that now.
 
 ---
@@ -509,7 +510,8 @@ State A closed.
 constant at the one site?**
 *Recommendation: a constant at the one site, with a cited capture.* We speak to
 one provider family; the descriptor-row generalization is real work
-(`llm-adapters.md:16-41`) with no second consumer to justify it, and the
+(`llm-adapters.md` §“Provider scope” records descriptor rows as historical)
+with no second consumer to justify it, and the
 trigger to pay for it is unambiguous — the day a second provider's inert set
 differs. Alternative: build it as descriptor data now, paying a day to avoid a
 later refactor of a mechanism we are already touching.

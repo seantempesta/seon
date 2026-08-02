@@ -1,6 +1,6 @@
 ---
 type: reference
-status: active
+status: archived
 tags: [prd, agent, architecture]
 ---
 

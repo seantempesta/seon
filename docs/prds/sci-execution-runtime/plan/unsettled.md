@@ -1874,12 +1874,12 @@ admitting a 250-event page = 7.5ms p50 of the 16ms frame before
 serialization; BLOCK-TARGETED morphs (interest/suppression rekeyed by
 block) are the 60fps thesis. Generic+specialist = select +
 :seon.render/selection ("the consumer never branches and the
-specialist's name never leaves its producer"). Streaming MINED
-(llm-adapters.md:545-563): wire-stream? separate from
-reply-evaluation, BodyHandlers/ofLines branch on complete, partials
-on the churn attribute, counts from the same fold; interactions
-settled — response-started? observable at first chunk, mid-stream
-failure = transmitted = no-retry unchanged. SEAL RULINGS: block
+specialist's name never leaves its producer"). Streaming MINED (current
+contract: `llm-adapters.md` §“Request and response contract”): streaming is a
+transport choice, complete partial snapshots ride the injected sink, and
+streamed/non-streamed calls return the same completion shape; interactions
+settled — response-started? observable at first chunk, mid-stream failure =
+transmitted = no-retry unchanged. SEAL RULINGS: block
 naming stands (ui.md accretes); durable html slot = qualified symbol
 ONLY (kills the pr-str codec); top-level derived; JetBrains Mono gets
 BUNDLED (silent fallback is a lie about the design); D6 Option B

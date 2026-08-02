@@ -35,6 +35,8 @@ Specialized developer teaching stays in the existing `:plan` block through an
 alternate AI renderer that reuses the same plan acquisition and formatting and
 falls back to ordinary plan context when inactive. Full code remains the
 responsibility of the existing `:namespaces` block by reconciling its
-`:seon.agent.ctx.namespaces/full-source` set. Model selection extends the
-existing database-owned provider resolution with named profiles; never branch
-on provider at the `generate-code!` call site.
+`:seon.agent.ctx.namespaces/full-source` set. The named-profile proposal is
+historical; fresh model selection uses the schema-derived per-agent settings
+and per-turn resolution documented in
+`docs/seon/reference/llm-adapters.md` §“Per-agent inheritance and per-turn
+resolution”. Never branch on provider at the `generate-code!` call site.
