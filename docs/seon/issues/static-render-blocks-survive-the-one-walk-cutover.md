@@ -47,6 +47,12 @@ docstrings that describe the superseded static-block model.
 - `src/seon/render/walk.clj:230` still cites
   `seon.render.root/messages-html` as an existing consumer even though no
   call remains.
+- The supplied `src/seon/render/value.cljc` lead is narrower than a dead JVM
+  require: `seon.schema/sha-256` is called on the CLJ branch at `:32-35`, but
+  the `seon.schema` require at `:7` is unconditional and therefore unused on
+  the CLJS branch. Clj-kondo reports exactly the CLJS-side warning. The cleanup
+  is to make the require CLJ-only while preserving the live digest owner, not
+  to delete it wholesale.
 
 ## Owner
 
@@ -63,6 +69,8 @@ do not.
   for removed blocks.
 - Remove comments/docstrings that describe seeded block sets or cite deleted
   render functions.
+- Make `seon.render.value`'s `seon.schema` require reader-conditional so both
+  halves of the portable namespace have an honest dependency set.
 - A source/schema/test reference chase finds one live render selection
   mechanism, and current namespace page, debug page, prompt, and SSE proofs
   remain green.
