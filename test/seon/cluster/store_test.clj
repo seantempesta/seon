@@ -325,7 +325,8 @@
                   (if (= "held" line)
                     (.complete readiness ::child-holding)
                     (recur)))))
-            (catch java.io.IOException _)))
+            (catch java.io.IOException error
+              (.completeExceptionally readiness error))))
         _ (.thenAccept
            (.onExit process)
            (reify java.util.function.Consumer
