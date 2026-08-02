@@ -394,6 +394,10 @@
           graph (::sut/graph launcher)]
       (try
         (flow/pause graph)
+        (is (= :paused
+               (::flow/status
+                (flow/ping-proc graph ::sut/work-launcher)))
+            "the launcher observes pause before the submission")
         (let [result
               (deref
                (future
