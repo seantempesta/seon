@@ -147,11 +147,30 @@ above — thinking-high's* (24). On `(count [1 2 3])` it spent more than
 thinking-high did. There is no near-zero floor on easy work, which is
 precisely the property the free lunch would require.
 
-This is **verdict (b): adaptive is thinking with extra marketing.** It is
-not (a), so by the owner's own criterion it does not earn the planner
-default — always-high remains the planner setting, and adaptive should not
-be adopted. It is not quite (c) either: it does not *skimp* on hard work, it
-simply thinks everywhere.
+This is **verdict (b) on the trivial tier, and (c) on the hard tier** — and
+either one alone disqualifies it. It is definitively not (a), so by the
+owner's own criterion adaptive does not earn the planner default;
+always-high remains the planner setting.
+
+**A premise worth correcting before the wrong number propagates:** adaptive's
+*trivial-to-hard* reasoning ratio is NOT flat. It scales enormously with
+difficulty (t0b 30 tokens → t1 46,897, a 1,563x spread). What is flat is
+**adaptive versus thinking-high at matched difficulty** — 30 vs 21 on
+trivial, both enormous on hard. Adaptive modulates by difficulty about as
+well as plain thinking-high does, which is to say it adds nothing.
+
+Worse, where it does differ from high, it differs in the wrong direction:
+
+| task | adaptive | thinking-high | outcome |
+|---|---|---|---|
+| t1 transducer | 46,897 tok / 455 s | (truncated) | both wasteful; non-thinking got it in 121 tok |
+| **t7 trace source** | **807 tok — WRONG** | **1,635 tok — RIGHT** | adaptive UNDER-thought where depth was the whole point |
+
+That is the (c) failure precisely: it over-spends 46,897 tokens on a task
+where reasoning bought nothing, and under-spends on the one task where
+reasoning was the entire value. An adaptive mode that cannot tell those two
+apart is worse than a fixed setting, because a fixed setting is at least
+predictable.
 
 The latency point stands on its own: on the transducer task adaptive spent
 **455.2 s and 46,897 reasoning tokens to reach the same PASS** that
@@ -175,8 +194,9 @@ for Seon, because it is what an agent reading its own program graph would do.
 | `admit` with `max-nodes` 1 elides `42` | **FALSIFIED** | projects `42` correctly |
 | `submit-evaluation!!` flow limit is 2x the eval limit | **FALSIFIED as a defect** | reading is correct; the 2x is the intentional outer backstop |
 | `CountedDroppingBuffer.full?` always false is a contract mismatch | **FALSIFIED as a defect** | core.async's own `DroppingBuffer` returns `false` identically (`buffers.clj:41`) |
+| `turn` loops forever if `ai/delays` returns an infinite seq | **FALSIFIED — false premise** | `delays` is a bounded `loop` returning a finite vector (`ai.cljc:219`) |
 
-Confirm rate on the six claims checked: **3 confirmed / 3 falsified**, from
+Confirm rate on the seven claims checked: **3 confirmed / 4 falsified**, from
 non-thinking calls costing 10–15 s each (four namespaces: `value.cljc`,
 `admit.clj`, `loop.cljc`, `flow.clj`; `schema.cljc` at 2548 lines was cut
 when it exceeded four minutes on one call).
@@ -188,12 +208,19 @@ consequential owner, because it bounds what every agent sees of its own
 evaluation results.
 
 The failure mode is legible and worth planning around: **the model reads the
-code accurately and then misjudges intent.** Not one falsified claim
-hallucinated code that was not there. Two of the three described the source
+code accurately and then misjudges what it cannot see.** Not one falsified
+claim hallucinated code that was in front of it. Two described the source
 correctly and drew the wrong conclusion because they lacked a surrounding
 contract — the 2x flow limit is Seon's deliberate last-resort backstop, and
 `full? = false` is core.async's own dropping-buffer contract, faithfully
-implemented. The third simply mispredicted a boundary.
+implemented. A third invented a risk conditioned on a function it was not
+shown (`ai/delays` "if it returns an infinite lazy sequence" — it cannot).
+The fourth simply mispredicted a boundary.
+
+The pattern is sharp: **claims about the pasted source are reliable; claims
+that depend on anything outside it are not.** That is directly actionable —
+paste the callees, or discount any claim whose mechanism reaches past the
+window.
 
 That is a good failure mode to design around, and it sets the supervision
 requirement precisely: **claims are cheap and must be verified, never
@@ -360,10 +387,55 @@ Honest limits, so nobody over-reads the table:
 - `temperature: 0` was sent on all main-matrix calls and is silently ignored
   in thinking mode, so thinking cells are one draw from a default-temperature
   distribution while non-thinking cells are deterministic.
-- `reasoning_effort: "low"` was not measured. Flash maps `low`→`low` (only
-  pro collapses it), so it is a real dial and plausibly the setting that
-  keeps t7's win without t1's runaway. **This is the highest-value follow-up**
-  and the one number this document is missing.
+- ~~`reasoning_effort: "low"` was not measured.~~ **Measured — see the next
+  section. It does not keep t7's win.**
 - `schema.cljc` (2548 lines) was cut from the interrogation after exceeding
   four minutes on a single non-thinking call; the interrogation covers four
   namespaces, and the thinking arm of that comparison was not run.
+
+## Addendum 2026-08-01: the effort dial, and why cheap thinking is not a free lunch
+
+`reasoning_effort: "low"` and vendor `adaptive` were measured on the same
+graded tasks. The result reframes the whole trade.
+
+| task | gate | nothink | **effort low** | **adaptive** | think high | pro |
+|---|---|---|---|---|---|---|
+| t1 transducer | executed | PASS 1.6 s | **PASS 9.7 s** | PASS 455.2 s | EMPTY 148.7 s | PASS 22.2 s |
+| t2 chunking (value) | `32` | WRONG | **32** | 32 | EMPTY | 32 |
+| t2 chunking (code) | executed | PASS | **PASS** | PASS | EMPTY | FAIL |
+| t4 datalog+malli | executed | FAIL | FAIL 21.2 s | FAIL 279.9 s | EMPTY | FAIL |
+| t5 debug | executed | PASS | **PASS 142.5 s** | PASS 136.9 s | EMPTY | EMPTY |
+| t6 puzzle | `31254` | PASS | — | PASS 7.5 s | PASS | PASS |
+| **t7 trace source** | 6 values | **WRONG** | **WRONG 6.1 s** | **WRONG 9.2 s** | **PASS 11.0 s** | **PASS** |
+
+**`reasoning_effort: "low"` cures the runaway completely.** The transducer
+went from an empty 148.7 s response at high effort (and a 455 s / 46,897-token
+adaptive answer) to a correct answer in **9.7 s / 908 reasoning tokens** — a
+50x latency cut and a 50x token cut against adaptive, same graded PASS. On
+t4 it produced a real (if wrong-for-other-reasons) answer where high effort
+produced nothing at all. Nothing in the matrix truncated at low effort.
+
+**But low effort loses t7 — the only gate thinking was buying.** At low
+effort and under adaptive, the model returns the same intuitive
+`WINDOW: [:a] / SHOWN: 1` that non-thinking returns. Only thinking at HIGH
+effort (and pro) substitutes `(dec 1) = 0` and gets it right.
+
+So the dial is not a quality knob with a cheap setting; it is close to a
+binary:
+
+- **high effort** — buys precise tracing (t7), and risks returning nothing
+  at all on code generation;
+- **low effort / adaptive** — reliably terminates and matches non-thinking's
+  correctness, i.e. **it costs 6–140 s to buy what non-thinking already gets
+  in 1–2 s.**
+
+That last line is the practical verdict on low effort: on every gate except
+t7 it merely paid latency for a result non-thinking already had. Its one real
+advantage over non-thinking is t2's value answer (32 vs 8) — reasoning did
+fix the chunking question — but it does not recover t7.
+
+**This strengthens, not weakens, the recommendation.** Thinking OFF for the
+agent loop stands. For the code-*reading* path the setting must be
+`thinking: enabled` at **high** effort, not low and not adaptive, with
+`max_tokens >= 32768` and the empty-content guard — because low and adaptive
+give you the latency of thinking with the answers of not thinking.
