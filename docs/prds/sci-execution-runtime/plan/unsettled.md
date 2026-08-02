@@ -55,6 +55,24 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 10 — 2026-08-02 morning.** Rulings #38-#40 sealed (assigned-
+namespace eval; tool-less — forms are the interface; keep-history as a
+per-cluster dial) + the no-coined-words style order. Ruling #27 is now
+COMPLETE (sci fork `6de1568` marks the 17 stock Vars read-only, merged
+to main + pushed + pointer bumped; the cross-cluster issue archived).
+The turn/evaluate PRD landed (`35b5ce327`) and its implementation is
+RUNNING as two lanes (prd-loop-split S1-S6, prd-eval-split S7-S9).
+Isolation posture (owner, this morning): namespace discipline IS the
+isolation for now — "just having them work in their respective
+namespaces will prevent them from stepping on each other's toes";
+deeper isolation later. SEQUENCING: the ruling-#38 slice (derive the
+eval namespace from `:seon.cluster.agent/namespace`) queues DIRECTLY
+BEHIND the two PRD lanes — it edits `agent-namespace` in eval.clj and
+the reply-freeze site in loop.cljc, both PRD-owned right now, and gets
+cheaper after the split. Also queued behind its blocker: inspect-slice-1
+(paused on the operator --root classpath fix, running) then the gpqa
+falsifier; r1 finishing the fresh artifact build.
+
 **ADDENDUM 9 — THE GATE IS GREEN: 804 tests / 4,003 assertions / 0
 failures / 0 errors (frozen tree, 2026-08-02, commits `feb1c30d9`…
 `40617bc43`).** The red's root causes, all real: `page-of` had DROPPED
