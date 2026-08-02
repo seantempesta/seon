@@ -50,3 +50,30 @@ The one `seon.render` projection-invocation boundary, composed with
   an agent cannot emit unescaped bytes by calling `raw`.
 - Hot-reloaded compiled system projections continue to use the same router,
   without a second render path.
+
+## Owner design gate — 2026-08-02
+
+The grounded options and recommendation are in
+`docs/prds/sci-execution-runtime/research/agent-renderer-design-2026-08-02.md`.
+The recommendation is one small guarded invocation kernel for every
+agent-driven render, with definitions installed once in the cluster's live SCI
+context, admitted semantic output on every cache miss, and no compiled
+first-party bypass. `raw` remains a post-admission serializer composition
+marker; calling it inside a renderer cannot carry unescaped bytes through the
+admitted Hiccup boundary.
+
+Load-only measurements on JDK 26.0.1 / 18 processors found:
+
+- small arm → interpreted Var call → admission → disarm:
+  10.250 µs p50 / 34.042 µs p95 for a trivial Hiccup value;
+- full `seon.sci.eval/evaluate` for the same call:
+  635.750 µs p50 / 941.208 µs p95 and about 1.40 MB allocated per call; and
+- the small kernel admitting a 250-event Hiccup fixture:
+  2.448 ms p50 / 3.337 ms p95 and about 10.9 MB allocated, including a
+  206,169-character receipt-oriented print projection.
+
+The design therefore recommends extracting the invocation kernel rather than
+reusing the REPL evaluator, and making successful render admission omit the
+`result-edn` sink while retaining the same bounded walk. That saving is
+unverified until prototyped. The issue remains open pending owner rulings D1–D4
+and implementation/live proof.
