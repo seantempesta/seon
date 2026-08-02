@@ -751,7 +751,7 @@
              ;; that contract, translate the guardrail into this seam's
              ;; named core fault rather than letting instrumentation
              ;; replace the incident it was observing.
-             (catch #?(:clj Throwable :cljs :default) _
+             (catch Throwable _
                (terminal-settlement-fault!
                 cluster
                 "Terminal refusal settlement could not be constructed."
@@ -1038,9 +1038,13 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id}]
   (merge form
+         ;; Custody is OPTIONAL in the request schema, so its absence is NO
+         ;; KEY — never an explicit nil against a non-nilable schema. A
+         ;; cluster value carrying no connection (every unit test that
+         ;; builds one by hand) would otherwise project one.
+         (when-let [connection (:seon.store/branch-connection cluster)]
+           {:seon.store/branch-connection connection})
          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
-          :seon.store/branch-connection
-          (:seon.store/branch-connection cluster)
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
           :seon.sci.eval/ctx ctx
           :seon.cluster.agent/id agent-id
@@ -1247,7 +1251,7 @@
                                      :seon.cluster.agent/id agent-id
                                      :seon.sci.admit/caps
                                      (:seon.sci.admit/caps cluster)})
-                     (catch #?(:clj Exception :cljs :default) failure
+                     (catch Exception failure
                        ;; the kind fallback keeps this total: an
                        ;; exception carrying no flat error data still
                        ;; ends the turn as a recorded value rather

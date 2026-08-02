@@ -77,7 +77,7 @@
 
   `remove!` is EMERGENCY RECOVERY, not a dial and never the answer to a
   noisy report. A noisy report means the schema or the caller is wrong;
-  the first one found this way was real (`loop.cljc` passing a
+  the first one found this way was real (`loop.clj` passing a
   transaction argument map where the contract said vector — see
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`)."
   (:require [clojure.edn :as edn]

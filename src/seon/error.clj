@@ -76,7 +76,7 @@
   (`admit.clj:128-129`). This is not a preference: two of flow's three
   shapes carry `::flow/state`, which for the run loop is the proc's
   whole init state holding a LIVE Datahike connection and executors
-  (`loop.cljc:226-229`), and `pr-str` of a value holding a reference
+  (`loop.clj:226-229`), and `pr-str` of a value holding a reference
   cycle raises `StackOverflowError` — an Error, which `catch Exception`
   does not even see (`admit.clj:82-92`, probed). Reusing the one codec
   also deletes the possibility of the second bounded printer the quarry
@@ -107,7 +107,7 @@
   convenience. The flow error map does not carry the agent: the loop's
   state is `{cluster, turns}`. Deriving \"the run claimed by this
   process and not closed at the fault's basis\" is EXACT today only
-  because turns are serial within a cluster (`loop.cljc:36-40`), so the
+  because turns are serial within a cluster (`loop.clj:36-40`), so the
   derivation belongs to the caller that knows the basis — and the day
   turns go concurrent it must move into the loop state. This namespace
   stays pure and takes the ids it is given; a run/agent id that is
