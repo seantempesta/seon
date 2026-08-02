@@ -422,8 +422,8 @@
         (try
           (let [page (page-at connection)
                 initial (read-complete-paint! stream connection)]
-            (is (= 14 (count page))
-                "the fixture reaches the complete production namespace walk")
+            (is (= 16 (count page))
+                "the complete cluster fixture includes its bootstrap-plan walk")
             (is (contains? page "surface-fleet-oversight")
                 "root's owner-ruled fleet block is part of the same paint")
             (is (str/includes? initial "data-walk-path=\"[]\""))
