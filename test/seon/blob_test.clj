@@ -29,3 +29,11 @@
       (finally
         (store/release-store! opened)
         (support/delete-recursively! (io/file root))))))
+
+(deftest utf8-content-round-trips-through-the-memory-backend
+  (support/with-database
+    (fn [connection]
+      (let [content "memory-backed naïve λ result"
+            digest (blob/put! connection content)]
+        (is (= content (blob/get connection digest)))
+        (is (= digest (blob/put! connection content)))))))

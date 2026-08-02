@@ -16,6 +16,16 @@
   ^bytes [content]
   (.getBytes ^String content StandardCharsets/UTF_8))
 
+(def ^:private byte-array-class
+  (class (byte-array 0)))
+
+(defn- read-octets
+  ^bytes [binary]
+  (if (instance? byte-array-class binary)
+    binary
+    (with-open [input ^java.io.InputStream binary]
+      (.readAllBytes input))))
+
 (defn put!
   "Store UTF-8 content once and return its SHA-256 digest."
   {:malli/schema
@@ -40,8 +50,7 @@
               (konserve-store connection)
               digest
               (fn [{:keys [input-stream]}]
-                (with-open [input input-stream]
-                  (.readAllBytes input)))
+                (read-octets input-stream))
               {:sync? true})]
     (let [actual (schema/sha-256 [octets])]
       (when-not (= digest actual)
