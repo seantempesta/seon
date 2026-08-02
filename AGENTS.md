@@ -34,9 +34,9 @@ THE CONVERSION TEST IS SIMPLIFICATION, not relocation (owner ruling
 2026-07-24 night, after the R52/R53 pattern): a function that "runs on
 the new tier" but keeps its old-model shape is NOT converted — it is a
 ported defect. Under the stateless claim-native model EFFECTS reduce to three
-shapes: pure code returning VALUES the driver interprets (lifecycle,
+shapes: pure code returning VALUES the run loop interprets (lifecycle,
 dispositions, plans); genuine capability requests through the one
-guarded door (fs, web, llm, db); and durable FACTS the driver commits
+guarded door (fs, web, llm, db); and durable FACTS the run loop commits
 (memory, messages, receipts). THIS IS A RULE ABOUT HOW EFFECTS HAPPEN,
 NEVER ABOUT WHAT IS CALLABLE: every agent may call every function in
 its cluster's program graph (ruling #20), and any reading of "three
@@ -294,9 +294,9 @@ channel loss breaks recovery is wrong by definition.
 
 **Crash model: nothing re-executes.** Recovery = reopen the store, mark
 dangling receipts `:interrupted`, re-derive the graph; the agent adapts
-from derived context. Runs are claimable database state (CAS + epoch +
-lease + receipts held on `:seon.agent.run/process` — never say
-"claimant").
+from derived context. Runs are claimable database state: custody is presence of
+`:seon.cluster.run/process`, and the process is the holder — never say
+"claimant". There is no claim epoch or lease clock.
 
 **Errors are two classes, never mixed.** An agent mistake becomes a flat
 `:seon.error` value the agent sees — nothing throws into the loop, and
@@ -622,13 +622,13 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
 | `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
 | `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
-| `:seon.agent.run/process` | **claimant** | the process holding a run; `script/seon/dev/process.clj` ↔ JDK `ProcessHandle` |
+| `:seon.cluster.run/process` | **claimant** | the process holding a run; `resources/seon/schema/run.edn` + `src/seon/cluster/run.cljc` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
-| initialization pages, rows, transaction data | seed bundle, sidecar | paged database population; `src-old/seon/db/protocol.cljc` (pages/phases) ↔ Datahike tx-data |
-| process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/dev/process.clj` + `state.clj` ↔ JDK `ProcessHandle` |
+| initialization rows, transaction data | seed bundle, sidecar | one admitted source population; `src/seon/cluster.clj` (`populate-source!`) + `src/seon/fn.clj` (`index!`) ↔ Datahike tx-data |
+| process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/fresh_operator.clj` + `script/seon/dev/state.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
 | reduce (plan execution) | fold | executing a plan is a reduce over its forms; the accumulator is the basis; `clojure.core/reduce` ↔ the Datahike transaction report's `:db-after` (`r/fold` is parallel — wrong word) |
-| run loop | driver, driving | the loop claiming runs via `:db.fn/cas` and reducing plans; `src-old/seon/agent/driver.clj` until the rename wave |
+| run loop | driver, driving | the per-agent proc reducing one claimed run over ordered forms; `src/seon/cluster/loop.cljc` ↔ custody transitions in `src/seon/cluster/run.cljc` |
 | `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — the door is about effects crossing out, never about which functions an agent may call (ruling #20); effects carry the one request identity |
 | every function is callable | toolkit, grants, home-requires, agent-facing surface (as a limit), allowlist | ruling #20: an agent may call ANY function in its cluster's program graph. Per-agent GRANTS do not exist; what differs per agent is only what is RENDERED into its context, which never gates execution. The guarded door bounds EFFECTS (fs/web/llm/db), not callability |
 | program graph | corpus | the collective name for `:seon.fn`/`:seon.ns`/`:seon.schema` facts; owners rename to `seon.code.fn`/`.ns`/`.schema`/`.test` |
@@ -688,8 +688,11 @@ is transaction data for initialization pages, not a novel noun). Invented
 vocabulary drifts from the dependency and causes integration and debugging
 mistakes; grounded vocabulary is free documentation.
 
-Current route truth is database data in `src-old/seon/route.cljs`: `/` is root's
-system view, `POST /agents` creates an agent, and `/agent/{id}` is its page.
+Current route truth is the one table in `src/seon/render/route.clj`: `/` is the
+root namespace page; `/ns/{namespace}` and its debug variant are canonical;
+agent routes are aliases; `POST /agent/{id}/message` submits a message; and
+`/feed/{id}`, `/data`, `/css/{*path}`, and `/js/{*path}` serve live transport,
+database inspection, and static assets.
 
 ## Data-oriented Clojure rules
 
@@ -716,9 +719,10 @@ Register shared shapes once and reference them. If the Malli→Datahike bridge
 cannot express the required referenced shape, fix the bridge rather than
 inlining copies.
 
-`seon.db` is the sole application database API. Outside `src-old/seon/db/`, never
-call `datahike.api` directly. The pod forwards writes through
-`seon.db.replica`; the JVM server alone owns durable Datahike resources.
+`seon.db` is the synchronous application read facade (`q`, `pull`, and
+`pull-many`). Durable writes are co-located with the branch connection at
+`seon.cluster.store/transact!`; system transition owners call that seam or
+return transaction data. There is no pod, remote replica, or second writer.
 
 An explicitly selected config manifest reconciles its declared subset into
 database facts. Runtime reads the database, not environment variables or the
@@ -800,11 +804,9 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
 - Instrumentation is derived from the database program graph and reapplied on
   hot reload. Wrong schemas/calls are fixed at the source. The kill-switch is
   only emergency recovery.
-- `^:async`/`await` is valid only inside a `^:async` function, and only in
-  CLJS leaves. Agent-facing eval awaits returned Promises; long work remains
-  addressable through its result symbol. The self-host (cljs.js) engine is
-  interim and dies at the great deletion — never invest in it; read the
-  `clojurescript` skill before touching it.
+- Fresh runtime code is plain synchronous CLJ. Blocking external transport runs
+  on Flow's `:io` executor; guarded SCI evaluation runs on `:compute`. No
+  Promise/await or self-host execution path exists.
 - The database, not atoms, owns important durable state. Atoms are acceptable
   only for genuinely process-local artifacts such as compiler state, a
   connection, or invocation-local coordination.
@@ -812,7 +814,9 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
   `seon.ai.tokens/estimate`, never raw character counts. Storage may keep a
   character projection, but display converts it.
 
-Detailed ownership belongs in `src-old/seon/AGENTS.md` and its child authorities.
+Detailed current ownership belongs in `docs/seon/architecture/`, its
+`library-grounding.md` read map, and the closest fresh source namespace.
+`src-old/**/AGENTS.md` files are quarry instructions only.
 
 ## Git and shared-tree safety
 
@@ -1135,27 +1139,20 @@ answer is anything, it was in the wrong place. Leave ACME
 alone while another lane owns it. After runtime/source changes, prove the
 default cluster before coordinating a downstream update.
 
-`bin/acme` is a semantic wrapper over the same operator with the ACME artifact
-flavor, not a second supervisor. It owns a separate process directory, cluster,
-Shadow cache, `acme-client` output, and dynamic endpoint files. `acme/deps.edn`
-adds only downstream source/dependencies; the root `:writer` and `:cljs`
-aliases remain the authority for Seon's maintained Datahike, Konserve,
-superv.async, and partial-cps coordinates in both default and ACME. Do not copy
-or override those shared forks downstream.
+`bin/acme` still speaks the deleted operator command language and is not a
+current operational surface. Its repair is tracked by
+`docs/seon/issues/acme-wrapper-speaks-deleted-operator-command-language.md`.
+Do not use it to infer fresh process, config, dependency, or runtime ownership.
 
 ## Provider and optional subsystem boundaries
 
-The default LLM provider remains DeepSeek. Hosted providers are
-DESCRIPTOR ROWS under the config singleton selecting one of two wire
-cores (`:openai-compat`/`:anthropic`) — adding a hosted provider is a
-row plus a catalog entry, never a new adapter arm. Local-worker
-providers (DiffusionGemma/typeahead) stay on their documented compiled
-dispatch. DiffusionGemma is opt-in only through
-explicit provider configuration; never activate it as a side effect. Embeddings
-use the one `seon.embed`/Vertex path when `SEON_EMBED` is enabled. Credentials,
-project IDs, and service-account files stay outside Git. Details live in
-`src-old/seon/ai/AGENTS.md`, `docs/seon/reference/llm-adapters.md`, and the
-embeddings PRD.
+The shipped model is DeepSeek through the single `seon.ai` HTTP owner. Every AI
+dial is a `:seon.config.ai/*` schema-derived config fact and supports the same
+per-agent overlay on the agent entity; absence inherits cluster settings, and
+the loop resolves the effective values from one database value per turn.
+Attempts record the effective settings and usage. The credential setting names
+an environment variable; the credential itself never becomes a datom or enters
+Git. Details live in `docs/seon/reference/llm-adapters.md`.
 
 ## Key entry points
 
@@ -1168,8 +1165,7 @@ embeddings PRD.
   `history.md`;
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
-- `src-old/seon/AGENTS.md` — State A one-mechanism and runtime ownership table;
-- `src-old/my/AGENTS.md` — State A quarry only; its per-agent toolkit
-  CONSTRAINTS are superseded by ruling #20 (every agent may call every
-  function) and must never be treated as current authority;
+- `docs/seon/architecture/library-grounding.md` — current first-party and
+  dependency source map; `src-old/**` appears only as explicitly requested
+  quarry;
 - `AGENT.md` — thin delegated-lane compatibility adapter.

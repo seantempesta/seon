@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, architecture, runtime]
 ---
@@ -67,3 +67,22 @@ must ground each current row.
   current operational authority.
 - A repository-wide reader chase confirms no localized authority or skill
   preserves the removed root claim after reconciliation.
+
+## Resolution
+
+Resolved by the root-authority correction on 2026-08-01. The named lines now
+point process identity to `src/seon/cluster/process.clj`,
+`script/seon/fresh_operator.clj`, and `script/seon/dev/state.clj`; run custody
+and the run loop to `resources/seon/schema/run.edn` plus
+`src/seon/cluster/{run,loop}.cljc`; initialization to
+`src/seon/cluster.clj` and `src/seon/fn.clj`; routes to
+`src/seon/render/route.clj`; reads to `seon.db`; and writes to
+`seon.cluster.store/transact!`. The CLJS self-host, replica, quarry-owner,
+obsolete ACME, and provider-adapter claims were removed from current guidance.
+
+The provider paragraph now matches `src/seon/ai.cljc`, the
+`:seon.config.ai/*` declarations in `resources/seon/schema/config.edn`, and the
+attempt facts committed by `src/seon/cluster/loop.cljc`. Searches over
+`AGENTS.md` find none of the moved process/route/run/database owners named by
+this issue. The remaining `src-old` occurrences are explicit quarry law, not
+current ownership delegation.
