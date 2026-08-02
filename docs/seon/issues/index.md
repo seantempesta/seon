@@ -49,7 +49,6 @@ See `README.md` for the convention.
 | [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
 | [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
 | [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
-| [Delete the pod CLJS reader closure](pod-cljs-reader-closure-teaches-a-deleted-runtime.md) | friction | rot deletion wave |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |
@@ -83,7 +82,6 @@ See `README.md` for the convention.
 | [Give the work launcher's control read SPI priority or rebuild it as a var-process](work-launcher-control-alts-lacks-priority.md) | friction | flow-protocol wave |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
-| [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
 ## Cleanup (10)
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, deletion, documentation, tooling]
 ---
@@ -59,6 +59,39 @@ reason to retain every package would preserve the pod by accident.
 The pod deletion wave, with the downstream extension contract redesigned at
 the surviving database program-graph owner rather than translated into
 another build overlay.
+
+## Resolution
+
+Commits `9fd1c5cd3`, `cae9203d8`, and `691517def` deleted the complete live
+reader closure:
+
+- the `:cljs` dependency alias, Shadow configuration, Node externs, downstream
+  override example, and ACME ClojureScript package;
+- the old overlay, process, database, testing, web, branding, and concept
+  runbooks, with linked component pages reduced to explicit archive
+  tombstones where their historical link identity remains useful;
+- pod-only environment examples and the stale root README/dashboard claims;
+  and
+- Inspect source-admission rows that treated the quarry, Shadow, nonexistent
+  package lock, ACME package, and alternate operator as runtime inputs.
+
+`package.json` and `bun.lock` now contain only Tailwind CSS dependencies.
+`resources/public/css/input.css` scans the fresh JVM source roots, and
+`bin/css` remains the one standalone stylesheet build.
+
+## Proof
+
+- `clojure -Spath` and `clojure -Spath -M:test` passed after deleting the
+  alias.
+- `bun install --frozen-lockfile --ignore-scripts && bin/css` passed in the
+  working checkout.
+- A clean `git archive` extraction installed exactly 31 packages from the
+  pruned lock and built the stylesheet in 65 ms.
+- `bun.lock` contains no Shadow, fake IndexedDB, websocket, provider SDK,
+  browser DOM, or pod dependency.
+- Post-cut path searches found deleted build names only in dated research,
+  archived evidence, explicit quarry guidance, or negative tombstones—not in
+  an executable reader or build instruction.
 
 ## Acceptance
 
