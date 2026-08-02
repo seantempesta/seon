@@ -144,8 +144,7 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (let [document (read-edn-map
-                  (or #?(:clj (io/resource default-manifest-path)
-                         :cljs nil)
+                  (or (io/resource default-manifest-path)
                       default-manifest-path))
         dials (dial-attributes)
         decisions (merge (registration-defaults) document)

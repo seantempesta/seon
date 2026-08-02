@@ -129,6 +129,6 @@ page.
   commands.
 - `src/seon/cluster.clj`, `src/seon/cluster/agent.clj`, and `src/seon/flow.clj`
   — process, cluster, and per-agent Flow topology.
-- `src/seon/config.cljc` and `config/default.edn` — configuration ownership.
+- `src/seon/config.clj` and `config/default.edn` — configuration ownership.
 - `src/seon/render/route.clj` and `src/seon/render/web.clj` — routes and SSE
   delivery.

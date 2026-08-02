@@ -82,7 +82,7 @@ or environment-driven watchdog configuration path in fresh Seon.
 
 ## Sources checked
 
-- `src/seon/config.cljc` — manifest compilation, absence, reconciliation, and
+- `src/seon/config.clj` — manifest compilation, absence, reconciliation, and
   database reads.
 - `resources/seon/schema.edn` — the one admitted population, including all dials.
 - `config/default.edn` — shipped decisions and provenance.
