@@ -21,5 +21,7 @@
                [StandardOpenOption/CREATE
                 StandardOpenOption/TRUNCATE_EXISTING
                 StandardOpenOption/WRITE]))
+  (println "held")
+  (flush)
   ;; An actual SIGKILL from the parent ends this process while holding.
   (Thread/sleep Long/MAX_VALUE))

@@ -21,7 +21,7 @@
             [seon.schema]
             [seon.test-support :as test-support])
   (:import [java.io File]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent CompletableFuture]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
@@ -299,7 +299,8 @@
 
 (deftest the-flock-fences-across-processes
   (let [dir (fresh-dir)
-        ready-file (io/file (str (io/file dir) "/../held.ready"))
+        ready-directory (.getParentFile (io/file dir))
+        ready-file (io/file ready-directory "held.ready")
         java-command (.getPath
                       (File. (System/getProperty "java.home") "bin/java"))
         process (-> (ProcessBuilder.
@@ -311,26 +312,42 @@
                       dir
                       (.getPath ready-file)])
                     (.redirectErrorStream true)
-                    (.start))]
+                    (.start))
+        readiness (CompletableFuture.)
+        child-output (atom [])
+        output-reader
+        (future
+          (try
+            (with-open [reader (io/reader (.getInputStream process))]
+              (loop []
+                (when-let [line (.readLine reader)]
+                  (swap! child-output conj line)
+                  (if (= "held" line)
+                    (.complete readiness ::child-holding)
+                    (recur)))))
+            (catch java.io.IOException _)))
+        _ (.thenAccept
+           (.onExit process)
+           (reify java.util.function.Consumer
+             (accept [_ exited]
+               (.complete readiness exited))))]
     (try
       ;; a cold JVM loads Clojure + Datahike before it can hold; the
-      ;; ready file is authoritative, the clock is only the
-      ;; foreign-process backstop
-      (let [limit (+ (System/nanoTime) (.toNanos TimeUnit/SECONDS 30))]
-        (loop []
-          (cond
-            (.exists ready-file) true
-            (not (.isAlive process))
-            (throw (ex-info "the child JVM exited before holding"
-                            {::exit (.exitValue process)
-                             ::output (slurp (.getInputStream process))}))
-            (< (System/nanoTime) limit) (do (Thread/sleep 10) (recur))
-            :else (throw (ex-info "the child never reported holding" {})))))
+      ;; child's `held` line follows ready-file creation and is authoritative;
+      ;; the clock in await-event! is only the foreign-process backstop
+      (let [observed
+            (test-support/await-event! readiness ::child-readiness)]
+        (when (instance? Process observed)
+          (throw (ex-info "the child JVM exited before holding"
+                          {::exit (.exitValue process)
+                           ::output (str/join "\n" @child-output)}))))
       (testing "a live foreign holder refuses this process's open"
         (is (thrown? Exception (store/open-store! {:seon.store/dir dir}))))
       (testing "the OS releases a killed holder's flock"
         (.destroyForcibly process)
-        (is (.waitFor process 20 TimeUnit/SECONDS))
+        (test-support/await-event!
+         (.onExit process)
+         ::child-exit-after-kill)
         (let [survivor (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? survivor))
@@ -338,7 +355,10 @@
             (finally
               (store/release-store! survivor)))))
       (finally
-        (.destroyForcibly process)
+        (when (.isAlive process)
+          (.destroyForcibly process)
+          (.join (.onExit process)))
+        (future-cancel output-reader)
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest an-in-process-refusal-never-drops-the-os-fence
@@ -365,13 +385,19 @@
                               (.getPath ready-file)])
                             (.redirectErrorStream true)
                             (.start))]
-            (is (.waitFor process 30 TimeUnit/SECONDS)
-                "the child settles: refused opens exit, they never hang")
-            (is (not (.exists ready-file))
-                "the foreign JVM never acquired — the fence survived the
-                 in-process refusal")
-            (is (not (zero? (.exitValue process)))
-                "the child exited by refusal, not by success"))
+            (try
+              (test-support/await-event!
+               (.onExit process)
+               ::refused-child-exit)
+              (is (not (.exists ready-file))
+                  "the foreign JVM never acquired — the fence survived the
+                   in-process refusal")
+              (is (not (zero? (.exitValue process)))
+                  "the child exited by refusal, not by success")
+              (finally
+                (when (.isAlive process)
+                  (.destroyForcibly process)
+                  (.join (.onExit process))))))
           (finally
             (store/release-store! held))))
       (finally
