@@ -55,19 +55,20 @@ effective, and database-entity composites from the leaf registrations.
 a second dial roster (`src/seon/schema/edn.clj:87-111`;
 `src/seon/config.cljc:137-229`).
 
-**Static build indexing and selective runtime publication are different
-admission domains.** Build indexing asks clj-kondo for the JVM projection of
-every first-party file under `src/` and `test/`, slices exact source from its
-locations, and records namespace rows plus every function/test definition,
-including private and uncontracted helpers. It never evaluates application
-forms; dependency caches improve resolution but never become database rows.
-Global schema rows come independently from the admitted
-`resources/seon/schema/` population (`src/seon/fn/analyzer.clj`;
-`src/seon/fn.clj`). Agent runtime publication remains contract-selective and
-commits admitted functions, schemas, and tests through the terminal
-transaction (`src/seon/sci/eval.clj:320-345,793-825`). Arbitrary evals,
-scratch defs, and atoms remain process-local. Receipts retain history but never
-reconstruct code.
+**Program state has four boundaries.** Static indexing analyzes first-party
+`src/` and `test/` without evaluation (`src/seon/fn/analyzer.clj:117-145`;
+`src/seon/fn.clj:19-21`). Contracted declarations publish as program rows only
+through the terminal transaction (`src/seon/cluster/loop.cljc:1411-1447`).
+Each cluster also owns one process-live SCI context in which ordinary defs
+accumulate immediately (`src/seon/cluster.clj:1337-1363`;
+`src/seon/sci/eval.clj:1230-1275`). Separately, the same terminal transaction
+exact-reconciles durable `:seon.code.def` session-image facts for faithful
+values/blobs, proven deterministic pure forms, or explicit unrestorable rows;
+cold acquisition restores those facts once into the cluster context
+(`src/seon/cluster/loop.cljc:325-430,1411-1424`;
+`src/seon/sci/eval.clj:1142-1228`). Read the single checked semantic source,
+[`references/program-state.md`](references/program-state.md), before changing
+or describing any of these boundaries.
 
 ## The reflexes, and what to write instead
 
