@@ -1917,6 +1917,41 @@ may reintroduce a shadow build into the dev feedback path.
   per-function placement table exists at any point, and which functions
   need custody stays the ruling-#33 contract query (9 declaring a
   branch connection, 42 a database value, counted live 2026-08-02).
+  **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
+  THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
+  (1) Owner verbatim: "we OWN sci now with our fork. Design with the
+  understanding that we can modify SCI internals to behave any way we
+  want. It doesn't have to be an atom. We can add more constraints,
+  require security credentials, whatever." This is established
+  practice, not a new liberty: the maintained fork is
+  `seantempesta/sci` (branch `main`, pin
+  `6de15683b7520cc973bc9c136aec7ad3f9b3788c`) and already carries our
+  own internals commits — "Mark shared stock Vars read-only", "Add
+  executed built-in call observation", "Observe host interop during SCI
+  analysis" — which are what `build-base-ctx`'s `:interrupt-fn`,
+  `:built-in-call-observer`, and `:host-interop-observer` consume
+  (`src/seon/sci/eval.clj:167-170`). A design may therefore propose
+  changing SCI's own data structures, and the two standing candidates
+  are named here so nobody re-derives them: the env holder need not be
+  an ordinary atom (an env that interpreted code cannot `swap!` kills
+  the cross-cluster program-rewrite finding at its root, rather than
+  relying on never leaking a reference), and fork need not be a shallow
+  env copy (a copy-on-write env would make CANDIDATE CONTEXTS cheap and
+  would remove the redefinition-leaks-to-parent asymmetry probed
+  2026-08-02, which is the trap standing between us and
+  test-before-install accretion). Every fork change carries permanent
+  upstream-delta maintenance and is subject to the standing sweep
+  cadence; that cost is accepted deliberately per change, never
+  incidentally. (2) AGENTS MUST NOT OPERATE OUTSIDE THEIR CONTEXT, but
+  cross-agent visibility WITHIN a cluster is not the hazard and needs
+  no mechanism — one SCI context per cluster already gives every agent
+  the same program, which is what makes a CLUSTER SUPERVISOR AGENT
+  ("we WANT them to be able to access all agents' context") fall out
+  for free. The hazard being closed is CROSS-CLUSTER reach obtained by
+  accident. If cross-cluster supervision is ever wanted it must be a
+  deliberate, attributable capability rather than a consequence of
+  publishing private vars — recorded now so the containment work does
+  not foreclose it.
   **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
   PERSISTENCE — restrict nothing an agent can call; gate only what it
   may persist.** The session is a faithful Clojure REPL first: a def an
