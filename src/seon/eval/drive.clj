@@ -191,6 +191,16 @@
          vec)
     []))
 
+(defn- run-records [db run-ids]
+  (mapv #(d/pull db
+                 [:seon.cluster.run/id
+                  :seon.cluster.run/opened-at
+                  :seon.cluster.run/closed-at
+                  :seon.cluster.run/plan-digest
+                  :seon.cluster.run/error]
+                 [:seon.cluster.run/id %])
+        run-ids))
+
 (defn- terminal-state [db agent-id process message-id run-cap]
   (let [run-ids (objective-run-ids db message-id)
         receipts (run-receipts db run-ids)
@@ -295,6 +305,7 @@
        :seon.eval.drive/grading-branch grading-branch
        :seon.eval.drive/terminal terminal
        :seon.eval.drive/run-ids run-ids
+       :seon.eval.drive/runs (run-records ending-db run-ids)
        :seon.eval.drive/model-attempts (model-attempts ending-db run-ids)
        :seon.eval.drive/receipts receipts
        :seon.eval.drive/completed-result (completed-result receipts)
