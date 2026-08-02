@@ -1,130 +1,109 @@
 #!/usr/bin/env bash
-# bin/acme — boot a fully ISOLATED "Acme" third-party cluster alongside the
-# live seon dev cluster, then delegate to bin/seon. Acme is the codename for a
-# downstream consumer; NEVER put a real product name in this repo.
-#
-# This wrapper is pure env composition — ZERO seon-src edits. It gives Acme its
-# own port, database, Bun process namespace, and logs, plus the downstream
-# overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring. The default JVM
-# writer remains the one Datahike authority for both databases.
-#
-#   bin/acme up                    # build and reconcile the complete target
-#   bin/acme down                  # stop the whole cluster
-#   bin/acme restart               # rebuild and reconcile the complete target
-#   bin/acme status --edn          # structured identity, endpoints, ownership
-#   bin/acme logs pod --follow
-#   bin/acme cluster reset acme    # scoped current-layout reset
-#
-# To reproduce BUG B (silent invisibility), comment out the (reset! …) in
-# acme/src/acme/pod.cljs and restart the pod: acme.* indexes ZERO rows.
+# bin/acme — operate the explicit `acme` cluster in an isolated operator root.
 set -euo pipefail
-SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# --- persisted local config: a gitignored .env at the repo root holds the LLM
-#     provider/key/model + debug-capture vars so a plain `bin/acme …` picks them
-#     up without inline env on every command. `set -a` exports each VAR=value so
-#     the pod + wire-server inherit them. Keep MACHINE overrides (ports) OUT of
-#     .env — those use ${:-} below and a shell-set value still wins. ---
-if [ -f "$SEON_ROOT/.env.acme" ]; then set -a; . "$SEON_ROOT/.env.acme"; set +a; fi
+SEON_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ACME_OPERATOR_ROOT="${SEON_ACME_ROOT:-$SEON_SOURCE_ROOT/tmp/acme-operator-root}"
+ACME_CLUSTER_NAME="acme"
 
-# --- isolation: distinct from the live default (7890, data/clusters/default,
-#     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
-#     shell override (SEON_PORT=… SEON_CLUSTER_DIR=… bin/acme …) can dodge a
-#     machine-level or cluster-identity collision without editing this file.
-#     The web port is stable for humans; the writer development REPL must bind
-#     port zero and publish its actual cluster-qualified port file. ---
-export SEON_PORT="${SEON_PORT:-7994}"
-export SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/acme}"
-ACME_CLUSTER_PATH="${SEON_CLUSTER_DIR%/}"
-ACME_CLUSTER_NAME="${ACME_CLUSTER_PATH##*/}"
-if [ "$ACME_CLUSTER_NAME" = "acme" ]; then
-  ACME_INSTANCE_SUFFIX=""
+if [[ "${1:-}" == "--root" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "✗ bin/acme --root requires an existing isolated operator root." >&2
+    exit 1
+  fi
+  ACME_OPERATOR_ROOT="$2"
+  shift 2
 else
-  ACME_INSTANCE_SUFFIX="-$ACME_CLUSTER_NAME"
+  mkdir -p "$ACME_OPERATOR_ROOT"
 fi
-export SEON_PROC_DIR="${SEON_PROC_DIR:-tmp/proc-acme${ACME_INSTANCE_SUFFIX}}"
-export SEON_LOG_DIR="${SEON_LOG_DIR:-logs/acme${ACME_INSTANCE_SUFFIX}}"
-export SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port-acme${ACME_INSTANCE_SUFFIX}}"
-export SEON_WRITER_PROC_DIR="${SEON_WRITER_PROC_DIR:-tmp/seon-operator}"
-export SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
-export SEON_WRITER_REPL_PORT_FILE="${SEON_WRITER_REPL_PORT_FILE:-tmp/seon-writer-repl-port-default}"
 
-# --- embeddings: default OFF (opt-in; owner-disabled in our configs
-#     2026-07-02 — .env.acme carries SEON_EMBED=0). Export GEMINI_API_KEY for
-#     KNN when enabled. SEON_EMBED is a
-#     PRESENCE gate in code (any value — even ""/"0" — counts as ON), so
-#     empty/"0" is translated to UNSET here; bin/seon repeats the same
-#     translation after sourcing the main .env. ---
-case "${SEON_EMBED:-}" in
-  ""|0) unset SEON_EMBED ;;
-  *)    export SEON_EMBED ;;
-esac
+usage() {
+  cat <<'EOF'
+Usage: bin/acme [--root PATH] COMMAND
 
-# --- capability grants (agent tools) — the DOWNSTREAM-consumer path: plain
-#     host env on the launcher, zero src/seon edits. Code defaults stay
-#     deny-when-unset; this harness (a legit bench pod AND the downstream-usage
-#     proof) grants shell + web like any consumer's launcher would. Any value
-#     but "0" grants; deny via .env.acme or the shell (SEON_SHELL=0 bin/acme
-#     restart). Web REACHABILITY is a config policy (config/acme.edn's
-#     :seon.config/web, :open here) — not an env knob. SEON_FS_LOCK still
-#     passes through from .env.acme when set.
-#     Full gate table: docs/seon/components/capability-gates.md ---
-export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
-export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (master on/off gate)
+Operate the `acme` cluster in an isolated fresh-system operator root.
 
-# --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
-export SEON_EXTRA_SRC="$SEON_ROOT/acme"
-export SEON_EXTRA_PRELOAD=acme.pod
+  start [--config PATH]     start the acme cluster
+  config apply PATH         reconcile acme from a sparse config manifest
+  init                      publish current source in this operator root
+  init --changed PATH...    publish safe changed source files
+  init acme [--force]       fork or destructively refork the acme cluster
+  status                    list this isolated operator root
+  open                      open the acme namespace page
+  stop [--force]            stop the acme cluster
+  down [--force]            stop every JVM in this isolated operator root
+  logs                      show the acme cluster log
+EOF
+}
 
-# --- acme's OWN artifact identity: one operator flavor selects the isolated
-#     Shadow cache, :acme-client build, output closure, and artifact manifest
-#     together. SEON_CLIENT_OUT remains only as a checked compatibility value;
-#     it cannot substitute an output from a different flavor. ---
-export SEON_ARTIFACT_DESCRIPTOR="$SEON_ROOT/acme/artifact.edn"
-export SEON_CLIENT_OUT=out-acme/client/main.js
+command="${1:-help}"
+shift || true
 
-# --- config seam: acme reads its OWN manifest (per-cluster loadout/routes/
-#     skills) — the same SEON_CONFIG seam bin/seon exposes, pointed at acme's
-#     file so acme curates independently of the default cluster with no src
-#     edit. A shell-set SEON_CONFIG still wins (e.g. SEON_CONFIG=config/test.edn
-#     bin/acme restart to prove retract-on-drop). ---
-export SEON_CONFIG="${SEON_CONFIG:-config/acme.edn}"
-
-# --- branding / CSS control (existing seon seams; no fork) ---
-export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
-export SEON_BRAND_TAGLINE="${SEON_BRAND_TAGLINE:-Acme — the third-party harness}"
-export SEON_BRAND_CSS="$SEON_ROOT/acme/branding/acme.css"
-
-# The shared operator owns ACME's flavor-aware watcher and Bun pod graph while
-# the default operator owns the one JVM writer. This wrapper contributes only
-# target data plus consumer-only commands.
-case "${1:-}" in
-  build|compile|start|stop|tail)
-    echo "bin/acme no longer exposes '$1'; use up, down, restart, status, or logs" >&2
-    exit 2
+case "$command" in
+  start)
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+      start "$ACME_CLUSTER_NAME" "$@"
     ;;
-  gym-diffusion)
-    # Score a CONSUMER-OWNED diffusion-gym scenario (acme/gym/scenarios/*.edn)
-    # through seon's CO-LOCATED ORACLE (bin/oracle-server parse-raw + the
-    # worker-oracle-eval bundle) and emit a scorecard. HERMETIC + OFFLINE (CPU):
-    # no pod, no wire-server, no GPU — the oracle is a pure fn reached by PATH,
-    # so this is ZERO src/seon edits and never touches a live store. SEON_ROOT is
-    # exported for the driver to locate the oracle binaries. A bare scenario name
-    # resolves under acme/gym/scenarios/; a path passes through.
-    #   bin/acme gym-diffusion celsius-killgate.edn --assert
-    #   bin/acme gym-diffusion pure-mean.edn --eval --assert
-    shift
-    ARGS=()
-    for a in "$@"; do
-      case "$a" in
-        --*) ARGS+=("$a") ;;
-        /*)  ARGS+=("$a") ;;
-        */*) ARGS+=("$SEON_ROOT/$a") ;;
-        *)   ARGS+=("$SEON_ROOT/acme/gym/scenarios/$a") ;;
-      esac
-    done
-    exec env SEON_ROOT="$SEON_ROOT" bb "$SEON_ROOT/acme/gym/diffusion_gym.bb" "${ARGS[@]}"
+  config)
+    if [[ "${1:-}" != "apply" || "$#" -ne 2 ]]; then
+      echo "✗ use: bin/acme [--root PATH] config apply PATH" >&2
+      exit 1
+    fi
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+      config apply "$ACME_CLUSTER_NAME" "$2"
+    ;;
+  init)
+    case "${1:-}" in
+      ""|--changed)
+        exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+          init "$@"
+        ;;
+      "$ACME_CLUSTER_NAME")
+        exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+          init "$@"
+        ;;
+      *)
+        echo "✗ use: bin/acme [--root PATH] init [--changed PATH...|acme [--force]]" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  status)
+    if [[ "$#" -ne 0 ]]; then
+      echo "✗ use: bin/acme [--root PATH] status" >&2
+      exit 1
+    fi
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" status
+    ;;
+  open|logs)
+    if [[ "$#" -ne 0 ]]; then
+      echo "✗ use: bin/acme [--root PATH] $command" >&2
+      exit 1
+    fi
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+      "$command" "$ACME_CLUSTER_NAME"
+    ;;
+  stop)
+    if [[ "$#" -gt 1 || ( "$#" -eq 1 && "$1" != "--force" ) ]]; then
+      echo "✗ use: bin/acme [--root PATH] stop [--force]" >&2
+      exit 1
+    fi
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" \
+      stop "$@" "$ACME_CLUSTER_NAME"
+    ;;
+  down)
+    if [[ "$#" -gt 1 || ( "$#" -eq 1 && "$1" != "--force" ) ]]; then
+      echo "✗ use: bin/acme [--root PATH] down [--force]" >&2
+      exit 1
+    fi
+    exec "$SEON_SOURCE_ROOT/bin/seon" --root "$ACME_OPERATOR_ROOT" down "$@"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "✗ unknown ACME command: $command" >&2
+    usage >&2
+    exit 1
     ;;
 esac
-
-exec "$SEON_ROOT/bin/seon" "$@"
