@@ -60,3 +60,33 @@ The minimal fix, if the rebuild is deferred, is `:priority true` at
 
 Proof: a regression that saturates the submission channel to its configured
 queue depth and shows `flow/stop` taking effect without draining the queue.
+
+## Implementation evidence — 2026-08-02, pending orchestrator review
+
+This issue and
+[[work-submission-can-block-before-its-time-limit]] have different immediate
+causes: this issue is a hand-written control loop that violates Flow's SPI;
+the blocker is a blocking full-buffer admission. One simplification serves
+both.
+
+`work-launcher-proc` is now a `var-process` over `#'work-launcher-step`
+(`src/seon/flow.clj:324-379`). Its completion channel enters through
+`::flow/in-ports`, and `::flow/input-filter` removes compute submissions while
+all compute slots are occupied. The custom `alts!!`, ping construction,
+command dispatch, and status loop are deleted. The ordinary Flow proc now
+supplies `:priority true` at its read selection and calls the step transition
+on stop from the pinned dependency
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:243-323`).
+The stop transition interrupts the launcher's owned task executor.
+
+`launcher-stop-precedes-ready-submissions`
+(`test/seon/flow_test.clj:520-577`) acknowledges pause, fills the configured
+queue depth, orders resume then stop on Flow's control channel, observes the
+standard step's stop transition, and proves the queued submission remains
+queued and unrealized. The proof waits on the transition event with only the
+shared loud backstop; it has no sleep or wall-duration assertion.
+
+Focused gate: `bin/test seon.flow-test` ran 21 tests containing 126 assertions
+with zero failures and zero errors. The implementation evidence functionally
+closes this issue together with the bounded-submission blocker; its status
+remains open for orchestrator review as requested.
