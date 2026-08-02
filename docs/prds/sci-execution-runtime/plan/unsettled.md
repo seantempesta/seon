@@ -55,6 +55,19 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 14 — THE PROVIDER-SEAM THESIS IS PROVED (gpqa 198/198).**
+Inspect's choice() scored every sample through Seon episodes verbatim
+(zero sample errors, labels 198/198, log SHA 38cc3c98…). AGENT
+accuracy 0.5% — 196/198 stopped on malformed Clojure replies: the
+episode shape does not yet fit raw-QA tasks (the bootstrap teaches
+objective-work, not answer-by-completion protocol) — the FIRST
+calibration datum the experiment loop exists for, not a seam failure.
+Terminal-honesty gated correctly (2/198). MEASURED SCALE COST:
+~42 MB median store growth PER SAMPLE (2.04 GB for the run,
+history-on); R40 history-off is NOT a creation-seam toggle — live
+d/history calls block non-temporal boots — recorded as the measured
+follow-up. inspect-slice-1 RETIRES complete.
+
 **ADDENDUM 13 — KNOWN RED AT HEAD (2026-08-02 afternoon): the schema
 merge (4b1740cec) regressed the Datahike schema INSTALL on fresh
 branches/fixtures** — declarations parse (one form, 652 keys verified)
