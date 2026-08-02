@@ -164,10 +164,8 @@ must be declared once and referenced by key. Inlining the same constraint in
 several EDN entries is drift.
 
 ```clojure
-{:seon.id/compact-value [:and :string [:re #"^[a-z][a-z0-9]{11}$"]]
- :seon.cluster.agent/id
- [:and {:seon.db/identity true} :seon.id/compact-value]
- :seon.session/id [:and {:seon.db/identity true} :seon.id/compact-value]}
+{:seon.cluster.run/process [:string {:min 1}]
+ :seon.cluster.run/live-processes [:set :seon.cluster.run/process]}
 ```
 
 If the Malli→datahike bridge doesn't yet handle a reference shape you need, fix
