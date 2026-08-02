@@ -23,10 +23,12 @@
             [seon.config :as config]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.fn.analyzer :as fn.analyzer]
+            [seon.problems :as problems]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
@@ -205,6 +207,91 @@
              :seon.cluster.loop/cluster cluster
              :seon.sci.eval/ctx ctx
              :seon.cluster.agent/id "agent-1"})))))
+
+(deftest asked-value-preserves-explicit-reply-and-problem-precedence
+  (let [db {:immutable :database-value}
+        explicit {:my.message/to "agent-2" :my.message/content "explicit"}
+        reply {:my.message/to "agent-3" :my.message/content "reply"}
+        assignment {:my.message/to "agent-4" :my.message/content "repair"}
+        completed (my.run/complete "done")]
+    (with-redefs [cluster.loop/messages (fn [value]
+                                         (when (= :explicit value) explicit))
+                  message/reply (fn [actual-db request]
+                                  (is (= db actual-db))
+                                  (is (= {:my.run/result "done"
+                                          :seon.cluster.agent/id "agent-1"
+                                          :seon.cluster.message/trigger "m-1"}
+                                         request))
+                                  reply)
+                  problems/assignment-value (constantly assignment)]
+      (is (= explicit
+             ((private-loop-fn 'asked-value)
+              {:seon.db/db db
+               :seon.sci.eval/evaluation {:seon.sci.admit/value :explicit}
+               :seon.cluster.loop/settled completed
+               :seon.problems/form-problem {:seon.problems/id :problem}
+               :seon.cluster.agent/id "agent-1"
+               :seon.cluster.message/trigger "m-1"})))
+      (is (= reply
+             ((private-loop-fn 'asked-value)
+              {:seon.db/db db
+               :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
+               :seon.cluster.loop/settled completed
+               :seon.problems/form-problem {:seon.problems/id :problem}
+               :seon.cluster.agent/id "agent-1"
+               :seon.cluster.message/trigger "m-1"})))
+      (is (= assignment
+             ((private-loop-fn 'asked-value)
+              {:seon.db/db db
+               :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
+               :seon.cluster.loop/settled nil
+               :seon.problems/form-problem {:seon.problems/id :problem}
+               :seon.cluster.agent/id "agent-1"}))))))
+
+(deftest delivery-rows-projects-rows-and-every-refusal-transaction
+  (let [db {:immutable :database-value}
+        asked [{:my.message/to "agent-2" :my.message/content "deliver"}
+               {:my.message/to "missing" :my.message/content "refuse"}]
+        rows [{:seon.cluster.message/id "delivered"}]
+        failures [{:seon.error/kind :failure/one}
+                  {:seon.error/kind :failure/two}]
+        cluster {:seon.config.message/max-chain 8}
+        requests (atom [])]
+    (with-redefs-fn
+      {#'message/delivery
+       (fn [actual-db request]
+         (swap! requests conj [:delivery actual-db request])
+         {:seon.cluster.message/rows rows
+          :seon.error/values failures})
+       (ns-resolve 'seon.cluster.loop 'error-tx)
+       (fn [actual-cluster actual-db failure actual-now attribution]
+         (swap! requests conj
+                [:error actual-cluster actual-db failure actual-now attribution])
+         [[:error/tx (:seon.error/kind failure)]])}
+      (fn []
+        (is (= {:seon.cluster.message/rows rows
+                :seon.error/values-tx
+                [[:error/tx :failure/one] [:error/tx :failure/two]]}
+               ((private-loop-fn 'delivery-rows)
+                {:seon.db/db db
+                 :seon.cluster.loop/cluster cluster
+                 :seon.cluster.loop/asked asked
+                 :seon.cluster.agent/id "agent-1"
+                 :seon.cluster.run/id "run-1"
+                 :seon.cluster.run.form/ordinal 2
+                 :seon.cluster.loop/now now
+                 :seon.cluster.message/trigger "m-1"})))
+        (is (= [:delivery db
+                {:my.message/value asked
+                 :seon.cluster.agent/id "agent-1"
+                 :seon.cluster.run/id "run-1"
+                 :seon.cluster.run.form/ordinal 2
+                 :seon.cluster.message/at now
+                 :seon.config.message/max-chain 8
+                 :seon.cluster.message/trigger "m-1"}]
+               (first @requests)))
+        (is (= failures
+               (mapv #(nth % 3) (rest @requests))))))))
 
 (deftest receipt-request-projects-one-schema-valid-terminal-request
   (let [result-blob (apply str (repeat 64 "a"))

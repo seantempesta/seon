@@ -593,6 +593,55 @@
             {:seon.config.error/escalate-to escalate-to})
           attribution)))
 
+(defn- asked-value
+  "The message-family value one completed evaluation asks to deliver."
+  [{db :seon.db/db
+    evaluation :seon.sci.eval/evaluation
+    settled ::settled
+    problem :seon.problems/form-problem
+    agent-id :seon.cluster.agent/id
+    trigger :seon.cluster.message/trigger}]
+  (or (messages (:seon.sci.admit/value evaluation))
+      (when (= :completed (:my.run/disposition settled))
+        (message/reply
+         db
+         (cond-> {:my.run/result (:my.run/result settled)
+                  :seon.cluster.agent/id agent-id}
+           trigger (assoc :seon.cluster.message/trigger trigger))))
+      (when problem (problems/assignment-value problem))))
+
+(defn- delivery-rows
+  "Delivery rows and refusal transaction data for one asked value."
+  [{db :seon.db/db
+    cluster ::cluster
+    asked ::asked
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    ordinal :seon.cluster.run.form/ordinal
+    now ::now
+    trigger :seon.cluster.message/trigger}]
+  (let [delivery
+        (when asked
+          (message/delivery
+           db
+           (cond-> {:my.message/value asked
+                    :seon.cluster.agent/id agent-id
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run.form/ordinal ordinal
+                    :seon.cluster.message/at now
+                    :seon.config.message/max-chain
+                    (:seon.config.message/max-chain cluster)}
+             trigger (assoc :seon.cluster.message/trigger trigger))))]
+    {:seon.cluster.message/rows (:seon.cluster.message/rows delivery)
+     :seon.error/values-tx
+     (into []
+           (mapcat
+            (fn [failure]
+              (error-tx cluster db failure now
+                        {:seon.cluster.agent/id agent-id
+                         :seon.cluster.run/id run-id})))
+           (:seon.error/values delivery))}))
+
 (defn- refused!
   "Record one refused transaction as a durable error, and say it refused.
   Returns true when `outcome` was a refusal, so a call site reads
@@ -1429,45 +1478,31 @@
                     ;; The reply is an ordinary `my.message` value, so
                     ;; it goes through the same bound, the same
                     ;; recipient check and the same derived id.
-                    asked (or (messages (:seon.sci.admit/value evaluation))
-                              (when (= :completed
-                                       (:my.run/disposition settled))
-                                (message/reply
-                                 @connection
-                                 (cond-> {:my.run/result
-                                          (:my.run/result settled)
-                                          :seon.cluster.agent/id agent-id}
-                                   trigger
-                                   (assoc :seon.cluster.message/trigger
-                                          trigger))))
-                              (when problem
-                                (problems/assignment-value problem)))
-                    delivery
-                    (when asked
-                      (message/delivery
-                       @connection
-                       (cond-> {:my.message/value asked
-                                :seon.cluster.agent/id agent-id
-                                :seon.cluster.run/id run-id
-                                :seon.cluster.run.form/ordinal ordinal
-                                :seon.cluster.message/at now
-                                :seon.config.message/max-chain
-                                (:seon.config.message/max-chain cluster)}
-                         trigger (assoc :seon.cluster.message/trigger
-                                        trigger))))
-                    rows (:seon.cluster.message/rows delivery)
+                    db-after-evaluation @connection
+                    asked
+                    (asked-value
+                     (cond-> {:seon.db/db db-after-evaluation
+                              :seon.sci.eval/evaluation evaluation
+                              ::settled settled
+                              :seon.cluster.agent/id agent-id}
+                       problem (assoc :seon.problems/form-problem problem)
+                       trigger (assoc :seon.cluster.message/trigger trigger)))
                     ;; an undeliverable message is a durable fact, never
                     ;; a drop — and `error/commit-tx` composes with
                     ;; itself now that its tempid derives from the
                     ;; error's own id rather than being a constant
-                    refusals
-                    (into []
-                          (mapcat
-                           (fn [failure]
-                             (error-tx cluster @connection failure now
-                                       {:seon.cluster.agent/id agent-id
-                                        :seon.cluster.run/id run-id})))
-                          (:seon.error/values delivery))
+                    delivery
+                    (delivery-rows
+                     (cond-> {:seon.db/db db-after-evaluation
+                              ::cluster cluster
+                              ::asked asked
+                              :seon.cluster.agent/id agent-id
+                              :seon.cluster.run/id run-id
+                              :seon.cluster.run.form/ordinal ordinal
+                              ::now now}
+                       trigger (assoc :seon.cluster.message/trigger trigger)))
+                    rows (:seon.cluster.message/rows delivery)
+                    refusals (:seon.error/values-tx delivery)
                     settlement-evaluation
                     (settlement-result cluster evaluation)
                     receipt
