@@ -80,13 +80,12 @@ See `README.md` for the convention.
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (10)
+## Cleanup (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
-| [Delete root operator files with no live reader](old-detach-helper-and-operator-alias-have-no-live-reader.md) | cleanup | rot deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
