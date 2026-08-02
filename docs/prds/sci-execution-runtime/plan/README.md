@@ -1861,6 +1861,28 @@ may reintroduce a shadow build into the dev feedback path.
   smart fast and cheap" (median turn 9.8 s vs 21.3 s thinking-high,
   $0.0003 vs $0.0007 off-peak); thinking is an opt-IN per-agent
   override (planners), never the shipped posture.
+  **Rulings 2026-08-02 #38-#40 (owner, morning).** #38 EVAL IN THE
+  ASSIGNED NAMESPACE: the evaluation namespace derives from
+  `:seon.cluster.agent/namespace` (temp agents keep `my.agents.<id>`
+  because that IS their assignment); redefinition of live vars follows
+  the existing accept-and-warn + message-the-owner protocol (2026-07-31
+  ruling) — no read-only mode, no second posture. #39 SEON IS
+  TOOL-LESS: "every function is a tool, this is better" — Seon never
+  sends a provider tools list; forms are how agents act. The
+  thinking-tool-continuation issue closes as moot-by-design (recorded
+  so nobody rebuilds it); ruling #37's raise-on-tools guardrail is the
+  enforcement. Benchmark implication accepted: Inspect class C
+  (typed tool-loop tasks, 7 families / 13 tasks ≈ 5%) cannot ride the
+  provider seam; if ever wanted, a thin Inspect-side adapter may
+  translate their tool protocol into door-backed function calls
+  without making Seon internally tool-callful. #40 KEEP-HISTORY IS A
+  PER-CLUSTER DIAL: default ON (grading forks, session restore, and
+  debug archaeology read the past); scratch/eval clusters may run
+  history-off for store economy. ALSO COMMISSIONED (not a ruling): a
+  detailed PRD for the `turn`/`evaluate` refactor — and a standing
+  style order recorded with it: STOP COINING WORDS; call things what
+  they are in the code ("turn", "evaluate", the actual fn and var
+  names — Clojure already has names for most things).
   **Ruling 2026-08-02 #37 (owner, night): THE MODEL-PROVIDER SEAM IS
   ACCEPTED, WITH GUARDRAILS** — per
   `plan/benchmark-mapping-2026-08-02.md`. Seon registers as an Inspect
