@@ -140,3 +140,50 @@ the function nobody thought about rather than re-confirming these four.
 Related: [[seon-db-is-not-the-one-database-namespace]] (ruling #41's
 custody model), and ruling #30's persistence gate, which governs what
 an agent may COMMIT and is a different control point from reachability.
+
+## Phase 2 public-Var checkpoint — 2026-08-02
+
+Commit `0c3a3d535` changed the one compiled first-party installation seam to
+publish `ns-publics` rather than `ns-interns`. The standing custody census now
+derives every loaded core-provenanced namespace from database provenance and
+asserts that its SCI intern set is exactly the host namespace's public set. It
+also proves that the census exercised namespaces containing private Vars, so a
+missing program graph cannot produce a vacuous pass.
+
+This preserves ruling #20 rather than narrowing it. `:seon.fn/private?` is the
+computed program-graph fact already honored by program documentation,
+namespace rendering, and the bootstrap drive. The compiled install seam was
+the sole agent-facing projection that disagreed. Public compiled functions
+continue to call their private JVM helpers normally; the pre-change audit found
+no bootstrap, render, macro, agent-authored acquisition, or SCI test path that
+resolved a private first-party Var from inside an evaluation.
+
+The recurring focus passed 42 tests and 173 assertions with zero failures and
+zero errors:
+
+```text
+bin/test seon.custody-stability-test seon.sci.eval-test
+```
+
+The reset-boundary proof used isolated operator root
+`tmp/reachability-phase2-live-root-0c3a3d535`. After explicit `init` published
+`current-src` digest
+`e06fb003ea2e5ec7eaa2510d3ee3a77455207b3a93f578783641f9f3b8a34d8d`, cluster
+`reachability-phase2` reached readiness in 1,449 ms. Its `bootstrap:root` run
+closed, its root agent owned `my.agents.root`, and one ordinary inbound message
+produced a real `deepseek-v4-flash` attempt with finish reason `stop`. The four
+receipts evaluated comments, `(+ 40 2)` to `42`, and
+`(my.run/complete "42")`; the run closed without an error. Its exact prompt was
+captured at basis 536870955 as one 5,529-estimated-token render-walk
+contribution. `/`, `/agent/root`, `/ns/my.agents.root`, and the namespace debug
+page all returned HTTP 200; the debug page contained both render projections,
+the namespace, and the settled transcript value.
+
+`bin/seon --root tmp/reachability-phase2-live-root-0c3a3d535 down` stopped the
+one recorded JVM. The final status reported both scratch clusters stopped,
+zero live clusters, no orphan JVMs, and a readable roster.
+
+The issue remains open for orchestrator review and the later approved
+reachability phases. This checkpoint closes only the owner-selected
+private-Var publication step; the derived public custody-returning surface and
+the other acceptance rows above remain explicit work.
