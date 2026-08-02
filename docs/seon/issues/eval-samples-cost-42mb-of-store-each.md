@@ -25,11 +25,16 @@ a blocker on scale rather than a performance nicety.
 `research/admission-caps-and-blob-fallback-2026-08-01.md:225-235`
 measured the same class directly: **every transaction rewrites the
 konserve index nodes across three indexes with no reclamation**, so
-cost scales with transactions and with how many rows share a node —
-40 receipts carrying 2 MB each produced a 6.3 GB store (~80x). The
-2026-08-01 synthesis records the companion figure: **~1.5 MB per
-transaction regardless of payload**
-(`plan/state-of-the-design-2026-08-01.md:102`).
+cost scales with transactions and with how many rows share a node.
+That probe used DELIBERATELY HUGE synthetic payloads (1-2 MB per
+receipt) to find the amplification knee — real receipts are nothing
+like that: the 2026-08-02 refactor proof measured a settled receipt's
+`result-edn` at **59 characters**. The companion figure is the one
+that bites: **~1.5 MB per transaction REGARDLESS OF PAYLOAD**
+(`plan/state-of-the-design-2026-08-01.md:102`) — the fixed cost of
+rewriting index nodes across three indexes. We pay megabytes to store
+tens of bytes; the payload is not the problem and shrinking it cannot
+help.
 
 An episode commits many transactions (agent creation, bootstrap plan
 seeding, a receipt per bootstrap form, the message, run open, the
