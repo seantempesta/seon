@@ -123,11 +123,12 @@
       :data-seon-path (pr-str (::path node))}
      (into [:span {:class "seon-print-content" :hidden "hidden"}] children)
      [:table {:class "seon-print-visual"}
-      [:thead [:tr (mapv (fn [column] [:th column]) columns)]]
-      [:tbody
-       (mapv (fn [row]
-               [:tr (mapv (fn [cell] [:td cell]) row)])
-             rows)]]]
+      [:thead
+       (into [:tr] (map (fn [column] [:th column])) columns)]
+      (into [:tbody]
+            (map (fn [row]
+                   (into [:tr] (map (fn [cell] [:td cell])) row)))
+            rows)]]
     [:details
      {:class (str "seon-print-node " (face-class (::kind node)))
       :data-seon-path (pr-str (::path node))}

@@ -175,9 +175,11 @@
                                 :seon.sci.admit/caps caps
                                 :seon.render/value {:a 1}}))))))
   (testing "an oversized value is elided and SAYS it was elided"
-    (let [panelled (block/data-panel
-                    {:seon.render/value (vec (range 500))
-                     :seon.sci.admit/caps caps})]
+    (let [narrow-caps
+          (assoc caps :seon.config.eval.result/max-collection 4)
+          panelled (block/data-panel
+                    {:seon.render/value (vec (range 20))
+                     :seon.sci.admit/caps narrow-caps})]
       (is (re-find #"elided" (hiccup/->string panelled))
           "a reader must never have to guess whether a marker was the data")))
   (testing "no caps is a legible card, never an invented bound"

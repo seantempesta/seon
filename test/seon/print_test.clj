@@ -12,6 +12,7 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.print :as print]
+            [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]))
@@ -253,4 +254,6 @@
     (is (= "\n| :a | :b |\n|----+----|\n|  1 |  x |\n| 22 | yy |\n"
            text))
     (is (= text (lexical-hiccup-text hiccup)))
+    (is (hiccup/hiccup? hiccup))
+    (is (str/includes? (hiccup/->string hiccup) "<table"))
     (is (= :table (-> hiccup (get-in [3 0]))))))
