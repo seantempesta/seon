@@ -30,12 +30,18 @@ What Seon already owns for the same problem, as one chain:
 - `seon.print` — the one closed print grammar; text and hiccup derive
   from one stored fact (ruling #26).
 - `seon.render.value/node-id` — "Stable element id for one root
-  selector and `get-in` path" (`src/seon/render/value.clj:19-33`): a
-  content-addressed `seon-value-<digest>` reference, with `path-url`
-  building `?path=…&offset=…` drill links (`:36-45`). This IS the
-  `value/{value-id}` referencing the owner recalled, and paged
-  navigation by `get-in` path is the "drill" already in the vocabulary
-  table.
+  selector and `get-in` path" (`src/seon/render/value.clj:19-33`),
+  with `path-url` building `?path=…&offset=…` drill links (`:36-45`).
+  Paged navigation by `get-in` path is the "drill" already in the
+  vocabulary table.
+  CORRECTION (2026-08-02, orchestrator's own overclaim, caught by the
+  MCP PRD lane and re-verified): `node-id` hashes the ADDRESS
+  `[agent-id root-address path]`, NOT the value, so it is a stable
+  element identity for morph targeting and is NOT a retrievable
+  content address. Retrieval comes from the blob tier below, whose
+  digest IS the content. A design that returns only a node id hands
+  back something nothing can look up; the two are complementary and
+  an oversized result needs both.
 - `seon.blob` — content-addressed `put!`/`get` with digest and size
   (`src/seon/blob.clj:19,32`), already the overflow tier for oversized
   eval results and reasoning under ruling #25's threshold split.
