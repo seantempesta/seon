@@ -93,3 +93,56 @@ The browser half crosses a second unowned seam: `/data` is already present in
 by private `data-response` in `src/seon/render/web.clj`. A route-table edit
 cannot add blob retrieval. The shared artifact/reference contracts may also
 need declarations in the unowned `resources/seon/schema.edn` authority.
+
+## 2026-08-02 artifact fidelity falsifier
+
+The semantic admitted value cannot be the artifact's stored source. Admission
+first builds one closed `:seon.print/node`, derives
+`:seon.sci.admit/value` from it through the lossy `semantic-value` projection,
+and separately prints the node as `:seon.cluster.eval/result-edn`
+(`src/seon/sci/admit.clj:385-419,463-468`). Reprinting the semantic value does
+not reconstruct the tagged node.
+
+A direct JVM probe used the shipped caps and an input exceeding both the
+8,192-entry collection cap and the 262,144-character string cap. The admitted
+result was capped; the existing tagged result was 687,341 characters, while
+`pr-str` of the semantic value was 302,086 characters, and the strings were
+unequal. Reading the tagged node and printing it again under explicit canonical
+bindings reproduced all 687,341 characters exactly. The decisive result was:
+
+```clojure
+{:capped? true
+ :original-count 687341
+ :semantic-count 302086
+ :semantic-equal? false
+ :node-canonical-equal? true}
+```
+
+There is a second defect at the same choke point: `admit` currently inherits
+ambient print bindings. Under `*print-length* = 2`, `*print-level* = 2`, and
+`*print-meta* = true`, a small admitted map produced
+`"#:seon.print{:face :seon.print/map, :entries [# #]}"`, which
+`clojure.edn/read-string` cannot read. The owning print helper must bind at
+least `*print-length* nil`, `*print-level* nil`, `*print-meta* false`,
+`*print-readably* true`, `*print-dup* false`, and
+`*print-namespace-maps* true`; both admission and artifact reads call that one
+helper.
+
+The one-source artifact therefore stores the structured print node, never the
+semantic value beside its derived print string. Its exact proposed schema is:
+
+```clojure
+:seon.sci.admit/print-node :seon.print/node
+
+:seon.render.value/artifact
+[:map {:closed true}
+ [:seon.sci.admit/print-node :seon.sci.admit/print-node]
+ [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+ [:seon.sci.admit/record
+  {:optional true}
+  :seon.sci.admit/record]]
+```
+
+On read, the semantic drill value derives through the existing
+`semantic-value` transformation and result EDN derives through the canonical
+print helper. No second stored projection is justified.

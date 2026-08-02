@@ -51,6 +51,12 @@ addressable by the raw prepl, and is never promoted to `alive`. Evaluation
 transport and timeout errors now echo the attempted mode and namespace. The
 focused gate passed 21 tests / 152 assertions / 0 failures / 0 errors.
 
+The session-consolidation slice landed in `db6b46321`. `runtime_status` now
+returns root-scoped session identifiers in its structured inventory value, and
+`list_sessions` was deleted atomically from discovery and dispatch. Calling its
+old name returns an unknown-tool error. The focused gate passed 22 tests / 156
+assertions / 0 failures / 0 errors.
+
 The next slices are blocked at owners outside the MCP lane, not at the bridge:
 
 - Raw JVM value projection must be installed as the cluster io-prepl `valf`.
@@ -61,10 +67,9 @@ The next slices are blocked at owners outside the MCP lane, not at the bridge:
   stateful session semantics. The live server is started by protected owner
   `src/seon/cluster.clj`; this lane did not edit it.
 - The `/data` route already exists in `src/seon/render/route.clj`; its actual
-  root selection is private `data-response` in unowned
-  `src/seon/render/web.clj`. Blob-digest selection cannot be implemented by
-  changing the route table alone. A new named artifact/reference contract may
-  also require the unowned global `resources/seon/schema.edn` authority.
+  root selection is private `data-response` in `src/seon/render/web.clj`.
+  Ownership of that selector has been granted, but its typed artifact contract
+  still requires the protected global `resources/seon/schema.edn` authority.
 - Complete inventory must come from a public read-only value in
   `script/seon/fresh_operator.clj`. Its current `source-observations`,
   `derive-cluster-truth`, `cluster-truth`, and `status!` functions are private,
@@ -74,10 +79,9 @@ The next slices are blocked at owners outside the MCP lane, not at the bridge:
   Adding the fact and its consumer crosses `resources/seon/schema.edn`,
   `config/default.edn`, and protected Flow/cluster owners.
 
-`list_sessions` therefore remains temporarily present: ruling #44 requires its
-atomic deletion only after the session data has moved into the completed
-status value. Deleting it before those owner seams land would lose the data
-rather than consolidate the mechanism.
+Complete inventory, health, and Flow remain pending behind those owner seams;
+the independent session data has already moved into `runtime_status`, so no
+compatibility `list_sessions` path remains.
 
 ## Grounding ledger
 
