@@ -16,7 +16,7 @@
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`.
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.dev.docstring :as docstring]
@@ -25,6 +25,30 @@
             [seon.flow :as flow]
             [seon.instrument :as instrument]
             [seon.schema :as schema]))
+
+(def ^:private function-schemas-state
+  ;; Malli exposes collection as a process-global defonce atom but no exact
+  ;; snapshot/restore operation. Tests must restore the entering map itself:
+  ;; re-registering compiled schemas changes their identity and is not exact.
+  (ns-resolve 'malli.core '-function-schemas*))
+
+(defn- preserving-instrumentation-state
+  [body]
+  (let [instrumented-roots (into {}
+                                 (map (juxt identity deref))
+                                 (instrument/instrumented))
+        function-schemas @@function-schemas-state]
+    (try
+      (body)
+      (finally
+        (try
+          (instrument/remove!)
+          (finally
+            (reset! @function-schemas-state function-schemas)))
+        (doseq [[instrumented-var root] instrumented-roots]
+          (alter-var-root instrumented-var (constantly root)))))))
+
+(use-fixtures :each preserving-instrumentation-state)
 
 (defn- instrumented!
   "Run `body` with instrumentation on, and always take it back off."
@@ -269,10 +293,13 @@
     (finally (instrument/remove!))))
 
 (deftest remove-is-total
-  (instrument/apply! {:seon.config/on-core-error :panic})
-  (is (zero? (instrument/remove!)))
-  (is (zero? (instrument/remove!)) "and idempotent")
-  (is (empty? (instrument/instrumented))))
+  (try
+    (instrument/apply! {:seon.config/on-core-error :panic})
+    (is (zero? (instrument/remove!)))
+    (is (zero? (instrument/remove!)) "and idempotent")
+    (is (empty? (instrument/instrumented)))
+    (finally
+      (instrument/remove!))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The selection is computed
