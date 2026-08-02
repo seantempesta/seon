@@ -23,7 +23,8 @@ if [[ -e "$case_dir/complete" ]]; then
   exit 2
 fi
 
-classpath="$(clojure -Spath -M:dev)"
+classpath="$(cd "$measurement_tree" && clojure -Spath -M:dev)"
+workload_script="$measurement_tree/tmp/jvm-tuning/workload.clj"
 jvm_args=(
   "-Xms16m"
   "-Xmx$heap"
@@ -50,14 +51,14 @@ else
 fi
 
 printf '%q ' java "${jvm_args[@]}" -cp "$classpath" clojure.main \
-  "$repo_root/tmp/jvm-tuning/workload.clj" "${workload_args[@]}" \
+  "$workload_script" "${workload_args[@]}" \
   > "$case_dir/command.txt"
 printf '\n' >> "$case_dir/command.txt"
 
 started_epoch="$(date +%s)"
 cd "$measurement_tree"
 java "${jvm_args[@]}" -cp "$classpath" clojure.main \
-  "$repo_root/tmp/jvm-tuning/workload.clj" "${workload_args[@]}" \
+  "$workload_script" "${workload_args[@]}" \
   > "$case_dir/stdout.edn" 2> "$case_dir/stderr.log" &
 pid=$!
 

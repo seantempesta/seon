@@ -377,3 +377,234 @@ not assumed supported because the physical host has 16 GiB.
   analysis, not class sharing. Attack that owner if the ten-second-start law
   remains unsettled; do not carry a 133 MiB custom archive that measured as
   noise.
+
+## Web-research follow-up — 2026-08-01
+
+### Source provenance and two corrections
+
+The first pass was not a systematic web-research pass. Its sources were the
+vendored dependency and first-party source lines named above, isolated local
+measurements, `PrintFlagsFinal`/unified-log output, and the Oracle/OpenJDK
+documents linked at the individual flag decisions. The collector and workload
+conclusions were measurement-led. This follow-up separately swept the JDK 26
+release notes, JEPs and issue tracker; Oracle's JDK 26 operational and migration
+guides; Clojure release notes and Ask Clojure; and Apple/OpenJDK platform
+material. Community searches found no M-series Clojure/Datahike workload close
+enough to substitute for Seon's direct measurements.
+
+Two claims in the first pass need explicit correction:
+
+- Agent graphs did **not** use the process-root cached platform `:io` pool.
+  `arm!` called `flow/create-flow` without an executor override
+  (`src/seon/cluster/agent.clj:376-380`), so flow resolved `:io` through
+  core.async's default (`reference-code/core.async/src/main/clojure/clojure/
+  core/async/flow/impl.clj:145-148`), which creates virtual threads on this JDK
+  (`impl/dispatch.clj:75-96`). The explicit process-root pair was consumed by
+  the work-launcher graph (`src/seon/flow.clj:381-425`). Commit `4ac039c7b`
+  subsequently replaced that pair's cached platform `:io` executor with the
+  same core.async virtual executor. Thus both the original turn drive and the
+  corrected repeats below exercised agent procs on virtual threads. This
+  supersedes the current-stack correction and the first bullet under “Limits.”
+- The first-pass case runner changed directory to its archived tree only after
+  resolving the classpath, and `git archive` did not populate submodules. The
+  JVMs and database roots were private, but the exact source classpath came
+  from the then-live checkout, not entirely from the named archived commit.
+  `freeze-head.sh` now archives initialized submodules and prepares their Java
+  classes; `run-case.sh` resolves both classpath and workload from that tree.
+  The follow-up measurements below use the corrected frozen tree at
+  `4ac039c7bb7bc4f945b423139f171ddd8fc2c015`. The first-pass workload numbers
+  remain observations of the actual checkout, but their commit identity must
+  not be treated as stronger than that.
+
+### JDK 26 HotSpot changes: adopt only the automatic ones
+
+The primary release source is Oracle's
+[JDK 26 release notes](https://www.oracle.com/java/technologies/javase/26-relnote-issues.html).
+The relevant changes reinforce G1; they do not add another production flag.
+
+| JDK 26 change | stack relevance and local falsifier | decision |
+|---|---|---|
+| [JEP 522: lower G1 synchronization](https://openjdk.org/jeps/522) | Seon's indexing burst creates and mutates many reference-bearing tree nodes. The new second card table costs 0.2% of maximum heap: **4 MiB at the directly tested 2 GiB consumer heap**, independent of the host's 128 GiB. Every first-pass G1 number already included the change. | Adopt automatically with JDK 26; no tuning flag. It strengthens the measured G1 choice. |
+| Eager G1 reclaim of humongous reference objects | JDK 26 can reclaim eligible reference arrays/objects at any pause. It does not cover primitive `byte[]`, so it should not be credited with reclaiming Konserve's 8 MiB byte payloads. The workload already ran with it. | Adopt automatically; no flag and no revised footprint claim. |
+| G1 `UseGCOverheadLimit` | JDK 26 now defaults to OOM after five collections above 98% GC time with less than 2% free heap. The 2 GiB cases never triggered it. | Retain the default. Disabling it could turn a capacity failure into a GC livelock. |
+| Smaller ergonomic initial heap | JDK 26 now chooses `MinHeapSize` when `-Xms`/`InitialHeapSize` is absent instead of 1/64 of physical RAM. This directly avoids a large-machine startup commitment. | Adopt automatically. Keep production free of `-Xms`; the probe-only `-Xms16m` remains an explicit controlled baseline. |
+| `MaxRAM` deprecation | JDK 26 deprecates `-XX:MaxRAM`; it was used only to simulate a 16 GiB host in `flags.sh`. Direct 2 GiB workload cases, not `MaxRAM`, establish the consumer result. | Never add a production `MaxRAM` cap. Keep the explicit `MaxRAMPercentage=12.5` policy and use `-Xmx` for capacity experiments. |
+| Linux-container default heap rises to 75% | [JDK-8356194](https://bugs.openjdk.org/browse/JDK-8356194) changes only the default on detected Linux containers. Seon's explicit 12.5% overrides it. | No flag change. A container needs at least a 16 GiB memory limit to derive the tested 2 GiB heap. |
+| G1 idle uncommit | Automatic time-based idle uncommit remains an open enhancement, [JDK-8357445](https://bugs.openjdk.org/browse/JDK-8357445). JDK 26 did not replace periodic GC with an automatic idle policy. | Retain the measured `G1PeriodicGCInterval=30000`. |
+| Virtual thread waits for class initialization | JDK 26 now usually unmounts a virtual thread while another thread initializes a class. That removes a startup/first-use starvation edge for flow `:io` tasks. | Adopt automatically; no scheduler or JVM flag. |
+| `MemoryPoolMXBean.getTotalGcCpuTime()` | `javap` on this JDK confirms the new default method returning accumulated GC CPU nanoseconds. | Adopt in future measurement tooling if GC CPU attribution is needed; it is not a launch flag. |
+
+The first-pass ZGC result does not change. The JDK 26 release notes contain no
+new generational-ZGC footprint policy that falsifies its measured 2 GiB RSS
+disadvantage. JEP 516 merely makes the AOT object cache collector-neutral.
+
+### JDK 26 AOT cache: stronger rejection than legacy AppCDS
+
+The first pass measured `ArchiveClassesAtExit`, the legacy AppCDS path. JDK 26
+also has the newer object-bearing cache described by
+[JEP 516](https://openjdk.org/jeps/516) and the
+[JDK 26 `java` command](https://docs.oracle.com/en/java/javase/26/docs/specs/man/java.html).
+It is tied to the exact application classpath, JDK release, OS, and CPU.
+
+`aot26.sh` tested that path against the corrected frozen tree:
+
+- The actual source-first classpath trained for 12.128 seconds, then assembly
+  refused its non-empty directory entries (`Cannot have non-empty directory in
+  paths`). This is a structural failure, not a timing loss.
+- Staging every directory as a JAR cost **1.627 seconds**. Training plus
+  assembly took **16.305 seconds** and wrote a 163.1 MiB configuration, but the
+  Homebrew OpenJDK 26.0.1 assembly child crashed with `SIGSEGV` in
+  `InstanceKlass::major_version()` and left a zero-byte cache. The one-step
+  parent returned zero despite its child status 134; the probe now validates
+  that the archive is non-empty before attempting comparisons.
+
+Reject the JDK 26 AOT cache. It cannot consume Seon's operational classpath,
+its best-case packaged path crashed this VM, and even a fixed assembler would
+retain the exact-classpath regeneration cost. These are CPU/startup and
+artifact-size observations; they do not scale down by the 128/16 GiB RAM
+ratio. A 16 GiB machine would receive the same zero usable cache and do the
+same class loading, only on a different CPU. Reconsider only after both a
+packaged launch artifact and a fixed JDK exist, then repeat on consumer Macs
+and Windows rather than projecting M5 wall time.
+
+### Clojure 1.12 on JDK 26
+
+Seon pins Clojure 1.12.5, the current stable release listed by
+[Clojure Downloads](https://clojure.org/releases/downloads). Clojure emits
+Java 8-compatible bytecode that newer JVMs load. The project officially
+supports current Java LTS releases through 25 and says it tries to keep interim
+releases working; JDK 26 is therefore compatible-by-testing, not an official
+LTS support promise ([installation guidance](https://clojure.org/guides/install_clojure)).
+The Clojure 1.12.5 changelog contains no JDK 26 compatibility fix.
+
+Clojure 1.12 had already changed `lazy-seq` and `delay` locking to avoid the
+JDK 21 synchronized-pinning behavior
+([1.12 release notes](https://clojure.org/news/2024/09/05/clojure-1-12-0)).
+JEP 491 removed that synchronized-pinning class in JDK 24, but the Clojure
+change remains compatible. Core.async's published virtual-thread design says
+`:io` uses virtual threads on JDK 21+ and a cached platform fallback on older
+JDKs; alpha3 also stopped retaining virtual-thread references
+([core.async announcement](https://clojure.org/news/2026/03/11/async_virtual_threads)).
+The pinned `1.10.874-alpha3` source lines above implement that behavior.
+
+The corrected 12-turn cases emitted only the expected incubator Vector API
+warning. There were no reflective-call, native-access, or final-field-mutation
+warnings. Both JFR recordings contained zero `jdk.FinalFieldMutation` events,
+and a separate 12-turn run completed in **4.392 seconds** with
+`--illegal-final-field-mutation=deny`. Because Oracle recommends fixing or
+replacing a mutating library rather than pre-authorizing it
+([JDK 26 final-field guidance](https://docs.oracle.com/en/java/javase/26/migrate/preparing-final-field-mutation-restrictions.html)),
+do not add `--enable-final-field-mutation=ALL-UNNAMED`. The default warning is
+useful; `deny` belongs in an occasional migration gate, not the consumer
+launch block while there is no offender.
+
+Ask Clojure's relevant interop cases point to type hints, qualified Clojure
+1.12 method symbols, parameter tags, or explicit coercion when overload
+reflection is ambiguous—not a JVM warning-suppression flag
+([reflection warning case](https://ask.clojure.org/index.php/14622/refection-warning-even-with-type-hinting),
+[overload case](https://ask.clojure.org/index.php/14612/method-with-parameter-called-although-provided-parameter?show=14617)).
+No JDK 26-specific Clojure 1.12 incompatibility was found in the Clojure
+release, Ask Clojure, or core-library issue searches. That search boundary is
+not a claim that future dependency combinations cannot expose one.
+
+Keep `--enable-native-access=ALL-UNNAMED`. Proximum's FFM caller is presently
+on Seon's source/class path, so `ALL-UNNAMED` is the launcher's only classpath
+granularity. Oracle recommends moving the native caller to the module path for
+narrower enablement; that would be a packaging design, not a more precise flag
+available to today's classpath. Adding `--illegal-native-access=deny` beside
+the existing enablement would not expose another unnamed-module caller, so it
+is rejected as false assurance.
+
+### Virtual-thread pinning diagnostic
+
+Do not add `-Djdk.tracePinnedThreads=full`. JEP 491 explicitly removed the
+property; setting it has no effect on JDK 26. The successor is JFR's
+`jdk.VirtualThreadPinned` event, retained for native/FFM pinning, plus
+`jdk.VirtualThreadSubmitFailed`. Oracle's
+[JDK 26 virtual-thread guide](https://docs.oracle.com/en/java/javase/26/core/virtual-threads.html)
+says both are enabled by the default JFR configuration, with a 20 ms threshold
+for pinned events. The same guide documents the virtual-thread scheduler MBean;
+`jcmd <pid> Thread.vthread_scheduler` is useful when queued tasks, rather than
+pinning, are suspected.
+
+Two corrected frozen-tree 2 GiB G1 turn drives per condition measured the
+diagnostic itself:
+
+| condition | 12-turn workload times | mean | peak RSS mean | recording |
+|---|---|---:|---:|---:|
+| no JFR | 4.259 s, 4.660 s | 4.459 s | 1656 MiB | — |
+| JFR `settings=default` | 4.783 s, 4.336 s | 4.560 s | 1749 MiB | 4.59, 4.28 MiB |
+
+The two-run mean is 2.3% slower with JFR. Peak RSS was 92 MiB higher on
+average, dominated by one 1876 MiB run; with two observations this is an
+overhead bound, not a stable estimate. Both 28-second recordings contained
+**zero pinned events, zero submit failures, and zero final-field mutations**.
+Because every case fixed `-Xmx2g`, these are direct 16 GiB-target capacity
+projections, not 128 GiB-derived heap estimates. CPU overhead still needs
+consumer-hardware confirmation.
+
+Adopt `jfr-pinning.sh` as a bounded virtual-thread migration/acceptance probe.
+Reject always-on JFR in `:dev`: it writes about 4.4 MiB per short process and
+has measurable overhead. For a live JVM, the lower-churn operational form is
+`jcmd PID JFR.start name=pinning settings=default`, exercise the flow, then
+`jcmd PID JFR.dump name=pinning filename=tmp/jvm-tuning/pinning-PID.jfr` and
+`jfr print --events jdk.VirtualThreadPinned,jdk.VirtualThreadSubmitFailed FILE`.
+
+### M-series, Windows, large pages, and containers
+
+Apple Silicon's relevant difference is its normal page size, not a hidden
+HotSpot tuning opportunity. `sysctl vm.pagesize hw.pagesize` returned
+**16,384 bytes**. `-Xlog:pagesize=info` showed 16 KiB for the G1 heap, both card
+tables, mark bitmap, and code heaps. OpenJDK's Apple Silicon port discussion
+also records `vm.pagesize: 16384`
+([HotSpot runtime thread](https://mail.openjdk.org/pipermail/hotspot-runtime-dev/2021-February/045781.html)).
+This size is OS/architecture-derived and does not scale with installed RAM; it
+changes mapping-rounding granularity, not the GiB consumer projections.
+
+The shortest local falsifiers reject three tempting footprint flags:
+
+- `-XX:+UseLargePages` warned that large pages are unsupported by this VM.
+- `-XX:+UseTransparentHugePages` was unrecognized. Oracle documents THP for
+  Linux; JDK 26 fixed its G1 use there, not on macOS.
+- `-XX:TrimNativeHeapInterval=30000` warned that native trimming is unsupported.
+  The [JDK 26 launcher guide](https://docs.oracle.com/en/java/javase/26/docs/specs/man/java.html)
+  limits it to Linux/glibc.
+
+None can enter the cross-platform default. Windows large pages require an
+operator privilege and precommit policy, which is the opposite of “polite
+consumer footprint”; do not enable them without a separate Windows workload
+result. There is no macOS transparent-huge-page analog exposed by this HotSpot
+build.
+
+Native macOS has no Linux cgroup/container detector; even the
+`os+container` log tag is absent from this build. Docker Desktop runs the JVM
+inside its Linux VM, where HotSpot sees the Linux cgroup limit, not macOS
+unified memory. The explicit 12.5% policy prevents JDK 26's new 75% Linux
+container default from changing Seon, but the existing minimum still applies:
+a limit below 16 GiB derives below the tested 2 GiB heap and is unsupported.
+
+No credible community measurement combined current JDK 26, Clojure 1.12,
+Datahike/Konserve, and M-series hardware. Generic Java or Clojure startup
+anecdotes therefore do not change Seon's measured numbers. The final consumer
+gate remains one actual 16 GiB M-series Mac and one 16 GiB modern x86-64
+Windows laptop.
+
+### Recommendation delta for review
+
+There is **no default alias flag-block change** from the first-pass
+recommendation:
+
+```diff
+ :jvm-opts ["--add-modules" "jdk.incubator.vector"
+            "--enable-native-access=ALL-UNNAMED"
+            "-XX:+UseG1GC"
+            "-XX:MaxRAMPercentage=12.5"
+            "-XX:G1PeriodicGCInterval=30000"]
++;; no JDK 26 web-sweep additions
+```
+
+In particular, do not add `jdk.tracePinnedThreads`, always-on JFR,
+`UseLargePages`, `UseTransparentHugePages`, `TrimNativeHeapInterval`,
+`MaxRAM`, final-field allowances, or native-access suppression. The only
+adoption is the opt-in JFR probe, plus the automatic improvements already in
+JDK 26. This follow-up makes no production edit.
