@@ -16,10 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (24)
+## Blocker (27)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
+| [Make every fresh recursive delete refuse symlink traversal](fresh-recursive-deletion-reintroduces-symlink-traversal.md) | blocker | filesystem safety wave |
+| [Delete the writer build that still packages the old host server](writer-build-still-packages-the-deleted-host-server.md) | blocker | great-deletion build wave |
 | [Reconcile the conventions document with the fresh runtime](docs-rot-conventions-describes-the-pre-fresh-runtime.md) | blocker | doc-rot fix wave |
 | [Retire active ADRs that authorize the deleted topology](docs-rot-active-adrs-authorize-deleted-topology-and-protocol.md) | blocker | doc-rot fix wave |
 | [Re-ground the Datahike fork skill at the selected revision](datahike-skill-claims-an-obsolete-fork-pin-is-current.md) | blocker | skill-rot fix wave |
@@ -45,10 +48,23 @@ See `README.md` for the convention.
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (43)
+## Friction (51)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
+| [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
+| [Delete static render blocks left by the one-walk cutover](static-render-blocks-survive-the-one-walk-cutover.md) | friction | render deletion wave |
+| [Preserve render resolution and feed failure evidence](render-resolution-and-feed-swallow-failures.md) | friction | render error-evidence wave |
+| [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | Flow observability wave |
+| [Keep session-image refusal evidence as facts, not derived prose](session-image-stores-derived-unrestorable-prose.md) | friction | session-image evidence wave |
+| [Derive namespace context without a stored `my.*` roster](cluster-toolkit-stores-a-prefix-derived-projection.md) | friction | context derivation wave |
+| [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
+| [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
+| [Derive changed-test ownership instead of classifying paths](changed-test-selector-classifies-hosts-by-path-prefix.md) | friction | changed-test selector repair |
+| [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
+| [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
+| [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
 | [Refresh the config skill's current acquisition-boundary matrix](config-skill-omits-current-acquisition-boundaries.md) | friction | skill-rot fix wave |
 | [Delete the pod CLJS reader closure](pod-cljs-reader-closure-teaches-a-deleted-runtime.md) | friction | rot deletion wave |
 | [Demote active reference pages that teach deleted runtime APIs](docs-rot-active-reference-pages-teach-deleted-runtime-apis.md) | friction | doc-rot fix wave |
@@ -56,21 +72,17 @@ See `README.md` for the convention.
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |
 | [Point the surviving writer-port consumers at fresh advertisements](old-writer-port-consumers-survive-outside-mcp.md) | friction | adversarial-audit fix wave |
-| [Run the agent graph's `:io` executor on virtual threads](agent-graph-io-runs-on-platform-threads.md) | friction | flow io-executor fix |
 | [Give the elision marker its count and identity](elided-marker-carries-no-count-or-identity.md) | friction | print-path follow-up |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
 | [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
-| [Make `seon.sci.eval` hot-reloadable](sci-eval-namespace-is-not-hot-reloadable.md) | friction | Core |
 | [Wire `:seon.render.value/options` so presentation decouples from admission caps](render-value-options-declared-but-unwired.md) | friction | caps-blob-print wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
-| [Derive the reachable blob set from the schema and include history](blob-reachability-names-one-attribute-by-hand.md) | friction | store/GC fix lane |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
 | [Restore the message bar to the page the agent route serves](agent-page-has-no-message-form.md) | friction | visual-QA fix wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
-| [Let a live config apply reach an armed agent graph](armed-agent-graphs-freeze-config-dials-at-arm.md) | friction | turn-loop preflight fix lane |
 | [Give `ai-prose` the ref shape the render walk actually hands it](error-render-puts-its-own-failure-in-agent-context.md) | friction | turn-loop preflight fix lane |
 | [Give render token budgets one config owner instead of private dials](render-token-budgets-are-private-dials-no-producer-supplies.md) | friction | context wave fix lane |
 | [Make the render wave's properties able to produce their failing cases](render-wave-properties-cannot-produce-their-failing-cases.md) | friction | context wave fix lane |
@@ -79,7 +91,6 @@ See `README.md` for the convention.
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [Merge the 28 upstream Datahike commits our fork is missing](datahike-fork-is-28-commits-behind-upstream.md) | friction | upstream-delta sweep follow-up |
-| [Make the filestore able to execute the batch write Datahike builds](konserve-filestore-cannot-execute-the-batch-write-datahike-builds.md) | friction | store/perf fix lane |
 | [State a position on `:keep-history?` instead of inheriting it](keep-history-is-on-by-default-without-a-decision.md) | friction | store/perf fix lane |
 | [Give storage GC the cutoff that makes it actually reclaim](storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md) | friction | store/perf fix lane |
 | [Refuse `:db.secondary/only` until a covering index exists](secondary-only-attributes-have-no-covering-index.md) | friction | schema-lifecycle wave |
@@ -95,10 +106,11 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (9)
+## Cleanup (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
 | [Remove deleted quarry gates from the Clojure testing skill](clojure-testing-skill-points-at-deleted-quarry-gates.md) | cleanup | skill-rot fix wave |
 | [Delete root operator files with no live reader](old-detach-helper-and-operator-alias-have-no-live-reader.md) | cleanup | rot deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
