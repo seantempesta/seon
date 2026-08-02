@@ -528,19 +528,47 @@ changes there.
 
 ### Slice 1 live checkpoint
 
-The provider, shared drive, guardrails, history-off root, store measurement,
-GPQA task, and terminal-honesty scorer are committed. A one-sample
-`gpqa_diamond` smoke and its single permitted retry both stopped before model
-generation. The retry's native Inspect log is
-`evals/runs/2026-08-02-gpqa-seon-smoke-retry/2026-08-02T12-27-07-00-00_gpqa-diamond_4DTBYH3XEEspAwKkznxN7p.eval`.
-It retains the mandatory `seon_episode_semantics` label and records the exact
-boundary: fresh-root `bin/seon init` starts its initialization JVM from the
-source-less operator root, where `seon.fn.analyzer` is absent from the
-classpath. `bd29da1f0` moved cluster launches to the repository checkout but
-did not move `source-process-value!` (`script/seon/fresh_operator.clj`) there.
-No sample completed, so the 198-sample falsifier, accuracy, choice-seam
-verdict, and per-sample growth measurement remain unrun rather than being
-reported from partial evidence.
+The provider, shared drive, guardrails, temporal-history root, store
+measurement, GPQA task, and terminal-honesty scorer are committed. After
+`b98728d5a` centralized every operator child JVM launch, the one-sample smoke
+crossed the complete operator/prepl/provider path. Its Seon run stopped
+honestly on an unmatched delimiter in the model reply, while Inspect's
+`choice()` scorer consumed `state.choices` normally.
+
+The authorized 198-sample `gpqa_diamond` falsifier then completed with six-way
+concurrency and no sample errors. All 198 samples have non-empty
+`state.choices`, a `choice` score, a terminal-honesty score, the mandatory
+`seon_episode_semantics` label, and the history/store-growth metadata. Choice
+accuracy is 1/198 (`0.005050505050505051`): one `C` and 197 `I`. The provider
+seam thesis therefore survives the falsifier; the low result is agent
+behavior, not lost answer choices. Of the Seon runs, 196 stopped and two
+completed. The terminal-honesty accuracy is correspondingly 2/198
+(`0.010101010101010102`).
+
+The run exposed one scorer projection bug after generation: unqualified
+Clojure `:completed` becomes JSON `"completed"`, while the initial scorer
+expected `"seon.eval.drive/completed"`. `fde3150c2` fixes that comparison.
+Inspect's offline rescore could not reconstruct the one original correct
+choice, so no replacement choice score was accepted and no seam shim was
+added. The authoritative log preserves every original choice score byte for
+byte and replaces only the terminal-honesty column from a terminal-only
+rescore, with correction provenance in eval metadata:
+`evals/runs/2026-08-02-gpqa-seon-full-198/2026-08-02T13-10-48-00-00_gpqa-diamond-accepted-terminal-correction.eval`
+(SHA-256
+`38cc3c985b80c96ae1fd35127d02265b6c88fd24de09243d476baf7f541c46b0`).
+
+Every retained sample records its shared-store interval. Because six samples
+run concurrently, these intervals overlap and are not additive isolated
+sample costs. Logical growth per retained interval was 11,964,881 bytes
+minimum, 42,399,810.5 median, 58,116,890.5 mean, and 516,434,096 maximum;
+allocated growth was 12,296,192 minimum, 43,716,608 median, 59,889,891.6 mean,
+and 532,176,896 maximum. The two operator roots used by the original run and
+native retry grew by 2,041,745,524 logical bytes and 2,103,963,648 allocated
+bytes in aggregate. That operational root total includes five samples that
+finished after the first task was cancelled but were not retained in its log;
+the accepted log itself has exactly 198 unique samples. This growth makes the
+R40 history-off follow-up material rather than speculative, but the live
+`d/history` dependencies still preclude enabling it in this slice.
 
 ## 9. Open owner questions (recommendation first)
 
