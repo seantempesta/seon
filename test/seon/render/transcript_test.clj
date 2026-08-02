@@ -1,11 +1,13 @@
 (ns seon.render.transcript-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.bootstrap :as bootstrap]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
@@ -81,10 +83,12 @@
   [rendered]
   (into
    []
-   (map (fn [[_ kind id detail]]
-          {:id id :kind (keyword kind) :detail (keyword detail)}))
+   (map (fn [[_ kind id-source detail]]
+          {:id (edn/read-string id-source)
+           :kind (keyword kind)
+           :detail (keyword detail)}))
    (re-seq
-    #"(?m)^;; transcript/entry :(message|eval) \"([^\"]+)\" :(full|summary)$"
+    #"(?m)^;; transcript/entry :(message|eval) (\"(?:\\.|[^\"])*\") :(full|summary)$"
     rendered)))
 
 (defn- ai-elided
@@ -239,6 +243,86 @@
         (is (= (mapv :id visible) (mapv :id (html-entries html-value))))
         (is (str/includes? ai (str elided " older transcript entr")))
         (is (str/includes? html (str elided " older transcript entr")))
+        (is (<= (tokens/estimate ai) budget))
+        (is (<= (tokens/estimate html) budget))
+        (is (reader-valid? ai))))))
+
+(defn- seed-pinned-bootstrap-history!
+  [connection]
+  (let [bootstrap-run-id (bootstrap/run-id agent-id)
+        bootstrap-receipts
+        (mapcat
+         (fn [ordinal]
+           (let [row-id (pr-str [bootstrap-run-id ordinal])]
+             [{:seon.cluster.run.form/id row-id
+               :seon.cluster.run.form/run
+               [:seon.cluster.run/id bootstrap-run-id]
+               :seon.cluster.run.form/ordinal ordinal
+               :seon.cluster.run.form/source (str "(identity " ordinal ")")}
+              {:seon.cluster.eval/id row-id
+               :seon.cluster.eval/run
+               [:seon.cluster.run/id bootstrap-run-id]
+               :seon.cluster.eval/ordinal ordinal
+               :seon.cluster.eval/at (at ordinal)
+               :seon.cluster.eval/result-edn (pr-str ordinal)}]))
+         (range 13))
+        messages
+        (concat
+         (map (fn [index]
+                {:seon.cluster.message/id (str "middle-" index)
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id agent-id]
+                 :seon.cluster.message/content
+                 (str "middle history " index " " (apply str (repeat 80 "x")))
+                 :seon.cluster.message/at (at (+ 100 index))})
+              (range 40))
+         (map (fn [index]
+                {:seon.cluster.message/id (str "newest-" index)
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id agent-id]
+                 :seon.cluster.message/content (str "newest history " index)
+                 :seon.cluster.message/at (at (+ 1000 index))})
+              (range 6)))]
+    (d/transact
+     connection
+     (into [{:seon.cluster.agent/id agent-id}
+            {:seon.cluster.run/id bootstrap-run-id
+             :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+             :seon.cluster.run/opened-at (at 0)}]
+           cat
+           [bootstrap-receipts messages]))))
+
+(deftest bootstrap-prefix-and-newest-tail-survive-middle-elision
+  (support/with-database
+    (fn [connection]
+      (seed-pinned-bootstrap-history! connection)
+      (let [db @connection
+            floor (transcript/minimum-token-budget (unit db 0))
+            budget (+ floor 1000)
+            ai (transcript/render-ai (unit db budget))
+            html-value (transcript/render-html (unit db budget))
+            html (hiccup/->string html-value)
+            ai-rows (ai-entries ai)
+            html-rows (html-entries html-value)
+            bootstrap-run-id (bootstrap/run-id agent-id)
+            pinned-ids (mapv #(pr-str [bootstrap-run-id %]) (range 13))
+            newest-ids (mapv #(str "newest-" %) (range 6))
+            visible-ids (mapv :id ai-rows)
+            pinned-end (.indexOf ai (str "\"" (last pinned-ids) "\""))
+            marker-start (.indexOf ai ";; transcript/elided")
+            newest-start (.indexOf ai (str "\"" (first newest-ids) "\""))]
+        (is (pos? (ai-elided ai)))
+        (is (= (ai-elided ai) (html-elided html-value)))
+        (is (= pinned-ids (subvec visible-ids 0 13)))
+        (is (every? #(= :full (:detail %)) (take 13 ai-rows)))
+        (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
+        (is (< pinned-end marker-start newest-start))
+        (is (str/includes? ai "middle transcript entries elided"))
+        (is (< (.indexOf html (last pinned-ids))
+               (.indexOf html "seon-transcript-elision")
+               (.indexOf html (first newest-ids))))
+        (is (= (mapv #(select-keys % [:id :kind :detail]) html-rows)
+               ai-rows))
         (is (<= (tokens/estimate ai) budget))
         (is (<= (tokens/estimate html) budget))
         (is (reader-valid? ai))))))

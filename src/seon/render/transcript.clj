@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.bootstrap :as bootstrap]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -99,32 +100,54 @@
   [db agent-id limit]
   (d/q {:query
         '[:find ?receipt ?at ?id
-          :in $ ?agent-id
+          :in $ ?agent-id ?bootstrap-run-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
           [?run :seon.cluster.run/agent ?agent]
+          [?run :seon.cluster.run/id ?run-id]
+          [(not= ?run-id ?bootstrap-run-id)]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/at ?at]
           [?receipt :seon.cluster.eval/id ?id]]
-        :args [db agent-id]
+        :args [db agent-id (bootstrap/run-id agent-id)]
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
 
+(defn- pinned-receipt-ids
+  [db agent-id]
+  (d/q '[:find [?receipt ...]
+         :in $ ?agent-id ?run-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.cluster.run/id ?run-id]
+         [?receipt :seon.cluster.eval/run ?run]]
+       db agent-id (bootstrap/run-id agent-id)))
+
 (defn- candidate-entity-ids
   [db agent-id limit]
-  (->> (concat
-        (map #(into [:message] %) (recent-message-rows db agent-id limit))
-        (map #(into [:eval] %) (recent-receipt-rows db agent-id limit)))
-       (sort-by (fn [[kind _ at id]]
-                  [(.getTime ^java.util.Date at)
-                   (case kind :message 0 :eval 1)
-                   id])
-                #(compare %2 %1))
-       (take limit)
-       (group-by first)
-       (reduce-kv (fn [ids kind rows]
-                    (assoc ids kind (mapv second rows)))
-                  {})))
+  (let [recent
+        (->> (concat
+              (map #(into [:message] %)
+                   (recent-message-rows db agent-id limit))
+              (map #(into [:eval] %)
+                   (recent-receipt-rows db agent-id limit)))
+             (sort-by (fn [[kind _ at id]]
+                        [(.getTime ^java.util.Date at)
+                         (case kind :message 0 :eval 1)
+                         id])
+                      #(compare %2 %1))
+             (take limit)
+             (group-by first)
+             (reduce-kv (fn [ids kind rows]
+                          (assoc ids kind (mapv second rows)))
+                        {}))]
+    (update recent :eval
+            (fn [receipt-ids]
+              (into []
+                    (distinct
+                     (concat (pinned-receipt-ids db agent-id)
+                             receipt-ids)))))))
 
 (defn- form-sources
   [db receipt-ids]
@@ -267,6 +290,11 @@
         sources (form-sources db (:eval ids))]
     (->> (concat (map (partial message-entry identities) messages)
                  (map (partial receipt-entry sources) receipts))
+         (map (fn [entry]
+                (assoc entry ::pinned?
+                       (and (= :eval (::kind entry))
+                            (= (bootstrap/run-id agent-id)
+                               (::run-id entry))))))
          (sort-by entry-order)
          vec)))
 
@@ -424,56 +452,63 @@
   (keyword (str "seon.transcript." (name (::kind entry))) (::id entry)))
 
 (defn- marker-text
-  [elided]
-  (str elided " older transcript entr" (if (= 1 elided) "y" "ies")
-       " elided by the token budget."))
+  [elided pinned?]
+  (str elided " " (if pinned? "middle" "older") " transcript entr"
+       (if (= 1 elided) "y" "ies") " elided by the token budget."))
 
 (defn- ai-output
-  [entries elided]
+  [pinned entries elided]
   (str/join
    "\n\n"
    (cond-> []
+     (seq pinned) (into (map ::text pinned))
      (pos? elided)
      (conj (str ";; transcript/elided " elided "\n;; "
-                (marker-text elided)))
+                (marker-text elided (seq pinned))))
      (seq entries) (into (map ::text entries)))))
 
+(defn- html-entries
+  [entries]
+  (into
+   [:ol {:class "seon-transcript-list"}]
+   (map (fn [entry]
+          [:li {:id (block/surface-id (entry-name entry))
+                :class "seon-transcript-entry"
+                :data-transcript-id (::id entry)
+                :data-transcript-kind (name (::kind entry))
+                :data-transcript-detail (name (::detail entry))}
+           [:pre [:code (::text entry)]]]))
+   entries))
+
 (defn- html-output
-  [entries elided]
+  [pinned entries elided]
   (into
    [:section {:id (block/surface-id :transcript)
               :class "seon-transcript"}]
    (cond-> []
+     (seq pinned)
+     (conj (html-entries pinned))
      (pos? elided)
      (conj [:p {:class "seon-transcript-elision"
                 :data-transcript-elided (str elided)}
-            (marker-text elided)])
+            (marker-text elided (seq pinned))])
      (seq entries)
-     (conj
-      (into
-       [:ol {:class "seon-transcript-list"}]
-       (map (fn [entry]
-              [:li {:id (block/surface-id (entry-name entry))
-                    :class "seon-transcript-entry"
-                    :data-transcript-id (::id entry)
-                    :data-transcript-kind (name (::kind entry))
-                    :data-transcript-detail (name (::detail entry))}
-               [:pre [:code (::text entry)]]]))
-       entries)))))
+     (conj (html-entries entries)))))
 
 (defn- output-tokens
-  [entries elided]
-  (max (tokens/estimate (ai-output entries elided))
-       (tokens/estimate (hiccup/->string (html-output entries elided)))))
+  [pinned entries elided]
+  (max (tokens/estimate (ai-output pinned entries elided))
+       (tokens/estimate
+        (hiccup/->string (html-output pinned entries elided)))))
 
 (defn- fits?
-  [budget entries elided]
-  (<= (output-tokens entries elided) budget))
+  [budget pinned entries elided]
+  (<= (output-tokens pinned entries elided) budget))
 
 (defn- best-summary
-  [unit entry newer older-count budget]
+  [unit pinned entry newer older-count budget]
   (let [candidate (projected-entry unit entry :summary)]
-    (when (fits? budget (into [candidate] newer) older-count)
+    (when (fits? budget pinned (into [candidate] newer) older-count)
       candidate)))
 
 (defn- projection
@@ -482,62 +517,69 @@
         agent-id (:seon.cluster.agent/id unit)
         total (history-count db agent-id)
         requested (max 0 (long (get unit ::token-budget 0)))
-        ;; The floor is derived from the exact smallest honest twin: the HTML
-        ;; wrapper, plus the loud marker whenever facts would be dropped.
-        minimum (output-tokens [] total)
-        budget (max requested minimum)
         candidate-limit (int (min Integer/MAX_VALUE
-                                  (max recent-entry-count budget)))
+                                  (max recent-entry-count requested)))
         entries (if (and db agent-id)
                   (history db agent-id candidate-limit)
                   [])
-        acquired (count entries)
-        unacquired (- total acquired)
+        pinned (into []
+                     (comp (filter ::pinned?)
+                           (map #(projected-entry unit % :full)))
+                     entries)
+        candidates (into [] (remove ::pinned?) entries)
+        pinned-count (count pinned)
+        acquired (count candidates)
+        unacquired (- total pinned-count acquired)
+        ;; The floor is the exact smallest honest twin: the full pinned
+        ;; bootstrap prefix plus the loud marker for everything after it.
+        minimum (output-tokens pinned [] (- total pinned-count))
+        budget (max requested minimum)
         recent-start (max 0 (- acquired recent-entry-count))]
     (loop [index (dec acquired)
            newer []]
       (if (neg? index)
-        {::entries newer
+        {::pinned pinned
+         ::entries newer
          ::elided unacquired
          ::minimum-token-budget minimum
          ::token-budget budget}
-        (let [entry (nth entries index)
+        (let [entry (nth candidates index)
               recent? (<= recent-start index)
               full (when recent?
                      (projected-entry unit entry :full))
               with-full (when full (into [full] newer))
               older-count (+ unacquired index)]
           (cond
-            (and with-full (fits? budget with-full older-count))
+            (and with-full (fits? budget pinned with-full older-count))
             (recur (dec index) with-full)
 
             :else
             (if-let [summary
-                     (best-summary unit entry newer older-count budget)]
+                     (best-summary
+                      unit pinned entry newer older-count budget)]
               (recur (dec index) (into [summary] newer))
-              {::entries newer
+              {::pinned pinned
+               ::entries newer
                ::elided (+ unacquired (inc index))
                ::minimum-token-budget minimum
                ::token-budget budget})))))))
 
 (defn minimum-token-budget
-  "Minimum budget that can render this history's loud oldest-tail marker."
+  "Minimum budget preserving the bootstrap and a loud elision marker."
   {:malli/schema [:=> [:cat :seon.render/unit] [:int {:min 0}]]}
   [unit]
-  (output-tokens
-   []
-   (history-count (:seon.db/db unit) (:seon.cluster.agent/id unit))))
+  (::minimum-token-budget (projection (assoc unit ::token-budget 0))))
 
 (defn render-ai
   "Render one agent's bounded transcript as reader-valid REPL text."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (let [{::keys [entries elided]} (projection unit)]
-    (ai-output entries elided)))
+  (let [{::keys [pinned entries elided]} (projection unit)]
+    (ai-output pinned entries elided)))
 
 (defn render-html
   "Render the same bounded transcript with stable block and entry ids."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{::keys [entries elided]} (projection unit)]
-    (html-output entries elided)))
+  (let [{::keys [pinned entries elided]} (projection unit)]
+    (html-output pinned entries elided)))
