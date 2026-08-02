@@ -53,3 +53,12 @@ the same function named by
   harness so the number sits next to the fusion and batching numbers.
 - `:keep-history?` is fixed at database creation, so landing a change means
   republishing and reforking, not editing config against live data.
+
+## Backlog triage 2026-08-02
+
+**Still real, narrowed to making the settled decision explicit and measured.**
+Ruling #23 chose retained time travel, and current blob GC now correctly marks
+history. `seon.cluster.store/datahike-configuration` nevertheless still omits
+`:keep-history?` and inherits Datahike's default silently. The store/performance
+wave must write `true` at creation and record the measured temporal-index cost;
+the design choice itself is no longer open.

@@ -47,3 +47,13 @@ admission semantics are unchanged (a bad contract is still refused with
 the same error), and a recurring test pins the cost class (e.g. the
 per-form cost of a contracted defn stays within a small multiple of an
 uncontracted one at a registry size the test constructs).
+
+## Backlog triage 2026-08-02
+
+**Still real after parsed contracts and live enforcement.** Those landings
+changed the durable representation and installed wrapper, not this admission
+cost: current `seon.schema/projection-with-function-contract` still calls
+`build-projection` over all forms and contracts, and `seon.sci.eval/program-row`
+still invokes it for every contracted definition. The destination is the
+contract-projection performance follow-up, not the completed per-cluster live-
+context wave.

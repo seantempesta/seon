@@ -71,3 +71,11 @@ quarry rather than receiving an independent fix plan.
 manifest but did not remove the duplicate quarry declarations:
 `src-old/seon/config/resolve.cljc:343-365` still declares both Flow dials, and
 the explicit `:writer` alias in `deps.edn` still loads `src` plus `src-old`.
+
+## Backlog triage 2026-08-02
+
+**Still real only inside the old writer reader closure.** Fresh ownership is
+now the schema resource, while the root writer/build aliases still make
+`src-old/seon.config.resolve` executable beside it. The destination is the rot
+deletion wave that removes those live quarry readers; this must not receive an
+independent fresh config mechanism or a compatibility fix.
