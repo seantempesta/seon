@@ -113,7 +113,7 @@
                      (range)
                      expected-sources)
                (ordered-run-forms @connection run-id)))
-        (is (= (bootstrap/plan-digest expected-sources)
+        (is (= (bootstrap/plan-digest @connection "bootstrap")
                (:seon.cluster.run/plan-digest before)))
         (is (= process (:seon.cluster.run/process before)))
         (is (= #{['help 'seon.bootstrap 'help]
@@ -161,8 +161,10 @@
             prior-run-id (bootstrap/run-id prior-id)
             prior-before (run-row @connection prior-run-id)
             prior-digest (:seon.cluster.run/plan-digest prior-before)
+            pre-edit-plan-digest
+            (bootstrap/plan-digest @connection "bootstrap-edit")
             plan-forms (ordered-plan-forms @connection "bootstrap-edit")
-            [_ edited-eid prior-edited-source] (nth plan-forms 2)
+            [edited-eid _ prior-edited-source] (nth plan-forms 2)
             inserted-source "(identity :inserted-bootstrap-form)"
             edited-source "(identity :edited-bootstrap-form)"
             renumber-tx
@@ -201,7 +203,8 @@
               (mapv second (ordered-run-forms @connection prior-run-id))]
           (is (= prior-before (run-row @connection prior-run-id))
               "the prior agent's frozen run is untouched")
-          (is (not= prior-digest
+          (is (= pre-edit-plan-digest prior-digest))
+          (is (not= pre-edit-plan-digest
                     (:seon.cluster.run/plan-digest later)))
           (is (= 14 (count later-sources)))
           (is (= inserted-source (nth later-sources 1)))
@@ -209,10 +212,8 @@
           (is (not-any? #{inserted-source edited-source} prior-sources))
           (is (= (:seon.cluster.run/plan-digest later)
                  (bootstrap/plan-digest
-                  (bootstrap/ordered-sources
-                   @connection
-                   "bootstrap-edit"
-                   'my.agents.bootstrap-later)))))))))
+                  @connection
+                  "bootstrap-edit"))))))))
 
 (deftest bare-help-prints-the-edn-authored-prose-through-sci
   (let [evaluation

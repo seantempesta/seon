@@ -1446,7 +1446,8 @@
   [:seon.cluster/name :seon.cluster/name]
   [:seon.cluster/config :seon.cluster/config]
   [:seon.cluster/instructions :seon.cluster/instructions]
-  [:seon.cluster/toolkit :seon.cluster/toolkit]]
+  [:seon.cluster/toolkit :seon.cluster/toolkit]
+  [:seon.cluster/bootstrap-plan :seon.cluster/bootstrap-plan]]
 
 ;; ===========================================================================
 ;; INSTRUMENT
@@ -2550,8 +2551,8 @@
  :seon.cluster.run.form/run :seon.db/ref
  :seon.cluster.run.form/source [:string {:min 1}]
 
- ; Bootstrap-plan declarations stay beside the ordered run.form family until
- ; the owner-ruled global-schema consolidation wave absorbs this block.
+ ; Bootstrap-plan declarations extend the ordered run.form family in this
+ ; owner-ruled global schema resource.
  :seon.ns/name-designation [:enum :agent :user]
  :seon.bootstrap.plan/id [:keyword {:seon.db/identity true}]
  :seon.bootstrap.plan/digest [:re "^[0-9a-f]{64}$"]

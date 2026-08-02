@@ -178,11 +178,11 @@
     (ordered-sources db cluster-name namespace-name)))
 
 (defn plan-digest
-  "The stable digest of one agent's ordered bootstrap sources."
-  {:malli/schema [:=> [:cat :seon.cluster.reply/sources]
+  "The stable digest of a cluster's ordered bootstrap-plan facts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster/name]
                   :seon.cluster.run/plan-digest]}
-  [sources]
-  (digest-value sources))
+  [db cluster-name]
+  (digest-value (ordered-plan-rows db cluster-name)))
 
 (defn seed-tx
   "Transaction data opening, claiming, and freezing one bootstrap run."
@@ -237,5 +237,5 @@
       (run/plan-tx
        {:seon.cluster.run/id id
         :seon.cluster.run/process process
-        :seon.cluster.run/plan-digest (plan-digest sources)
+        :seon.cluster.run/plan-digest (plan-digest db cluster-name)
         :seon.cluster.run/sources sources})])))
