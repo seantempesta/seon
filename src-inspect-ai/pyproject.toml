@@ -30,6 +30,9 @@ inspect-evals = { path = "../reference-code/inspect-evals", editable = true }
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.entry-points.inspect_ai]
+seon_inspect = "seon_inspect._registry"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/seon_inspect"]
 

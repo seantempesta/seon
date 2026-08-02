@@ -5,7 +5,7 @@
       "distribution": "inspect-ai",
       "module": "inspect_ai",
       "path": "reference-code/inspect-ai",
-      "revision": "05322696a0f784ec399ef6abbafd3d2a250ea9cc",
+      "revision": "8ebc782ec6e5f74774c0878214502ed694cdf9db",
       "version_contains_revision": true,
       "admitted_paths": [
         "pyproject.toml",
@@ -15,7 +15,7 @@
       "nested_sources": {
         "inspect_view": {
           "path": "src/inspect_ai/_view/ts-mono",
-          "parent_revision": "eccde6b7c67c8d07eef224c1a8a3ff85c51eb1e2",
+          "parent_revision": "9096073512b07b592e56ef715c43ea9a3b2a94ef",
           "revision": "f3588038f399de82eec7d189f82a31402153f553"
         }
       }
