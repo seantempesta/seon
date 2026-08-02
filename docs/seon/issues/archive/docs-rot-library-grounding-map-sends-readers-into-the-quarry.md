@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, agent, database, flow]
 ---
@@ -58,3 +58,29 @@ side.
   first-party consumer.
 - All inbound readers are checked so none continues to call the old map's
   quarry owner current.
+
+## Resolution
+
+Resolved in the path-limited library-grounding commit containing this note.
+
+- `docs/seon/architecture/library-grounding.md:14-27` records the verified
+  submodule revisions for Datahike, Konserve, SCI, core.async, Malli,
+  clj-kondo, Reitit, and Datastar Clojure.
+- `docs/seon/architecture/library-grounding.md:29-42` now begins every concept
+  row at live `src/`, `resources/`, `script/`, or `bin/` owners and continues
+  to exact existing files under `reference-code/`. The map contains no
+  `src-old/`, deleted CLJS gate, Bun/pod owner, remote database protocol, or
+  missing test command.
+- `src/seon/cluster.clj:1-17` and
+  `src/seon/cluster/store.clj:288-398` verify the process-root store and
+  branch-per-cluster seam; `src/seon/fn/analyzer.clj:1-28,107-139` verifies
+  the clj-kondo JVM analysis seam; and `src/seon/sci/eval.clj:1205-1270`
+  verifies the live cluster `ctx` and supplied-context evaluation seam.
+- `src/seon/blob.clj:19-54` verifies content-addressed Konserve blob writes and
+  digest-checked reads. `src/seon/render/route.clj:1-55` and
+  `src/seon/render/web.clj:692-804` verify the live Reitit and Datastar/http-kit
+  seams.
+- Every listed path was existence-checked at the pinned checkout. Inbound
+  architecture links in `architecture.md`, `data-model.md`, the decisions,
+  and this map's Related section now resolve to a map whose first-party owners
+  are current; none embeds a quarry owner as current guidance.
