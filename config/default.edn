@@ -26,11 +26,17 @@
  ; Unit: total nodes visited across the whole projection.
  :seon.config.eval.result/max-nodes 65536
 
- ; Unit: serialized result-edn characters. Provenance: the 2026-08-01
- ; file-store probe found the inline transaction knee between 10 KB and
- ; 100 KB; 65,536 keeps ordinary results inline while moving amplified
- ; payloads to the content-addressed blob path.
- :seon.config.eval.result/blob-threshold 65536
+ ; Unit: serialized result-edn characters. Provenance: REVISED
+ ; 2026-08-02 (owner ruling) on direct measurement — the 2026-08-01
+ ; probe placed the knee "between 10 KB and 100 KB" and shipped 65,536,
+ ; but tmp/store-amplification measured inline payload amplification at
+ ; ~86x: a 4 KB inline payload costs 350 KB of store and a 64 KB one
+ ; costs 5.5 MB. 4,096 keeps genuinely small results (the common case —
+ ; a settled receipt measured 59 characters) inline while moving
+ ; anything amplified onto the content-addressed blob path, whose own
+ ; cost is ~10 ms per 8 MB. Re-derive if the blob path's read cost ever
+ ; dominates a rendering budget.
+ :seon.config.eval.result/blob-threshold 4096
 
  ; Unit: retained entries in one routed `/data` window; the navigation
  ; elision marker rides beside them, never inside the count (the
