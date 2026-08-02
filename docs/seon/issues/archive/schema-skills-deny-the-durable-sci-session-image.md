@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, skills, sci, program-graph, schema]
 ---
@@ -70,3 +70,21 @@ the live cluster session and print/session evidence discoverable.
   session transaction.
 - The three repeated paragraphs have one checked semantic source and cannot
   drift independently.
+
+## Resolution
+
+Resolved by `2ca66d484`, `677d67a30`, `d049ba5b1`, and `431f424bb`. The shared
+semantic source is now
+`.agents/skills/data-oriented-clojure/references/program-state.md`; the
+data-oriented, data-modeling, and Datahike skills link to that one checked
+four-boundary account, while the REPL skill distinguishes the reply reader,
+agent turn in the live cluster ctx plus terminal transaction, io-prepl, and a
+raw JVM REPL. The reference cites current indexing, terminal publication,
+live-ctx, `:seon.code.def`, cold-acquisition, and recurring restoration-test
+owners. All four affected skill packages pass skill validation.
+
+The attempted session-image test gate was blocked outside this issue's owned
+paths by concurrent protected-source breakage at
+`src/seon/render/web.clj:282:10` (`No such namespace: transcript`). This repair
+did not resume, message, or edit that lane; source and existing-test evidence
+are recorded in the skill reference instead.

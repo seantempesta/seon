@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, skills, rendering, context]
 ---
@@ -73,3 +73,18 @@ architecture.
   current-state explanation.
 - Every current claim carries checked source lines, and an independent reader
   verifies the skill through both symlinked audiences.
+
+## Resolution
+
+Resolved by `e933750f5` and `0b1275e8f`. The Datastar skill now names the one
+Reitit route table, canonical namespace pages, root/agent aliases, both debug
+variants, the shared AI/HTML walk, and the live complete-snapshot delivery
+path. The canvas skill retains the refusal of nonexistent generalized controls
+while treating namespace pages, debug pages, and the shared walk as built.
+Both mark generalized controls, `/call`, agent-owned `::renders`, and
+revisioned package/keyframe delivery **[TARGET]** with current source lines.
+Both skill packages pass validation and the canonical/symlinked skill trees
+resolve to identical bytes.
+
+The blast-radius law still requires an independent adversarial verification
+pass; the implementing lane did not self-certify that review.

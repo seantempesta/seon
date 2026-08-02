@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, skills, config, context]
 ---
@@ -69,3 +69,18 @@ context/render implementation, and the linked flow and web-skill issues.
   ideas, with no restoration of the deleted manifest model.
 - An independent sweep of every `config/effective` call site verifies that the
   matrix is complete at the selected source revision.
+
+## Resolution
+
+Resolved by `5b92b714a`. The skill's source-derived matrix now distinguishes
+boot-time process structure, operator instrumentation, graph-arm loop values,
+per-episode work, per-turn AI settings and agent overlays, per-render/request
+reads, the explicit walk fallback, program-row installation, and per-fault
+reads. It records both actual `:seon.config/on-core-error` acquisition
+boundaries and cites the live next-turn AI-settings proof. Its context/UI
+section now names current walk and namespace/debug behavior while refusing the
+deleted manifest model and nonexistent generalized controls. Skill validation
+passes.
+
+The required independent adversarial verification pass remains to be
+commissioned; this implementing lane did not self-certify the call-site sweep.

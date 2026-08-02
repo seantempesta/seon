@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, skills, testing, tooling]
 ---
@@ -46,3 +46,13 @@ The `clojure-testing` skill together with the owner of the separate
 - `rg 'test-cljs|test-writer'` over live instructions and scripts either finds
   no current reader or only explicitly historical evidence.
 - Nothing restores a CLJS or writer gate to satisfy the stale sentence.
+
+## Resolution
+
+Resolved by `683158bca`. The testing skill now names `bin/test` as the sole
+fresh JVM correctness gate, identifies `src-old` and `test-old` as disabled
+quarry without executable gate claims, and cites the current launcher and
+aliases (`.agents/skills/clojure-testing/SKILL.md:15-23`). Skill validation
+passes. The separate protected `bin/test-parser` reader still contains its own
+historical `bin/test-cljs` reference; this repair did not restore or edit that
+outer reader.

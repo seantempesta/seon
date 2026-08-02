@@ -24,12 +24,8 @@ See `README.md` for the convention.
 | [Make every fresh recursive delete refuse symlink traversal](fresh-recursive-deletion-reintroduces-symlink-traversal.md) | blocker | filesystem safety wave |
 | [Delete the writer build that still packages the old host server](writer-build-still-packages-the-deleted-host-server.md) | blocker | great-deletion build wave |
 | [Reconcile the conventions document with the fresh runtime](docs-rot-conventions-describes-the-pre-fresh-runtime.md) | blocker | doc-rot fix wave |
-| [Re-ground the Datahike fork skill at the selected revision](datahike-skill-claims-an-obsolete-fork-pin-is-current.md) | blocker | skill-rot fix wave |
 | [Remove dead parser and oracle tools from live evaluation chains](dead-parser-oracle-tools-have-live-downstream-readers.md) | blocker | rot deletion wave |
-| [Teach the durable SCI session image in the foundational data skills](schema-skills-deny-the-durable-sci-session-image.md) | blocker | skill-rot fix wave |
-| [Re-ground the web UI skills in the live namespace-page renderer](skill-web-ui-route-map-predates-namespace-pages.md) | blocker | skill-rot fix wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
-| [Re-ground the flow skill after the virtual-I/O and live-context waves](flow-skill-teaches-overturned-runtime-facts.md) | blocker | skill-rot fix wave |
 | [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
 | [Re-ground root AGENTS vocabulary in fresh owners](docs-rot-root-agents-names-moved-and-deleted-runtime-owners.md) | blocker | doc-rot fix wave |
 | [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
@@ -57,7 +53,6 @@ See `README.md` for the convention.
 | [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
 | [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
 | [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
-| [Refresh the config skill's current acquisition-boundary matrix](config-skill-omits-current-acquisition-boundaries.md) | friction | skill-rot fix wave |
 | [Delete the pod CLJS reader closure](pod-cljs-reader-closure-teaches-a-deleted-runtime.md) | friction | rot deletion wave |
 | [Demote active reference pages that teach deleted runtime APIs](docs-rot-active-reference-pages-teach-deleted-runtime-apis.md) | friction | doc-rot fix wave |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
@@ -101,7 +96,6 @@ See `README.md` for the convention.
 |-------|----------|------|
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
-| [Remove deleted quarry gates from the Clojure testing skill](clojure-testing-skill-points-at-deleted-quarry-gates.md) | cleanup | skill-rot fix wave |
 | [Delete root operator files with no live reader](old-detach-helper-and-operator-alias-have-no-live-reader.md) | cleanup | rot deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |

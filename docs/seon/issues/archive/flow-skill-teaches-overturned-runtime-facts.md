@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, skills, flow, sci, operator]
 ---
@@ -77,3 +77,19 @@ first-party `seon.cluster`, `seon.flow`, `seon.sci.eval`, and operator source.
   resolved issue as a live stop condition.
 - Process and cluster identity use their owning source terms.
 - Every reference file is independently checked, not only the top-level map.
+
+## Resolution
+
+Resolved by `3b1562462`. The main skill and all six progressive-disclosure
+references were re-grounded against core.async
+`dc35f3e0d7bc2eef502e77982f48641f025c8051`, SCI
+`a27e2c0e079476196477b533e76a2a6a8095017d`, and current first-party source.
+They now distinguish dependency-owned default I/O, Seon's fixed compute pool,
+and the work task executor; preserve the one live cluster ctx and narrow
+namespace-unmap fork; place session-image restoration in the boot tower; use
+process identity `(pid, start-instant)`; and describe operator-root isolation
+as repaired current behavior. The package-wide stale-claim scan is clean,
+skill and Markdown validation pass, and the package worktree is clean.
+
+The skill law's independent adversarial verification pass remains explicitly
+unclaimed and must be commissioned after this wave.
