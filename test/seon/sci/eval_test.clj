@@ -370,6 +370,54 @@
             :seon.cluster.eval/output "before"}
            evaluation))))
 
+(deftest evaluation-projection-prefers-the-live-context
+  (let [projection {:seon.schema.projection/forms {:user/x :int}}
+        ctx (assoc (eval/build-base-ctx)
+                   :seon.schema/projection projection)]
+    (with-redefs [seon.schema/current-projection
+                  (fn [] (throw (ex-info "fallback reached" {})))]
+      (is (identical?
+           projection
+           (#'eval/evaluation-projection {:seon.sci.eval/ctx ctx}))))))
+
+(deftest unmap-row-carries-the-exact-forked-namespace-state
+  (let [ctx (eval/build-base-ctx)
+        _ (sci/eval-string*
+           ctx
+           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                "discarded [x] x)"))
+        source "(ns-unmap 'user 'discarded)"
+        event (#'eval/one-event source 'user ctx)
+        execution-ctx (sci/fork ctx)
+        before-interns (sci/namespace-interns execution-ctx)
+        before-namespace-state (sci/namespace-state execution-ctx)
+        before-reader-context (#'eval/reader-context execution-ctx 'user)
+        _ (sci/binding [sci/ns (sci/create-ns 'user)]
+            (sci/eval-form execution-ctx
+                           (:seon.sci.reader/form event)))
+        result
+        (#'eval/unmap-row
+         {:seon.sci.eval/execution-ctx execution-ctx
+          :seon.sci.eval/before-interns before-interns
+          :seon.sci.eval/before-namespace-state before-namespace-state
+          :seon.sci.eval/before-reader-context before-reader-context
+          :seon.sci.eval/event event
+          :seon.sci.eval/base-declared-row nil
+          :seon.sci.eval/live-declaration? false
+          :seon.sci.eval/namespace-name 'user
+          :seon.sci.eval/namespace-unmap? true
+          :seon.cluster.run.form/source source})
+        row (:seon.sci.eval/program-row result)]
+    (is (true? (:seon.sci.eval/namespace-changed? result)))
+    (is (= #{[:seon.fn/sym "user/discarded"]
+             [:seon.test/sym "user/discarded"]
+             [:seon.code.def/id "user/discarded"]}
+           (set (:seon.program/delete-identities row))))
+    (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
+    (is (= (sci/namespace-state execution-ctx)
+           (:seon.sci.eval/namespace-state row)))
+    (is (nil? (:seon.sci.eval/context-row result)))))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))

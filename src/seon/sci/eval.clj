@@ -743,6 +743,12 @@
               :seon.schema/projection)
       (:seon.schema/projection ctx)))
 
+(defn- evaluation-projection
+  [{ctx :seon.sci.eval/ctx}]
+  (or (context-projection ctx)
+      (schema/current-projection)
+      (schema/build-projection (schema/registered-schemas))))
+
 (defn- advance-context-projection!
   "Advance a live context's projection at the database's basis transaction."
   [ctx db projection]
@@ -1226,6 +1232,51 @@
         connection (assoc :seon.store/branch-connection connection)))
      ctx)))
 
+(defn- unmap-row
+  [{execution-ctx :seon.sci.eval/execution-ctx
+    before-interns :seon.sci.eval/before-interns
+    before-namespace-state :seon.sci.eval/before-namespace-state
+    before-reader-context :seon.sci.eval/before-reader-context
+    event :seon.sci.eval/event
+    base-declared-row :seon.sci.eval/base-declared-row
+    live-declaration? :seon.sci.eval/live-declaration?
+    namespace-name :seon.sci.eval/namespace-name
+    namespace-unmap? :seon.sci.eval/namespace-unmap?
+    source :seon.cluster.run.form/source}]
+  (let [removed-identities
+        (when namespace-unmap?
+          (removed-program-identities
+           before-interns (sci/namespace-interns execution-ctx)))
+        after-namespace-state
+        (when namespace-unmap?
+          (sci/namespace-state execution-ctx))
+        namespace-changed?
+        (and namespace-unmap?
+             (not= before-namespace-state after-namespace-state))
+        deletion-row
+        (when (seq removed-identities)
+          (program/deletion-row
+           (assoc event :seon.sci.reader/ns-unmap-identities
+                  removed-identities)))
+        declared-row (or deletion-row base-declared-row)
+        ;; Standalone REPL `require` is namespace registration too. Its
+        ;; committed row carries the complete dependency set derived from
+        ;; SCI's namespace table, so fresh acquisition reconstructs the
+        ;; same reader/evaluator context before installing declarations.
+        context-row
+        (when-not declared-row
+          (namespace-context-row
+           namespace-name source before-reader-context
+           (reader-context execution-ctx namespace-name)
+           namespace-changed?))
+        row (cond-> (or declared-row context-row)
+              live-declaration? (assoc ::evaluated? true)
+              (and namespace-changed? (or declared-row context-row))
+              (assoc ::namespace-state after-namespace-state))]
+    {:seon.sci.eval/program-row row
+     :seon.sci.eval/context-row context-row
+     :seon.sci.eval/namespace-changed? namespace-changed?}))
+
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
     caps :seon.sci.admit/caps
@@ -1364,9 +1415,7 @@
                              {:seon.print/length @sci/print-length
                               :seon.print/level @sci/print-level})))))
             projection
-            (or (context-projection evaluation-ctx)
-                (schema/current-projection)
-                (schema/build-projection (schema/registered-schemas)))
+            (evaluation-projection {:seon.sci.eval/ctx evaluation-ctx})
             raw-row (program-row event projection)
             unregister-key (deleted-schema-key raw-row)
             schema-delta
@@ -1440,37 +1489,19 @@
                     (:seon.test/sym base-declared-row)
                     (when unregister-key schema-value)))
               (eval-form!))
-            removed-identities
-            (when namespace-unmap?
-              (removed-program-identities
-               before-interns (sci/namespace-interns execution-ctx)))
-            after-namespace-state
-            (when namespace-unmap?
-              (sci/namespace-state execution-ctx))
-            namespace-changed?
-            (and namespace-unmap?
-                 (not= before-namespace-state after-namespace-state))
-            deletion-row
-            (when (seq removed-identities)
-              (program/deletion-row
-               (assoc event :seon.sci.reader/ns-unmap-identities
-                      removed-identities)))
-            declared-row (or deletion-row base-declared-row)
-            ;; Standalone REPL `require` is namespace registration too. Its
-            ;; committed row carries the complete dependency set derived from
-            ;; SCI's namespace table, so fresh acquisition reconstructs the
-            ;; same reader/evaluator context before installing declarations.
-            context-row
-            (when-not declared-row
-              (namespace-context-row
-               namespace-name source before-reader-context
-               (reader-context execution-ctx namespace-name)
-               namespace-changed?))
-            row (cond-> (or declared-row context-row)
-                  live-declaration?
-                  (assoc ::evaluated? true)
-                  (and namespace-changed? (or declared-row context-row))
-                  (assoc ::namespace-state after-namespace-state))
+            {row :seon.sci.eval/program-row
+             context-row :seon.sci.eval/context-row}
+            (unmap-row
+             {:seon.sci.eval/execution-ctx execution-ctx
+              :seon.sci.eval/before-interns before-interns
+              :seon.sci.eval/before-namespace-state before-namespace-state
+              :seon.sci.eval/before-reader-context before-reader-context
+              :seon.sci.eval/event event
+              :seon.sci.eval/base-declared-row base-declared-row
+              :seon.sci.eval/live-declaration? live-declaration?
+              :seon.sci.eval/namespace-name namespace-name
+              :seon.sci.eval/namespace-unmap? namespace-unmap?
+              :seon.cluster.run.form/source source})
             ;; Durable declarations are installed only after the row commits.
             value (if context-row (:seon.ns/name context-row) evaluated-value)
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy
