@@ -66,7 +66,7 @@
          "(fn [path#] "
          "(clojure.string/replace "
          "(str (.relativize root# (.toPath (clojure.java.io/file path#)))) "
-         "\\\\ \"/\")))) "
+         "\"\\\\\" \"/\")))) "
          "(:seon.fn.manifest/artifacts manifest#)) "
          "portable# (seon.fn/replace-manifest-artifacts manifest# artifacts#)] "
          "(prn {:seon.source/digest "
