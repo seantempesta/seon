@@ -119,9 +119,8 @@ When a scratch cluster fails partway up the tower, read
 - inspect the carried `:seon.boot/instance`; absent keys identify the last
   published layer (`src/seon/cluster.clj:1289-1386,1458-1485`);
 - inspect the advertisement and prove both the named cluster and any detached
-  operator JVM are gone with `bin/seon status`; `bin/seon-fresh status` is the
-  compatibility alias and reaches the same fresh operator
-  (`bin/seon:4-7`; `bin/seon-fresh:5-6`);
+  operator JVM are gone with `bin/seon status` (root-scoped; use
+  `--root PATH` for an isolated operator root);
 - remember that `bin/seon start <name>` adds to an already-running JVM when
   this operator root has a reachable anchor, so its Var roots may predate the
   source edit (`script/seon/fresh_operator.clj:1593-1654`). Use

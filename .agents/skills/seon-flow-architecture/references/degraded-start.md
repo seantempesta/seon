@@ -67,8 +67,8 @@ bin/seon status
 ```
 
 `bin/seon` accepts `--root PATH` and enters `seon.fresh-operator` with that
-canonical operator root; `bin/seon-fresh` is only a compatibility alias
-(`bin/seon:4-18`; `bin/seon-fresh:1-6`). Process records, advertisements,
+canonical operator root (`bin/seon:4-18`; the old `bin/seon-fresh`
+compatibility alias is deleted). Process records, advertisements,
 discovered JVMs, roster reads, and anchor selection are root-scoped
 (`script/seon/fresh_operator.clj:96-120,789-866,1041-1113,1593-1627`).
 Cross-root JVMs are excluded before probing and therefore cannot become an
