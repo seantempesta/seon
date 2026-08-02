@@ -6,9 +6,10 @@
   these green by implementing seon.schema.edn (and wiring `register!`
   through the one gate) ONLY — schemas and tests are byte-sealed.
   Fixture EDN lives under test/seon/schema_edn_fixtures/ (on the :test
-  classpath), one directory per scenario, so the production
-  `seon/schema` resource directory is never touched by a test."
-  (:require [clojure.string :as str]
+  classpath), one resource per scenario, so the production
+  `seon/schema.edn` resource is never touched by a test."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -25,20 +26,24 @@
 
 (deftest production-schema-edn-is-a-resource-not-source
   (let [loaded (schema.edn/load! {})
-        files (:seon.schema.edn/files loaded)]
-    (is (seq files))
-    (is (every? #(str/includes? % "/resources/seon/schema/") files)
-        "all production schema EDN comes from the dedicated resource root")))
+        file (:seon.schema.edn/file loaded)]
+    (is (str/includes? file "/resources/seon/schema.edn")
+        "production schema EDN is the one named resource")))
 
-(deftest a-directory-of-files-is-one-population
-  (let [loaded (schema.edn/load!
-                {:seon.schema.edn/resource-dir
-                 "seon/schema_edn_fixtures/valid"})]
-    (testing "both files contribute, three keys total"
-      (is (= 2 (count (:seon.schema.edn/files loaded))))
+(deftest one-resource-is-one-population
+  (let [resource "seon/schema_edn_fixtures/valid.edn"
+        resolve-resource io/resource
+        calls (atom [])
+        loaded
+        (with-redefs [io/resource
+                      (fn [name]
+                        (swap! calls conj name)
+                        (resolve-resource name))]
+          (schema.edn/load! {:seon.schema.edn/resource resource}))]
+    (testing "one lookup contributes all three keys"
+      (is (= [resource] @calls))
       (is (= 3 (:seon.schema.edn/keys loaded))))
-    (testing "a cross-file alias reference is a candidate like any other
-              — file boundaries carry zero semantic meaning"
+    (testing "a cross-section alias is a candidate like any other"
       (is (schema/registered? :seon.schema.edn.fixture/label)))
     (testing "a loaded attribute validates values end to end"
       (is (schema/valid-candidate-value?
@@ -46,23 +51,23 @@
       (is (not (schema/valid-candidate-value?
                 :seon.schema.edn.fixture/name ""))))))
 
-(deftest duplicates-across-files-refuse-naming-both
+(deftest duplicates-across-sections-refuse
   (let [data (test-support/refusal-data
               #(schema.edn/load!
-                {:seon.schema.edn/resource-dir
-                 "seon/schema_edn_fixtures/duplicate"}))]
+                {:seon.schema.edn/resource
+                 "seon/schema_edn_fixtures/duplicate.edn"}))]
     (is (map? data) "the duplicate refused")
     (is (= :seon.schema.edn.fixture/twice
            (:seon.schema.edn/attribute data))
         "the refusal names the colliding key")
-    (is (= 2 (count (:seon.schema.edn/files data)))
-        "the refusal names BOTH contributing files")))
+    (is (str/ends-with? (:seon.schema.edn/file data) "/duplicate.edn")
+        "the refusal names the one resource")))
 
 (deftest unreadable-files-refuse-by-name
   (let [data (test-support/refusal-data
               #(schema.edn/load!
-                {:seon.schema.edn/resource-dir
-                 "seon/schema_edn_fixtures/unreadable"}))]
+                {:seon.schema.edn/resource
+                 "seon/schema_edn_fixtures/unreadable.edn"}))]
     (is (map? data))
     (is (string? (:seon.schema.edn/file data))
         "the refusal names the unreadable file")))

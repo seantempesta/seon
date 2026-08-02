@@ -11,7 +11,7 @@
 
 (set! *warn-on-reflection* true)
 
-(schema.edn/load! {::schema.edn/resource-dir "seon/schema"})
+(schema.edn/load! {})
 
 (def ^:private dial-attributes
   (into #{}
