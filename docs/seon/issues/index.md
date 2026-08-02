@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (12)
+## Blocker (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -32,6 +32,7 @@ See `README.md` for the convention.
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
+| [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
 ## Friction (66)
 
