@@ -128,8 +128,11 @@
      [::var-usages [:vector :map]]
      [::findings [:vector :map]]]]}
   [{::keys [paths]}]
-  (let [result (invoke-kondo {:lint paths
-                              :parallel true})
+  ;; A trusted diagnostic must preserve each call as one coherent record.
+  ;; clj-kondo's parallel analysis has combined an outer call's location and
+  ;; arity with an inner call's resolved var, then emitted the corruption
+  ;; twice. Its sequential path retains the same linters and dependency cache.
+  (let [result (invoke-kondo {:lint paths})
         analysis (:analysis result)]
     {::namespace-definitions
      (filterv jvm-entry?
