@@ -158,6 +158,24 @@
           [:fn {:gen/schema :inst}
            'seon.schema.edn-test-fixture/late-instant?]}}))))
 
+(deftest an-unregistered-predicate-refusal-names-its-reload-owner
+  (let [predicate 'seon.schema.edn-test/no-such-predicate?
+        failure
+        (try
+          (schema.edn/admit
+           {:seon.schema/forms
+            {:seon.schema.edn.gate/missing
+             [:fn {:gen/schema :inst} predicate]}})
+          nil
+          (catch clojure.lang.ExceptionInfo cause
+            cause))]
+    (is (some? failure))
+    (is (= predicate (::schema.edn/predicate (ex-data failure))))
+    (is (= 'seon.schema.edn-test
+           (::schema.edn/predicate-owner (ex-data failure))))
+    (is (str/includes? (ex-message failure)
+                       "load or reload that namespace before schema admission"))))
+
 (deftest register!-flows-through-the-same-gate
   (let [state (schema/snapshot-state)]
     (try

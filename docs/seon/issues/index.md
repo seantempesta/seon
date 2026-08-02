@@ -31,7 +31,7 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (69)
+## Friction (70)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -45,6 +45,7 @@ See `README.md` for the convention.
 | [Bound operator subprocess reads and waits](operator-subprocesses-have-unbounded-read-and-wait-paths.md) | friction | operator child-lifecycle wave |
 | [Teach namespaced data in the bootstrap contract example](bootstrap-teaches-bare-map-keys.md) | friction | bootstrap instruction wave |
 | [Delete the readerless second Datahike transaction codec](schema-datahike-keeps-a-readerless-second-codec.md) | friction | schema codec deletion wave |
+| [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Delete dev feedback gates that observe deleted owners](dev-feedback-gates-observe-deleted-owners.md) | friction | dev feedback deletion wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |

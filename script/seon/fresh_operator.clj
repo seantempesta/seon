@@ -1822,11 +1822,15 @@
         ;; The live JVM owns the process-root store lock. Reload only the
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
-        ;; untouched. The schema loader must reload first so a JVM that
-        ;; predates a schema-resource consolidation cannot publish through its
-        ;; stale resource shape.
+        ;; untouched. Predicate registration owners must reload before the
+        ;; schema loader, which then prevents a JVM predating a schema-resource
+        ;; change from publishing through its stale resource shape.
         (require 'seon.fn.analyzer :reload)
         (require 'seon.fn :reload)
+        ;; A live JVM may already have an older `seon.db` loaded, so
+        ;; `requiring-resolve` cannot replay its new load-time registrations
+        ;; during schema admission.
+        (require 'seon.db :reload)
         (require 'seon.schema.edn :reload)
         (require 'seon.cluster.source :reload)
         (require 'seon.cluster

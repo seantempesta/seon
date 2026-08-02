@@ -1007,6 +1007,58 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest live-init-reloads-a-moved-core-predicate-owner-before-admission
+  (let [root (fresh-root)
+        cluster-name "predicate-owner-reload"
+        launched-identities (atom [])]
+    (try
+      (let [published (run-operator root "init")
+            forked (run-operator root "init" cluster-name)
+            started (run-operator root "start" cluster-name)]
+        (is (= 0 (::exit published)) (::output published))
+        (is (= 0 (::exit forked)) (::output forked))
+        (is (= 0 (::exit started)) (::output started)))
+      (swap! launched-identities conj
+             (advertisement-process-identity root cluster-name))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters"
+                             cluster-name "prepl.edn")))
+            stale
+            (edn/read-string
+             (prepl-eval
+              advertisement
+              (pr-str
+               `(do
+                  (require 'seon.db 'seon.schema)
+                  (seon.schema/restore-state!
+                   (update-in
+                    (seon.schema/snapshot-state)
+                    [:seon.schema.state/predicate-functions]
+                    dissoc
+                    'seon.db/connection?
+                    'seon.db/database-value?))
+                  {:seon.dev.fresh-operator-test/owner-loaded?
+                   (boolean (find-ns 'seon.db))
+                   :seon.dev.fresh-operator-test/connection-registered?
+                   (seon.schema/core-predicate-registered?
+                    'seon.db/connection?)}))))]
+        (is (true? (::owner-loaded? stale)) stale)
+        (is (false? (::connection-registered? stale)) stale))
+      (let [republished (run-operator root "init")]
+        (is (= 0 (::exit republished)) (::output republished))
+        (is (str/includes? (::output republished) (str source/current-branch))
+            (::output republished)))
+      (finally
+        (try
+          (run-operator root "down")
+          (catch Throwable failure
+            (binding [*out* *err*]
+              (println "operator down cleanup failed:" (ex-message failure)))))
+        (doseq [process-identity (distinct @launched-identities)]
+          (reap-process-identity! process-identity))
+        (delete-recursively! root)))))
+
 (deftest source-less-root-reset-republishes-and-reforks-default
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))]

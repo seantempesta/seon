@@ -262,10 +262,16 @@
 
 (defn- refusal!
   [error identity declaration extra]
-  (let [file (get @!source-files identity)]
+  (let [file (get @!source-files identity)
+        predicate (::predicate extra)
+        predicate-owner (::predicate-owner extra)]
     (throw
      (ex-info
-      (str "Schema population refused " identity " (" (name error) ").")
+      (str "Schema population refused " identity " (" (name error) ")."
+           (when (= error ::unregistered-predicate)
+             (str " Predicate " predicate " is owned by namespace "
+                  predicate-owner "; load or reload that namespace before "
+                  "schema admission.")))
       (cond->
        (merge
         {::error error
@@ -304,7 +310,9 @@
                 {::predicate predicate ::path path}))
     (when-not (predicate-registered? predicate)
       (refusal! ::unregistered-predicate identity definition
-                {::predicate predicate ::path path}))))
+                {::predicate predicate
+                 ::predicate-owner (some-> predicate namespace symbol)
+                 ::path path}))))
 
 (defn admit
   "THE one admission gate over a complete candidate population.
