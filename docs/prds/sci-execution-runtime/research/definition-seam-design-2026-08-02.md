@@ -78,6 +78,77 @@ today. That single derived edge is the whole prerequisite:
   reachability derivation `:seon.fn/calls` already serves for workload
   classification.
 
+## Candidate contexts: test before committing — with one trap
+
+Owner direction, same afternoon: "we can spin up any sci context we
+need … run old tests on function candidates and only commit them to the
+main context if they pass." This is better than accept-and-report where
+it works, because it never lets a broken definition into the shared
+world at all, and it does not contradict ruling #30 — nothing is rolled
+back if nothing was installed.
+
+THE TRAP, measured 2026-08-02 with a throwaway `sci/init` context:
+`sci/fork` isolates only HALF of what it looks like it isolates.
+
+```clojure
+;; in the fork: (defn f [] :CHANGED-IN-FORK) and (def fresh :FORK-ONLY)
+{:original-sees-redefinition :CHANGED-IN-FORK   ; LEAKED
+ :fork-sees-redefinition     :CHANGED-IN-FORK
+ :original-sees-new-name     "ABSENT: Unable to resolve symbol: probe/fresh"}
+```
+
+A brand-new name stays in the fork; A REDEFINITION OF AN EXISTING NAME
+LEAKS INTO THE PARENT, because `fork` copies the env atom
+(`reference-code/sci/src/sci/core.cljc:326-331`) while `bindRoot`
+mutates the shared Var object in place — the behavior ruling #32
+already recorded for the env atom, here confirmed to cross a fork
+boundary.
+
+Redefinition is precisely the case the accretion design targets, so
+**a fork must never be used as the candidate context.** A candidate
+context has to be BUILT, not forked: `cluster-ctx` already composes
+exactly that (`build-base-ctx` → `acquire!` → `install-session-image!`,
+`src/seon/sci/eval.clj:1211-1234`). Cost is the cold-acquire path that
+was removed from the per-turn hot path earlier in this program — order
+of a few hundred milliseconds, which is acceptable per DEFINITION event
+and unacceptable per call. Measure it before sealing.
+
+Consequence for sequencing: candidate-test-then-install becomes viable
+for definitions, and accept-and-report remains the fallback for cases a
+candidate context cannot cover (anything whose test genuinely needs the
+committed world). Both keep ruling #30 intact.
+
+## Contexts are per cluster, not per agent
+
+Same conversation, the owner asked whether agent contexts must now be
+stored separately, wanting Agent A to build functions that Agent B can
+then simply call after asking for them by message.
+
+No new storage: that collaboration is what the CURRENT design already
+provides, and it is why the SCI context is per cluster. One live
+context per cluster (ruling #27) plus every agent may call every
+function in its cluster's program graph (ruling #20) means A's new
+function is immediately callable by B — same context, same program.
+The message exchange ("can you build X" → "go for it, I added these")
+is ordinary agent messaging; nothing in the runtime needs to change to
+support it.
+
+The word "context" is doing two jobs here and the collision is the real
+hazard:
+
+- the SCI CONTEXT is the evaluation environment and program — PER
+  CLUSTER, shared by every agent in it, and the thing candidate
+  contexts are copies of;
+- an AGENT'S CONTEXT is what is RENDERED into its prompt — per agent,
+  derived from database facts by the walk, and it NEVER gates execution
+  (ruling #20's standing clause).
+
+"Agent-specific context assembled on the fly" is the second one, and it
+is already derived per agent on every turn. Keeping these two senses
+apart in speech and in code is what prevents someone building per-agent
+interpreter contexts, which would break exactly the sharing the owner
+asked for.
+
 ## The sequencing question, with a recommendation
 
 Running tests when a definition lands must not contradict ruling #30:
