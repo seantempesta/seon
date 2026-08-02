@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, source, build]
 ---
@@ -9,9 +9,10 @@ tags: [issue, source, build]
 
 ## Problem
 
-The program-index gate forces clj-kondo's shared analysis context through its
-parallel mode. A corrupted var usage can therefore refuse a clean source tree,
-and rerunning the affected file sequentially does not reproduce the finding.
+The program-index gate forced clj-kondo's shared analysis context through its
+parallel mode. A corrupted var usage could therefore refuse a clean source
+tree, and rerunning the affected file sequentially did not reproduce the
+finding.
 
 ## Evidence
 
@@ -47,3 +48,10 @@ program indexing.
   does not weaken the gate.
 - The full `bin/test` gate reaches test execution instead of refusing on a
   cross-wired analyzer finding.
+
+## Resolution
+
+Resolved by `9e635c7dc`. Complete sequential analysis covered 152 first-party
+files and returned 234 findings with zero errors. A separate malformed-call
+probe still returned `:invalid-arity` for a two-argument call to the one-arity
+`sci.core/namespace-interns`, so the repair preserved blocking diagnostics.
