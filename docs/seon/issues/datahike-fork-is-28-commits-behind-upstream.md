@@ -16,8 +16,10 @@ running a query engine with known-fixed defects still live in it.
 
 ## Evidence
 
-`reference-code/datahike` HEAD `9b3be9d5`; merge base with `upstream/main` is
-`85c40aee8`; `git rev-list --count HEAD..upstream/main` = 28.
+`reference-code/datahike` HEAD is now `256b714d97` after the ordered-batch
+landing; `git rev-list --count HEAD..upstream/main` remains 28 (and the
+maintained fork is now 96 commits ahead). The upstream correctness delta is
+therefore unchanged by tonight's storage work.
 
 Correctness fixes we lack:
 

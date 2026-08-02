@@ -78,3 +78,15 @@ and an empty `{:backend :self}` writer map, so neither the index options nor
   window into the page cache and can lose commits out of order, leaving a branch
   head pointing at nodes that were never written — the precise failure
   `writing.cljc:502-511` orders its writes to prevent.
+
+## Backlog triage 2026-08-02
+
+**Still real, narrowed to the writer wait and recurring measurement.**
+`c5c55809d` now creates stores with fused roots and the 256-entry diff buffer;
+`393198915` made the file store execute Datahike's ordered batch. Current
+`seon.cluster.store/datahike-configuration` still emits only
+`{:backend :self}` for the writer, and `commit-wait-time` has no fresh config
+fact or consumer. The remaining destination is the store/performance follow-up:
+derive that writer setting from facts and rerun the retained serial/concurrent
+measurement on a newly created store. The original 18-object default-path claim
+no longer describes newly created Seon stores.

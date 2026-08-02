@@ -79,3 +79,21 @@ removed or backed by a portability proof that loads.
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## Backlog triage 2026-08-02
+
+**Still real, narrowed to two mechanisms.** The sealed print wave deleted the
+dead option family and marker hand list, made `render-html-data` a real sink,
+and replaced the old depth constants/docstrings. `9aa9bf8d1` also deleted the
+duplicate debug cursor walk. Two current findings survive:
+
+- `seon.render.web/generic-entity` still repeats
+  `seon.render.walk/reverse-refs`, including its cap and prose; and
+- `seon.render.value/stable-entries` still sorts the complete raw map/set with
+  `pr-str` before applying the page window, while `node-id` still deliberately
+  hashes differently on CLJ and CLJS without a checked dual-tier identity
+  proof.
+
+The destination is the render-floor cleanup wave: one reverse-ref window owner,
+bounded cursor preparation before whole-value sorting, and one proven stable
+node identity across every supported tier.

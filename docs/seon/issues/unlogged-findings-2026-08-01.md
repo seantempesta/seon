@@ -139,3 +139,28 @@ is the opposite of crippling: with presentation pinned to the safety
 ceiling, a genuinely huge result would flood the context, and the
 per-entry detail policy that should decide is the deliberately-unwritten
 compaction layer (ruling #24's dynamic transcript).
+
+## Backlog triage 2026-08-02
+
+This catch-up note now has three surviving destinations; the other four items
+must not remain scheduled as open work:
+
+- **Items 1, 2, and 5 remain real.** The fresh SCI context still exposes only
+  `Throwable`/`Error`; no gated agent fact-write surface exists; and
+  `seon.db` still has no `entity` or `datoms` API while fresh source retains
+  direct Datahike call sites. Their destinations remain, respectively, the
+  coupled interop-observation wave, the persistence-gate wave, and the
+  `seon.db` facade completion wave.
+- **Items 3 and 6 are superseded as entries here.** The complete CLJS/root
+  reader closure is now owned by
+  `pod-cljs-reader-closure-teaches-a-deleted-runtime.md` and its transitive
+  reader-chain issues.
+- **Item 4 was resolved by `393198915`.** The fetchable Konserve revision and
+  root pointer landed with the ordered file-store batch.
+- **Item 7 was resolved by `ebfaa4900` plus the sealed print migration.**
+  `resources/seon/schema/render_value.edn` no longer carries a default; the
+  shipped page-size decision lives in `config/default.edn`, while print
+  presentation uses the `:seon.print/*` family.
+
+The open row is therefore a temporary umbrella for the three named surviving
+waves, not authority for the four closed findings.

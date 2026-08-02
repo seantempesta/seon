@@ -48,3 +48,15 @@ pane's tables reflow to two characters per cell (`:db` / `/id`, `visual-` /
 The left pane equals the recorded `:seon.context.capture/prompt` for the
 agent's latest run, byte for byte, including the header. Long lines wrap or
 the pane scrolls; neither pane clips content at its boundary.
+
+## Backlog triage 2026-08-02
+
+**Still real, but the old formatting symptoms are fixed.** `9aa9bf8d1` made
+the pane render the current AI walk and gave it wrapping/scrolling CSS, so the
+missing-header and namespace-map spelling evidence above is historical.
+Current `debug-page-of` still calls `ai-walk` against `@connection`; it never
+reads the latest committed `:seon.context.capture/prompt`. A later transaction
+can therefore change the pane after the model call. The remaining destination
+is the visual-QA context-capture wave: select the latest capture for the agent
+and render those exact bytes, with current-walk inspection remaining a
+separately labelled surface if retained.

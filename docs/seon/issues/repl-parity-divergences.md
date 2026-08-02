@@ -5,7 +5,7 @@ severity: friction
 tags: [issue, sci, testing]
 ---
 
-# The REPL-parity gate proves 34 divergences from stock Clojure
+# The REPL-parity gate proves 24 divergences from stock Clojure
 
 `test/seon/repl_parity_test.clj` is the standing discovery gate built
 2026-08-01 from the mined checklist
@@ -51,3 +51,13 @@ updated.
 
 Also recorded in the mining ledger: several upstream citations in the
 checklist were incorrect or overstated and are corrected there.
+
+## Backlog triage 2026-08-02
+
+**Still real, with ten rows promoted.** Commit `050fff5c7` promoted A1, A9,
+B1, B4, B9, B10, E4, H1, H4, and H6 after the sealed print path landed. The
+independently recounted current partition is 88 rows: 45 passing executable,
+24 known divergences, and 19 non-executable pending rows (the roadmap's
+temporary “23 pending” wording counted four newly executable rows twice).
+The destination is the REPL-parity follow-up, one semantic family at a time;
+the gate remains the recurring acceptance surface.
