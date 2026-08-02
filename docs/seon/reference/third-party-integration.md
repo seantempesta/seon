@@ -32,6 +32,27 @@ Use `bin/seon --root PATH ...` for a deployment or destructive proof that must
 be isolated from the shared operator root. The selected root owns its process
 records, advertisements, logs, and Datahike store.
 
+## Build a standalone artifact
+
+Build the fresh system from the default dependency basis:
+
+```sh
+clojure -T:build uber
+target/seon --root ./seon-root
+```
+
+The build writes `target/seon-standalone.jar`, its SHA-256 file, and the
+`target/seon` launcher. The launcher applies the measured G1 JVM options;
+`java -jar target/seon-standalone.jar --root ./seon-root` is the direct entry.
+The artifact embeds the build-time `current-src` initialization pages and
+installs their rows idempotently when the selected root is empty. It does not
+need a source checkout at runtime.
+
+Custom AppCDS is deliberately absent. The five-run comparison in
+`jvm-tuning-2026-08-01.md` found no meaningful startup improvement, produced a
+132.6 MiB archive, and also records the AOT-cache HotSpot failure. The stock
+JDK CDS archive remains enabled.
+
 ## Supply configuration
 
 `config/default.edn` is the complete shipped decision map. A supplied plain-EDN
