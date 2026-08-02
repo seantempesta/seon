@@ -38,8 +38,8 @@ own their copies of those identities.
 
 ## Resolution
 
-Resolved by the path-limited architecture-model documentation commit that
-contains this note.
+Resolved by the path-limited architecture-model commit `f67bf81de` and the
+independent acceptance correction `bff70ca11`.
 
 - `docs/seon/architecture/data-model.md` is now a census of the admitted
   persistent entities and distinguishes two unsettled target facts:
@@ -63,6 +63,11 @@ contains this note.
 - `docs/seon/architecture/architecture.md`, `agent-runtime.md`, `context.md`,
   `laws.md`, `observability.md`, `toolkit.md`, and `ui.md` now use the same
   fresh identities and absence-based state model as the census.
+- The acceptance correction removed the surviving turn-record, reply-blob,
+  `turns-retained`, Promise, `seon.agent/set-namespace!`, and "every tool enters
+  the effect boundary" claims. Context captures, token-budgeted transcript
+  entries, ordinary namespace transactions, and the three effect shapes now
+  own those passages.
 - The inbound-reader check found one remaining deleted turn attribute in the
   protected skill corpus and one in a protected PRD runbook. They
   were reported to their owning waves rather than copied into the reconciled
