@@ -234,7 +234,7 @@
 
 (defn- raw-cache-count
   [store]
-  (count @(:cache store)))
+  (some-> store :cache deref count))
 
 (defn- measure-caches!
   [root]
@@ -333,7 +333,10 @@
         :store-options/ordered-batch? true}]
       result
       {:store-options/revisions
-       {:store-options/datahike "256b714d97a0e8f952b01a47c693eff2976ccee7"
+       {:store-options/datahike-before-cache-fix
+        "256b714d97a0e8f952b01a47c693eff2976ccee7"
+        :store-options/datahike-after-cache-fix
+        "0e8601d7f2f68c01070e13a95483bc82be04cabc"
         :store-options/konserve "737697d9205e5e8f0bc08a666e4c97dad55e9dbe"
         :store-options/persistent-sorted-set
         "e1a17bbe767c7801e67407c81f64efabfd2f1601"}
