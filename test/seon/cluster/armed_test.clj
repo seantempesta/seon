@@ -23,7 +23,6 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -46,8 +45,7 @@
   "Boot one real cluster into its own root, and always stop it."
   [name body]
   (let [root (str "tmp/armed-test/" name)]
-    (doseq [file (reverse (file-seq (io/file root)))]
-      (.delete ^java.io.File file))
+    (test-support/delete-recursively! root)
     (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
@@ -164,8 +162,7 @@
 
 (deftest two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]
-    (doseq [file (reverse (file-seq (io/file root)))]
-      (.delete ^java.io.File file))
+    (test-support/delete-recursively! root)
     (cluster/refresh-source! root)
     (let [left (cluster/start! {:seon.boot/cluster-name "live-left"
                                 :seon.boot/root root})
@@ -257,8 +254,7 @@
         called (CountDownLatch. 1)
         next-agent-work work/next-agent-work
         arm! agent/arm!]
-    (doseq [file (reverse (file-seq (io/file root)))]
-      (.delete ^java.io.File file))
+    (test-support/delete-recursively! root)
     (cluster/refresh-source! root)
     (with-redefs
       [work/next-agent-work
@@ -308,8 +304,7 @@
   (let [name "terminal-refusal-fault"
         root (str "tmp/armed-test/" name)
         run-id (atom nil)]
-    (doseq [file (reverse (file-seq (io/file root)))]
-      (.delete ^java.io.File file))
+    (test-support/delete-recursively! root)
     (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]

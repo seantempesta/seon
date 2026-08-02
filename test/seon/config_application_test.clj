@@ -12,7 +12,8 @@
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.flow :as flow]
-            [seon.render.web :as web]))
+            [seon.render.web :as web]
+            [seon.test-support :as test-support]))
 
 (def ^:private application-ledger
   {:seon.config.flow.compute/queue-depth
@@ -27,6 +28,11 @@
    {:mode :arm-time :consumer 'seon.cluster/loop-handle}
    :seon.config.eval.result/max-nodes
    {:mode :arm-time :consumer 'seon.cluster/loop-handle}
+   :seon.config.eval.result/blob-threshold
+   {:mode :live
+    :consumer '[seon.cluster.loop/store-session-values!
+                seon.cluster.loop/settlement-result
+                seon.cluster.loop/record-attempt!]}
    :seon.config.eval/time-limit-ms
    {:mode :arm-time :consumer 'seon.cluster/loop-handle}
    :seon.config.error/recurrence-limit
@@ -43,6 +49,10 @@
    {:mode :arm-time :consumer 'seon.cluster/serve!}
    :seon.config.render/coalesce-ms
    {:mode :live :consumer 'seon.render.web/coalesce-floor}
+   :seon.render.value/max-collection
+   {:mode :live
+    :consumer '[seon.cluster.loop/settlement-result
+                seon.render.web/data-response]}
    :seon.config.ai/endpoint
    {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/model
@@ -137,10 +147,6 @@
     (cluster/refresh-source! root)
     root))
 
-(defn- delete-recursively! [path]
-  (doseq [child (reverse (file-seq (io/file path)))]
-    (.delete ^java.io.File child)))
-
 (deftest every-config-entry-has-an-honest-application-contract
   (let [registered
         (set (keys (edn/read-string (slurp config/default-manifest-path))))]
@@ -223,7 +229,7 @@
           (finally
             (cluster/stop! instance))))
       (finally
-        (delete-recursively! root)))))
+        (test-support/delete-recursively! root)))))
 
 (deftest no-auth-is-consumed-as-the-credential-alternative
   (let [root (fresh-root)]
@@ -250,4 +256,4 @@
           (finally
             (cluster/stop! instance))))
       (finally
-        (delete-recursively! root)))))
+        (test-support/delete-recursively! root)))))

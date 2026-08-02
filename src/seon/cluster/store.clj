@@ -23,6 +23,7 @@
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
             [seon.error :as error]
+            [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -254,15 +255,6 @@
           (.close channel)))))
   nil)
 
-(defn- delete-store-directory!
-  "Delete the store directory and everything under it."
-  [store-dir]
-  (let [root (io/file store-dir)]
-    (when (.exists root)
-      (doseq [entry (reverse (file-seq root))]
-        (.delete ^java.io.File entry))))
-  nil)
-
 ;;; Genesis writes the immutable commit, then the mutable `:db` branch
 ;;; head, then the `:branches` roster LAST. `database-exists?` reads only
 ;;; `:db`, so `:branches` presence is the one fact that separates a
@@ -276,7 +268,7 @@
 (defn- create-store!
   "Create a fresh store at `store-dir`, verifying genesis completed."
   [store-dir configuration]
-  (delete-store-directory! store-dir)
+  (fs/delete-recursively! store-dir store-dir)
   (d/create-database configuration)
   (when-not (genesis-complete? store-dir)
     (refuse! ::initialization-incomplete

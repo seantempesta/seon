@@ -1,7 +1,6 @@
 (ns seon.oversight-test
   "The fleet story over real booted Flow graphs and a real root page."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.oversight :as oversight]
@@ -19,8 +18,7 @@
   "Boot one real scratch cluster and always stop it."
   [name body]
   (let [root (str "tmp/oversight-test/" name)]
-    (doseq [file (reverse (file-seq (io/file root)))]
-      (.delete ^java.io.File file))
+    (support/delete-recursively! root)
     (cluster/refresh-source! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]

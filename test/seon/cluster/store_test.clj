@@ -18,7 +18,8 @@
             [konserve.filestore :as filestore]
             [konserve.utils :as konserve.utils]
             [seon.cluster.store :as store]
-            [seon.schema])
+            [seon.schema]
+            [seon.test-support :as test-support])
   (:import [java.io File]
            [java.util.concurrent TimeUnit]))
 
@@ -30,12 +31,6 @@
   (let [dir (str "tmp/store-test/" (random-uuid) "/store")]
     (.mkdirs (.getParentFile (io/file dir)))
     dir))
-
-(defn- delete-recursively! [path]
-  (let [file (.getCanonicalFile (io/file path))]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
 
 (def ^:private probe-schema
   [{:db/ident :seon.store.test/marker
@@ -91,6 +86,32 @@
 ;;; Lifecycle — live against the :file backend
 ;;; ---------------------------------------------------------------------------
 
+(deftest store-creation-never-follows-a-symlink-out-of-its-directory
+  (let [root (str "tmp/store-test/delete-symlink-" (random-uuid))
+        dir (io/file root "store")
+        outside (io/file root "outside")
+        sentinel (io/file outside "must-survive.txt")
+        link (io/file dir "linked-elsewhere")]
+    (try
+      (.mkdirs dir)
+      (.mkdirs outside)
+      (spit sentinel "do not delete me")
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath link)
+       (.toAbsolutePath (.toPath outside))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [opened (store/open-store! {:seon.store/dir (.getPath dir)})]
+        (try
+          (is (true? (:seon.store/created? opened)))
+          (is (.exists sentinel)
+              "store recreation deletes the link entry, not its target")
+          (is (not (.exists link))
+              "the stale link is absent from the newly created store")
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! root)))))
+
 (deftest file-store-executes-ordered-multi-key-operations
   (let [dir (fresh-dir)]
     (try
@@ -102,7 +123,7 @@
           (finally
             (store/release-store! opened))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest open-write-release-reopen-preserves-data
   (let [dir (fresh-dir)]
@@ -123,7 +144,7 @@
             (finally
               (store/release-store! reopened)))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest create-settings-apply-only-to-fresh-stores
   (testing "a legacy store reopens by adopting its stored configuration"
@@ -144,7 +165,7 @@
             (finally
               (store/release-store! opened))))
         (finally
-          (delete-recursively! (str (io/file dir) "/.."))))))
+          (test-support/delete-recursively! (str (io/file dir) "/.."))))))
   (testing "a fresh store persists fused roots and the diff buffer"
     (let [dir (fresh-dir)]
       (try
@@ -159,7 +180,7 @@
             (finally
               (store/release-store! opened))))
         (finally
-          (delete-recursively! (str (io/file dir) "/..")))))))
+          (test-support/delete-recursively! (str (io/file dir) "/..")))))))
 
 (deftest transact-normalizes-only-jdk-integers
   (let [dir (fresh-dir)]
@@ -203,7 +224,7 @@
           (finally
             (store/release-store! opened))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest one-holder-per-store-in-one-process
   (let [dir (fresh-dir)]
@@ -219,7 +240,7 @@
             (is (false? (:seon.store/created? reopened)))
             (store/release-store! reopened))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest a-jvm-hosts-independent-stores
   (let [dir-a (fresh-dir)
@@ -238,8 +259,8 @@
             (store/release-store! a)
             (store/release-store! b))))
       (finally
-        (delete-recursively! (str (io/file dir-a) "/.."))
-        (delete-recursively! (str (io/file dir-b) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir-a) "/.."))
+        (test-support/delete-recursively! (str (io/file dir-b) "/.."))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The first-create kill window — :db present, :branches missing
@@ -270,7 +291,7 @@
           (finally
             (store/release-store! repaired))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The flock across processes — a real child JVM holds the store
@@ -318,7 +339,7 @@
               (store/release-store! survivor)))))
       (finally
         (.destroyForcibly process)
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest an-in-process-refusal-never-drops-the-os-fence
   ;; fcntl drops EVERY lock a process holds on a file when ANY of its
@@ -354,7 +375,7 @@
           (finally
             (store/release-store! held))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest a-failed-release-never-drops-the-fence
   ;; a live connection behind a dropped fence is the two-writers loss;
@@ -375,7 +396,7 @@
           (is (false? (:seon.store/created? reopened)))
           (store/release-store! reopened)))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest open-branch-refuses-what-the-roster-refutes
   (let [dir (fresh-dir)]
@@ -388,4 +409,4 @@
           (finally
             (store/release-store! held))))
       (finally
-        (delete-recursively! (str (io/file dir) "/.."))))))
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))

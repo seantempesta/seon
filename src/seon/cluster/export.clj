@@ -63,6 +63,7 @@
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.cluster.store :as store]
+            [seon.fs :as fs]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
 
@@ -89,12 +90,6 @@
   (binding [*out* *err*]
     (println "WARNING" message (pr-str data))
     (flush)))
-
-(defn- delete-recursively! [^java.io.File file]
-  (when (.exists file)
-    (doseq [entry (reverse (file-seq file))]
-      (.delete ^java.io.File entry)))
-  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Copying the bytes — the fast path and the never-unavailable one
@@ -168,7 +163,8 @@
           (finally
             (d/release target-main))))
       (finally
-        (delete-recursively! datoms-dir)))
+        (fs/delete-recursively! (.getPath datoms-dir)
+                                (.getPath datoms-dir))))
     nil))
 
 (defn- copy-store!
@@ -190,7 +186,7 @@
              {::os (System/getProperty "os.name")
               ::cause (ex-message cause)})
       ; a failed clone may have left a partial tree behind
-      (delete-recursively! target)
+      (fs/delete-recursively! (.getPath target) (.getPath target))
       (try
         (retransact! store target)
         (catch Throwable fallback-failure
@@ -298,5 +294,5 @@
                     (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
         (.getCanonicalPath target)
         (catch Throwable failure
-          (delete-recursively! temp)
+          (fs/delete-recursively! (.getPath temp) (.getPath temp))
           (throw failure))))))

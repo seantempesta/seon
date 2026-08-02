@@ -28,7 +28,8 @@
             [konserve.filestore :as filestore]
             [seon.cluster.export :as export]
             [seon.cluster.store :as store]
-            [seon.schema]))
+            [seon.schema]
+            [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Scaffolding
@@ -41,12 +42,6 @@
     :db/unique :db.unique/identity}])
 
 (def ^:private other-branch :cluster-carried)
-
-(defn- delete-recursively! [path]
-  (let [file (.getCanonicalFile (io/file path))]
-    (when (.exists file)
-      (doseq [child (reverse (file-seq file))]
-        (.delete ^java.io.File child)))))
 
 (defn- markers [connection]
   (set (d/q '[:find [?marker ...]
@@ -85,7 +80,7 @@
         (body {:root root :store opened})
         (finally
           (store/release-store! opened)
-          (delete-recursively! root))))))
+          (test-support/delete-recursively! root))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; export!
@@ -144,6 +139,38 @@
                            {:seon.store/store store
                             :seon.export/parent-dir parent})))))))))
 
+(deftest failed-export-cleanup-never-follows-a-symlink
+  (with-populated-store
+    (fn [{:keys [root store]}]
+      (let [parent (str root "/failed-export")
+            outside (io/file root "outside-export-temp")
+            sentinel (io/file outside "must-survive.txt")
+            temporary (atom nil)
+            copy-store-var
+            (ns-resolve 'seon.cluster.export 'copy-store!)]
+        (.mkdirs outside)
+        (spit sentinel "do not delete me")
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"injected copy failure"
+             (with-redefs-fn
+               {copy-store-var
+                (fn [_store target]
+                  (reset! temporary target)
+                  (.mkdirs ^java.io.File target)
+                  (java.nio.file.Files/createSymbolicLink
+                   (.toPath (io/file target "linked-elsewhere"))
+                   (.toAbsolutePath (.toPath outside))
+                   (make-array java.nio.file.attribute.FileAttribute 0))
+                  (throw (ex-info "injected copy failure" {})))}
+               #(export/export!
+                 {:seon.store/store store
+                  :seon.export/parent-dir parent}))))
+        (is (.exists sentinel)
+            "failed-export cleanup deletes the link, not its target")
+        (is (not (.exists ^java.io.File @temporary))
+            "the failed export's temporary tree is removed")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; reidentify!
 ;;; ---------------------------------------------------------------------------
@@ -185,4 +212,4 @@
                  (:seon.cluster.export/rule
                   (refusal #(export/reidentify! dir)))))))
       (finally
-        (delete-recursively! root)))))
+        (test-support/delete-recursively! root)))))
