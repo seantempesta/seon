@@ -118,8 +118,8 @@ def test_provider_maps_completed_episode_and_metadata(monkeypatch):
 @pytest.mark.parametrize(
     ("outcome", "expected"),
     [
-        ("seon.eval.drive/completed", CORRECT),
-        ("seon.eval.drive/capped", INCORRECT),
+        ("completed", CORRECT),
+        ("capped", INCORRECT),
     ],
 )
 def test_terminal_honesty_is_a_separate_gate(outcome, expected):
