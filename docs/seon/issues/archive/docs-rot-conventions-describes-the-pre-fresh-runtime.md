@@ -72,7 +72,7 @@ belong in archived research, not in current-state sections.
 
 ## Resolution
 
-Resolved by the conventions rewrite on 2026-08-01. `docs/conventions.md` now
+Resolved by `323930535` on 2026-08-01. `docs/conventions.md` now
 names the process-root JVM/branch-per-cluster topology from
 `src/seon/cluster.clj` and `src/seon/cluster/store.clj`; shipped schema EDN from
 `src/seon/schema/edn.clj`; runtime registration from `src/seon/sci/eval.clj`;

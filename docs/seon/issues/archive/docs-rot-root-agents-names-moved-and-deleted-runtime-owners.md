@@ -70,7 +70,7 @@ must ground each current row.
 
 ## Resolution
 
-Resolved by the root-authority correction on 2026-08-01. The named lines now
+Resolved by `b37d54b64` on 2026-08-01. The named lines now
 point process identity to `src/seon/cluster/process.clj`,
 `script/seon/fresh_operator.clj`, and `script/seon/dev/state.clj`; run custody
 and the run loop to `resources/seon/schema/run.edn` plus
