@@ -158,7 +158,7 @@
   (when-let [printed (:seon.cluster.eval/result-edn receipt)]
     (try
       (edn/read-string printed)
-      (catch #?(:clj Throwable :cljs :default) _
+      (catch Throwable _
         nil))))
 
 (def ^:private lint-rejected-kind
