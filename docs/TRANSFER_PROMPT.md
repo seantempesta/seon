@@ -271,9 +271,16 @@ unbuilt is largely built and live-proven:
   transaction regardless of payload" is FALSE and may still be quoted
   in older documents — do not plan against it. Still owed: the
   konserve/datahike source anatomy explaining WHY 86x.
-- **The agent write surface** — still the largest design hole. Agents
-  can persist code but not domain facts, which blocks the memory
-  story. No design exists; commission one.
+- **The agent write surface** — still the largest design hole, but the
+  hole is ergonomics and gating, not capability. Agents CAN transact
+  any declared attribute (ruling #20 makes `store/transact!` callable;
+  `:schema-flexibility :write` refuses undeclared ones; refusals return
+  as values). What's actually missing: the loop never binds
+  `seon.db/*conn*` around evaluations, so the ambient read facade fails
+  through the door (filed as a blocker with live proof, 2026-08-02, fix
+  lane running), and ruling #30's persistence gate — the designed
+  control over what an agent may COMMIT — has no design yet. Commission
+  the gate design.
 - **The effect door** (`seon.effect`) does not exist. That is why
   replay-safety is trivially true today, and it gates ~26% of the
   benchmark catalog.
