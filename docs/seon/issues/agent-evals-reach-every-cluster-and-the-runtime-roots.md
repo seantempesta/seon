@@ -76,6 +76,37 @@ metadata (`src/seon/instrument.clj:115,147`), so an agent can alter what
 instrumentation and documentation say about a compiled function for
 every cluster in the JVM. It cannot change what the function does.
 
+## `ns-publics` is necessary but not sufficient — and the residue is a query
+
+Two lanes converged on `ns-publics` as the smallest correction (708
+private host Vars across 42 live namespaces are installed today). The
+semantics lane then found the gap: `seon.cluster.store/release-store!`
+is PUBLIC (`src/seon/cluster/store.clj:340`), and the store is
+process-root-wide, so releasing it affects EVERY cluster in the
+process — a cross-cluster damage vector that survives the private-var
+fix.
+
+The remaining surface is small and, importantly, DERIVED rather than
+enumerated by hand. Public functions whose declared output hands back a
+custody object, queried live on `default` 2026-08-02 over ruling #33's
+contract facts (`:seon.fn.arity/output-refs` against
+`:seon.store/store`, `:seon.store/branch-connection`,
+`:seon.sci.eval/ctx`):
+
+```text
+seon.cluster.store/open-branch!
+seon.cluster.store/open-store!
+seon.sci.eval/build-base-ctx
+seon.sci.eval/cluster-ctx
+```
+
+Four functions, each needing its own decision (relocate to a
+never-installed operator namespace, or accept with reasons). Because
+this is a query and not a list, it becomes a STANDING CHECK: any future
+function that starts handing out custody appears in it automatically.
+That check belongs in the stability suite, where its value is catching
+the function nobody thought about rather than re-confirming these four.
+
 ## Acceptance
 
 - The install seam stops publishing private vars into the cluster ctx
