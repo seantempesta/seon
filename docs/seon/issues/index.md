@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (12)
+## Blocker (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Keep trusted static analysis sequential](clj-kondo-parallel-analysis-cross-wires-var-usages.md) | blocker | analyzer gate repair lane |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Run agent renderers through the guarded SCI program context](agent-renderers-never-enter-the-sci-program-context.md) | blocker | SCI render-execution design gate |
