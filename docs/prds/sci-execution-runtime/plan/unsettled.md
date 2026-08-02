@@ -55,6 +55,54 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 15 — SESSION CLOSE (2026-08-02 afternoon). START A NEW
+SESSION FROM HERE.**
+
+TREE: publication REPAIRED and verified by the orchestrator after the
+schema merge (`d99a0ec7f`; `bin/seon init` republishes — addendum 13's
+red is CLOSED). Everything is committed and pushed. ONE LANE STILL
+RUNNING at close: `schema-edn-consolidation` finishing its full-suite
+acceptance — resume/collect it with `bin/codex-agent summary
+schema-edn-consolidation`. The FULL GATE HAS NOT RUN since the merge +
+PRD refactor: run `bin/test` FIRST in the new session (last known
+green 823/4,062/0 before the merge) and treat any red as this wave's
+newest seams.
+
+THE ORCHESTRATOR OWES (do these before new work):
+1. The 4-point consolidation verification: the rg proof PASSED (no
+   `seon/schema/` path refs in live code); still owed are the loader
+   shape read, a fresh `--root` READY boot, and the duplicate-refusal
+   falsifier across sections.
+2. Issue notes for the turn/evaluate PRD's §9 behavior questions (the
+   `Thread/sleep` on an `:io` proc; the per-form full `:seon.ns` pull;
+   the silent `schema/build-projection` fallback) — then that PRD's
+   issue closes.
+3. Notes for the two measured follow-ups below.
+
+MEASURED FOLLOW-UPS (new, real, unfiled):
+- ~42 MB store growth PER EVAL SAMPLE (2.04 GB per 198-sample run,
+  history-on). R40's history-off is NOT a creation-seam toggle: live
+  `d/history` calls block non-temporal boots. Eval-scale economics
+  need a design answer before large matrices.
+- Source load is 11.8s (July's 2.23s is a fossil; profile:
+  konserve.tiered 1154ms, datahike.connector 851ms, superv.async
+  588ms — vendored deps dominate, first-party `seon.cluster` 259ms).
+  `9bb559df9` began the dev dependency-closure cache; the
+  `load-time-incident` lane stopped mid-work — resume it.
+
+PENDING THE OWNER: his bootstrap revision (the gpqa run is the sharp
+input — 196/198 episodes tried to WORK a QA question instead of
+answering it; the episode shape does not fit raw-QA tasks); firing the
+full O1-O5 matrix (the A/B loop is proven: edit `resources/seon/
+bootstrap.edn` or transact a plan edit, digests key the grades); the
+PRD-wave review; commissioning the AGENT WRITE SURFACE design (still
+the largest named hole).
+
+QUEUE (no lanes may launch until the owner says so): ruling-#38
+assigned-namespace slice (both edit sites are now small named
+functions); the load-time cache; addendum-8's residue list; the
+inspect slice-2 (`humaneval`) once the owner reviews slice 1.
+
 **ADDENDUM 14 — THE PROVIDER-SEAM THESIS IS PROVED (gpqa 198/198).**
 Inspect's choice() scored every sample through Seon episodes verbatim
 (zero sample errors, labels 198/198, log SHA 38cc3c98…). AGENT
