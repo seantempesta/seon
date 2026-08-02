@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: major
+severity: friction
 tags: [issue, skills, config, context]
 ---
 

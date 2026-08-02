@@ -16,10 +16,23 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (24)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Reconcile the conventions document with the fresh runtime](docs-rot-conventions-describes-the-pre-fresh-runtime.md) | blocker | doc-rot fix wave |
+| [Retire active ADRs that authorize the deleted topology](docs-rot-active-adrs-authorize-deleted-topology-and-protocol.md) | blocker | doc-rot fix wave |
+| [Re-ground the Datahike fork skill at the selected revision](datahike-skill-claims-an-obsolete-fork-pin-is-current.md) | blocker | skill-rot fix wave |
+| [Remove dead parser and oracle tools from live evaluation chains](dead-parser-oracle-tools-have-live-downstream-readers.md) | blocker | rot deletion wave |
+| [Teach the durable SCI session image in the foundational data skills](schema-skills-deny-the-durable-sci-session-image.md) | blocker | skill-rot fix wave |
+| [Re-ground the web UI skills in the live namespace-page renderer](skill-web-ui-route-map-predates-namespace-pages.md) | blocker | skill-rot fix wave |
+| [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
+| [Rebuild the current library grounding map from fresh owners](docs-rot-library-grounding-map-sends-readers-into-the-quarry.md) | blocker | doc-rot fix wave |
+| [Re-ground the flow skill after the virtual-I/O and live-context waves](flow-skill-teaches-overturned-runtime-facts.md) | blocker | skill-rot fix wave |
+| [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
+| [Re-ground root AGENTS vocabulary in fresh owners](docs-rot-root-agents-names-moved-and-deleted-runtime-owners.md) | blocker | doc-rot fix wave |
+| [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
+| [Reconcile the architecture model with the admitted fresh schema](docs-rot-architecture-model-names-deleted-entities-and-attributes.md) | blocker | doc-rot fix wave |
 | [State live definitions left behind by a failed evaluation](failed-eval-definitions-have-no-session-image-delta.md) | blocker | stateless-resume repair wave |
 | [Prove SCI built-ins are deterministic before replaying session forms](session-replay-treats-effectful-sci-builtins-as-pure.md) | blocker | stateless-resume repair wave |
 | [Enforce agent-authored contracts in the live ctx](agent-authored-contracts-do-not-enforce-in-the-live-ctx.md) | blocker | live-ctx contract slice |
@@ -32,10 +45,13 @@ See `README.md` for the convention.
 | [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (40)
+## Friction (43)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Refresh the config skill's current acquisition-boundary matrix](config-skill-omits-current-acquisition-boundaries.md) | friction | skill-rot fix wave |
+| [Delete the pod CLJS reader closure](pod-cljs-reader-closure-teaches-a-deleted-runtime.md) | friction | rot deletion wave |
+| [Demote active reference pages that teach deleted runtime APIs](docs-rot-active-reference-pages-teach-deleted-runtime-apis.md) | friction | doc-rot fix wave |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |
@@ -79,10 +95,12 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (7)
+## Cleanup (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Remove deleted quarry gates from the Clojure testing skill](clojure-testing-skill-points-at-deleted-quarry-gates.md) | cleanup | skill-rot fix wave |
+| [Delete root operator files with no live reader](old-detach-helper-and-operator-alias-have-no-live-reader.md) | cleanup | rot deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
