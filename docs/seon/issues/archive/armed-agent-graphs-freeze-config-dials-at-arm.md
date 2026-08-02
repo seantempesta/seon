@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, flow, agent]
 ---
@@ -63,3 +63,11 @@ it already holds rather than from a handle field — or, if the owner rules that
 arm-time freezing is correct, `config apply` refuses loudly for the dials it
 cannot deliver instead of reporting success. Either way one convention, stated
 once, covering both the render proc and the turn proc.
+
+## Resolution
+
+Resolved by `de7a01483` (`Resolve AI settings once per turn`).
+`seon.cluster.loop/turn-step` now reads `config/effective` from the turn's
+current database value and resolves one immutable settings value per turn;
+`bf2ef7797` records the live proof that a sparse config apply changed the next
+call's model without changing the process or graph identity.

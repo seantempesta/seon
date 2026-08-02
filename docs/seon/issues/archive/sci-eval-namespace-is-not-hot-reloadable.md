@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, eval]
 ---
@@ -28,3 +28,10 @@ next evaluation.
 Acceptance: `(require 'seon.sci.eval :reload)` in a live cluster JVM
 followed by a door evaluation succeeds, or refuses loudly naming the
 restart requirement; a regression covers the class.
+
+## Resolution
+
+Resolved by `88ebbde51` (`Make SCI evaluation arms reload-safe`). The arm is
+now ordinary data instead of a reload-identity-bearing `deftype`, and the
+landed regression reloads `seon.sci.eval` before evaluating through the same
+guarded context.

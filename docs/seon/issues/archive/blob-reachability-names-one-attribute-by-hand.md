@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, datahike]
 ---
@@ -62,3 +62,12 @@ session-image `:seon.code.def/blob` in
 
 Store/GC owner (`seon.cluster.registry`), coordinating with whoever lands
 the session-image blob attribute.
+
+## Resolution
+
+Resolved by `78b1e6eca` (`Restore faithful SCI session values first`).
+`seon.cluster.registry/blob-digest-attributes` derives every digest-bearing
+attribute from the admitted schema, and `branch-blobs` queries a Datahike
+history value for each roster branch. The same commit added the superseded-
+datom regression and the second live digest attribute
+`:seon.code.def/blob`.

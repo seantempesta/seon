@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, dependency, database, architecture]
 ---
@@ -68,3 +68,12 @@ improved from `20.019 ms` to `18.012 ms` and clears the `<=25 ms` gate.
   failure, so the crash model (`writing.cljc:502-511`) is untouched.
 - Measured against the same harness as the fsync issue, so the two changes'
   effects can be told apart.
+
+## Resolution
+
+Resolved by `393198915` (`Adopt ordered Konserve filestore batches`), which
+published the maintained Konserve/Datahike fork revisions, advanced the root
+dependency pointers, and added a real file-store assertion that
+`konserve.utils/multi-key-capable?` is true. The separate create-time fusion
+and writer-wait work remains tracked by
+`file-store-commits-pay-five-times-the-fsyncs-they-need.md`.
