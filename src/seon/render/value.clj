@@ -1,14 +1,13 @@
 (ns seon.render.value
   "Unit adapter from admitted print data to the two floor projections."
   (:require [clojure.string :as str]
-            #?(:clj [clojure.edn :as edn]
-               :cljs [cljs.reader :as edn])
+            [clojure.edn :as edn]
             [seon.print :as print]
             [seon.schema :as schema]
-            #?(:clj [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
-#?(:clj (schema.edn/load! {}))
+(schema.edn/load! {})
 
 (def ^:private print-option-keys
   #{:seon.print/length
@@ -29,16 +28,13 @@
               [:seon.render.block/name block-name])
             :seon.render.value/anonymous)
         address [(:seon.cluster.agent/id unit) root-address path]
-        digest #?(:clj
-                  (schema/sha-256
-                   [(.getBytes ^String (pr-str address) "UTF-8")])
-                  :cljs (str (hash address)))]
-    (str "seon-value-" #?(:clj (subs digest 0 24) :cljs digest))))
+        digest (schema/sha-256
+                [(.getBytes ^String (pr-str address) "UTF-8")])]
+    (str "seon-value-" (subs digest 0 24))))
 
 (defn- encoded
   [value]
-  #?(:clj (java.net.URLEncoder/encode (str value) "UTF-8")
-     :cljs (js/encodeURIComponent (str value))))
+  (java.net.URLEncoder/encode (str value) "UTF-8"))
 
 (defn- path-url
   [unit path offset]
@@ -81,7 +77,7 @@
 (defn- counted-size
   [value]
   (when (counted? value)
-    (try (count value) (catch #?(:clj Throwable :cljs :default) _ nil))))
+    (try (count value) (catch Throwable _ nil))))
 
 (defn- opened-window
   [value offset size]
@@ -107,7 +103,7 @@
        :seon.render.value/shown 0
        :seon.render.value/total nil
        :seon.render.value/more? false})
-    (catch #?(:clj Throwable :cljs :default) failure
+    (catch Throwable failure
       {:seon.render.value/window
        {:seon.error/kind :seon.render.value/window-failed
         :seon.error/message (or (ex-message failure) "realization failed")}
