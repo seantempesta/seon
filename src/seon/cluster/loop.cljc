@@ -834,6 +834,22 @@
     failover-from (assoc :seon.ai.attempt/failover-from failover-from)
     delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms)))
 
+(defn- provider-targets
+  "Resolved provider targets, settings, and finite schedule for one turn."
+  [{db :seon.db/db
+    cluster-name :seon.cluster/name
+    agent-id :seon.cluster.agent/id}]
+  (let [settings (ai/settings (config/effective db cluster-name)
+                              (ai/agent-overlay db agent-id))
+        targets (ai/targets settings)
+        primary (:seon.ai/primary targets)
+        backup (:seon.ai/backup targets)
+        strategy (ai/retry-strategy settings)]
+    {:seon.ai/primary primary
+     :seon.ai/backup backup
+     :seon.ai/settings settings
+     ::schedule (if backup [] (ai/delays strategy rand))}))
+
 (defn- record-attempt!
   "Commit ONE model attempt — and its error fact when it failed.
   Returns the COMMITTED error fact on failure, nil otherwise.
@@ -1057,13 +1073,14 @@
             ;; agent override therefore changes the NEXT turn, without a
             ;; graph rebuild or a cached derived projection.
             db @connection
-            settings (ai/settings
-                      (config/effective db (:seon.cluster/name cluster))
-                      (ai/agent-overlay db agent-id))
-            targets (ai/targets settings)
-            primary (:seon.ai/primary targets)
-            backup (:seon.ai/backup targets)
-            strategy (ai/retry-strategy settings)
+            providers (provider-targets
+                       {:seon.db/db db
+                        :seon.cluster/name (:seon.cluster/name cluster)
+                        :seon.cluster.agent/id agent-id})
+            settings (:seon.ai/settings providers)
+            primary (:seon.ai/primary providers)
+            backup (:seon.ai/backup providers)
+            schedule (::schedule providers)
             ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
             ;; one `offer!` of the run id plus the complete
             ;; `:seon.ai/partial` snapshot
@@ -1171,13 +1188,7 @@
             ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
             ;; text and alone places that string in `:seon.ai/prompt` —
             ;; the bytes the capture recorded are the bytes sent.
-            text (:seon.cluster.prompt/text rendered)
-            ;; DERIVED ONCE, and EMPTY whenever a backup exists. That is
-            ;; the whole "backoff only on the no-backup path" rule, held
-            ;; by the data instead of by a condition inside the reduce.
-            schedule (if backup
-                       []
-                       (ai/delays strategy rand))]
+            text (:seon.cluster.prompt/text rendered)]
         (if (refused! cluster captured now
                       {:seon.cluster.agent/id agent-id
                        :seon.cluster.run/id run-id})

@@ -88,6 +88,56 @@
              :seon.ai.attempt/failover-from "run-1:1"
              :seon.ai.attempt/delay-ms 200})))))
 
+(deftest provider-targets-resolves-once-and-omits-backoff-for-a-backup
+  (let [db {:immutable :database-value}
+        cluster-settings {:scope :cluster}
+        overlay {:scope :agent}
+        settings {:resolved true}
+        primary {:seon.ai/model "primary"}
+        backup {:seon.ai/model "backup"}
+        strategy {:retry :strategy}
+        calls (atom [])]
+    (with-redefs [config/effective
+                  (fn [actual-db cluster-name]
+                    (swap! calls conj [:effective actual-db cluster-name])
+                    cluster-settings)
+                  ai/agent-overlay
+                  (fn [actual-db agent-id]
+                    (swap! calls conj [:overlay actual-db agent-id])
+                    overlay)
+                  ai/settings
+                  (fn [actual-cluster-settings actual-overlay]
+                    (swap! calls conj
+                           [:settings actual-cluster-settings actual-overlay])
+                    settings)
+                  ai/targets (fn [actual-settings]
+                               (swap! calls conj [:targets actual-settings])
+                               {:seon.ai/primary primary
+                                :seon.ai/backup backup})
+                  ai/retry-strategy
+                  (fn [actual-settings]
+                    (swap! calls conj [:strategy actual-settings])
+                    strategy)
+                  ai/delays
+                  (fn [& arguments]
+                    (swap! calls conj [:delays arguments])
+                    [10 20])]
+      (is (= {:seon.ai/primary primary
+              :seon.ai/backup backup
+              :seon.ai/settings settings
+              :seon.cluster.loop/schedule []}
+             ((private-loop-fn 'provider-targets)
+              {:seon.db/db db
+               :seon.cluster/name "cluster"
+               :seon.cluster.agent/id "agent"})))
+      (is (= [[:effective db "cluster"]
+              [:overlay db "agent"]
+              [:settings cluster-settings overlay]
+              [:targets settings]
+              [:strategy settings]]
+             @calls)
+          "a configured backup makes the schedule empty without deriving delays"))))
+
 (deftest receipt-request-projects-one-schema-valid-terminal-request
   (let [result-blob (apply str (repeat 64 "a"))
         completed (my.run/complete "done")
