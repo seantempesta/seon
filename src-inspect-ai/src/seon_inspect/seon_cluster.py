@@ -1,6 +1,6 @@
 """Scratch-cluster lease for the fresh JVM Seon system.
 
-This is the io-prepl sibling of :func:`seon_inspect.cluster.wire_repl_json`.
+This is the current io-prepl evaluation client.
 It deliberately does not use the retired pod, HTTP run endpoint, or branch
 lease machinery.  Each lease owns a repository-local operator root, whose
 ``bin/seon`` initializes and starts one named branch.

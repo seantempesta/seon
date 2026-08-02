@@ -69,9 +69,8 @@ class BenchSpec:
     arm kind into one structure keyed by bench name:
 
     - `module`/`attr` — the upstream inspect_evals task callable.
-    - `kind` — the driver arm: "case1" (text through the pod door —
-      `run_bench`) or "swebench" (the A-overlay sandbox composition —
-      `tasks/swe_bench_seon.py`; NOT runnable through `run_bench`).
+    - `kind` — the driver arm; the surviving catalog contains only "case1"
+      tasks runnable through `run_bench`.
     - `adapter` — bespoke solver-chain hook for benches whose scorer does
       not read the pod's TEXT reply (bfcl's AST scorer reads synthesized
       ToolCalls); None = the default `swap_generate`.
@@ -110,12 +109,6 @@ BENCHES: dict[str, BenchSpec] = {
     "bfcl_ast": BenchSpec("inspect_evals.bfcl", "bfcl",
                           adapter=_bfcl_adapt,
                           default_task_kwargs=_bfcl_ast_kwargs),
-    # The SWE-bench A-overlay arm (slice 3): dataset + sandbox + OFFICIAL
-    # scorer from inspect_evals; solver + per-sample compose are ours
-    # (seon_inspect.swebench_arm via tasks/swe_bench_seon.py) — never the
-    # plain pod door.
-    "swe_bench_verified": BenchSpec("inspect_evals.swe_bench", "swe_bench",
-                                    kind="swebench"),
 }
 
 
@@ -152,19 +145,13 @@ def load_bench_task(
 ) -> Task:
     """Load a standard inspect_evals Task by catalog name (its own dataset+scorer).
 
-    Pod-door (case1) benches only; a registered bench of another kind names
-    its own driver in the error."""
+    Pod-door (case1) benches only."""
     spec = BENCHES.get(name)
     if spec is None:
         raise KeyError(
             f"{name!r} not in the assessed bench registry {sorted(BENCHES)}; "
             "code-exec (humaneval/mbpp) + web-tool (gaia) benches are the "
             "case-2/mvm tier — not runnable through the pod door."
-        )
-    if spec.kind != "case1":
-        raise KeyError(
-            f"{name!r} is a {spec.kind!r} arm, not a pod-door bench — drive "
-            "it through its own driver (swebench: tasks/swe_bench_seon.py)."
         )
     if _admission is None:
         source_admission.verify_sources(_bench_identity(name, spec))

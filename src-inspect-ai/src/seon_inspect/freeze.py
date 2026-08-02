@@ -130,71 +130,6 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
         # the pin so an inspect-evals sync that moves it diffs loudly.
         "pin": ("inspect_evals.bfcl.bfcl", "BFCL_GITHUB_COMMIT"),
     },
-    "swe_bench_verified": {
-        # The A-overlay composition arm (benchmark-suite design §3): dataset
-        # + official scorer from inspect_evals.swe_bench; driven by
-        # tasks/swe_bench_seon.py, never the pod door. Stratified across
-        # repos per the design (Verified is django-heavy).
-        "capability_row": "swe_bench",
-        "dev_n": 10,
-        "milestone_n": 25,
-        "stratify": "repo",
-        "freeze_task_kwargs": {},
-        "pin": ("inspect_evals.swe_bench.swe_bench",
-                "SWE_BENCH_VERIFIED_REVISION"),
-        # Exclusions are FILTERED OUT OF THE DRAW SEQUENCE (never re-shuffled
-        # — the seeded order over the full corpus stays fixed; excluding an
-        # id just promotes the next id in the sequence). Two kinds, both
-        # honest non-difficulty reasons, each recorded in the lock:
-        "exclude_ids": {
-            "sympy__sympy-22914": (
-                "spent as the slice-2 smoke + slice-3 composition probe; "
-                "solution/patch published in evals/runs/ evidence"),
-            "astropy__astropy-12907": (
-                "spent as a slice-2 de-risk smoke probe; solution published "
-                "in evals/runs/ evidence"),
-            # Availability exclusions (slice 4, 2026-07-05): no arm64 epoch
-            # instance image exists — ghcr returns "not found" even
-            # AUTHENTICATED (evals/runs/2026-07-05-slice4-dev-pass/
-            # pull-stats.txt). Not difficulty picks; the seeded sequence
-            # tops the dev slice back up.
-            "pydata__xarray-6721": (
-                "no arm64 epoch instance image on ghcr (not found, "
-                "authenticated pull, 2026-07-05)"),
-            "matplotlib__matplotlib-22719": (
-                "no arm64 epoch instance image on ghcr (not found, "
-                "authenticated pull, 2026-07-05)"),
-            "scikit-learn__scikit-learn-14629": (
-                "no arm64 epoch instance image on ghcr (not found, "
-                "authenticated pull, 2026-07-05)"),
-            "pydata__xarray-4629": (
-                "no arm64 epoch instance image on ghcr (not found, "
-                "authenticated pull, 2026-07-05)"),
-        },
-    },
-    "terminal_bench_2": {
-        # Terminal-Bench 2.0 (Harbor harness) — the published 59.1 anchor's
-        # task set. NOT an inspect_evals dataset: 89 task DIRECTORIES obtained
-        # via `harbor download terminal-bench/terminal-bench-2` (harbor 0.17.1)
-        # and frozen from a COMMITTED corpus manifest (offline-reproducible; no
-        # harbor in the pinned .venv). Driven by tb2_agent.SeonAgent via
-        # harbor's --agent-import-path, never the pod door — same non-pod-door
-        # shape as swe_bench_verified. Stratified by category (16) so a split
-        # spans the bench. ARM64 NOTE: all 89 prebuilt images are amd64-only
-        # (native_arm64 false in the manifest); the dev split is drawn from the
-        # full 89 (runnable under amd64 emulation/Rosetta) — there is NO
-        # native-arm64 subset to restrict to, and that fact is pinned in the
-        # manifest + the lock's `arm64` block.
-        "capability_row": "terminal_bench",
-        "dev_n": 10,
-        "milestone_n": 25,
-        "stratify": "category",
-        "freeze_task_kwargs": {},
-        # Manifest-corpus source (not an inspect Task): freeze reads the
-        # committed manifest instead of load_bench_task.
-        "corpus": "manifest",
-        "manifest": "evals/tb2_terminal_bench_2.corpus.json",
-    },
 }
 
 # Bespoke generator rows (eval-design): the GENERATOR + seeds are what's
@@ -333,11 +268,8 @@ def _corpus_sha256(rows: list[dict[str, Any]]) -> str:
 def _freeze_task(name: str):
     """Load a source's upstream Task for FREEZING (dataset access only).
 
-    Deliberately bypasses `load_bench_task`'s kind gate: the freeze needs
-    every registered source's DATASET, including non-pod-door arms
-    (swe_bench_verified, kind "swebench", is run-refused there but its
-    sample corpus freezes exactly like any other). Same default_task_kwargs
-    merge as load_bench_task, so freeze and run load the SAME set."""
+    Same default-task-kwargs merge as `load_bench_task`, so freeze and run
+    load the same set."""
     from seon_inspect.catalog import BENCHES  # deferred: heavy import
 
     spec = EXTERNAL_SOURCES[name]

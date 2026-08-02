@@ -64,16 +64,13 @@ def test_bench_registry_is_one_benchspec_surface():
     for name, spec in catalog.BENCHES.items():
         assert isinstance(spec, catalog.BenchSpec), name
         assert spec.module.startswith("inspect_evals."), name
-        assert spec.kind in ("case1", "swebench"), name
+        assert spec.kind == "case1", name
     assert not hasattr(catalog, "CASE1_BENCHES")
     assert not hasattr(catalog, "BENCH_ADAPTERS")
     assert not hasattr(catalog, "BENCH_DEFAULT_TASK_KWARGS")
     # bfcl carries its adapter + categories pin ON the spec
     bfcl = catalog.BENCHES["bfcl_ast"]
     assert bfcl.adapter is not None and bfcl.default_task_kwargs is not None
-    # the swebench arm is registered but is NOT a pod-door bench
-    assert catalog.BENCHES["swe_bench_verified"].kind == "swebench"
-    assert "swe_bench_verified" not in catalog.case1_benches()
 
 
 def test_unknown_bench_names_case2_tier():
@@ -81,13 +78,6 @@ def test_unknown_bench_names_case2_tier():
     with pytest.raises(KeyError) as e:
         catalog.load_bench_task("humaneval")
     assert "case-2" in str(e.value)
-
-
-def test_non_case1_kind_refused_by_pod_door_loader():
-    # a registered bench of another arm kind names its own driver loudly
-    with pytest.raises(KeyError) as e:
-        catalog.load_bench_task("swe_bench_verified")
-    assert "swe_bench_seon" in str(e.value)
 
 
 def test_run_bench_passes_cluster_url_agnostic(monkeypatch):

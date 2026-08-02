@@ -127,11 +127,8 @@ def test_selected_lock_admits_runtime_build_inputs():
     lock = json.loads(source_admission.DEFAULT_LOCK_PATH.read_text())
     admitted = set(lock["seon_admitted_paths"])
     assert {
-        "src", "src-old", "test-old",
-        "script", "resources", "config", "seon-skills", "acme",
-        "bb.edn", "build.clj", "deps.edn",
-        "shadow-cljs.edn", "package.json", "package-lock.json",
-        "bin/seon", "bin/acme",
+        "src", "test", "script", "resources", "config", "seon-skills",
+        "build.clj", "deps.edn", "bin/seon",
     } <= admitted
 
 
@@ -143,7 +140,7 @@ def test_generated_python_bytecode_does_not_dirty_admitted_source(tmp_path):
                    cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text(
         (source_admission.REPO_ROOT / ".gitignore").read_text())
-    helper = tmp_path / "script" / "seon" / "dev" / "detach.py"
+    helper = tmp_path / "script" / "source_admission_fixture.py"
     helper.parent.mkdir(parents=True)
     helper.write_text("print('source')\n")
     subprocess.run(["git", "add", ".gitignore", str(helper.relative_to(tmp_path))],
@@ -159,7 +156,7 @@ def test_generated_python_bytecode_does_not_dirty_admitted_source(tmp_path):
 
     helper.write_text("print('changed')\n")
     assert source_admission._dirty_paths(tmp_path, ["script"], []) == [
-        "script/seon/dev/detach.py"]
+        "script/source_admission_fixture.py"]
 
 
 def test_verify_sources_rejects_revision_mismatch(monkeypatch, tmp_path):

@@ -241,82 +241,6 @@ def test_run_planning_sample_sequences_and_assembles():
     assert out["phase1"]["agent_id"] == "a-1"
 
 
-def test_live_driver_choreography_with_fakes(monkeypatch):
-    # the LIVE driver's wiring, effects faked: create → phase1 → restart
-    # (fresh port) → phase2 with the SAME agent_id → snapshot via the wire
-    # REPL against the CLUSTER db → destroy ALWAYS
-    import seon_inspect.cluster as cl
-    import seon_inspect.planning as planning
-    import seon_inspect.solver as solver
-
-    order = []
-    snap = _good_snapshot()
-
-    monkeypatch.setattr(cl, "create_cluster",
-                        lambda name, ephemeral, **kw: (order.append(("create", name, ephemeral))
-                                                       or cl.Cluster(name, 40001)))
-    monkeypatch.setattr(cl, "restart_pod",
-                        lambda c, **kw: (order.append(("restart", c.name))
-                                         or cl.Cluster(c.name, 40002)))
-    monkeypatch.setattr(cl, "destroy_cluster",
-                        lambda name: order.append(("destroy", name)))
-    monkeypatch.setattr(planning, "fetch_plan_snapshot",
-                        lambda cname, aid: (order.append(("snapshot", cname, aid))
-                                            or snap))
-    monkeypatch.setattr(planning, "fetch_eval_rows",
-                        lambda cname, aid: (order.append(("evals", cname, aid))
-                                            or []))
-
-    def fake_run(text, timeout_ms, url, agent_id=None):
-        order.append(("run", url, agent_id, timeout_ms))
-        return {"agent_id": agent_id or "a-9", "reply": f"ran: {text[:6]}"}
-
-    monkeypatch.setattr(solver, "pod_run", fake_run)
-
-    out = planning.pod_planning_driver("p1 text", "p2 text",
-                                       cluster_name="plan-t")
-    kinds = [o[0] for o in order]
-    assert kinds == ["create", "run", "restart", "run", "snapshot", "evals", "destroy"]
-    assert order[0] == ("create", "plan-t", True)
-    assert order[1][1].endswith(":40001/agents/run")  # phase 1: pre-restart port
-    assert order[3][1].endswith(":40002/agents/run")  # phase 2: the NEW port
-    assert order[3][2] == "a-9"                       # SAME agent resumed
-    assert order[1][3] is None and order[3][3] is None  # database-owned bound
-    assert order[4] == ("snapshot", "plan-t", "a-9")
-    assert out["plan_snapshot"] is snap
-    assert out["cluster"] == "plan-t" and out["agent_id"] == "a-9"
-
-
-def test_live_driver_destroys_on_failure(monkeypatch):
-    import seon_inspect.cluster as cl
-    import seon_inspect.planning as planning
-    import seon_inspect.solver as solver
-
-    destroyed = []
-    monkeypatch.setattr(cl, "create_cluster",
-                        lambda name, ephemeral, **kw: cl.Cluster(name, 40001))
-    monkeypatch.setattr(cl, "destroy_cluster", destroyed.append)
-
-    def boom(*a, **k):
-        raise RuntimeError("phase 1 blew up")
-
-    monkeypatch.setattr(solver, "pod_run", boom)
-    with pytest.raises(RuntimeError, match="phase 1 blew up"):
-        planning.pod_planning_driver("p1", "p2", cluster_name="plan-x")
-    assert destroyed == ["plan-x"]
-
-
-def test_snapshot_form_is_one_line_with_sentinels():
-    # the wire REPL reads ONE form per connection and the extractor keys on
-    # the sentinel — the interpolated form must keep both properties
-    from seon_inspect.planning import _SNAPSHOT_FORM
-    form = _SNAPSHOT_FORM % ("plan-t", '"a-9"')
-    assert "\n" not in form
-    assert form.count("WIRE-JSON") == 2
-    assert ":seon.db.registry/database-name :plan-t" in form
-    assert '"a-9"' in form
-
-
 # --- rung-2 process checks (2026-07-10): decompose-first + close-adjacency ----
 
 
@@ -413,12 +337,6 @@ def test_run_planning_sample_wires_eval_rows():
     )
     assert out["eval_rows"] == [_ev(_WORK)]
 
-
-def test_evals_form_is_one_line_with_sentinels():
-    from seon_inspect.planning import _EVALS_FORM
-    form = _EVALS_FORM % ("plan-t", '"a-9"')
-    assert "\n" not in form
-    assert form.count("WIRE-JSON") == 2
 
 
 def test_close_adjacency_fused_work_and_close_breaks_the_run():

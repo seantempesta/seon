@@ -1,40 +1,8 @@
-"""Long-horizon planning as a first-class inspect-ai task.
+"""Offline proof for the long-horizon planning scorer.
 
-The headline continuity capability (plan → restart → resume) that no
-`inspect_evals` bench measures without a sandbox. Until now it ran only
-through `planning.pod_planning_driver`, because a standard Inspect solver is
-single-generation and cannot restart the pod mid-sample and resume the SAME
-agent. This wraps that driver in a custom
-`@solver` so the measurement is `inspect eval`-runnable and uniform with its
-siblings (`milestone_lift`, `skill_lift`, `ladder_lift`) — same scorer
-(`planning.planning_scorer`), same two arms.
-
-Two solver modes (arm switch, like `milestone_lift`):
-  - `endpoint="mock:<good|bad>"` — OFFLINE proof: a frozen golden
-    `(reply, plan_snapshot, eval_rows, oracle)` drives the REAL oracle with no
-    pod and no LLM, so the harness's DISCRIMINATION is provable (`mock:good`
-    → CORRECT, `mock:bad` → INCORRECT).
-  - `endpoint="pod"` — LIVE: `planning.pod_planning_driver` creates an
-    ephemeral cluster, POSTs phase 1, restarts the pod, POSTs phase 2 to the
-    SAME agent, snapshots the plan, and reads the eval rows back — every value
-    the scorer needs lands in `state.metadata`.
-  - `endpoint="mock:experiment:<arm>"` — OFFLINE three-arm plan-preload
-    proof (`pretransacted`, `model_authored`, `no_plan`). It exercises the
-    same scorer's database-outcome, plan-integrity, report-delivery, and
-    address-step checks without a cluster or paid model call.
-
-Samples come from the deterministic generators (`generators.generate_rows`,
-the `long_term_planning` templates) — no hand-maintained rows; `(seed, n)` is
-byte-reproducible.
-
-RUN (offline, both arms — proves the oracle discriminates):
-    .venv/bin/inspect eval src/seon_inspect/tasks/long_term_planning.py@long_term_planning \\
-      -T endpoint=mock:good --model mockllm/model --display plain
-
-RUN (live, one sample, against a local model behind the ephemeral cluster):
-    .venv/bin/inspect eval src/seon_inspect/tasks/long_term_planning.py@long_term_planning \\
-      -T endpoint=pod -T n=1 --model mockllm/model --display plain
-    # (the pod arm ignores --model; the cluster's own config selects the LLM)
+The task uses explicit goldens for plan continuity and plan-preload arms.
+Live execution will enter through the current provider boundary rather than
+the deleted pod restart and writer-port read-back path.
 """
 
 from __future__ import annotations
@@ -207,7 +175,7 @@ _EXPERIMENT_ORACLE: dict[str, Any] = {
 
 @solver
 def planning_solver(endpoint: str):
-    """Drive the live two-phase pod (endpoint="pod") or replay a golden (mock:*)."""
+    """Replay an explicit offline planning golden."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         if endpoint.startswith("mock:experiment:"):
@@ -225,31 +193,16 @@ def planning_solver(endpoint: str):
             state.metadata["eval_rows"] = golden["eval_rows"]
             state.metadata["oracle"] = _MOCK_ORACLE
             return state
-        if endpoint == "pod":
-            import anyio
-
-            from seon_inspect.planning import pod_planning_driver
-            phase2 = state.metadata["phase2_input"]
-            res = await anyio.to_thread.run_sync(
-                lambda: pod_planning_driver(state.input_text, phase2))
-            state.output.completion = res["reply"]
-            state.metadata["plan_snapshot"] = res["plan_snapshot"]
-            state.metadata["t_interrupt_ms"] = res["t_interrupt_ms"]
-            state.metadata["eval_rows"] = res["eval_rows"]
-            # oracle already rides in metadata from the generator row.
-            state.metadata["planning_run"] = {
-                "cluster": res.get("cluster"), "agent_id": res.get("agent_id")}
-            return state
         raise ValueError(f"unknown endpoint {endpoint!r} "
                          "(mock:good | mock:bad | "
-                         "mock:experiment:<arm> | pod)")
+                         "mock:experiment:<arm>)")
 
     return solve
 
 
 @task
 def long_term_planning(seed: str = "s1", n: int = 1,
-                       endpoint: str = "pod", epochs: int = 1):
+                       endpoint: str = "mock:good", epochs: int = 1):
     """Long-horizon planning rows x pass^k epochs (plan → restart → resume)."""
     if endpoint.startswith("mock:experiment:"):
         arm = endpoint.rsplit(":", 1)[1]

@@ -1,14 +1,9 @@
-"""Inspect's cluster coordinates and writer read-back helpers.
+"""Inspect's cluster coordinates.
 
 The current operator owns one configured cluster and exposes no per-sample
 lease yet. Lease-dependent entry points therefore fail before invoking a
 subprocess. This is deliberate: the retired create/destroy/per-pod commands
 could mutate the wrong runtime and must not survive as a compatibility path.
-
-The wire-server's loopback socket REPL (port in the per-supervisor file —
-`$SEON_WRITER_REPL_PORT_FILE`, default `tmp/seon-writer-repl-port-default`)
-survives pod restarts and sees every cluster's db through the registry —
-`wire_repl_json` is the read-back channel the planning snapshot uses.
 
 Nothing here talks to a pod at import time.
 """
@@ -18,9 +13,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import re
-import socket
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -40,94 +33,6 @@ BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
 
 # Matches seon.dev.branch/::name, the public operator target contract.
 _NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-
-# ---------------------------------------------------------------------------
-# Per-cluster LLM config (the thinking-arm lever) — config-DATA, never env
-# ---------------------------------------------------------------------------
-# The retained config transaction for an arm that changes model data (for
-# example armD thinking). A future lease may call it only after ownership and
-# writer endpoint selection. The pod reads
-# the row PER CALL (seon.ai/current — the agent-override → config-row →
-# shipped-defaults chain), the row survives pod restarts (the planning row's
-# interruption), and boot re-seeding never retracts it (seon.ai/sync-tx-data
-# is seed-once). Chosen over a solver-level setup eval because EVERY cluster
-# creation (run_bench per-sample, tool_rows, planning driver) already funnels
-# through `create_cluster` — one hook, zero plumbing, and no LLM-driven
-# bootstrap turn polluting the sample's cluster db.
-#
-# `AI_CONFIG` remains data for callers/tests; cluster creation is paused.
-AI_CONFIG: dict[str, Any] | None = None
-
-# Datahike schema for the config-row attrs, DERIVED (not authored) via the one
-# bridge `seon.db/malli->datahike-schema` on the live pod, 2026-07-04:
-#   (seon.db/malli->datahike-schema
-#     [:seon.ai/id :seon.ai/thinking :seon.ai/timeout-ms])
-# Needed because a fresh cluster installs schema lazily on first WRITE and the
-# wire REPL bypasses the pod-side installer. Install-if-missing only; if the
-# source schemas ever drift, the per-run model_config verification fails loud
-# (a sample whose model_config disagrees with AI_CONFIG is a harness defect,
-# never scored). COMPLEXITY ARTIFACT (flagged, accepted): this duplicates the
-# bridge's OUTPUT for three stable attrs because no non-LLM pod-side write
-# door exists for a bench cluster — subsume it if such a door lands.
-_AI_ATTR_SCHEMA_EDN = (
-    '[{:db/ident :seon.ai/id :db/valueType :db.type/string'
-    ' :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}'
-    ' {:db/ident :seon.ai/thinking :db/valueType :db.type/string'
-    ' :db/cardinality :db.cardinality/one}'
-    ' {:db/ident :seon.ai/timeout-ms :db/valueType :db.type/long'
-    ' :db/cardinality :db.cardinality/one}]'
-)
-
-# %s slots: db-name keyword, config-row map EDN (merged over :seon.ai/id).
-_AI_CONFIG_FORM = (
-    "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
-    " (let [conn (:seon.db.registry/conn (seon.db.registry/lookup-connection"
-    " {:seon.db.registry/database-name :%s}))"
-    " installed (set (keys (d/schema @conn)))"
-    " schema-tx (into [] (remove (fn [s] (installed (:db/ident s)))) " + _AI_ATTR_SCHEMA_EDN + ")"
-    " _ (when (seq schema-tx) (d/transact conn {:tx-data schema-tx}))"
-    " _ (d/transact conn {:tx-data [(merge {:seon.ai/id \"config\"} %s)]})"
-    " row (d/q (quote [:find (pull ?e [*]) . :where [?e :seon.ai/id \"config\"]]) @conn)]"
-    " (println (str \"WIRE-JSON<\" (json/generate-string"
-    " {\"thinking\" (:seon.ai/thinking row)"
-    "  \"timeout_ms\" (:seon.ai/timeout-ms row)}) \">WIRE-JSON\"))))"
-)
-
-_AI_CONFIG_KEYS = {"thinking": ":seon.ai/thinking",
-                   "timeout_ms": ":seon.ai/timeout-ms"}
-
-
-def _ai_config_edn(cfg: dict[str, Any]) -> str:
-    """The config dict as an EDN map literal ({\"thinking\": \"true\", …})."""
-    parts = []
-    for key, attr in _AI_CONFIG_KEYS.items():
-        if key not in cfg:
-            continue
-        v = cfg[key]
-        parts.append(f"{attr} {json.dumps(v) if isinstance(v, str) else v}")
-    unknown = set(cfg) - set(_AI_CONFIG_KEYS)
-    if unknown:
-        raise ValueError(f"unsupported AI_CONFIG keys: {sorted(unknown)} "
-                         f"(supported: {sorted(_AI_CONFIG_KEYS)})")
-    return "{" + " ".join(parts) + "}"
-
-
-def apply_ai_config(name: str, cfg: dict[str, Any],
-                    repl: Callable[..., Any] | None = None) -> dict[str, Any]:
-    """Transact `cfg` onto cluster `name`'s global `:seon.ai` config row.
-
-    Runs after the cluster's ready gate; returns the read-back row fields
-    ({"thinking": …, "timeout_ms": …}) and RAISES when the read-back doesn't
-    carry what was asked (fail-loud: a cluster that didn't take the config
-    must never silently run the arm's samples)."""
-    call = repl or wire_repl_json
-    out = call(_AI_CONFIG_FORM % (_check_name(name), _ai_config_edn(cfg)))
-    if "thinking" in cfg and out.get("thinking") != cfg["thinking"]:
-        raise RuntimeError(
-            f"cluster {name}: AI config read-back mismatch — asked "
-            f"thinking={cfg['thinking']!r}, row says {out.get('thinking')!r}")
-    return out
-
 
 class FrozenBundleChanged(RuntimeError):
     """The frozen bench bundle changed under a run — the run is contaminated.
@@ -655,61 +560,3 @@ def ephemeral_fork(source: str, basis_t: int, name: str | None = None, *,
         yield cluster
     finally:
         destroy_cluster(cluster.name, runner=runner)
-
-
-# ---------------------------------------------------------------------------
-# Wire-server socket REPL — the supervisor-facing read-back channel
-# ---------------------------------------------------------------------------
-
-# Per-supervisor port file (seon registry C48): the harness benches through
-# the DEFAULT supervisor's wire-server, whose file is
-# tmp/seon-writer-repl-port-default; $SEON_WRITER_REPL_PORT_FILE overrides
-# (`bin/seon` exports it). The old unqualified shared file is dead.
-def _wire_repl_port_file() -> Path:
-    p = Path(os.environ.get("SEON_WRITER_REPL_PORT_FILE",
-                            "tmp/seon-writer-repl-port-default"))
-    return p if p.is_absolute() else REPO_ROOT / p
-
-
-WIRE_REPL_PORT_FILE = _wire_repl_port_file()
-
-
-def wire_repl_port() -> int:
-    """The wire-server's loopback socket-REPL port (written at its boot)."""
-    if not WIRE_REPL_PORT_FILE.is_file():
-        raise RuntimeError(
-            f"wire-server REPL port file missing: {WIRE_REPL_PORT_FILE} — "
-            "is the selected cluster running? (bin/seon status)")
-    return int(WIRE_REPL_PORT_FILE.read_text().strip())
-
-
-def parse_wire_json(text: str) -> Any:
-    """Extract + parse the `WIRE-JSON<{...}>WIRE-JSON` sentinel from REPL text.
-
-    The one wire-REPL reply parser — shared by the host loopback channel
-    (`wire_repl_json`) and the in-container exec channel (the SWE-bench arm's
-    run-bounds delivery, `swebench_arm.apply_run_bounds`). Sentinels make the
-    extraction robust against REPL prompts/echoes; raises when absent."""
-    m = re.search(r"WIRE-JSON<(.*)>WIRE-JSON", text, re.DOTALL)
-    if not m:
-        raise RuntimeError(
-            f"wire REPL reply carried no WIRE-JSON sentinel: {text!r:.400}")
-    return json.loads(m.group(1))
-
-
-def wire_repl_json(form: str, *, port: int | None = None,
-                   timeout_s: int = 30) -> Any:
-    """Eval ONE Clojure form on the wire-server REPL; parse a sentinel line.
-
-    The form must print exactly one line `WIRE-JSON<{...}>WIRE-JSON` (JSON
-    between the sentinels — e.g. via cheshire, on the wire-server classpath)."""
-    p = port or wire_repl_port()
-    with socket.create_connection(("127.0.0.1", p), timeout=timeout_s) as s:
-        s.settimeout(timeout_s)
-        s.sendall(form.strip().encode() + b"\n")
-        s.shutdown(socket.SHUT_WR)
-        buf = b""
-        with contextlib.suppress(TimeoutError, OSError):
-            while chunk := s.recv(65536):
-                buf += chunk
-    return parse_wire_json(buf.decode(errors="replace"))

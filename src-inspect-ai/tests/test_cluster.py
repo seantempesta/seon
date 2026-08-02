@@ -1,9 +1,7 @@
-"""Offline tests for the cluster lifecycle helper (subprocess/socket fakes)."""
+"""Offline tests for the cluster lifecycle helper."""
 
 import json
 import subprocess
-import threading
-import socket
 
 import pytest
 
@@ -210,10 +208,10 @@ def test_cluster_name_validated():
 
 def test_operator_failure_preserves_complete_evidence():
     runner = lambda argv, **kwargs: subprocess.CompletedProcess(
-        argv, 1, stdout="", stderr="failed\n{:writer/response :busy}")
+        argv, 1, stdout="", stderr="failed\n{:seon.error/message \"busy\"}")
     with pytest.raises(RuntimeError) as error:
         cl.acquire_branch_lease("proof", runner=runner)
-    assert str(error.value) == "failed\n{:writer/response :busy}"
+    assert str(error.value) == "failed\n{:seon.error/message \"busy\"}"
 
 
 def test_bench_cluster_names_are_fresh():
@@ -308,81 +306,3 @@ def test_absent_legacy_bundle_is_not_an_artifact_identity(tmp_path, monkeypatch)
     monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA", tmp_path / "missing.sha256")
     assert cl.bundle_identity() is None
     assert cl.bundle_violation(None) is None
-
-
-def test_wire_repl_json_sentinel_roundtrip():
-    # a fake socket REPL: reads one form, replies with prompt noise + the
-    # sentinel line — wire_repl_json must extract exactly the JSON payload
-    rows = [{"id": "s1", "status": "done"}]
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    port = srv.getsockname()[1]
-
-    def serve():
-        conn, _ = srv.accept()
-        conn.recv(65536)
-        conn.sendall(("user=> WIRE-JSON<" + json.dumps(rows)
-                      + ">WIRE-JSON\nuser=> ").encode())
-        conn.close()
-
-    t = threading.Thread(target=serve, daemon=True)
-    t.start()
-    try:
-        assert cl.wire_repl_json("(fake)", port=port, timeout_s=5) == rows
-    finally:
-        srv.close()
-
-
-def test_wire_repl_json_no_sentinel_is_loud():
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    port = srv.getsockname()[1]
-
-    def serve():
-        conn, _ = srv.accept()
-        conn.recv(65536)
-        conn.sendall(b"Syntax error compiling at (REPL:1:1)\n")
-        conn.close()
-
-    threading.Thread(target=serve, daemon=True).start()
-    try:
-        with pytest.raises(RuntimeError, match="no WIRE-JSON sentinel"):
-            cl.wire_repl_json("(broken", port=port, timeout_s=5)
-    finally:
-        srv.close()
-
-
-# ---------------------------------------------------------------------------
-# Per-cluster AI config hook (the thinking-arm lever, 2026-07-04)
-# ---------------------------------------------------------------------------
-
-
-def test_ai_config_can_be_applied_only_to_an_explicit_owned_connection():
-    seen = {}
-
-    def fake_repl(form):
-        seen["form"] = form
-        return {"thinking": "true", "timeout_ms": 300000}
-
-    row = cl.apply_ai_config(
-        "bench-armd", {"thinking": "true", "timeout_ms": 300000},
-        repl=fake_repl)
-    assert row == {"thinking": "true", "timeout_ms": 300000}
-    assert ":bench-armd" in seen["form"]
-    assert ':seon.ai/thinking "true"' in seen["form"]
-    assert ":seon.ai/timeout-ms 300000" in seen["form"]
-
-
-def test_ai_config_readback_mismatch_is_loud():
-    with pytest.raises(RuntimeError) as e:
-        cl.apply_ai_config("bench-x", {"thinking": "true"},
-                           repl=lambda form: {"thinking": None})
-    assert "read-back mismatch" in str(e.value)
-
-
-def test_ai_config_rejects_unknown_keys():
-    with pytest.raises(ValueError):
-        cl.apply_ai_config("bench-x", {"reasoning": "max"},
-                           repl=lambda form: {})
