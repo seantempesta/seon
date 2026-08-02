@@ -35,8 +35,10 @@ Model "no value" as **key absence**, never as nil. For persisted schemas: `{:opt
 - **`[:maybe X]` with nil-stripping + retraction layer** -- required smart middleware to distinguish new entities (strip nils) from updates (retract). Two representations of "no value" in the system.
 - **Mixed boundary (absence in DB, nil in app)** -- most flexible but most complex. Three representations, boundary functions to maintain.
 
-## Details
+## Current owners
 
-- `docs/prds/schema-unification/research/nil-semantics-findings.md` -- full research with REPL verification
-- [[components/schema-system]] for schema patterns
-- [[components/database]] for EAV semantics
+- `src/seon/schema/datahike.cljc` validates logical values and derives
+  Datahike attribute storage.
+- `resources/seon/schema/` declares optional persisted attributes by omitting
+  absent values.
+- [[data-model]] owns the current EAV and schema target.

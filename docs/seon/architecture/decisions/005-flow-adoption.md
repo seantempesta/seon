@@ -38,4 +38,4 @@ only record of durable work.
   Seon does not copy `flow.impl`.
 
 See [[agent-runtime]], [[ui]], and
-[[architecture/decisions/008-database-protocol]].
+[[architecture/decisions/012-process-root-cluster-topology]].

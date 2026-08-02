@@ -15,18 +15,17 @@ shape and let Malli validation drift from Datahike schema derivation.
 
 ## Decision
 
-`:seon.db/ref`, registered in `seon.schema`, is the one reference shape. Every
-plain or component reference attribute names it. The bridge in
-`seon.db.internal` derives `:db.type/ref`; a vector wrapper derives cardinality
-many, and `{:seon.db/component true}` derives component ownership.
+`:seon.db/ref` is the one reference shape. Every plain or component reference
+attribute names it. The bridge in `seon.schema.datahike` derives
+`:db.type/ref`; a collection wrapper derives cardinality many, and
+`{:seon.db/component true}` derives component ownership.
+
+The portable schema authority defines the shared shape once. Shipped
+attributes and entity maps refer to it from `resources/seon/schema/`:
 
 ```clojure
-(schema/register! :seon.agent.run/agent :seon.db/ref)
-(schema/register! :seon.agent.turn/evals
-                  [:vector {:seon.db/component true} :seon.db/ref])
-
-(db/transact! {:seon.db/tx-data
-               [{:seon.agent.turn/run [:seon.agent.run/id "run-id"]}]})
+:seon.cluster.run/agent :seon.db/ref
+:seon.cluster.run/forms [:set {:seon.db/component true} :seon.db/ref]
 ```
 
 ## Consequences
@@ -39,6 +38,7 @@ many, and `{:seon.db/component true}` derives component ownership.
 
 ## Owners
 
-- `src-old/seon/schema.cljc` — registered reference grammar.
-- `src-old/seon/db/internal.cljs` — Malli-to-Datahike derivation.
+- `src/seon/schema.cljc` — shared reference grammar.
+- `src/seon/schema/datahike.cljc` — Malli-to-Datahike derivation.
+- `resources/seon/schema/` — shipped attribute and entity declarations.
 - [[data-model]] — reference, identity, and component semantics.

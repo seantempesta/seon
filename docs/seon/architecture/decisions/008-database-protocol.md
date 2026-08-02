@@ -1,69 +1,24 @@
 ---
 type: decision
-status: active
+status: superseded
 date: 2026-07-14
-tags: [decision, architecture, database, runtime]
+tags: [decision, architecture, archive, database, runtime]
 ---
 
 # ADR-008: Data-only Transit database protocol
 
-## Context
+This decision is superseded. It selected a versioned Transit protocol,
+persistent remote sessions, database replicas, catch-up, and claim epochs for
+database access across processes. Those mechanisms were deleted.
 
-One cluster JVM owns each store's ordered transactions, committed-report
-source, run loop, guarded evals, program graph, render pipeline, and web UI.
-Co-located database reads use immutable database values directly and writes
-call the transaction owner. Disposable leaf runtimes and remote clients use
-ordinary protocol values but own no durable database state. Transport details
-may differ locally and remotely without changing database semantics.
-
-## Decision
-
-`seon.db.protocol` is the one semantic protocol. Messages are eager ordinary
-data encoded with Transit. Request and response values name their operation,
-one request identity, database value, and typed result or error.
-Transport owners carry those values and do not reinterpret them.
-Protocol version 7 preserves the existing `:seon.error/kind` on failed outer
-and member responses alongside the protocol's operation-level error kind. A
-client can therefore keep user-input and core-bug classification without
-parsing an error string or learning JVM exception types.
-
-The writer is the sole durable mutation owner. Clients never send closures or
-database handles. Datahike's `:db.fn/cas` crosses only in data form and is
-reserved for facts two processes race to win exactly once: plan freeze from
-absent to digest, and run claim from no process to the process record together
-with a claim-epoch increment. One persistent remote session carries
-independently correlated mutation requests, responses, cancellation, committed
-changes, and selective interests.
-Successful writes advance replicas with committed ordinary data. A gap
-reacquires a complete current database value before delivery resumes. Durable
-request receipts provide same-request mutation recovery without a second write
-path.
-
-Datahike owns replica connection/index lifetime, exact committed-value identity,
-query caching, and native read semantics. Seon owns protocol validation,
-session acquisition, mutation admission, replica catch-up, paging, delivery
-bytes, and errors-as-values. Native Datahike, socket, stream, process, Future,
-and Promise values remain inside their host owners.
-
-## Consequences
-
-- Unix-domain sockets are the local transport, not the protocol definition.
-- A future remote or non-JVM authority conforms to the same data fixtures and
-  state machine.
-- Nippy is not a wire contract; any use inside Konserve remains private storage
-  encoding.
-- Each remote reader process has one database replica owner; the cluster JVM
-  reads its co-located database values directly. There is no second
-  application cache, database broker, or duplicate invalidation bus.
-- Interests are connection-owned and ephemeral; the database does not persist
-  active subscriptions, changed-row summaries, or a second invalidation bus.
-- Backpressure is bounded independently at database admission, encoding, and
-  each session's exact retained output bytes. A slow client loses only its own
-  session.
+[[architecture/decisions/012-process-root-cluster-topology]] is the current
+decision. It follows the 2026-07-27 branch-per-cluster ruling and the
+2026-07-28 transport and custody rulings: cluster reads and writes are
+co-located, durable state is database facts, and run custody is process
+presence without an epoch.
 
 ## Related
 
-- [[architecture]] — cluster-JVM, leaf-runtime, and browser topology.
-- [[data-model]] — transaction provenance and database values.
-- [[agent-runtime]] — `:db.fn/cas` fences and lifecycle transitions.
-- [[observability]] — replay and forensic database values.
+- [[architecture]] — current topology.
+- [[data-model]] — database values and transaction facts.
+- [[agent-runtime]] — run custody and recovery.

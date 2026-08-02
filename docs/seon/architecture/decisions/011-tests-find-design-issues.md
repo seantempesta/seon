@@ -44,11 +44,10 @@ Supporting rules:
 - Localized tests belong to lanes; full suites run only at frozen-tree
   integration checkpoints, where the suite tests the integrated system rather
   than an in-flight shared tree.
-- Assertions target facts, transitions, envelopes, and Datahike
-  `:db.fn/cas` outcomes — never exact prose renderings. `:db.fn/cas` is
-  reserved for facts two processes race to win exactly once: plan freeze from
-  absent to digest, and run claim from no process to the process record
-  together with a claim-epoch increment.
+- Assertions target facts, transitions, envelopes, and Datahike transaction
+  outcomes — never exact prose renderings. Run transition tests assert
+  eligibility from the mid-transaction database value and custody presence;
+  there is no claim epoch.
 - Tests for a mechanism scheduled for deletion are not written, including
   regressions that would "protect" behavior the architecture has already
   replaced.

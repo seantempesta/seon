@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, database, runtime]
 ---
@@ -63,3 +63,32 @@ their current owners.
   claim epochs, one JVM per cluster, Integrant lifecycle, or Shadow hot reload.
 - Cross-links from abandoned ADRs resolve to the one current decision rather
   than forming a stale authority chain.
+
+## Resolution
+
+Resolved in the path-limited ADR cluster commit containing this note.
+
+- `docs/seon/architecture/decisions/004-schema-unification.md`,
+  `007-runtime-instrumentation.md`, `008-database-protocol.md`, and
+  `009-cluster-jvm-topology.md` are explicitly `status: superseded`, retain a
+  concise historical decision record, and name the replacing owner rulings and
+  current source owners. ADR-001 and ADR-006 now point to the same current
+  decision rather than the stale ADR-008/ADR-009 chain.
+- `docs/seon/architecture/decisions/012-process-root-cluster-topology.md:24-68`
+  records the current decision: one process-root store, one branch connection
+  and live SCI `ctx` per cluster, co-located database access, shared root
+  executors, and presence-based run custody.
+- `src/seon/cluster.clj:1-17` verifies that one JVM hosts several named cluster
+  instances with shared process-root store and executors but per-cluster
+  connections, flows, routing state, advertisements, and web services.
+- `src/seon/cluster/store.clj:288-301` verifies that the process-root physical
+  store is fenced before Datahike opens; `src/seon/cluster/store.clj:369-398`
+  verifies one live connection per cluster branch; and
+  `src/seon/cluster/store.clj:440-458` verifies the co-located transaction
+  boundary and its error values.
+- `src/seon/sci/eval.clj:1205-1228` verifies cold construction of one live
+  cluster `ctx`, while `resources/seon/schema/run.edn:59-64` verifies custody
+  by `:seon.cluster.run/process` presence with no claim epoch or lease.
+- The remaining active ADRs were revalidated: ADR-005 still names the live
+  `seon.flow`/core.async Flow seam, ADR-010 remains the protective-limit law,
+  and ADR-011 no longer instructs a claim-epoch increment.

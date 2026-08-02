@@ -1,18 +1,18 @@
 ---
 type: decision
-status: abandoned
+status: superseded
 date: 2026-02-14
 tags: [decision, architecture, archive, agent]
 ---
 
 # ADR-006: Separate JVM processes for agent isolation
 
-This decision is superseded by [[009-cluster-jvm-topology]]. Seon does not run
-one full application, database, nREPL, or mutable registry per agent. One
-cluster JVM per store executes all agents through database-backed run claims
-and one virtual thread per held run.
+This decision is superseded by
+[[architecture/decisions/012-process-root-cluster-topology]]. Seon does not run
+one application process, database, REPL, or mutable registry per agent.
 
-Process count is capacity, not identity. Claim epochs, turn phases, and receipts
-preserve authority and recovery across cluster JVM replacement. Scale comes
-from adding isolated clusters, never another writer or agent process to one
-store. Historical details remain recoverable from Git.
+The replacement follows the 2026-07-27 branch-per-cluster ruling and the
+2026-07-28 agents-are-flows ruling. Agents are independent Flow graphs inside
+their cluster; several sovereign cluster branches may run in one JVM over the
+process-root store and shared executors. Run custody is the presence of
+`:seon.cluster.run/process`; there is no claim epoch.
