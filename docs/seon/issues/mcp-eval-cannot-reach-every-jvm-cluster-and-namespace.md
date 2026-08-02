@@ -60,3 +60,90 @@ Four gaps, three of them coordinates and one of them semantics:
   result differs visibly from its JVM result (a capped collection or a
   contract violation) proving the two modes are genuinely different
   views.
+
+## Owner
+
+The development MCP boundary in `script/seon/dev/mcp.clj`; implementation
+landed in `816cbac0f` and awaits orchestrator review before archival.
+
+## Evidence
+
+Dependency ledger for the implemented boundary:
+
+- Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`, with io-prepl's
+  read/eval/session namespace behavior grounded in
+  `reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
+- SCI `6de15683b7520cc973bc9c136aec7ad3f9b3788c`, with namespace creation and
+  form evaluation grounded in `reference-code/sci/src/sci/core.cljc:354-405`;
+- the operator's one observation derivation in
+  `script/seon/fresh_operator.clj:434-458,636-651,788-895`; and
+- the live cluster context and exact door request in
+  `src/seon/cluster.clj:1039-1086,1337-1363` and
+  `src/seon/sci/eval.clj:1392-1578`.
+
+Implementation `816cbac0f` replaces the MCP bridge's private advertisement
+roster with rows derived from the operator's `source-observations`: root-scoped
+advertisements lead, and the operator's reconciled process records plus live
+JVM registrations recover a target whose own advertisement is absent. A small
+readiness observation over that already-discovered prepl distinguishes a live
+REPL from a cluster that reached its shared SCI context. Root is part of the
+session identity, duplicate live identities return `:ambiguous-cluster` with
+candidates, and all tool failures remain
+ordinary MCP error values.
+
+The tool schema now supplies `root`, `namespace`, and `mode` (`jvm` or `door`).
+JVM mode enters the requested namespace, explicitly refers `clojure.core`, and
+evaluates the one already-read form. Door mode calls `seon.sci.eval/evaluate`
+with the selected instance's shared context and the loop handle's admission
+caps, time limit, and core-error decision. Its published description states
+both load-bearing properties verbatim: it mutates the shared per-cluster
+context, and it creates no run or receipts. It also states that returned MCP
+content renders directly into the calling agent/orchestrator context.
+
+Recurring focused proof:
+
+```text
+bin/test seon.dev.mcp-bridge-test
+Ran 20 tests containing 144 assertions.
+0 failures, 0 errors.
+```
+
+The suite includes a real `clojure.core.server/io-prepl` crossing proving that
+an explicit non-default root and namespace return
+`[mcp.live.chosen 42]`; function-level regressions cover operator-root
+selection, a process-record-derived degraded registration, advertised degraded
+classification, ambiguity with the full candidate list, both generated
+namespace forms, and the exact tool-description obligations. A direct stdio
+`tools/list` probe returned server version `0.4.0` with the new schema and
+description.
+
+Live acceptance used only the isolated operator root
+`tmp/mcp-eval-live-root` and ended with `bin/seon --root ... down`:
+
+- `default` booted at pid `88188`, prepl `64754`; `runtime_status` and JVM
+  evaluation selected that explicit root. JVM namespace `mcp.live.jvm`
+  returned `[:jvm mcp.live.jvm (0 ... 199)]`. Door namespace
+  `mcp.live.door` returned `[:door "mcp.live.door" (0 ... 199)]`, and a
+  second door call returned the prior `marker` value `:door`, proving shared
+  context mutation.
+- A forced failure of `stack-tower!` after `seon.cluster/start!` opened the
+  REPL produced the carried `:seon.boot/refused` instance `failed-boot` at
+  prepl `65072`. MCP status reported
+  `failed-boot state=degraded ... cluster-layer=degraded`, while JVM mode in
+  `mcp.failed.jvm` returned `[mcp.failed.jvm :reachable]`. After temporarily
+  moving that cluster's `prepl.edn` aside, the operator-derived registration
+  still resolved it and returned
+  `[mcp.failed.no-ad :reachable-without-file]`; the file was then restored.
+- The identical form `(java.lang.System/getProperty "user.dir")` returned the
+  repository path in JVM mode and the flat
+  `:seon.sci.eval/evaluation-failed` value "Unable to resolve symbol" in door
+  mode, visibly proving different evaluation views.
+- Run/receipt counts were `[1 13]` immediately before a door-only debug `def`
+  and `[1 13]` immediately after it. The definition appeared in the shared SCI
+  context while no run or receipt was created.
+
+The current `seon.cluster/start!` writes its advertisement in REPL layer zero
+(`src/seon/cluster.clj:1443-1471`), so an ordinary post-REPL failure retains
+that primary discovery fact. The missing-advertisement live falsifier above is
+the stronger fallback proof: the process-record/JVM-registration path still
+reached the failed cluster when its own file was unavailable.
