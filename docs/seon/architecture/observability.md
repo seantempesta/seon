@@ -4,454 +4,212 @@ status: active
 tags: [architecture, agent, database]
 ---
 
-# Observability — inspect any agent, any turn
+# Observability — inspect any agent and run
 
 > **Target design** (present tense). Implementation state, gaps, order, and
 > evidence live only in [[roadmap]].
 
-Every question about agent behavior — "what exactly did this agent see at turn
-N?", "what changed between turn N and N+1?", "why did it do that?" — is answered
-by a **query against the database plus the blob archive**. Process logs remain
-necessary operational evidence for startup, readiness, transport, and crashes;
-they are not the durable forensic truth of an agent turn.
-This falls out of the core property: a turn's prompt is a pure render of one
-frozen database value. The turn retains a ref to that value's basis transaction,
-so the same structured inputs can be queried with `as-of`; the complete database
-value remains request-scoped. Observability is not a subsystem bolted on; it is the
-derive-everything principle pointed backwards in time.
+Agent forensics are queries over messages, runs, context captures, provider
+attempts, planned forms, eval receipts, program rows, and error facts. Process
+logs remain necessary for startup, readiness, transport, and crashes, but they
+are not a second durable agent-history model.
 
-## The turn record
+## The evidence spine
 
-Every datom already names its Datahike transaction. Normal Seon transactions
-add `:seon.db/user` and `:seon.db/process` refs on that transaction, so
-“who/through which execution path wrote this datom?” is a join, never a stored
-domain back-reference. Turn/eval causality is intentionally not copied onto
-arbitrary transactions: ordinary run/turn/eval/message refs record the modeled
-facts, but Seon does not claim it can enumerate or replay every external effect
-caused inside a turn. What every turn additionally persists—always on, no debug
-flag:
+One episode leaves a connected set of facts:
 
-- **The rendered transaction** —
-  `:seon.agent.turn/rendered-tx` is a native Datahike ref to the basis
-  transaction of the request-scoped database value captured before prompt
-  rendering. This is the one historical fact the turn's own transaction cannot
-  supply because other commits may interleave before the turn is recorded.
-  `render-prompt` applies `as-of` at that transaction to reproduce the
-  structured context. Rare exact-branch forensics resolve the transaction's
-  originating commit from Datahike's retained commit graph at the authority;
-  every turn does not duplicate a commit descriptor.
-- **`:seon.agent.turn/prompt-blob`** — the assembled prompt verbatim, in the
-  blob archive. The as-of re-render is the *structured, queryable* view; the blob
-  is the byte ground truth that survives render-code changes (a re-render runs
-  TODAY's render fns; the blob is what the model actually saw).
-- **`:seon.agent.turn/reply-blob`** — the raw LLM reply. Not derivable from
-  anything, so it is stored: a blob ref on the turn (content-addressing makes
-  repeated replies free). An errored turn stores WHY instead —
-  `:seon.agent.turn/error`, the failure as a bounded data string — so capture
-  never depends on turn success.
-- **The volatile prompt inputs, as data** — any `result/<id>` values rendered
-  into the prompt are recorded on the turn, so nothing the model saw came
-  from an unrecorded volatile.
-- **`:seon.agent.turn/cause-message`** — the exact inbound human message the
-  runtime assigned this turn to answer, when one exists. It is not guessed from
-  the run opener because a run can absorb later messages.
-- The existing projections: prompt size (tokens at display), `llm-usage` /
-  `llm-meta`, the `:seon.eval` component refs, status, retries.
-- **Compact turn measurements** —
-  `:seon.agent.turn/duration-ns` records one monotonic run-loop interval and
-  `:seon.agent.turn/timings` owns its measured component rows. Each row names
-  the boundary, ordinal, nanosecond duration, and optional exact transaction
-  ref. The component sum is checked against the total; any difference is
-  derived at read time and never stored as a remainder row. Context
-  construction, provider request/response, response-envelope work, reply
-  derivation, every transaction call, eval, and final publication remain
-  distinct. The later transaction that writes these measurements is outside
-  the interval and is reported as an explicit artifact. Missing evidence is
-  absent and rendered as unmeasured, never as zero. Optional detailed spans and
-  database resource evidence belong in one bounded diagnostic blob rather than
-  expanding ordinary turn datoms.
-- **Provider attempts as facts** — every provider attempt connects to the turn
-  with its ordinal, resolved non-secret
-  transport projection, adapter and outer timeout layers, outcome, and present
-  response model/fingerprint/request identity. The adapter consumes that one
-  resolved value without rereading mutable config. Missing response fields stay
-  absent; credentials, headers, and signed parameters never enter evidence.
-  Historical projection uses the parent turn's rendered transaction; attempts
-  do not copy database identity. Projection re-derives the adapter and stream
-  mode at that same historical value. Evidence-size
-  policy is read from the config singleton in the final immutable response
-  value, once per projection. The outer attempt bound is retained as the exact
-  applied value: normally the admitted process default, or the explicit sparse
-  launch override copied onto that agent. Admission rejects drift within a run
-  and binds cross-run comparison to that ordinary birth/process evidence. An absent policy
-  or rejected optional identity makes formal evidence
-  incomplete without changing the provider request, model output, usage, or
-  successful outcome; rejected bytes never enter an error value.
+```text
+agent ← message
+  ↑        ↓ run-opening transaction metadata
+  └── run ← context capture
+        ├── provider attempt(s)
+        ├── ordered form(s)
+        └── eval receipt(s)
+               ↓ optional error/problem refs
+```
 
-**Datom vs blob is decided by size, never by kind.** The DB stores projections
-and small values; large text — a prompt, a raw reply, a big eval result —
-lives in the blob archive behind a datom ref. The DB is never a text dump.
+The durable joins are concrete:
 
-### Receipts are the crash-forensics spine
+- the agent is `:seon.cluster.agent/id`;
+- messages point through `:seon.cluster.message/to`, optional `/from`, and
+  optional `/about`;
+- runs point through `:seon.cluster.run/agent` and the agent's current `/run`;
+- context captures and attempts point to the run through their `/run` refs;
+- forms and receipts point to the run and join by `/ordinal`; and
+- error facts may point to `/agent` and `/run`.
 
-The run's `:seon.agent.run/process` custody, turn phase,
-provider attempts, and eval rows form one causally ordered record. They answer four different
-questions without consulting process memory:
+No turn identity, phase cursor, recovery anchor, route row, or browser-session
+entity is required to reconstruct that chain.
 
-- **Who held authority?** Query `:seon.agent.run/process` at the
-  relevant database value — custody is that fact's presence
-  (2026-07-28 custody revision: epochs and leases are deleted).
-- **What step was admitted?** Read `:seon.agent.turn/phase` together with the
-  attempt or eval receipt opened before dispatch.
-- **What finished?** Terminal receipt state uses Datahike's `:db.fn/cas` from
-  the open/running state and carries the bounded result, error, output, usage,
-  or response identity. `:db.fn/cas` is reserved for facts two processes race
-  to win exactly once: plan freeze from absent to digest, and run claim from
-  no process to the process record (CAS-on-absence);
-  receipt settlement follows the same asserted old-value discipline under the
-  run fence.
-- **What did takeover repair?** An abandoned provider attempt becomes
-  `:crashed`; an admitted eval remains terminal or becomes interrupted
-  according to its receipt. The later phase transition records the recovery
-  database transaction.
+## Context capture — what the model saw
 
-An `:open` attempt with an `:attempt-open` turn phase is evidence that external
-work was admitted but not durably settled. Absence of an eval receipt at
-`:evaling` means no form was admitted; a `:running` eval receipt means a form
-crossed guarded eval admission but did not terminalize. These distinctions govern
-recovery and remain visible to debug projections.
+Before a remote model call, the loop commits one
+`:seon.context.capture/capture` containing:
 
-Datahike temporal history supplies **claim archaeology**. An investigator can
-walk the run's process-ref custody changes; join each transition to
-transaction provenance; inspect the cursor and receipts at the same database
-value; and identify the exact transaction that displaced a holder. Expiry
-itself is derived from the historical heartbeat and configured stale interval,
-so forensics never treats a stored `expired?` flag as evidence.
+- `:seon.context.capture/run` — the run;
+- `/basis-t` — the basis transaction of the database value every projection
+  read;
+- `/prompt` — the exact prompt string handed to the model;
+- `/contributions` — owned evidence rows ordered by their `/position`; and
+- optional `:seon.cluster.run/live-processes` — the nondatabase input when a
+  projection actually used it.
 
-## The blob archive — `my.blob`
+Each contribution records its render-block name, position, hash, token estimate,
+and optional projection/error evidence. It does not duplicate its text: the
+capture's prompt is the byte ground truth. Failed contribution state is the
+presence of error attributes; omitted blocks create no contribution row.
 
-The disk tier of the three-tier storage rule (datoms = projections, blobs =
-persistent full content, stash = volatile live values), made a first-class
-capability instead of ad-hoc log files:
+The capture identity derives from run identity and basis. Re-deriving the same
+prompt at the same basis upserts the same evidence; a later basis produces a
+new capture. Writer ordering makes the boundary honest: no capture means no
+prompt is claimed, while a capture with no attempt says only that the external
+call may not have occurred.
 
-- **Content-addressed** — a blob's name is its content hash; writes are
-  idempotent, identical content dedupes for free. Blobs live under the
-  cluster dir, beside the database backend they annotate.
-- **A blob ref is data** — the datom carries the hash plus a token estimate
-  and a media hint, so queries can filter and budget without touching disk.
-- **Functions** — `my.blob/put!`, `my.blob/get`, `my.blob/text` (paged, honest
-  totals), on the same never-throw result envelope as every toolkit function.
-- **One archive, many producers** — turn capture, oversized eval results, and
-  agent-authored artifacts all use the same functions. There is no separate
-  "debug capture" file tree; debug persistence IS blob persistence.
-- **Discoverable** — database blob projections are queryable by hash, media,
-  and token estimate. Literal or semantic content search reuses the protected
-  search/embedding capabilities when explicitly requested; `my.blob` does not
-  create another index.
+## Provider attempts — what crossed the external boundary
 
-Volatile live values follow the same law with one addition: a live
-`result/<id>` handle stays in its owning process, but its existence is a
-database fact keyed by that process-instance identity — the result-symbol
-lifecycle registry. A platform reset or restart wipes its instance's rows, so
-a stale handle reference is a loud steering error toward re-derivation, and
-forensics can always answer which tier held a value and when it died.
-Streamed reply partials are the opposite case: complete prefixes remain
-process-local values in the render flow and are never database or blob
-evidence. A full `(sliding-buffer 1)` tap may drop intermediate prefixes. The
-attempt receipt and terminal reply blob remain the forensic truth.
+One `:seon.ai/attempt` row records each completed observation of a model call.
+It retains:
 
-Cluster-JVM telemetry follows the same storage law. JVM thread handles, active
-timers, and demanded CPU or heap samples remain transient in the
-owning process. Healthy sampling does not write transactions. A deadline,
-process exit, or explicit forensic capture may attach one bounded terminal
-projection and one `:diagnostic` blob, but neither replaces the claim, phase,
-and receipt facts.
+- run, ordinal, and attempt instant;
+- the exact endpoint, model, and canonical effective settings used;
+- open provider usage, finish reason, and optional reasoning content or blob;
+- HTTP and request/response/output phase observations; and
+- error, failover-from, and retry-delay facts when present.
 
-Stack attribution is evidence, not certainty. A thrown exception supplies a JVM
-stack; a non-responsive cluster JVM may receive a bounded on-demand sample. Reports
-retain raw frames and sampling context so optimized, native, or blocked-system-
-call cases can state incomplete attribution rather than invent an exact source
-line.
+These are observations, not replay authorization. Error-ref presence means the
+attempt failed. `failover-from` identifies which attempt supplied the failure
+context. Retry disposition, error class, normalized usage, and whether an
+attempt was primary or backup derive from those facts; no outcome or role enum
+duplicates them.
 
-## Replay, diff, search
+The attempt row is written after the external call. A process that dies during
+the call may leave a context capture and no attempt. That is the honest limit:
+the database says the call was not recorded, not that it certainly never
+happened. Recovery never retries it.
 
-Three functions make a turn a first-class object of study:
+## Forms and eval receipts — the authentic REPL history
 
-- **`agent-debug/turn`** — one call returns the whole bundle for agent X, turn N:
-  the exact prompt (blob), the structured context (as-of re-render, per-block),
-  the reply, the evals with results, usage, and the messages visible at that
-  database value. No joins by hand, no filesystem.
-- **`agent-debug/turn-diff`** — what changed between two turns: a block-level diff
-  of the two rendered contexts plus the datom delta when both commits share the
-  required ancestry (`db/since`). Different lineages use two immutable snapshot
-  results and report that no linear since-range exists. This is also the
-  cache-stability instrument: bytes that should have been frozen but moved show
-  up here.
-- **`agent-debug/ctx-preview`** — generalized over time: preview any agent's
-  context at any complete ordinary database value, not just now. Turn replay
-  constructs that request value from the selected database plus the turn's
-  rendered transaction. Exact cross-lineage branch work resolves a retained
-  commit at the authority rather than guessing one from a transaction number.
+The transcript interleaves messages with eval receipts. A frozen plan records
+each form's exact source, ordinal, and optional reader namespace. Its matching
+receipt records the instant, ending namespace, printed output, admitted result,
+blob address and full size when large, error, or interruption.
 
-The agent debug page renders the same turn measurement projection as a compact
-waterfall and operation/cache totals. It does not sample process-global
-counters and assign them to whichever agent happens to be open. Datahike's
-cache outcome, work, result count, result weight, and dependency-plan names stay
-intact; Seon request duration is a separate boundary measurement.
+Receipt state is presence:
 
-Search runs at two ends, one function boundary each, and nothing in between:
+- no result/error/interruption → running;
+- `/result-edn` or `/result-blob` → returned value;
+- `/error` → failed evaluation; and
+- `/interrupted-at` → time-limit or crash cut.
 
-- **Literal** — `grep-graph` targets every text-carrying attr: fns, schemas,
-  evals, messages, turns, and blob-backed prompts/replies; filterable by
-  agent, time range, and attr.
-- **Semantic** — the ONE `:seon/embedding` index. Writer boot resolves the
-  configured trigger attributes and compose symbols into one immutable
-  embedding pipeline; requiring a namespace never mutates it. `search-pull`
-  scopes KNN by a datalog `:where`. No second index or separate FTS engine —
-  exact regex and semantic KNN cover the spectrum.
+The receipt and form share `[run ordinal]`; neither stores `ok?`, status,
+error-data, turn, or phase. The run's own `/closed-at`, `/process`,
+`/plan-digest`, and `/error` facts explain whether work is open, held, planned,
+closed, or unable to start.
 
-## Error facts — one normalizer, one fault path
+Printed REPL text is rendered from durable source, output, and result data.
+`result-edn` remains the data projection; the text and HTML faces come from the
+one print grammar and may re-render without changing the receipt.
 
-`seon.error/normalize` is the one normalizer. Any value that means something
-went wrong — a flat `:seon.error` value, a transaction refusal, a Flow error
-report, a bare `Throwable`, or an unrecognized value — becomes the same
-canonical durable error fact. The function is total and pure. It derives the
-source family structurally, takes `:seon.error/kind` from the deepest site data
-that supplied one, and fails closed to an unclassified kind. Kinds are therefore
-computed from producing sites, never maintained as an enum or blame table.
+## Large values and blobs
 
-The normalizer projects the complete source through the one value-admission
-codec before any printing. Every committed error fact validates the same
-`:seon.error/value` contract and carries enough bounded provenance to join back
-to the process, proc, run, agent, and immutable database value involved. Full
-diagnostic bytes may live in the blob archive; the fact remains the bounded,
-queryable authority.
+Content-addressed blobs use SHA-256 `:seon.blob/digest`. Eval receipts keep a
+bounded result projection plus `:seon.cluster.eval/result-blob` and
+`/result-size`; provider attempts use the same digest family for large
+reasoning content; durable session definitions may use `:seon.code.def/blob`
+and `/size`.
 
-Recurrence is also derived. Each fact carries a signature over stable
-diagnostic content — process, exception class, kind, and top frame — and the
-signature deliberately excludes the message. Paths, ids, timestamps, and other
-changing prose therefore cannot make every occurrence look unique. Counts are
-queries over facts, never mutable counters.
+Blob state never becomes a second lifecycle or replay log. The referencing
+row carries the semantic identity, digest, and size. Capped presentation derives
+from the size and configured threshold. A missing blob is a loud forensic
+failure attached to the referencing fact.
 
-There are two error classes, separated by construction:
+## Error facts
 
-- An agent-code mistake is wrapped and caught by the SCI execution boundary.
-  The boundary returns a flat value, records any owning eval receipt, and
-  submits the same normalized report to the cluster's fault-committer channel.
-  It never throws across the proc boundary. The committer persists a fact
-  routed to the agent that ran the code; that agent's next context reaches it
-  and the problem-routing graph escalates it to root.
-- A core fault is a `Throwable` that escaped a proc onto Flow's error channel.
-  The same fault committer normalizes the report and commits the error fact
-  together with one explanation **message** to the responsible agent in a
-  single transaction. Responsibility derives from the fact's provenance and
-  namespace ownership; there is no router or subscription registry. The
-  message is ordinary delivery, so its commit is also the wake.
+Agent-facing failure is the flat `:seon.error/value`. A failure worth retaining
+becomes one `:seon.error/fact` with identity, instant, process identity, kind,
+message, content signature, bounded data projection, capped flag, and optional
+class/Flow/run/agent/instrumentation evidence.
 
-The explanation is an AI projection selected through the one render contract
-and frozen as message content because it records what the agent was told. Log
-and HTML projections remain derived. An escalation-recipient config fact
-controls where otherwise unowned or recurring faults are explained.
+Kinds are producer-owned namespaced keywords, never a central enum or entity
+discriminator. Recurrence is a query over `/signature`. The `/agent` and `/run`
+refs route the same evidence into the responsible agent's context and root's
+overview. A render failure therefore appears in place and remains forensics;
+fixing the renderer removes the current derived problem without deleting
+history.
 
-Delivery makes an error capable of waking the code path that produced it, so
-the fault path has a structural storm bound. Occurrences continue to commit as
-facts. Explanation messages are emitted only through the configured recurrence
-limit, followed by one recurring-fault escalation; later facts with the same
-signature are silent. An error fact by itself is not a wake attribute. Thus the
-record remains complete without allowing
-error → message → wake → error to become an unbounded loop.
+Core faults enter through Flow's error channel and the fault committer. Agent
+mistakes become flat values and eval receipts. The channel, not a guessed kind
+list, determines which escalation policy applies.
 
-### Fail loud does not mean fall down
+## Transaction and program provenance
 
-`:seon.config/on-core-error :panic` makes development failures immediately
-visible: the offending call, eval, turn, or proc activity halts; the durable
-fact commits; and the UI, logs, and REPL expose it. The cluster JVM, REPL, and
-web UI remain alive so the failure can be investigated. Production uses the
-same fact path and degrades on the configured dial.
+Every datom already names its transaction. `:seon.db/user`,
+`:seon.db/process`, and `:db/txInstant` answer who, through which path, and when.
+Joining a program row's datom through that transaction distinguishes admitted
+source publication from agent-authored changes without storing a duplicate
+author field.
 
-The recorder itself never panics. Normalization and admission run in recording
-mode even when the failing activity uses `:panic`, because losing the original
-fact while reporting it would turn the fire alarm into the fire. Projection
-holes become bounded markers on the fact and remain visible to
-`seon.problems`.
+Program rows provide the source side of a forensic answer:
 
-### Problems are a current derivation
+- `:seon.fn` retains exact source, contract, call refs, parsed arities/AST, and
+  explicit capability-leaf workload;
+- `:seon.ns` retains source and effective resolver bindings;
+- `:seon.schema` retains canonical forms;
+- `:seon.test` and test observation rows retain recurring proof; and
+- `:seon.code.def` retains the namespace session image used by cold restore.
 
-`seon.problems/problems` is pure over one database value plus the observed set
-of live process identities. It derives what is wrong now: recurring error
-signatures, runs held by dead processes, failed runs, and errored eval receipts.
-Families are map keys, not stored kinds; empty families are absent; a healthy
-cluster returns exactly `{}`. One hundred occurrences of one signature are one
-problem with a recurrence count and the latest fact, not one hundred rows.
-Nothing is acknowledged, marked seen, or copied into a health table.
+Effective AI settings are recorded on every provider attempt, so a config
+change after the call cannot rewrite history. The live config remains ordinary
+database facts and can still be inspected at any temporal basis.
 
-Triage and reproduction tools query these same facts. Compact lists render the
-latest normalized facts; detail views join a fact to its process, run, agent,
-turn, and immutable database value; reproduction resolves that historical
-value and reports honestly when bounded evidence is absent. They do not build a
-second error envelope or replay log.
+## Crash forensics
 
-### Instrumentation composes into the same path
+Recovery compares every open run's `:seon.cluster.run/process` with the live
+process set. A dead or absent holder causes one transaction to stamp dangling
+receipts `/interrupted-at`, close the run, release custody, and retract the
+agent pointer. Settled receipts are unchanged and unstarted forms remain
+unstarted.
 
-`seon.instrument/apply!` explicitly collects every loaded public var carrying a
-`:malli/schema` and applies the configured input/output instrumentation. The
-selection is computed from vars and schemas, never namespace prefixes or an
-allowlist. `apply!` is idempotent and is run again after a `defn` is
-re-evaluated, because replacing a var root removes its instrumentation wrapper.
+The forensic answer is deliberately bounded:
 
-In development, an instrumentation violation throws the canonical flat
-violation value from the offending activity. If it escapes a Flow proc, the
-ordinary fault-committer path turns it into the durable fact, explanation
-message, and `seon.problems` entry. Instrumentation does not own another
-recorder, formatter, or notification channel.
+- a terminal receipt proves the evaluation settled;
+- an interrupted receipt says its effect may have happened;
+- a frozen form with no terminal receipt says it did not produce a recorded
+  result; and
+- a context capture without an attempt says the external call may not have
+  fired.
 
-The as-of db is read-only; when the fix needs a WRITABLE view—re-running
-safe code, patching data, letting a forensic agent act—the fourth step is
-**fork**: the operator creates a Datahike copy-on-write branch at the retained
-commit, then starts a non-autonomous forensic runtime for the new database name. It
-does not copy Konserve or define another versioning model. Entity/transaction
-ids through the fork point are identical, but database values always retain
-`:db-name` and `:datahike/commit-id` because later transaction ids can
-diverge/reuse after a reset.
+Nothing in the model claims automatic effect replay or exactly-once remote
+execution. Recovery closes the wreckage and the agent adapts from the evidence.
 
-No bare-`:t` convenience selector exists; the complete database value names a
-temporal cut inside one retained immutable containing commit. The debug cluster starts
-non-autonomously: opening history installs no ticker, wake trigger, or agent
-host and never resumes agents, schedules, providers, or external-effect workers.
+## Page and operator inspection
 
-The database-value semantics are precise: it is captured at the catch site—the db
-value the failing code saw—while the error datom itself commits later, so the
-error datom does not exist inside its own historical view. Branch-local blob
-overlays, promotion, garbage collection, and remote retention are related
-designs owned by the database-lifecycle-recovery and blob-lifecycle PRDs. The
-stable forensic flow is fault list → error detail → reproduction bundle →
-non-autonomous historical runtime; operator command names are not part of
-the data model.
+The web UI exposes the same facts through `/`, `/ns/{namespace}`,
+`/ns/{namespace}/debug`, `/agent/{id}`, `/agent/{id}/debug`, and `/data`.
+Namespace and agent debug pages walk the current database value, retain refs for
+drill navigation, and show AI/HTML projections from the same render owners.
+They do not store a display selection or route entity.
 
-Claim recovery retains two database values rather than inventing a rollback
-point: the value pinned for the interrupted phase and the current value at which
-takeover terminalizes or advances it. Their basis transactions and commit IDs
-show what the prior process saw and what committed before replacement. Process
-diagnostics stay in operator logs. Database forensics retain
-`:seon.agent.run/process`, phase cursor, attempt/eval receipts, and the
-thin process-loss recovery fact. The next turn may state that replacement loaded the current
-database program and that transient tier-local values were lost. It never
-claims committed effects were undone or silently retries an effect contrary
-to its class.
+The operator separately reports process identities, branches, ports, readiness,
+and logs. Those facts govern process lifecycle, not agent history. Reproduction
+uses an isolated cluster fork and the ordinary message/run path.
 
-## The forensic agent
+## Source authority
 
-Debugging an agent is done **by another agent given the exact db the target
-saw**, not by a human reading logs:
+- `resources/seon/schema/{context,ai,run,error,program,test}.edn` owns the
+  durable evidence shapes.
+- `src/seon/context.clj` commits captures from rendered context.
+- `src/seon/cluster/loop.cljc` opens attempts and receipts, persists blobs and
+  session definitions, and settles the fold.
+- `src/seon/cluster/run.cljc` owns settle-once and recovery transitions.
+- `src/seon/render/transcript.clj` owns the message/receipt queries and REPL
+  interleave.
+- `src/seon/render/{agent,root,ns,web}.clj` owns current agent, root, namespace,
+  debug, and data-page inspection.
 
-- Mint a forensic agent in an **ephemeral writable branch** rooted at the
-  target's resolved commit, so it
-  sees exactly what the target saw at that moment.
-- Seed its ctx with the target's **reconstructed context blocks** plus one
-  extra **debug-brief block**: the behavior in question and the ask —
-  "identify why the agent did this; answer in clear markdown."
-- It **evals code to investigate** — its transactions land in its OWN
-  cluster's db, advancing that copy realistically, never touching the
-  target's cluster.
-- **Per-agent LLM config** selects a cheap reasoning model with thinking ON
-  for these runs, so forensic passes are routine, not precious.
+## See also
 
-This is a composition of existing mechanisms—cluster isolation, Datahike branch
-roots, the derived block walk over a database value, as-of reconstruction,
-per-agent provider routing — not a new runtime. A forensic pass is cheap
-enough to run on every puzzling drive.
-
-## Cluster lifecycle and the composition endpoint
-
-Isolation is the CLUSTER: one store, one cluster JVM, and disposable leaf
-runtimes. From inside a cluster there is ONE connection and
-ONE database — agents never know other clusters exist. Database enumeration,
-fork, release, and deletion are
-typed root/supervisor operations in `seon.db.registry`, never agent protocol
-operations. The supervisor owns the lifecycle:
-
-- creation establishes one registered database name and process group;
-- fork requires a complete retained database value and creates a writable Datahike
-  branch without physically copying the database;
-- a historical or forensic runtime starts non-autonomously; and
-- destroy quiesces users of the target and removes only resources owned by that
-  database name. A branch cannot delete source-database content.
-
-`POST /agents/run` is the one-shot composition endpoint, built
-purely from the agent primitives: start-or-reuse an agent in the cluster's own
-cluster (optional `agent_id` — durable database, so the same agent can be
-driven again across a cluster JVM restart), deliver the input through the real wake
-path, await the derived `:idle` of the run it woke, return the truthful
-reply plus termination metadata (turns/evals scoped to this request's
-window, closed-reason, timed-out), an ordered `eval_evidence` projection of
-that same window's eval ids, times, sources, success facts, and present
-narration and result data, plus the ordered bounded provider-attempt facts
-connected to those turns.
-The pure `seon.ai/resolved-config` reconstructs configuration intent at each
-attempt database value; stored attempt facts preserve non-derivable response
-identity and outcome. A response-time final database value is never mislabeled as
-call evidence. Inspect AI copies the projection unchanged and rejects missing
-or drifting transport evidence before capability scoring. Inspect AI runs
-per-sample ephemeral clusters by port through this same production boundary;
-there is no in-process evaluator lifecycle. The answer key never enters the cluster
-— scoring stays host-side. Benchmark vocabulary is harness-side only.
-
-An explicit `timeout_ms` is a caller-selected experiment bound. When it is
-absent, the boundary derives its wait duration from the same frozen database run
-policy and optional agent override that `open-run!` uses. The HTTP boundary
-never introduces a shorter literal deadline that can terminate an otherwise
-healthy database-owned run. Its response projects the effective duration and
-whether its source was the request or database; Inspect retains both in the
-native sample metadata. These are derived evidence, not another config value.
-
-The eval projection is derived from the same final immutable database value
-and exact turn-entity set used for the response counts. General eval results,
-printed output, exception stacks, and unrelated source dumps never enter the
-endpoint. The bounded result projection comes from the eval row recorded in the
-same database authority as the turn; it does not preserve a second execution
-trace or database-operation log. Inspect consumes this production response
-directly and does not issue arbitrary forms through the writer REPL to
-reconstruct eval rows.
-
-Standard Inspect tasks measure the selected model and scorer. Cluster-backed Inspect
-tasks measure Seon's production agent/runtime behavior through this endpoint; the
-two claims are reported separately and no duplicate evaluator is created.
-Every admitted live run retains both its opening and closing source admission
-plus the operator-owned target identity in the native `.eval`. A formal local-
-model run also retains a closed model-server identity: the exact request
-endpoint, stable process start, serving-module and package identity, absolute
-revision-pinned model path, canonical weights-manifest digest, quantization,
-and expected response identity. Every provider attempt joins to that exact
-endpoint and model path; a successful attempt also joins its response model
-and server fingerprint. The model-server snapshot is observed before task
-construction and again after the terminal log is published. Remotely managed
-weights and mutable local tags remain diagnostic until their serving boundary
-can prove the loaded content digest.
-
-The admitted opening identities are one immutable value at the run boundary.
-Inspect retains them at eval scope and exact-merges them into every sample's
-state before task-owned setup runs, so setup, solver admission, and scoring see
-the same maps. A byte-equal value already present on a sample is accepted; a
-contradiction rejects the sample before task setup can produce side effects.
-Eval metadata alone never stands in for sample-state evidence.
-
-All closing observations are written before evidence finalization. A changed
-source, target, or model-server identity makes the run rejected infrastructure
-evidence while preserving the terminal bytes; it never becomes a capability
-score. The target identity includes one canonical digest of the operator
-closure and runtime that started the processes, so a checkout that later
-converges cannot make transient launch bytes appear reproducible.
-An incorrect scored sample receives one explicit human-reviewed failure label
-from the frozen experiment taxonomy on that existing score. The edit preserves
-the scorer's value, explanation, metadata, and aggregate metrics, and Inspect's
-native score history records who made the classification and why. Passing
-scores carry no manufactured failure label, infrastructure failures remain
-unscored, and no heuristic classifier becomes another evidence authority.
-Long-term planning is a cluster-backed Inspect task: one ephemeral cluster spans
-multiple interactions and a cluster JVM restart, then host-side scoring reads the
-resulting plan and eval facts. Offline good/bad fixtures exercise the same
-scorer without claiming to measure the cluster.
-
-Every turn uses the one complete ordinary database value plus prompt/reply blob
-refs. `seon.agent.debug/turn` and `turn-diff` reconstruct and compare turns from
-those facts. Inspect and debug projections read the same blobs by hash.
+- [[data-model]] — admitted evidence attributes.
+- [[agent-runtime]] — the transitions that create and settle them.
+- [[context]] — current context derivation.
+- [[ui]] — the pages that render the same facts for a human.

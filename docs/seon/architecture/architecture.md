@@ -195,32 +195,34 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   agent↔human communication area.
 - **view** — an agent's page, route `/agent/{id}`: the canvas plus a
   recency-ordered rail of the agent's other html surfaces.
-- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/` system-view
+- **root agent** — ONE `:seon.cluster.agent/id "root"` that is BOTH the `/`
+  system-view
   owner (UI) AND the system orchestrator (lifecycle) — the same elevated grant,
   never two entities. Its all-agents overview uses a dedicated system layout
   over the SAME blocks, render units, route resolution, and live-morph machinery
   as ordinary agent pages. It holds the elevated system-level lifecycle
   functions (`start!`, terminate, cross-agent) in its
   discoverable context; those functions enforce their own caller rules. Its
-  registered home callbacks still pass through the ordinary `/call` browser
-  gate. It is the root of the render + route
-  tree (`/` → `/agent/{id}` → apps) and the base case of the bootstrap recursion
-  (root has no `:seon.agent/parent`). See [[agent-runtime]].
-- **app** — an agent-authored sub-page, route `/agent/{id}/app/{x}`.
-- **route** — a datom mapping a URL pattern to a layout, consumed by reitit.
-  `:seon.route/*` (`seon.route` ns).
-- **reitit** — the HTTP router: a pure derived value of the route
-  datoms (vendored, `reference-code/reitit`, `.cljc`). The capability gate
-  (`seon.web.reactive.call`) authorizes the fn behind `/call`. See [[ui]].
+  actions use the specific POST routes in `seon.render.route/routes`. Root is
+  the base case because its ordinary agent identity is reserved; no parent
+  attribute or second lifecycle identity exists. See [[agent-runtime]].
+- **namespace page** — one namespace's web surface, route
+  `/ns/{namespace}`; its owner agent follows from
+  `:seon.cluster.agent/namespace`.
+- **route** — one line in `seon.render.route/routes`, compiled by reitit. Routes
+  are code, not database entities.
+- **reitit** — the HTTP router and reverse-routing index compiled from that one
+  route table. See [[ui]].
 - **warnings block** — the block surfacing current problems: an ai render to the
   agent, error cards to the human, one source. `seon.agent.ctx.warnings` + `seon.warn`.
   Self-healing — empty when clean.
 - **error value** — the flat value an agent, user, provider, or guarded
   runtime-boundary failure produces: required `:seon.error/message` and
   `:seon.error/kind`, with optional structured `:seon.error/data`. It is never
-  nested under `:seon/error` at a capability boundary. A core publication/
-  readiness failure instead records one `:seon.error/fault :core` and fails
-  admission in development or returns the configured bounded production fallback. See
+  wrapped in a second error envelope at a capability boundary. A core
+  publication or readiness failure instead records one `:seon.error/fact`
+  with process and flow provenance, then fails admission in development or
+  returns the configured bounded production fallback. See
   [[data-model]] and [[observability]].
 - **the walk** — the one block-membership derivation: a recursive read of the
   agent entity and the values it reaches, resolving each value to a renderer
@@ -233,12 +235,13 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **program graph** — the collective `:seon.fn`, `:seon.ns`, `:seon.schema`,
   and `:seon.test` facts. Those established top-level attribute namespaces are
   their settled owners.
-- **orchestrator-root** — the lifecycle facet of the root agent: it `start!`s and
-  manages child agents through `/call`, writing `:seon.agent/parent`. See
+- **orchestrator-root** — the root agent using the same message, function, and
+  database mechanisms as every agent; it has no parent/grant topology. See
   [[agent-runtime]].
-- **run / claim / turn / phase** — the bounded work entity a trigger opens,
-  its `:seon.agent.run/process` presence custody, one prompt/model/eval record, and that
-  record's persisted recovery cursor. See [[agent-runtime]].
+- **run / claim / form / eval receipt** — the bounded work entity a message
+  opens, its `:seon.cluster.run/process` presence custody, its frozen ordered
+  forms, and each form's settle-once `:seon.cluster.eval` receipt. See
+  [[agent-runtime]].
 - **process root / cluster instance / leaf runtime / database interest** — the
   JVM holding one fenced physical store and shared executors; one branch-local
   transaction/agent/render/web runtime inside it; a disposable native-effect
@@ -268,8 +271,9 @@ Datastar's ID-aware morph. It contains no ClojureScript application or database
 logic.
 
 Every process may die. The operator restarts the process root and its selected
-cluster instances; each run's `:seon.agent.run/process`, phase, and receipts
-let replacement compute derive recovery from that branch's facts. Render graphs
+cluster instances; each run's `:seon.cluster.run/process`, terminal facts, and
+eval receipts let replacement compute derive recovery from that branch's
+facts. Render graphs
 and leaf runtimes are reconstructed from database, artifact, and configuration
 facts. On process restart, every pinned canvas renders once from current
 database truth. Remote
@@ -323,7 +327,7 @@ replaying process-local events.
 Model calls execute on `:io` virtual threads in the process root, so a slow
 provider does not occupy `:compute` capacity or block render `step-fn`s.
 Their admitted attempts and terminal outcomes are receipts connected to the
-turn. Embedding and package work is downstream of committed facts and follows
+owning run and call pass. Embedding and package work is downstream of committed facts and follows
 the same claim or capability-effect rules; leaf-runtime death leaves
 database-visible work or a flat boundary error rather than wedging its cluster
 instance.
@@ -390,8 +394,8 @@ one blueprint, parked between episodes, pausable and resumable per agent, and
 kicked off by the messages it receives. There is no central loop, dispatcher,
 or scheduler entity — parallelism across agents holds by construction, and
 per-agent pause is a Flow command, not a fact a router consults. Beside the
-agent graphs, the cluster keeps a few shared plumbing graphs — the render
-pipeline, the fault committer, and schedule fires — and the process root owns
+agent graphs, the cluster keeps shared render and fault plumbing graphs, and
+the process root owns
 one bounded `:compute` executor and one `:io` (virtual-thread) executor shared
 by every graph. A per-tab SSE connection is a tap plus a connection-owned
 virtual thread, deliberately not a graph: connections churn with browsers while
@@ -465,13 +469,11 @@ into data and steering, never silently into staleness.
 
 ### Derive everything
 
-Every settled projection — the claim decision, the prompt, an agent's view, a
-status view, the work bound, the agent's state — is a **function of the DB at
-render time**; nothing derivable is stored. Agent state is the
-`seon.derive/derive-state` projection of
-primitives (an open run, `paused-at`, `terminated-at`), never a stored field. The
-work bound is `default-turn-limit` + the inbound-message count, not a per-message
-write. Renders are projections, never persisted; transient streamed prefixes
+Every settled projection — the claim decision, the prompt, an agent's page,
+and its state — is a **function of the database value at render time**; nothing
+derivable is stored. An agent with `:seon.cluster.agent/run` is running; an
+agent without it is idle. A run with `/process` is held and one with
+`/closed-at` is closed. Renders are projections, never persisted; transient streamed prefixes
 remain process-local render-flow values. New ways to surface data are new
 block render fns, not new mechanisms — when the underlying problem is fixed, the
 query returns empty and the surface vanishes (self-healing). Frozen caches key
@@ -482,11 +484,11 @@ on the complete ordinary database value, including `:datahike/commit-id` and any
 
 Agent-authored, provider, input, capability, and handler failures are caught at
 their boundary and represented as flat values with `:seon.error/message` and
-`:seon.error/kind`. A core publication or
-readiness failure is recorded once with `:seon.error/fault :core`; development
-fails loudly at the owning transition, while a production boundary may return a
-bounded fallback. Detailed diagnostics are pulled on demand rather than injected
-as a standing census. The full failure map lives in [[data-model]].
+`:seon.error/kind`. A core publication or readiness failure is recorded once
+as a `:seon.error/fact` carrying its process and flow provenance; development
+fails loudly at the owning transition, while a production boundary may return
+a bounded fallback. Detailed diagnostics are pulled on demand rather than
+injected as a standing census. The full failure map lives in [[data-model]].
 
 ### Dependency-aware tests, one runner per runtime boundary
 
@@ -524,16 +526,12 @@ is the basis at which each cached function call's bytes last changed, with
 near-equal changes clustered by branch. No priority or band attributes exist.
 The `my.*` namespaces supply render functions. See [[ui]] and [[context]].
 
-### Roles are capabilities
+### Context is not callability
 
-A role = the discoverable functions/context plus the guarded operations an agent
-can perform, NEVER a stored `:kind`/`:role` enum. "Orchestrator" sees the
-spawn/terminate/system functions; "worker" does not, while each operation owns
-its enforcement. The `/call` gate covers registered browser callbacks in an
-agent's home namespace; it does not authorize direct REPL/eval calls to core
-lifecycle functions. This is the entity-level case
-of the general rule: an entity's kind is the attributes it carries, never a stored
-discriminator (see [[data-model]]).
+Every agent may call every function in its cluster's program graph. Context
+chooses which functions and facts to render; it never grants execution. The
+guarded effect boundary controls external effects, not function visibility.
+There is no stored role, grant, or allowlist entity.
 
 ### Code as data
 
@@ -580,22 +578,19 @@ cluster.
 
 ### Data model — [[data-model]]
 
-Everything is namespaced datoms in one bitemporal DB; the agent record is the root of
-its context and current-run pointer, and everything else is reachable from it or derived.
-The doc owns every entity/attr/type, the three relationship kinds (datahike ref,
-identity/lookup attr, symbol-as-value late binding), the flat error value + the
-entity-kind-vs-value-enum rule (kind = attribute presence, never a stored
-discriminator), and the domain schemas: `my.kb` (no agent ref → global, one KB all
-agents see), `my.plan` (a TREE via `:my.plan/parent` + derived roll-up, scoped per
-agent by `:my.plan/agent`), and `my.agent` (`:my.agent/purpose`, the per-agent seed
-worked-example). Global-vs-per-agent is decided by the **data's** agent-ref, never by
-the block. Index every ns's valid forms; render `my.*` in full. See [[data-model]].
+Everything is namespaced datoms in one temporal database. The cluster connects
+agents, instructions, configuration, and the program graph; an agent's optional
+current-run ref leads to forms and eval receipts, while messages, captures,
+attempts, errors, and program rows connect through their own refs. The doc owns
+the admitted identity and attribute census, relationship forms, absence-based
+state, and the flat error value. See [[data-model]].
 
 ### Agent runtime — [[agent-runtime]]
 
-Runs are claimable database state. `:seon.agent.run/process` presence IS
-custody (claimed by CAS-on-absence; recovery stamps dangling receipts
-`interrupted-at` and retracts it — no epoch, no lease, no expiry). Each
+Runs are claimable database state. `:seon.cluster.run/process` presence IS
+custody; recovery stamps dangling receipts `interrupted-at`, closes the run,
+and retracts the agent's current-run pointer. There is no epoch, lease, or
+expiry. Each
 agent's own flow
 graph reduces over the frozen form plan.
 Its basis accumulator begins at the plan transaction's `:db-after`; each
@@ -603,23 +598,20 @@ form's transaction report supplies the next basis through its `:db-after`.
 Provider and eval receipts open before dispatch and terminalize through
 `:db.fn/cas`,
 making cluster JVM death recoverable without a process-local attempt buffer.
-Creation still produces an idle agent; messages and due schedules open bounded
-runs. The doc owns claim/run/turn/phase/derived-state mechanics, the one
+Creation produces an idle agent; inbound messages open bounded runs. The doc
+owns claim/run/form/receipt and derived-state mechanics, the one
 `:interrupt-fn`, fact-first initialization, the
 **orchestrator-root** lifecycle
-(`start!` = a core function surfaced to root, writing `:seon.agent/parent` and
-enforcing its own caller/depth rule; roles-as-capabilities; root = the cluster-boot base case;
-UI-root == orchestrator-root), and process replacement recovery. See
+root-agent lifecycle, and process replacement recovery. See
 [[agent-runtime]].
 
 ### UI — [[ui]]
 
 The human UI is **pages**—a **layout** arranging an already resolved tree of
-block HTML renders, each visible block a **surface**; all pages are agent **views**, a tree of
-routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
-(`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
-`/call` is the browser-action endpoint and its gate authorizes registered
-agent-owned home callbacks (it is not lifecycle authorization). The **live
+block HTML renders, each visible block a **surface**. The one code route table
+serves `/`, namespace and agent pages and their debug variants, message
+submission, feeds, `/data`, and static assets. reitit compiles that table and
+provides reverse routing; there are no route datoms. The **live
 channel is ours**: each demanded normalized computation owns one database
 interest. A matching report wakes its render proc, which invokes
 agent-authored renderers through the one SCI door, suppresses equal bytes, and
@@ -641,16 +633,12 @@ prose.
 
 ### Observability — [[observability]]
 
-Every question about agent behavior — what an agent saw at turn N, what changed
-between turns, why it acted — is answered by a **query against the database plus
-the blob archive**. Process logs remain operational evidence rather than turn
-truth. Each turn persists the frozen ordinary database value that makes context
-re-derivable, the assembled prompt
-verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
-`turn-diff` shows what changed between two; a dedicated **forensic agent** runs
-these queries on demand; the `/agents/run` endpoint runs a reproducible task
-through an agent in the cluster for an external harness. See
-[[observability]].
+Questions about what an agent saw and why it acted are answered by runs,
+context captures, provider attempts, forms, eval receipts, messages, and error
+facts. The context capture stores the exact prompt and rendered basis before
+the external call; attempts preserve the remote-call observations; forms and
+receipts preserve the REPL interleave. Process logs remain operational evidence,
+not the durable forensic model. See [[observability]].
 
 ## Documentation boundary
 
@@ -660,17 +648,16 @@ order, dates, measurements, and acceptance evidence.
 
 ## Detail docs
 
-- [[data-model]] — entity shapes, attributes, relationship forms, error values,
-  and the `my.kb`/`my.plan`/`my.agent` schemas.
-- [[agent-runtime]] — claim/run/turn/phase/derived-state, guarded evaluation,
+- [[data-model]] — current entity shapes, attributes, relationship forms, and
+  error values.
+- [[agent-runtime]] — claim/run/form/receipt state, guarded evaluation,
   receipt recovery, creation-as-idle, and orchestrator-root lifecycle.
 - [[ui]] — block/render/canvas/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
   derived-walk block model.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
-- [[observability]] — historical turn reconstruction (database value + prompt blob + reply), `agent-debug/turn` /
-  `turn-diff`, the blob archive, the forensic agent, cluster lifecycle + the
-  `/agents/run` endpoint.
+- [[observability]] — context captures, attempts, eval receipts, error facts,
+  and cluster lifecycle evidence.
 - [[context]] — the dynamic context tree, per-function-call cache,
   last-bytes-changed ordering with branch tie-clustering, namespace-as-location,
   pull-first relevance retrieval, and the UI twin of every block.

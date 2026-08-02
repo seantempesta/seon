@@ -180,38 +180,24 @@ Likewise, transcript clipping is a final guardrail; functions return bounded,
 structured, drillable values and errors before rendering.
 
 Failure diagnostics retain the database-configured eval cap at every display
-site. `:seon.render/full?` and the agent's escape-clipping policy may release
-successful authored source and stdout, while `full?` may release a successful
-citable result; neither flag releases failed source, captured stdout, Malli
+site. A caller may request a larger successful authored-source, stdout, or
+citable-result projection within the owning bound; no display option releases
+failed source, captured stdout, Malli
 diagnostics, read errors, or runtime errors. Large parse failures window the
 source excerpt around the exact reported source location before the transcript
 renderer applies that same cap. Exact raw replies and error evidence remain
 separate database/blob facts, so bounded agent context never weakens forensic
 capture.
 
-## The reply mode is a datom — and it teaches its own grammar
+## The reply grammar is one current instruction
 
-Two orthogonal database facts govern a reply. `:seon.ai/wire-stream?` selects
-the provider transport only — whether bytes arrive as a stream — and never
-changes what is evaluated. `:seon.ai/reply-evaluation` selects `:batch` or
-`:first-form` as the evaluation semantics; all four combinations are legal,
-and a named launch variant may copy either fact onto an agent, whose value
-wins over the cluster default. `:batch` reads the reply to natural completion,
-preserves the raw bytes, and parses the complete program once. Ordinary forms
-retain source order, while explicit generated namespace sections run in
-derived requirement order with recognized schemas before the remaining forms
-in their namespace. Every attempted form records its real value or error with
-its original source position. It never
-regex-rewrites model output, invents a result for an unattempted form, or treats
-a model-authored claim as execution evidence. `:first-form` ends the turn after
-the first complete top-level form and counts attempted forms as work; it is an
-explicit per-agent choice for models that work better under immediate
-evaluation, not a consequence of the transport streaming.
-
-The transcript masthead derives its grammar instruction from the same
-evaluation fact, so only the applicable instruction is present. Turn facts
-retain the forms and token usage needed to compare modes without changing
-prompt truth.
+The cluster instruction facts teach the grammar implemented by
+`seon.cluster.reply`: a model reply is read to natural completion, split into
+ordered form sources, frozen on the run, and reduced in source order. Each
+attempted form records its actual result or error. The reader never
+regex-rewrites model output, invents a result for an unattempted form, or
+treats a model-authored claim as execution evidence. Provider byte streaming
+is transport behavior and does not select a second evaluation mode.
 
 ## A render fn supplies twin projections
 
@@ -224,47 +210,15 @@ a **renderer**, and the keys present decide where it goes:
 - **both keys → twins**: one value, two projections — the agent's context
   and the human's screen showing the same thing.
 
-The **canvas** is a distinct, focal surface. Its shared **agent-derived focus**
-shows the **last-updated surface** by default — a pure function of the db
-(`seon.render.surface/last-updated-surface`): among the agent's own
-authored surface fns (its `:seon.fn` rows whose tx provenance names the agent
-through the REPL process and whose output schema declares the hiccup twin), the
-one most recently *touched*—redefined, or an agent-user/REPL transaction that
-touches a scoped input captured by the surface's **current** runtime-observed
-database reads. Initial/cold
-render captures actual `seon.db` query/pull/entity calls (including current
-helpers/conditional branches), then runs a bounded indexed history lookup for
-the newest matching user+entity/attr datom. It does not reconstruct every past
-conditional dependency or evaluate every historical before/after result. A
-broad/unknown observation gets definition recency only; the agent can make its
-read selective or pin the canvas. No literal keyword read-set is stored. So the
-human's focus follows what the current surface most plausibly received from the
-agent's recent work
-with zero ceremony: author a plan surface, write plan data, and that surface
-is the canvas. Resolution is one ordered chain: an explicit agent-entity pin
-(`:seon.render.canvas/content`), then the configured `:canvas` context-block
-default, then the derived last-updated surface, then the core welcome. The
-explicit pin is the deliberate override; retracting it resumes the configured
-or derived default. The renderer returns the exact resolved value and
-provenance with its projections, so the canvas context block explains the same
-render instead of performing a second lookup.
-(Unknown/dynamic reads are conservatively compared for live invalidation, but do
-not claim precise historical focus.) A browser session may temporarily select a
-different page-focused surface; that tab-local database fact neither changes
-the agent-derived focus nor propagates into root fleet cards.
+### [TARGET] Generalized canvas focus
 
-The canvas context block is the bounded AI projection of that same resolved
-canvas, not a second resolution or render. Its AI twin and the agent-authored
-renderer source are clipped independently by
-`:seon.config.render/render-fn-token-cap`, with a token-denominated marker at
-either cut. A short operational footer names the existing `my.canvas` controls.
-This preserves enough local source to repair a broken renderer without letting
-one verbose canvas duplicate an unbounded surface or program into every later
-prompt.
-
-The process qualifier prevents root-owned boot/config facts from masquerading
-as root-agent authorship. `:seon.db/user` answers who; `:seon.db/process`
-answers which durable ingress. Deliberate canvas recency needs both facts.
+The render-contract ruling reserves one focal canvas selected by an
+agent-owned durable ref to a renderable value. The same value supplies its AI
+and HTML projections; retracting the ref returns focus to a derived default.
+The canvas schema and action/control boundary assign their attribute and
+function identities before any transaction, route, or agent call names them.
+No context-block manifest, captured runtime read-set, or effectful in-eval UI
+helper participates in that design.
 
 These are the block's two renders (`:seon.render/ai` /
 `:seon.render/html`). Its explicit args contain the db value and any other
@@ -325,75 +279,27 @@ other agent facts are reached from their ordinary refs in the same tree.
 Rule: **derive the derivable; an override is data the same walk reads.** One
 walk produces one tree of render units—never two rendering systems.
 
-## Explicit dependencies — injected at the eval boundary
+## Explicit render inputs
 
-A tool or render fn's dependencies (the db, the calling agent, the current
-time) are **declared in its request schema and injected once at the eval
-boundary** — never read from an ambient dynamic var deep in the body. The
-contract:
+Render and context functions receive ordinary namespaced request data. The
+walk supplies the immutable `:seon.db/db`, the viewing
+`:seon.cluster.agent/id`, admission caps, distance, live-process evidence when
+needed, and the pulled entity. A renderer declares the request it consumes and
+never reaches through an ambient connection or a deleted injectable registry.
 
-- A map-in fn declares an injectable as an **optional** request key —
-  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (the branch-local
-  basis-transaction display aid; the database value carries the store ID,
-  branch, commit ID, and basis transaction), and
-  `:seon.web.session/id` (the browser tab attached to the human message this
-  turn is answering),
-  and whatever else the registry grows to hold. It is `{:optional true}` in the
-  request shape, and the registry decides whether an explicit caller value is
-  allowed; the wrapper guarantees it *present in the body*.
-- On an agent call, the eval boundary inspects the fn's request schema and the
-  one injectable registry. Each registry entry declares its caller policy.
-  Ordinary inspectable dependencies may accept an explicit value; a
-  context-only dependency may not. For every declared key the caller omitted,
-  the boundary fills the current value from the eval context.
-- The injectable **registry** is one explicit map of
-  `injectable-key → {resolver, caller-policy}`: `:seon.db/db` → the turn's frozen
-  db, `:seon.agent/id` → whose turn is running, and
-  `:seon.web.session/id` → the session ref reached through
-  current turn → `:seon.agent.turn/cause-message` → web session. The session
-  entry is context-only: an
-  agent-supplied value is rejected as a typed error rather than accepted or
-  silently replaced. Trusted unit code may call the pure implementation with a
-  validated explicit request; that is not an agent-eval override or a second
-  injection wrapper. Adding a dependency means adding one registry entry and
-  having fns declare the key. If a declared injectable has no current value—for
-  example a scheduled root turn has no human session—the boundary returns a
-  typed error envelope and never invokes the function with nil or guesses
-  another tab.
-- The injectable contract has **one named request shape**:
-  `:seon.render/section-request` (registered in `seon.render`) — an OPEN map
-  naming exactly the registry's keys, each `{:optional true}` and referencing
-  its registered schema. Every block/section/converter fn the render engine
-  calls declares `[:cat :seon.render/section-request]`, never a bare
-  `[:cat :map]` — the contract is greppable, and a wrong-shaped injectable
-  (e.g. a string `:seon.render/at`) rejects at the instrumented boundary
-  naming the schema. Open on purpose: the engine composes extra per-call
-  keys (`:seon.render/node`, `:seon.agent/entity`, …); a semantically
-  richer request (e.g. `:seon.agent.debug/request`) stays its own schema.
-
-This rides the one program-publication instrumentation layer. Boot reconstructs
-wrappers once from committed program facts; a definition or schema transition
-then instruments only changed definitions and schema dependents. The structural
-exceptions are explicit in that transition. A candidate that cannot be
-validated and instrumented does not publish or pass readiness; it records one
-bounded core fault. Context may show that current fault concisely, while the
-detailed coverage diagnosis is pulled on demand through [[observability]].
-Coverage diagnostics are never standing context blocks. Injection happens before input
-validation, so the filled map satisfies the declared request shape and remains
-reproducible from the captured database value.
-
-The **scope-by-signature** rule falls out: a fn that declares `:seon.agent/id`
-reads/writes **per-agent** data (it stamps `:my.plan/agent me` and filters by
-it); a fn that does not is **global** (`my.kb`). You know where data goes by
-reading the arglist — not from an invisible binding.
+The database value and agent identity describe one render request; they are not
+execution grants. A function's schema remains its complete contract, and
+instrumentation validates it at the SCI or host boundary that invokes it.
+Per-agent domain ownership is expressed by a real ref on the data, not inferred
+from the presence of an injected argument.
 
 ## Renderer discovery — the walk queries the program graph
 
 The walk first discovers schema'd values. For each value, it queries the
 program graph for a same-schema renderer in the governing namespace and runs
-the winning function through the same injecting boundary. Renderer functions
-are map-in functions declaring `:seon.db/db`, `:seon.agent/id`, and their
-domain arguments; their presence alone never inserts a context unit. This keeps
+the winning function through the same render boundary. Renderer functions
+consume a unit carrying `:seon.db/db`, `:seon.cluster.agent/id`, and their
+domain values; their presence alone never inserts a context unit. This keeps
 membership in the entity tree while allowing the current namespace to override
 how discovered data renders with zero registry ceremony.
 
@@ -407,18 +313,16 @@ identity, never a grant: root can call exactly what every other agent can
 call (ruling #20), and the cards only decide what root SEES first. Root-authored
 definitions never land in framework code. The resolved vector is persisted
 with root's home namespace; there is no runtime role registry or renderer
-allowlist. When root moves into an
-orchestration, database, or UI-session namespace, that
-namespace becomes current and its source plus applicable same-schema renderers
+allowlist. When root moves into an orchestration, database, or UI namespace,
+that namespace becomes current and its source plus applicable same-schema renderers
 enter context through the same walk-and-query rule above. The root canvas's bounded AI twin
 provides current fleet facts through the ordinary canvas block: every agent is
 listed compactly, while running, erroring, and recently active agents receive
 bounded recent-message, failed-eval, and canvas-AI detail. Root itself remains a
 summary-only agent row because its canvas is the fleet view; recursively
 materializing its own surface or canvas-AI detail is forbidden. The fleet is not
-copied into a second context block. The originating human session's normalized
-route is also derived into that root view, so root knows what the user is seeing.
-Derived root-only warnings still render only when their queries return facts.
+copied into a second context block. Derived root-only warnings still render only
+when their queries return facts.
 
 This is the quality bar for restoring historical root context: keep a statement
 only when it names root's irreducible role or an actual derived state; move
@@ -495,30 +399,15 @@ the compounding asset: as the agent persists schemas, fns, and tests, its own
 code becomes the majority of its context — self-reinforcing, cheap, and, being
 the least recently changed, naturally cached at the front.
 
-## Multi-agent sections — subagents + orphaned-agents
+## Multi-agent context
 
-Two derived sections make the spawn tree visible without any registry or
-notification state (both vanish when their query is empty). Their renderer and
-tests exist, but the general block remains dormant until the solo-agent proof
-closes; multi-agent visibility must not obscure the solo navigation signal:
-
-- **`:subagents`** (general agent-context, volatile tail near the transcript) —
-  the **direct** children the rendering agent spawned (`:seon.agent/parent` =
-  me; NOT the whole subtree). One compact line each: id · derived state · purpose
-  · and, running → `turn i/limit` + last-beat age; idle with a completed latest
-  run → the run's `:seon.agent.run/result` (+ a ref pointer); closed abnormally →
-  the `closed-reason` (a parent MUST see a child that DIED, not just one that
-  succeeded). A breaker-tripped child shows it. This is the parent's monitoring
-  surface: completion is a **fact in the DB**, so a parent that was mid-turn or
-  restarted still sees every child result — no acknowledgement, nothing to clear.
-  After that proof closes, childless agents render empty → it costs them zero;
-  the compact running-progress view occupies the root telemetry render unit while
-  persisted outcomes remain in the database-derived body.
-- **`:orphaned-agents`** (root-only, config-injected via
-  `:seon.config/root-context` like `:core-faults`) — live agents whose
-  `:seon.agent/parent` is **terminated**. One line each (id · state · purpose ·
-  parent id). No action machinery — root (or the human) decides per case with the
-  existing functions (no cascade-terminate, no reparenting: observe first).
+Agents relate through durable `:seon.cluster.message` rows, shared namespace
+ownership, and ordinary refs such as a message's optional `/about` fact. There
+is no persisted parent tree or orphan state. Root's namespace page derives the
+agent population by `:seon.cluster.agent/id`; an agent page derives received and
+sent messages, runs, eval receipts, and routed errors by their current refs.
+Empty queries render nothing, so visibility needs no notification or
+acknowledgement state.
 
 ## Inspectability — the human twin of every position
 
@@ -526,62 +415,34 @@ Every agent has a read-only debug view that begins at that agent's entity and
 walks the same tree through the one merged structural floor. It exposes every
 reachable schema'd value—including system apparatus hidden from the curated
 page—preserves identities and refs for drill navigation, and never transacts a
-display choice. The view also shows each unit's AI/HTML projections, token
-counts, cache dependencies/revisions, code revision, digest, last-bytes-changed
-basis, and error routing. Through [[observability]], the same surface reaches
-the exact historical context of any turn (`agent-debug/turn`, `turn-diff`, the
-prompt at its resolved commit, and the prompt blob as byte ground truth).
+display choice. The view also shows each unit's AI/HTML projections and their
+source facts. Through [[observability]], the same surface reaches a run's exact
+`:seon.context.capture/prompt`, database basis transaction, ordered
+contributions, AI attempts, forms, eval receipts, and errors.
 
 ## Configuration
 
-Every effective dial is database data (`:seon.config/*`): namespace projection
-policy, transcript age schedule + decay, render caps, invocation-class
-`time-limit` defaults, the predicted-relevance token cap, and per-agent
-overrides in agent scope. A manifest is
-an optional desired-state input explicitly selected for one startup/apply
-operation; no selection preserves DB facts and never falls back to
-`config/system.edn`. Environment overrides are captured only while compiling a
-selected input and never become a hidden runtime dependency.
+Fresh configuration is one compiled and reconciled database row per cluster.
+`config/default.edn` supplies one shipped decision for every registered dial;
+an explicitly selected sparse EDN overlay may replace those decisions for one
+start or apply operation. Omitted overlay keys inherit defaults, unknown keys
+are refused, and the caller may supply a typed environment map while compiling
+that input. Runtime consumers never read ambient environment variables or a
+configuration file.
 
-**Config-through-DB (the whole surface, not one dial).** A selected manifest is
-a transition input, not a runtime dependency. At a selected startup/apply,
-`seon.config/resolve-config-singleton` resolves every knob (environment overrides
-manifest, which overrides defaults), and the exact population reconciler
-restores the declared config singleton/routes/root-context/skill-import subset. Omitted managed attributes and
-stale exclusive rows retract; outside facts remain untouched; equal state emits
-no transaction. A config-free boot skips this transition. The write is
-`{user root, process config}`. After database acquisition runtime startup
-acquires the singleton once, decodes its EDN slots, and installs that ordinary
-map in the existing async transaction context alongside the current database
-value and provenance. Descendant work inherits it without another database
-read or configuration argument. Pure accessors such as
-`config/eval-render-cap`, `config/on-core-error`, `config/web-policy`, and
-`config/namespaces-policy` read the acquired map; a central operation boundary
-may merge an explicit request override over it. No accessor owns an atom,
-additional async context, injected reader, manifest fallback, or second
-projection cache. Explicitly selected manifest data or resolved code defaults
-are valid only before database initialization; afterward missing required
-config is a typed readiness error.
+`seon.config/apply!` is the one exact reconciliation mechanism and
+`seon.config/effective` reads the ordinary effective map from an immutable
+database value. Acquisition belongs to each consumer: process structures read
+at boot, loop handles capture their dials when an agent graph arms, AI settings
+resolve once per turn including the agent overlay, and render-request dials
+read from that request's database value. Applying facts therefore affects a
+consumer at its documented acquisition boundary; it does not silently rebuild
+a graph, executor, or web server.
 
-Database read resource fields are safety ceilings rather than result-shaping
-controls. Datahike `max-work` counts charged execution steps, `max-results`
-counts retained result nodes (including nested pull values), and
-`max-result-weight` counts shallow scalar/container weight rather than bytes.
-Normal query and pull work inherits generous database configuration values;
-an individual operation may explicitly request a smaller ceiling. Pagination,
-top-level row limits, and application semantics use their own query shape or
-API fields and never overload these resource counters.
-Collection knobs
-(`:seon.config/always`, `:seon.config.repair/classes`,
-`:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the
-`home-requires` precedent) — one cardinality-one datom that upsert replaces.
-
-Two payoffs this unlocks: a dial is now **history-visible** (a `cluster fork`
-at the resolved commit before a dial change renders with the old value—config lives in
-history) and **live-tunable** (a `db/transact` of the singleton changes the
-next prompt with no file edit). `:seon.ai/reply-evaluation` and the
-transcript's tier/decay datoms are the precedents this generalizes to the
-whole config surface.
+Routes, context membership, instruction imports, and skills are not a config
+manifest. Routes are the canonical Reitit table; context is the visible walk;
+instructions are ordinary cluster or agent refs. Configuration contains only
+registered decision attributes from `resources/seon/schema/config.edn`.
 
 **Instructions are ordinary cluster facts.** The cluster entity's
 `:seon.cluster/instructions` ref set reaches named
@@ -595,11 +456,6 @@ instruction versioning, complete block-tree manifest, or static prepend path.
 The manifest-owned config singleton remains a separate entity reached by
 `:seon.cluster/config`.
 
-The skills manifest section is an import input, never a default loadout. Apply
-freezes and validates the selected files, stores their canonical source facts,
-and then forgets the path. A later config-free boot reads those facts from the
-database and adds no agent instruction ref on its own.
-
 Prompt acquisition resolves the system text and the agent's selected context
 inside one compiled acquisition operation over one immutable database value. That one
 ordinary result flows unchanged through turn capture, token accounting, every
@@ -610,9 +466,8 @@ re-resolves live config after the prompt database value has been chosen.
 
 - [[ui]] — the block, its two renders, the surface catalog, the derived
   entity walk and its resolution chain, and the live channel.
-- [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
-  twin an agent sees and the human watches), the `my.*` schemas.
-- [[observability]] — turn record, replay functions, the blob archive.
+- [[data-model]] — admitted context, run, receipt, and program-graph facts.
+- [[observability]] — context captures, attempts, receipts, errors, and blobs.
 - [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
 - [[think-in-clojure]] — a fn's specced in/out is the query substrate for
   both rendering and running.

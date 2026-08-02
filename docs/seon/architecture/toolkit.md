@@ -28,8 +28,10 @@ protected implementation or invent a second tool protocol.
 - Ordinary data-processing functions may use fully specified named positional
   arguments.
 - Optional values are absent, never stored as nil.
-- An agent or user failure returns an error value. Persisted forensic blame is
-  `:seon.error/fault :agent` or `:core`; no second `kind` taxonomy decides blame.
+- An agent or user failure returns an error value. Core failures become
+  `:seon.error/fact` entities with process, proc, operation, connection, and
+  optional run or agent provenance; no stored blame discriminator restates
+  what those facts already establish.
 - Generated identities come from `seon.db.id/allocate!`. Callers do not invent
   timestamp IDs; human-visible agent IDs are readable word IDs.
 - `seon.db` is the sole database API. Reads use the injected frozen database
@@ -37,8 +39,6 @@ protected implementation or invent a second tool protocol.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
-- `:seon.capability/effect` is optional replay documentation. An absent
-  declaration is conservatively `:external` and is never automatically rerun.
 - Every public function is agent-callable by definition. Function menus and
   program export derive the public, non-private function surface directly;
   complete schemas determine which functions can render compact contracts.
@@ -66,7 +66,7 @@ a context-economy decision; it never gates execution.
 | Namespace | Owner and purpose |
 |---|---|
 | `my.blob` | SHA-256-addressed large-content storage and bounded reads |
-| `my.canvas` | the one agent-facing focal canvas and interaction API |
+| `my.canvas` | **[TARGET]** generalized focal-canvas and interaction API |
 | `my.data` | small data transformation and presentation composition |
 | `my.fs` | guarded filesystem reads and writes over approved paths |
 | `my.kb` | global knowledge-domain schemas, database examples, and recall composition |
@@ -132,16 +132,17 @@ The four effect classes describe replay behavior at the entry boundary:
   an explicit immutable database value.
 - `:read` observes mutable external state without changing it and is safe to
   run again without a receipt.
-- `:idempotent` mutates through a durable receipt. `effect/request!` assigns
-  `:seon.effect/request-id` once; explicitly reusing that identity addresses
-  the same recorded request.
+- `:idempotent` mutates through a durable receipt. The effect owner assigns
+  one request identity; explicitly reusing it addresses the same recorded
+  request.
 - `:external` mutates without a durable receipt, so recovery never assumes that
   replay is safe.
 
 The effect request identity is the only request identity across admission,
 leaf execution, transport, receipt, and result; families do not mint another
-operation ID. A successful replay exposes `:seon.effect/replayed? true` in the
-family result.
+operation ID. The exact durable request and replay schemas remain target work
+owned by the effect boundary; architecture does not invent attribute names
+before that schema is admitted.
 
 ### Database and program graph
 
@@ -187,13 +188,13 @@ effect metadata per entry function. A package host therefore installs a leaf
 through the same capability seam; it does not introduce a second registry,
 envelope, or routing protocol.
 
-### Lifecycle, messages, schedules, and sessions
+### Agents, runs, and messages
 
-Agent birth, run control, termination, cross-agent messaging, scheduled work, and
-browser-session navigation stay in the protected namespaces that own their
-database facts. Roles are capability sets rather than stored entity kinds. Root
-can discover the elevated functions it receives; each operation still enforces
-its caller and data invariants.
+Agent creation and run transitions stay in the protected cluster namespaces
+that own their facts. Agent-facing message and run functions return pure values
+that the loop interprets; they do not transact themselves. Every agent may call
+every function in the cluster program graph, while the persistence and effect
+boundaries enforce their own data contracts.
 
 ### Tests
 
@@ -257,13 +258,13 @@ without bodies. Both selection operations preserve every other block dial and
 return errors for unknown or stale program rows. No operation copies the
 program graph into a second registry or renderer.
 
-### `my.canvas` and `my.ui`
+### [TARGET] `my.canvas` and generalized `my.ui` controls
 
-`my.canvas` is the permanent agent-facing API for the focal shared value.
-`my.ui` provides reusable Hiccup/control composition. Both produce ordinary
-render data consumed by the one guarded render-unit engine in [[ui]]. Buttons,
-inputs, selects, toggles, and forms call registered functions through the one
-browser capability gate; neither namespace touches SSE connections.
+`my.canvas` selects the focal shared value and generalized `my.ui` controls
+produce ordinary render data. Actions are pure values interpreted by the run
+loop or genuine capability requests; no effectful eval helper mutates page
+state. Exact constructors and the action route are named only when their
+schemas and route contract are settled.
 
 ### `my.skills`
 
@@ -308,13 +309,10 @@ Capability failures use one flat public shape: required
 identity fields alongside those keys, but does not nest the error under
 `:seon/error` or invent a parallel envelope.
 
-`:seon.error/fault` is the persisted forensic blame axis:
-
-- `:agent` means the agent-authored call, data, or function owns the correction.
-- `:core` means the runtime, schema publication, or protected boundary owns it.
-
-Optional diagnostic categories may refine a record, but do not replace this
-axis. Core publication/readiness failures follow the configured escalation at
+The durable error fact records the producing process and may record the flow
+proc, operation, connection, run, agent, and instrumented function. Those
+connections answer who owns the correction without a parallel blame axis.
+Core publication and readiness failures follow the configured escalation at
 their transition; ordinary agent mistakes remain values and do not wedge the
 cluster JVM.
 

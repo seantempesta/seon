@@ -43,20 +43,14 @@ declare what they can produce and the boundary picks. This is why kind
 is a request argument and never a stored fact: a boundary is a place,
 not a property of data.
 
-## Interactions are database transactions
+## Human input becomes a message
 
-An interactive control posts the authored handler symbol and ordinary
-arguments. The route validates the handler's exact committed schema and source
-identity, transacts one pending interaction/run fact, and acknowledges
-immediately. The HTTP response is never an execution-result channel.
-
-The agent's own flow graph acquires and executes the interaction. Its
-result or flat error becomes committed interaction facts. A normal HTML block
-queries the latest terminal outcome for the page's agent and returns no render
-when no such fact exists. The existing database interest, equality
-suppression, `mult`, per-tab `(sliding-buffer 1)` tap, and Datastar morph chain
-therefore own every visible outcome; reconnecting derives the same surface
-from database truth.
+The only current interactive mutation is the agent message form. Its POST route
+validates same-origin input, target identity, and bounded content, then commits
+one `:seon.cluster.message` row. The agent's own graph wakes from the `/to`
+datom and derives its run from database truth. The HTTP response is not an
+execution-result channel; the page feed renders the later message, run, and
+eval facts.
 
 ## The projection contract — one router, an open kind set
 
@@ -157,12 +151,10 @@ place on its stable identity.
 There is one chain and one floor. A layout never redirects resolution, and no
 stored membership, band, or priority attribute exists.
 
-Global-vs-per-agent is decided by the DATA the render fn queries, never by the
-block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
-`:my.plan/*` row carries `:my.plan/agent` (each agent sees its own). The render
-fn scopes by what it reads. (See [[data-model]] for the domain schemas +
-data-ref scoping; [[agent-runtime]] for the fact-first atomic birth transaction
-and post-commit safe declaration load.)
+Global-vs-per-agent is decided by the data's connections, never by the block.
+The current agent family is scoped by `:seon.cluster.agent/id`; messages, runs,
+receipts, and errors point to their owning or receiving agents through refs.
+The render function scopes by the facts it queries. See [[data-model]].
 
 ## The render engine
 
@@ -334,260 +326,71 @@ chain, and hands the resulting tree to its layout. The `/data` browser is the
 floor exposed directly: paged `get-in` navigation into any nested value uses
 the same bounded expansion and cursor discipline.
 
-## Pages — agent view, root view, debug view, app
+## Pages — root, namespace, agent, debug, and data
 
-Every **page** is a layout arranging the already resolved HTML render tree;
-each visible block is a surface. Pages may have different layouts, but all use one rendering,
-render-unit, routing, and live-morph mechanism in one route tree:
+Every page is a projection over one database value and the same block/walk
+machinery:
 
-- **agent view** (`/agent/{id}`) — one agent: a large primary panel plus a right
-  rail of curated HTML renders. The rail uses the same
-  last-bytes-changed order and branch tie-clustering as context. Units that
-  would reach the generic HTML floor are hidden until this tab enables **show
-  everything**; AI-only projections remain absent from the curated rail.
-  Selecting a rail card previews that render in the primary panel; its explicit
-  focus control keeps it selected across subsequent updates. The canvas is the
-  agent's focal surface projection, not a renderer-resolution redirect.
+- `/` renders root's namespace page and the cluster overview.
+- `/ns/{namespace}` resolves the namespace, its owner agent through
+  `:seon.cluster.agent/namespace`, and the namespace walk.
+- `/ns/{namespace}/debug` shows that same walk with exact AI context and the
+  complete walked value side by side.
+- `/agent/{id}` resolves one `:seon.cluster.agent/id` and renders its agent page.
+- `/agent/{id}/debug` exposes the corresponding debug walk.
+- `/data` renders the structural database floor for inspection.
 
-  Two focus values are deliberately distinct. **Agent-derived focus** is shared
-  database meaning: the agent's `:seon.render.canvas/content` pin when present,
-  otherwise its **last agent-updated surface**, otherwise
-  `seon.render.canvas/welcome`. **Page focus** is this tab's valid explicit
-  surface pin when present, otherwise agent-derived focus. An unpinned rail
-  selection is transient and the next deliberate surface update replaces it.
-  The pin is scoped to the tab's database-backed web-session location; it never
-  changes another tab or becomes an agent-global selected-surface projection.
+Namespace pages are generic: adding one is adding the route-table line, not a
+new page-specific renderer. Agent pages query received and sent messages, runs,
+eval receipts, and routed errors using the refs named in [[data-model]]. Root is
+the ordinary agent whose identity is `"root"`; it has a specialized layout but
+no second route, parent, role, or render model.
 
-  Renderer recency is the latest transaction by this agent through the REPL,
-  found by a bounded indexed history lookup over scoped inputs captured by the
-  renderer's current runtime-observed database reads; canvas writes share that
-  same database value. Content recency orders the rail, while focus recency treats
-  either direction of the human-agent conversation as a transcript update and a
-  canvas/domain write as a canvas update; eval bookkeeping alone never steals
-  focus.
-  `seon.render.surface/last-updated-surface` is pure over the db value plus the
-  runtime-derived read plan (see [[context]]). Pinning is the exact durable
-  override; retracting the pin falls back to recency. The page-focused surface
-  is skipped as its own supporting card, so it is not duplicated. The welcome
-  surface leads with the agent's latest reply as markdown and falls back to the
-  greeting only before the agent has spoken.
+Page-local selection, scroll, disclosure, and input state remain in the browser.
+No web-session, canvas pin, focus, route, or selected-agent entity is stored.
+The debug view preserves entity identities and refs for drill navigation but
+does not transact display choices.
 
-  Focus recency is intentionally a current-renderer heuristic, not historical
-  dependency replay: it does not reconstruct old conditional branches, and a
-  broad/unknown read earns definition recency only. Session selection and agent
-  pinning are separate overrides at separate scopes. Live invalidation remains
-  exact before/after result comparison and is not weakened by this focus policy.
+## The shell and message action
 
-  Both provenance dimensions are load-bearing for agent-derived focus. Root boot
-  and config transactions legitimately name root as their user, but are system
-  maintenance rather than updates authored by the root agent. Requiring the
-  REPL process keeps those facts available for provenance without letting them
-  select or reorder the root canvas.
-- **the root system view** (`/`) — root remains the supervising
-  `:seon.agent/id "root"`, but `/` uses a dedicated system layout over the SAME
-  blocks, render units, route resolution, database projections, and Datastar morph
-  feed as every other page. It is not wrapped in the ordinary-agent heading,
-  context rail, or canvas pin. Its primary surface is an attractive, calm grid
-  of ordinary-agent work sessions; root itself is not rendered as a recursive
-  card. System-scoped blocks query across all agents. A cheap card shell always
-  shows identity, derived state, and the agent-derived focus label. Visible
-  cards materialize that surface's compact HTML face through
-  the same `seon.render.surface` catalog/focus/materializer used by the agent's
-  own page;
-  its working data uses colocated `:seon.render.surface/*` keys. Expanded details
-  lazily show up to five recent messages and failed evals. Each card overlays a
-  concise derived work description: an active plan's goal/title and current
-  active-or-ready step first, explicit purpose second, then a bounded recent
-  conversation fallback. This is a projection of existing facts, never a stored
-  display summary. These are independent view units, so one agent update does
-  not rebuild the fleet. Dive
-  into one via reverse routing (step back to see all, dive into one). Its human
-  input addresses root, whose
-  deliberately small role context is to understand the fleet, start/select an
-  ordinary agent, delegate, and route the originating browser tab there. Root's
-  operational detail comes from its orchestration/navigation namespace cards
-  and current-namespace source, not a long root instruction block. It shares
-  block, render-unit, route-resolution, and feed machinery rather than creating
-  a second reactive or routing system. It grounds the render and
-  route tree: root system view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
-  lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
-  agent whose supervising view is `/`.) Its layout differs from an ordinary
-  agent page while its rendering and live-update mechanisms remain identical. A
-  fresh database also contains one ordinary agent; initial navigation opens
-  that ordinary agent while `/` remains available as mission control.
+The shared shell links root and data inspection, includes the page content,
+opens the page's SSE feed, and adds the agent message form only when the page
+has an agent identity. `POST /agent/{id}/message` is the one browser mutation
+route. It applies same-origin middleware, validates the target agent and bounded
+content, and transacts one ordinary `:seon.cluster.message` row. No generic
+callback route or function descriptor crosses the browser boundary.
 
-  `system-view`'s AI twin always names every agent and its status/focused
-  surface. Within one explicit block budget it adds non-root canvas-AI,
-  five-message, and recent-failure detail in the order running → erroring →
-  recent. A cap never
-  silently drops agents from the list; it marks which detail was omitted. The same twin
-  includes the normalized location from the root message's originating browser
-  session, so root knows what that human is currently seeing.
+## Routing is one code table
 
-  Host telemetry is a separate optional system-status surface, not prose added
-  to every turn. It consumes the operator's one reusable process-status
-  projection and samples process-group liveness, CPU, RSS, uptime, and
-  feed pressure on demand. It is one independently refreshed unit on the normal
-  feed, persists no rolling projection, and contributes to root's AI context
-  only when anomalous.
-- **debug view** (`/agent/{id}/debug`) — a read-only walk beginning at that
-  agent's entity through the one merged structural floor. It is always
-  available alongside the curated page, drillable by preserved refs and
-  `get-in` paths, and shows schema'd system apparatus as well as domain data.
-  The view exposes AI/HTML projections, total and per-unit token estimates,
-  dependency commit IDs, conservative/code revisions, digest,
-  last-bytes-changed order, agent state, and turn/error-routing diagnostics.
-  It ignores the curated page's floor-visibility checkbox and never transacts a
-  display choice. Its page GET remains an empty shell and uses the same
-  Datastar subscription graph as every other live page; with no open page it
-  owns no database interest or render work.
-- **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
-  is an agent layout symbol executed by the cluster JVM with the one
-  `:interrupt-fn`.
+`seon.render.route/routes` is the one route authority, compiled by reitit at
+namespace load. The current entries are:
 
-## The persistent header — one shared render unit
+| Route | Method | Handler role |
+|---|---|---|
+| `/` | GET | root namespace page |
+| `/ns/{namespace}` | GET | namespace page |
+| `/ns/{namespace}/debug` | GET | namespace debug page |
+| `/agent/{id}` | GET | agent page |
+| `/agent/{id}/debug` | GET | agent debug page |
+| `/agent/{id}/message` | POST | bounded inbound message |
+| `/feed/{id}` | GET | page SSE feed |
+| `/data` | GET | database inspection |
+| `/css/{*path}` and `/js/{*path}` | GET | static assets |
 
-Every page carries a fixed-top **status bar**, `seon.ui.header/system-header`
-(NEVER throws — degrades to a brand-only bar).
-Left→right: the brand (`seon.web.brand`, links `/`); agents-by-state dots+counts
-(reusing `seon.render.system/fleet-summary` — one fleet counter, not
-re-derived); datom count (links `/data`) + `SEON_EMBED` on/off; and a
-`+ new agent` button + home/data links + a health dot. It is one shared stable
-  render unit: a relevant database dependency change renders it once and
-  fans the same complete element to every subscribed page. It does not recompute
-  inside every whole view and it uses a cheap index count rather than reconstructing
-  every database entity. The `+ new agent` button POSTs the `/agents` creation endpoint
-  with an empty purpose and switches to the new `/agent/{id}`. The same endpoint
-  accepts an optional purpose from a root-fleet form; there is no separate
-  creation or agents page.
+Named reverse routing uses the same compiled router. Reitit's conflict checks
+run before the HTTP service binds. The table has no database mirror or dynamic
+route population.
 
-The persistent header has no rolling clock-driven rate. Usage totals and rates
-over an operator-selected interval are derived on demand from timestamped turn/
-log facts; merely passing time never forces a page morph.
+An unknown route produces the web owner's not-found response. Unknown agent or
+namespace identities are resolved against the current database value and fail
+as explicit HTTP responses rather than creating route state.
 
-## Graceful default routes (#28)
+### Browser-local state
 
-No request dead-ends on a raw 404. The reitit no-match default-handler 302s to
-`/` (root's dashboard); a well-formed but UNKNOWN `/agent/{id}` (stale bookmark,
-reset database, typo) also 302s home. `/agent/root` canonicalizes to `/` before
-render, so root never has two live page/feed identities. There is no GET
-`/agents` view or `/agents/feed`; a GET to the creation collection follows the
-same no-match redirect to `/`.
-
-## Routing is data — reitit + the capability gate
-
-The HTTP router is **reitit** (vendored `reference-code/reitit`, `.cljc`,
-loaded by the cluster JVM) consuming `:seon.route/*` datoms. A route datom
-carries its pattern,
-method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
-route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
-symbol** — the same render machinery as a block's html render, not a separate
-mechanism. `db->routes` projects the datoms into reitit's route vector.
-http-kit supplies ordinary Ring request and response data. The router remains a pure derived value of the route
-datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
-`case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
-registered per [[data-model]].)
-
-- **Seeded core routes:** `/` owns one dedicated root shell and one feed,
-  `POST /agents` creates an agent, and `/agent/{id}` owns the ordinary agent
-  shell and feed. A page shell and its long-lived SSE stream are distinct GET
-  routes. The browser-action endpoint is
-  `/agent/{id}/call` (POST); `POST /agents` is the sole agent-birth HTTP endpoint
-  and shares the same database route projection.
-  Agents add `/agent/{id}/app/{x}` rows. Application functions may live in any
-  allowed namespace; route ownership and source-transaction authorship are
-  independent from namespace organization.
-- **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
-  child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
-  routing; build-time path/name conflict detection catches overlaps the
-  hand-rolled `cond` silently shadowed.
-- **`/agent/{id}/call` is the browser-action endpoint, and the callback gate
-  (`seon.web.reactive.call`) remains the authorization boundary.** reitit dispatches the URL to that one
-  per-agent endpoint; the fn rides as a route-data **descriptor** (the `?fn=` param),
-  NOT its own route — **namespaces are not a routing level**. The gate authorizes
-  the fn by proving at one immutable database value that the route agent is
-  live and that the registered function's source transaction was authored by
-  an agent through the REPL process and that the function is not private.
-  Public agent-authored functions are shared
-  cluster capabilities: the caller and original author may differ, and the
-  function may live in any allowed application namespace;
-  refusal precedes any invoke; args stay data; the call runs in the cluster JVM
-  with the one `:interrupt-fn` → it transacts → the page re-derives and the
-  stream morphs.
-  reitit replaces the FRAGILE dispatch, not the SECURE gate.
-- **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
-  render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
-  fn-ref `submit-order!` into one standard datastar `@post` to the agent's
-  `/agent/{id}/call` endpoint (fn-call args transit-serialized in the query; the
-  fn-ref case pulls form values from datastar **signals** — the POST body).
-  The render owner supplies the agent id; ordinary Clojure resolution supplies
-  the fully qualified function symbol. Bare symbols resolve in the renderer's
-  authoring namespace, while already-qualified symbols remain unchanged.
-  Transient client state — an input value, a popover, a time-slider — lives in
-  datastar signals, never in DOM attributes, so a whole-element morph never
-  clobbers it. Routing is orthogonal to this rewrite.
-- **Auth + error-catch ride as middleware.** Per-route concerns are reitit
-  route-data middleware referenced by keyword through a registry; a `:compile`
-  middleware reads route-data and vanishes when N/A. Auth is wired empty — adding
-  it later is one keyword + one registry entry, zero handler edits.
-
-### Database-backed human location and root-directed navigation
-
-Each browser tab owns one compact `:seon.web.session/id` represented by database
-facts defined in [[data-model]]. Tab-local browser storage keeps the
-`{:db-name db-name :session-id session-id}` tuple needed to reconnect it. The
-session carries a ref to the human plus one normalized local location string.
-That location is the fact: route name, agent target, and URL are derived through
-reitit rather than duplicated as more session attributes. Transaction metadata
-provides recency, so there is no stored `updated-at`, `active?`, or presence
-registry.
-
-First load has no browser-generated identity. Bootstrap accepts a stored tuple
-only when its database name matches the current database and its lookup ref
-exists in that database for the current human. Otherwise the page asks the
-writer's one `seon.db.id/allocate!` path to create the session entity atomically
-with its initial normalized location, returns the replacement tuple, stores it
-in `sessionStorage`, and only then opens the feed keyed by it. Reload and
-reconnect reuse a validated ID. Every subsequent route observation compares the
-normalized location and transacts only when it changed. If a reset or restore
-removes the session beneath an already-open feed, that feed sends one
-auto-removing control patch that clears only this tab's Seon session tuple and
-reloads the current local route through the same bootstrap; it never preserves
-a ghost cursor or client-upserts the missing identity.
-
-An agent page's explicit surface pin is the one meaningful sub-route state: it
-is encoded in the normalized location's query component. With no pin parameter,
-the page uses agent-derived focus. Clicking a rail card changes only the
-transient selection; pinning it updates the URL/session fact and Datastar signal
-together. Reload restores that tab's pin, and root can query it through the
-originating session, but a fleet card does not adopt it. Unpinned selection,
-scroll position, disclosure state, and form signals stay browser-transient and
-are not falsely promoted to database facts.
-
-Opening/navigating a route reconciles that same session location. A human message
-links to the originating session, and each turn records the exact inbound
-message it is assigned to answer as `:seon.agent.turn/cause-message`; the run's
-waking message is insufficient because a run can absorb later input. Root can
-therefore receive the right session through the ordinary injection boundary.
-Root calls the protected, fully specified
-`seon.web.session/select-agent!`; its required
-`:seon.web.session/agent-id` names the target and its optional injected
-`:seon.web.session/id` names the originating tab. That key is context-only at
-the eval boundary: agent input cannot override it. It validates/reverse-routes
-the target, compares the normalized location, and transacts only a real change. A
-missing originating session or target returns an error envelope. The already-open
-feed for that session applies the
-official Datastar redirect-helper semantics: an auto-removing script patch over
-the existing stream, not a second event family or channel, only when the stored
-location differs from that feed's normalized current route. Arrival at the new
-route observes equality, writes nothing, and emits no redirect. Another tab has
-a different session identity and does not move.
-
-This is desired/current UI state, not authentication and not a second command
-queue. Root can query exactly what the human who messaged it is seeing, while
-the browser remains a projection of database state. A missing originating
-session returns an explicit error envelope instead of guessing which tab to
-move.
+Each feed connection is process-local and keyed by its URL identity. Open-tab
+registration, SSE taps, transient selection, inputs, scroll, and disclosure are
+disposable browser/process state. They are not database facts and recovery does
+not pretend otherwise. Reconnect renders current database truth.
 
 ## The in-process render flow
 
@@ -680,23 +483,17 @@ Agent-authored route/layout failures follow the same guarantee.
 
 ## Downstream composition
 
-A downstream cluster composes the same public mechanisms: route facts choose
-page handlers, schemas and entity facts choose renderers through the one
-resolution chain, canvas facts select
-focal content, and an explicitly selected
-manifest supplies brand and route populations. Consumer-specific files,
-launchers, and wiring remain in the downstream repository. Mutable global
-`set!` seams are not target state; a reusable customization becomes a public
-symbol selected by facts or config through the one render engine.
+A downstream cluster composes the same public mechanisms: the code route table
+chooses page handlers, while schemas and entity facts choose renderers through
+the one resolution chain. Consumer-specific pages and routes belong in the
+downstream repository; Seon core does not persist route or canvas entities for
+them.
 
 ## Malli throughout
 
-Every map is a registered `:malli/schema` — the block, `:seon.route/*`, the
-flat error value, layout I/O — instrumented like everything else. reitit
-route-data is open maps, so our malli-validated maps ride as route-data with no
-friction; reitit-malli coercion (vendored, optional) validates/coerces path-params
-/ query / body against a route's `:parameters` schema for free, since we
-malli-everything already.
+Every render, page, feed, and message request has a registered Malli shape and
+is instrumented like the rest of the runtime. Reitit route-data remains plain
+code data; it is not mirrored into a database schema.
 
 ## See also
 
@@ -704,9 +501,11 @@ Strict single-ownership: when a fact you need is owned by another doc, follow th
 link and read it.
 
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
-- [[data-model]] — the block, route, and flat error schemas these renders read, and the `my.*` domains.
-- [[agent-runtime]] — the agent graph that assembles the prompt, fact-first agent initialization, and the run-status block's data source (`derive-status`).
-- [[toolkit]] — `my.canvas` and the agent functions that drive the canvas.
+- [[data-model]] — the agent, message, run, eval, and flat-error facts these
+  renders read.
+- [[agent-runtime]] — the agent graph that assembles the prompt and owns run
+  transitions.
+- [[toolkit]] — the **[TARGET]** generalized canvas and control boundary.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
   state-gated teaching + pull); imported `my.skills` bodies remain explicit
   overrides rather than a default context block.

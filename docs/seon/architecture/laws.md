@@ -50,10 +50,10 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   capacity. Supervision, bounded evals, and cheap flow-graph rebuilds protect
   the cluster JVM; process walls do not split its co-located responsibilities.
 - **Claims and receipts outrank process memory.** A run's
-  `:seon.agent.run/process` presence establishes custody (custody
-  revision 2026-07-28: epochs and leases are deleted); the turn
-  phase and attempt/eval receipts establish admitted and completed work.
-  Recovery derives from those facts.
+  `:seon.cluster.run/process` presence establishes custody; context captures,
+  provider attempts, planned forms, and `:seon.cluster.eval` receipts establish
+  admitted and completed work. Epochs, leases, turn rows, and phase rows do not
+  exist. Recovery derives from the surviving facts.
 - **Same source or same artifact.** Cross-runtime policy is one portable
   `.cljc` core or one shared compiled artifact. Each tier adds one native leaf,
   with reader conditionals only at entry expressions. Hand-mirrored wrappers
