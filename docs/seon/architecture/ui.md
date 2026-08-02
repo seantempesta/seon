@@ -167,11 +167,11 @@ render yields a flat error value (see [[data-model]] §6) for that render only;
 siblings never crash.
 
 **prompt == page by construction.** Both derive from the same blocks at the
-turn's complete ordinary database value. The turn acquires and formats
+model call's complete ordinary database value. The run loop acquires and formats
 the AI renders in last-bytes-changed order ([[context]]); the web UI applies
 the same order, including branch tie-clustering, to visible HTML renders.
-"What the agent saw at turn N" is a re-derive from that exact value; `:t` alone
-is not a durable bookmark.
+"What the agent saw for this model call" is the committed context capture: its
+prompt bytes plus the basis transaction and ordered contribution evidence.
 
 **The structural floor is one merged data browser.** It combines the bounded
 value skeleton with `/data`'s drill navigation on the admission codec's one
@@ -180,20 +180,14 @@ identities/indices and explicit elision markers, and pays only for opened data.
 Specialized message, source, error, and hiccup projections sit above it through
 the one resolution chain; they do not create another walker or floor.
 
-**Markdown renders server-side.** Agent text becomes Hiccup through
-`seon.ui.markdown/md->hiccup`. The view shim does not parse Markdown in the
-browser; every message and eval body uses the same server-side projection.
-
-**The human transcript is chat-first.** Message entities render as the visible
-conversation. Eval entities render as fixed-size one-line activity rows derived
-from their called symbol and status; source, arguments, result projections, and
-full errors are not embedded in the normal transcript DOM. The visible history
-is bounded by the transcript block's database-owned `turns-retained` policy,
-with one preceding message retained for conversational orientation.
-Consecutive equivalent failures remain coalesced into one row. Exact AI text
-and technical data remain available in the separate debug/data surfaces. This
-changes only the HTML projection—the agent's AI transcript remains
-byte-faithful.
+**The transcript has one bounded projection.** Messages and eval receipts join
+by agent and run, order by their durable instants, and render as reader-valid
+REPL text for AI and stable Hiccup entries for HTML. Provider reasoning
+observations join the HTML projection only after the shared token-budget
+decisions. The budget preserves the bootstrap prefix, keeps a fixed recent tail
+at full detail when it fits, summarizes older entries when possible, and emits
+an explicit elision count for the rest. The database facts and blobs remain
+available through debug and `/data`; projection never rewrites them.
 
 **The database browser pays for opened data.** `/data` exposes the same
 structural floor directly. Bounded expansion uses a cursor that says where to
@@ -270,13 +264,10 @@ systems.
 
 A streamed reply is the only genuinely high-churn thing the UI shows, and it
 rides a channel, never the writer. Partials are COALESCED COMPLETE VALUES
-offered onto one `(sliding-buffer 1)` conn from the turn's provider fold into
-the render proc's in-port; only the settled reply becomes a database fact (its
-bytes a blob behind the turn's reply ref). Streamed partials never touch a
-database attribute. (This supersedes the 2026-07-23 no-history-attribute
-streaming design, per the 2026-07-28 transport-law ruling: the one database
-path is for facts; in-flight transients ride channels with loss-encoding
-buffers.)
+offered onto one `(sliding-buffer 1)` conn from the model call's provider fold
+into the render proc's in-port. Provider attempts, frozen forms, eval receipts,
+run errors, and resulting messages are durable facts; streamed partials never
+touch a database attribute.
 
 Each clause is load-bearing. Complete values rather than deltas, because a
 consumer that missed a delta is permanently wrong while one that missed a
@@ -430,12 +421,13 @@ and last-bytes-changed bases exist only in process memory. Restart discards the
 cache and re-derives demanded pages from facts. There is no stored render
 snapshot, presentation attribute, or replay log for display output.
 
-Streamed reply partials enter this same flow as another producer. The turn's
-provider fold reduces its byte stream for the durable terminal reply while
+Streamed reply partials enter this same flow as another producer. The model
+call's provider fold reduces its byte stream to the completion value while
 offering coalesced complete prefixes onto the render proc's sliding-1 in-port;
 a full buffer drops intermediate prefixes rather than delaying inference. The
-terminal reply blob and attempt receipt remain the forensic facts. A reconnect
-paints current database truth and does not replay transient prefixes.
+provider attempt and the completion's durable consequences remain the forensic
+facts. A reconnect paints current database truth and does not replay transient
+prefixes.
 
 ### Fine-grained Datastar element patches
 

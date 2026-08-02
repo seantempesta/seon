@@ -77,14 +77,15 @@ a context-economy decision; it never gates execution.
 | `my.ui` | reusable Hiccup and control composition over the public render shapes |
 | `my.web` | guarded fetch, search, and browser-facing web operations |
 
-Agent-facing tools are flat `my.*` namespaces. Their protected policy and
-platform leaves remain under `seon.*`, but an agent never selects or calls a
-leaf directly. Every `my.*` tool call enters the one guarded
-`seon.effect/request!` function carrying the request identity. The
-function validates policy and schema, records the admitted request boundary,
-and dispatches to the selected leaf.
+Agent-facing tools are flat `my.*` namespaces. Pure functions return ordinary
+values for the run loop to interpret. Functions whose result is a durable fact
+return transaction intent that the owning system boundary commits. Only a
+genuine capability request—filesystem, shell, web, model, or database
+effect—enters `seon.effect/request!` with one request identity for validation,
+policy, receipt, and leaf dispatch.
 
-The per-agent home namespace `my.agent.<id>` is a safe starting namespace, not
+The default namespace `my.agents.<id>` is a safe starting namespace for a
+temporary or undifferentiated agent, not
 a code silo or ownership scheme. An agent may author a coherent application in
 `my.orders`, `my.customers`, `my.reporting`, or any other allowed namespace.
 Those committed functions, schemas, tests, declarations, and require edges are
@@ -103,12 +104,11 @@ change uses the same validation, instrumentation, and test gate. Namespace
 names never encode agent IDs, and an owner process holds no private copy of the
 code. Ownership is a collaboration protocol, not a call-time security boundary.
 
-Root uses `seon.agent/set-namespace!` to change that ref for an existing agent;
-an ordinary agent may use it for itself or a descendant. The operation does
-not rename or recreate the agent. If the assignment transaction is newer than
-the latest successful eval transaction, the assigned namespace becomes the
-next turn's current namespace. Subsequent `in-ns` movement remains ordinary
-REPL history.
+Namespace creation and assignment are ordinary transactions at the cluster
+agent boundary. Reassignment changes the unique namespace ref; it does not
+rename or recreate the agent. The assigned namespace is the default for
+subsequent eval admission, while later `in-ns` movement remains ordinary
+durable REPL history.
 
 ## Protected capabilities
 

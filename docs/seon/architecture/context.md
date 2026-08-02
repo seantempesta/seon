@@ -7,7 +7,7 @@ tags: [architecture, agent]
 # Context — functions applied to the db
 
 > **Target design** (present tense). The block/render machinery lives in
-> [[ui]]; historical turn reconstruction + inspection in [[observability]]; the measured laws
+> [[ui]]; historical run reconstruction + inspection in [[observability]]; the measured laws
 > that constrain this in [[laws]]. Implementation state lives in [[roadmap]]. This doc keeps
 > to Clojure primitives — `ns`, `defn`, `require`, var metadata, and a db value.
 > A block is the informal name for one render-function call in either
@@ -18,8 +18,8 @@ data are renderable leaves and refs are branches. The recursive walk discovers
 the tree from one immutable database value; a separate display projection
 orders the resulting units and joins their AI bytes.
 
-Every turn re-derives the tree from one frozen db value. Nothing is accumulated.
-The agent, cluster, current turn, namespace, window policy, tool/schema graph,
+Every model call re-derives the tree from one frozen db value. Nothing is accumulated.
+The agent, cluster, current run, namespace, window policy, tool/schema graph,
 plan, event membership, and tree edges are facts or pure queries over that
 value. Rendering the same database value (the same store ID, branch, commit ID,
 and basis transaction), code revision, and explicit render arguments for the
@@ -94,27 +94,23 @@ always renders:
   boundary cannot reconstruct unless it was written down as data. An open step
   never renders as a settled fact; a node whose only remaining action is
   verify-and-close renders as actionable, not invisible. (See [[data-model]].)
-- **what I am waiting on** — delegated children and their live state (the
-  multi-agent sections below), blocked items.
+- **what I am waiting on** — outstanding messages, delegated work, and blocked
+  facts.
 - **what I just did** — my last turn's actions and their outcomes, from the
   transcript.
 - **what I learned** — accumulated knowledge (`my.kb`), and *only* knowledge:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
-- **what changed since I last looked** — the **delta**, derived from the
-  previous turn's rendered database value: the
-  datoms transacted since I last saw the view when that commit is an ancestor
-  of the current head (new messages, newly-completed children, newly-failed
-  items). A series of independent snapshots becomes a felt continuity because
-  each turn can name what is new. The exact database value is already recorded per
-  turn ([[observability]]); the delta is a query over it, not new state. A
-  lineage change renders a reset/diff boundary instead of pretending bare t is
-  continuous.
+- **what changed since I last looked** — the **delta**, derived between the
+  previous model call's context-capture basis and the current database value.
+  New messages, settled delegated work, and new failures are queries over those
+  values, not new stored state. A lineage change renders a reset/diff boundary
+  instead of pretending a bare basis transaction is globally continuous.
 
 **Situation, never the answer.** The projection renders the agent's operational
-situation and the operations available on it — "a child is idle at its
-turn-limit; continue it or release it," "three plan items are open and
-independent; any may be delegated" — because a continuous agent would know
+situation and the operations available on it — "this open run has no process
+custody," "three plan items are open and independent; any may be delegated" —
+because a continuous agent would know
 these. It never renders the answer to the agent's task; that is the line
 between context and coaching. Making the situation legible makes the right
 action obvious without prescribing it.
@@ -147,16 +143,16 @@ byte-faithful REPL session:
 3. events interleaved at the point they occurred and **attributable** — an
    inbound message is unmistakably distinct from the agent's own eval;
    mis-attribution is the fake-instruction confabulation;
-4. async resolved to **values**, not dangling Promises — a form that returned
-   a pending computation shows its resolved value (or a legible "value now at
-   `result/<id>`"), never a Promise the agent can't tell finished.
+4. evaluation resolved to **values** — a form shows its admitted result, flat
+   error, interruption, or a legible `result/<id>` handle for a process-local
+   value.
 
 **Additive, not optional.** The spine is bounded and blind, so two additive
 roles are load-bearing: derived sections **crystallize what the transcript
 will lose** as it decays (the plan is the durable form of intent, findings of
 knowledge — what would otherwise scroll off), and they **surface what the spine
-is blind to** — derived state the agent never eval'd (a child at its
-turn-limit) and non-event changes between turns. Because the transcript already
+is blind to** — derived state the agent never eval'd (for example, an open run
+without custody) and non-event changes between model calls. Because the transcript already
 carries event-deltas (a message that arrived is already a line), the delta
 surface is only the *non-event* changes. Additive sections layer on the spine;
 they never contradict it.
@@ -285,7 +281,7 @@ Render and context functions receive ordinary namespaced request data. The
 walk supplies the immutable `:seon.db/db`, the viewing
 `:seon.cluster.agent/id`, admission caps, distance, live-process evidence when
 needed, and the pulled entity. A renderer declares the request it consumes and
-never reaches through an ambient connection or a deleted injectable registry.
+never reaches through an ambient connection or an injectable registry.
 
 The database value and agent identity describe one render request; they are not
 execution grants. A function's schema remains its complete contract, and
@@ -361,8 +357,8 @@ contains is one block from one render fn over the db, and there is no second
 assembly path for anchors (owner ruling 2026-07-31 — see
 `docs/prds/sci-execution-runtime/plan/README.md`).
 
-Banding, priority, and hysteresis do not exist in this contract. Every captured
-turn already records each block's identity, content hash, estimated tokens, and
+Banding, priority, and hysteresis do not exist in this contract. Every context
+capture records each block's identity, content hash, estimated tokens, and
 position as observability facts, and provider cache-read usage measures real
 reuse. Evidence of oscillation would require a new ordering ruling; it does not
 reserve the retired attributes or a dormant second mechanism.
@@ -370,21 +366,19 @@ reserve the retired attributes or a dormant second mechanism.
 Root-only live telemetry is an ordinary first-party render unit described at
 the top of this document. Its bytes participate in the same last-changed order;
 because its explicit process-local inputs change often, it naturally moves
-toward the end. Active-child outcomes remain database facts in the ordinary
+toward the end. Delegated-work outcomes remain database facts in the ordinary
 tree, while genuinely live progress may be another explicit process-local
 input to that same bounded unit.
 
 Two content policies survive the retirement of the bands, because they are
 about what a block contains, not where it sits:
 
-- **the transcript** is acquired through a fixed-work newest-turn window, with
-  per-band caps, eval-result decay, and a fixed total budget for older retained
-  events. The same immutable database value and policy produce the same bytes;
-  the leading edge may evict the oldest retained turn whenever a newer one
-  arrives. Eviction never rewrites retained events into summaries, and every
-  truncated older tail is marked honestly. What must outlive the window goes to
-  the DB (plan, kb, blobs), not transcript residue; a large inbound payload
-  clips to a blob ref.
+- **the transcript** is acquired newest-first under one total token budget. A
+  fixed recent tail retains full detail when it fits; older entries use their
+  derived summary projection when it fits; everything omitted contributes to
+  one explicit elision count. The same immutable database value and budget
+  produce the same bytes. What must outlive the window is already a database
+  fact or blob, never transcript residue.
 - **relevance retrieval is pull-first, not a block.** Reference code and
   retrieval beyond the current namespace are explicitly inspected or called
   when needed. Functions whose *input* specs match the shapes the agent is
@@ -458,7 +452,7 @@ The manifest-owned config singleton remains a separate entity reached by
 
 Prompt acquisition resolves the system text and the agent's selected context
 inside one compiled acquisition operation over one immutable database value. That one
-ordinary result flows unchanged through turn capture, token accounting, every
+ordinary result flows unchanged through context capture, token accounting, every
 retry, the provider adapter, and the debug view. None of those consumers
 re-resolves live config after the prompt database value has been chosen.
 
