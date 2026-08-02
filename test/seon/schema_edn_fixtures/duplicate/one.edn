@@ -1,1 +1,0 @@
-{:seon.schema.edn.fixture/twice [:string {:min 1}]}

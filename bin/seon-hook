@@ -792,8 +792,8 @@
                  (str/ends-with? lower ".cljc"))
              (or (beneath? (root-file "src") file-path)
                  (beneath? (root-file "test") file-path)))
-        (and (str/ends-with? lower ".edn")
-             (beneath? (root-file "resources/seon/schema") file-path)))))
+        (= (absolute-file-path (root-file "resources/seon/schema.edn"))
+           (absolute-file-path file-path)))))
 
 (defn- current-source-feedback
   "Publish edited first-party source through the live operator when possible."

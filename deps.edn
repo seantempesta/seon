@@ -80,10 +80,17 @@
   ;; writer-calibrated heap; they ride every -M invocation that loads the
   ;; database closure.
   :dev
-  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
+  {:extra-paths ["target/dev-dependency-classes"]
+   :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
               "-XX:G1PeriodicGCInterval=30000"]}
+
+  ;; Rebuild the source-preferred class cache for the dependency namespaces
+  ;; reached by `seon.artifact`; first-party source remains uncached.
+  :dev-cache
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+   :ns-default dev-cache}
 
   ;; The system test gate: `bin/test` (all suites) or
   ;; `bin/test seon.cluster.run-test` (selection). Source classpath,

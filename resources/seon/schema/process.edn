@@ -1,4 +1,0 @@
-{:seon.cluster.process/identity
- [:map {:closed true}
-  [:seon.boot/pid :seon.boot/pid]
-  [:seon.boot/start-instant :seon.boot/start-instant]]}

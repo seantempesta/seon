@@ -123,7 +123,7 @@
            [java.util.concurrent.atomic AtomicBoolean]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/eval.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (defn ctx?

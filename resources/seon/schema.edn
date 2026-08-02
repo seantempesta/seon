@@ -1,0 +1,3104 @@
+{
+;; ===========================================================================
+;; ADMIT
+;; ===========================================================================
+; The output caps. Every one is a registered DIAL — a config fact the
+ ; caller reads from the database and passes in; never a literal in code.
+ ; Wiring them into :seon.config/manifest + config/default.edn is a
+ ; seal-side edit named in the draft report.
+ :seon.config.eval.result/max-collection [:int {:min 1}]
+ :seon.config.eval.result/max-depth [:int {:min 1}]
+ :seon.config.eval.result/max-nodes [:int {:min 1}]
+ :seon.config.eval.result/max-string [:int {:min 1}]
+
+ ; The recorded diagnostics. NEVER limits (the vocabulary table's word):
+ ; 271M fn-entries in 500 ms reads as a spin, 12 reads as blocked in a
+ ; host call. First registered here because admission is the fresh tree's
+ ; first producer; the seon.sci.interrupt adoption REFERENCES these keys
+ ; and must not re-declare them (the loader refuses duplicates by design).
+ :seon.eval/allocated-bytes :int
+ :seon.eval/duration-ms :int
+ :seon.eval/fn-entries :int
+ :seon.eval/host-interop-count [:int {:min 0}]
+ :seon.eval/outcome [:enum :ok :time :error]
+
+ :seon.sci.admit/caps [:map {:closed true} [:seon.config.eval.result/max-depth :seon.config.eval.result/max-depth] [:seon.config.eval.result/max-collection :seon.config.eval.result/max-collection] [:seon.config.eval.result/max-string :seon.config.eval.result/max-string] [:seon.config.eval.result/max-nodes :seon.config.eval.result/max-nodes]]
+ :seon.sci.admit/capped? :boolean
+ :seon.sci.admit/interrupt-fn [:fn {:gen/gen seon.sci.admit/interrupt-fn-generator} seon.sci.admit/interrupt-fn?]
+ :seon.sci.admit/record [:map {:closed true} [:seon.eval/fn-entries :seon.eval/fn-entries] [:seon.eval/host-interop-count :seon.eval/host-interop-count] [:seon.eval/duration-ms :seon.eval/duration-ms] [:seon.eval/allocated-bytes :seon.eval/allocated-bytes] [:seon.eval/outcome :seon.eval/outcome]]
+ ; :any twice, both at the one genuine third-party boundary: IN, whatever
+ ; object a sci evaluation produced; OUT, the projection, whose grammar is
+ ; the admit docstring's and is deliberately NOT a second predicate
+ ; (n3-plan §6.1: ordinary-wire-value? collapses into this operation).
+ ; The dial rides IN the request (owner ruling, 2026-07-27, reversing
+ ; the drafted marker-only taste call): a projection failure is a core
+ ; degradation, so R41 decides it — :panic throws hard and loud in
+ ; development, :record degrades reasonably in production. It is a
+ ; required key because a caller that has not decided has not thought
+ ; about it.
+ ; The DIAGNOSTICS are optional (seal revision, 2026-07-27): they are
+ ; eval-shaped, and admission now has a caller that is not an eval —
+ ; `seon.error/normalize` projects an arbitrary error source through
+ ; this same one codec, and fabricating a zeroed `fn-entries` /
+ ; `duration-ms` / `allocated-bytes` record for it would be inventing
+ ; measurements nobody took. Absent in, absent out: admission carries
+ ; the record through untouched, and an absent record stays absent
+ ; rather than becoming a stored nil.
+ :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/admitted [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/value :any
+
+;; ===========================================================================
+;; AGENT
+;; ===========================================================================
+; An agent's current namespace is a connection to the canonical
+ ; `:seon.ns` entity. Cardinality one means an agent has at most one;
+ ; unique-value means a namespace has at most one agent. Reassignment
+ ; is an ordinary cardinality-one transact, never a second identity.
+ :seon.cluster.agent/namespace
+ [:and {:seon.db/unique true} :seon.db/ref]
+
+ ; Every agent is its own entity and points to its branch's cluster entity.
+ ; Cluster-global facts never move onto the agent; per-agent instructions are
+ ; an additive connection whose ordinary empty state is absence.
+ :seon.cluster.agent/cluster :seon.db/ref
+
+ :seon.cluster.agent/context-links
+ [:map {:seon.db/entity true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.agent/cluster :seon.cluster.agent/cluster]
+  [:seon.cluster.agent/instructions
+   {:optional true}
+   :seon.cluster.agent/instructions]]
+
+ ; The one formal creation shape. It creates the namespace row and the
+ ; agent row in one transaction so a newly created agent is never
+ ; ownerless at any committed basis.
+ :seon.cluster.agent/creation-request
+ [:map {:closed true}
+ [:seon.cluster.agent/id :seon.cluster.agent/id]
+ [:seon.ns/name :seon.ns/name]
+  [:seon.cluster/name :seon.cluster/name]]
+
+ ; Pure transaction data is heterogeneous Datahike input by definition.
+ :seon.cluster.agent/creation-tx [:vector :map]
+
+ ; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
+ ; Two agents differ only in the agent-id their procs carry and the
+ ; mailbox channel routed to them — there is no per-agent variation.
+ :seon.cluster.agent/blueprint-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]
+
+ ; THE ROUTING ENTRY: process-local map atom held on the cluster
+ ; instance beside the connection — the sanctioned kind of process
+ ; state (a disposable artifact, rebuilt by arming at boot). It is not
+ ; a fact: it names live channels. ::armed is keyed by agent id;
+ ; ::channels by the recipient's ENTITY id, because that is what a
+ ; committed `:seon.cluster.message/to` datom carries, so the wake
+ ; handler's delivery is one map lookup — no query, no park.
+ :seon.cluster.agent/routing [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+
+ :seon.cluster.agent/arm-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+
+ :seon.cluster.agent/disarm-request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+
+ ; One armed agent's process-local entry: its graph, its mailbox, the
+ ; orderly-stop completion, and the entity id its routing rides on.
+ :seon.cluster.agent/armed [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/eid :int] [:seon.flow/graph :seon.flow/graph] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel]]
+
+ :seon.cluster.agent/eid :int
+
+;; ===========================================================================
+;; AI
+;; ===========================================================================
+; ONE PROVIDER, ONE ATTEMPT, ONE DEADLINE. Authentication is exactly
+ ; one of two explicit shapes: the NAME of the environment variable
+ ; holding the credential, or the literal no-auth fact. The credential
+ ; itself is read at the leaf and never becomes a datom.
+ :seon.ai/api-key-variable [:string {:min 1}]
+ ; Literal true rather than boolean: false would be a second spelling
+ ; for the authenticated shape. The target/request unions below make
+ ; both and neither unrepresentable.
+ :seon.config.ai/no-auth
+ [:= {:seon.config/optional true :seon.config/per-agent true} true]
+ :seon.ai/endpoint [:string {:min 1}]
+ :seon.ai/model [:string {:min 1}]
+ ; One value makes contradictory toggle/effort pairs unrepresentable.
+ ; Absence leaves the provider default untouched; :disabled sends an
+ ; explicit off switch; every other value sends enabled + that effort.
+ :seon.ai/thinking [:enum :disabled :low :high :max]
+ :seon.ai/temperature :seon.config.ai/temperature
+ :seon.ai/top-p :seon.config.ai/top-p
+ :seon.ai/frequency-penalty :seon.config.ai/frequency-penalty
+ :seon.ai/presence-penalty :seon.config.ai/presence-penalty
+ :seon.ai/stop :seon.config.ai/stop
+ :seon.ai/response-format :seon.config.ai/response-format
+ :seon.ai/extra-body-edn :seon.config.ai/extra-body-edn
+ ; The provider's output budget. This bounds reasoning and visible
+ ; completion together on the OpenAI-compatible wire; keeping thinking
+ ; enabled is safe only when the request carries this positive cap.
+ :seon.ai/max-tokens [:int {:min 1}]
+ :seon.ai/prompt [:string {:min 1}]
+ :seon.ai/system [:string {:min 1}]
+ ; The one legitimate deadline in the rung: a remote HTTP call is
+ ; genuinely unobservable external state. Its firing is an ordinary
+ ; error value, never a bug report.
+ :seon.ai/timeout-ms [:int {:min 1}]
+ :seon.ai/text [:string {:min 1}]
+ ; Provider reasoning is a separate projection from visible reply text.
+ ; The settled value is persisted on the attempt; the partial exists only
+ ; while the same lossy stream snapshot is in flight.
+ :seon.ai/reasoning-content [:string {:min 1}]
+ :seon.ai/reasoning-partial :string
+ ; STREAMING is a transport choice and nothing more
+ ; (docs/seon/reference/llm-adapters.md:545-563: wire transport and reply
+ ; evaluation are independent). Its one invariant, quoted from that
+ ; authority because it is the thing a partial-display feature always
+ ; breaks: "Partial display is presentation-only and cannot affect
+ ; transport, parsing, usage, or evaluation." A streamed call and a
+ ; one-shot call return the SAME completion value.
+ :seon.ai/stream? :boolean
+
+ ; Where partials GO, injected by the caller rather than known here.
+ ; `seon.ai` owns the wire and the fold; it does not own the database,
+ ; so it cannot be the thing that decides a partial becomes a datom.
+ ; The sink is called with a snapshot and its return value is ignored —
+ ; presentation may lag or drop, and it may never slow the call.
+ :seon.ai/sink [:fn {:gen/gen seon.ai/sink-generator} seon.ai/sink?]
+
+ ; The provider's own usage map, retained as the NEWEST seen. Kept
+ ; independently of choices because Gemini attaches cumulative usage to
+ ; content chunks while OpenAI-compatible providers emit one final
+ ; choices-empty chunk — the portable fold must not assume either.
+ :seon.ai/usage [:map-of :string :any]
+ :seon.ai/tokens [:int {:min 0}]
+ :seon.ai/finish-reason [:string {:min 1}]
+
+ ; Request settings are canonical Clojure data until this one projection
+ ; applies the registration's [wire-key coercion] pairs.
+ :seon.ai/sent [:map-of :string :any]
+ :seon.ai/inert [:set :qualified-keyword]
+ :seon.ai/wire-settings
+ [:map {:closed true}
+  [:seon.ai/sent :seon.ai/sent]
+  [:seon.ai/inert :seon.ai/inert]]
+ :seon.ai/request-body [:or :seon.ai/sent :seon.error/value]
+ :seon.ai/settings :seon.config/effective
+
+ ; Open provider usage stays open on the attempt; these comparable counts are
+ ; derived at read and never stored beside their source document.
+ :seon.ai.usage/prompt-tokens :seon.ai/tokens
+ :seon.ai.usage/completion-tokens :seon.ai/tokens
+ :seon.ai.usage/total-tokens :seon.ai/tokens
+ :seon.ai.usage/cached-tokens :seon.ai/tokens
+ :seon.ai/normalized-usage
+ [:map {:closed true}
+  [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
+  [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]
+  [:seon.ai.usage/total-tokens {:optional true} :seon.ai.usage/total-tokens]
+  [:seon.ai.usage/cached-tokens {:optional true} :seon.ai.usage/cached-tokens]]
+
+ ; One snapshot handed to the sink: everything so far, plus the live
+ ; token count derived from the SAME fold rather than counted twice.
+ :seon.ai/partial
+ [:map {:closed true}
+  [:seon.ai/text :string]
+  [:seon.ai/reasoning-partial {:optional true} :seon.ai/reasoning-partial]
+  [:seon.ai/tokens :seon.ai/tokens]
+  [:seon.ai/usage {:optional true} :seon.ai/usage]
+  [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]]
+
+ :seon.ai/request
+ [:or
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
+ :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
+
+ ; ---------------------------------------------------------------------
+ ; THE DESCRIPTOR ROW. A target is one callable model: the four wire
+ ; facts and nothing else. A `:seon.ai/request` IS a target plus what to
+ ; say, which is why `complete` takes `(assoc target :seon.ai/prompt …)`
+ ; and no adapter sits between them.
+ ; The two ROLES are registered in their own right so every key in
+ ; `:seon.ai/targets` resolves through the registry like every other
+ ; key here. Neither carries a persistence facet, so neither becomes a
+ ; database attribute — the roles are a shape, not a row.
+ :seon.ai/primary :seon.ai/target
+ :seon.ai/backup :seon.ai/target
+ :seon.ai/target
+ [:or
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]]
+ ; TWO ROLES, and the backup is ABSENT rather than nil when there is
+ ; none — absence is the state, and `:seon.ai/backup?` downstream is
+ ; literally `(contains? targets :seon.ai/backup)`.
+ :seon.ai/targets [:map {:closed true} [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target]]
+
+ ; ---------------------------------------------------------------------
+ ; THE BACKOFF STRATEGY, as data. Composed the way `again` composes it
+ ; (multiplicative → randomize → clamp → max-retries → max-duration),
+ ; but DERIVED rather than executed: `seon.ai/delays` turns these six
+ ; facts plus injected randomness into a finite vector of waits, so the
+ ; whole schedule is one value a seeded property can pin.
+ :seon.ai.retry/base-delay-ms [:int {:min 1}]
+ :seon.ai.retry/multiplier [:double {:min 1.0}]
+ :seon.ai.retry/jitter-fraction [:double {:min 0.0 :max 1.0}]
+ :seon.ai.retry/maximum-delay-ms [:int {:min 1}]
+ ; zero retries is a legitimate configuration: it turns `:backoff` into
+ ; `:fail` by data rather than by a code branch.
+ :seon.ai.retry/maximum-retries [:int {:min 0}]
+ :seon.ai.retry/maximum-total-delay-ms [:int {:min 0}]
+ :seon.ai.retry/strategy [:map {:closed true} [:seon.ai.retry/base-delay-ms :seon.ai.retry/base-delay-ms] [:seon.ai.retry/multiplier :seon.ai.retry/multiplier] [:seon.ai.retry/jitter-fraction :seon.ai.retry/jitter-fraction] [:seon.ai.retry/maximum-delay-ms :seon.ai.retry/maximum-delay-ms] [:seon.ai.retry/maximum-retries :seon.ai.retry/maximum-retries] [:seon.ai.retry/maximum-total-delay-ms :seon.ai.retry/maximum-total-delay-ms]]
+ :seon.ai.retry/delays [:vector [:int {:min 0}]]
+
+ ; ---------------------------------------------------------------------
+ ; THE ATTEMPT FACT — one durable row per model call, and the reason the
+ ; whole failover story is a query rather than a log grep. Without it,
+ ; a successful backup ERASES the primary's failure and "nothing retried
+ ; a paid call" is unprovable after the fact.
+ ;
+ ; It is warranted despite the crash model's aversion to replay ledgers,
+ ; and the distinction is exact: a remote call's OCCURRENCE and its
+ ; payment-safety evidence are not derivable from anything else we hold.
+ ; The row authorizes no replay — nothing reads it to decide what to do
+ ; next, only to say what happened.
+ ;
+ ; ONE ROW PER ATTEMPT, WRITTEN AFTER THE CALL, deliberately. A
+ ; before-the-call `:running` row would be a second interruption
+ ; mechanism for a fact nothing reads: a process that dies mid-call
+ ; already leaves a claimed run that `work/interruption` finds and the
+ ; loop settles, and nothing re-calls either way. The honest cost is
+ ; named: a crash mid-call leaves NO attempt row, so the chain says
+ ; "the call was never recorded", not "the call never happened".
+ :seon.ai.attempt/id [:string {:min 1 :seon.db/identity true}]
+ ; DERIVED as <run-id>-attempt-<ordinal>, so a re-entered `:call` pass
+ ; appends rather than overwriting, and the chain reads in order.
+ :seon.ai.attempt/run [:and {:seon.db/index true} :seon.db/ref]
+ :seon.ai.attempt/ordinal [:int {:min 0}]
+ :seon.ai.attempt/at :inst
+ ; The provider's open usage document after JSON decoding. Persisted as
+ ; EDN because its string-keyed, provider-owned shape is deliberately
+ ; open; cached-token normalization remains a read-time derivation.
+ :seon.ai.attempt/usage-edn :string
+ ; The SAME inline/blob split as eval results, using the same configured
+ ; threshold. Digest shape is direct so schema-derived history GC reaches it.
+ :seon.ai.attempt/reasoning :string
+ :seon.ai.attempt/reasoning-blob :seon.blob/digest
+ :seon.ai.attempt/reasoning-size [:int {:min 1}]
+ ; The complete resolved config map used for this attempt. It is an
+ ; observation of the call, not a provider usage field or derived warning.
+ :seon.ai.attempt/settings-edn :string
+ :seon.ai.attempt/finish-reason :seon.ai/finish-reason
+ ; The error FACT this attempt produced — the whole normalized record
+ ; with its signature, prose projection and evidence, never a copy of
+ ; its message. ITS PRESENCE IS THE OUTCOME (owner ruling 2026-07-28):
+ ; an attempt failed exactly when it points at an error fact, and there
+ ; is no stored :success/:error label restating that.
+ :seon.ai.attempt/error :seon.db/ref
+ ; ROLE BY CONNECTION, never a `:primary`/`:backup` stamp: an attempt is
+ ; the backup exactly when it points at the attempt it replaced. That
+ ; ref is also the proof of WHICH failure supplied its context.
+ :seon.ai.attempt/failover-from :seon.db/ref
+ ; The wait that preceded this attempt, present only on a backoff retry.
+ :seon.ai.attempt/delay-ms [:int {:min 0}]
+ ; The descriptor fields and the transport evidence keep the names the
+ ; PRODUCERS already use — `seon.ai/target`'s own endpoint/model and the
+ ; leaf's own `:seon.error/data` evidence keys — so reading a row back
+ ; needs no translation table. The row stores OBSERVATIONS only (owner
+ ; ruling 2026-07-28): the disposition acted on and the error class are
+ ; pure functions of the durable evidence (`seon.ai/disposition`,
+ ; `status-class`, the error fact's data-edn), derived at read rather
+ ; than frozen beside the facts they restate.
+ :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning] [:seon.ai.attempt/reasoning-blob {:optional true} :seon.ai.attempt/reasoning-blob] [:seon.ai.attempt/reasoning-size {:optional true} :seon.ai.attempt/reasoning-size] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+
+ ; ---------------------------------------------------------------------
+ ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
+ ; only the leaf knows what actually happened on the wire. The five flat
+ ; kinds are unchanged and stay the agent-facing shape; these are
+ ; namespaced fields inside `:seon.error/data`, never a nested envelope.
+ ;
+ ; `error-class` is NORMALIZED — derived from the JDK's own exception
+ ; taxonomy and the HTTP status, which is the dependency's vocabulary
+ ; rather than a list we invented. The three phase booleans are what
+ ; make "did this cost anything?" answerable instead of guessed, and
+ ; that question is the whole no-retry ruling.
+ :seon.ai/error-class [:enum :credential :transport-before-send :transport-unknown :timeout :rate-limit :server :authentication :authorization :model :request :response]
+ :seon.ai/http-status [:int {:min 100 :max 599}]
+ ; TRANSMITTED means the request left this machine, so the provider may
+ ; have done paid work. UNKNOWN counts as transmitted: the ruling is
+ ; strict, and "we cannot prove it was free" is not "it was free".
+ :seon.ai/request-transmitted? :boolean
+ :seon.ai/response-started? :boolean
+ :seon.ai/output-observed? :boolean
+
+ ; ONE DISPOSITION, computed. Three ordinary values, and the reducer
+ ; that produces them is pure over the evidence above plus whether a
+ ; backup exists.
+ :seon.ai/disposition [:enum :failover-now :backoff :fail]
+ :seon.ai/backup? :boolean
+ :seon.ai/disposition-request [:map {:closed true} [:seon.error/value :seon.error/value] [:seon.ai/backup? :seon.ai/backup?]]
+
+;; ===========================================================================
+;; BLOCK
+;; ===========================================================================
+; The retained block vocabulary belongs to in-memory render values and stable
+ ; DOM ids. Namespace-page membership and ordering come from `render.walk`;
+ ; nothing here declares or stores an agent-owned block set.
+ :seon.render.block/name :keyword
+
+ ; Temporary dependency of the in-flight context-contribution schema. The
+ ; context lane removes both together; no render code reads this attribute.
+ :seon.render.block/band [:enum :anchor :program :authored :continuity :dynamic]
+
+ ; An in-memory named render declaration accepted by the retained direct
+ ; `unit`/`surface` helpers. It is not a database entity family.
+ :seon.render.block/block
+ [:map
+  [:seon.render.block/name :seon.render.block/name]
+  [:seon.render/ai {:optional true} :seon.render/ai]
+  [:seon.render/html {:optional true} :seon.render/html]]
+
+ ; ---------------------------------------------------------------------------
+ ; THE HTML KIND
+ ; ---------------------------------------------------------------------------
+
+ ; One more kind on the open set. Its consumer is a surface in the
+ ; browser, and its output grammar is hiccup — stated by the consumer,
+ ; per the router's rule that a kind's grammar belongs to the kind's
+ ; consumer and never to the router.
+ :seon.render/html :seon.render/projection
+
+ ; HICCUP IS A NAMED PREDICATE, and that is a limitation being paid for
+ ; honestly rather than a preference. Hiccup is a tree, and a
+ ; self-referential declaration currently overflows the stack in
+ ; `seon.schema/bind-predicates` (issue
+ ; a-self-referential-schema-overflows-the-stack). The supported idiom
+ ; for a shape this registry cannot express is a registered core
+ ; predicate with an honest generator, which is strictly better than
+ ; `:any` here anyway: the grammar belongs to the serializer that
+ ; enforces it, the predicate IS that grammar, and the generator's
+ ; output domain is the serializer's input domain so every totality
+ ; property generates against the real thing.
+ :seon.render/hiccup [:fn {:gen/gen seon.render.hiccup/hiccup-generator} seon.render.hiccup/hiccup?]
+
+ ; ---------------------------------------------------------------------------
+ ; THE RENDERED PAGE
+ ; ---------------------------------------------------------------------------
+
+ ; The DOM element id, derived from the name by ONE function so the hole
+ ; and the patch can never drift apart. `surface-` prefixed because the
+ ; id shares a document with ids nobody here owns.
+ :seon.render/surface-id [:string {:min 9}]
+
+ ; ONE RENDERED BLOCK. Success carries the output; failure carries the
+ ; flat error value INSTEAD — never merged beside it, because
+ ; `:seon.error/value` is a closed shape registered once and a map that
+ ; is both is neither. The surface always carries its name and id, so a
+ ; failed block still has a place to put its error card and its
+ ; neighbours are unaffected: per-block isolation is structural here, not
+ ; a try/catch somebody remembered.
+ ;
+ ; A UNION OF TWO CLOSED MAPS rather than one map with two optional keys,
+ ; and no discriminator: closedness already makes the two disjoint, and
+ ; `:seon.error/value` presence is the same "did this render?" test the
+ ; router's own wrap contract established. This is not the `:close`
+ ; precedent — there the FOLD's end had to be visible in the value
+ ; because an absent ordinal meant two different things; here nothing is
+ ; inferred from an absence, only read from a presence.
+ :seon.render/surface
+ [:or
+  [:map {:closed true}
+   [:seon.render.block/name :seon.render.block/name]
+   [:seon.render/surface-id :seon.render/surface-id]
+   [:seon.render/kind :seon.render/kind]
+   [:seon.render/output :seon.render/output]]
+  [:map {:closed true}
+   [:seon.render.block/name :seon.render.block/name]
+   [:seon.render/surface-id :seon.render/surface-id]
+   [:seon.render/kind :seon.render/kind]
+   [:seon.error/value :seon.error/value]]]
+
+ ; Rendered values supplied to the retained bounded slot expander.
+ :seon.render/surfaces [:vector :seon.render/surface]
+
+ ; ---------------------------------------------------------------------------
+ ; DISTANCE — how many hops of the neighborhood one render reaches
+ ; (owner ruling, 2026-07-28 post-midnight; seal revision to the request
+ ; shapes below).
+ ;
+ ; NO NEW NOUN AND NO NEW KIND: distance is a REQUEST PARAMETER threaded
+ ; to the renderers and to the one bounded expansion, exactly as caps and
+ ; the trusted inputs already are. "The neighborhood view" is therefore
+ ; the same page mechanism asked a different question, not a second one.
+ ;
+ ; THE CALL CONVENTION, and it is the whole design: distance is an
+ ; argument TO the renderer, never a property OF it. The renderer is
+ ; CALLED with the distance (present on the unit; IMPLIED 1 when absent,
+ ; and never required — a projection that ignores it is correct).
+ ; Reaching past its own unit is the renderer'S OWN COMPOSITIONAL ACT: it
+ ; includes a neighbor by DELEGATING to that neighbor's renderer —
+ ; mechanically, by emitting the ref hole `seon.render.block/entity-slot`
+ ; already produces — and the expansion DECREMENTS distance per hop, so
+ ; the neighbor is rendered at distance-1 and distance 0 is identity
+ ; only: no expansion at all.
+ ;
+ ; REDIRECTION AT THE SLOT: a ref hole may carry an explicit projection
+ ; symbol, and the neighbor is then rendered through that projection
+ ; instead of its own declaration — the "override at any point" half of
+ ; the ruling, routed through the ONE router like every other
+ ; declaration, and recorded where every projection choice is recorded:
+ ; in the emitting renderer's own output.
+ ;
+ ; ACCRETION, strictly. Absent means exactly today's behaviour: the
+ ; admission caps alone bound the walk. Distance never overrides those
+ ; caps — the depth and node dials remain the absolute bound, and
+ ; distance SELECTS WITHIN them.
+ :seon.render/distance [:int {:min 0}]
+
+ ; The retained direct unit builder's input.
+ :seon.render/unit-request
+ [:map {:closed true}
+  [:seon.db/db :seon.db/database-value]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ ; What one bounded expansion needs. The database value is OPTIONAL
+ ; because block-slot expansion needs none; an entity ref without one is
+ ; refused in place, naming what it needed, rather than silently
+ ; rendering an empty hole.
+ ;
+ ; DISTANCE is optional: absent means the caps alone bound the expansion;
+ ; present means each ref hop spends one.
+ :seon.render/expansion
+ [:map {:closed true}
+  [:seon.render/surfaces :seon.render/surfaces]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.db/db {:optional true} :seon.db/database-value]]
+
+ ; The shell's ordered hiccup fragment.
+ :seon.render/page [:vector :seon.render/hiccup]
+
+ ; ---------------------------------------------------------------------------
+ ; GENERIC DEFAULT + SPECIALIST — the reusable selection shape
+ ; (owner architectural ruling, 2026-07-27 night)
+ ;
+ ; Every output kind has a GENERIC default renderer that can project any
+ ; value of the family. A producer that knows more about a particular
+ ; value points that value's key at a SPECIALIST instead — and the
+ ; choice is made WHERE THE UNIT IS BUILT, computed from the value's own
+ ; attributes.
+ ;
+ ; The two halves of the ruling are one design. Because the key on the
+ ; unit is the whole answer, a CONSUMER never branches: it hands the
+ ; unit to the one router and receives whatever the producer decided.
+ ; That is what makes "consumers reach an error's renderings only
+ ; through the router" enforceable rather than a convention — there is
+ ; no second call site to reach for, because the specialist's name never
+ ; leaves the producer.
+ ;
+ ; It also keeps hot reload: the specialist is a SYMBOL resolved late by
+ ; the router on every render, so re-evaluating it changes the next
+ ; render, exactly as the generic default does.
+ ; ---------------------------------------------------------------------------
+
+ ; ONE RULE: a pure predicate over the value's own attributes, and the
+ ; projection to use when it accepts. Both are qualified symbols
+ ; resolved late — a rule is as hot-reloadable as the renderer it picks.
+ :seon.render/specialist [:tuple :qualified-symbol :seon.render/projection]
+
+ ; What a producer asks for. `specialists` is ORDERED and first match
+ ; wins, because "more specific" is a judgement its owner makes and not
+ ; something a scoring function should guess. An empty vector is the
+ ; ordinary case and yields the default, so a family with no specialists
+ ; writes no special code.
+ ;
+ ; This is NOT a registry: the vector belongs to the ONE producer that
+ ; owns the family, is built from that family's own attributes, and is
+ ; never consulted by anybody rendering. A second family's rules are
+ ; invisible here, which is the difference between a producer's rules
+ ; and a dispatch table.
+ :seon.render/selection
+ [:map {:closed true}
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/default :seon.render/projection]
+  [:seon.render/specialists [:vector :seon.render/specialist]]]
+
+;; ===========================================================================
+;; BOOT
+;; ===========================================================================
+:seon.boot/advertisement [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant] [:seon.render.web/url {:optional true} :seon.render.web/url] [:seon.render.web/port {:optional true} :seon.render.web/port]]
+ :seon.boot/cluster-name [:string {:min 1}]
+ :seon.boot/config [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/root :seon.boot/root] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port :seon.boot/prepl-port] [:seon.boot/log-dir :seon.boot/log-dir] [:seon.boot/store-dir :seon.boot/store-dir]]
+ :seon.boot/instance [:map {:closed true} [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops] [:seon.render.web/view {:optional true} :seon.render.web/view] [:seon.render.web/served {:optional true} :seon.render.web/server] [:seon.cluster.agent/routing {:optional true} :seon.cluster.agent/routing] [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]]
+ ; THE ARMED LAYERS, each optional because absence marks where boot
+ ; stopped: the loop's handle, the graph it runs on, the error fan-out
+ ; that makes flow's error channel more than a 100-deep buffer nobody
+ ; reads, and the counter for faults the fan-out had to drop. They are
+ ; ARMED AND IDLE — the graph is running and the wake channel is primed,
+ ; and not one model call happens until a real trigger commits.
+ ; THE PROCESS ROOT'S TWO EXECUTORS, registered ONCE and referenced.
+ ; It was inlined in the instance map and inlined AGAIN on
+ ; `seon.cluster/root-executors`, where malli could not compile it at
+ ; all — a `:malli/schema` goes straight to malli, and a bare `[:fn
+ ; sym]` there has no resolver, so that contract had never once been
+ ; checked. Instrumentation found it the moment it collected. Register
+ ; shared shapes once and reference them; that rule exists for exactly
+ ; this.
+ :seon.boot/executors [:map {:closed true} [:compute [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]] [:io [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]]]
+
+ :seon.boot/log-dir [:string {:min 1}]
+ :seon.boot/overrides [:map {:closed true} [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name] [:seon.boot/root {:optional true} :seon.boot/root] [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host] [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port] [:seon.boot/log-dir {:optional true} :seon.boot/log-dir] [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]]
+ :seon.boot/pid [:int {:min 1}]
+ :seon.boot/prepl-host [:string {:min 1}]
+ :seon.boot/prepl-port [:int {:min 0 :max 65535}]
+ ; What boot recovery found and did. Counts, not status flags: absence
+ ; means the tower stopped before recovery, and zero operations means a
+ ; clean boot — which is the common case and commits nothing.
+ :seon.boot/recovered-runs [:int {:min 0}]
+ :seon.boot/recovery-operations [:int {:min 0}]
+
+ :seon.boot/root [:string {:min 1}]
+ :seon.boot/start-instant :inst
+ :seon.boot/store-dir [:string {:min 1}]
+ :seon.cluster.agent/count [:int {:min 0}]
+
+ ; THE BOOT BANNER'S data, derived from a started instance. Optional
+ ; where the tower may not have reached — a degraded instance still has
+ ; a readiness, and absence marks what never stood.
+ :seon.boot/readiness
+ [:map {:closed true}
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.boot/pid :seon.boot/pid]
+  [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
+  [:seon.cluster.agent/count :seon.cluster.agent/count]
+  [:seon.problems/problems :seon.problems/problems]
+  [:seon.render.web/url {:optional true} :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]
+  [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs]
+  [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+  [:seon.instrument/instrumented {:optional true} [:int {:min 0}]]]
+
+
+;; ===========================================================================
+;; CONFIG
+;; ===========================================================================
+:seon.config/cluster
+ [:string {:min 1 :seon.db/identity true}]
+
+ :seon.config/applied-manifest-digest
+ [:re "^[0-9a-f]{64}$"]
+
+ :seon.config/on-core-error
+ [:enum {:seon.config/dial true} :record :panic]
+
+ ; THE ONE LIMIT on an agent evaluation, as a dial. The evaluator takes
+ ; it in its request and never defaults it: a deadline literal in code
+ ; is what the ruling bans, and a dial with a provenanced default is
+ ; what replaces it. Declared here with the other dials so the config
+ ; gate and this value schema share one authority.
+ :seon.config.eval/time-limit-ms
+ [:int {:min 1}]
+
+ ; Serialized receipt text larger than this moves to `seon.blob`; the
+ ; receipt retains a bounded presentation projection plus digest and size.
+ :seon.config.eval.result/blob-threshold
+ [:int {:min 1 :seon.config/dial true}]
+
+ ; WHO hears a fault nobody else can be told about. It names an agent
+ ; id, and boot seeds `"root"` so the shipped default names something
+ ; that really exists. Still OPTIONAL: a manifest may drop it, and
+ ; absence is then the state — the error fact is committed and no
+ ; escalation message is sent.
+ :seon.config.error/escalate-to
+ [:string {:min 1 :seon.config/optional true}]
+
+ ; How many faults of one SIGNATURE since this process started before
+ ; the same fault also escalates. Counted by query over committed
+ ; facts, never a stored tally.
+ :seon.config.error/recurrence-limit
+ [:int {:min 1}]
+
+ ; THE VIEW. Port 0 means the operating system chooses and the chosen
+ ; port is reported — a second cluster just works, and nobody has to
+ ; know a number in advance. Pin it when a stable bookmark is wanted.
+ :seon.config.web/port
+ [:int {:min 0 :max 65535 :seon.config/optional true}]
+
+ ; How often a tab is willing to be repainted. A coalescing FLOOR, not
+ ; a timer standing in for an unobservable event: the observable event
+ ; is the commit and `listen!` already delivers it. Declared HERE with
+ ; the other dials, because a dial has to be inside the config
+ ; singleton entity to install as an attribute at all — a declaration
+ ; beside its consumer would have been tidier and would not have
+ ; installed.
+ :seon.config.render/coalesce-ms [:int {:min 0 :max 1000}]
+
+ ; HOW LONG AN AGENT MAY RUN ON ITS OWN STEAM. Unit: consecutive runs
+ ; per idle→running episode — runs since (and including) the one
+ ; answering the last OUTSIDE trigger, derived purely from committed
+ ; facts (the run's opening transaction names its trigger; a trigger
+ ; with no :seon.cluster.message/from and no
+ ; :seon.cluster.message/about came from outside the population's
+ ; autonomous activity — a human, or a schedule fire). No stored
+ ; counter exists; an outside trigger's own run IS the reset. ABSENT is
+ ; FAIL-CLOSED for agent-sent triggers (the max-chain precedent):
+ ; nothing agent-triggered opens, outside triggers open normally.
+ :seon.config.run/max-episode-runs
+ [:int {:min 1 :seon.config/optional true}]
+
+ ; HOW LONG A CONVERSATION MAY RUN WITHOUT A HUMAN. Unit: agent-to-agent
+ ; hops in one causal chain. Delivery IS the wake, so alice messaging
+ ; bob wakes bob, whose reply wakes alice — a polite infinite
+ ; conversation is a REAL shape, and unlike the error storm it never
+ ; repeats a signature, so the recurrence fence cannot see it. Each hop
+ ; is also a paid model call, so the bound is a spend bound as much as
+ ; a liveness one. Counted by walking committed transaction metadata,
+ ; never a stored counter (the quarry stored `hops` on every message
+ ; and then needed a second rule to reset it).
+ :seon.config.message/max-chain
+ [:int {:min 1}]
+
+ ; THE MODEL SEAM, as dials rather than a map hard-coded in a drive script.
+ ; The loop resolves the provider from current facts at each :call, so these
+ ; are the descriptor row the request is built from. The credential is NEVER
+ ; here — only the NAME of the
+ ; environment variable that holds it, which is what keeps a key out of
+ ; the database and out of Git.
+ :seon.config.ai/endpoint
+ [:string {:min 1 :seon.config/per-agent true}]
+
+ :seon.config.ai/model
+ [:string {:min 1 :seon.config/per-agent true}]
+
+ ; The positive output budget sent to the provider. It bounds thinking
+ ; and visible completion together; the HTTP deadline remains only the
+ ; backstop for genuinely unobservable remote state.
+ :seon.config.ai/max-tokens
+ [:and {:seon.config/per-agent true
+        :seon.ai/wire [["max_tokens" clojure.core/identity]]}
+  :seon.ai/max-tokens]
+
+ ; Optional by design: absence sends no thinking field, so the provider owns
+ ; its documented default (DeepSeek v4 Flash is default-on/high). :disabled
+ ; sends explicit off. :low/:high/:max send explicit on plus that effort.
+ ; Vendor mapping captured 2026-08-01:
+ ; requested low/high/xhigh/max -> Flash low/high/high/max;
+ ; requested low/high/xhigh/max -> Pro high/high/max/max until its announced
+ ; early-August mapping update. Seon exposes low/high/max and lets the provider
+ ; perform its model-specific mapping; there is no model-name branch here.
+ :seon.config.ai/thinking
+ [:and {:seon.config/optional true
+        :seon.config/per-agent true
+        :seon.ai/wire
+        [["thinking" seon.ai/thinking-wire-value]
+         ["reasoning_effort" seon.ai/reasoning-effort-wire-value]]}
+  :seon.ai/thinking]
+
+ ; OpenAI-compatible request settings are optional so absence leaves the
+ ; provider untouched. Every one is uniformly overridable on an agent entity;
+ ; the one derived overlay follows these registrations without a dial roster.
+ :seon.config.ai/temperature
+ [:double {:min 0.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["temperature" clojure.core/identity]]}]
+
+ :seon.config.ai/top-p
+ [:double {:min 0.0 :max 1.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["top_p" clojure.core/identity]]}]
+
+ :seon.config.ai/frequency-penalty
+ [:double {:min -2.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire
+           [["frequency_penalty" clojure.core/identity]]}]
+
+ :seon.config.ai/presence-penalty
+ [:double {:min -2.0 :max 2.0
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire
+           [["presence_penalty" clojure.core/identity]]}]
+
+ :seon.config.ai/stop
+ [:vector {:min 1 :max 4
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/wire [["stop" clojure.core/identity]]}
+  [:string {:min 1}]]
+
+ :seon.config.ai/response-format
+ [:enum {:seon.config/optional true
+         :seon.config/per-agent true
+         :seon.ai/wire
+         [["response_format" seon.ai/response-format-wire-value]]}
+  :json-object]
+
+ ; An EDN map string is the escape hatch for vendor request parameters whose
+ ; first-class dial has not landed yet. The request builder validates its map
+ ; shape and protected keys before any paid call.
+ :seon.config.ai/extra-body-edn
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true
+           :seon.ai/extra-body true}]
+
+ :seon.config.ai/api-key-variable
+ [:string {:min 1 :seon.config/per-agent true}]
+
+ ; The deadline on a genuinely unobservable external call — the one
+ ; place a clock is the honest mechanism rather than a stand-in for an
+ ; event we could have watched.
+ :seon.config.ai/timeout-ms
+ [:int {:min 1 :seon.config/per-agent true}]
+
+ ; ---------------------------------------------------------------------
+ ; THE BACKUP DESCRIPTOR ROW — the four dials above, a second time, for
+ ; the OPTIONAL second target. Three of the four are optional OVERRIDES
+ ; that inherit the primary's value, and that is what makes a partial
+ ; backup UNREPRESENTABLE rather than merely refused: a backup exists
+ ; exactly when `:seon.config.ai.backup/model` is present, so there is
+ ; no state in which three backup dials are configured and the fourth
+ ; silently voids them. It also makes the common case honest — a backup
+ ; model at the same provider is ONE dial, not four copied lines.
+ ;
+ ; This is a deliberate departure from research/model-failover
+ ; §"Provider descriptors" option 2 (provider + model-target ENTITY rows
+ ; joined by refs). The manifest is a flat dial map validated key by
+ ; key, and `:seon.db/ref` admits an eid, a tempid or a lookup ref —
+ ; never an inline map — so entity rows would need the config gate, the
+ ; reconciler's desired-row identity rule and the ref candidate form all
+ ; changed at once. Two roles plus sparse same-ident agent overrides do not
+ ; need a join table; a third role or a changing descriptor relationship is
+ ; the evidence that would earn entity rows.
+ :seon.config.ai.backup/model
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
+
+ :seon.config.ai.backup/endpoint
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
+
+ :seon.config.ai.backup/api-key-variable
+ [:string {:min 1
+           :seon.config/optional true
+           :seon.config/per-agent true}]
+
+ :seon.config.ai.backup/timeout-ms
+ [:int {:min 1
+        :seon.config/optional true
+        :seon.config/per-agent true}]
+
+ ; ---------------------------------------------------------------------
+ ; THE BACKOFF STRATEGY. It runs on exactly ONE path — an unpaid,
+ ; transient failure with NO backup configured — and it is data so that
+ ; the schedule is a value a seeded property pins rather than a constant
+ ; in a call site.
+ :seon.config.ai.retry/base-delay-ms
+ [:and {:seon.config/per-agent true} :seon.ai.retry/base-delay-ms]
+
+ :seon.config.ai.retry/multiplier
+ [:and {:seon.config/per-agent true} :seon.ai.retry/multiplier]
+
+ :seon.config.ai.retry/jitter-fraction
+ [:and {:seon.config/per-agent true} :seon.ai.retry/jitter-fraction]
+
+ :seon.config.ai.retry/maximum-delay-ms
+ [:and {:seon.config/per-agent true} :seon.ai.retry/maximum-delay-ms]
+
+ :seon.config.ai.retry/maximum-retries
+ [:and {:seon.config/per-agent true} :seon.ai.retry/maximum-retries]
+
+ :seon.config.ai.retry/maximum-total-delay-ms
+ [:and {:seon.config/per-agent true}
+  :seon.ai.retry/maximum-total-delay-ms]
+
+ :seon.config/apply-request
+ [:map {:closed true}
+  ; A live Datahike connection is a genuine third-party boundary.
+  [:seon.config/connection :any]
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
+
+ :seon.config/compile-request
+ [:map {:closed true}
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
+
+ :seon.config/compiled
+ [:map {:closed true}
+  [:seon.config/effective :seon.config/effective]
+  [:seon.config/applied-manifest-digest
+   :seon.config/applied-manifest-digest]
+  [:seon.config/desired-row :seon.config/entity]
+  [:seon.config/resolved-attributes [:set :qualified-keyword]]]
+
+ :seon.boot/start-request
+ [:map {:closed true}
+  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+  [:seon.boot/root {:optional true} :seon.boot/root]
+  [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host]
+  [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port]
+  [:seon.boot/log-dir {:optional true} :seon.boot/log-dir]
+  [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]
+  [:seon.config/manifest {:optional true} :seon.config/manifest]
+  [:seon.config/environment {:optional true} :seon.config/manifest]]
+
+;; ===========================================================================
+;; CONTEXT
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; CONTEXT CAPTURE — what was sent, durable BEFORE the provider call.
+ ;
+ ; Owner ruling 2026-07-28 (Decision 4, Option A): the turn owner commits
+ ; the exact prompt text, the rendered database basis, the ordered
+ ; contribution records, and the trusted-input snapshot in ONE
+ ; transaction before the unobservable remote call. Writer ordering then
+ ; guarantees: no capture → the prompt was never derived; capture with no
+ ; attempt row → the call may never have fired — the receipt-before-
+ ; dispatch pattern applied to context evidence.
+ ; ---------------------------------------------------------------------------
+
+ ; Identity is DERIVED from provenance, never allocated:
+ ; "<run-id>-context-<basis-t>". Re-deriving the same prompt at the same
+ ; basis upserts the same capture; a released run re-entering :call at a
+ ; new basis creates a new capture, which is the honest record — the
+ ; prompt genuinely differs.
+ :seon.context.capture/id [:string {:min 1 :seon.db/identity true}]
+ :seon.context.capture/run :seon.db/ref
+
+ ; The rendered database basis transaction (:t of the database value
+ ; every projection read). The branch is the cluster's own and the
+ ; prompt path never renders as-of/history values, so :t identifies the
+ ; value exactly (the exact-database-identity oracle still generates the
+ ; other axes to prove no cross-identity reuse — in memory, not here).
+ :seon.context.capture/basis-t [:int {:min 0}]
+
+ ; THE BYTE GROUND TRUTH — the exact string handed to :seon.ai/prompt.
+ ; Ruled blob-backed; the blob archive is quarry order Q1 and does not
+ ; exist in the fresh tree yet, so this ships as a string attribute with
+ ; the blob-ref cutover named as an accretion at that rung (§9 of the
+ ; owning contract package). Never admitted/capped: capping the capture
+ ; would make the evidence lie about what was sent.
+ :seon.context.capture/prompt [:string {:min 1}]
+
+ ; The one honest non-database input, recorded so the projection is
+ ; reproducible. Present exactly when the membership required it —
+ ; absence means no block needed liveness, never "assumed alive".
+ :seon.cluster.run/live-processes [:set :seon.cluster.run/process]
+
+ ; Ordered by each child's own position (L13: order is never a
+ ; collection-type property; component children carry ordinals).
+ :seon.context.capture/contributions [:set {:seon.db/component true} :seon.db/ref]
+
+ :seon.context.capture/capture
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.context/capture-ai
+        :seon.render/html seon.context/capture-html}
+  [:seon.context.capture/id :seon.context.capture/id]
+  [:seon.context.capture/run :seon.context.capture/run]
+  [:seon.context.capture/basis-t :seon.context.capture/basis-t]
+  [:seon.context.capture/prompt :seon.context.capture/prompt]
+  [:seon.context.capture/contributions :seon.context.capture/contributions]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ ; ---------------------------------------------------------------------------
+ ; ONE CONTRIBUTION ROW — evidence, not content.
+ ;
+ ; The prompt blob is the byte ground truth; rows explain how it was
+ ; built: name, hash, tokens, position, projection. NO stored
+ ; :seon.render/kind — the 2026-07-28 presence ruling exempts kind as
+ ; "a request argument, never stored", and on a prompt capture it is the
+ ; constant :seon.render/ai anyway (derivable, so storing it would be a
+ ; stored derivation). NO stored text — hash + position + the blob
+ ; reconstruct it. A FAILED contribution is presence of the error keys.
+ ; An OMITTED block writes no row: its omission is re-derivable from the
+ ; captured basis and membership (derive, don't store).
+ ; ---------------------------------------------------------------------------
+
+ ; "<capture-id>-<position>" — provenance-derived, upsert-idempotent.
+ :seon.context.contribution/id [:string {:min 1 :seon.db/identity true}]
+ :seon.context.contribution/position [:int {:min 0}]
+ ; SHA-256 hex of the contribution's exact UTF-8 text (schema/sha-256 —
+ ; the one digest owner; the queued schema/digest helper lands here).
+ :seon.context.contribution/hash [:string {:min 1}]
+ ; ESTIMATED tokens (house rule: human-visible sizes are estimated
+ ; tokens, never raw characters). The estimator is a named adopt (§9).
+ :seon.context.contribution/tokens [:int {:min 0}]
+ ; The bounded message of the flat error value, when the block failed.
+ ; The full flat value stays in memory on the rendered-context record;
+ ; the durable row keeps the open :seon.error/kind (already registered,
+ ; ERROR section) plus this bounded message — never a second error shape.
+ :seon.context.contribution/error [:string {:min 1}]
+
+ :seon.context.contribution/contribution
+ [:map {:seon.db/entity true}
+  [:seon.context.contribution/id :seon.context.contribution/id]
+  [:seon.context.contribution/position :seon.context.contribution/position]
+  [:seon.render.block/name :seon.render.block/name]
+  [:seon.context.contribution/hash :seon.context.contribution/hash]
+  [:seon.context.contribution/tokens :seon.context.contribution/tokens]
+  [:seon.render/projection {:optional true} :seon.render/projection]
+  [:seon.error/kind {:optional true} :seon.error/kind]
+  [:seon.context.contribution/error {:optional true}
+   :seon.context.contribution/error]]
+
+ ; ---------------------------------------------------------------------------
+ ; IN-MEMORY SHAPES — never transacted, so [:maybe]/nil are legal here.
+ ; ---------------------------------------------------------------------------
+
+ ; One in-memory contribution record. Text is ALWAYS present — a failed
+ ; block contributes a bounded, block-named error statement rather than
+ ; silence (silent omission is confabulation fuel). :seon.error/value
+ ; presence IS "failed"; :seon.render/kind rides here (request-argument
+ ; territory) even though the durable row drops it.
+ :seon.context/contribution
+ [:map {:closed true}
+  [:seon.render.block/name :seon.render.block/name]
+  [:seon.render/kind :seon.render/kind]
+  [:seon.context.contribution/position :seon.context.contribution/position]
+  [:seon.context.contribution/text [:string {:min 1}]]
+  [:seon.context.contribution/hash :seon.context.contribution/hash]
+  [:seon.context.contribution/tokens :seon.context.contribution/tokens]
+  [:seon.render/projection {:optional true} :seon.render/projection]
+  [:seon.error/value {:optional true} :seon.error/value]]
+
+ :seon.context/contributions [:vector :seon.context/contribution]
+
+ ; What capture-tx receives: the rendered context plus the run it is
+ ; evidence for. Pure in, tx-data out; the LOOP commits.
+ :seon.context/capture-request
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.prompt/rendered-context :seon.cluster.prompt/rendered-context]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+;; ===========================================================================
+;; DATA
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; THE /data DRILL. Bounded expansion whose cursor says where to resume
+ ; instead of eliding — the same caps and the same walk as a panel, one
+ ; keeping the tail and one throwing it away.
+ ;
+ ; Process-local only. A cursor lives in a URL, not in the database: a
+ ; drilled position is a link somebody can send, and storing it would
+ ; make "where is this reader looking" a fact somebody has to retract.
+ ; ---------------------------------------------------------------------------
+
+ ; A `get-in` path — the quarry's own vocabulary for this, deliberately
+ ; not a new noun. Steps are ordinary values because the things they
+ ; index are: a keyword key, a string key, an integer index.
+ :seon.render.data/path [:vector :any]
+ :seon.render.data/offset [:int {:min 0}]
+
+ :seon.render.data/cursor
+ [:map {:closed true}
+  [:seon.render.data/path :seon.render.data/path]
+  [:seon.render.data/offset :seon.render.data/offset]]
+
+ ; One page, and the honest count beside it. `total` is present always
+ ; because a reader must know a window is a window; the two resume
+ ; offsets are present exactly when there IS somewhere to resume, so
+ ; "is there a next page?" is key presence rather than arithmetic
+ ; repeated at every call site.
+ :seon.render.data/window
+ [:map {:closed true}
+  [:seon.render.data/entries [:vector [:tuple :any :any]]]
+  [:seon.render.data/offset :seon.render.data/offset]
+  [:seon.render.data/total [:int {:min 0}]]
+  [:seon.render.data/next-offset {:optional true} :seon.render.data/offset]
+  [:seon.render.data/previous-offset {:optional true} :seon.render.data/offset]]
+
+;; ===========================================================================
+;; DISPOSITIONS
+;; ===========================================================================
+; The agent-facing disposition VALUES. Exactly two (owner ruling,
+ ; 2026-07-27 night): no start!, no pause/resume/terminate until an
+ ; agent-lifecycle entity exists. These are values the driver
+ ; interprets — the first of the three agent-facing shapes — and they
+ ; are pure: `my.run` commits nothing and reads nothing.
+ :my.run/disposition [:enum :wait :completed]
+ :my.run/note [:string {:min 1}]
+ :my.run/result [:string {:min 1}]
+ :my.run/wait [:map {:closed true} [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note]]
+ :my.run/completed [:map {:closed true} [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+ ; what an agent's last form may evaluate to and the loop will act on
+ :my.run/value [:or :my.run/wait :my.run/completed]
+
+;; ===========================================================================
+;; ERROR
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; ONE FAMILY. `:seon.fault/*` merged in here 2026-07-27 (orchestrator
+ ; ruling) BEFORE anything referenced those names: an error is an error
+ ; whether it arrived as a flat value an agent reads, a transition's
+ ; refusal, or a Throwable that escaped our own code onto flow's error
+ ; channel. Two shapes in one family, and the relation between them is
+ ; a projection, not a conversion:
+ ;
+ ;   :seon.error/value — the FLAT value. Nothing throws into the run
+ ;     loop, so this is what a caller branches on and what an agent is
+ ;     shown. Producers keep their own closed maps under `data`.
+ ;   :seon.error/fact  — the DURABLE fact. One committed entity per
+ ;     error worth remembering, carrying the projected evidence and
+ ;     refs to what it interrupted. `seon.error/value` projects a fact
+ ;     back down to the flat shape, which is why the totality property
+ ;     asserts both of one normalization.
+ ;
+ ; KINDS ARE NEVER ENUMERATED HERE. `:seon.error/kind` stays `:keyword`
+ ; on purpose: the kind population is the set of namespaced keywords the
+ ; producing sites already carry (`::no-credential`, `:seon.db/rejected`,
+ ; `:seon.cluster.run/refused`, …). A `[:enum]` here would be a
+ ; hand-maintained list of everyone else's vocabulary and would go stale
+ ; the first time a site is added. N5's program graph makes the real
+ ; enumeration QUERYABLE from the corpus; until then it is discoverable
+ ; by reading the producers, and neither answer is a list in this file.
+ ; ---------------------------------------------------------------------------
+
+ ; --- the flat value -------------------------------------------------------
+ ; `kind` is the namespaced rule that failed, `message` is what a reader
+ ; (agent or human) is told, and `data` carries whatever the owner of
+ ; that rule attached. Producers stay closed maps of their own; this is
+ ; the shared floor.
+ :seon.error/data :map
+ :seon.error/kind :keyword
+ :seon.error/message [:string {:min 1}]
+ :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]
+
+ ; --- the durable fact -----------------------------------------------------
+ ; Classification is the CHANNEL, not a predicate — `seon.sci.eval/evaluate`
+ ; never throws, so an agent's mistake is a VALUE and can only become a
+ ; receipt; anything arriving on ::flow/error is definitionally ours. No
+ ; kind list, no ambient scope, no authorship inference.
+ :seon.error/id [:string {:min 1 :seon.db/identity true}]
+ :seon.error/at :inst
+ ; the ONE holder string, `seon.cluster/process-identity`
+ :seon.error/process [:string {:min 1}]
+ :seon.error/proc :keyword
+ :seon.error/op :keyword
+ :seon.error/cid :keyword
+ :seon.error/class [:string {:min 1}]
+ :seon.error/basis-t [:int {:min 0}]
+ ; the projected source, printed. NEVER a raw pr-str: two of flow's three
+ ; report shapes carry ::flow/state, which for the run loop holds a live
+ ; Datahike connection and executors. One codec — `seon.sci.admit/admit`.
+ :seon.error/data-edn :string
+ ; the honest signal that `data-edn` is not the whole source, so a reader
+ ; never has to guess whether an elision marker was the original value
+ :seon.error/capped? :boolean
+ ; a derivation of the error's OWN content, committed with it — never a
+ ; mutable tally. Recurrence is counted by query. Deliberately excludes
+ ; the message: a message carrying an id or a timestamp would make every
+ ; occurrence unique and recurrence undetectable.
+ :seon.error/signature [:re {:seon.db/index true} "^[0-9a-f]{64}$"]
+ :seon.error/occurrence [:int {:min 1}]
+ :seon.error/occurrences [:int {:min 1}]
+ :seon.error/notification-limit [:int {:min 1}]
+ :seon.error/notification [:enum :final]
+ :seon.error/agent [:and {:seon.db/index true} :seon.db/ref]
+ :seon.error/run [:and {:seon.db/index true} :seon.db/ref]
+
+ ; The entity map is not decoration: canonical-database-attributes
+ ; installs entity-map entries BY CONSTRUCTION, and a family declared
+ ; only as standalone leaves installs nothing but its identity —
+ ; the fixture-vs-live-boot class that cost the N3 drive two rounds.
+ :seon.error/fact
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html}
+  [:seon.error/id :seon.error/id]
+  [:seon.error/at :seon.error/at]
+  [:seon.error/process :seon.error/process]
+  ; REQUIRED, where the merged draft had it optional: normalization is
+  ; fail-closed, so a source carrying no discoverable kind gets
+  ; `:seon.error/unclassified` rather than an absent key. That is what
+  ; makes "every fact projects to a valid flat value" true by
+  ; construction, and it means a kind query can never silently miss.
+  [:seon.error/kind :seon.error/kind]
+  [:seon.error/message :seon.error/message]
+  [:seon.error/signature :seon.error/signature]
+  [:seon.error/data-edn :seon.error/data-edn]
+  [:seon.error/capped? :seon.error/capped?]
+  ; absent when the error was never a Throwable — a flat value and a
+  ; transition refusal have no class, and absence is the state
+  [:seon.error/class {:optional true} :seon.error/class]
+  ; absent for everything that did not arrive on flow's error channel,
+  ; and `op`/`cid` are absent for two of its three report shapes
+  [:seon.error/proc {:optional true} :seon.error/proc]
+  [:seon.error/op {:optional true} :seon.error/op]
+  [:seon.error/cid {:optional true} :seon.error/cid]
+  ; absent when no database value was pinned at the error
+  [:seon.error/basis-t {:optional true} :seon.error/basis-t]
+  ; absent when no claimed-open run existed at the error's basis
+  [:seon.error/run {:optional true} :seon.error/run]
+  [:seon.error/agent {:optional true} :seon.error/agent]
+  [:seon.instrument/fn {:optional true} :seon.instrument/fn]
+  [:seon.instrument/arm {:optional true} :seon.instrument/arm]
+  [:seon.instrument/expected {:optional true} :seon.instrument/expected]
+  [:seon.instrument/args {:optional true} :seon.instrument/args]]
+
+ ; --- normalization --------------------------------------------------------
+ ; `:any` at the ONE genuine third-party boundary of this family: the
+ ; source is whatever went wrong — a Throwable from any library, one of
+ ; core.async.flow's three incompatible report maps, a flat value, or a
+ ; transition's ex-data. A schema here would be a second classifier, and
+ ; the whole point of one normalizer is that there is no second one.
+ :seon.error/source :any
+ ; NOTE what is NOT a key here: `:seon.config/on-core-error`. The error
+ ; path may not panic — a panic while recording an error destroys the
+ ; one record of the original failure (the quarry's recursion fence,
+ ; src-old/seon/error.cljc:738-745). Admission is therefore called in
+ ; `:record` mode unconditionally, and a codec hole stays visible as a
+ ; projection marker plus `capped?` rather than as a throw.
+ :seon.error/normalize-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+
+ ; --- the notice: the derived routing unit ---------------------------------
+ ; WHY an agent is being told. A derived clause, never boilerplate — and
+ ; the reason IS the escalation rule, so the two cannot drift. It is not
+ ; an attribute of the fact because it is per-RECIPIENT: one fact can be
+ ; :your-run to the interrupted agent and :recurring to the escalation
+ ; owner in the same transaction.
+ ; `:failover` is the fourth recipient reason and it is NOT a message
+ ; reason: nobody is mailed, the backup model READS it as the system
+ ; segment of the very request that replaces the failed one. Adding it
+ ; here rather than writing a bespoke failover notice is the whole
+ ; point — the primary's why-clause is the SAME derivation the agent,
+ ; the escalation owner and the log already get.
+ :seon.error/reason [:enum :your-run :no-attributable-agent :recurring :failover]
+ ; Machine-readable projection structure. The durable fact remains the
+ ; evidence owner; the notice carries its lookup ref, the derived kind,
+ ; every route it declares, and the selected human presentation.
+ :seon.error/evidence [:tuple [:enum :seon.error/id] :seon.error/id]
+ :seon.error/presentation :seon.render/projection
+ :seon.error/notice-request [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ ; The notice is DERIVED and never stored: a fact plus the projection
+ ; declarations, which is what makes it routable through the one generic
+ ; router (`seon.render`). The projection keys ride on the notice rather
+ ; than on the entity because a stored symbol identical on every row is
+ ; stored-derived data, and because the ai projection needs the reason
+ ; the entity cannot carry.
+ :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.error/presentation :seon.error/presentation] [:seon.render/kinds :seon.render/kinds] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+
+ ; How many faults the fan-out's bounded buffer had to DROP in this
+ ; process. Process-local by nature — it counts what never became a
+ ; fact, so it cannot itself be a fact — and it is on the instance so
+ ; "did we lose any?" is answerable rather than assumed. Dropping is
+ ; ADMITTED, never silent: the quarry's own lesson was that an unread
+ ; error channel forgets quietly.
+ :seon.error/drops [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+
+ ; --- the commit ------------------------------------------------------------
+ ; `commit-tx` is PURE over a database value and returns transaction
+ ; data, which is what keeps this family free of the store: the
+ ; dependency runs `store -> error` (store's `transact!` uses this
+ ; family's `refusal`), never both ways. The caller commits through the
+ ; one door. Slice 1's `commit-request`/`committed` shapes are GONE —
+ ; they described an effectful function that no longer exists, and
+ ; keeping them would have been a second contract for one mechanism.
+ :seon.error/commit-tx-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to]]
+
+ ; An explanation message carries a ref to what it explains. A user
+ ; message has none — absence is the state, and it is what makes the
+ ; storm fence computable without a flag. The `:and` wrap is the one
+ ; idiom for a facet on a referenced form, and the facet is not
+ ; decoration: a BARE `:seon.db/ref` carries no persistence facet and
+ ; would never install as a canonical database attribute (the computed
+ ; rule the PROVENANCE section documents). Slice 1 declared it bare, so a
+ ; fault-explanation message would have been untransactable on the live
+ ; boot path and no fixture would have seen it. Indexed because the
+ ; storm fence and "which messages explain this error" both query BY
+ ; the ref.
+ :seon.cluster.message/about [:and {:seon.db/index true} :seon.db/ref]
+
+;; ===========================================================================
+;; EVAL
+;; ===========================================================================
+; THE ONE LIMIT. Time, and nothing else: sci counts no steps and has no
+ ; step concept, so a wall-clock deadline read at every interpreted fn
+ ; body entrance is the whole mechanism (reference-code/sci/doc/
+ ; interrupt.md:23-35). :seon.eval/fn-entries is RECORDED beside it and
+ ; is never a limit — 271M entries in 500ms reads as a spin, 12 reads as
+ ; blocked in a host call.
+ :seon.sci.eval/time-limit-ms [:int {:min 1}]
+ ; sci's own word for an interpreter context; one live context belongs to
+ ; each cluster, so every agent in that cluster shares definitions while
+ ; another cluster remains isolated.
+ :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
+ :seon.sci.eval/program-row :map
+ :seon.sci.eval/referenced-vars [:set :symbol]
+ :seon.sci.eval/unproven-called-vars [:set :symbol]
+ :seon.sci.eval/nondeterministic-calls [:set :symbol]
+ :seon.sci.eval/impure-calls [:set :symbol]
+ :seon.sci.eval/session-def
+ [:map {:closed true}
+  [:seon.code.def/id :seon.code.def/id]
+  [:seon.code.def/ns :seon.code.def/ns]
+  [:seon.code.def/name :seon.code.def/name]
+  [:seon.code.def/source :seon.code.def/source]
+  [:seon.sci.eval/value :any]
+  [:seon.sci.eval/referenced-vars :seon.sci.eval/referenced-vars]
+  [:seon.sci.eval/unproven-called-vars
+   :seon.sci.eval/unproven-called-vars]
+  [:seon.sci.eval/nondeterministic-calls
+   :seon.sci.eval/nondeterministic-calls]
+  [:seon.sci.eval/impure-calls :seon.sci.eval/impure-calls]]
+ :seon.sci.eval/session-defs [:vector :seon.sci.eval/session-def]
+ :seon.sci.eval/install-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :seon.db/database-value]
+  [:seon.sci.eval/program-row :seon.sci.eval/program-row]]
+ :seon.sci.eval/acquire-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :seon.db/database-value]]
+ :seon.sci.eval/session-install-request
+ [:map {:closed true}
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true}
+   :seon.store/branch-connection]]
+ ; The error disposition is REQUIRED and is passed straight to
+ ; admission: R41 decides what a projection failure does, and a caller
+ ; that has not decided has not thought about it.
+ :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ ; What one evaluation leaves behind: the terminal facts the receipt
+ ; stores (result-edn always; error when it failed; interrupted-at when
+ ; the time limit fired), the admitted value the loop reads a
+ ; disposition out of, the printed projection, and the diagnostics.
+ ; Nothing here is optional-by-nil — an absent key means the evaluation
+ ; had no such thing, and PRESENCE IS THE STATE: there is no status
+ ; label restating which keys exist (owner ruling 2026-07-28).
+ :seon.sci.eval/ending-ns :symbol
+ :seon.sci.eval/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options :seon.print/options] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
+
+;; ===========================================================================
+;; EXPORT
+;; ===========================================================================
+:seon.export/parent-dir [:string {:min 1}]
+ :seon.export/path [:string {:min 1}]
+ :seon.export/request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.export/parent-dir :seon.export/parent-dir]]
+
+;; ===========================================================================
+;; FLOW
+;; ===========================================================================
+:seon.config.flow.compute/concurrency [:int {:min 1 :description "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}]
+ :seon.config.flow.compute/queue-depth [:int {:min 1 :description "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}]
+ :seon.flow/active-evals [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.flow/active-work [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.flow/admitted? :boolean
+ :seon.flow/attempt [:int {:min 0}]
+ :seon.flow/buffer-capacity [:int {:min 1}]
+ :seon.flow/capacity-observer-request [:map [:seon.flow/parallelism :seon.flow/parallelism] [:seon.flow/active-work :seon.flow/active-work]]
+ :seon.flow/changed-namespace :symbol
+ :seon.flow/changed-source :string
+ :seon.flow/channel [:fn {:gen/gen seon.flow/channel-generator} seon.flow/channel?]
+ ; Callback contracts are function schemas, not predicate-shaped escape
+ ; hatches. Malli therefore constructs real functions from their output
+ ; schemas and the recurring flow gate invokes them with generated inputs.
+ :seon.flow/callback-result
+ [:or :nil :map
+  [:vector :seon.schema/value]
+  [:set :seon.schema/value]
+  [:sequential :seon.schema/value]
+  :string :keyword :symbol :boolean :int :double :uuid :inst]
+ :seon.flow/core-fault :map
+ :seon.flow/commit-drop!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/commit-fault!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/changed-namespace-request
+ [:map {:closed true}
+  [:seon.flow/changed-namespace :seon.flow/changed-namespace]
+  [:seon.flow/changed-source :seon.flow/changed-source]]
+ :seon.flow/compile-namespace-fn
+ [:=> [:cat :seon.flow/changed-namespace-request]
+  :seon.store/transaction-operation]
+ :seon.flow/compute-timeout-ms [:int {:min 1}]
+ :seon.flow/deliver!
+ [:=> [:cat :seon.sci.admit/value] :seon.flow/callback-result]
+ :seon.flow/error-fanout [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/fault-graph :seon.flow/graph] [:seon.flow/application-report-channel :seon.flow/channel] [:seon.flow/monitor-report-channel :seon.flow/channel] [:seon.flow/monitor-error-channel :seon.flow/channel] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/completion :seon.flow/channel]]
+ :seon.flow/error-fanout-request [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/started [:map [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]] [:seon.flow/fault-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/monitor-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/read-core-error-mode :seon.flow/read-core-error-mode] [:seon.flow/commit-fault! :seon.flow/commit-fault!] [:seon.flow/commit-drop! :seon.flow/commit-drop!] [:seon.flow/panic! :seon.flow/panic!]]
+ :seon.flow/escalated? :boolean
+ :seon.flow/escalation-request [:map [:seon.flow/turn-count :seon.flow/turn-count] [:seon.flow/failure-count :seon.flow/failure-count] [:seon.flow/max-turns :seon.flow/max-turns] [:seon.flow/max-failures :seon.flow/max-failures]]
+ :seon.flow/eval-proc-request [:map [:seon.flow/parallelism :seon.flow/parallelism] [:seon.flow/active-evals :seon.flow/active-evals] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/executor [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]
+ :seon.flow/failure-count [:int {:min 0}]
+ :seon.flow/fault-committer-proc-request [:map [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/completion :seon.flow/channel] [:seon.flow/read-core-error-mode :seon.flow/read-core-error-mode] [:seon.flow/commit-fault! :seon.flow/commit-fault!] [:seon.flow/panic! :seon.flow/panic!]]
+ :seon.flow/completion :seon.flow/channel
+ :seon.flow/fix-outcome [:enum :seon.flow/fix-succeeds :seon.flow/fix-fails :seon.flow/fix-breaks-other-namespace :seon.flow/no-response]
+ :seon.flow/fix-step-fn
+ [:=> [:cat :map] :seon.flow/fix-outcome]
+ :seon.flow/future [:fn {:gen/gen seon.flow/java-future-generator} seon.flow/java-future?]
+ :seon.flow/graph [:fn {:gen/gen seon.flow/graph-generator} seon.flow/graph?]
+ :seon.flow/join-error-request [:map [:seon.flow/started [:map [:error-chan :seon.flow/channel]]] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/tag [:map-of :qualified-keyword :string]]]
+ :seon.flow/indexer-proc-request [:map [:seon.flow/compile-namespace-fn :seon.flow/compile-namespace-fn] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/launcher [:fn {:gen/gen seon.flow/proc-launcher-generator} seon.flow/proc-launcher?]
+ :seon.flow/launcher-configuration [:map {:closed true} [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]
+ :seon.flow/started [:map {:closed true} [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]
+ :seon.flow/work-launcher
+ [:map {:closed true}
+  [:seon.flow/graph :seon.flow/graph]
+  [:seon.flow/started :seon.flow/started]
+  [:seon.flow/active-work :seon.flow/active-work]
+  [:seon.flow/compute-executor :seon.flow/executor]
+  [:seon.flow/configuration :seon.flow/launcher-configuration]]
+ :seon.flow/lineage-status [:enum :seon.flow/iterating :seon.flow/escalated :seon.flow/done]
+ :seon.flow/lineage-status-request [:map [:seon.flow/owner-count :seon.flow/owner-count] [:seon.flow/successful-owners :seon.flow/successful-owners] [:seon.flow/escalated? :seon.flow/escalated?] [:seon.flow/admitted? :seon.flow/admitted?]]
+ :seon.flow/mailbox-request [:map [:seon.flow/deliver! :seon.flow/deliver!]]
+ :seon.flow/max-failures [:int {:min 1}]
+ :seon.flow/max-turns [:int {:min 1}]
+ :seon.flow/namespace-owner-proc-request [:map [:seon.flow/fix-step-fn :seon.flow/fix-step-fn]]
+ :seon.flow/owner-count [:int {:min 1}]
+ :seon.flow/owner-ordinal [:int {:min 0}]
+ :seon.flow/panic!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/parallelism [:int {:min 1}]
+ :seon.flow/plan-step-fn [:=> [:cat :map] :map]
+ :seon.flow/planner-proc-request [:map [:seon.flow/plan-step-fn :seon.flow/plan-step-fn]]
+ :seon.flow/read-core-error-mode [:=> [:cat] :seon.config/on-core-error]
+ :seon.flow/read-sources [:=> [:cat] :seon.flow/sources]
+ :seon.flow/seed :int
+ :seon.flow/seeded-outcome-request [:map [:seon.flow/seed :seon.flow/seed] [:seon.flow/owner-ordinal :seon.flow/owner-ordinal] [:seon.flow/attempt :seon.flow/attempt]]
+ :seon.flow/source-enumerator-proc-request [:map [:seon.flow/read-sources :seon.flow/read-sources]]
+ :seon.flow/sources [:map-of :symbol :string]
+ :seon.flow/submission-id [:or :uuid :keyword :string]
+ :seon.flow/submission-wait-ms [:int {:min 0}]
+ :seon.flow/work-result
+ [:or
+  [:map {:closed true}
+   [:seon.flow/outcome [:= :seon.flow/time-limit]]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]
+  [:map {:closed true}
+   [:seon.flow/outcome [:= :seon.flow/completed]]
+   [:seon.flow/value :seon.sci.admit/value]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]]
+ :seon.flow/successful-owners [:set :keyword]
+ :seon.flow/turn-count [:int {:min 0}]
+ :seon.flow/started! [:=> [:cat] :nil]
+ :seon.flow/work-call
+ [:or
+  [:map {:closed true}
+   [:seon.flow/started! :seon.flow/started!]]
+  [:map {:closed true}
+   [:seon.flow/interrupt-fn :seon.sci.admit/interrupt-fn]]]
+ :seon.flow/work-fn
+ [:=> [:cat :seon.flow/work-call] :seon.sci.admit/value]
+ :seon.flow/work-launcher-request [:map {:closed true} [:seon.flow/configuration :seon.flow/launcher-configuration]]
+ :seon.flow/work-submission [:map {:closed true} [:seon.flow/submission-id :seon.flow/submission-id] [:seon.flow/workload :seon.flow/workload] [:seon.flow/work-fn :seon.flow/work-fn] [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/workload [:enum :compute]
+
+;; ===========================================================================
+;; INSTRUCTION
+;; ===========================================================================
+:seon.cluster.instruction/id
+ [:keyword {:seon.db/identity true}]
+
+ :seon.cluster.instruction/text
+ [:string {:min 1}]
+
+ :seon.cluster.instruction/instruction
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.instruction/instruction-ai
+        :seon.render/html seon.cluster.instruction/instruction-html}
+  [:seon.cluster.instruction/id :seon.cluster.instruction/id]
+  [:seon.cluster.instruction/text :seon.cluster.instruction/text]]
+
+ :seon.cluster.instruction/seed-rows
+ [:vector :seon.cluster.instruction/instruction]
+
+ :seon.cluster/toolkit-namespaces
+ [:vector :seon.ns/name]
+
+ ; Per-agent instructions are additive. Absence is the ordinary empty set;
+ ; the cluster's authoritative set lives on the separate cluster entity.
+ :seon.cluster.agent/instructions
+ [:set :seon.db/ref]
+
+ :seon.cluster/name
+ [:string {:min 1 :seon.db/identity true}]
+
+ :seon.cluster/config
+ :seon.db/ref
+
+ :seon.cluster/instructions
+ [:set :seon.db/ref]
+
+ :seon.cluster/toolkit
+ [:set :seon.db/ref]
+
+ :seon.cluster/cluster
+ [:map {:seon.db/entity true}
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.cluster/config :seon.cluster/config]
+  [:seon.cluster/instructions :seon.cluster/instructions]
+  [:seon.cluster/toolkit :seon.cluster/toolkit]]
+
+;; ===========================================================================
+;; INSTRUMENT
+;; ===========================================================================
+; INSTRUMENTATION IS A PROCESS AFFORDANCE, and its counts are the
+ ; answer to "is it on right now?" — a question that must be answerable
+ ; rather than assumed. `registered` is how many function schemas the
+ ; collect pass found; `instrumented` is how many vars actually carry a
+ ; wrapper afterwards. They differ legitimately: malli refuses to
+ ; instrument a primitive-hinted fn, and a `:record` process
+ ; deliberately instruments nothing at all.
+ :seon.instrument/registered [:int {:min 0}]
+ :seon.instrument/instrumented [:int {:min 0}]
+ :seon.instrument/fn [:string {:min 1}]
+ :seon.instrument/arm [:enum :input :output]
+ :seon.instrument/expected [:string {:min 1}]
+ :seon.instrument/args :string
+
+ ; The dial decides, and the caps are optional because they are only
+ ; needed to bound a violation's arguments — a REPL caller with no caps
+ ; to hand gets a report with no args rather than an invented bound.
+ :seon.instrument/request [:map {:closed true} [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]]
+ :seon.instrument/applied [:map {:closed true} [:seon.instrument/registered :seon.instrument/registered] [:seon.instrument/instrumented :seon.instrument/instrumented]]
+
+;; ===========================================================================
+;; LOOP
+;; ===========================================================================
+; The cluster handle one proc carries: everything a turn needs and
+ ; nothing it does not. The EVALUATOR IS INJECTED as a qualified symbol
+ ; (the same symbols-as-data idiom as :seon.source/populate), so the
+ ; loop's mechanics do not wait on the seon.sci.eval adoption and a
+ ; suite can drive a turn with a fake evaluator.
+ ; `:seon.cluster.loop/stream-channel` is the cluster's ONE stream conn
+ ; (F2 §2.1): a `(sliding-buffer 1)` in-port of the render proc onto
+ ; which the `:call` arm's sink offers complete `:seon.ai/partial`
+ ; snapshots. OPTIONAL because a suite or a REPL drives a turn without a
+ ; render pipeline — absent means the call runs one-shot.
+ :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ ; `::flow/pid` is FLOW'S, added to the args map it hands the init
+ ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
+ ; the handle a running proc holds genuinely has one and the closed
+ ; shape has to say so. Optional because a suite or a REPL builds the
+ ; handle itself and flow adds the key only at start. Instrumentation
+ ; found this the first time it ran against a real boot — the contract
+ ; was wrong about its own live input and nothing had ever checked.
+ ; `:seon.cluster.loop/provider` is DELETED, not deprecated. The later
+ ; boot-captured `:seon.ai/primary`, optional backup, and retry strategy
+ ; are deleted too: `:call` resolves those values from current cluster
+ ; and agent facts once per turn. The handle carries the cluster name
+ ; needed for that live read, never a cached projection of its AI facts.
+ ; `:seon.cluster.eval/output` is what the form PRINTED, captured as
+ ; bounded receipt evidence. Both closed shapes below omitted it while
+ ; the code has threaded it since the base-ctx fixes — a contract wrong
+ ; about its own live input, exactly the class instrumentation found
+ ; four of at step 4. Review-caught 2026-07-27.
+ :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options {:optional true} :seon.print/options]]
+ :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
+ :seon.cluster.loop/terminal-request [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/result-blob {:optional true} :seon.cluster.eval/result-blob] [:seon.cluster.eval/result-size {:optional true} :seon.cluster.eval/result-size] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.error/kind {:optional true} :seon.error/kind] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:my.run/value {:optional true} :my.run/value]]
+ ; The central pass's own proc state and turn counter died with it
+ ; (F2 §3.1); the surviving turn proc keeps its state keys in the AGENT section.
+ :seon.cluster.loop/completion :seon.flow/channel
+
+ ; One completed turn, for observation only. The run id is OPTIONAL
+ ; because an `:open` turn reports before a run exists — the report is
+ ; built by a `cond->` that omits it, and the closed shape said
+ ; required, so the contract had been wrong about its own most common
+ ; report since it was written (instrumentation found it) — the loop's out port
+ ; carries a report nothing depends on, so a dropped report costs
+ ; nothing and no consumer can backpressure the loop.
+ :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
+ :seon.cluster.loop/forms-run [:int {:min 0}]
+ :seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]
+
+;; ===========================================================================
+;; MESSAGE
+;; ===========================================================================
+; THE TRIGGER. The run loop needs exactly one thing to wake on that it
+ ; does not itself commit (L8 disjointness); the smallest honest one is
+ ; an inbound message. No delivery/ack/read semantics —
+ ; the messaging rung owns that shape when it exists (n3-plan §11.8).
+ :seon.cluster.message/at :inst
+ :seon.cluster.message/content [:string {:min 1}]
+ :seon.cluster.message/id [:string {:min 1 :seon.db/identity true}]
+ ; the WAKE attribute: a new datom on this ref is the one thing that
+ ; wakes the loop. It is a ref so "who was triggered" is a follow, and
+ ; because an idempotently re-asserted value emits no datom and would
+ ; therefore emit no wake (probe B Q10).
+ :seon.cluster.message/to :seon.db/ref
+
+ ; WHO SENT IT, and its ABSENCE is the other half of the contract: a
+ ; message with no `from` came from outside the agent population — the
+ ; human, or the system's own error recorder. That absence is what
+ ; makes a human nudge structurally distinguishable from an agent's
+ ; reply without a flag, an origin enum, or a `:from :human` stamp
+ ; (the quarry stored an origin keyword AND a hops integer for want of
+ ; this: src-old/seon/agent/message.cljc:48-64).
+ ;
+ ; Indexed for the same reason `:seon.cluster.message/about` is: a bare
+ ; ref carries no persistence facet and would never install, and
+ ; "what did bob send me" is a query BY the ref.
+ :seon.cluster.message/from [:and {:seon.db/index true} :seon.db/ref]
+
+ ; THE ENTITY MAP, and it is not decoration: `canonical-database-
+ ; attributes` installs entity-map entries BY CONSTRUCTION and
+ ; standalone forms only when they carry a persistence facet. Without
+ ; this map only `/id` installed (it has an identity facet) and the
+ ; live boot path could not transact a message at all — the fixtures
+ ; never saw it because they install explicit attribute lists, which is
+ ; exactly the fixture-vs-live-boot class. Declaring the entity makes
+ ; `to`, `content` and `at` installable, and `to` installs WITH its ref
+ ; type through the bridge.
+ :seon.cluster.message/message
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.message/render-ai
+        :seon.render/html seon.cluster.message/render-html}
+  [:seon.cluster.message/id :seon.cluster.message/id]
+  [:seon.cluster.message/to :seon.cluster.message/to]
+  [:seon.cluster.message/content :seon.cluster.message/content]
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]
+  ; The referenced fact this message assigns to the recipient. The
+  ; attribute is declared with its persistence facet in the ERROR section,
+  ; where the error recorder first established the same relation.
+  [:seon.cluster.message/about
+   {:optional true}
+   :seon.cluster.message/about]
+  ; A declination rides the ordinary message row. The reason's presence
+  ; is the reply shape settlement joins; content mirrors it so the
+  ; existing render path gives readers the explanation without parsing.
+  [:my.message/reason {:optional true} :my.message/reason]]
+
+ ; --------------------------------------------------------------------
+ ; THE AGENT-FACING VALUES — `my.message/send` and `/decline` return
+ ; these and nothing happens. They are the FIRST of the three
+ ; agent-facing shapes (pure code returning a value the driver
+ ; interprets), exactly like `my.run`'s two dispositions, and they are
+ ; deliberately NOT the second shape: a message is a durable FACT the
+ ; driver commits, not a capability request that needs a guarded door.
+ ; Building `seon.effect` for verbs whose whole effect is a transaction
+ ; the loop already makes would be a door around the inside of the house.
+ ;
+ ; The recipient is an AGENT ID string, not a ref: agent code holds
+ ; names, never entity ids, and resolving the name is the driver's job
+ ; — which is also where "no such agent" becomes an error fact instead
+ ; of a lookup ref that would fail the whole terminal transaction.
+ :my.message/to [:string {:min 1}]
+ :my.message/content [:string {:min 1}]
+ :my.message/about [:string {:min 1}]
+ :my.message/reason [:string {:min 1}]
+ :my.message/message
+ [:map {:closed true}
+  [:my.message/to :my.message/to]
+  [:my.message/content :my.message/content]
+  ; Optional identity of the fact this message concerns. Agent code
+  ; carries the string; the driver resolves the ref and derives the
+  ; assignment's unique `(about, recipient)` message id.
+  [:my.message/about {:optional true} :my.message/about]]
+
+ ; A can't-fix is a STRUCTURED REPLY, not a run disposition. `about`
+ ; is mandatory because an unjoinable declination cannot settle the
+ ; routed form; `reason` is reader-facing and is never parsed.
+ :my.message/declination
+ [:map {:closed true}
+  [:my.message/to :my.message/to]
+  [:my.message/about :my.message/about]
+  [:my.message/reason :my.message/reason]]
+
+ ; What a FORM may evaluate to and the loop will deliver: one message
+ ; or declination, or several of either. The vector arm is not a
+ ; convenience — a form's value is the only channel, so a mixed vector
+ ; is the ONLY way to answer and message several recipients in one form.
+ :my.message/value
+ [:or :my.message/message
+  :my.message/declination
+  [:vector {:min 1}
+   [:or :my.message/message :my.message/declination]]]
+
+ ; --------------------------------------------------------------------
+ ; THE DRIVER SIDE — what `seon.cluster.message/delivery` is asked and
+ ; what it answers. Rows are ordinary tx-data the loop rides in its own
+ ; terminal transaction; refusals are flat error VALUES the loop hands
+ ; to the error recorder, so a refused delivery is a durable fact and
+ ; never a silent drop.
+ :seon.cluster.message/delivery-request
+ [:map {:closed true}
+  [:my.message/value :my.message/value]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.config.message/max-chain :seon.config.message/max-chain]
+  ; the message this run is answering, when there is one: the chain the
+  ; new message extends. ABSENT means depth zero — a run whose trigger
+  ; cannot be found starts a fresh chain, which is the conservative
+  ; direction (it can only make the guard fire later, never never).
+  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
+
+ ; What a completed run owes the agent that asked for it. The result is
+ ; the disposition's own text, and the trigger is optional because a
+ ; run answering a human has nobody to reply TO — absence is the state,
+ ; and it is what makes "reply to the asker" a derivation rather than
+ ; a rule with an exception.
+ :seon.cluster.message/reply-request
+ [:map {:closed true}
+  [:my.run/result :my.run/result]
+  ; WHO IS COMPLETING, needed to ask the second question the chain
+  ; answers: is this trigger an ANSWER to something I sent? A reply is
+  ; not a question, and completing back at it is how a delegation
+  ; becomes a bounce.
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
+
+ :seon.cluster.message/delivery
+ [:map {:closed true}
+  [:seon.cluster.message/rows [:vector :map]]
+  [:seon.error/values [:vector :seon.error/value]]]
+
+ ; --------------------------------------------------------------------
+ ; THE BROWSER BOUNDARY. The request content deliberately admits the
+ ; empty string so `inbound-tx` can return the blank-content refusal as
+ ; a VALUE; the durable `/content` attribute remains non-empty.
+ :seon.cluster.message/inbound-content :string
+ :seon.cluster.message/inbound-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/inbound-content
+   :seon.cluster.message/inbound-content]
+  [:seon.cluster.message/at :seon.cluster.message/at]
+  [:seon.config.eval.result/max-string
+   :seon.config.eval.result/max-string]]
+
+ ; One admitted request becomes one ordinary tx-data row. A refusal is
+ ; the shared flat error value, never a thrown agent-facing result.
+ :seon.cluster.message/inbound
+ [:or [:vector {:min 1 :max 1} :map] :seon.error/value]
+
+;; ===========================================================================
+;; PRINT
+;; ===========================================================================
+:seon.print/face
+ [:enum
+  :seon.print/nil
+  :seon.print/boolean
+  :seon.print/number
+  :seon.print/keyword
+  :seon.print/symbol
+  :seon.print/char
+  :seon.print/string
+  :seon.print/inst
+  :seon.print/uuid
+  :seon.print/vector
+  :seon.print/list
+  :seon.print/set
+  :seon.print/map
+  :seon.print/record
+  :seon.print/var
+  :seon.print/type
+  :seon.print/class
+  :seon.print/object
+  :seon.print/truncated-string
+  :seon.print/failed
+  :seon.print/throwable
+  :seon.print/elided
+  :seon.print/pruned]
+
+ ; Every semantic node is this envelope. Authored values are always children
+ ; under `value`, `items`, or `entries`; they can therefore contain every
+ ; `:seon.print/*` keyword without becoming printer instructions.
+ :seon.print/node
+ [:schema
+  {:registry
+   {:seon.print/node*
+    [:multi {:dispatch :seon.print/face}
+     [:seon.print/nil
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/nil]]
+       [:seon.print/value :nil]]]
+     [:seon.print/boolean
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/boolean]]
+       [:seon.print/value :boolean]]]
+     [:seon.print/number
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/number]]
+       [:seon.print/value
+        [:fn {:gen/gen seon.print/number-generator}
+         seon.print/print-number?]]]]
+     [:seon.print/keyword
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/keyword]]
+       [:seon.print/value :keyword]]]
+     [:seon.print/symbol
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/symbol]]
+       [:seon.print/value :symbol]]]
+     [:seon.print/char
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/char]]
+       [:seon.print/value
+        [:fn {:gen/gen seon.print/char-generator}
+         seon.print/print-char?]]]]
+     [:seon.print/string
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/string]]
+       [:seon.print/value :string]]]
+     [:seon.print/inst
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/inst]]
+       [:seon.print/value :inst]]]
+     [:seon.print/uuid
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/uuid]]
+       [:seon.print/value :uuid]]]
+     [:seon.print/vector
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/vector]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/list
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/list]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/set
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/set]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/map
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/map]]
+       [:seon.print/entries
+        [:vector
+         [:or
+          [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
+          [:map {:closed true}
+           [:seon.print/face [:= :seon.print/elided]]]]]]]]
+     [:seon.print/record
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/record]]
+       [:seon.print/name :string]
+       [:seon.print/entries
+        [:vector
+         [:or
+          [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
+          [:map {:closed true}
+           [:seon.print/face [:= :seon.print/elided]]]]]]]]
+     [:seon.print/var
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/var]]
+       [:seon.print/name :string]]]
+     [:seon.print/type
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/type]]
+       [:seon.print/name :string]]]
+     [:seon.print/class
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/class]]
+       [:seon.print/name :string]]]
+     [:seon.print/object
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/object]]
+       [:seon.print/class :string]
+       [:seon.print/address :string]
+       [:seon.print/rep {:optional true} :string]]]
+     [:seon.print/truncated-string
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/truncated-string]]
+       [:seon.print/value :string]
+       [:seon.print/length [:int {:min 0}]]]]
+     [:seon.print/failed
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/failed]]
+       [:seon.print/class :string]
+       [:seon.print/message :string]]]
+     [:seon.print/throwable
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/throwable]]
+       [:seon.print/value [:ref :seon.print/node*]]]]
+     [:seon.print/elided
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/elided]]]]
+     [:seon.print/pruned
+      [:map {:closed true}
+       [:seon.print/face [:= :seon.print/pruned]]]]]}}
+  [:ref :seon.print/node*]]
+
+ :seon.print/length
+ [:int {:min 0 :seon.print/default nil}]
+ :seon.print/level
+ [:int {:min 0 :seon.print/default nil}]
+ :seon.print/width
+ [:int {:min 0 :seon.print/default 72}]
+ :seon.print/namespace-maps?
+ [:boolean {:seon.print/default true}]
+ :seon.print/table?
+ [:enum {:seon.print/default :derived} :derived true false]
+ :seon.print/options
+ [:map {:closed true}
+  [:seon.print/length {:optional true} [:maybe :seon.print/length]]
+  [:seon.print/level {:optional true} [:maybe :seon.print/level]]
+  [:seon.print/width {:optional true} :seon.print/width]
+  [:seon.print/namespace-maps? {:optional true}
+   :seon.print/namespace-maps?]
+  [:seon.print/table? {:optional true} :seon.print/table?]]
+
+ :seon.print/sink
+ [:fn {:gen/gen seon.print/sink-generator} seon.print/sink?]
+ :seon.print/result
+ [:map {:closed true}
+  [:seon.print/text :string]
+  [:seon.print/hiccup :seon.render/hiccup]]
+
+;; ===========================================================================
+;; PROBLEMS
+;; ===========================================================================
+; EVERYTHING WRONG NOW, derived. The PULL side of exactly the facts the
+ ; error path PUSHES — same facts, no second store, no acknowledgement
+ ; flag, no "seen" attribute, nothing stamped when something is fixed. A
+ ; problem stops being a problem when the FACTS stop saying so.
+ ;
+ ; The value is a MAP KEYED BY FAMILY with every empty family ABSENT, so
+ ; a healthy cluster derives `{}`. That shape is deliberate twice over:
+ ; it needs no `:type` discriminator on the entries (the key a family
+ ; arrives under is the family), and it makes "is anything wrong?"
+ ; `(seq problems)` rather than a status anybody has to maintain.
+
+ ; One SIGNATURE, however many times it happened. Grouping is the point:
+ ; a hundred errors of one signature is one problem that recurred a
+ ; hundred times, and reporting it a hundred times would bury the other
+ ; two. `fact` is the latest occurrence in full, so the log projection
+ ; composes the ordinary per-fact line and a digger has the id, the
+ ; kind, the refs and the projected data without a second lookup.
+ :seon.problems/occurrences [:int {:min 1}]
+ ; Agent-held identity for one red receipt's derived problem. This is an
+ ; identity on the receipt, not stored problem state: redness, routing and
+ ; settlement remain pure derivations over current facts.
+ :seon.problems/id [:string {:min 1 :seon.db/identity true}]
+ :seon.problems/error-signature [:map {:closed true} [:seon.error/signature :seon.error/signature] [:seon.error/kind :seon.error/kind] [:seon.problems/occurrences :seon.problems/occurrences] [:seon.error/fact :seon.error/fact]]
+
+ ; A run held by a process that is NOT in the live set. Not "old" and
+ ; not "expired" — no clock is consulted, because liveness is an
+ ; observable fact about processes and a deadline standing in for it
+ ; would be exactly the tuned constant the ruling bans.
+ :seon.problems/wedged-run [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process]]
+
+ ; A run that closed carrying WHY it closed. The agent reads this in its
+ ; next prompt; a human reading `problems` sees the same fact from the
+ ; other side.
+ :seon.problems/failed-run [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/error :seon.cluster.run/error]]
+
+ ; One form of one plan that errored. An agent's own mistake is not a
+ ; core fault and never becomes an error fact — but a plan that keeps
+ ; erroring is something a human wants to see, so it is a problem
+ ; without being a fault, and the distinction survives into this value.
+ :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
+
+ ; One red evaluation that may be assigned. The namespace owner is derived
+ ; from the form's parse-time `/ns`; author is the total fallback.
+ :seon.problems/form-problem
+ [:map {:closed true}
+  [:seon.problems/id :seon.problems/id]
+  [:seon.cluster.eval/id :seon.cluster.eval/id]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.problems/author :seon.cluster.agent/id]
+  [:seon.error/kind :seon.error/kind]
+  [:seon.cluster.eval/error :seon.cluster.eval/error]]
+
+ :seon.problems/form-problem-request
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]
+
+ :seon.problems/author :seon.cluster.agent/id
+
+ ; An agent the episode cap is deferring (F1 §7). PRESENCE, derived:
+ ; the count is `work/episode-runs`, the deferrals are the unanswered
+ ; agent-sent triggers the gate skips, and the whole row vanishes when
+ ; the next outside trigger's run resets the derivation — no counter,
+ ; no flag, no refusal message row anywhere.
+ :seon.problems/deferred-agent [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
+
+ ; A program namespace carrying source but no reverse namespace assignment.
+ ; Presence is the problem; it vanishes when an agent gains the ref.
+ :seon.problems/unowned-namespace
+ [:map {:closed true} [:seon.ns/name :seon.ns/name]]
+
+ ; The request. `live-processes` is the same set `run/recover-tx` takes,
+ ; by the same name, because it is the same question: which holders are
+ ; real right now. Absent set = nothing is known to be live, which
+ ; honestly makes every held run wedged — the caller that cannot answer
+ ; must not get a quieter answer than the truth.
+ ; `live-processes` references the ONE global registration (CONTEXT section)
+ ; — the same set, by the same name, as the capture and every request
+ ; builder carry (§9 of the context-blocks contract package).
+ :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
+
+ :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]
+
+;; ===========================================================================
+;; PROCESS
+;; ===========================================================================
+:seon.cluster.process/identity
+ [:map {:closed true}
+  [:seon.boot/pid :seon.boot/pid]
+  [:seon.boot/start-instant :seon.boot/start-instant]]
+
+;; ===========================================================================
+;; PROGRAM
+;; ===========================================================================
+; The current program graph. A function, namespace, or test is found by
+ ; identity-attribute presence and connected through refs; there is no kind
+ ; stamp and no stored projection of callability.
+ :seon.fn/sym [:string {:min 1 :seon.db/identity true}]
+ :seon.fn/ns :seon.db/ref
+ :seon.fn/source [:string {:min 1}]
+ :seon.fn/arglists :string
+ :seon.fn/doc :string
+ :seon.fn/private? :boolean
+ :seon.fn/spec :string
+ :seon.fn/calls [:set :seon.db/ref]
+ :seon.fn/arities
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn/ast
+ [:and {:seon.db/component true} :seon.db/ref]
+
+ :seon.fn.arity/order :int
+ ; Malli returns an integer or :varargs; canonical EDN keeps one Datahike type.
+ :seon.fn.arity/arity :string
+ :seon.fn.arity/min :int
+ :seon.fn.arity/max :int
+ :seon.fn.arity/input :seon.db/ref
+ :seon.fn.arity/output :seon.db/ref
+ :seon.fn.arity/guard :seon.db/ref
+ ; Membership only; ordering is irrelevant and cardinality-many is honest.
+ :seon.fn.arity/input-refs [:set :seon.db/ref]
+ :seon.fn.arity/output-refs [:set :seon.db/ref]
+ :seon.fn.arity/guard-refs [:set :seon.db/ref]
+ :seon.fn.arity/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.fn.arity/arity :seon.fn.arity/arity]
+  [:seon.fn.arity/min :seon.fn.arity/min]
+  [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]
+  [:seon.fn.arity/input :seon.fn.arity/input]
+  [:seon.fn.arity/output :seon.fn.arity/output]
+  [:seon.fn.arity/guard {:optional true} :seon.fn.arity/guard]
+  [:seon.fn.arity/input-refs {:optional true} :seon.fn.arity/input-refs]
+  [:seon.fn.arity/output-refs {:optional true} :seon.fn.arity/output-refs]
+  [:seon.fn.arity/guard-refs {:optional true} :seon.fn.arity/guard-refs]]
+
+ ; Every collection-valued AST leaf points through entry components because
+ ; Datahike cardinality-many is a set. The entry order is Malli's order.
+ ; Malli also overloads :value between scalar data and a schema-valued child,
+ ; so the singular value leaf uses the same scalar-or-child entry shape.
+ :seon.fn.ast/type :string
+ :seon.fn.ast/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/input [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/output [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/guard [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/child [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/key [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/ref :seon.db/ref
+ :seon.fn.ast/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/children
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/keys
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/registry
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/values
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/node
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast/type :seon.fn.ast/type]
+  [:seon.fn.ast/value {:optional true} :seon.fn.ast/value]
+  [:seon.fn.ast/input {:optional true} :seon.fn.ast/input]
+  [:seon.fn.ast/output {:optional true} :seon.fn.ast/output]
+  [:seon.fn.ast/guard {:optional true} :seon.fn.ast/guard]
+  [:seon.fn.ast/child {:optional true} :seon.fn.ast/child]
+  [:seon.fn.ast/key {:optional true} :seon.fn.ast/key]
+  [:seon.fn.ast/ref {:optional true} :seon.fn.ast/ref]
+  [:seon.fn.ast/properties {:optional true} :seon.fn.ast/properties]
+  [:seon.fn.ast/children {:optional true} :seon.fn.ast/children]
+  [:seon.fn.ast/keys {:optional true} :seon.fn.ast/keys]
+  [:seon.fn.ast/registry {:optional true} :seon.fn.ast/registry]
+  [:seon.fn.ast/values {:optional true} :seon.fn.ast/values]]
+
+ ; One ordered child, keyed map/registry entry, property, enum member, or
+ ; singular AST value. A schema-valued value uses `value`; scalar data uses
+ ; canonical `value-edn`.
+ :seon.fn.ast.entry/order :int
+ :seon.fn.ast.entry/key :string
+ :seon.fn.ast.entry/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/value-edn :string
+ :seon.fn.ast.entry/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast.entry/order {:optional true} :seon.fn.ast.entry/order]
+  [:seon.fn.ast.entry/key {:optional true} :seon.fn.ast.entry/key]
+  [:seon.fn.ast.entry/value {:optional true} :seon.fn.ast.entry/value]
+  [:seon.fn.ast.entry/value-edn {:optional true}
+   :seon.fn.ast.entry/value-edn]
+  [:seon.fn.ast.entry/properties {:optional true}
+   :seon.fn.ast.entry/properties]]
+ ; Explicit only on capability leaves. All other workload classification is
+ ; derived by reachability over the program graph.
+ :seon.fn/workload [:enum :io :compute]
+ :seon.fn/fn
+ [:map {:seon.db/entity true}
+  [:seon.fn/sym :seon.fn/sym]
+  [:seon.fn/ns :seon.fn/ns]
+  [:seon.fn/source :seon.fn/source]
+  [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+  [:seon.fn/doc {:optional true} :seon.fn/doc]
+  [:seon.fn/private? {:optional true} :seon.fn/private?]
+  [:seon.fn/spec {:optional true} :seon.fn/spec]
+  [:seon.fn/calls {:optional true} :seon.fn/calls]
+  [:seon.fn/arities {:optional true} :seon.fn/arities]
+  [:seon.fn/ast {:optional true} :seon.fn/ast]
+  [:seon.fn/workload {:optional true} :seon.fn/workload]]
+
+ :seon.schema/schema
+ [:map {:seon.db/entity true}
+  [:seon.schema/key :seon.schema/key]
+  [:seon.schema/form :seon.schema/form]
+  [:seon.schema/created-at {:optional true} :seon.schema/created-at]
+  [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
+
+ :seon.db.id/generator
+ [:enum
+  :seon.db.id.generator/human-readable
+  :seon.db.id.generator/compact]
+
+ :seon.ns/name [:symbol {:seon.db/identity true}]
+ :seon.ns/source [:string {:min 1}]
+ :seon.ns/doc :string
+ :seon.ns/requires [:set :seon.db/ref]
+ :seon.ns/aliases
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/imports
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/refers
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/ns
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.ns/render-ai
+        :seon.render/html seon.render.ns/render-html}
+  [:seon.ns/name :seon.ns/name]
+  [:seon.ns/source {:optional true} :seon.ns/source]
+  [:seon.ns/doc {:optional true} :seon.ns/doc]
+  [:seon.ns/requires {:optional true} :seon.ns/requires]
+  [:seon.ns/aliases {:optional true} :seon.ns/aliases]
+  [:seon.ns/imports {:optional true} :seon.ns/imports]
+  [:seon.ns/refers {:optional true} :seon.ns/refers]]
+
+ ; Effective bindings are namespace-owned components. They preserve SCI's
+ ; resolver inputs rather than the require operations that produced them.
+ :seon.ns.alias/local :symbol
+ :seon.ns.alias/target-ns :symbol
+ :seon.ns.alias/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.alias/local :seon.ns.alias/local]
+ [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]]
+
+ ; A missing target-class is SCI's exact nil mask for a removed default
+ ; import. Class objects never cross the database boundary.
+ :seon.ns.import/local :symbol
+ :seon.ns.import/target-class :symbol
+ :seon.ns.import/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.import/local :seon.ns.import/local]
+  [:seon.ns.import/target-class
+   {:optional true}
+   :seon.ns.import/target-class]]
+
+ :seon.ns.refer/local :symbol
+ :seon.ns.refer/target-ns :symbol
+ :seon.ns.refer/target-name :symbol
+ :seon.ns.refer/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.refer/local :seon.ns.refer/local]
+  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
+  [:seon.ns.refer/target-name :seon.ns.refer/target-name]]
+
+ :seon.fn/roots [:vector [:string {:min 1}]]
+ :seon.fn/index-request
+ [:map {:closed true}
+  [:seon.store/branch-connection
+   {:optional true}
+   :seon.store/branch-connection]
+  [:seon.db/process {:optional true} :seon.db/ref]
+  [:seon.fn/roots {:optional true} :seon.fn/roots]
+  [:seon.fn/manifest {:optional true} :map]]
+
+ ; One namespace name's current REPL definition. Presence of source means the
+ ; defining form is proven replay-safe; presence of unrestorable states why it
+ ; cannot be reconstructed. Contracted functions remain in :seon.fn only.
+ :seon.code.def/id [:string {:min 1 :seon.db/identity true}]
+ :seon.code.def/ns :seon.db/ref
+ :seon.code.def/name :symbol
+ :seon.code.def/value-edn :string
+ :seon.code.def/blob :seon.blob/digest
+ :seon.code.def/size [:int {:min 0}]
+ :seon.code.def/source [:string {:min 1}]
+ :seon.code.def/unrestorable [:string {:min 1}]
+ :seon.code.def/ordinal [:int {:min 0}]
+ :seon.code.def/def
+ [:map {:seon.db/entity true}
+  [:seon.code.def/id :seon.code.def/id]
+  [:seon.code.def/ns :seon.code.def/ns]
+  [:seon.code.def/name :seon.code.def/name]
+  [:seon.code.def/value-edn {:optional true} :seon.code.def/value-edn]
+  [:seon.code.def/blob {:optional true} :seon.code.def/blob]
+  [:seon.code.def/size {:optional true} :seon.code.def/size]
+  [:seon.code.def/source {:optional true} :seon.code.def/source]
+  [:seon.code.def/unrestorable {:optional true}
+   :seon.code.def/unrestorable]
+  [:seon.code.def/ordinal :seon.code.def/ordinal]]
+
+;; ===========================================================================
+;; PROMPT
+;; ===========================================================================
+; The derived prompt: a pure function of a database value, assembled
+ ; from the agent's blocks through the ONE router. The request names the
+ ; HELD RUN — never a message id: the run's creating transaction records
+ ; its exact trigger as :seon.db/trigger tx-meta, and
+ ; seon.cluster.message/trigger reads it back, so a later queued message
+ ; can never replace the recorded cause (review finding 6, repaired).
+ :seon.cluster.prompt/request
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  ; HOW MANY HOPS of its own neighbourhood the agent sees (owner ruling
+  ; 2026-07-28 post-midnight). The same optional parameter the surfaces,
+  ; page and expansion requests already carry — the landed accretion
+  ; reached every render request but this one, so a prompt could not ask
+  ; a different question of the same mechanism. Absent is IMPLIED 1,
+  ; written once in `seon.render.block/distance`, so every existing
+  ; caller is unchanged.
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ :seon.cluster.prompt/text [:string {:min 1}]
+
+ ; The rendered context: the exact text the loop sends, the ordered
+ ; contribution records every other consumer (capture, debug, token
+ ; accounting, cache measurement) reads WITHOUT rerunning a projection,
+ ; and the exact database value it was derived at. In-memory only.
+ :seon.cluster.prompt/rendered-context
+ [:map {:closed true}
+  [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+  [:seon.context/contributions :seon.context/contributions]
+  [:seon.db/db :seon.db/database-value]]
+
+;; ===========================================================================
+;; PROVENANCE
+;; ===========================================================================
+; Verdict: State A stored both transaction-metadata values as refs.
+ ; Keep that shape: provenance resolves to durable user/process entities,
+ ; never denormalized strings on the transaction entity. The :seon.db/index
+ ; facet admits both into canonical-database-attributes by the computed
+ ; persistence-facet rule (a bare :seon.db/ref carries no facet and would
+ ; never install).
+ ; the :and wrap is the one idiom for facet properties on a referenced
+ ; form — properties attach to Malli TYPES, and :seon.db/ref is a
+ ; registered alias, not a type
+ :seon.db/user [:and {:seon.db/index true} :seon.db/ref]
+ :seon.db/process [:and {:seon.db/index true} :seon.db/ref]
+ ; the process entity provenance refs resolve to; identities are the
+ ; owner-ruled literal core set (:seon.db.process/{boot,config,core})
+ ; seeded as GENESIS DATA in the ancestor, where bootstrap content lives
+ :seon.db.process/id [:string {:min 1 :seon.db/identity true}]
+
+ ; A RUN'S WHY IS TRANSACTION METADATA (owner ruling, 2026-07-27 night):
+ ; the run-opening transaction carries a ref to the message that caused
+ ; it, so "has this trigger been answered?" is "does any run-opening
+ ; transaction point at it". The one deliberate extension of minimal
+ ; provenance (user + process) on ONE transition — never copied onto
+ ; the run entity, which is why this key is NOT :seon.cluster.run/*.
+ ; Indexed like the other two: a bare ref never installs (the computed
+ ; persistence-facet rule above), and "answered?" queries BY the ref.
+ :seon.db/trigger [:and {:seon.db/index true} :seon.db/ref]
+
+;; ===========================================================================
+;; RECONCILE
+;; ===========================================================================
+; the managing process identity that scopes the managed population;
+ ; opaque here — config supplies the one core identity
+ :seon.reconcile/process
+ [:string {:min 1}]
+
+ :seon.reconcile/desired
+ [:vector [:map]]
+
+ ; identities the caller explicitly adopts into the managed scope even
+ ; though their first assertion predates management
+ :seon.reconcile/adopt-identities
+ [:set [:vector :any]]
+
+ :seon.reconcile/converged?
+ :boolean
+
+ :seon.reconcile/operations
+ [:int {:min 0}]
+
+ :seon.reconcile/request
+ [:map {:closed true}
+  [:seon.reconcile/desired :seon.reconcile/desired]
+  [:seon.reconcile/process :seon.reconcile/process]
+  [:seon.reconcile/adopt-identities
+   {:optional true}
+   :seon.reconcile/adopt-identities]]
+
+ :seon.reconcile/result
+ [:map {:closed true}
+  [:seon.reconcile/converged? :seon.reconcile/converged?]
+  [:seon.reconcile/operations :seon.reconcile/operations]]
+
+;; ===========================================================================
+;; REGISTRY
+;; ===========================================================================
+:seon.cluster.registry/branch-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/branch-commit-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/branch-result [:map {:closed true} [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]]
+ :seon.cluster.registry/cluster-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.source/commit-id :seon.source/commit-id]]
+ :seon.cluster.registry/from [:or :keyword :uuid]
+ :seon.cluster.registry/retire-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/roster [:set :keyword]
+ :seon.cluster.registry/swept [:int {:min 0}]
+ :seon.cluster/created? :boolean
+
+;; ===========================================================================
+;; RENDER
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; THE PROJECTION CONTRACT, generic (owner direction, 2026-07-27 night).
+ ; A unit is any map that declares, per OUTPUT KIND, the fully qualified
+ ; symbol of the function that projects it into that kind. One router
+ ; resolves and applies. The render contract's `:seon.render/ai` +
+ ; `:seon.render/html` pair (docs/seon/architecture/ui.md, "The block and
+ ; its two renders") is the SPECIAL CASE of this, not a separate
+ ; mechanism; new kinds — log, sms, metrics — are accretion: add a key,
+ ; write the fn, no router change and no registration table.
+ ; ---------------------------------------------------------------------------
+
+ ; A kind IS its key: `:seon.render/ai` is both the declaration key on a
+ ; unit and the kind a caller asks for. Nothing maps short names to keys,
+ ; because a second naming is a second place to drift.
+ :seon.render/kind :qualified-keyword
+ :seon.render/kinds [:set :seon.render/kind]
+ ; The viewer namespace whose `render-<kind>` defn may override a matching
+ ; schema's default. Explicit request data, never ambient `*ns*`.
+ :seon.render/namespace :symbol
+ ; The declaration. USUALLY a fully qualified symbol naming the
+ ; projection fn, resolved LATE on every render so a re-`defn` takes
+ ; effect with no re-registration — the proven `:seon.source/populate`
+ ; / `:seon.cluster.loop/evaluate` / predicate-owner idiom.
+ ;
+ ; A SYMBOL, and only a symbol — because this schema is what the two
+ ; kind attributes are declared as, and a kind attribute is STORED. One
+ ; Datahike value type stores natively (`:db.type/symbol`) where a union
+ ; needs a pr-str codec on every read and write, which is the codec the
+ ; quarry had and this design deleted.
+ ;
+ ; Proven the hard way rather than reasoned about: widening this to
+ ; `[:or :qualified-symbol :string [:vector :any]]` made the bridge
+ ; derive `:db.type/string` from the union's first branch and every
+ ; block transaction refused. The durable/runtime split is not a
+ ; preference — the schema IS the durable side.
+ :seon.render/projection :qualified-symbol
+
+ ; The RUNTIME affordance, which is deliberately not an attribute: a
+ ; unit built in memory may declare a literal that is its own output —
+ ; a verbatim string for a prose kind, a vector for a hiccup kind
+ ; (docs/seon/architecture/ui.md, "The block and its two renders"). This
+ ; is the accretion `seon.render`'s docstring scoped and deferred out of
+ ; step 1: a block that just says a fixed thing should not have to
+ ; define a function to say it.
+ ;
+ ; `seon.render/declaration?` is the code-level contract that admits
+ ; both, and the admissible SHAPES are narrow on purpose: `kinds`
+ ; derives what a unit can become from the unit itself, so every shape
+ ; admitted becomes a shape that turns an ordinary
+ ; `seon.render`-namespaced key into a KIND. `:seon.render/priority 3`
+ ; is presentation data and must stay data, so a number, keyword, map
+ ; or set declares nothing.
+ :seon.render/literal [:or :string [:vector :any]]
+
+ ; `:any` twice, at this router's one genuinely polymorphic boundary and
+ ; for the same reason value admission gives: IN, a unit is any map any
+ ; owner declares (naming a shape here would defeat the mechanism — the
+ ; whole point is that a family the router has never heard of routes);
+ ; OUT, the projection's grammar belongs to the KIND'S CONSUMER — prose
+ ; for `ai`, a line for `log`, hiccup for `html` — and restating it here
+ ; would be a second contract that drifts from the consumer's.
+ ; The keys are `:qualified-keyword` rather than `:any`, because fully
+ ; namespaced map keys are the house rule and this is where it is
+ ; enforceable for free.
+ :seon.render/unit [:map-of :qualified-keyword :any]
+ :seon.render/output :any
+
+ :seon.render/request
+ [:map {:closed true}
+  [:seon.render/unit :seon.render/unit]
+  [:seon.render/kind :seon.render/kind]]
+ ; The output is WRAPPED, and that is deliberate: an unwrapped return
+ ; would be indistinguishable from a flat `:seon.error/value` for any
+ ; projection whose own output is a map. With the wrap, "did this
+ ; render?" is `:seon.error/kind` presence, by construction.
+ :seon.render/rendered [:map {:closed true} [:seon.render/kind :seon.render/kind] [:seon.render/output :seon.render/output]]
+
+ ; The two kinds the error family declares today. Registered here, in the
+ ; router's own file, because a kind is a contract between the router and
+ ; a consumer rather than a property of any one producer — and because
+ ; the loader is global, an owner declaring a new kind adds one line to
+ ; whichever file owns that consumer.
+ :seon.render/ai :seon.render/projection
+ :seon.render/log :seon.render/projection
+
+;; ===========================================================================
+;; RENDER_VALUE
+;; ===========================================================================
+; The one positive `/data` and oversized-receipt page-size dial. Its shipped
+ ; decision lives only in config/default.edn; admission caps remain the outer
+ ; safety bound and print presentation has its own :seon.print family.
+ :seon.render.value/max-collection
+ [:int {:min 1 :seon.config/dial true}]
+
+ ; A render unit may combine the page-size dial with explicit print options,
+ ; but every print key is declared exactly once in the PRINT section.
+ :seon.render.value/options
+ [:map {:closed true}
+  [:seon.render.value/max-collection {:optional true}
+   :seon.render.value/max-collection]
+  [:seon.print/length {:optional true} [:maybe :seon.print/length]]
+  [:seon.print/level {:optional true} [:maybe :seon.print/level]]
+  [:seon.print/width {:optional true} :seon.print/width]
+  [:seon.print/namespace-maps? {:optional true}
+   :seon.print/namespace-maps?]
+  [:seon.print/table? {:optional true} :seon.print/table?]]
+
+ :seon.render/value :any
+ :seon.render.value/tree :seon.print/node
+ :seon.render.value/truncated? :boolean
+ :seon.render.value/text :string
+ :seon.render.value/html :seon.render/hiccup
+ :seon.render.value/projection
+ [:map {:closed true}
+  [:seon.render.value/tree :seon.render.value/tree]
+  [:seon.render.value/truncated? :seon.render.value/truncated?]
+  [:seon.render.value/text :seon.render.value/text]
+  [:seon.render.value/html :seon.render.value/html]
+  [:seon.render.value/options :seon.print/options]]
+
+;; ===========================================================================
+;; REPLY
+;; ===========================================================================
+; One model reply, as text, and the ordered form SOURCES read out of it.
+ ; Sources are strings, not forms: the stored source is exactly what the
+ ; agent wrote (comments and all), and the evaluator parses inside its
+ ; own armed context — parsing twice on two readers is how a `#=` scar
+ ; comes back.
+ ; One plan form: the exact source the agent wrote, plus the namespace
+ ; that form was written under when THE ONE READER attributed one.
+ ; Absence is a real answer (a malformed declaration yields absence
+ ; rather than inheritance), and it routes a red form to its author.
+ :seon.cluster.reply/form
+ [:map {:closed true}
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.ns/name {:optional true} :seon.ns/name]]
+ :seon.cluster.reply/sources [:vector :seon.cluster.reply/form]
+ :seon.cluster.reply/text :string
+
+;; ===========================================================================
+;; RUN
+;; ===========================================================================
+:seon.cluster.agent/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.agent/run :seon.db/ref
+
+ ; The agent entity. FOUND BY THE SUBSET CHECK, not by the drive: the
+ ; loop asserts `/run` when it opens a run and retracts it when it
+ ; closes one, and without this map only `/id` installed — so the live
+ ; path would have failed at run-open, one step past the trigger. Same
+ ; class, same commit. `/run` is optional because an idle agent has no
+ ; current run, and absence IS idle (there is no status to read).
+ ; The family lens is declared WHERE THE FAMILY IS (the `:seon.fn` /
+ ; `:seon.ns` / `:seon.schema` idiom in seon.schema.cljc):
+ ; `seon.render.walk/projection` reads it off the matched entity map, so
+ ; a family gains a default render by adding one line here and writing
+ ; one plain function. No registry, no table, no dispatch.
+ :seon.cluster.agent/agent
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.agent/agent-ai
+        :seon.render/html seon.render.agent/agent-html}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.agent/namespace
+   {:optional true}
+   :seon.cluster.agent/namespace]
+  [:seon.cluster.agent/run {:optional true} :seon.cluster.agent/run]]
+ :seon.cluster.eval/at :inst
+ :seon.cluster.eval/error :string
+ ; What the form PRINTED. Agent-visible evidence about its own work, so
+ ; it is durable rather than dropped on the floor; bounded by the same
+ ; string cap the projection uses.
+ :seon.cluster.eval/output [:string {:min 1}]
+ :seon.cluster.eval/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.eval/ordinal [:int {:min 0}]
+ :seon.cluster.eval/ns :seon.db/ref
+ :seon.cluster.eval/result-edn :string
+ ; Full result text moves to a content-addressed blob once it crosses the
+ ; configured threshold. The receipt retains a presentation projection and
+ ; these primitive facts; capped state is derived at render time.
+ :seon.cluster.eval/result-blob [:re "^[0-9a-f]{64}$"]
+ :seon.cluster.eval/result-size [:int {:min 0}]
+ :seon.cluster.eval/run :seon.db/ref
+ ; When this eval was cut instead of settling: the time limit fired, or
+ ; boot recovery found the receipt dangling after its process died.
+ ; STATE IS PRESENCE (owner ruling 2026-07-28): a receipt with none of
+ ; result-edn/error/interrupted-at is running, and there is no stored
+ ; status restating which of those facts exist.
+ :seon.cluster.eval/interrupted-at :inst
+ :seon.cluster.run/agent :seon.db/ref
+ :seon.cluster.run/closed-at :inst
+ :seon.cluster.run/forms [:set {:seon.db/component true} :seon.db/ref]
+ :seon.cluster.run/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.run/missing-results [:int {:min 0}]
+ :seon.cluster.run/opened-at :inst
+ ; Why a run ended before it had a plan — a lost model call, an
+ ; unreadable reply. Without it the error value EVAPORATED: the live
+ ; drive sat claimed-with-no-plan for 120 s and the operator had to
+ ; reproduce the call by hand to learn it was a missing credential.
+ :seon.cluster.run/error [:string {:min 1}]
+
+ :seon.cluster.run/plan-digest [:string {:min 1}]
+ :seon.cluster.run/process [:string {:min 1}]
+ ; Custody IS presence (custody revision 2026-07-28): `/process`
+ ; present = held, absent = unheld. There is no claim epoch and no
+ ; lease clock — the flock + single writer make a competing claimant
+ ; unrepresentable, and the settle-once presence fences carry the rest.
+ :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai :seon.render/html seon.cluster.run/render-html} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
+ ; The ordered form entity. Same reason as the message map: without it
+ ; only `/id` installed, so a frozen plan could not be transacted on the
+ ; live boot path. Every entry is required — `plan-call` writes all four
+ ; together or writes none (run.cljc:409-417).
+ :seon.cluster.run.form/form
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.run/render-form-ai
+        :seon.render/html seon.cluster.run/render-form-html}
+  [:seon.cluster.run.form/id :seon.cluster.run.form/id]
+  [:seon.cluster.run.form/run :seon.cluster.run.form/run]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  ; Parse-time namespace-in-effect. Optional until the one reader's
+  ; plan-row integration lands; absence routes a red form to its author.
+  [:seon.cluster.run.form/ns
+   {:optional true}
+   :seon.cluster.run.form/ns]]
+
+ ; The eval receipt entity. The optionals ARE the states — absence is
+ ; the state, never a stored nil and never a status label: a running
+ ; receipt has no result, no error and no interrupted-at; a settled one
+ ; has a result; a failed or time-limited one has an error and the flat
+ ; error value as its result; a cut one has interrupted-at. There is no
+ ; fourth fact for a discriminator to restate (owner ruling 2026-07-28).
+ :seon.cluster.eval/receipt
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.cluster.run/render-receipt-ai
+        :seon.render/html seon.cluster.run/render-receipt-html}
+  [:seon.cluster.eval/id :seon.cluster.eval/id]
+  [:seon.cluster.eval/run :seon.cluster.eval/run]
+  [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+  [:seon.cluster.eval/at :seon.cluster.eval/at]
+  [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
+  [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
+  [:seon.cluster.eval/result-blob {:optional true}
+   :seon.cluster.eval/result-blob]
+  [:seon.cluster.eval/result-size {:optional true}
+   :seon.cluster.eval/result-size]
+  [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
+  [:seon.cluster.eval/interrupted-at {:optional true}
+   :seon.cluster.eval/interrupted-at]
+  ; An unambiguous agent-held identity for the derived problem. The
+  ; receipt and form identities intentionally share `[run ordinal]`, so
+  ; assignment resolution cannot use either string without ambiguity.
+  [:seon.problems/id {:optional true} :seon.problems/id]
+  [:seon.error/kind {:optional true} :seon.error/kind]
+  [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]]
+
+ :seon.blob/content :string
+ :seon.blob/digest :seon.cluster.eval/result-blob
+
+ :seon.cluster.run.form/id [:string {:min 1 :seon.db/identity true}]
+ :seon.cluster.run.form/ns :seon.db/ref
+ :seon.cluster.run.form/ordinal [:int {:min 0}]
+ :seon.cluster.run.form/run :seon.db/ref
+ :seon.cluster.run.form/source [:string {:min 1}]
+
+ ; Bootstrap-plan declarations stay beside the ordered run.form family until
+ ; the owner-ruled global-schema consolidation wave absorbs this block.
+ :seon.ns/name-designation [:enum :agent :user]
+ :seon.bootstrap.plan/id [:keyword {:seon.db/identity true}]
+ :seon.bootstrap.plan/digest [:re "^[0-9a-f]{64}$"]
+ :seon.bootstrap.plan/forms
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.bootstrap.plan.form/context [:string {:min 1}]
+ :seon.cluster/bootstrap-plan :seon.db/ref
+
+ :seon.bootstrap/default-form
+ [:map {:closed true}
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.ns/name-designation :seon.ns/name-designation]
+  [:seon.bootstrap.plan.form/context
+   {:optional true}
+   :seon.bootstrap.plan.form/context]]
+ :seon.bootstrap/default-forms
+ [:vector {:min 1} :seon.bootstrap/default-form]
+
+ :seon.bootstrap.plan.form/form
+ [:map {:seon.db/entity true}
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+  [:seon.ns/name-designation :seon.ns/name-designation]
+  [:seon.bootstrap.plan.form/context
+   {:optional true}
+   :seon.bootstrap.plan.form/context]]
+
+ :seon.bootstrap.plan/plan
+ [:map {:seon.db/entity true}
+  [:seon.bootstrap.plan/id :seon.bootstrap.plan/id]
+  [:seon.bootstrap.plan/digest :seon.bootstrap.plan/digest]
+  [:seon.bootstrap.plan/forms :seon.bootstrap.plan/forms]]
+
+;; ===========================================================================
+;; SOURCE
+;; ===========================================================================
+:seon.source/branch :keyword
+ :seon.source/built-at :inst
+ :seon.source/built? :boolean
+ :seon.source/commit-id :uuid
+ :seon.source/current [:map {:closed true} [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id]]
+ :seon.source/digest [:re {:seon.db/index true} "^[0-9a-f]{64}$"]
+ :seon.source/digest-request [:map {:closed true} [:seon.source/roots :seon.source/roots]]
+ :seon.source/expected-commit-id :uuid
+ :seon.source/file-digests [:map-of :string :seon.source/digest]
+ :seon.source/populate :qualified-symbol
+ :seon.source/population [:map [:seon.store/branch-connection :seon.store/branch-connection] [:seon.source/digest :seon.source/digest]]
+ :seon.source/population-data :map
+ :seon.source/publish-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.source/digest :seon.source/digest] [:seon.source/populate :seon.source/populate] [:seon.source/population-data {:optional true} :seon.source/population-data]]
+ :seon.source/published [:map {:closed true} [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/built? :seon.source/built?]]
+ :seon.source/rows [:vector :map]
+ :seon.source/roots [:vector [:string {:min 1}]]
+ :seon.source/snapshot [:map {:closed true} [:seon.source/digest :seon.source/digest] [:seon.source/file-digests :seon.source/file-digests]]
+ :seon.source/upsert-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.source/expected-commit-id :seon.source/expected-commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/rows :seon.source/rows] [:seon.db/process {:optional true} :seon.db/ref]]
+
+;; ===========================================================================
+;; STORE
+;; ===========================================================================
+; WHAT ONE TRANSACTION IS, in Datahike's own vocabulary: a vector of
+ ; operations, or its argument map carrying `:tx-data` and optional
+ ; `:tx-meta`. Those two keys are unqualified because they are THEIRS
+ ; (`reference-code/datahike/src/datahike/spec.cljc:66-67`), and
+ ; renaming a dependency's keys to look like ours is the drift the
+ ; grounding rule forbids.
+ ; This form exists because the map arm was already on the live
+ ; critical path while `transact!`'s contract said `[:vector :any]`,
+ ; and Datahike's own spec admitted the map by accident — every map
+ ; entry is a `coll?`. Declared, the mismatch is unrepresentable.
+ ; Datahike database values are opaque runtime objects, but not anonymous:
+ ; its maintained `datahike.db.utils/db?` predicate covers current, as-of,
+ ; since, and history values. The generator constructs all four variants.
+ :seon.db/database-value
+ [:fn {:gen/gen seon.cluster.store/database-value-generator}
+  seon.cluster.store/database-value?]
+ ; Transaction operations are dependency-owned open data: entity maps or
+ ; Datahike operation vectors. Their values are genuinely polymorphic at this
+ ; boundary, so the one named `:seon.schema/value` exception is referenced
+ ; instead of repeating anonymous `:any` slots throughout public contracts.
+ :seon.store/transaction-operation
+ [:or :map [:vector :seon.schema/value]]
+ :seon.store/transaction-data
+ [:vector :seon.store/transaction-operation]
+ :seon.store/transaction
+ [:or
+  :seon.store/transaction-data
+  [:map {:closed true}
+   [:tx-data :seon.store/transaction-data]
+   [:tx-meta {:optional true} :map]]]
+ :seon.store/branch :keyword
+ :seon.store/branch-connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]
+ ; A connection OBJECT, live or released. The distinction is not
+ ; pedantry: a started instance holds a connection that outlives its own
+ ; liveness, and `stop!` is idempotent, so its second call necessarily
+ ; receives a released one. Requiring liveness on the instance made the
+ ; contract forbid the case stop! exists to handle.
+ :seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection-object?]
+ :seon.store/dir [:string {:min 1}]
+ :seon.store/lock-file [:string {:min 1}]
+ :seon.store/store [:map {:closed true} [:seon.store/dir :seon.store/dir] [:seon.store/lock-file :seon.store/lock-file] [:seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]] [:seon.store/lock [:fn {:gen/gen seon.cluster.store/file-lock-generator} seon.cluster.store/file-lock?]] [:seon.store/created? :boolean]]
+
+;; ===========================================================================
+;; TEST
+;; ===========================================================================
+; The indexed test row. The result sink can assert the identity + namespace
+ ; floor before the corpus indexer enriches the same entity with source.
+ :seon.test/sym [:string {:min 1 :seon.db/identity true}]
+ :seon.test/ns :seon.db/ref
+ :seon.test/source :string
+ :seon.test/test
+ [:map {:seon.db/entity true}
+  [:seon.test/sym :seon.test/sym]
+  [:seon.test/ns {:optional true} :seon.test/ns]
+  [:seon.test/source {:optional true} :seon.test/source]]
+
+ ; One invocation of bin/test. The run is the batch identity delegation can
+ ; carry; its instant and git SHA apply to every referenced result.
+ :seon.test.run/id [:string {:min 1 :seon.db/identity true}]
+ :seon.test.run/at :inst
+ :seon.test.run/git-sha [:re "^[0-9a-f]{40}$"]
+ :seon.test.run/run
+ [:map {:seon.db/entity true}
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test.run/at :seon.test.run/at]
+  [:seon.test.run/git-sha :seon.test.run/git-sha]]
+
+ ; Failure text is its own referenced fact. A result never inlines it, so a
+ ; future blob-backed message can replace this leaf without changing joins.
+ :seon.test.failure/id [:string {:min 1 :seon.db/identity true}]
+ :seon.test.failure/message [:string {:min 1}]
+ :seon.test.failure/failure
+ [:map {:seon.db/entity true}
+  [:seon.test.failure/id :seon.test.failure/id]
+  [:seon.test.failure/message :seon.test.failure/message]]
+
+ ; One test in one run. `:error` is folded into the failing outcome because
+ ; delegation asks whether the test passed; the referenced message preserves
+ ; the exact failure class and detail.
+ :seon.test.result/id [:string {:min 1 :seon.db/identity true}]
+ :seon.test.result/test :seon.db/ref
+ :seon.test.result/run :seon.db/ref
+ :seon.test.result/outcome [:enum :pass :fail]
+ :seon.test.result/failure
+ [:and {:seon.db/component true} :seon.db/ref]
+ :seon.test.result/result
+ [:map {:seon.db/entity true}
+  [:seon.test.result/id :seon.test.result/id]
+  [:seon.test.result/test :seon.test.result/test]
+  [:seon.test.result/run :seon.test.result/run]
+  [:seon.test.result/outcome :seon.test.result/outcome]
+  [:seon.test.result/failure {:optional true} :seon.test.result/failure]]
+
+ ; The capture boundary's ordinary values.
+ :seon.test.runner/namespaces [:vector :symbol]
+ :seon.test.runner/result
+ [:map {:closed true}
+  [:seon.test/sym :seon.test/sym]
+  [:seon.ns/name :seon.ns/name]
+  [:seon.test.result/outcome :seon.test.result/outcome]
+  [:seon.test.failure/message
+   {:optional true}
+   :seon.test.failure/message]]
+ :seon.test.runner/results [:vector :seon.test.runner/result]
+ :seon.test.runner/test-count [:int {:min 0}]
+ :seon.test.runner/pass-count [:int {:min 0}]
+ :seon.test.runner/fail-count [:int {:min 0}]
+ :seon.test.runner/error-count [:int {:min 0}]
+ :seon.test.runner/summary
+ [:map {:closed true}
+  [:seon.test.runner/test-count :seon.test.runner/test-count]
+  [:seon.test.runner/pass-count :seon.test.runner/pass-count]
+  [:seon.test.runner/fail-count :seon.test.runner/fail-count]
+  [:seon.test.runner/error-count :seon.test.runner/error-count]]
+ :seon.test.runner/run-request
+ [:map {:closed true}
+  [:seon.test.runner/namespaces :seon.test.runner/namespaces]
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test.run/at :seon.test.run/at]
+  [:seon.test.run/git-sha :seon.test.run/git-sha]]
+ :seon.test.runner/run-result
+ [:map {:closed true}
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test.run/at :seon.test.run/at]
+  [:seon.test.run/git-sha :seon.test.run/git-sha]
+  [:seon.test.runner/summary :seon.test.runner/summary]
+  [:seon.test.runner/results :seon.test.runner/results]]
+
+ :seon.test.runner/record-request
+ [:map {:closed true}
+  [:seon.test.runner/run-result :seon.test.runner/run-result]
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.boot/root :seon.boot/root]]
+ :seon.test.runner/record-tx [:vector :map]
+ :seon.test.runner/recorded
+ [:map {:closed true}
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test.runner/recorded-count [:int {:min 0}]]]
+
+;; ===========================================================================
+;; WAKE
+;; ===========================================================================
+; The wake channel carries no information: it says "look", never
+ ; "here is what changed". Work is derived from facts, so a wake that
+ ; lost its payload lost nothing.
+ :seon.cluster.wake/attributes [:set :keyword]
+ :seon.cluster.wake/key :keyword
+ ; THE ROUTING DELIVERY (F1 §4): one registration per cluster whose
+ ; handler ROUTES each committed wake datom to its recipient's mailbox
+ ; instead of one global channel. `channels` is a zero-arg fn returning
+ ; the CURRENT process-local routing map (recipient entity id →
+ ; mailbox channel) — a fn, not a snapshot, because arming grows the
+ ; map while the listener lives.
+ :seon.cluster.wake/channels fn?
+ ; A two-arg predicate over recipient eid + the exact mailbox route.
+ ; The agent routing owner derives quarantine from its current route;
+ ; no fenced-id set or stored lifecycle flag exists.
+ :seon.cluster.wake/fenced? fn?
+ ; Delivery combines `offer!`'s answer with that derived route fact.
+ ; A closed channel alone is not a fence: a closed render route is a
+ ; genuine delivery failure and remains loud.
+ :seon.cluster.wake/offer-result [:enum true false nil]
+ :seon.cluster.wake/delivery [:enum :seon.cluster.wake/delivered :seon.cluster.wake/fenced :seon.cluster.wake/refused]
+ ; `render-channel` is the THIRD delivery (F2 §1.4): one payload-free
+ ; wake per REPORT, unconditionally, into the render proc's `::interest`
+ ; in-port. Required, not optional — a cluster whose commits reach no
+ ; render pass would serve a page that silently stops updating.
+ :seon.cluster.wake/route-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/channels :seon.cluster.wake/channels] [:seon.cluster.wake/fenced? :seon.cluster.wake/fenced?] [:seon.cluster.wake/armer-channel :seon.flow/channel] [:seon.cluster.wake/render-channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+ :seon.cluster.wake/unlisten-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+
+;; ===========================================================================
+;; WALK
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; THE NEIGHBOURHOOD TRAVERSAL — `seon.render.walk`.
+ ;
+ ; Every shape here is IN-MEMORY: a walk transacts nothing, and the
+ ; rendered neighbourhood is a value the consumer assembles and drops.
+ ; The durable half of this mechanism is elsewhere and already exists —
+ ; the family default renderers are `:seon.render/ai`/`:seon.render/html`
+ ; properties on the registered ENTITY maps, which is where a family
+ ; declares everything else about itself.
+ ; ---------------------------------------------------------------------------
+
+ ; Anything `d/pull` accepts as an eid: an entity id, or a lookup ref
+ ; like `[:seon.cluster.run/id "run-7f21"]`. `:any` at a genuinely
+ ; polymorphic dependency boundary — the admissible forms are Datahike's
+ ; and restating them here would be a second contract to drift from the
+ ; database's own (`seon.render.block/entity-slot` takes the same value
+ ; under the same rule).
+ :seon.render.walk/lookup :any
+ :seon.render.walk/target :int
+ :seon.render.walk/back-reference? :boolean
+ :seon.render/would-fall-to-floor? :boolean
+ :seon.render.walk/changed-at [:int {:min 0}]
+
+ ; WHICH CONNECTION a neighbour was reached through. Named on the node
+ ; so a reader never has to re-query to learn why a neighbour is there,
+ ; and so a consumer can group by relationship without a second walk.
+ :seon.render.walk/attribute :qualified-keyword
+
+ :seon.render.walk/connection
+ [:map {:closed true}
+  [:seon.render.walk/attribute :seon.render.walk/attribute]
+  [:seon.render.walk/target {:optional true} :seon.render.walk/target]
+  [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
+  [:seon.error/value {:optional true} :seon.error/value]]
+
+ ; ---------------------------------------------------------------------------
+ ; THE RESOLUTION CHAIN (owner ruling 2026-07-28 post-midnight #3),
+ ; most specific first. Each step is DATA the caller already holds, so
+ ; "why did it render that way?" is answered by reading one map.
+ ; ---------------------------------------------------------------------------
+
+ ; step 1 — the VIEWER's local override for a data type, keyed by the
+ ; registered schema key the value matches. It rides the REQUEST rather
+ ; than the unit precisely because the viewer is constant through the
+ ; whole walk: every hop renders through the original agent's overrides, and
+ ; perspective never silently shifts to an intermediate namespace.
+ :seon.render/overrides [:map-of :qualified-keyword :seon.render/projection]
+
+ ; step 3 — the kind's floor. Required, because a kind whose floor could
+ ; be absent would make some value unrenderable, and the floor exists
+ ; precisely so none is: "code is a good fallback as it's the truth of
+ ; the system."
+ :seon.render/floor :seon.render/projection
+
+ :seon.render.walk/resolution
+ [:map {:closed true}
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/floor :seon.render/floor]
+  [:seon.render/overrides {:optional true} :seon.render/overrides]]
+
+ ; ---------------------------------------------------------------------------
+ ; THE WALK
+ ; ---------------------------------------------------------------------------
+
+ ; DISTANCE is optional for the same reason it is optional on every
+ ; other render request: implied 1, never required, written in one place
+ ; (`seon.render.block/distance`). Caps are REQUIRED — a walk over a
+ ; graph that fans out and genuinely cycles needs the node budget, and
+ ; the reverse-neighbour width is the same collection dial rather than a
+ ; second one to drift from it.
+ :seon.render.walk/request
+ [:map {:closed true}
+  [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/kind :seon.render/kind]
+  [:seon.render/floor :seon.render/floor]
+  [:seon.render/namespace {:optional true} :seon.render/namespace]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.render/overrides {:optional true} :seon.render/overrides]]
+
+ ; One rendered node. `:seon.render/output` and `:seon.error/value` are
+ ; SIBLINGS, never a key beside each other: a node either rendered or
+ ; said why it could not, and both are values — nothing here throws,
+ ; because the prompt path is an error path.
+ ;
+ ; `:seon.render.walk/neighbours` is `[:vector :map]` rather than a
+ ; self-reference: the population admits no recursive form today, and a
+ ; consumer walks the tree with `get`, so a nominally recursive
+ ; declaration would buy nothing the reader does not already have.
+ :seon.render.walk/neighbours [:vector :map]
+
+ :seon.render.walk/node
+ [:map {:closed true}
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/distance :seon.render/distance]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
+  [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
+  [:seon.render.walk/back-reference? {:optional true}
+   :seon.render.walk/back-reference?]
+  [:seon.render/would-fall-to-floor? {:optional true}
+   :seon.render/would-fall-to-floor?]
+  [:seon.render/projection {:optional true} :seon.render/projection]
+  [:seon.render/output {:optional true} :seon.render/output]
+  [:seon.error/value {:optional true} :seon.error/value]
+  [:seon.render.walk/neighbours {:optional true}
+   :seon.render.walk/neighbours]]
+
+ ; A projection-neutral flattened walk unit. `output` remains the raw render
+ ; value; consumers decide whether to serialize it as prose or HTML.
+ :seon.render.walk/path [:vector [:or :keyword :int]]
+ :seon.render.walk/found-depth [:int {:min 0}]
+ :seon.render.walk/branch :seon.render.walk/path
+ :seon.render.walk/unit
+ [:map {:closed true}
+  [:seon.render.walk/node :seon.render.walk/node]
+  [:seon.render.walk/path :seon.render.walk/path]
+  [:seon.render.walk/found-depth :seon.render.walk/found-depth]
+  [:seon.render.walk/branch {:optional true} :seon.render.walk/branch]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
+  [:seon.render/output {:optional true} :seon.render/output]]
+ :seon.render.walk/units [:vector :seon.render.walk/unit]
+
+;; ===========================================================================
+;; WEB
+;; ===========================================================================
+; ---------------------------------------------------------------------------
+ ; THE PAGE ON A SOCKET. Process-local shapes only: a server descriptor,
+ ; a request, a repaint. Nothing here is a database attribute, because
+ ; nothing rendered is stored (O14) and a socket is not a fact.
+ ; ---------------------------------------------------------------------------
+
+ ; `:seon.config.render/coalesce-ms` is DECLARED in the CONFIG section, with the
+ ; other dials and inside the config singleton entity. It is a
+ ; coalescing FLOOR honored at the RENDER PROC (F2 §1.2), read from the
+ ; config facts per pass — not a timer standing in for an unobservable
+ ; event: the observable event is the commit and the routing listener
+ ; already delivers it.
+
+ :seon.render.web/port [:int {:min 0 :max 65535}]
+
+ ; The fan-out the complete page snapshots ride: the render proc's
+ ; `::pages` out-port, multed, tapped per tab with a sliding-1.
+ :seon.render.web/pages-mult [:fn {:gen/gen seon.render.web/mult-generator} seon.render.web/mult?]
+
+ ; The watched-agent registration: a process-local atom
+ ; `{agent-id → open-tab count}`, written by the feed's
+ ; on-open/on-close, read by the render pass. Disposable by the
+ ; transport law — it names live sockets, and reconnect = repaint.
+ :seon.render.web/registration [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.render.web/url [:string {:min 1}]
+ :seon.render.web/root-agent-id :seon.cluster.agent/id
+
+ ; The http-kit server object. A `[:fn]` with an honest generator, the
+ ; supported idiom for a host object — the same shape `seon.store` uses
+ ; for a connection and `seon.flow` for a channel.
+ :seon.render.web/http-server [:fn {:gen/gen seon.render.web/server-generator} seon.render.web/server?]
+
+ ; The port the derivation ASKED for, present exactly when it is not the
+ ; port we got. Key presence answers "did this fall back?" so no reader
+ ; has to remember to compare two numbers.
+ :seon.render.web/wanted-port :seon.render.web/port
+
+ :seon.render.web/server
+ [:map {:closed true}
+  [:seon.render.web/server :seon.render.web/http-server]
+  [:seon.render.web/port :seon.render.web/port]
+  [:seon.render.web/url :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]]
+
+ ; The render proc's process-local view, constructed once by
+ ; `seon.cluster/arm-agents!`. Every opaque member references the existing
+ ; predicate schema with its real generator: channels carry wakes, pages, and
+ ; completion; the atom counts watched agents; the mult fans pages to tabs.
+ ; Loss is free by the transport law, so none of this is database data.
+ :seon.render.web/view
+ [:map {:closed true}
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/pages-channel :seon.flow/channel]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/completion :seon.flow/channel]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]]
+
+ ; What the handler needs. The database CONNECTION rather than a
+ ; database value, because a page derives at whatever basis is current
+ ; when the request arrives and a feed derives again on every commit —
+ ; a value captured at start would freeze the page at boot.
+ ; `:seon.cluster.run/process` is THIS process's run-holder identity,
+ ; and it is REQUIRED rather than optional on purpose. It is the one
+ ; input the database cannot answer — which processes are alive — and
+ ; the problems block refuses to guess it, correctly: an absent set
+ ; makes every held run look wedged and an assumed-alive default hides
+ ; a real wedge. A service that cannot say who is alive cannot render an
+ ; honest page, so the refusal belongs at construction, not per card.
+ :seon.render.web/service
+ [:map {:closed true}
+  [:seon.store/connection :seon.store/connection]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/port {:optional true} :seon.render.web/port]]
+
+ :seon.render.web/feed-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.store/connection :seon.store/connection]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/render-channel :seon.flow/channel]]
+
+ :seon.render.web/page-request
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render/page :seon.render/page]
+  [:seon.render.web/feed-url [:string {:min 1}]]]
+
+ ; The parsed body handed from the Ring dispatcher to the one inbound
+ ; boundary. Content is optional at the wire because a missing field is
+ ; a 422 refusal, not a schema/instrumentation throw. When present it may
+ ; still be blank; the message family owns that refusal.
+ :seon.render.web/inbound
+ [:map {:closed true}
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/inbound-content
+   {:optional true}
+   :seon.cluster.message/inbound-content]]
+
+ ; What ONE agent's paint needs. A map rather than five positional
+ ; arguments because the two optional members carry meaning by
+ ; PRESENCE: an agent that is not streaming has no `:seon.ai/partial`
+ ; at all, and absent is not the same as empty. The database VALUE is
+ ; here, not the connection — a paint is derived at one basis and the
+ ; whole page must be that basis.
+ :seon.render.web/paint-request
+ [:map {:closed true}
+  [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]]
+
+ ; One repaint: what to send, and what the connection has now seen.
+ ; Keyed by surface id and holding the BYTES, because bytes are what the
+ ; socket costs and what suppression must compare — two values that
+ ; serialize identically are the same page.
+ :seon.render.web/repaint
+ [:map {:closed true}
+  [:seon.render.web/patches [:vector [:tuple :seon.render/surface-id :string]]]
+  [:seon.render.web/delivered [:map-of :seon.render/surface-id :string]]]
+
+;; ===========================================================================
+;; WORK
+;; ===========================================================================
+; WHAT THE LOOP SHOULD DO NEXT, as one derived value. The four
+ ; situations below are total and mutually exclusive over any database
+ ; value; `nil` is idle, and nothing else is representable.
+ :seon.cluster.work/situation [:enum :resume :call :open :close]
+ ; :resume — an open run THIS process already holds, with a plan: fold
+ ;           on at the first ordinal lacking a terminal receipt. An
+ ;           unheld plan never resumes; recovery closes interrupted work.
+ ; :call   — an open run this process holds, no plan: derive the prompt,
+ ;           call the model, freeze the plan (the ONE paid call, never
+ ;           retried)
+ ; :open   — an unanswered trigger and an idle agent: open + claim first,
+ ;           model second (the claim-early fence)
+ ; :close  — an open run whose every form has a terminal receipt: the
+ ;           fold is done. Its own situation rather than a :resume with
+ ;           a missing ordinal, because fold-vs-close is a different
+ ;           instruction and must be visible in the VALUE, never inferred
+ ;           from an absent key (seal revision, 2026-07-27)
+ :seon.cluster.work/next [:multi {:dispatch :seon.cluster.work/situation}
+                          [:resume [:map {:closed true} [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
+                          [:call [:map {:closed true} [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
+                          [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
+                          [:close [:map {:closed true} [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
+ ; THE PER-AGENT DERIVATION'S REQUEST (F1): the same request narrowed
+ ; to one agent. The episode dial is deliberately NOT here — it is a
+ ; config fact the derivation reads from the database value itself, so
+ ; a live dial change applies at the next pass with no handle rebuild.
+ :seon.cluster.work/agent-request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
+ ; Runs since (and including) the one answering the last OUTSIDE
+ ; trigger — the episode, derived purely from committed facts.
+ :seon.cluster.work/episode-runs [:int {:min 0}]
+ :seon.cluster.work/now :inst
+
+ ; THE SEVEN STATES OF ONE FROZEN FORM. These are derived values, never
+ ; stored status attributes. Run closure is intentionally absent.
+ :seon.cluster.work/form-state
+ [:enum :unevaluated :running :succeeded :routed :unrouted-red
+  :owner-fixed :owner-declared-cant]
+ :seon.cluster.work/settled? :boolean
+ :seon.cluster.work/form-settlement
+ [:map {:closed true}
+  [:seon.cluster.run.form/id :seon.cluster.run.form/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
+  [:seon.problems/id {:optional true} :seon.problems/id]
+  [:seon.cluster.work/form-state :seon.cluster.work/form-state]
+  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
+ :seon.cluster.work/plan-settlement
+ [:map {:closed true}
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]]
+  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
+ :seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]
+}

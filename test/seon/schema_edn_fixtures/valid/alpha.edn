@@ -1,2 +1,0 @@
-{:seon.schema.edn.fixture/name [:string {:min 1}]
- :seon.schema.edn.fixture/label :seon.schema.edn.fixture/name}

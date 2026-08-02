@@ -1,126 +1,210 @@
 (ns seon.bootstrap
-  "The system-authored bootstrap run shared by every new agent."
-  (:require [seon.cluster.run :as run]
+  "The fact-authored bootstrap run shared by every new agent."
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [seon.cluster.run :as run]
             [seon.schema :as schema]))
 
-(def help-text
-  (str
-   "You are an agent in a Seon cluster. This is a real Clojure REPL and it is\n"
-   "yours: what you evaluate here runs, and what you define here stays.\n\n"
-   "Your reply is read as Clojure forms and evaluated in order, one at a time,\n"
-   "in your own namespace. Everything a form prints and everything it returns\n"
-   "comes back to you as the session you are reading now. Round trips are\n"
-   "expensive, so plan the most forms you can usefully run together and send\n"
-   "them in one reply; when a later form depends on what an earlier one\n"
-   "returned, split the batch there.\n\n"
-   "The cluster is one graph database. `seon.db/q` and `seon.db/pull` read it\n"
-   "at the current basis, `dir` lists a namespace, `doc` explains a function\n"
-   "from the graph's own facts. Every function in this cluster is callable by\n"
-   "you.\n\n"
-   "A `defn` with a complete `:malli/schema` becomes a durable fact other\n"
-   "agents can find and call; without one it lives only in this session. The\n"
-   "contract is checked, so write it honestly: input maps must say\n"
-   "`{:closed true}`, and a return may not be a bare `[:maybe ...]`.\n\n"
-   "Other agents and the human reach you by message and you reach them with\n"
-   "`(my.message/send \"id\" \"text\")`. End your run with\n"
-   "`(my.run/complete \"the reply you want delivered\")`, or\n"
-   "`(my.run/wait \"what you are waiting for\")` when you need someone else\n"
-   "first — your next run starts fresh, so put everything it will need into\n"
-   "that note.\n"))
+(def plan-id
+  "The inherited bootstrap-plan identity on every cluster branch."
+  :default)
+
+(def ^:private resource-path
+  "seon/bootstrap.edn")
+
+(def ^:private namespace-token
+  "{{seon.ns/name}}")
+
+(defn packaged-forms
+  "The shipped bootstrap form maps read from the classpath EDN resource."
+  {:malli/schema [:=> [:cat] :seon.bootstrap/default-forms]}
+  []
+  (let [resource (io/resource resource-path)
+        forms (when resource (edn/read-string (slurp resource)))]
+    (when-not resource
+      (throw
+       (ex-info "The shipped bootstrap EDN resource is absent."
+                {:seon.error/kind :seon.bootstrap/resource-absent
+                 :seon.bootstrap/resource resource-path})))
+    (when-not (schema/valid-candidate-value?
+               :seon.bootstrap/default-forms forms)
+      (throw
+       (ex-info "The shipped bootstrap EDN resource is invalid."
+                {:seon.error/kind :seon.bootstrap/resource-invalid
+                 :seon.bootstrap/resource resource-path
+                 :seon.bootstrap/explanation
+                 (schema/explain-candidate-value
+                  :seon.bootstrap/default-forms forms)})))
+    forms))
+
+(defn help-text
+  "The prose context authored on the shipped help form map."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (:seon.bootstrap.plan.form/context (first (packaged-forms))))
 
 (defmacro help
   "Print the one prose guide to the agent REPL."
   []
-  (list 'clojure.core/print help-text))
+  (list 'clojure.core/print (help-text)))
 
 (defmacro dir
-  "List the public names in `namespace-name` through Clojure's REPL macro."
+  "List the public names in namespace-name through Clojure's REPL macro."
   [namespace-name]
   (list 'clojure.repl/dir namespace-name))
 
 (defmacro doc
-  "Print documentation for `symbol` through Clojure's REPL macro."
+  "Print documentation for symbol through Clojure's REPL macro."
   [documented-symbol]
   (list 'clojure.repl/doc documented-symbol))
 
 (defn run-id
-  "The deterministic id of `agent-id`'s system-authored bootstrap run."
+  "The deterministic id of an agent's system-authored bootstrap run."
   {:malli/schema [:=> [:cat :seon.cluster.agent/id]
                   :seon.cluster.run/id]}
   [agent-id]
   (str "bootstrap:" agent-id))
 
-(defn sources
-  "The thirteen ordered forms in a new agent's bootstrap plan."
-  {:malli/schema [:=> [:cat :seon.ns/name]
+(defn- digest-value
+  [value]
+  (schema/sha-256 [(.getBytes (pr-str value) "UTF-8")]))
+
+(defn population-tx
+  "Install the shipped bootstrap plan once on a source database value."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.store/transaction-data]}
+  [db]
+  (let [forms (packaged-forms)
+        digest (digest-value forms)
+        current (d/pull db
+                        [:seon.bootstrap.plan/id
+                         :seon.bootstrap.plan/digest]
+                        [:seon.bootstrap.plan/id plan-id])]
+    (cond
+      (nil? current)
+      [{:seon.bootstrap.plan/id plan-id
+        :seon.bootstrap.plan/digest digest
+        :seon.bootstrap.plan/forms
+        (mapv (fn [ordinal form]
+                (assoc form :seon.cluster.run.form/ordinal (long ordinal)))
+              (range)
+              forms)}]
+
+      (= digest (:seon.bootstrap.plan/digest current))
+      []
+
+      :else
+      (throw
+       (ex-info
+        "The database already carries a different bootstrap plan."
+        {:seon.error/kind :seon.bootstrap/population-conflict
+         :seon.bootstrap.plan/id plan-id
+         :seon.bootstrap.plan/digest digest
+         :seon.bootstrap.plan/current-digest
+         (:seon.bootstrap.plan/digest current)})))))
+
+(defn- ordered-plan-rows
+  [db cluster-name]
+  (let [rows
+        (d/q
+         {:query
+          '[:find ?ordinal ?source ?designation
+            :in $ ?cluster-name
+            :where
+            [?cluster :seon.cluster/name ?cluster-name]
+            [?cluster :seon.cluster/bootstrap-plan ?plan]
+            [?plan :seon.bootstrap.plan/forms ?form]
+            [?form :seon.cluster.run.form/ordinal ?ordinal]
+            [?form :seon.cluster.run.form/source ?source]
+            [?form :seon.ns/name-designation ?designation]]
+          :args [db cluster-name]
+          :order-by '[?ordinal :asc]})
+        actual-ordinals (mapv first rows)
+        expected-ordinals (mapv long (range (count rows)))]
+    (when (empty? rows)
+      (throw
+       (ex-info "The cluster has no bootstrap-plan forms."
+                {:seon.error/kind :seon.bootstrap/plan-absent
+                 :seon.cluster/name cluster-name})))
+    (when-not (= expected-ordinals actual-ordinals)
+      (throw
+       (ex-info "The cluster bootstrap-plan ordinals are not contiguous."
+                {:seon.error/kind :seon.bootstrap/invalid-ordinals
+                 :seon.cluster/name cluster-name
+                 :seon.bootstrap.plan/expected-ordinals expected-ordinals
+                 :seon.bootstrap.plan/actual-ordinals actual-ordinals})))
+    rows))
+
+(defn ordered-sources
+  "The cluster's bootstrap-plan facts resolved for one agent namespace."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster/name
+                       :seon.ns/name]
                   :seon.cluster.reply/sources]}
-  [namespace-name]
-  (let [user-form (fn [source]
-                    {:seon.cluster.run.form/source source
-                     :seon.ns/name 'user})
-        agent-form (fn [source]
-                     {:seon.cluster.run.form/source source
-                      :seon.ns/name namespace-name})
-        function-symbol (str namespace-name "/largest")]
-    [(agent-form "(help)")
-     (user-form (str "(in-ns '" namespace-name ")"))
-     (agent-form "(dir my.run)")
-     (agent-form "(doc my.run/complete)")
-     (agent-form "(dir my.message)")
-     (agent-form
-      "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])")
-     (agent-form
-      "(seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])")
-     (agent-form
-      (str
-       "(defn largest\n"
-       "  \"The row with the largest :amount.\"\n"
-       "  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]\n"
-       "                  [:map [:label :string] [:amount :int]]]}\n"
-       "  [rows]\n"
-       "  (last (sort-by :amount rows)))"))
-     (agent-form
-      (str
-       "(defn largest\n"
-       "  \"The row with the largest :amount; {} when there are none.\"\n"
-       "  {:malli/schema [:=> [:cat [:sequential [:map {:closed true} [:label :string] [:amount :int]]]]\n"
-       "                  [:map {:closed true} [:label {:optional true} :string] [:amount {:optional true} :int]]]}\n"
-       "  [rows]\n"
-       "  (or (last (sort-by :amount rows)) {}))"))
-     (agent-form
-      "(largest [{:label \"a\" :amount 3} {:label \"b\" :amount 9}])")
-     (agent-form "(largest)")
-     (agent-form "(largest [])")
-     (agent-form
-      (str
-       "(seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] \""
-       function-symbol
-       "\")"))]))
+  [db cluster-name namespace-name]
+  (mapv
+   (fn [[_ source designation]]
+     {:seon.cluster.run.form/source
+      (str/replace source namespace-token (str namespace-name))
+      :seon.ns/name
+      (case designation
+        :agent namespace-name
+        :user 'user)})
+   (ordered-plan-rows db cluster-name)))
+
+(defn agent-sources
+  "The owning cluster's ordered bootstrap sources for an existing agent."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  :seon.cluster.reply/sources]}
+  [db agent-id]
+  (let [[cluster-name namespace-name]
+        (d/q '[:find [?cluster-name ?namespace-name]
+               :in $ ?agent-id
+               :where
+               [?agent :seon.cluster.agent/id ?agent-id]
+               [?agent :seon.cluster.agent/cluster ?cluster]
+               [?cluster :seon.cluster/name ?cluster-name]
+               [?agent :seon.cluster.agent/namespace ?namespace]
+               [?namespace :seon.ns/name ?namespace-name]]
+             db agent-id)]
+    (when-not cluster-name
+      (throw
+       (ex-info "The agent has no cluster-backed bootstrap plan."
+                {:seon.error/kind :seon.bootstrap/agent-plan-absent
+                 :seon.cluster.agent/id agent-id})))
+    (ordered-sources db cluster-name namespace-name)))
 
 (defn plan-digest
   "The stable digest of one agent's ordered bootstrap sources."
   {:malli/schema [:=> [:cat :seon.cluster.reply/sources]
                   :seon.cluster.run/plan-digest]}
-  [ordered-sources]
-  (schema/sha-256 [(.getBytes (pr-str ordered-sources) "UTF-8")]))
+  [sources]
+  (digest-value sources))
 
 (defn seed-tx
   "Transaction data opening, claiming, and freezing one bootstrap run."
   {:malli/schema
    [:=>
     [:cat
+     :seon.db/database-value
      [:map {:closed true}
       [:seon.cluster.agent/id :seon.cluster.agent/id]
+      [:seon.cluster/name :seon.cluster/name]
       [:seon.ns/name :seon.ns/name]
       [:seon.cluster.run/process :seon.cluster.run/process]
       [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]]]
     :seon.store/transaction-data]}
-  [{agent-id :seon.cluster.agent/id
+  [db
+   {agent-id :seon.cluster.agent/id
+    cluster-name :seon.cluster/name
     namespace-name :seon.ns/name
     process :seon.cluster.run/process
     opened-at :seon.cluster.run/opened-at}]
   (let [id (run-id agent-id)
-        ordered-sources (sources namespace-name)
+        sources (ordered-sources db cluster-name namespace-name)
         namespace-row
         {:seon.ns/name namespace-name
          :seon.ns/requires
@@ -153,5 +237,5 @@
       (run/plan-tx
        {:seon.cluster.run/id id
         :seon.cluster.run/process process
-        :seon.cluster.run/plan-digest (plan-digest ordered-sources)
-        :seon.cluster.run/sources ordered-sources})])))
+        :seon.cluster.run/plan-digest (plan-digest sources)
+        :seon.cluster.run/sources sources})])))

@@ -1,9 +1,8 @@
 (ns seon.schema.edn
   "Loads and admits the classpath's EDN schema population.
 
-  `load!` reads the EDN maps directly beneath a classpath resource
-  directory from file or jar URLs, refuses unreadable files and
-  duplicate keys, and contributes the merged forms to
+  `load!` reads the one named EDN classpath resource, refuses an unreadable
+  resource and duplicate keys, and contributes its forms to
   `seon.schema` without activating them. It also derives the manifest,
   effective-config, and config-entity composites from registered config
   attributes.
@@ -11,35 +10,33 @@
   `admit` checks a candidate population through the shared schema
   contracts. Every `[:fn]` predicate must resolve to a registered core
   predicate and declare a generator. Refusals identify the offending
-  schema key and, for loaded forms, its source file. This namespace
+  schema key and, for loaded forms, its source resource. This namespace
   reads classpath and in-memory data only; database installation belongs
   to cluster population."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.schema :as schema]
-            [seon.schema.form :as schema.form])
-  (:import [java.net JarURLConnection URL]
-           [java.util.jar JarFile]))
+            [seon.schema.form :as schema.form]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
 ;;; ---------------------------------------------------------------------------
 
-; where the loader looks; overridable so suites use fixture directories
-(schema/register! ::resource-dir [:string {:min 1}])
-(schema/register! ::files [:vector [:string {:min 1}]])
+; the one classpath resource; overridable so suites use fixture resources
+(schema/register! ::resource [:string {:min 1}])
+(schema/register! ::file [:string {:min 1}])
 (schema/register! ::keys [:int {:min 0}])
 
 (schema/register!
  ::load-request
  [:map {:closed true}
-  [::resource-dir {:optional true} ::resource-dir]])
+  [::resource {:optional true} ::resource]])
 
 (schema/register!
  ::loaded
  [:map {:closed true}
-  [::files ::files]
+  [::file ::file]
   [::keys ::keys]])
 
 (defonce ^:private packaged-base-forms
@@ -48,9 +45,9 @@
   ;; bootstrap population; the ambient registry is never a build input.
   (schema/registered-schemas))
 
-(def default-resource-dir
-  "Classpath directory backed by `resources/seon/schema/` in a source checkout."
-  "seon/schema")
+(def default-resource
+  "Classpath resource backed by `resources/seon/schema.edn` in a source checkout."
+  "seon/schema.edn")
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
@@ -143,134 +140,95 @@
                [identity (:seon.config/default properties)]))))
         forms))
 
-(defn- resource-files
-  [resource-dir]
-  (let [loader (clojure.lang.RT/baseLoader)]
-    (into []
-          (mapcat
-           (fn [^URL directory-url]
-             (case (.getProtocol directory-url)
-               "file"
-               (let [directory (io/file (.toURI directory-url))]
-                 (->> (or (.listFiles directory) (make-array java.io.File 0))
-                      (filter #(.isFile ^java.io.File %))
-                      (filter #(str/ends-with? (.getName ^java.io.File %) ".edn"))
-                      (sort-by #(.getName ^java.io.File %))
-                      (map (fn [file]
-                             {:seon.schema.edn/file
-                              (.toExternalForm (.toURL (.toURI ^java.io.File file)))
-                              :seon.schema.edn/url (.toURL (.toURI ^java.io.File file))}))))
+(defn- duplicate-attribute
+  [error]
+  (when-let [[_ printed]
+             (re-matches #"Duplicate key: (.+)" (ex-message error))]
+    (let [value (edn/read-string printed)]
+      (when (keyword? value) value))))
 
-               "jar"
-               (let [^JarURLConnection connection
-                     (.openConnection directory-url)
-                     ^JarFile jar (.getJarFile connection)
-                     prefix (str (str/replace resource-dir #"/+$" "") "/")]
-                 (->> (enumeration-seq (.entries jar))
-                      (map #(.getName ^java.util.jar.JarEntry %))
-                      (filter #(and (str/starts-with? % prefix)
-                                    (str/ends-with? % ".edn")
-                                    (not (str/includes?
-                                          (subs % (count prefix)) "/"))))
-                      sort
-                      (map (fn [entry]
-                             (let [url (URL. (str "jar:"
-                                                   (.toExternalForm
-                                                    (.getJarFileURL connection))
-                                                   "!/" entry))]
-                               {:seon.schema.edn/file (.toExternalForm url)
-                                :seon.schema.edn/url url})))))
-
-               (throw
-                (ex-info
-                 "Schema resource directory uses an unsupported URL protocol."
-                 {:seon.schema.edn/resource-dir resource-dir
-                  :seon.schema.edn/file (.toExternalForm directory-url)
-                  :seon.error/kind :core-bug})))))
-          (enumeration-seq (.getResources loader resource-dir)))))
-
-(defn- read-schema-file
-  [{::keys [file url]}]
-  (let [value
-        (try
-          (with-open [reader (java.io.PushbackReader. (io/reader url))]
-            (edn/read {:eof ::eof} reader))
-          (catch Exception e
-            (throw
-             (ex-info
-              (str "Schema EDN file is unreadable: " file)
-              {::error ::unreadable-file
-               ::file file
-               :seon.error/kind :user-input}
-              e))))]
+(defn- read-schema-resource
+  [resource]
+  (let [url (io/resource resource)
+        file (or (some-> url .toExternalForm) resource)
+        value
+        (if-not url
+          (throw
+           (ex-info
+            (str "Schema EDN resource is absent: " resource)
+            {::error ::unreadable-file
+             ::file file
+             :seon.error/kind :user-input}))
+          (try
+            (with-open [reader (java.io.PushbackReader. (io/reader url))]
+              (edn/read {:eof ::eof} reader))
+            (catch IllegalArgumentException error
+              (if-let [attribute (duplicate-attribute error)]
+                (throw
+                 (ex-info
+                  (str "Schema attribute " attribute
+                       " is declared twice in the schema resource.")
+                  {::error ::duplicate-attribute
+                   ::attribute attribute
+                   ::file file
+                   :seon.error/kind :user-input}
+                  error))
+                (throw
+                 (ex-info
+                  (str "Schema EDN resource is unreadable: " file)
+                  {::error ::unreadable-file
+                   ::file file
+                   :seon.error/kind :user-input}
+                  error))))
+            (catch Exception error
+              (throw
+               (ex-info
+                (str "Schema EDN resource is unreadable: " file)
+                {::error ::unreadable-file
+                 ::file file
+                 :seon.error/kind :user-input}
+                error)))))]
     (when-not (map? value)
       (throw
        (ex-info
-        (str "Schema EDN file must contain one map: " file)
+        (str "Schema EDN resource must contain one map: " file)
         {::error ::not-a-map
          ::file file
          :seon.error/kind :user-input})))
-    value))
-
-(defn- merge-schema-files
-  [resources]
-  (reduce
-   (fn [{::keys [forms files-by-key] :as population} resource]
-     (let [file (::file resource)
-           file-forms (read-schema-file resource)]
-       (reduce-kv
-        (fn [result attribute definition]
-          (if-let [prior-file (get (::files-by-key result) attribute)]
-            (throw
-             (ex-info
-              (str "Schema attribute " attribute
-                   " is declared by two classpath resources.")
-              {::error ::duplicate-attribute
-               ::attribute attribute
-               ::files [prior-file file]
-               :seon.error/kind :user-input}))
-            (-> result
-                (assoc-in [::forms attribute] definition)
-                (assoc-in [::files-by-key attribute] file))))
-        population
-        file-forms)))
-   {::forms {} ::files-by-key {}}
-   resources))
+    {::file file ::forms value}))
 
 (defn- resource-population
-  [resource-dir]
-  (let [resources (resource-files resource-dir)
-        {::keys [forms files-by-key]} (merge-schema-files resources)]
-    {::resources resources
+  [resource]
+  (let [{::keys [file forms]} (read-schema-resource resource)]
+    {::file file
      ::forms (derive-config-forms forms)
-     ::files-by-key files-by-key}))
+     ::files-by-key (zipmap (keys forms) (repeat file))}))
 
 (defn packaged-forms
   "Canonical schema forms declared by Seon's bootstrap and schema resources."
   {:malli/schema [:=> [:cat] :map]}
   []
   (merge packaged-base-forms
-         (::forms (resource-population default-resource-dir))))
+         (::forms (resource-population default-resource))))
 
 (defn load!
-  "Merge every `<resource-dir>/*.edn` on the classpath into candidates.
-  The default is `default-resource-dir`, physically
-  `resources/seon/schema/` in a source checkout. Each file is one EDN map of
-  registry key → schema form. Refuses
-  `::duplicate-attribute` (one key contributed by two files, both
-  named), `::unreadable-file` (not EDN, file named), and
-  `::not-a-map` (a file whose top level is not a map). Contributes
+  "Read one named EDN classpath resource into candidates.
+  The default is `default-resource`, physically `resources/seon/schema.edn`
+  in a source checkout. The resource is one EDN map of registry key → schema
+  form. Refuses `::duplicate-attribute` (one key appears twice),
+  `::unreadable-file` (resource named), and `::not-a-map` (the top level is
+  not a map). Contributes
   candidates exactly as `register!` does; never activates — activation
   admits the whole population through `admit`. Returns what was
   loaded."
   {:malli/schema [:=> [:cat ::load-request] ::loaded]}
-  [{::keys [resource-dir]}]
-  (let [resource-dir (or resource-dir default-resource-dir)
-        {::keys [resources forms files-by-key]}
-        (resource-population resource-dir)]
+  [{::keys [resource]}]
+  (let [resource (or resource default-resource)
+        {::keys [file forms files-by-key]}
+        (resource-population resource)]
     (schema/contribute-candidate-forms! forms)
     (swap! !source-files merge files-by-key)
-    {::files (mapv ::file resources)
+    {::file file
      ::keys (count forms)}))
 
 (defn- predicate-declarations

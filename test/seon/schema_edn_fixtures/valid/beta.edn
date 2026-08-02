@@ -1,1 +1,0 @@
-{:seon.schema.edn.fixture/count [:int {:min 0}]}

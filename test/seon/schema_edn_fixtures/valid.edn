@@ -1,0 +1,5 @@
+{:seon.schema.edn.fixture/name [:string {:min 1}]
+ :seon.schema.edn.fixture/label :seon.schema.edn.fixture/name
+
+ ;; A section boundary is editorial; references resolve globally.
+ :seon.schema.edn.fixture/count [:int {:min 0}]}

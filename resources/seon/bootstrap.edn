@@ -1,0 +1,70 @@
+[{:seon.cluster.run.form/source "(help)"
+  :seon.ns/name-designation :agent
+  :seon.bootstrap.plan.form/context
+  "You are an agent in a Seon cluster. This is a real Clojure REPL and it is
+yours: what you evaluate here runs, and what you define here stays.
+
+Your reply is read as Clojure forms and evaluated in order, one at a time,
+in your own namespace. Everything a form prints and everything it returns
+comes back to you as the session you are reading now. Round trips are
+expensive, so plan the most forms you can usefully run together and send
+them in one reply; when a later form depends on what an earlier one
+returned, split the batch there.
+
+The cluster is one graph database. `seon.db/q` and `seon.db/pull` read it
+at the current basis, `dir` lists a namespace, `doc` explains a function
+from the graph's own facts. Every function in this cluster is callable by
+you.
+
+A `defn` with a complete `:malli/schema` becomes a durable fact other
+agents can find and call; without one it lives only in this session. The
+contract is checked, so write it honestly: input maps must say
+`{:closed true}`, and a return may not be a bare `[:maybe ...]`.
+
+Other agents and the human reach you by message and you reach them with
+`(my.message/send \"id\" \"text\")`. End your run with
+`(my.run/complete \"the reply you want delivered\")`, or
+`(my.run/wait \"what you are waiting for\")` when you need someone else
+first — your next run starts fresh, so put everything it will need into
+that note.
+"}
+ {:seon.cluster.run.form/source "(in-ns '{{seon.ns/name}})"
+  :seon.ns/name-designation :user}
+ {:seon.cluster.run.form/source "(dir my.run)"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source "(doc my.run/complete)"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source "(dir my.message)"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(defn largest
+  \"The row with the largest :amount.\"
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label :string] [:amount :int]]]}
+  [rows]
+  (last (sort-by :amount rows)))"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(defn largest
+  \"The row with the largest :amount; {} when there are none.\"
+  {:malli/schema [:=> [:cat [:sequential [:map {:closed true} [:label :string] [:amount :int]]]]
+                  [:map {:closed true} [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(largest [{:label \"a\" :amount 3} {:label \"b\" :amount 9}])"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source "(largest)"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source "(largest [])"
+  :seon.ns/name-designation :agent}
+ {:seon.cluster.run.form/source
+  "(seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] \"{{seon.ns/name}}/largest\")"
+  :seon.ns/name-designation :agent}]

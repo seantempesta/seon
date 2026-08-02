@@ -426,6 +426,13 @@
   [{connection :seon.store/branch-connection
     manifest :seon.fn/manifest}]
   (accrete-schema-population! connection nil)
+  (let [rows (bootstrap/population-tx @connection)]
+    (when (seq rows)
+      (d/transact connection
+                  {:tx-data rows
+                   :tx-meta
+                   {:seon.db/process
+                    [:seon.db.process/id boot-process-identity]}})))
   (let [rows (instruction-row-changes
               @connection
               (instruction/seed-rows))]
@@ -832,6 +839,8 @@
         desired {:seon.cluster/name cluster-name
                  :seon.cluster/config
                  [:seon.config/cluster cluster-name]
+                 :seon.cluster/bootstrap-plan
+                 [:seon.bootstrap.plan/id bootstrap/plan-id]
                  :seon.cluster/instructions
                  (mapv (fn [instruction-id]
                          [:seon.cluster.instruction/id instruction-id])
@@ -843,6 +852,8 @@
         expected-current
         {:seon.cluster/name cluster-name
          :seon.cluster/config {:seon.config/cluster cluster-name}
+         :seon.cluster/bootstrap-plan
+         {:seon.bootstrap.plan/id bootstrap/plan-id}
          :seon.cluster/instructions
          (into #{}
                (map (fn [instruction-id]
@@ -857,6 +868,8 @@
                                 '[:seon.cluster/name
                                   {:seon.cluster/config
                                    [:seon.config/cluster]}
+                                  {:seon.cluster/bootstrap-plan
+                                   [:seon.bootstrap.plan/id]}
                                   {:seon.cluster/instructions
                                    [:seon.cluster.instruction/id]}
                                   {:seon.cluster/toolkit
@@ -903,7 +916,9 @@
     []
     (into (cluster.agent/creation-tx request)
           (bootstrap/seed-tx
+           db
            {:seon.cluster.agent/id agent-id
+            :seon.cluster/name (:seon.cluster/name request)
             :seon.ns/name namespace-name
             :seon.cluster.run/process process
             :seon.cluster.run/opened-at now}))))

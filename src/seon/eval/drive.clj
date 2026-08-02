@@ -45,7 +45,7 @@
                        [?receipt :seon.cluster.eval/run ?run]]
                      db run-id)
                 0)]
-        (when (= (count (bootstrap/sources (agent-namespace agent-id)))
+        (when (= (count (bootstrap/agent-sources db agent-id))
                  receipt-count)
           {:seon.cluster.run/id run-id
            :seon.cluster.run/closed-at closed-at

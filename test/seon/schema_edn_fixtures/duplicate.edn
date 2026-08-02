@@ -1,0 +1,4 @@
+{:seon.schema.edn.fixture/twice [:string {:min 1}]
+
+ ;; A duplicate across editorial sections must still refuse.
+ :seon.schema.edn.fixture/twice [:int {:min 0}]}

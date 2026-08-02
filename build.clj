@@ -81,7 +81,7 @@
          ":seon.fn.manifest/artifacts []) artifacts#)] "
          "(let [pages# {:seon.source/digest "
          "(seon.cluster.source/digest "
-         "{:seon.source/roots [\"src\" \"test\" \"resources\"]}) "
+         "{:seon.source/roots [\"src\" \"test\" \"resources/seon/schema.edn\"]}) "
          ":seon.fn/manifest portable#}] "
          "(spit " (pr-str output) " (str (pr-str pages#) \"\\n\")) "
          "(prn {:seon.source/digest (:seon.source/digest pages#) "
