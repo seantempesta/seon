@@ -17,7 +17,6 @@
   the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
-            [clojure.core.async.impl.dispatch :as async.dispatch]
             [clojure.core.server]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.instruction :as instruction]
@@ -37,6 +36,8 @@
             [seon.config :as config]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
+            [seon.operator.runtime :as operator.runtime
+             :refer [root-store-holder running-instances]]
             [seon.problems :as problems]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
@@ -152,40 +153,18 @@
      :seon.boot/log-dir (str (io/file cluster-dir "logs"))}))
 
 ;;; ---------------------------------------------------------------------------
-;;; The shared root executors — created once per JVM, never per cluster
-;;; ---------------------------------------------------------------------------
-
-(defonce ^:private root-executor-pair
-  (delay
-    {:compute
-     (flow/bounded-platform-executor
-      (.availableProcessors (Runtime/getRuntime)))
-     :io (async.dispatch/executor-for :io)}))
-
-(defn root-executors
-  "The process root's two shared executors.
-  One bounded `:compute` platform-thread executor (parallelism =
-  available processors — a computed hardware fact) and one `:io`
-  dependency-owned `:io` executor for blocking transport. Idempotent per JVM:
-  repeated calls return the SAME executor objects (the root owns them; cluster
-  graphs share them).
-  This is deliberately process-global state — the one sanctioned kind:
-  a genuinely process-local artifact, like a compiler state or a
-  connection."
-  ;; the shape is REGISTERED (boot.edn), not inlined here: a
-  ;; `:malli/schema` goes straight to malli, which has no resolver for a
-  ;; bare `[:fn sym]`, so the inlined form could never compile and this
-  ;; contract had never once been checked until instrumentation
-  ;; collected it
-  {:malli/schema [:=> [:cat] :seon.boot/executors]}
-  []
-  @root-executor-pair)
-
-;;; ---------------------------------------------------------------------------
 ;;; The instance lifecycle
 ;;; ---------------------------------------------------------------------------
 
-(defonce ^:private running-instances (atom {}))
+(defn root-executors
+  "The process root's two shared executors.
+
+  Flow resolves this stable public entry point from its protected owner. The
+  executor holder itself lives in `seon.operator.runtime`, outside every
+  cluster program graph."
+  {:malli/schema [:=> [:cat] :seon.boot/executors]}
+  []
+  (operator.runtime/root-executors))
 
 (def ^:private starting ::starting)
 
@@ -228,12 +207,9 @@
 ;;; The process-root store — opened once, shared by every instance
 ;;; ---------------------------------------------------------------------------
 
-;;; Deliberately process-global, the same sanctioned kind as the root
-;;; executors: a genuinely process-local artifact (a connection under a
-;;; lifetime flock) that clusters SHARE rather than each opening. The
-;;; count is the holder count, not a status flag — the last instance out
-;;; releases the store, and the flock with it.
-(defonce ^:private root-store-holder (atom {}))
+;;; The operator runtime owns the process-global holder. The count is the
+;;; holder count, not a status flag — the last instance out releases the store,
+;;; and the flock with it.
 
 (defn- root-store-key
   "The canonical key for one physical process-root store."

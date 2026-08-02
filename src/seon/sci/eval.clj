@@ -1219,7 +1219,9 @@
   ([db]
    (cluster-ctx db nil))
   ([db connection]
-   (let [ctx (build-base-ctx)
+   (let [ctx (assoc (build-base-ctx)
+                    ::custody
+                    {:seon.store/branch-connection connection})
          acquired (acquire! {:seon.sci.eval/ctx ctx
                              :seon.db/db db})
          projection (:seon.schema/projection acquired)
@@ -1399,8 +1401,8 @@
   caller's work launcher.
 
   Order is the contract:
-  1. bind the request's branch connection on this evaluation thread,
-     preserving an existing ambient binding when the request omits it;
+  1. bind the compiled `seon.db/*conn*` from the supplied cluster ctx,
+     or nil for an isolated base ctx;
   2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
   3. arm its stable interrupt-fn on the current thread with
@@ -1423,7 +1425,6 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     namespace-ref :seon.cluster.run.form/ns
-    connection :seon.store/branch-connection
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
   (let [;; a supplied ctx is used AS GIVEN — forking it here would
@@ -1443,7 +1444,9 @@
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         session-observation (volatile! nil)]
-    (binding [db/*conn* (or connection db/*conn*)]
+    (binding [db/*conn*
+              (get-in evaluation-ctx
+                      [::custody :seon.store/branch-connection])]
       (try
         (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)

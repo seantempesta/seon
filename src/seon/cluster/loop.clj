@@ -1038,12 +1038,6 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id}]
   (merge form
-         ;; Custody is OPTIONAL in the request schema, so its absence is NO
-         ;; KEY — never an explicit nil against a non-nilable schema. A
-         ;; cluster value carrying no connection (every unit test that
-         ;; builds one by hand) would otherwise project one.
-         (when-let [connection (:seon.store/branch-connection cluster)]
-           {:seon.store/branch-connection connection})
          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
           :seon.sci.eval/ctx ctx

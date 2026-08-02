@@ -24,6 +24,7 @@
             [clojure.test.check.generators :as gen]
             [seon.error :as error]
             [seon.fs :as fs]
+            [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -214,8 +215,6 @@
 ;;; true, and a foreign JVM walks in (falsified live: parent holds,
 ;;; parent refuses its own second open, child JVM then ACQUIRES). This
 ;;; table is the process's own holdings; it is not a second fence.
-(defonce ^:private held-flocks (atom {}))
-
 (defn- acquire-flock!
   "Acquire the exclusive flock on `lock-path`, or nil when it is held."
   [lock-path]

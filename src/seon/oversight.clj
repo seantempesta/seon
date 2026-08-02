@@ -53,7 +53,7 @@
   ;; The cluster registry is therefore resolved late, like a render
   ;; declaration. It is read only and matched by connection identity; no
   ;; caller can accidentally select "the" cluster.
-  (some-> (find-var 'seon.cluster/running-instances) var-get deref))
+  (some-> (ns-resolve 'seon.cluster 'running-instances) var-get deref))
 
 (defn- owning-instance
   "The running instance whose branch connection owns `db`, or nil."
