@@ -6,7 +6,6 @@
             [clojure.test :as test]
             [datahike.api :as d]
             [seon.cluster :as cluster]
-            [seon.cluster.instruction :as instruction]
             [seon.fs :as fs])
   (:import [java.util.concurrent CountDownLatch Future TimeUnit
             TimeoutException]))
@@ -181,19 +180,7 @@
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
   [connection cluster-name]
-  (let [toolkit-namespaces (instruction/toolkit-namespaces @connection)]
-    (d/transact
-     connection
-     (into [{:seon.config/cluster cluster-name}
-            {:seon.cluster/name cluster-name
-             :seon.cluster/config [:seon.config/cluster cluster-name]
-             :seon.cluster/instructions
-             (mapv (fn [instruction-id]
-                     [:seon.cluster.instruction/id instruction-id])
-                   instruction/instruction-ids)
-             :seon.cluster/toolkit
-             (mapv (fn [namespace-name]
-                     [:seon.ns/name namespace-name])
-                   toolkit-namespaces)}]
-           (instruction/seed-rows))))
+  (d/transact connection [{:seon.config/cluster cluster-name}])
+  (cluster/ensure-cluster-entity!
+   connection cluster-name cluster/boot-process-identity)
   nil)
