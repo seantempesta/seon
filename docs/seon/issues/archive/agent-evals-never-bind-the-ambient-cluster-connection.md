@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, database, runtime]
 ---
@@ -21,7 +21,7 @@ is the render walk (`seon.render/call-with-walk-context`,
 `src/seon/render.clj:106-109`). The run loop threads the branch
 connection explicitly to its own call sites and never binds the ambient
 custody around `seon.sci.eval/evaluate`, so inside an agent's
-evaluation the blessed read facade fails.
+evaluation the ambient `seon.db` reads fail.
 
 Live proof (2026-08-02, cluster `default`, through the door —
 `seon.sci.eval/evaluate` against the live cluster ctx with the
@@ -164,3 +164,12 @@ put it in its direct evaluation request. Its current held-out grading functions
 are pure over the supplied argument. If that surface is expected to grade
 database-reading functions, it should pass the same optional request key; it
 must not introduce another binding site.
+
+## Closed — 2026-08-02, orchestrator-verified
+
+Accepted after independent verification: commit `643719904` reviewed
+(schema delta is exactly the optional `:seon.store/branch-connection`
+request key), the regression re-run by the orchestrator (36 tests / 138
+assertions / 0 failures in `seon.sci.eval-test`), and the live
+two-cluster proof recorded above. The `bootstrap_drive.clj` residue and
+the render-walk relationship transfer to the seon.db wave issue.

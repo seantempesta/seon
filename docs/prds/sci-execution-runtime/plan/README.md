@@ -1848,9 +1848,34 @@ may reintroduce a shadow build into the dev feedback path.
   reconcile.cljc). Each write site is classified individually before
   migration — boot-time installs have their own failure semantics —
   never regex-swept. Sequencing: MCP probe-surface fix first (owner
-  order), then the ambient-connection blocker, then the facade
+  order), then the ambient-connection blocker, then the seon.db
   move+completion, then the call-site sweep after the consolidation
   lane's in-flight files land.
+  AMENDED same afternoon (owner): (5) TWO INTERFACES PER FUNCTION —
+  every seon.db function offers Datahike's own positional interface AND
+  Datahike's own argument-map interface, and BOTH may elide the db/conn
+  argument to assume the current database of the calling agent's
+  cluster. The map keys are the dependency's, never an invented
+  envelope: `{:query :args :offset :limit}` for `q`
+  (specification.cljc:437-459), `{:selector :eid}` for `pull`
+  (:SPullOptions), `{:tx-data :tx-meta}` for `transact!`
+  (:STransactions — already the store owner's documented map form),
+  `{:index :components}` for `datoms` (:SIndexLookupArgs). Datahike
+  already ships these dual arities; seon.db adds exactly one thing to
+  both: elidable custody. (6) THE WORD IS seon.db, NEVER "facade" —
+  owner verbatim: "it's not a fascade it's just a db namespace … It's
+  just the seon.db namespace for all things datahike. Of course I
+  don't want to duplicate database behavior all over the codebase."
+  The namespace intercepts and forwards Datahike's calls so failures
+  return as flat error values and custody defaults ambiently; that is
+  interception for error/custody semantics, not a pattern, and no
+  pattern noun names it. Current-authority docs sweep the word out;
+  historical rulings keep their original text. The ambient-custody
+  blocker RESOLVED same afternoon (`643719904`, orchestrator-verified:
+  36/138/0 focused, two-cluster isolation + declared-commit +
+  undeclared-refusal + unwind proven; the binding spans the complete
+  guarded evaluation through admit's realization, so a lazy value
+  cannot lose custody before it is realized).
   **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
   PERSISTENCE — restrict nothing an agent can call; gate only what it
   may persist.** The session is a faithful Clojure REPL first: a def an

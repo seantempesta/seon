@@ -641,6 +641,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | namespace page | page, screen, view, dashboard | one namespace's web surface (owner ruling 2026-07-31): the route resolves the namespace → its owner agent → the walk rendered in the `:seon.render/html` projection; `/` is root's namespace page; the debug variant is the same walk, two panes (exact AI context left, all walked units right). Adding a namespace page is adding a route line — never per-page render code |
 | block | widget, component, panel | ONE render function's identified output: the function + its stable element id + its current bytes — the unit of rendering, morph targeting, equality suppression, and churn ranking (owner ruling 2026-07-29). The ONE render unit in both projections — `:seon.render/ai` into agent context and `:seon.render/html` to the page are two projections of the same block; there is no static scaffold path — system message and global instruction files are blocks rendered from instruction facts reached through the cluster entity (owner ruling 2026-07-31) |
 | package, keyframe, delta | frame, bundle, snapshot-stream | the DELIVERY units (render-pipeline-design-2026-07-29.md): one revisioned package per change carries delta fragments (changed blocks) and/or the keyframe (every block, serialized once, multed to all tabs); a revision gap snaps to keyframe; new page loads serve from the latest keyframe with zero re-render |
+| `seon.db` | facade, read facade, data-access layer, wrapper | the one database namespace for all things Datahike (owner ruling 2026-08-02 #41): every core data function with Datahike's own positional AND argument-map interfaces, db/conn elidable to the calling agent's cluster's current database, failures as flat error values; `reference-code/datahike/src/datahike/api/specification.cljc` ↔ `src/seon/db.clj` |
 
 This table is maintained: when a boundary term is settled, add its row in the
 same change, and when the meaning spans an integration boundary, name the
@@ -720,12 +721,20 @@ cannot express the required referenced shape, fix the bridge rather than
 inlining copies.
 
 `seon.db` is the ONE database namespace (owner ruling 2026-08-02 #41):
-all of Datahike's core data functions, agent-first — optional explicit
-db/connection first argument, ambient cluster-connection default,
-errors-as-values, SCI-admit-clean returns. All first-party code calls
-`seon.db`, never `datahike.api` directly; only `seon.db` itself plus the
-store/registry custody owners (flock, open/release, branch management)
-require `datahike.api`. MIGRATION IN FLIGHT: until the facade wave lands
+all of Datahike's core data functions, agent-first. Every function has
+TWO interfaces — Datahike's own positional arity and Datahike's own
+argument-map arity (`{:query :args}`, `{:selector :eid}`,
+`{:tx-data :tx-meta}`, `{:index :components}` — the dependency's keys,
+never an invented envelope) — and BOTH may elide the db/conn argument
+to assume the current database of the calling agent's cluster.
+Failures return as flat `:seon.error` values; returns are
+SCI-admit-clean. It is not a "facade" — never use that word for it; it
+is the db namespace, intercepting Datahike's calls only for
+error-value and ambient-custody semantics. All first-party code calls
+`seon.db`, never `datahike.api` directly; only `seon.db` itself plus
+the store/registry custody owners (flock, open/release, branch
+management) require `datahike.api`. MIGRATION IN FLIGHT: until the
+seon.db wave lands
 (`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`),
 `transact!` still lives at `seon.cluster.store/transact!` and today's
 `seon.db` exposes only `q`/`pull`/`pull-many` — new code targets the

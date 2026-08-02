@@ -1,5 +1,10 @@
 (ns seon.db
-  "The synchronous application read facade over one Datahike database value."
+  "The one database namespace for all things Datahike. Reads run over an
+  explicit immutable database value or, when the argument is elided, the
+  current database of the calling agent's cluster (`*conn*`, bound per
+  evaluation). Failures return flat `:seon.error` values. Today this
+  namespace holds `q`, `pull`, and `pull-many`; ruling #41 moves
+  `transact!` here and adds the remaining core functions."
   (:require [datahike.api :as d]
             [datahike.db.utils :as db.utils]))
 

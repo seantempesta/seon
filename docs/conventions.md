@@ -371,17 +371,24 @@ symbol roster, or disable a noisy contract. Fix the caller or the schema.
 
 ## Database Access
 
-`seon.db` is the synchronous application read facade. It exports `q`, `pull`,
-and `pull-many`, each over either an explicit immutable database value or the
-current cluster connection bound at the public-call boundary. Dependency
-failures become flat `:seon.error` values; reads never cross a remote protocol.
+`seon.db` is the one database namespace for all things Datahike (owner
+ruling 2026-08-02 #41). Every core data function offers two interfaces —
+Datahike's own positional arity and Datahike's own argument-map arity
+(`{:query :args}` for `q`, `{:selector :eid}` for `pull`, `{:tx-data
+:tx-meta}` for `transact!`, `{:index :components}` for `datoms`; the
+dependency's keys, never an invented envelope) — and both may elide the
+db/conn argument to assume the current database of the calling agent's
+cluster. Dependency failures become flat `:seon.error` values; returns
+are admit-clean for SCI contexts; reads never cross a remote protocol.
+It is not called a "facade" — it is the db namespace, intercepting
+Datahike's calls only for error-value and ambient-custody semantics.
 
-Durable writes are co-located with the branch connection in
-`seon.cluster.store/transact!`. System transition owners return transaction
-data or call that one write boundary; agent code does not acquire a second
-connection, writer, listener API, or replica path. Internal namespaces that
-must use Datahike directly keep the call at the owning database seam and pass
-immutable database values through pure reads.
+All first-party code calls `seon.db`; only `seon.db` itself and the
+store/registry custody owners (flock, open/release, branch management)
+require `datahike.api`. Migration in flight: `transact!` still lives at
+`seon.cluster.store/transact!` until the seon.db wave lands
+(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`); new
+code never adds a direct `datahike.api` call site.
 
 ```clojure
 (require '[seon.db :as db])
