@@ -55,6 +55,28 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 16 — 2026-08-02 late afternoon, RULING #41 + THREE LANES
+LANDED.** Ruling #41 sealed and twice amended (README): seon.db is the
+one database namespace for all things Datahike — dual
+positional/argument-map interfaces (Datahike's own keys), db/conn
+elidable to the calling agent's cluster's current database, everything
+first-party migrates, the word "facade" banned (vocab row added).
+LANDED, orchestrator-verified: the ambient-custody blocker
+(`643719904`, evaluate binds `seon.db/*conn*` per evaluation, archived)
+and the MCP probe-surface fix (`816cbac0f`: root/degraded/namespace/
+door modes, 20/144/0 re-run — MCP clients need a fresh session to load
+the new schemas). The FULL-TREE AUDIT (`fc86cd1f5`,
+`research/full-codebase-audit-2026-08-02.md`) filed 19 issues; 3 new
+blockers: SSE malformed-chunk splice can alter agent code
+(orchestrator re-confirmed at ai.cljc:429), Flow `submit!!` blocks
+before its time limit, agent renderers cannot enter the SCI ctx.
+FULL GATE at this state: 827/4,083 with 10F/2E, ALL inside the
+schema-edn-consolidation lane's unfinished in-flight files (its 29
+uncommitted modifications still sit in the tree; resuming it is the
+gate's unblock). QUEUED on owner confirmation: the seon.db wave
+(entity-return-shape decision pending), then the call-site sweep after
+consolidation lands.
+
 **ADDENDUM 15 — SESSION CLOSE (2026-08-02 afternoon). START A NEW
 SESSION FROM HERE.**
 
