@@ -361,18 +361,39 @@ deciding and acting. The abort is atomic: every other operation in the same
 `d/transact` vector is discarded too (REPL-verified).
 
 ```clojure
-(defn claim-call
-  "Refuse unless the run is open and unclaimed; otherwise return tx-data."
-  [db {::keys [run-id process now] :as request}]
-  (let [run (d/entity db [::id run-id])]
-    (when-not (eligible? run now)
-      (throw (ex-info "run is not claimable" {::run-id run-id})))
-    [{::id run-id ::process process ::lease-until (lease-end now)}]))
+(defn claim-unheld-call
+  "Claim an existing open run only when no process currently holds it."
+  [db request]
+  (let [id (:seon.cluster.run/id request)
+        process (:seon.cluster.run/process request)
+        run (d/entity db [:seon.cluster.run/id id])]
+    (cond
+      (nil? run)
+      (throw (ex-info "run does not exist" {:seon.cluster.run/id id}))
 
-(d/transact connection [[:db.fn/call claim-call request]])
+      (:seon.cluster.run/closed-at run)
+      (throw (ex-info "run is closed" {:seon.cluster.run/id id}))
+
+      (:seon.cluster.run/process run)
+      (throw (ex-info "run is held"
+                      {:seon.cluster.run/id id
+                       :seon.cluster.run/process
+                       (:seon.cluster.run/process run)}))
+
+      :else
+      [[:db/add (:db/id run) :seon.cluster.run/process process]])))
+
+(d/transact connection [[:db.fn/call claim-unheld-call request]])
 ```
 
 `f` here is a resolved function, so this form is for co-located core code.
+Current run custody is process presence: absent is unheld and present is held;
+there is no epoch or lease. The production `claim-call` additionally recovers
+custody from a process absent from the supplied live-process set and stamps
+that holder's running receipts interrupted
+(`src/seon/cluster/run.cljc:18-30,265-309`).
+`test/seon/cluster/run_test.clj:14-23,487-514` independently models the same
+custody fence.
 `src/seon/cluster/run.cljc` is the worked example;
 `test/seon/cluster/run_test.clj` asserts both rails.
 
