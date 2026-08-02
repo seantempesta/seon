@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (17)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -27,14 +27,13 @@ See `README.md` for the convention.
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
 | [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
 | [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
-| [Reconcile the architecture model with the admitted fresh schema](docs-rot-architecture-model-names-deleted-entities-and-attributes.md) | blocker | doc-rot fix wave |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (49)
+## Friction (50)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -89,7 +88,7 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (11)
+## Cleanup (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
