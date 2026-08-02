@@ -1,21 +1,17 @@
 ---
 type: reference
-status: active
+status: superseded
 tags: [prd, architecture]
 ---
 
-# Source-cleanup chunk runbook
+# Historical PRD boundary
 
-`roadmap.md` is the ledger: live bug table plus five dependency-ordered
-stages. Work top stage only; one in-progress critical item at a time.
+This localized authority is inert: it records no current sequencing or
+ownership. Before reading anything else in this subtree, return to the
+[active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),
+the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),
+and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
 
-Rules of engagement:
-
-- every fix strengthens the existing owner in place — no v2 names, no
-  wrapper layers, no second logging/config/eval path;
-- bug rows close only with a commit plus behavioral or live proof;
-- stage 2 (pod retirement) is an atomic orchestrator-owned rename under a
-  lane freeze — never run it concurrently with source-editing lanes;
-- evidence lives in the six dated 2026-07-20 audit reports linked from the
-  roadmap; do not re-audit before reading them;
-- gates are the three existing suites plus the live proofs named per stage.
+The adjacent roadmap and research are historical quarry. They preserve dated
+evidence, but their commands, owners, gates, and sequencing must not be
+executed. Re-derive any useful lesson against current architecture and source.

@@ -101,8 +101,9 @@ Unit template (every capability):
 
 - The `my.pkg/install` mechanism, per-cluster package roots, and the
   execution-host ruling — [[../sci-execution-runtime/roadmap]] U13.
-- The generate-code scheduler/worker-context machinery —
-  [[../generate-code/roadmap]].
+- The deleted pod-era generate-code scheduler/worker-context machinery is
+  historical quarry in [[../generate-code/roadmap]]; current sequencing stays
+  in the SCI execution-runtime program.
 - Benchmark harness changes (amd64 overlay, `:open` web policy for bench
   clusters) — recorded in the benchmark-pkg audit, owned by src-inspect-ai
   work.

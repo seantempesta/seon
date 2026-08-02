@@ -4,23 +4,14 @@ status: archived
 tags: [orchestrator, prd, flow, database, web, agent]
 ---
 
-# Local performance proof — working context
+# Historical PRD boundary
 
-This final PRD owns the destructive end-to-end acceptance matrix, explicit
-local performance budgets, and safe retirement of superseded processes,
-worktrees, and data after units 1–8 graduate. Read [[roadmap]], every predecessor
-roadmap/evidence package, architecture observability/runtime/UI, and the closest
-source authorities before research or code.
+This localized authority is inert: it records no current sequencing or
+ownership. Before reading anything else in this subtree, return to the
+[active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),
+the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),
+and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
 
-Begin with exact versions/source for Node/V8 diagnostics, Datahike/Konserve,
-Shadow, Datastar/gzip, browser measurement, and the operator. Reuse the one
-operator, test runners, Inspect harness, browser workflow, and existing
-profiling hooks; do not create a benchmark runtime or alternate startup path.
-
-Budgets are measured contracts with cold/warm distributions and retained raw
-evidence. Cleanup is destructive and requires explicit owner authorization plus
-closed preservation/read-back gates. Never touch the active ACME worktree or
-protected shared-schema file.
-
-Research belongs in `research/`; current gaps, order, and proof belong in
-[[roadmap]]. This PRD cannot claim subsystem proof early.
+The adjacent roadmap and research are historical quarry. They preserve dated
+evidence, but their commands, owners, gates, and sequencing must not be
+executed. Re-derive any useful lesson against current architecture and source.

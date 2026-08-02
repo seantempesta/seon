@@ -1,42 +1,17 @@
 ---
 type: orchestrator
-status: active
+status: superseded
 tags: [orchestrator, prd, agent, flow]
 ---
 
-# Goal-driven code generation — working context
+# Historical PRD boundary
 
-This PRD owns the proposed `seon.ai/generate-code!` workflow: a small calling
-agent states an existing `my.plan` goal, description, and expected behavior; a
-specialized planning agent answers through the ordinary Seon REPL; namespace
-requirements derive dependency order; and database-driven scheduling delegates
-only dependency-ready repair work.
+This localized authority is inert: it records no current sequencing or
+ownership. Before reading anything else in this subtree, return to the
+[active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),
+the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),
+and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
 
-The current phase is the approved namespace-symbol foundation in Stage 1 of
-[[roadmap]]. Record executable probes and source evidence in `research/` before
-each implementation boundary. Reuse `my.plan`, `seon.agent` messages/runs,
-`seon.repl.internal`, `seon.eval/eval-batch!`, `seon.reactive/observe!`, and the
-existing `:namespaces` context block; do not create a parallel plan language,
-parser, task registry, event bus, worker lifecycle, or namespace renderer.
-
-Namespace names are complete symbols such as
-`my.library.model` (Malli `:symbol`, not `:qualified-symbol`, which implies a
-slash). `:seon.ns/name`, `:seon.ns.require/target`, and `:seon.eval/ns` use
-that representation directly. Datahike cannot change an installed value type
-in place, so applying this source boundary requires a fresh database rebuild.
-Do not add keyword/symbol coercions.
-
-The source-fenced projection is invocation-local ordinary data. Persist only
-the existing model reply, eval/program facts, plan steps, messages, and runs.
-Completion is derived from eval and behavioral-test evidence; never recognize
-an agent's prose marker as completion.
-
-Specialized developer teaching stays in the existing `:plan` block through an
-alternate AI renderer that reuses the same plan acquisition and formatting and
-falls back to ordinary plan context when inactive. Full code remains the
-responsibility of the existing `:namespaces` block by reconciling its
-`:seon.agent.ctx.namespaces/full-source` set. The named-profile proposal is
-historical; fresh model selection uses the schema-derived per-agent settings
-and per-turn resolution documented in
-`docs/seon/reference/llm-adapters.md` §“Per-agent inheritance and per-turn
-resolution”. Never branch on provider at the `generate-code!` call site.
+The adjacent roadmap and research are historical quarry. They preserve dated
+evidence, but their commands, owners, gates, and sequencing must not be
+executed. Re-derive any useful lesson against current architecture and source.

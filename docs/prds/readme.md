@@ -1,128 +1,45 @@
 ---
 type: reference
-status: draft
-tags: [prd, reference, database]
+status: active
+tags: [prd, reference, agent]
 ---
-# PRD System
 
-The active program is split across four PRD directories. Superseded PRDs live
-under `archive/`.
+# PRD authority map
 
-- `sci-execution-runtime/` — active program ledger and sci transition
-- `source-cleanup/` — source cleanup stages
-- `generate-code/` — code-generation completion
-- `package-capabilities/` — package capability work
-- `archive/` — superseded PRDs retained as historical evidence
+This page indexes PRD lifecycle; it never sequences work. Current ordering is
+owned only by the [SCI execution-runtime program](/docs/prds/sci-execution-runtime/plan/README.md),
+with its [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
+The [issue index](/docs/seon/issues/index.md) is the ranked queue.
 
-## Creating a New PRD
+- `sci-execution-runtime/` contains the active program and its current runbook.
+- `package-capabilities/` is a bounded successor PRD; its roadmap does not
+  replace the program ordering.
+- `source-cleanup/` and `generate-code/` are superseded historical quarry.
+- `archive/` contains archived historical quarry.
 
-```bash
-cp -r docs/prds/archive/_example-feature docs/prds/your-feature-name
-rm docs/prds/your-feature-name/README.md
+## Authority lifecycle
 
-```
+Every localized PRD `AGENTS.md` is executable authority, while its adjacent
+`roadmap.md` carries that chunk's lifecycle. Their frontmatter statuses must
+match. Current authorities use `status: active`; retained superseded
+authorities use `status: superseded`; authorities below `archive/` use
+`status: archived`.
 
-Or manually:
+Historical `research/` documents and archived issue notes are dated records,
+not localized sequencing authorities. Their original lifecycle metadata stays
+intact; no one retcons them to describe the current system.
 
-```bash
-mkdir -p docs/prds/your-feature-name/research
-touch docs/prds/your-feature-name/{prd,decisions,notes}.md
+The recurring `seon.dev.markdown-test/historical-prd-authorities-fail-closed-test`
+discovers every `docs/prds/**/AGENTS.md`, requires a sibling roadmap, enforces
+matching lifecycle status, forces every archive runbook to `archived`, and
+requires every archived or superseded runbook to contain only the inert
+historical boundary. If discovery finds no runbooks, the test reports
+`authority-subjects-absent` and fails.
 
-```
+## Historical reading
 
-## Directory Structure
-
-```
-docs/prds/
-+-- sci-execution-runtime/
-+-- source-cleanup/
-+-- generate-code/
-+-- package-capabilities/
-+-- archive/
-
-```
-
-## PRD Template
-
-```markdown
-# PRD: {Feature Name}
-
-**Status:** [Draft | In Progress | Complete]
-**Priority:** [Low | Medium | High | Critical]
-
-## Goals
-
-1. **Goal** - Why it matters
-
-## Problem Statement
-
-What's broken or missing. Impact. Why now.
-
-## Resources
-
-| Resource | What's There |
-|----------|--------------|
-| `reference-code/foo/` | Library source to study |
-| `src-old/seon/bar.clj` | Existing State A code to build on or explicitly adopt |
-
-## Solution Design
-
-High-level approach. Architecture, data flow, key decisions.
-This is guidance, not prescription -- pivot if a better approach emerges.
-
-## Constraints
-
-- Must be REPL-friendly
-- Must work with existing Datalevin schema
-- Must follow CONVENTIONS.md patterns
-
-## Success Criteria
-
-1. Tests pass
-2. REPL verification works
-3. Documented in decisions.md
-
-```
-
-## Agent Workflow
-
-1. **Explore** -- Read PRD, study resources, understand problem
-2. **Research** -- Test assumptions in REPL, spike solutions, document findings
-3. **Implement** -- Build incrementally, verify each step in REPL
-4. **Validate** -- Run tests, verify success criteria, update docs
-
-**Key principles:**
-
-- PRDs are guidance, not gospel -- pivot and document why
-- Verify everything in the REPL -- `(user/run-tests 'ns)` not `clj -M:test`
-- Document decisions and learnings as you go
-- Focus on goals, not prescribed implementation
-
-## Research Documents
-
-Use `research/` for spikes, evaluations, and findings. Prefix files descriptively:
-
-- `spike-*.md` -- proof-of-concept experiments
-- `findings-*.md` -- research summaries
-- `eval-*.md` -- technology comparisons
-
-## Decision Log Format
-
-Each decision in `decisions.md` should answer:
-
-- **What** was decided
-- **Why** this approach
-- **Alternatives** considered
-- **Trade-offs** accepted
-
-## Example
-
-```
-docs/prds/schema-unification/
-+-- prd.md
-+-- design.md
-+-- research/
-    +-- serialization-findings.md
-    +-- nil-semantics-findings.md
-
-```
+Enter historical PRDs through their inert localized runbook. Return to the
+current program before reading the adjacent roadmap or research, extract only
+dated evidence, and re-derive every useful claim against current architecture
+and source. Historical commands, owners, gates, and sequencing are never
+instructions to execute.

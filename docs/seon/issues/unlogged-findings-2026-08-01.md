@@ -117,6 +117,12 @@ left: one non-executing CLJS audit comment at
 `src-needle/audit/seon/needle_lora_audit_test.cljs:27`; `evals/runs/`
 stays as archive material.
 
+The 2026-08-02 PRD-authority sweep found another reader in the same root
+cause: active `docs/seon/vision/index.md` still calls the deleted CLJS pod a
+working second runtime and sends readers to the archived runtime-reliability
+roadmap "for current state." That vision-page rewrite is not part of the
+localized-runbook blocker closure; this open finding owns it.
+
 ## 7. `:seon.render.value/max-collection` now has TWO defaults authorities
 
 The caps/blob wave added `:seon.render.value/max-collection 8` to

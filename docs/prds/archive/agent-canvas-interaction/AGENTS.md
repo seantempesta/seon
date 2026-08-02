@@ -4,23 +4,14 @@ status: archived
 tags: [orchestrator, prd, web, agent]
 ---
 
-# Agent canvas interaction — working context
+# Historical PRD boundary
 
-This PRD owns the one `my.canvas` focal agent/human surface and its complete
-interaction path. Read [[roadmap]], architecture UI/toolkit/context/data-model,
-the `data-oriented-clojure`, `data-modeling`, `datahike`, `ui-canvas`,
-`datastar-web-ui`, and `browser-automation` skills, and the closest source
-authorities before research or code.
+This localized authority is inert: it records no current sequencing or
+ownership. Before reading anything else in this subtree, return to the
+[active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),
+the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),
+and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
 
-Begin with exact source/version grounding for Malli schemas, Datahike writes,
-Datastar controls/signals/morphs, Hiccup rendering, and the current `my.canvas`
-implementation. Exercise the next control or transition from the live REPL and
-browser before editing.
-
-Canvas content is one database-derived focal surface with AI/human twins.
-Controls call schema'd functions and return data or `:seon/error`; they do not
-write UI-only state or bypass the capability gate. Strengthen the existing
-path; do not add a second canvas API, form runtime, renderer, or feed.
-
-Research belongs in `research/`; current gaps, order, and proof belong in
-[[roadmap]]. Implementation follows render units and root/session ownership.
+The adjacent roadmap and research are historical quarry. They preserve dated
+evidence, but their commands, owners, gates, and sequencing must not be
+executed. Re-derive any useful lesson against current architecture and source.

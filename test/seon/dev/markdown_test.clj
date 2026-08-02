@@ -1,6 +1,89 @@
 (ns seon.dev.markdown-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.dev.markdown :as md]))
+
+(def ^:private historical-authority-body
+  (str "# Historical PRD boundary\n"
+       "\n"
+       "This localized authority is inert: it records no current sequencing or\n"
+       "ownership. Before reading anything else in this subtree, return to the\n"
+       "[active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),\n"
+       "the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),\n"
+       "and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).\n"
+       "\n"
+       "The adjacent roadmap and research are historical quarry. They preserve dated\n"
+       "evidence, but their commands, owners, gates, and sequencing must not be\n"
+       "executed. Re-derive any useful lesson against current architecture and source.\n"))
+
+(def ^:private historical-authority-statuses
+  #{"archived" "superseded"})
+
+(defn- frontmatter-status [content]
+  (get-in (md/parse {::md/content content}) [::md/frontmatter :status]))
+
+(defn- content-body [content]
+  (let [[_ body] (re-matches #"(?s)^---\r?\n.*?\r?\n---\r?\n(.*)$" content)]
+    (some-> body (str/replace-first #"^(?:\r?\n)+" ""))))
+
+(defn- archived-prd-path? [path]
+  (str/includes? (str/replace path "\\" "/") "docs/prds/archive/"))
+
+(defn- authority-errors
+  "Errors for localized PRD authorities, including an absent-subject refusal."
+  [subjects]
+  (if (empty? subjects)
+    [{::rule ::authority-subjects-absent
+      ::message "No localized PRD AGENTS.md subjects were discovered"}]
+    (into []
+          (mapcat
+           (fn [{::keys [path runbook-content roadmap-content]}]
+             (let [runbook-status (frontmatter-status runbook-content)
+                   roadmap-status (some-> roadmap-content frontmatter-status)
+                   archived-path? (archived-prd-path? path)
+                   historical? (or archived-path?
+                                   (contains? historical-authority-statuses
+                                              runbook-status))]
+               (cond-> []
+                 (nil? roadmap-content)
+                 (conj {::rule ::roadmap-absent
+                        ::path path
+                        ::message "Localized PRD authority has no sibling roadmap.md"})
+
+                 (and archived-path? (not= "archived" runbook-status))
+                 (conj {::rule ::archived-authority-status
+                        ::path path
+                        ::message (str "Archived PRD authority has status "
+                                       (pr-str runbook-status)
+                                       ", expected \"archived\"")})
+
+                 (and roadmap-content (not= runbook-status roadmap-status))
+                 (conj {::rule ::authority-roadmap-status
+                        ::path path
+                        ::message (str "Runbook status " (pr-str runbook-status)
+                                       " differs from roadmap status "
+                                       (pr-str roadmap-status))})
+
+                 (and historical?
+                      (not= historical-authority-body
+                            (content-body runbook-content)))
+                 (conj {::rule ::historical-authority-body
+                        ::path path
+                        ::message "Historical PRD authority contains executable stale guidance"}))))
+          subjects))))
+
+(defn- repository-prd-authorities []
+  (into []
+        (comp
+         (filter (fn [file]
+                   (and (.isFile file) (= "AGENTS.md" (.getName file)))))
+         (map (fn [runbook]
+                (let [roadmap (io/file (.getParentFile runbook) "roadmap.md")]
+                  {::path (.getPath runbook)
+                   ::runbook-content (slurp runbook)
+                   ::roadmap-content (when (.isFile roadmap) (slurp roadmap))}))))
+        (file-seq (io/file "docs/prds"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Parse Tests
@@ -78,6 +161,38 @@
     (let [result (md/validate {::md/content "---\ntype: component\nstatus: active\n---\n# Title\n"
                                ::md/rules #{:required-fields}})]
       (is (::md/valid? result)))))
+
+(deftest historical-prd-authority-rule-test
+  (let [active-content (str "---\n"
+                            "type: orchestrator\n"
+                            "status: active\n"
+                            "tags: [orchestrator, prd]\n"
+                            "---\n\n"
+                            historical-authority-body)
+        archived-content (str/replace active-content
+                                      "status: active"
+                                      "status: archived")
+        stale [{::path "docs/prds/archive/example/AGENTS.md"
+                ::runbook-content active-content
+                ::roadmap-content archived-content}]
+        marked [{::path "docs/prds/archive/example/AGENTS.md"
+                 ::runbook-content archived-content
+                 ::roadmap-content archived-content}]]
+    (testing "an archived authority that claims active status fails"
+      (is (= #{::archived-authority-status ::authority-roadmap-status}
+             (into #{} (map ::rule) (authority-errors stale)))))
+
+    (testing "the same authority passes after status marks it archived"
+      (is (empty? (authority-errors marked))))
+
+    (testing "discovering no authority subjects is a failure"
+      (is (= [::authority-subjects-absent]
+             (mapv ::rule (authority-errors [])))))))
+
+(deftest historical-prd-authorities-fail-closed-test
+  (let [errors (authority-errors (repository-prd-authorities))]
+    (is (empty? errors)
+        (str "Localized PRD authority violations: " (pr-str errors)))))
 
 (deftest validate-heading-increment-test
   (testing "flags h1 to h3 jump"

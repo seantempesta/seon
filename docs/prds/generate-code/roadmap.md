@@ -1,10 +1,18 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, agent, cljs, database, flow]
 ---
 
 # Goal-driven code generation
+
+## Historical boundary
+
+This roadmap is historical quarry, not current sequencing or ownership. Use
+the [active SCI execution-runtime runbook](/docs/prds/sci-execution-runtime/AGENTS.md),
+the [one program ordering](/docs/prds/sci-execution-runtime/plan/README.md),
+and the [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md)
+before mining the dated evidence below.
 
 ## Outcome
 
