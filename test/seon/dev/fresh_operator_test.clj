@@ -315,6 +315,50 @@
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
 
+(defn- launch-observation
+  [root]
+  (let [code
+        (pr-str
+         `(do
+            (require 'clojure.string 'seon.fresh-operator)
+            (let [operator-var#
+                  (fn [name#]
+                    (ns-resolve 'seon.fresh-operator name#))
+                  detach-python#
+                  ~(str "import os,sys\n"
+                        "open(sys.argv[2],'w').write(os.getcwd()+'\\n'+sys.argv[1]+'\\n'+'\\n'.join(sys.argv[4:]))\n"
+                        "print(os.getpid(),flush=True)\n")]
+              (with-redefs-fn
+                {(operator-var# (symbol "detach-python")) detach-python#}
+                (fn []
+                  ((var-get (operator-var# (symbol "launch!")))
+                   ~(str root) "launch-observation" {} 1)
+                  (prn
+                   (clojure.string/split-lines
+                    (slurp
+                     ~(str (io/file root "data" "clusters"
+                                    "launch-observation" "logs" "seon.log"))))))))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" (str (io/file project-root "script"))
+            "-e" code])
+          (.directory root)
+          (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The launch observation failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    (edn/read-string output)))
+
 (defn- process-output
   [^Process process]
   (future
@@ -703,7 +747,7 @@
                0 1 (java.net.InetAddress/getLoopbackAddress))]
     (let [launch-form
           (operator-private-value
-           'launch-form "anchor" {} (.getLocalPort ready-server))
+           'launch-form (str root) "anchor" {} (.getLocalPort ready-server))
           code
           (pr-str
            `(do
@@ -827,6 +871,22 @@
       (is (= [[:launch "cold-start"] [:started "cold-start"]]
              (cold-start-calls root))
           "cold start launched one JVM without an offline roster JVM")
+      (finally
+        (delete-recursively! root)))))
+
+(deftest isolated-root-launch-keeps-repository-classpath-and-root-property
+  (let [root (fresh-root)]
+    (try
+      (let [[launcher-directory child-directory & child-command]
+            (launch-observation root)]
+        (is (= (.getCanonicalPath project-root) launcher-directory))
+        (is (= (.getCanonicalPath project-root) child-directory))
+        (is (some #{(str "-J-Dseon.operator.root="
+                         (.getCanonicalPath root))}
+                  child-command))
+        (is (some #{"-M:dev"} child-command))
+        (is (str/includes? (last child-command)
+                           (str (io/file root "data" "clusters")))))
       (finally
         (delete-recursively! root)))))
 
@@ -1060,7 +1120,8 @@
         (delete-recursively! root)))))
 
 (deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
-  (let [form (operator-private-value 'add-form "scratch" {})
+  (let [root (fresh-root)
+        form (operator-private-value 'add-form (str root) "scratch" {})
         start-var #'cluster/start!
         start-meta (meta start-var)
         instances-var
@@ -1068,16 +1129,19 @@
         instances-before @(var-get instances-var)
         connection (atom nil)
         current-request
-        {:seon.boot/cluster-name "scratch"
+        {:seon.boot/root (str (io/file root "data" "clusters"))
+         :seon.boot/cluster-name "scratch"
          :seon.config/manifest {}}
         stale-schema
         [:=> [:cat
               [:map {:closed true}
+               [:seon.boot/root :string]
                [:seon.boot/cluster-name :string]]]
          :map]
         current-schema
         [:=> [:cat
               [:map {:closed true}
+               [:seon.boot/root :string]
                [:seon.boot/cluster-name :string]
                [:seon.config/manifest :map]]]
          :map]

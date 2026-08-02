@@ -2,6 +2,7 @@
   "The persisted-roster operator for the fresh JVM system."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state])
@@ -23,6 +24,17 @@
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
+
+(defn- repository-root
+  []
+  ;; `bin/seon` loads this namespace from its checkout-relative `script/`.
+  (-> (io/resource "seon/fresh_operator.clj")
+      io/file
+      .getCanonicalFile
+      .getParentFile
+      .getParentFile
+      .getParentFile))
+
 (def ^:private detach-python
   (str "import os,subprocess,sys,time\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
@@ -1370,14 +1382,15 @@
          ~(instrument-form anchor anchor-name)))))
 
 (defn- launch-form
-  [name manifest ready-port]
+  [root name manifest ready-port]
   (let [instance (gensym "instance")]
     (pr-str
      `(do
         (require 'seon.cluster 'seon.config 'seon.instrument)
         (let [~instance
               (seon.cluster/start!
-               {:seon.boot/cluster-name ~name
+               {:seon.boot/root ~(str (cluster-root root))
+                :seon.boot/cluster-name ~name
                 :seon.config/manifest ~manifest})
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "ready — instrumented"
@@ -1392,7 +1405,7 @@
           @(promise))))))
 
 (defn- add-form
-  [name manifest]
+  [root name manifest]
   (let [instance (gensym "instance")]
     (pr-str
      `(do
@@ -1407,7 +1420,8 @@
         ~(refresh-instrument-form)
         (let [~instance
               (seon.cluster/start!
-               {:seon.boot/cluster-name ~name
+               {:seon.boot/root ~(str (cluster-root root))
+                :seon.boot/cluster-name ~name
                 :seon.config/manifest ~manifest})
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "added — instrumented"
@@ -1429,14 +1443,14 @@
         _ (do (fs/create-dirs (fs/parent adoption-path))
               (fs/delete-if-exists adoption-path))
         command ["python3" "-c" detach-python
-                 (str (fs/path root)) (str log) (str adoption-path)
+                 (str (repository-root)) (str log) (str adoption-path)
                  "clojure"
                  (str "-J-Dseon.operator.root=" root)
                  (str "-J-Dseon.operator.generation=" generation)
                  (str "-J-Dseon.operator.log=" log)
-                 "-M:dev" "-e" (launch-form name manifest ready-port)]
+                 "-M:dev" "-e" (launch-form root name manifest ready-port)]
         builder (doto (ProcessBuilder. ^java.util.List command)
-                  (.directory (.toFile (fs/path root)))
+                  (.directory (repository-root))
                   (.redirectErrorStream true))
         _ (.putAll (.environment builder) (child-environment root))
         process (.start builder)
@@ -1626,7 +1640,7 @@
             (:seon.fresh-operator/transport-advertisement anchor)
             _
             (try
-              (prepl-eval! anchor-ad (add-form name manifest))
+              (prepl-eval! anchor-ad (add-form root name manifest))
               (catch Throwable error
                 ;; A start can fail above the REPL after registering the
                 ;; partial instance. Reconcile before returning the failure,
