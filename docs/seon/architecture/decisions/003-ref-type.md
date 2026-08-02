@@ -39,6 +39,6 @@ attributes and entity maps refer to it from `resources/seon/schema.edn`:
 ## Owners
 
 - `src/seon/schema.clj` — reference grammar.
-- `src/seon/schema/datahike.cljc` — Malli-to-Datahike derivation.
+- `src/seon/schema/datahike.clj` — Malli-to-Datahike derivation.
 - `resources/seon/schema.edn` — shipped attribute and entity declarations.
 - [[data-model]] — reference, identity, and component semantics.

@@ -169,7 +169,7 @@ several EDN entries is drift.
 ```
 
 If the Malli→datahike bridge doesn't yet handle a reference shape you need, fix
-the bridge (`src/seon/schema/datahike.cljc`) — never duct-tape by inlining the
+the bridge (`src/seon/schema/datahike.clj`) — never duct-tape by inlining the
 shape at each site. `resolve-malli-form` there is what follows a keyword
 reference to its stored shape.
 

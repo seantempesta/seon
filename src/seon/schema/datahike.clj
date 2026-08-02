@@ -5,8 +5,7 @@
    database bridge — registered attribute forms in, ordinary Datahike
    schema maps out. Pure derivation: no connection, no session, no
   transaction. The store owner transacts the returned declarations."
-  (:require #?(:clj [clojure.edn :as edn]
-               :cljs [cljs.reader :as edn])
+  (:require [clojure.edn :as edn]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
@@ -98,14 +97,11 @@
     (symbol? literal) :db.type/symbol
     (uuid? literal) :db.type/uuid
     (inst? literal) :db.type/instant
-    #?(:clj (instance? Long literal)
-       :cljs (and (number? literal) (js/Number.isSafeInteger literal)))
+    (instance? Long literal)
     :db.type/long
-    #?(:clj (instance? Double literal)
-       :cljs (number? literal))
+    (instance? Double literal)
     :db.type/double
-    #?(:clj (instance? Float literal)
-       :cljs false)
+    (instance? Float literal)
     :db.type/float
     :else nil))
 
@@ -141,7 +137,7 @@
                       (schema.form/attr-form-properties resolved))
             types (into #{} (map #(try
                                     (form->datahike-value-type-in projection %)
-                                    (catch #?(:clj Throwable :cljs :default) _
+                                    (catch Throwable _
                                       ::unmappable)))
                         (form-children resolved))]
         (or explicit
@@ -285,7 +281,7 @@
              (into #{}
                    (map #(try
                            (form->datahike-value-type-in projection %)
-                           (catch #?(:clj Throwable :cljs :default) _
+                           (catch Throwable _
                              ::unmappable)))
                    (form-children form)))]
        (and types
@@ -446,7 +442,7 @@
       (let [decoded
             (try
               (edn/read-string value)
-              (catch #?(:clj Throwable :cljs :default) _
+              (catch Throwable _
                 (refuse-slot! ::malformed-edn attr value)))]
         (when-not (= value (pr-str decoded))
           (refuse-slot! ::noncanonical-edn attr value))
@@ -465,7 +461,7 @@
       (let [decoded
             (try
               (edn/read-string value)
-              (catch #?(:clj Throwable :cljs :default) _
+              (catch Throwable _
                 (refuse-slot! ::malformed-edn attr value)))]
         (when-not (= value (pr-str decoded))
           (refuse-slot! ::noncanonical-edn attr value))
