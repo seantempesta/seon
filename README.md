@@ -67,7 +67,7 @@ deployment or destructive proof. Configuration is reconciled into database
 facts from the shipped defaults plus an optional sparse EDN overlay:
 
 ```bash
-bin/seon --root tmp/demo-root start demo --config config/example.edn
+bin/seon --root tmp/demo-root start demo
 bin/seon --root tmp/demo-root status
 bin/seon --root tmp/demo-root down
 ```
