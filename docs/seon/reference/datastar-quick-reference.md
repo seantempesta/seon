@@ -32,7 +32,7 @@ paint from the current database value.
 ## Render unit
 
 A block is one render function's identified output: its stable element id and
-current bytes. `seon.render.web/block-fragment` wraps each HTML projection in
+current bytes. `seon.render.web/surface-html` wraps each walked HTML unit in
 the element that Datastar morphs. Blocks may be present in the AI projection,
 the HTML projection, or both; omission is derived from the render result, not
 from a list.
@@ -52,7 +52,7 @@ through that owner rather than concatenating paths.
 
 ## Datastar boundary
 
-`seon.render.web/feed-response` calls the SDK's
+`seon.render.web/feed` calls the SDK's
 `starfederation.datastar.clojure.adapter.http-kit/->sse-response`, registers
 interest before painting, taps the pages `mult`, and closes and untaps on every
 terminal path. `write-patches!` sends the changed stable elements through the
