@@ -44,6 +44,50 @@
   [function-name]
   (deref (ns-resolve 'seon.cluster.loop function-name)))
 
+(deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
+  (let [project (private-loop-fn 'attempt-evidence)]
+    (is (= {:seon.ai/usage {:source :completion}
+            :seon.ai/reasoning-content "fallback reasoning"
+            :seon.ai/finish-reason "stop"}
+           (project
+            {:seon.ai/completion
+             {:seon.ai/usage {:source :completion}
+              :seon.ai/finish-reason "stop"
+              :seon.error/data
+              {:seon.ai/usage {:source :error}
+               :seon.ai/reasoning-content "fallback reasoning"
+               :seon.ai/finish-reason "length"}}})))))
+
+(deftest attempt-request-assembles-evidence-and-optional-provenance
+  (let [failure {:seon.error/kind :provider/refused
+                 :seon.error/message "refused"}
+        evidence {:seon.ai/usage {"prompt_tokens" 3}
+                  :seon.ai/reasoning-content "reasoning"
+                  :seon.ai/finish-reason "length"}]
+    (is (= {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
+                             :seon.ai/model "model"}
+            :seon.ai/settings {:seon.config.ai/thinking :high}
+            :seon.cluster.run/id "run-1"
+            :seon.cluster.agent/id "agent-1"
+            :seon.ai.attempt/ordinal 2
+            :seon.ai/usage {"prompt_tokens" 3}
+            :seon.ai/reasoning-content "reasoning"
+            :seon.ai/finish-reason "length"
+            :seon.error/value failure
+            :seon.ai.attempt/failover-from "run-1:1"
+            :seon.ai.attempt/delay-ms 200}
+           ((private-loop-fn 'attempt-request)
+            {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
+                              :seon.ai/model "model"}
+             :seon.ai/settings {:seon.config.ai/thinking :high}
+             :seon.cluster.run/id "run-1"
+             :seon.cluster.agent/id "agent-1"
+             :seon.ai.attempt/ordinal 2
+             :seon.cluster.loop/attempt-evidence evidence
+             :seon.error/value failure
+             :seon.ai.attempt/failover-from "run-1:1"
+             :seon.ai.attempt/delay-ms 200})))))
+
 (deftest receipt-request-projects-one-schema-valid-terminal-request
   (let [result-blob (apply str (repeat 64 "a"))
         completed (my.run/complete "done")

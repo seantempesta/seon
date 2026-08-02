@@ -794,6 +794,46 @@
   [:seon.ai/http-status :seon.ai/request-transmitted?
    :seon.ai/response-started? :seon.ai/output-observed?])
 
+(defn- attempt-evidence
+  "Provider evidence projected from one completion or failure value."
+  [{completion :seon.ai/completion}]
+  (cond-> {}
+    (or (:seon.ai/usage completion)
+        (get-in completion [:seon.error/data :seon.ai/usage]))
+    (assoc :seon.ai/usage
+           (or (:seon.ai/usage completion)
+               (get-in completion [:seon.error/data :seon.ai/usage])))
+    (or (:seon.ai/reasoning-content completion)
+        (get-in completion [:seon.error/data :seon.ai/reasoning-content]))
+    (assoc :seon.ai/reasoning-content
+           (or (:seon.ai/reasoning-content completion)
+               (get-in completion
+                       [:seon.error/data :seon.ai/reasoning-content])))
+    (or (:seon.ai/finish-reason completion)
+        (get-in completion [:seon.error/data :seon.ai/finish-reason]))
+    (assoc :seon.ai/finish-reason
+           (or (:seon.ai/finish-reason completion)
+               (get-in completion
+                       [:seon.error/data :seon.ai/finish-reason])))))
+
+(defn- attempt-request
+  "One record-attempt request assembled from target, evidence, and provenance."
+  [{:keys [:seon.ai/target :seon.ai/settings
+           :seon.ai.attempt/ordinal :seon.error/value
+           :seon.ai.attempt/failover-from :seon.ai.attempt/delay-ms]
+    run-id :seon.cluster.run/id
+    agent-id :seon.cluster.agent/id
+    evidence ::attempt-evidence}]
+  (cond-> (merge {:seon.ai/target target
+                  :seon.ai/settings settings
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.agent/id agent-id
+                  :seon.ai.attempt/ordinal ordinal}
+                 evidence)
+    value (assoc :seon.error/value value)
+    failover-from (assoc :seon.ai.attempt/failover-from failover-from)
+    delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms)))
+
 (defn- record-attempt!
   "Commit ONE model attempt — and its error fact when it failed.
   Returns the COMMITTED error fact on failure, nil otherwise.
@@ -1159,17 +1199,7 @@
                                 sink (assoc :seon.ai/stream? true
                                             :seon.ai/sink sink)))
                   failure (when (:seon.error/kind completion) completion)
-                  usage (or (:seon.ai/usage completion)
-                            (get-in completion
-                                    [:seon.error/data :seon.ai/usage]))
-                  reasoning-content
-                  (or (:seon.ai/reasoning-content completion)
-                      (get-in completion
-                              [:seon.error/data :seon.ai/reasoning-content]))
-                  finish-reason
-                  (or (:seon.ai/finish-reason completion)
-                      (get-in completion
-                              [:seon.error/data :seon.ai/finish-reason]))
+                  evidence (attempt-evidence {:seon.ai/completion completion})
                   ;; a backup is only ever a target ONCE: the attempt that
                   ;; already failed over cannot fail over again, and that
                   ;; is what bounds a failover at exactly two calls
@@ -1179,25 +1209,22 @@
                                   :seon.ai/backup? (and (some? backup)
                                                         (nil? failover-from))}))
                   fact (record-attempt! cluster
-                                        (cond-> {:seon.ai/target target
-                                                 :seon.ai/settings settings
-                                                 :seon.cluster.run/id run-id
-                                                 :seon.cluster.agent/id agent-id
-                                                 :seon.ai.attempt/ordinal ordinal}
-                                          usage (assoc :seon.ai/usage usage)
-                                          reasoning-content
-                                          (assoc :seon.ai/reasoning-content
-                                                 reasoning-content)
-                                          finish-reason
-                                          (assoc :seon.ai/finish-reason
-                                                 finish-reason)
-                                          failure (assoc :seon.error/value failure)
-                                          failover-from
-                                          (assoc :seon.ai.attempt/failover-from
-                                                 failover-from)
-                                          delay-ms
-                                          (assoc :seon.ai.attempt/delay-ms
-                                                 delay-ms))
+                                        (attempt-request
+                                         (cond->
+                                          {:seon.ai/target target
+                                           :seon.ai/settings settings
+                                           :seon.cluster.run/id run-id
+                                           :seon.cluster.agent/id agent-id
+                                           :seon.ai.attempt/ordinal ordinal
+                                           ::attempt-evidence evidence}
+                                           failure
+                                           (assoc :seon.error/value failure)
+                                           failover-from
+                                           (assoc :seon.ai.attempt/failover-from
+                                                  failover-from)
+                                           delay-ms
+                                           (assoc :seon.ai.attempt/delay-ms
+                                                  delay-ms)))
                                         now)]
               (cond
                 (nil? failure) (freeze! completion)
