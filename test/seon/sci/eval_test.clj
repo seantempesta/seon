@@ -187,6 +187,37 @@
         "live sharing preserves metadata rather than merely `=` values")
     (is (= 2 (first value)))))
 
+(deftest cluster-contexts-share-no-writable-sci-stock-vars
+  (let [ctx-a (eval/build-base-ctx)
+        ctx-b (eval/build-base-ctx)
+        shared-writable
+        (for [[ns-sym ns-map] (:namespaces @(:env ctx-a))
+              [sym var-a] ns-map
+              :let [var-b (get-in @(:env ctx-b)
+                                  [:namespaces ns-sym sym])]
+              :when (and (instance? sci.lang.Var var-a)
+                         (identical? var-a var-b)
+                         (not (:sci/built-in (meta var-a))))]
+          (symbol (str ns-sym) (str sym)))
+        before (sci/eval-string*
+                ctx-b
+                "(clojure.walk/macroexpand-all '(when true :ok))")
+        attempt
+        (try
+          (sci/eval-string*
+           ctx-a
+           "(alter-var-root #'clojure.walk/macroexpand-all identity)")
+          ::root-rebound
+          (catch Throwable failure
+            failure))]
+    (is (empty? shared-writable) (pr-str (sort shared-writable)))
+    (is (instance? Throwable attempt))
+    (is (re-find #"read-only" (ex-message attempt)))
+    (is (= before
+           (sci/eval-string*
+            ctx-b
+            "(clojure.walk/macroexpand-all '(when true :ok))")))))
+
 (deftest require-context-rows-persist-namespace-lookup-refs
   (let [ctx (eval/build-base-ctx)
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
