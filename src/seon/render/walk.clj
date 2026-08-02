@@ -371,7 +371,7 @@
     0))
 
 (defn- transcript-entity-ids
-  "The agent, message, run, eval, and matched form entities used by a transcript."
+  "The agent, message, run, attempt, eval, and matched form entities used by a transcript."
   [db agent-eid]
   (into #{agent-eid}
         (map first)
@@ -394,6 +394,12 @@
                 [?run :seon.cluster.run/agent ?agent]
                 [?receipt :seon.cluster.eval/run ?run]]
               db agent-eid)
+         (d/q '[:find ?attempt
+                :in $ ?agent
+                :where
+                [?run :seon.cluster.run/agent ?agent]
+                [?attempt :seon.ai.attempt/run ?run]]
+              db agent-eid)
          (d/q '[:find ?form
                 :in $ ?agent
                 :where
@@ -415,12 +421,14 @@
   (into #{}
         (keep (fn [entity]
                 (when (or (:seon.cluster.message/id entity)
+                          (:seon.ai.attempt/id entity)
                           (:seon.cluster.eval/id entity)
                           (:seon.cluster.run.form/id entity))
                   (:db/id entity))))
         (d/pull-many db
                      [:db/id
                       :seon.cluster.message/id
+                      :seon.ai.attempt/id
                       :seon.cluster.eval/id
                       :seon.cluster.run.form/id]
                      entity-ids)))
@@ -529,7 +537,10 @@
                                          caps))
                                   tokens/chars-per-token)}
                              viewer-namespace
-                             (assoc :seon.render/namespace viewer-namespace))
+                             (assoc :seon.render/namespace viewer-namespace)
+                             (:seon.store/branch-connection request)
+                             (assoc :seon.store/branch-connection
+                                    (:seon.store/branch-connection request)))
                       declaration (if (= kind :seon.render/html)
                                     `transcript/render-html
                                     `transcript/render-ai)]

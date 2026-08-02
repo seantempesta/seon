@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.print :as print]
             [seon.render :as render]
@@ -48,6 +49,15 @@
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run [:db/id :seon.cluster.run/id]}])
+
+(def ^:private reasoning-attempt-selector
+  [:db/id
+   :seon.ai.attempt/id
+   :seon.ai.attempt/at
+   :seon.ai.attempt/reasoning
+   :seon.ai.attempt/reasoning-blob
+   :seon.ai.attempt/reasoning-size
+   {:seon.ai.attempt/run [:db/id :seon.cluster.run/id]}])
 
 (defn- message-count
   [db agent-id]
@@ -278,7 +288,7 @@
 (defn- entry-order
   [entry]
   [(.getTime ^java.util.Date (::at entry))
-   (case (::kind entry) :message 0 :eval 1)
+   (case (::kind entry) :message 0 :attempt 1 :eval 2)
    (::id entry)])
 
 (defn- history
@@ -442,10 +452,53 @@
   {::kind (::kind entry)
    ::id (::id entry)
    ::at (::at entry)
+   ::run-id (::run-id entry)
    ::detail detail
    ::text (case (::kind entry)
             :message (message-text unit entry detail)
             :eval (receipt-text unit entry detail))})
+
+(defn reasoning-disclosure
+  "A collapsed, exact reasoning display shared by live and settled HTML."
+  {:malli/schema [:=> [:cat :string] :seon.render/hiccup]}
+  [reasoning]
+  (let [first-line (or (first (str/split-lines reasoning)) "")]
+    [:details {:class "seon-attempt-reasoning"}
+     [:summary [:span (str first-line "…")]]
+     [:div {:class "seon-attempt-reasoning-body"}
+      [:pre [:code reasoning]]]]))
+
+(defn- reasoning-attempts
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        connection (:seon.store/branch-connection unit)]
+    (if (and db agent-id)
+      (->> (d/q '[:find [?attempt ...]
+                   :in $ ?agent-id
+                   :where
+                   [?agent :seon.cluster.agent/id ?agent-id]
+                   [?run :seon.cluster.run/agent ?agent]
+                   [?attempt :seon.ai.attempt/run ?run]
+                   (or [?attempt :seon.ai.attempt/reasoning]
+                       [?attempt :seon.ai.attempt/reasoning-blob])]
+                 db agent-id)
+           (pulled-many db reasoning-attempt-selector)
+           (keep (fn [attempt]
+                   (let [digest (:seon.ai.attempt/reasoning-blob attempt)
+                         reasoning (or (:seon.ai.attempt/reasoning attempt)
+                                       (when (and connection digest)
+                                         (blob/get connection digest)))]
+                     (when (string? reasoning)
+                       {::kind :attempt
+                        ::id (:seon.ai.attempt/id attempt)
+                        ::at (:seon.ai.attempt/at attempt)
+                        ::run-id (get-in attempt [:seon.ai.attempt/run
+                                                  :seon.cluster.run/id])
+                        ::reasoning reasoning}))))
+           (sort-by entry-order)
+           vec)
+      [])))
 
 (defn- entry-name
   [entry]
@@ -473,11 +526,15 @@
    [:ol {:class "seon-transcript-list"}]
    (map (fn [entry]
           [:li {:id (block/surface-id (entry-name entry))
-                :class "seon-transcript-entry"
+                :class (str "seon-transcript-entry"
+                            (when (= :attempt (::kind entry))
+                              " seon-transcript-attempt"))
                 :data-transcript-id (::id entry)
                 :data-transcript-kind (name (::kind entry))
-                :data-transcript-detail (name (::detail entry))}
-           [:pre [:code (::text entry)]]]))
+                :data-transcript-detail (some-> (::detail entry) name)}
+           (if (= :attempt (::kind entry))
+             (reasoning-disclosure (::reasoning entry))
+             [:pre [:code (::text entry)]])]))
    entries))
 
 (defn- html-output
@@ -582,4 +639,10 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [{::keys [pinned entries elided]} (projection unit)]
-    (html-output pinned entries elided)))
+    ;; Reasoning is deliberately joined only after the shared projection has
+    ;; made every token-budget decision. It therefore changes neither the AI
+    ;; bytes nor which transcript entries the agent receives.
+    (html-output pinned
+                 (sort-by entry-order
+                          (into entries (reasoning-attempts unit)))
+                 elided)))

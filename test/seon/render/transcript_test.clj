@@ -7,10 +7,12 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.ai.tokens :as tokens]
+            [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
+            [seon.render.walk :as walk]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
 
@@ -35,6 +37,19 @@
     :seon.cluster.agent/id agent-id
     :seon.render.transcript/token-budget token-budget
     :seon.sci.admit/caps render-caps}))
+
+(defn- full-agent-ai
+  [db]
+  (walk/prose
+   db
+   (walk/neighborhood
+    {:seon.db/db db
+     :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+     :seon.render/kind :seon.render/ai
+     :seon.render/floor `block/data-prose
+     :seon.render/overrides {}
+     :seon.render/distance 2
+     :seon.sci.admit/caps caps})))
 
 (defn- reader-valid?
   [text]
@@ -427,6 +442,68 @@
             (is (str/includes? ai "of 189000 chars"))
             (is (str/includes? ai (str "result-blob " digest)))
             (is (reader-valid? ai))))))))
+
+(deftest reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
+  (support/with-database
+    (fn [connection]
+      (let [reasoning "First line of thought\nThen the detail."
+            digest (apply str (repeat 64 "d"))
+            base-attempt
+            {:seon.ai.attempt/run [:seon.cluster.run/id "run-reasoning"]
+             :seon.ai.attempt/at (at 500)
+             :seon.ai/endpoint "https://provider.invalid"
+             :seon.ai/model "fixture-thinking"
+             :seon.ai.attempt/settings-edn "{}"}]
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.run/id "run-reasoning"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 0)}
+          (assoc base-attempt
+                 :seon.ai.attempt/id "reasoning-inline"
+                 :seon.ai.attempt/ordinal 0)])
+        (let [before (full-agent-ai @connection)]
+          (d/transact
+           connection
+           [[:db/add [:seon.ai.attempt/id "reasoning-inline"]
+             :seon.ai.attempt/reasoning reasoning]])
+          (let [after (full-agent-ai @connection)
+                without-basis #(str/replace % #"basis=\\d+" "basis=<same>")]
+            (is (= (without-basis before) (without-basis after))
+                "the complete agent projection is byte-identical when reasoning appears")
+            (is (not (str/includes? after reasoning)))
+            (is (not (str/includes? after digest)))))
+        (d/transact
+         connection
+         [(assoc base-attempt
+                 :seon.ai.attempt/id "reasoning-blob"
+                 :seon.ai.attempt/ordinal 1
+                 :seon.ai.attempt/at (at 600)
+                 :seon.ai.attempt/reasoning-blob digest
+                 :seon.ai.attempt/reasoning-size (long (count reasoning)))])
+        (let [request (assoc (unit @connection 100000)
+                             :seon.store/branch-connection connection)
+              rendered
+              (with-redefs [blob/get (fn [actual-connection actual-digest]
+                                       (is (identical? connection actual-connection))
+                                       (is (= digest actual-digest))
+                                       reasoning)]
+                (transcript/render-html request))
+              disclosures
+              (into []
+                    (filter (fn [node]
+                              (= "seon-attempt-reasoning"
+                                 (get-in node [1 :class]))))
+                    (nodes rendered))]
+          (is (= 2 (count disclosures)))
+          (is (= (first disclosures) (second disclosures))
+              "inline and blob-backed history use the same disclosure block")
+          (doseq [disclosure disclosures]
+            (is (not (contains? (second disclosure) :open))
+                "the disclosure is collapsed by default")
+            (is (= "First line of thought…" (get-in disclosure [2 1 1])))
+            (is (= reasoning (get-in disclosure [3 2 1 1])))))))))
 
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
   (support/with-database

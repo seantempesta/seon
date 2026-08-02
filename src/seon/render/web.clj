@@ -62,6 +62,7 @@
             [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
+            [seon.render.transcript :as transcript]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
@@ -278,10 +279,14 @@
           :class "seon-stream-strip"}
     (when stream-partial
       [:div {:class "seon-stream-live"}
-       [:span {:class "seon-stream-label"} "tokens"]
-       [:span {:class "seon-stream-count"}
-        (str (or (:seon.ai/tokens stream-partial) 0))]
-       [:span {:class "seon-stream-text"} (:seon.ai/text stream-partial)]
+       (when-some [reasoning (:seon.ai/reasoning-partial stream-partial)]
+         (transcript/reasoning-disclosure reasoning))
+       [:div {:class "seon-stream-reply"}
+        [:span {:class "seon-stream-label"} "tokens"]
+        [:span {:class "seon-stream-count"}
+         (str (or (:seon.ai/tokens stream-partial) 0))]
+        [:pre [:code {:class "seon-stream-text"}
+               (:seon.ai/text stream-partial)]]]
        [:span {:class "seon-stream-cursor"} ""]])]))
 
 (defn- path-compare
@@ -315,10 +320,12 @@
   whole live set."
   {:malli/schema [:=> [:cat :seon.render.web/paint-request]
                   [:map-of :seon.render/surface-id :string]]}
-  [{:keys [:seon.db/db :seon.cluster.agent/id] caps :seon.sci.admit/caps
+  [{:keys [:seon.db/db :seon.cluster.agent/id
+           :seon.store/branch-connection] caps :seon.sci.admit/caps
     stream-partial :seon.ai/partial}]
   (let [node (render.walk/neighborhood (walk-request db caps id
-                                                     :seon.render/html))
+                                                     :seon.render/html
+                                                     branch-connection))
         units (render.walk/units node)
         ranks (into {}
                     (map-indexed (fn [rank unit]
@@ -426,11 +433,12 @@
 (declare ai-walk)
 
 (defn- debug-page-of
-  [db agent-id caps]
+  [db connection agent-id caps]
   (let [page (dissoc
               (page-of {:seon.db/db db
                         :seon.cluster.agent/id agent-id
                         :seon.sci.admit/caps caps
+                        :seon.store/branch-connection connection
                         :seon.cluster.run/live-processes #{}})
               stream-strip-id)
         ai-id (str "debug-ai-" agent-id)]
@@ -532,6 +540,7 @@
                              (cond-> {:seon.db/db db
                                       :seon.cluster.agent/id agent-id
                                       :seon.sci.admit/caps caps
+                                      :seon.store/branch-connection connection
                                       :seon.cluster.run/live-processes
                                       #{(:seon.cluster.run/process handle)}}
                                (get-in streams [agent-id :seon.ai/partial])
@@ -748,11 +757,12 @@
         debug? (= "true" (get query "debug"))
         registration-key (if debug? [::debug-tab id] id)
         paint (if debug?
-                (fn [] (debug-page-of @connection id caps))
+                (fn [] (debug-page-of @connection connection id caps))
                 (fn []
                   (page-of {:seon.db/db @connection
                             :seon.cluster.agent/id id
                             :seon.sci.admit/caps caps
+                            :seon.store/branch-connection connection
                             :seon.cluster.run/live-processes #{process}})))
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
@@ -986,7 +996,7 @@
   {:depth 2})
 
 (defn- walk-request
-  [db caps agent-id kind]
+  [db caps agent-id kind connection]
   (let [viewer-namespace (agent-namespace db agent-id)]
     (cond-> {:seon.db/db db
              :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
@@ -998,7 +1008,9 @@
              :seon.render/distance (:depth namespace-walk-options)
              :seon.sci.admit/caps caps}
       viewer-namespace
-      (assoc :seon.render/namespace viewer-namespace))))
+      (assoc :seon.render/namespace viewer-namespace)
+      connection
+      (assoc :seon.store/branch-connection connection))))
 
 (defn- ai-walk
   [db caps agent-id]
@@ -1017,6 +1029,7 @@
         page (page-of {:seon.db/db db
                        :seon.cluster.agent/id agent-id
                        :seon.sci.admit/caps caps
+                       :seon.store/branch-connection connection
                        :seon.cluster.run/live-processes #{process}})
         stream-html (get page stream-strip-id)
         unit-html (vals (dissoc page stream-strip-id))]
@@ -1043,7 +1056,7 @@
     caps :seon.sci.admit/caps}
    agent-id]
   (let [db @connection
-        page (debug-page-of db agent-id caps)
+        page (debug-page-of db connection agent-id caps)
         ai-id (str "debug-ai-" agent-id)
         ai (get page ai-id)
         html (vals (dissoc page ai-id))]

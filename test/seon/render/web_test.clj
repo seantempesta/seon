@@ -722,6 +722,73 @@
           (finally
             (.close tab))))))))
 
+(deftest thinking-stream-morphs-into-the-settled-session-transcript
+  (with-server
+    (fn [connection server context]
+      (let [run-id "stream-thinking-settled"
+            reasoning "First streaming thought\nSecond private detail."
+            reply "; thinking\n(+ 1000 517)"]
+        (open-run! connection run-id)
+        (let [tab (open-feed server (str "/feed/" agent-id))]
+          (try
+            (read-complete-paint! tab connection)
+            (async/offer! (:stream-channel context)
+                          {:seon.cluster.agent/id agent-id
+                           :seon.cluster.run/id run-id
+                           :seon.ai/partial
+                           {:seon.ai/text ""
+                            :seon.ai/reasoning-partial reasoning
+                            :seon.ai/tokens 2}})
+            (let [thinking (read-until! tab "First streaming thought")]
+              (is (str/includes? thinking "seon-attempt-reasoning"))
+              (is (str/includes? thinking "First streaming thought"))
+              (is (not (str/includes? thinking " details open="))
+                  "the live disclosure is collapsed by default"))
+
+            (async/offer! (:stream-channel context)
+                          {:seon.cluster.agent/id agent-id
+                           :seon.cluster.run/id run-id
+                           :seon.ai/partial
+                           {:seon.ai/text reply
+                            :seon.ai/reasoning-partial reasoning
+                            :seon.ai/tokens 4}})
+            (let [acting (read-until! tab "(+ 1000 517)")]
+              (is (str/includes? acting "; thinking")
+                  "model-authored comments remain exact visible form text")
+              (is (< (.indexOf acting "seon-attempt-reasoning")
+                     (.indexOf acting "; thinking"))))
+
+            (d/transact
+             connection
+             [{:seon.ai.attempt/id "thinking-attempt"
+               :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+               :seon.ai.attempt/ordinal 0
+               :seon.ai.attempt/at (java.util.Date.)
+               :seon.ai/endpoint "https://provider.invalid"
+               :seon.ai/model "fixture-thinking"
+               :seon.ai.attempt/settings-edn "{}"
+               :seon.ai.attempt/reasoning reasoning}
+              {:seon.cluster.run.form/id "thinking-form"
+               :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
+               :seon.cluster.run.form/ordinal 0
+               :seon.cluster.run.form/source reply}
+              {:seon.cluster.eval/id "thinking-eval"
+               :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/at (java.util.Date.)
+               :seon.cluster.eval/result-edn "1517"}
+              [:db/add [:seon.cluster.run/id run-id]
+               :seon.cluster.run/plan-digest
+               (apply str (repeat 64 "e"))]])
+            (let [settled (read-until! tab "thinking-attempt")]
+              (is (str/includes? settled "seon-attempt-reasoning"))
+              (is (str/includes? settled "First streaming thought"))
+              (is (str/includes? settled "; thinking"))
+              (is (not (str/includes? settled "seon-stream-live"))
+                  "the ordinary fact morph replaces the lossy stream state"))
+            (finally
+              (.close tab))))))))
+
 (deftest reconnect-mid-stream-is-a-fact-only-repaint
   ;; Partials are channel values, never facts. A new socket therefore
   ;; paints the current database value or nothing; it cannot restore the

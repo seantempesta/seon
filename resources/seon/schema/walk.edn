@@ -71,6 +71,7 @@
  :seon.render.walk/request
  [:map {:closed true}
   [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/kind :seon.render/kind]
   [:seon.render/floor :seon.render/floor]

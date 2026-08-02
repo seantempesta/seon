@@ -113,6 +113,7 @@
  :seon.render.web/paint-request
  [:map {:closed true}
   [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]

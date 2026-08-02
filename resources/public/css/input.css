@@ -1159,6 +1159,25 @@ details.tool-call-details[open] .tool-preview {
   transition: background-color 0.45s ease-out;
   animation: seon-transcript-change 0.45s ease-out both;
 }
+.seon-attempt-reasoning {
+  color: var(--color-text-400);
+}
+.seon-attempt-reasoning > summary {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seon-attempt-reasoning-body {
+  margin-top: 0.35rem;
+  color: var(--color-text-200);
+}
+.seon-attempt-reasoning-body pre,
+.seon-stream-reply pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 @keyframes seon-transcript-change {
   from { background: color-mix(in srgb, var(--color-signal) 12%, transparent); }
   to { background: transparent; }
