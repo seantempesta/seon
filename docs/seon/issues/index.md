@@ -16,18 +16,16 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (19)
+## Blocker (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
 | [Make every fresh recursive delete refuse symlink traversal](fresh-recursive-deletion-reintroduces-symlink-traversal.md) | blocker | filesystem safety wave |
 | [Delete the writer build that still packages the old host server](writer-build-still-packages-the-deleted-host-server.md) | blocker | great-deletion build wave |
-| [Reconcile the conventions document with the fresh runtime](docs-rot-conventions-describes-the-pre-fresh-runtime.md) | blocker | doc-rot fix wave |
 | [Remove dead parser and oracle tools from live evaluation chains](dead-parser-oracle-tools-have-live-downstream-readers.md) | blocker | rot deletion wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
 | [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
-| [Re-ground root AGENTS vocabulary in fresh owners](docs-rot-root-agents-names-moved-and-deleted-runtime-owners.md) | blocker | doc-rot fix wave |
 | [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
 | [Reconcile the architecture model with the admitted fresh schema](docs-rot-architecture-model-names-deleted-entities-and-attributes.md) | blocker | doc-rot fix wave |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
@@ -36,10 +34,11 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (48)
+## Friction (49)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
