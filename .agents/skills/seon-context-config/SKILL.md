@@ -67,14 +67,12 @@ Apply an overlay to a live cluster:
 bin/seon config apply CLUSTER path/to/overlay.edn
 ```
 
-The current operator grammar is
-`script/seon/fresh_operator.clj:705-730`; `bin/seon:4-7` routes `start` and
-`config` to it.
-
-`start` discovery is not currently scoped to the operator root. Before
-accepting a start result, confirm that its pid and store path belong to the
-intended root; otherwise stop at the boundary
-(`docs/seon/issues/operator-start-discovers-jvms-from-other-roots.md`).
+The current `config apply` grammar and live-cluster prepl operation are
+`script/seon/fresh_operator.clj:1690-1722`; `bin/seon:4-7` routes the command
+to that operator. Process records, advertisements, discovery, and lifecycle
+are scoped by the explicit operator root; use `bin/seon --root PATH ...` for a
+separate deployment (`bin/seon:4-18`;
+`script/seon/fresh_operator.clj:44-76,604-619,1690-1722`).
 
 `seon.config/apply!` exact-reconciles the desired row
 (`src/seon/config.cljc:237-252`). Runtime code reads the effective ordinary
@@ -84,34 +82,53 @@ map from a database value with `seon.config/effective`
 Verify the resulting datoms and consumer behavior. File contents are desired
 input; the database row is runtime truth.
 
-## Distinguish live and arm-time consumers
+## Trace the acquisition boundary
 
 Applying a row does not magically rebuild a proc, executor, web server, or
 other process-local structure.
 
-The July 29 proof found:
+The registered-dial census and its owning consumer are checked by
+`test/seon/config_application_test.clj:17-150`. Read the source boundary too;
+the grouped current matrix is:
 
-- the maximum-runs-per-episode dial is read from current facts and applies on
-  the next episode;
-- render coalescing reads current facts and applies on the next pass; and
-- structural values captured during boot/arming need their owning topology or
-  process operation before they change.
+| acquisition | dials | source and update truth |
+|---|---|---|
+| boot-time process structure | flow queue depth/concurrency; web port | the work launcher and web server capture them while the cluster starts; applying facts does not rebuild either (`src/seon/cluster.clj:940-971,1357-1370`) |
+| operator start/add instrumentation | core-error mode and result caps | the operator reads one running cluster's effective row when it applies process-global host-Var instrumentation; `config apply` itself only reconciles the database row (`script/seon/fresh_operator.clj:1335-1415,1690-1722`) |
+| graph-arm-time loop handle | result caps, eval time limit, message-chain limit; one copy of recurrence/escalation and core-error mode | `loop-handle` reads one effective map and carries these values into agent graphs (`src/seon/cluster.clj:1043-1077,1118-1125`) |
+| per-episode pass | maximum runs per episode | the work derivation queries the current database value, so the next pass sees the change (`src/seon/cluster/work.cljc:424-441`) |
+| per-turn | every registered AI setting plus the agent overlay | the `:call` branch resolves both from one immutable database value once per turn; a config apply or override changes the next turn, never the attempts already derived for this turn (`src/seon/cluster/loop.cljc:975-989`) |
+| per-render pass/request | render coalescing; data-drill collection page size | the render proc queries coalescing before each pass; `/data` reads page size from the request's database value (`src/seon/render/web.clj:473-480,636-662,1126-1145`) |
+| explicit walk fallback | result caps | an agent walk normally receives the arm-time caps in its ambient context; only a call lacking those caps re-reads the current cluster config (`src/seon/render.clj:169-211`) |
+| program-row installation | core-error mode and result caps | installing a contracted interpreted function reads the committed row's database value before wrapping it, both on cold acquisition and after a successful terminal transaction (`src/seon/sci/eval.clj:762-786,789-895`) |
+| per-fault | recurrence/escalation facts and the fan-out's core-error decision | fault commit reads recurrence/escalation from the fault's database value, while the fan-out callback reads `on-core-error` again for each fault (`src/seon/cluster.clj:1000-1034,1151-1164`) |
 
-Read the exact matrix and probes in
-`docs/prds/sci-execution-runtime/research/config-application-proof-2026-07-29.md`.
-For a new dial, document its acquisition boundary in the owning code and test
-that boundary. Do not add polling or a generic config-change dispatcher.
+`:seon.config/on-core-error` is deliberately split: the loop handle carries
+the arm-time value into eval requests (`src/seon/cluster.clj:1051-1067`;
+`src/seon/cluster/loop.cljc:1287-1302`), while flow-fault fan-out re-reads it
+per fault (`src/seon/cluster.clj:1151-1160`). Never give that dial one blanket
+“live” label.
+
+Applying AI settings is next-turn live, including per-agent overrides. The
+real-provider proof changed the same running worker's next request without a
+PID or graph change
+(`docs/prds/sci-execution-runtime/research/ai-settings-live-proof-2026-08-01.md`).
+For any new dial, update the registered application ledger, cite the exact read
+site, and test that boundary. Do not add polling or a generic config-change
+dispatcher.
 
 ## Context and UI are not config manifests
 
 The deleted manifest seeded context blocks, namespace policy, skill corpus,
 routes, and render caps. Fresh Seon does not expose that model.
 
-Current context/render design is still being settled, and broader UI
-restoration is tabled by ruling 12
-(`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`). Read
-`docs/seon/architecture/context.md` and `docs/seon/architecture/ui.md` as
-target documents before proposing new context or UI dials.
+Current context is one visible walk, namespace pages are canonical Reitit
+routes, and agent/namespace debug variants render the AI and HTML projections
+of that walk (`src/seon/render/route.clj:1-34`;
+`src/seon/render/web.clj:1041-1087,1198-1220`). These are derived runtime
+behavior, not config manifests. Generalized canvas controls and a `/call`
+action boundary remain absent from the current route table
+(`src/seon/render/route.clj:1-34`).
 
 Do not place route trees, prose blocks, namespace allowlists, skill scans, or
 rendered output into fresh configuration merely because the old manifest did.
