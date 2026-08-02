@@ -71,6 +71,7 @@
 
 (defn -main
   "Install packaged source rows and run one fresh cluster."
+  {:malli/schema [:=> [:cat [:* :string]] :nil]}
   [& arguments]
   (let [{operator-root :seon.artifact/operator-root
          cluster-name :seon.boot/cluster-name}
