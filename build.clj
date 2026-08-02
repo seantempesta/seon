@@ -55,12 +55,24 @@
   (let [expression
         (str
          "(do "
-         "(require 'seon.fn 'seon.cluster.source) "
+         "(require 'clojure.java.io 'clojure.string "
+         "'seon.fn 'seon.cluster.source) "
+         "(let [root# (.toPath (.getCanonicalFile (clojure.java.io/file \".\"))) "
+         "manifest# (seon.fn/build-manifest "
+         "{:seon.fn/roots seon.fn/source-roots}) "
+         "artifacts# (mapv "
+         "(fn [artifact#] "
+         "(update artifact# :seon.fn.file/path "
+         "(fn [path#] "
+         "(clojure.string/replace "
+         "(str (.relativize root# (.toPath (clojure.java.io/file path#)))) "
+         "\\\\ \"/\")))) "
+         "(:seon.fn.manifest/artifacts manifest#)) "
+         "portable# (seon.fn/replace-manifest-artifacts manifest# artifacts#)] "
          "(prn {:seon.source/digest "
          "(seon.cluster.source/digest "
          "{:seon.source/roots [\"src\" \"test\" \"resources\"]}) "
-         ":seon.fn/manifest "
-         "(seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})}) "
+         ":seon.fn/manifest portable#})) "
          "(shutdown-agents))")
         result
         (checked-process!
