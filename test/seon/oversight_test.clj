@@ -1,7 +1,10 @@
 (ns seon.oversight-test
   "The fleet story over real booted Flow graphs and a real root page."
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.oversight :as oversight]
             [seon.render :as render]
@@ -14,8 +17,24 @@
 
 (set! *warn-on-reflection* true)
 
+(defn- await-fact
+  "Return the first truthy `probe` result published by a database value."
+  [connection probe]
+  (let [events (async/promise-chan)
+        key (keyword (str (ns-name *ns*)) (str (gensym "fact-")))]
+    (d/listen connection key
+              (fn [report]
+                (when-let [value (probe (:db-after report))]
+                  (async/offer! events value))))
+    (try
+      (when-let [value (probe @connection)]
+        (async/offer! events value))
+      (support/await-event! events "database fact")
+      (finally
+        (d/unlisten connection key)))))
+
 (defn- with-cluster
-  "Boot one real scratch cluster and always stop it."
+  "Boot one real scratch cluster, await bootstrap, and always stop it."
   [name body]
   (let [root (str "tmp/oversight-test/" name)]
     (support/delete-recursively! root)
@@ -23,6 +42,15 @@
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
+        (await-fact
+         (:seon.boot/cluster-connection instance)
+         (fn [db]
+           (d/q '[:find ?closed-at .
+                  :in $ ?run-id
+                  :where
+                  [?run :seon.cluster.run/id ?run-id]
+                  [?run :seon.cluster.run/closed-at ?closed-at]]
+                db (bootstrap/run-id "root"))))
         (body instance)
         (finally
           (cluster/stop! instance))))))
@@ -65,7 +93,8 @@
           (is (not-any? #(contains? % :seon.oversight/state)
                         (concat (:seon.oversight/agents value) plumbing))
               "the process-local story carries presence, not an enum")
-          (is (= 0 (:seon.cluster.work/episode-runs root)))
+          (is (= 1 (:seon.cluster.work/episode-runs root))
+              "the autonomous bootstrap run belongs to this episode")
           (is (= {:seon.oversight/count 0
                   :seon.oversight/capacity 1}
                  (:seon.oversight/mailbox root)))

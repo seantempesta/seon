@@ -291,3 +291,11 @@
                   [:maybe [:or :seon.render/hiccup :seon.error/value]]]}
   [source]
   (projection source :seon.render/html))
+
+(def block
+  "Root's live fleet block declaration."
+  {:seon.render.block/name :fleet-oversight
+   :seon.render.block/priority 15
+   :seon.render.block/band :dynamic
+   :seon.render/ai `block-ai
+   :seon.render/html `block-html})

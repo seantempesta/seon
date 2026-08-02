@@ -27,6 +27,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.run :as run]
@@ -40,19 +41,6 @@
            [java.util.concurrent CountDownLatch]))
 
 (set! *warn-on-reflection* true)
-
-(defn- with-cluster
-  "Boot one real cluster into its own root, and always stop it."
-  [name body]
-  (let [root (str "tmp/armed-test/" name)]
-    (test-support/delete-recursively! root)
-    (cluster/refresh-source! root)
-    (let [instance (cluster/start! {:seon.boot/cluster-name name
-                                    :seon.boot/root root})]
-      (try
-        (body instance)
-        (finally
-          (cluster/stop! instance))))))
 
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
@@ -71,6 +59,28 @@
       (test-support/await-event! events "database fact")
       (finally
         (d/unlisten connection key)))))
+
+(defn- with-cluster
+  "Boot one real cluster, await its bootstrap plan, and always stop it."
+  [name body]
+  (let [root (str "tmp/armed-test/" name)]
+    (test-support/delete-recursively! root)
+    (cluster/refresh-source! root)
+    (let [instance (cluster/start! {:seon.boot/cluster-name name
+                                    :seon.boot/root root})]
+      (try
+        (await-fact
+         (:seon.boot/cluster-connection instance)
+         (fn [db]
+           (d/q '[:find ?closed-at .
+                  :in $ ?run-id
+                  :where
+                  [?run :seon.cluster.run/id ?run-id]
+                  [?run :seon.cluster.run/closed-at ?closed-at]]
+                db (bootstrap/run-id "root"))))
+        (body instance)
+        (finally
+          (cluster/stop! instance))))))
 
 (defn- errors
   [db]
@@ -169,6 +179,16 @@
           right (cluster/start! {:seon.boot/cluster-name "live-right"
                                  :seon.boot/root root})]
       (try
+        (doseq [instance [left right]]
+          (await-fact
+           (:seon.boot/cluster-connection instance)
+           (fn [db]
+             (d/q '[:find ?closed-at .
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?run :seon.cluster.run/closed-at ?closed-at]]
+                  db (bootstrap/run-id "root")))))
         (let [left-handle (:seon.cluster.loop/cluster left)
               right-handle (:seon.cluster.loop/cluster right)
               left-ctx (:seon.sci.eval/ctx left-handle)
@@ -208,9 +228,9 @@
           (cluster/stop! right)
           (cluster/stop! left))))))
 
-(deftest booting-spends-nothing
-  ;; owner-explicit: an armed loop must not cost tokens. It is armed and
-  ;; IDLE — the wake channel is primed, and a wake only says "look".
+(deftest booting-spends-no-model-call
+  ;; The system-authored bootstrap plan evaluates locally; boot must not
+  ;; spend a provider call. After that one run, an empty wake stays free.
   (let [calls (atom 0)]
     (with-redefs [ai/complete (fn [_]
                                 (swap! calls inc)
@@ -220,15 +240,18 @@
         (fn [instance]
           (let [routing (:seon.cluster.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")
-                graph (:seon.flow/graph entry)
                 derived (CountDownLatch. 1)
-                next-agent-work work/next-agent-work]
-            ;; root's graph has looked at least once (the arm primes
-            ;; its mailbox) and found nothing: turns only advance when
-            ;; work was done
-            (is (zero? (:seon.cluster.agent/turns
-                        (:clojure.core.async.flow/state
-                         (flow/ping-proc graph :seon.cluster.agent/turn)))))
+                next-agent-work work/next-agent-work
+                connection (:seon.boot/cluster-connection instance)
+                run-count (fn []
+                            (d/q '[:find (count ?run) .
+                                   :in $ ?agent-id
+                                   :where
+                                   [?agent :seon.cluster.agent/id ?agent-id]
+                                   [?run :seon.cluster.run/agent ?agent]]
+                                 @connection "root"))]
+            (is (= 1 (run-count))
+                "the one local bootstrap plan is the only durable run")
             (with-redefs [work/next-agent-work
                           (fn [& arguments]
                             (let [result (apply next-agent-work arguments)]
@@ -237,12 +260,7 @@
               (async/offer! (:seon.cluster.wake/channel entry) ::probe)
               (test-support/await-event! derived
                                          "empty-wake work derivation")
-              ;; `ping-proc` is processed by the proc after its active
-              ;; transform returns, so the state is terminal here.
-              (is (zero? (:seon.cluster.agent/turns
-                          (:clojure.core.async.flow/state
-                           (flow/ping-proc
-                            graph :seon.cluster.agent/turn))))
+              (is (= 1 (run-count))
                   "a wake with no facts to act on is not work"))
             (is (zero? @calls)
                 "and nothing anywhere called the model")))))))

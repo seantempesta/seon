@@ -2706,6 +2706,7 @@
                           (async/chan (async/sliding-buffer 1))
                           :seon.render.web/registration (atom {})
                           :seon.render.web/completion completion
+                          :seon.render.web/root-agent-id "root"
                           :seon.cluster.loop/cluster cluster})}}
                 :conns []})
         {:keys [report-chan error-chan]} (flow.core/start graph)]

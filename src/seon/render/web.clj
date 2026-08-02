@@ -57,6 +57,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.config :as config]
+            [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.data :as data]
@@ -321,7 +322,9 @@
   {:malli/schema [:=> [:cat :seon.render.web/paint-request]
                   [:map-of :seon.render/surface-id :string]]}
   [{:keys [:seon.db/db :seon.cluster.agent/id
+           :seon.render.web/root-agent-id
            :seon.store/branch-connection] caps :seon.sci.admit/caps
+    live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial}]
   (let [node (render.walk/neighborhood (walk-request db caps id
                                                      :seon.render/html
@@ -340,6 +343,25 @@
                                       (get ranks
                                            (:seon.render.walk/path unit)))}))
                    units)
+        fleet-row
+        (when (= id root-agent-id)
+          (let [request {:seon.db/db db
+                         :seon.cluster.agent/id root-agent-id
+                         :seon.sci.admit/caps caps
+                         :seon.cluster.run/live-processes live-processes}
+                surface (block/surface request oversight/block
+                                       :seon.render/html)]
+            {:seon.render.web/element-id
+             (:seon.render/surface-id surface)
+             :seon.render.walk/path [::fleet-oversight]
+             :seon.render.web/html
+             (hiccup/->string
+              (block/expand
+               (block/slot :fleet-oversight)
+               {:seon.render/surfaces [surface]
+                :seon.db/db db
+                :seon.sci.admit/caps caps}))}))
+        rows (cond-> rows fleet-row (conj fleet-row))
         paths (into {stream-strip-id [::stream-strip]}
                     (map (juxt :seon.render.web/element-id
                                :seon.render.walk/path))
@@ -433,10 +455,11 @@
 (declare ai-walk)
 
 (defn- debug-page-of
-  [db connection agent-id caps]
+  [db connection agent-id root-agent-id caps]
   (let [page (dissoc
               (page-of {:seon.db/db db
                         :seon.cluster.agent/id agent-id
+                        :seon.render.web/root-agent-id root-agent-id
                         :seon.sci.admit/caps caps
                         :seon.store/branch-connection connection
                         :seon.cluster.run/live-processes #{}})
@@ -539,6 +562,8 @@
                             (page-of
                              (cond-> {:seon.db/db db
                                       :seon.cluster.agent/id agent-id
+                                      :seon.render.web/root-agent-id
+                                      (:seon.render.web/root-agent-id state)
                                       :seon.sci.admit/caps caps
                                       :seon.store/branch-connection connection
                                       :seon.cluster.run/live-processes
@@ -747,7 +772,8 @@
   `on-close` untaps and deregisters. The connection owns exactly one
   virtual thread and one map; nothing outlives the socket."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
-  [request {:keys [:seon.cluster.agent/id :seon.store/connection]
+  [request {:keys [:seon.cluster.agent/id :seon.store/connection
+                   :seon.render.web/root-agent-id]
             caps :seon.sci.admit/caps
             process :seon.cluster.run/process
             pages-mult :seon.render.web/pages-mult
@@ -757,10 +783,12 @@
         debug? (= "true" (get query "debug"))
         registration-key (if debug? [::debug-tab id] id)
         paint (if debug?
-                (fn [] (debug-page-of @connection connection id caps))
+                (fn [] (debug-page-of @connection connection id
+                                      root-agent-id caps))
                 (fn []
                   (page-of {:seon.db/db @connection
                             :seon.cluster.agent/id id
+                            :seon.render.web/root-agent-id root-agent-id
                             :seon.sci.admit/caps caps
                             :seon.store/branch-connection connection
                             :seon.cluster.run/live-processes #{process}})))
@@ -1021,13 +1049,14 @@
    #(render/walk namespace-walk-options)))
 
 (defn- page-response
-  [{:keys [:seon.store/connection]
+  [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps
     process :seon.cluster.run/process}
    agent-id]
   (let [db @connection
         page (page-of {:seon.db/db db
                        :seon.cluster.agent/id agent-id
+                       :seon.render.web/root-agent-id id
                        :seon.sci.admit/caps caps
                        :seon.store/branch-connection connection
                        :seon.cluster.run/live-processes #{process}})
@@ -1052,11 +1081,11 @@
                    (route/path ::route/feed {:id agent-id})})}))
 
 (defn- debug-response
-  [{:keys [:seon.store/connection]
+  [{:keys [:seon.store/connection :seon.cluster.agent/id]
     caps :seon.sci.admit/caps}
    agent-id]
   (let [db @connection
-        page (debug-page-of db connection agent-id caps)
+        page (debug-page-of db connection agent-id id caps)
         ai-id (str "debug-ai-" agent-id)
         ai (get page ai-id)
         html (vals (dissoc page ai-id))]
@@ -1127,7 +1156,9 @@
 (defn- feed-response
   [service request]
   (feed request
-        (merge {:seon.cluster.agent/id (get-in request [:path-params :id])}
+        (merge {:seon.cluster.agent/id (get-in request [:path-params :id])
+                :seon.render.web/root-agent-id
+                (:seon.cluster.agent/id service)}
                (select-keys service
                             [:seon.store/connection
                              :seon.sci.admit/caps

@@ -81,7 +81,8 @@
             view {:seon.render.web/render-channel render-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
-                  :seon.render.web/completion completion}
+                  :seon.render.web/completion completion
+                  :seon.render.web/root-agent-id agent-id}
             graph (flow.core/create-flow
                    {:procs
                     {:seon.render.web/render
@@ -284,6 +285,7 @@
   [connection]
   (web/page-of {:seon.db/db @connection
                 :seon.cluster.agent/id agent-id
+                :seon.render.web/root-agent-id agent-id
                 :seon.sci.admit/caps caps
                 :seon.cluster.run/live-processes #{process}}))
 
@@ -420,8 +422,10 @@
         (try
           (let [page (page-at connection)
                 initial (read-complete-paint! stream connection)]
-            (is (= 13 (count page))
+            (is (= 14 (count page))
                 "the fixture reaches the complete production namespace walk")
+            (is (contains? page "surface-fleet-oversight")
+                "root's owner-ruled fleet block is part of the same paint")
             (is (str/includes? initial "data-walk-path=\"[]\""))
             (is (str/includes? initial "surface-transcript"))
             (is (str/includes? initial "surface-stream")))
@@ -540,6 +544,7 @@
               (is (= page (web/page-of
                            {:seon.db/db @connection
                             :seon.cluster.agent/id agent-id
+                            :seon.render.web/root-agent-id agent-id
                             :seon.sci.admit/caps caps
                             :seon.cluster.run/live-processes #{process}}))
                   "and it is the NEWEST page: byte-equal to a fresh

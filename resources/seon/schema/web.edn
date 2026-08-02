@@ -23,6 +23,7 @@
  ; transport law — it names live sockets, and reconnect = repaint.
  :seon.render.web/registration [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
  :seon.render.web/url [:string {:min 1}]
+ :seon.render.web/root-agent-id :seon.cluster.agent/id
 
  ; The http-kit server object. A `[:fn]` with an honest generator, the
  ; supported idiom for a host object — the same shape `seon.store` uses
@@ -52,6 +53,7 @@
   [:seon.render.web/pages-channel :seon.flow/channel]
   [:seon.render.web/registration :seon.render.web/registration]
   [:seon.render.web/completion :seon.flow/channel]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.cluster.run/process :seon.cluster.run/process]
   [:seon.render.web/pages-mult :seon.render.web/pages-mult]]
 
@@ -80,6 +82,7 @@
  :seon.render.web/feed-request
  [:map {:closed true}
   [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.store/connection :seon.store/connection]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/process :seon.cluster.run/process]
@@ -115,6 +118,7 @@
   [:seon.db/db :seon.db/database-value]
   [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]
   [:seon.ai/partial {:optional true} :seon.ai/partial]]

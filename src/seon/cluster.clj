@@ -1135,6 +1135,7 @@
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
               :seon.render.web/completion (async/promise-chan)
+              :seon.render.web/root-agent-id "root"
               ;; THE ONE THING THE DATABASE CANNOT ANSWER, carried to
               ;; the page boundary rather than defaulted at it. On this
               ;; branch the live set is a singleton by construction —
