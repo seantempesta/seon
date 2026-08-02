@@ -55,6 +55,74 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 17 — 2026-08-02 evening, THE CUSTODY/ISOLATION RESEARCH IS
+COMPLETE AND FUSED.** Three research reports landed and agree:
+`custody-isolation-design-2026-08-02.md` (§1-8 no-fork baseline, §9
+fork options), `sci-var-semantics-2026-08-02.md`, and
+`definition-seam-design-2026-08-02.md`. Orchestrator independently
+re-probed every load-bearing claim.
+
+SETTLED FACTS (probed, not argued): a per-cluster SCI var CANNOT feed
+compiled `seon.db` functions (`copy-var*` copies dereferenced values),
+so custody derives from the ctx and binds the compiled var — the
+owner's "option C" injection is refuted. `sci/fork` isolates a NEW name
+but a REDEFINITION leaks to the parent (`identical?` Var objects;
+`eval-def` does `bindRoot` on the previous Var), AND our own
+`install-function-contract!` calls `sci.vars/bindRoot` directly
+(`src/seon/sci/eval.clj:790`), so contract installation inside a forked
+candidate context would corrupt the real cluster. Compiled first-party
+Vars are already exempt from that mutation (`utils/var?` tests
+`sci.lang.Var`, so a `clojure.lang.Var` takes the new-Var branch) —
+hot reload is safe under any copy-on-write scheme placed after that
+branch. An agent can substitute arbitrary code into ANY other cluster
+using `swap!` on the reachable env atom; no custody design touches it,
+only reachability does. The compiled runtime canNOT be redefined
+(`alter-var-root`/`with-redefs`/`var-set`/`intern` all throw), with one
+exception: `alter-meta!` succeeds process-globally and instrumentation
+reads var metadata.
+
+MEASURED (orchestrator, live `default`, 2026-08-02): building a
+candidate ctx via `cluster-ctx` = **636 ms**; `sci/fork` of the live
+ctx = **0.705 µs**. Six orders of magnitude. This is the number the
+candidate-context case rests on and it was previously unmeasured.
+
+THE ORDER (each step independently valuable, earlier steps never
+blocked by later ones):
+1. `ns-publics` at the install seam — 708 private host Vars across 42
+   namespaces stop being published. `:seon.fn/private?` is already a
+   computed fact every other agent-facing projection filters on, so
+   this makes the install seam agree with the graph rather than adding
+   a restriction. Ruling-#20 argument recorded with it.
+2. The four public custody-returning functions (`open-branch!`,
+   `open-store!`, `build-base-ctx`, `cluster-ctx` — DERIVED by querying
+   `:seon.fn.arity/output-refs`, so it stays a standing check) plus
+   relocating `running-instances`/root-store-holder to a
+   never-installed operator namespace. `release-store!` is public and
+   the store is process-root-wide, so step 1 alone leaves a
+   cross-cluster damage vector.
+3. Ctx-derived custody: attach custody at `cluster-ctx` build, bind the
+   compiled `seon.db/*conn*` from it in `evaluate`, delete
+   `:seon.store/branch-connection` from the request schema. Strictly
+   simpler than today — one fact instead of two that must agree.
+4. The `seon.db` surface itself (ruling #41).
+5. OWNER DECISION PENDING — the SCI fork changes: generation-stamped
+   copy-on-write (one `assoc` in `fork`, one `cond` clause in
+   `eval-def`, same check in `bindRoot`; reuses the read-only commit's
+   own pattern) which makes candidate contexts free and unblocks
+   test-before-install accretion; and `EnvBox` (a non-`IAtom` env,
+   ~87 call sites across 15 files) which closes the `swap!` escalation
+   but is defence in depth only — reachability remains required either
+   way.
+
+The stability suite pins thirteen properties, led by custody totality
+and non-inheritance, cross-cluster write isolation, reachability
+closure, foreign-context integrity, and the two guarantees that
+currently hold by accident and must not be lost: no compiled-Var
+mutation, and no concurrency primitives.
+
+LEDGER DEFECT found: ruling numbers #20 and #30 each appear twice in
+`plan/README.md`.
+
 **ADDENDUM 16 — 2026-08-02 late afternoon, RULING #41 + THREE LANES
 LANDED.** Ruling #41 sealed and twice amended (README): seon.db is the
 one database namespace for all things Datahike — dual
