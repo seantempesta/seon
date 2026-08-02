@@ -76,8 +76,23 @@
   (let [{operator-root :seon.artifact/operator-root
          cluster-name :seon.boot/cluster-name}
         (parse-arguments arguments)
-        root (cluster-root operator-root)]
+        root (cluster-root operator-root)
+        direct-entry-time (System/nanoTime)
+        namespace-load-started
+        (or (Long/getLong "seon.artifact.namespace-load-started-nanos")
+            direct-entry-time)
+        namespace-load-completed
+        (or (Long/getLong "seon.artifact.namespace-load-completed-nanos")
+            direct-entry-time)
+        installation-started (System/nanoTime)]
     (install-initialization-pages! root)
+    (let [installation-completed (System/nanoTime)]
+      (println
+       {:seon.artifact/namespace-load-ms
+        (/ (double (- namespace-load-completed namespace-load-started)) 1e6)
+        :seon.artifact/initialization-install-ms
+        (/ (double (- installation-completed installation-started)) 1e6)})
+      (flush))
     (let [instance (cluster/start! {:seon.boot/root root
                                     :seon.boot/cluster-name cluster-name})]
       (.addShutdownHook
