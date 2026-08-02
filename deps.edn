@@ -96,7 +96,7 @@
   ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
   ;; in-memory Datahike, seconds per cycle.
   :test
-  {:extra-paths ["test" "script"]
+  {:extra-paths ["test" "script" "target/dev-dependency-classes"]
    :extra-deps {rewrite-clj/rewrite-clj
                 {:local/root "reference-code/rewrite-clj"}
                 ;; JVM-only testbed dependency; the Seon fork is published
