@@ -198,84 +198,93 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
 - **Long-running work dies sometimes** (upstream API errors, machine load).
   Commit in small coherent slices so churn costs minutes, not hours.
 
-## Start here, 2026-08-01: the open work and how to approach it
+## Start here, 2026-08-02: where the program actually is
 
-Read `plan/state-of-the-design-2026-08-01.md` first — it is the one
-synthesis of where the design stands, what is BUILT versus designed,
-and what genuinely needs experiment rather than more planning. Then
-`plan/unsettled.md` for the operational edge and `plan/README.md`
-rulings #24-#29.
+Read `plan/unsettled.md` from the TOP — its addenda run newest-first
+and **ADDENDUM 15 is the session-close handoff** (tree state, owed
+verifications, the queue). Then `plan/README.md` rulings **#24-#40**;
+the 2026-08-01/02 ones are the current charter. Then
+`issues/index.md`.
 
-**Before you touch any of the queued work, ground yourself in the
-running system.** Boot your own cluster, drive a real form through the
-door, read what an agent actually sees. Several of today's rulings were
-overturned within hours by one measurement; assume yours will be too
-unless you have run it.
+**Run `bin/test` before anything else.** The full gate has not run
+since the schema consolidation and the `turn`/`evaluate` refactor
+landed. Last known green: 823 tests / 4,062 assertions / 0 failures.
 
-The open work, and the trap in each:
+### What is BUILT now (this list changed enormously on 2026-08-01/02)
 
-- **The live per-cluster program graph** (`plan/per-cluster-base-context-
-  2026-08-01.md`, ruling #29). Removes 283 ms from every turn. Trap:
-  this is the change that makes several accidental behaviors visible —
-  today's per-turn reinstall MASKS things. Expect surprises and welcome
-  them.
-- **Stateless resume** (`plan/stateless-resume-design-2026-08-01.md`,
-  ruling #28) — proven end to end. Owner decision open: forms-only
-  slice 1 versus forms plus the value/blob cache. Trap: "the defining
-  form is the truth, the stored value is a cache" is load-bearing;
-  serializing values looks easier and is wrong for sorted colls, lazy
-  seqs, and metadata.
-- **The print path** (`plan/print-path-design-2026-08-01.md`, ruling
-  #26, SEALED). Its acceptance evidence already exists:
-  `test/seon/repl_parity_test.clj` has 34 proven divergences waiting to
-  be promoted as they are fixed. Trap: the gate FAILS if a divergence
-  starts passing without promotion — that is deliberate.
-- **The agent write surface** — the largest real design hole. Agents can
-  read the graph but cannot record their own facts, and after `seon.db`
-  publishes they can reach the raw store door with no ownership rule.
-  See `issues/unlogged-findings-2026-08-01.md`.
-- **`acquire!` per-row containment**, the remaining `seon.db` slices,
-  the interop policy (default-allow, deny at the site with a reason),
-  and the pod-era rot inventory — all in `docs/seon/issues/`.
+The substrate the earlier "state of the design" called designed-but-
+unbuilt is largely built and live-proven:
 
-**The standing adversarial audit has NOT been run on the 2026-08-01
-tree.** It is due: a big landing day, several lanes, a large deletion
-wave. Trust none of the lane reports; falsify at the REPL.
+- **One live SCI context per cluster**, built at cluster start and kept
+  hot — the per-turn rebuild is gone (~350 ms off every turn). Agents
+  in a cluster share one program; clusters share nothing (ruling #27
+  closed, including the 17-var sci-fork residue).
+- **Stateless resume**: a session restores value-first from
+  `:seon.code.def` facts, re-evaluating only *provably pure* forms;
+  effectful and nondeterministic ones never re-run (rulings #28/#32).
+- **The print path**: one closed grammar, one dispatch, text and hiccup
+  from one stored fact (#26). 34 REPL-parity divergences tracked; 10
+  promoted.
+- **Parsed function contracts as facts** (#33): "which functions accept
+  X / produce X" is one Datalog query, derived with Malli's own parser.
+- **Agent contract enforcement**: an agent calling another agent's
+  contracted function with bad input gets the same flat error a host
+  var produces — live-proven.
+- **AI settings** (#34): every dial overridable per agent by the same
+  attribute idents on the agent entity, resolved per turn.
+  Default model `deepseek-v4-flash`, **thinking off**, max-tokens
+  65536, timeout 180 s — all calibration-cited. Planners opt into
+  thinking; Seon is **tool-less** — forms are how agents act (#39).
+- **Model reasoning** persisted and streamed to the HTML projection
+  only, never into agent context (#35).
+- **The bootstrap is data**: `resources/seon/bootstrap.edn` populates
+  per-cluster plan facts; editing one form is a transaction, digests
+  key graded drives, prior agents stay frozen.
+- **Evals**: Seon registers as an Inspect model provider — **proved on
+  198 real gpqa samples**, upstream untouched (#36/#37). Goal grading
+  is our own `clojure.test` + test.check against the ending commit's
+  fork; judges advise, tests gate.
+- **One schema resource** (`resources/seon/schema.edn`, ruling #14
+  finally executed) — the per-family files and the globbing machinery
+  are gone.
+- **The operator**: `bin/seon --root PATH` isolation, `down` prints its
+  census before acting, `reset --force` works from any wreckage, one
+  `start-child-jvm!` owns every child launch.
+- **A standalone jar** (`build.clj`) that boots a cluster from nothing
+  but the jar, shipping pre-analyzed initialization rows.
 
-## How to establish what is broken right now
+### The open work, and the trap in each
 
-Do not preserve a second issue list in this orientation. It went stale within
-one day and taught a repaired registration failure as current fact. The current
-queue is exactly `docs/seon/issues/index.md`; each note carries evidence,
-acceptance, and an owner. The current implementation edge and latest frozen
-gate live at the top of `plan/unsettled.md`. Verify both against `git status`,
-`git log`, `bin/seon status`, and the smallest relevant test before scheduling.
-
-The 2026-07-30 replacement removed evaluated build inspection and live source
-synchronization. clj-kondo now statically analyzes first-party `src/` and
-`test/`; exact locations become namespace/function/test rows, while global
-schema rows come from admitted EDN. Dependency caches are resolution context,
-never database authorship. One malformed file still yields findings and
-analysis for its valid siblings, but publication never seals a partial branch.
-Type-mismatch findings remain visible warnings—the type checker is useful
-context, not a sound database admission authority—while syntax, resolution,
-privacy, and arity errors block the affected source. Runtime analysis queries
-the program graph and materializes only namespaces referenced by the candidate
-forms, preserving cross-namespace knowledge without paying to inject the whole
-graph into every reply.
-
-Hot reload and source publication remain distinct. A re-evaluated Var changes
-behavior in its JVM; it does not update database program facts. The edit hook
-publishes safe first-party changes to one `:current-src` branch and falls back
-to a complete scratch build for structural changes. Bare `bin/seon init`
-requests that complete publication explicitly. Existing clusters are
-sovereign; only `bin/seon init CLUSTER --force` destroys and reforks one. The
-current evidence and any still-open integration edge live at the top of
-`plan/unsettled.md`. The edit hook never runs tests: it returns static feedback
-and publication promptly. Gemini review is optional and asynchronous, with all
-reviewable edits coalesced into at most one batch per two-minute window;
-provider failure silently drops the batch. A coherent checkpoint explicitly
-invokes the changed-test selector, and full suites remain frozen-tree gates.
+- **The bootstrap's content is the live experiment.** The gpqa run is
+  the sharpest datum yet: **196 of 198 episodes tried to WORK a
+  multiple-choice question instead of answering it**. The episode
+  teaches objective-work; raw-QA tasks want an answer. Trap: this is
+  not a bug to fix in code — it is the empirical question the whole
+  apparatus exists to answer. Edit `resources/seon/bootstrap.edn` (or
+  transact a plan edit), run drives, compare by digest.
+- **Store economics at eval scale** (blocker). Measured 2026-08-02:
+  small transactions cost KILOBYTES (2.8-10.8 KB), but inline payloads
+  amplify **~86x** (4 KB costs 350 KB; 64 KB costs 5.5 MB) and
+  batching is worth **42x** (100 datoms in one transaction: 25 KB; in
+  100 transactions: 1,084 KB). The blob threshold was lowered to 4,096
+  characters on that evidence. Trap: an earlier claim of "~1.5 MB per
+  transaction regardless of payload" is FALSE and may still be quoted
+  in older documents — do not plan against it. Still owed: the
+  konserve/datahike source anatomy explaining WHY 86x.
+- **The agent write surface** — still the largest design hole. Agents
+  can persist code but not domain facts, which blocks the memory
+  story. No design exists; commission one.
+- **The effect door** (`seon.effect`) does not exist. That is why
+  replay-safety is trivially true today, and it gates ~26% of the
+  benchmark catalog.
+- **My own probe tools are too narrow** — `eval_clj` cannot reach a
+  `--root` JVM, a degraded boot (the REPL starts first precisely so
+  those stay debuggable), a chosen namespace, or the agent's own view
+  through the door. Filed; fix it early, it pays for itself.
+- **Load time**: 11.8 s -> 2.14 s via a dev dependency class cache
+  (first-party stays uncached, hot reload intact). The jar still pays
+  ~12 s; the same mechanism could serve it, with core.async's AOT/IOC
+  behavior the one thing to decide.
 
 ## The mentality
 
@@ -374,7 +383,11 @@ disagreement.
   ruling. Re-derive before you repeat.
 - **COUNT WHAT YOU CITE.** A mined checklist was reported as 59 rows and
   actually contained 88 — the summary silently dropped a whole category. If
-  you are about to state a number, count it.
+  you are about to state a number, count it. And when a number is
+  ALARMING, measure it before repeating it: on 2026-08-02 a "1.5 MB per
+  transaction" figure survived two documents and an issue note before a
+  probe showed the real cost was kilobytes and the actual problem was
+  something else entirely (payload amplification).
 - **A LANE'S HEARTBEAT IS ITS COMMITS, NOT ITS PROCESS.** A finished lane can
   leave its wrapper running for an hour. Read `git log` for its owned paths;
   reap it when the deliverable has landed. And a lane reporting "another lane
