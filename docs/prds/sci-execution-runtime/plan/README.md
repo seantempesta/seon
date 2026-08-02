@@ -1955,6 +1955,38 @@ may reintroduce a shadow build into the dev feedback path.
   TIME, after an evening in which unbounded parallelism produced 25
   JVMs, a load average of 69, and two orphaned suite runs that sat for
   87 minutes producing nothing.
+  **Ruling 2026-08-02 #45 (owner, evening): A CORRUPTED STREAM FAILS
+  THE TURN, AND TEST RUNS ISOLATE RATHER THAN SERIALIZE.**
+  (1) STREAM INTEGRITY: an unparseable `data:` payload FAILS the
+  completion as a flat error value the agent sees and adapts to — it
+  never silently concatenates the text either side of the dropped
+  chunk. The audit's probe is the reason: a valid prefix, a malformed
+  middle, and a valid suffix produced `(my.run/complete "safe")`, a
+  syntactically valid program the provider never sent, which the agent
+  then executed. NO RETRY: a corrupted stream is transport failure, but
+  retrying reopens what the no-retry position closed and would destroy
+  the phase evidence that enforces it, so the turn settles with the
+  error and the agent decides. Accepted consequence, stated so nobody
+  mistakes it for a regression: transient provider flakiness becomes
+  VISIBLE turn failures where today it is silent corruption. The
+  skip-and-continue behavior remains correct for genuine presentation
+  noise — comments, blank lines, `[DONE]`, non-data SSE fields — which
+  is the distinction the fix turns on. The class covers malformed
+  reasoning deltas and streamed provider-error documents; the
+  non-streaming path already fails atomically.
+  (2) TEST ISOLATION OVER SERIALIZATION: each suite run gets its own
+  operator root so concurrent lanes verify their own work in parallel.
+  This extends the existing `--root` isolation (`script/seon/
+  fresh_operator.clj`) and the temp roots tests already build, rather
+  than adding a mechanism. It REPLACES the global `tmp/bin-test.lock`
+  that the liveness work first landed: refusing the second run stopped
+  the silent hang correctly, but with three lanes running it makes
+  testing the queue everything waits behind. The liveness guarantee is
+  kept independently — a run that stops progressing must be LOUD, zero
+  bytes for 87 minutes stays impossible, and any single-run wedge (a
+  child JVM that never exits, an undrained pipe) is fixed on its own
+  merits, because isolation prevents collision between runs and does
+  nothing for a run that wedges alone.
   **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
   THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
   (1) Owner verbatim: "we OWN sci now with our fork. Design with the
