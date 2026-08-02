@@ -471,20 +471,16 @@
   absent — never a stored nil, never the word \"unknown\", and never
   boilerplate.
 
-  Three rules the prose may not break:
+  Two rules the prose may not break:
 
   - the why-clause is derived from `:seon.error/reason` and is the one
     sentence an agent will act on: its own run was interrupted, or it is
     the escalation owner and the error had no attributable agent, or the
     same signature has now recurred. With no reason the clause is absent
     entirely, because nobody is being contacted;
-  - it says \"may have\" wherever it may have. A fault mid-transform has
-    the same ambiguity `prompt.cljc:130-134` already refuses to paper
-    over for interruptions: claiming certainty is a lie the agent then
-    reasons from;
-  - it never restates the interrupted-run warning the prompt already
-    derives (`prompt.cljc:122-147`), or the agent reads one event twice
-    and infers two.
+  - it says \"may have\" wherever the committed facts do not establish
+    whether the interrupted operation completed. Claiming certainty is a
+    lie the agent then reasons from.
 
   Sizes shown to anyone are estimated tokens, never characters — this
   prose prints no character count.
