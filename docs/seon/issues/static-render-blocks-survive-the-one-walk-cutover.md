@@ -5,7 +5,7 @@ severity: friction
 tags: [issue, deletion, rendering, testing]
 ---
 
-# Delete static render blocks left by the one-walk cutover
+# Delete superseded static render blocks left by the one-walk cutover
 
 ## Problem
 
@@ -13,7 +13,7 @@ The one fresh namespace walk removed seeded static block membership, but a
 large static page implementation remains in fresh source with only tests,
 comments, and CSS as readers. The namespace page and prompt now render family
 lenses reached by `seon.render.walk`; these old root, transcript, namespace,
-execution, and fleet blocks are a second render vocabulary that nothing in
+and execution blocks are a second render vocabulary that nothing in
 the live route or schema selects.
 
 Because fresh source is indexed into the program graph, this residue is not
@@ -40,10 +40,10 @@ docstrings that describe the superseded static-block model.
   `execution-ai` and a duplicate `contribution-tokens` estimator with no live
   reader. `seon.cluster.prompt` calls `tokens/estimate` directly while
   `contribution-hash` remains genuinely live.
-- `src/seon/oversight.clj` has no production or schema reader. Its only
-  executable reader is `test/seon/oversight_test.clj`; CSS selectors and a
-  stale comment at `src/seon/oversight.clj:51` still claim the cluster
-  requires `seon.render.root`, which current source does not.
+- Fleet oversight is excluded: owner ruling 2026-07-28 requires root to carry
+  it by default. Commit `feb1c30d9` restored its production reader inside the
+  one `seon.render.web/page-of` snapshot mechanism after this audit's reader
+  chase incorrectly treated the missing caller as proof of supersession.
 - `src/seon/render/walk.clj:230` still cites
   `seon.render.root/messages-html` as an existing consumer even though no
   call remains.
@@ -62,8 +62,9 @@ do not.
 
 ## Acceptance
 
-- Delete `seon.render.root`, `seon.oversight`, their test/CSS closure, and the
-  unselected static functions in `seon.render.agent` and `seon.context`.
+- Delete `seon.render.root`, its test/CSS closure, and the unselected static
+  functions in `seon.render.agent` and `seon.context`; preserve the
+  owner-ruled root fleet block.
 - Delete or rewrite tests so the recurring web/prompt gates exercise the live
   namespace walk and family lenses, not direct calls that manufacture readers
   for removed blocks.
