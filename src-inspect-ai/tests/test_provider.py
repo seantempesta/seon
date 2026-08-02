@@ -7,7 +7,8 @@ import pytest
 from inspect_ai.model import ChatMessageSystem, ChatMessageUser, GenerateConfig
 from inspect_ai.scorer import CORRECT, INCORRECT, Target
 
-from seon_inspect.host import EPISODE_SEMANTICS
+from seon_inspect import host as host_module
+from seon_inspect.host import EPISODE_SEMANTICS, SeonHost, StoreSnapshot
 from seon_inspect.provider import SeonModelAPI, objective_message
 from seon_inspect.scorers import seon_terminal_honesty
 from seon_inspect.tasks.gpqa import gpqa_diamond
@@ -36,6 +37,25 @@ def test_provider_refuses_tools_before_starting_host(monkeypatch):
                 GenerateConfig(),
             )
         )
+
+
+def test_fresh_eval_root_publishes_source_before_cluster_start(tmp_path, monkeypatch):
+    host = SeonHost()
+    host.root = tmp_path / "operator-root"
+    host.cluster_root = host.root / "data" / "clusters"
+    host.store_path = host.cluster_root / "store"
+    host.summary_path = host.root / "store-growth.json"
+    commands = []
+    monkeypatch.setattr(host, "_operator", lambda *args: commands.append(args))
+    monkeypatch.setattr(host_module, "_advertisement", lambda _path: ("127.0.0.1", 1))
+    monkeypatch.setattr(
+        host_module, "_store_snapshot", lambda _path: StoreSnapshot(0, 0, 0)
+    )
+
+    host.start()
+    host._closed = True
+
+    assert commands == [("init",), ("start", "eval-host")]
 
 
 def test_provider_maps_completed_episode_and_metadata(monkeypatch):

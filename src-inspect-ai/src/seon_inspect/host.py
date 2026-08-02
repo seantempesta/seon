@@ -142,6 +142,7 @@ class SeonHost:
             if self._closed:
                 raise SeonHostError("The Seon operator root is already closed")
             self.root.mkdir(parents=True, exist_ok=False)
+            self._operator("init")
             self._operator("start", "eval-host")
             _advertisement(self.cluster_root / "eval-host" / "prepl.edn")
             self._baseline = _store_snapshot(self.store_path)
