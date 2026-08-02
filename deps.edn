@@ -53,6 +53,10 @@
         ;; coordinate needed): plain synchronous, virtual threads park.
         org.clojure/data.json {:mvn/version "2.5.1"}
 
+        ;; Generative properties are runtime evaluation material as well as
+        ;; developer tests: goal grading loads them in the eval host.
+        org.clojure/test.check {:mvn/version "1.1.1"}
+
         ;; The render pipeline's wire: Datastar SSE morphs over http-kit
         ;; (N4 — the web layer is system code; the block morph rides SSE).
         dev.data-star.clojure/sdk
@@ -86,8 +90,7 @@
   ;; in-memory Datahike, seconds per cycle.
   :test
   {:extra-paths ["test" "script"]
-   :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
-                rewrite-clj/rewrite-clj
+   :extra-deps {rewrite-clj/rewrite-clj
                 {:local/root "reference-code/rewrite-clj"}
                 ;; JVM-only testbed dependency; the Seon fork is published
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
