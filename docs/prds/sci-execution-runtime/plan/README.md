@@ -1861,6 +1861,23 @@ may reintroduce a shadow build into the dev feedback path.
   smart fast and cheap" (median turn 9.8 s vs 21.3 s thinking-high,
   $0.0003 vs $0.0007 off-peak); thinking is an opt-IN per-agent
   override (planners), never the shipped posture.
+  **Ruling 2026-08-02 #37 (owner, night): THE MODEL-PROVIDER SEAM IS
+  ACCEPTED, WITH GUARDRAILS** — per
+  `plan/benchmark-mapping-2026-08-02.md`. Seon registers as an Inspect
+  model provider (`@modelapi("seon")`), so benchmark tasks whose
+  solvers end in `generate()` run VERBATIM (86 families / 133 tasks =
+  53% of inspect-evals today, zero doors; the shell door raises it to
+  ~79%). Guardrails are constitutive: the provider RAISES on a
+  non-empty tools list (an episode never silently scores tool work it
+  did not do — surfaced as the sample's error, never a score), and
+  every eval log carries a mandatory metadata label naming the Seon
+  episode semantics behind the completion interface. Benchmark-washing
+  refusals recorded by name: SWE-bench/terminal-bench/commit0/
+  aider-polyglot are NOT served through REPL-equivalence — their
+  toolchain is the measured object; they wait for the real shell door.
+  Slice 1 = gpqa_diamond (198 samples, choice()-scored — the one-run
+  falsifier of the whole seam), slice 2 = humaneval, upstream files
+  untouched as the acceptance criterion.
   **Ruling 2026-08-02 #36 (owner, night): INSPECT AI IS THE AGENT-EVAL
   SURFACE, GRADED BY OUR OWN TESTS** — sealed per
   `plan/inspect-ai-adaptation-2026-08-02.md`. Goal grading IS
