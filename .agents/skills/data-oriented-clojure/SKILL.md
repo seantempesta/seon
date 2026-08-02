@@ -29,7 +29,7 @@ matters (datahike, malli, core.async + flow, sci) is checked out under
 `reference-code/`, grep-able, the same version we run. Use `clojure -M:dev` for
 a load-only JVM probe; create an explicit `:memory` database or use
 `seon.test-support/with-database` when database behavior is the subject
-(`test/seon/test_support.clj:151-183`). The default
+(`test/seon/test_support.clj:184-216`). The default
 failure mode is writing confident Clojure in a place/mutable mindset while
 *guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
 wrong. Ground the concept→file first, then write. A 30-second REPL experiment
