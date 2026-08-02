@@ -24,7 +24,6 @@
             [seon.instrument :as instrument]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
-            [sci.impl.vars :as sci.vars]
             [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as eval]
@@ -326,25 +325,74 @@
       (finally
         (reset-meta! #'compiled-runtime-victim before)))))
 
-(deftest current-sci-fork-shares-existing-var-roots
-  ;; CHARACTERIZATION FOR PHASE 4: copy-on-write deliberately flips the two
-  ;; leaking assertions while preserving isolation of the new name.
+(deftest sci-fork-copies-existing-var-roots-on-write
   (let [parent (eval/build-base-ctx)
-        _ (sci/eval-string* parent "(def shared :parent)")
+        _ (sci/eval-string* parent
+                            "(def shared :parent) (def bound :parent) (def untouched :parent)")
         forked (sci/fork parent)
+        untouched-parent-var (sci/resolve parent 'untouched)
+        untouched-fork-var (sci/resolve forked 'untouched)
         _ (sci/eval-string* forked "(def fork-only :fork-only)")
         _ (sci/eval-string* forked "(def shared :fork-redefinition)")
         parent-var (sci/resolve parent 'shared)
-        fork-var (sci/resolve forked 'shared)]
+        fork-var (sci/resolve forked 'shared)
+        bound-var (sci/bind-root! forked
+                                  (sci/resolve forked 'bound)
+                                  :fork-bind-root)]
     (is (nil? (sci/resolve parent 'fork-only))
         "a new fork name changes only the fork's env map")
-    (is (identical? parent-var fork-var)
-        "CURRENT SCI: an existing name retains one shared Var object")
-    (is (= :fork-redefinition (sci/eval-string* parent "shared"))
-        "CURRENT SCI: eval-def bindRoot leaks a redefinition to the parent")
-    (sci.vars/bindRoot fork-var :fork-bind-root)
-    (is (= :fork-bind-root (sci/eval-string* parent "shared"))
-        "CURRENT SCI: direct bindRoot on a forked Var also leaks")))
+    (is (identical? untouched-parent-var untouched-fork-var)
+        "an untouched name retains the structurally shared Var")
+    (is (not (identical? parent-var fork-var))
+        "a redefinition creates a generation-owned Var")
+    (is (= :parent (sci/eval-string* parent "shared"))
+        "eval-def leaves the parent root unchanged")
+    (is (= :fork-redefinition (sci/eval-string* forked "shared")))
+    (is (identical? bound-var (sci/resolve forked 'bound)))
+    (is (= :parent (sci/eval-string* parent "bound"))
+        "context-aware root binding leaves the parent root unchanged")
+    (is (= :fork-bind-root (sci/eval-string* forked "bound")))))
+
+(deftest sci-fork-preserves-compiled-var-hot-reload
+  (let [parent (compiled-runtime-ctx)
+        forked (sci/fork parent)
+        entering-root (var-get #'compiled-runtime-victim)]
+    (try
+      (is (identical? #'compiled-runtime-victim
+                      (get-in (sci/namespace-state forked)
+                              ['stability.host 'victim])))
+      (is (= :original (sci/eval-string* forked "(stability.host/victim)")))
+      (alter-var-root #'compiled-runtime-victim
+                      (constantly (fn [] :hot-reloaded)))
+      (is (= :hot-reloaded
+             (sci/eval-string* forked "(stability.host/victim)"))
+          "the next host call dereferences the live compiled Var")
+      (finally
+        (alter-var-root #'compiled-runtime-victim
+                        (constantly entering-root))))))
+
+(deftest contract-installation-in-a-fork-leaves-the-parent-var-unchanged
+  (test-support/with-database
+    (fn [connection]
+      (let [parent (eval/build-base-ctx)
+            _ (sci/eval-string*
+               parent
+               "(defn contracted [x] x)")
+            parent-var (sci/resolve parent 'contracted)
+            parent-root @parent-var
+            candidate (sci/fork parent)]
+        (#'eval/install-function-contract!
+         candidate
+         {:seon.fn/sym "user/contracted"
+          :seon.fn/spec "[:=> [:cat :int] :int]"}
+         (seon.schema/projection-from-database @connection)
+         @connection)
+        (is (identical? parent-var (sci/resolve parent 'contracted)))
+        (is (identical? parent-root @(sci/resolve parent 'contracted)))
+        (is (not (identical? parent-var
+                             (sci/resolve candidate 'contracted)))
+            "contract installation copies the inherited candidate Var")
+        (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
 (deftest require-context-rows-persist-namespace-lookup-refs
   (let [ctx (eval/build-base-ctx)
@@ -544,6 +592,9 @@
     (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
     (is (= (sci/namespace-state execution-ctx)
            (:seon.sci.eval/namespace-state row)))
+    (is (some? (sci/resolve ctx 'discarded))
+        "the forked ns-unmap leaves the parent context unchanged")
+    (is (nil? (sci/resolve execution-ctx 'discarded)))
     (is (nil? (:seon.sci.eval/context-row result)))))
 
 (deftest declared-row-evaluates-a-schema-once-inside-its-delta

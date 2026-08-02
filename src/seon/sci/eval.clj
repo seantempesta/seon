@@ -786,8 +786,8 @@
           sci-var (sci/resolve ctx function-symbol)
           {:keys [:seon.config/on-core-error :seon.sci.admit/caps]}
           (instrumentation-config db)]
-      (sci.vars/bindRoot
-       sci-var
+      (sci/bind-root!
+       ctx sci-var
        (instrument/wrap-interpreted
         function-symbol spec-edn projection on-core-error caps @sci-var))))
   nil)
