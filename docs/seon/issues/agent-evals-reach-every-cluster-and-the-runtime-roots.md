@@ -47,6 +47,35 @@ the argument this fix turns on, and it must be made explicitly rather
 than assumed: excluding them restricts no documented agent capability,
 while installing them hands out the process's mutable roots.
 
+## What the reach actually enables (2026-08-02, `custody-isolation-design-2026-08-02.md`)
+
+The consequence is worse than cross-cluster writes. Because each
+instance carries `:seon.sci.eval/ctx` (`resources/seon/schema.edn:1488`)
+and a ctx is an ordinary map whose `:env` is an ordinary atom
+(`reference-code/sci/src/sci/core.cljc:312-331`), an agent holding
+another cluster's ctx can rewrite that cluster's ENTIRE PROGRAM using
+`swap!` and `assoc-in`/`dissoc` alone — no interop, no privileged
+function, no Var mutation. Demonstrated in
+`research/scripts/custody-probe7-2026-08-02.clj`: a function deleted out
+of a victim context (victim then gets `Unable to resolve symbol`), and
+an attacker-authored function injected into it and executed by the
+victim (`:ATTACKER`). That is arbitrary code execution in every other
+cluster's agent world, invisible to any database audit, and NO custody
+design touches it — `swap!` on a reachable atom is not a call into any
+function we own. Only removing the reference closes it.
+
+Separately verified, and reassuring: the COMPILED runtime cannot be
+redefined. `alter-var-root`, `with-redefs`, `var-set`, `intern`,
+`binding`, and `push-thread-bindings` against a raw `clojure.lang.Var`
+reached from SCI all throw, because SCI's `IVar`/`IBox` protocols are
+not extended to `clojure.lang.Var`
+(`research/scripts/custody-probe6-2026-08-02.clj`); `.bindRoot` interop
+is blocked by the `:classes` gate. ONE EXCEPTION: `alter-meta!`
+SUCCEEDS and is process-global, and `seon.instrument` derives from var
+metadata (`src/seon/instrument.clj:115,147`), so an agent can alter what
+instrumentation and documentation say about a compiled function for
+every cluster in the JVM. It cannot change what the function does.
+
 ## Acceptance
 
 - The install seam stops publishing private vars into the cluster ctx
@@ -65,6 +94,17 @@ while installing them hands out the process's mutable roots.
   beyond the installed set, no arbitrary interop.
 - Regressions live in the database/SCI stability suite (in-memory
   connections, no disk growth).
+- FOREIGN-CONTEXT INTEGRITY is pinned as its own property: for any
+  clusters A and B and any agent form evaluated in A, B's env atom is
+  unchanged — no namespace added, removed, or rebound. This is the
+  regression for the arbitrary-substitution finding above.
+- Reachability is not left depending on a `defn-` metadata flag: the
+  process-root registry moves to an operator-owned namespace that is
+  never installed into any ctx, so a future `defn-` → `defn` slip
+  cannot reopen it.
+- COMPILED VAR METADATA IMMUTABILITY is either restored (no
+  `alter-meta!` effect from an agent form) or recorded as an explicit
+  accepted residual with the instrumentation consequence named.
 
 Related: [[seon-db-is-not-the-one-database-namespace]] (ruling #41's
 custody model), and ruling #30's persistence gate, which governs what
