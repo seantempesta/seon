@@ -461,7 +461,9 @@
 ;;; Datahike schema and canonical rows are installed into `current-src`.
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
-  (conj seon.fn/source-roots "resources"))
+  (into seon.fn/source-roots
+        ["resources/seon/schema.edn"
+         "resources/seon/bootstrap.edn"]))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,

@@ -875,21 +875,29 @@
                           (assoc published "/repo/src/new.clj" "n1")
                           ["/repo/src/a.clj"])))))
 
+(deftest current-source-digest-names-the-one-schema-resource
+  (is (some #{"resources/seon/schema.edn"} cluster/source-roots)
+      "the ancestor hashes the one schema resource")
+  (is (some #{"resources/seon/bootstrap.edn"} cluster/source-roots)
+      "the ancestor hashes the bootstrap forms installed as source facts")
+  (is (not-any? #{"resources"} cluster/source-roots)
+      "the ancestor never discovers schema through a resource-directory walk"))
+
 (deftest incremental-source-refresh-preserves-agreement-across-real-edits
   (let [root (bare-root)
         project (io/file root "project")
         source-root (io/file project "src")
         test-root (io/file project "test")
         resource-root (io/file project "resources")
+        schema-path (write-source! resource-root "seon/schema.edn" "{}\n")
         a-path (write-source! source-root "sample/a.clj"
                               "(ns sample.a)\n(defn value [] 1)\n")
         b-path (write-source! source-root "sample/b.clj"
                               "(ns sample.b)\n(defn value [] 10)\n")
         roots (mapv #(.getCanonicalPath ^java.io.File %)
                     [source-root test-root])
-        all-roots (conj roots (.getCanonicalPath resource-root))]
+        all-roots (conj roots schema-path)]
     (.mkdirs test-root)
-    (.mkdirs resource-root)
     (try
       (with-redefs [seon.fn/source-roots roots
                     cluster/source-roots all-roots]
