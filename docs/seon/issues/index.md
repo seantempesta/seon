@@ -43,7 +43,7 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (50)
+## Friction (49)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -73,7 +73,6 @@ See `README.md` for the convention.
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
 | [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
-| [Wire `:seon.render.value/options` so presentation decouples from admission caps](render-value-options-declared-but-unwired.md) | friction | caps-blob-print wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
