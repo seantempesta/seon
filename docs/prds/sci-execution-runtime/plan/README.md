@@ -1861,6 +1861,21 @@ may reintroduce a shadow build into the dev feedback path.
   smart fast and cheap" (median turn 9.8 s vs 21.3 s thinking-high,
   $0.0003 vs $0.0007 off-peak); thinking is an opt-IN per-agent
   override (planners), never the shipped posture.
+  **Ruling 2026-08-01 #35 (owner, late night): MODEL REASONING IS
+  DURABLE FOR HUMANS AND ABSENT FROM AGENT CONTEXT.** Retain provider
+  `reasoning_content` on every completed attempt. Reuse ruling #25's
+  one eval-result split and its existing
+  `:seon.config.eval.result/blob-threshold`: small reasoning is inline;
+  large reasoning is a content-addressed blob with digest and size.
+  Streaming reasoning remains a separate complete prefix on the SAME
+  sliding-1 channel path as visible reply prefixes and never enters
+  `:seon.ai/text`. The HTML projection shows one collapsed disclosure:
+  while streaming its summary is the first reasoning line plus `…` and
+  visible forms arrive below it; after settlement the ordinary morph
+  retains the disclosure beside the evaluated reply; later transcript
+  renders recover the same disclosure from the attempt row or blob.
+  The `:seon.render/ai` projection contains zero reasoning in every
+  state, and later provider requests never carry it forward.
   **Ruling 2026-08-01 #34 (owner, night): THE AI SETTINGS MODEL IS
   SEALED** per `plan/ai-settings-design-2026-08-01.md`. (1) UNIFORM
   overridability — "ideally everything so we don't have two systems":

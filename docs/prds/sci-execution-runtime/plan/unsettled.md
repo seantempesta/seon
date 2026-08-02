@@ -16,6 +16,19 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-01, RULING #35 IMPLEMENTED; LIVE PROOF PENDING.**
+Provider reasoning now remains separate from visible text through one-shot and
+streaming parsing and settles on the attempt row through ruling #25's existing
+65,536-character inline/blob split. The same sliding-1 render input carries a
+lossy reasoning prefix; the web UI uses one collapsed disclosure for streaming,
+settled, and historical attempts. Attempts are transcript-owned, so the generic
+walk cannot expose their raw reasoning facts to `:seon.render/ai`; HTML joins
+reasoning only after transcript budgeting. Schema-derived blob discovery already
+includes the new digest attribute automatically. Commits: `983121aa1` and
+`7bd877df1`. Focused source loading is green. The recurring render gate and the
+fresh private-root inline/blob/no-carry capture wait on the concurrently edited
+bootstrap/transcript tree reaching a coherent source-index boundary.
+
 **ADDENDUM — 2026-08-01, RULING #34 LIVE.** Uniform per-agent AI settings are
 landed and proven through real DeepSeek calls in a fresh private operator root.
 One agent inherited shipped `thinking :disabled`; one same-ident agent fact
