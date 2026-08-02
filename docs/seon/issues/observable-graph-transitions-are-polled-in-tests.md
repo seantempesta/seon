@@ -15,9 +15,14 @@ publish directly.
 
 ## Evidence
 
-`test/seon/cluster/agent_test.clj:139-147` defines a 25 ms polling loop used
-throughout the suite; line 416 sleeps 300 ms to assert that a paused graph did
-not run. `test/seon/flow_test.clj:930-944` polls an atom with 10 ms sleeps.
+`test/seon/cluster/agent_test.clj:153-160` defines a 25 ms polling loop with 12
+remaining call sites. The hard core observes idle-pass counts and armer/routing
+settlement. `seon.cluster.agent/arm!` receives Flow's started map, including
+the report channel, but omits it from the armed handle
+(`src/seon/cluster/agent.clj:376-390`). The closed
+`:seon.cluster.agent/armed` schema likewise has no report channel
+(`resources/seon/schema.edn:106`). Tests therefore cannot await those named
+graph events through the public handle.
 Render and turn fixtures also loop on `flow/ping`.
 
 These are not foreign-process or remote-I/O backstops. Core.async Flow already
@@ -28,9 +33,29 @@ tests to infer readiness, pause, idle, and settlement from later effects.
 independently identifies the same root cause; no issue note previously owned
 it.
 
-The child-process sleeps in `flow/kill_child.clj` and `store_child.clj`, the
-bounded foreign-child readiness wait in `store_test.clj`, and deliberate
-workload timing in `flow_test.clj:124` are not part of this defect.
+The `Long/MAX_VALUE` child-process sleeps in `flow/kill_child.clj` and
+`store_child.clj` are not part of this defect: each child has published
+readiness and must remain alive until the parent deliberately sends SIGKILL.
+
+## Progress — 2026-08-02
+
+Commit `53996daa3` removed the pause test's provider-entry polling, wall-clock
+duration assertion, fixed 300 ms negative sleep, repeated pause-status ping,
+plan poll, and resumed-quiescence poll. They now use latches, one ordered
+pause-then-ping acknowledgement, and Datahike transaction events. The exact
+test passed 50/50 repetitions; the focused namespace passed 12 tests / 93
+assertions.
+
+Commits `8259098f2`, `e5d0e4544`, and `1e320cf41` removed the parent-side
+foreign-child file polls through filesystem/pipe readiness plus
+`Process.onExit`. Those changes preserve a loud foreign-process backstop and
+do not change the intentional child wait-to-be-killed sleeps.
+
+The issue remains open because the 12 agent polling call sites cannot all be
+removed within test-only ownership. Closing them requires the armed handle to
+retain the existing Flow report channel and the closed schema to admit it; a
+hidden test-only channel would recreate the interface defect rather than fix
+it.
 
 ## Owner
 
