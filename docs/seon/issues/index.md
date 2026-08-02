@@ -16,14 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (13)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Run agent renderers through the guarded SCI program context](agent-renderers-never-enter-the-sci-program-context.md) | blocker | SCI render-execution design gate |
-| [Stop installing private vars so agents cannot reach other clusters or the runtime roots](agent-evals-reach-every-cluster-and-the-runtime-roots.md) | blocker | custody/isolation wave |
 | [Make `seon.db` the one agent-first database namespace and route everything through it](seon-db-is-not-the-one-database-namespace.md) | blocker | seon.db wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
 | [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
@@ -34,7 +33,7 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (66)
+## Friction (68)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -104,6 +103,8 @@ See `README.md` for the convention.
 | [Give the work launcher's control read SPI priority or rebuild it as a var-process](work-launcher-control-alts-lacks-priority.md) | friction | flow-protocol wave |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
+| [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
+| [Delete schema-row creation clocks from retained snapshots](schema-created-at-multiplies-nonsemantic-provenance.md) | friction | eval-scale economics wave |
 
 ## Cleanup (12)
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, runtime, database]
 ---
@@ -183,7 +183,104 @@ the namespace, and the settled transcript value.
 one recorded JVM. The final status reported both scratch clusters stopped,
 zero live clusters, no orphan JVMs, and a readable roster.
 
-The issue remains open for orchestrator review and the later approved
-reachability phases. This checkpoint closes only the owner-selected
-private-Var publication step; the derived public custody-returning surface and
-the other acceptance rows above remain explicit work.
+At that checkpoint the issue remained open for the later approved reachability
+phases: the derived public custody-returning surface and the other acceptance
+rows above were still explicit work.
+
+## Resolution — ruling #43 phase 3
+
+Commit `a8fdc8085` closes the remaining reachability and evaluation-custody
+acceptance rows. The reset-boundary evidence is recorded in
+`custody-phase3-live-proof-2026-08-02.md`.
+
+### Context-derived evaluation custody
+
+`cluster-ctx` now carries the branch connection in private context metadata.
+`evaluate` binds the COMPILED `seon.db/*conn*` from that metadata with no
+request value and no ambient fallback. The closed `:seon.sci.eval/request`
+schema and `seon.cluster.loop/evaluation-request` no longer admit or copy
+`:seon.store/branch-connection`.
+
+This preserves the verified SCI constraint: a copied SCI-side Var cannot bind
+a compiled function because `sci/copy-var*` copies its dereferenced value. The
+dynamic binding therefore remains on the compiled `seon.db/*conn*`. The final
+direct caller in `seon.bootstrap-drive` already passed a context made by
+`cluster-ctx` and no request connection; it required no source change, and its
+focused drive stays green.
+
+### Decision: keep `release-store!` public
+
+`seon.cluster.store/release-store!` stays public. It is the paired close of the
+explicit public `open-store!` lifecycle and accepts only a store value the
+caller already holds. Moving only the close would create an operator-only
+second lifecycle while every function remains callable under ruling #20. The
+structural correction is instead to make the live process-root store value
+undiscoverable: its holder moved out of the program graph, and a second
+`open-store!` for the held root refuses before returning a value. This accepts
+the explicit store lifecycle, not ambient reach to another cluster's store.
+
+### Decision: keep `open-store!` public
+
+`seon.cluster.store/open-store!` stays public. It opens a caller-selected
+directory under the process and OS flock fences; it cannot discover the live
+root directory or return its held store, and another open of that directory
+refuses. Its custody return is the declared result of an explicit lifecycle,
+not ambient cluster custody.
+
+### Decision: keep `open-branch!` public
+
+`seon.cluster.store/open-branch!` stays public. It requires the already-held
+store value and a named existing branch. It has no discovery path to the
+process-root holder, and it refuses a branch connection already held by the
+process. Its returned connection therefore cannot expose cluster B unless the
+caller already possesses B's store custody.
+
+### Decision: keep `build-base-ctx` public
+
+`seon.sci.eval/build-base-ctx` stays public. It returns a fresh, isolated,
+uncustodied context: no database connection, runtime registry, foreign context,
+or installed operator namespace. The result is the intended construction
+surface for isolated evaluation and cannot discover a live cluster context.
+
+### Decision: keep `cluster-ctx` public
+
+`seon.sci.eval/cluster-ctx` stays public. Cold acquisition requires the
+database value and optional connection the caller already possesses; the
+function performs no cluster or connection discovery. Its returned context
+contains only that supplied custody and is not registered into any other
+cluster. Keeping the constructor public preserves ruling #20 without adding an
+ambient route to cluster B.
+
+### Structural process-root relocation
+
+`running-instances`, the root store holder, held flocks, and the root executor
+holder moved to `seon.operator.runtime`. That namespace lives under
+`resources/`, so it is on the operator/runtime classpath and packaged into the
+artifact, but it is outside the indexed `src` and `test` program roots. It has
+no `:seon.ns` database row and is never acquired into a cluster SCI context.
+Compiled consumers refer to its Vars; `seon.cluster/root-executors` remains the
+stable public Flow entry point, but the executor holder itself is not in the
+program graph. A future visibility change on a root Var therefore cannot
+publish it into an agent context.
+
+The standing census proves both absences and checks that each referred root
+Var is actually owned by `seon.operator.runtime`, preventing a vacuous
+namespace assertion.
+
+### Foreign-context integrity
+
+`seon.custody-stability-test` now has a fixed-seed generative property that
+builds independent contexts A and B, evaluates generated forms only in A, and
+compares B's complete namespace and Var-root snapshot after every form. The
+forms include definitions, namespace creation/removal, database reads, and
+attempts to resolve every relocated process root. B remains unchanged.
+
+### Accepted residual: compiled Var metadata
+
+Compiled Var behavior remains immutable from SCI, but `alter-meta!` can still
+change a compiled Var's metadata process-wide. This is explicitly accepted as
+the ruling-#43 residual: it can change what instrumentation and documentation
+derive from metadata, but cannot change the function root or another cluster's
+SCI environment. The characterization
+`known-gap-agent-code-can-change-compiled-var-metadata` keeps the consequence
+visible until a later metadata policy restores immutability.
