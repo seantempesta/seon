@@ -1878,17 +1878,32 @@ may reintroduce a shadow build into the dev feedback path.
   cannot lose custody before it is realized).
   AMENDED again same afternoon (owner): (7) AGENTS GET THEIR OWN LITTLE
   WORLD — "I do want the functions to operate differently whether they
-  are system executed or agent executed." The cost flagged at the
-  design gate (one name resolving to different function objects for
-  compiled core code versus interpreted agent code) is ACCEPTED
-  DELIBERATELY, not merely tolerated: the agent-facing surface is
-  per-cluster BY CONSTRUCTION, so the function installed in cluster A's
-  context carries A's custody and an agent has no name for any other
-  cluster's. (8) CUSTODY INJECTION SUPPLIES CUSTODY; IT NEVER REWRITES
-  ARGUMENTS — this is what makes both of ruling #41's interfaces work
-  through ONE code path, positional and argument-map alike. The
-  installed closure answers only "which connection is mine"; the
-  function's own body still decides placement, normalizing first
+  are system executed or agent executed." THE INTENT STANDS; THE
+  MECHANISM THE ORCHESTRATOR FIRST RECORDED FOR IT DOES NOT, and the
+  correction is recorded here rather than quietly dropped. Per-cluster
+  custody baked into the installed function value (the owner's
+  "option C") is REFUTED by two verified facts:
+  `install-loaded-first-party-namespaces!` binds namespaces with
+  `ns-interns`, i.e. THE REAL COMPILED VARS — deliberately, so a
+  re-evaluated `defn` changes the next host call without reacquisition
+  (`src/seon/sci/eval.clj:908-932`) — so there is exactly ONE
+  `seon.db/q` Var per JVM shared by every cluster, and a custody value
+  baked into it would be the same for all of them; and `sci/copy-var*`
+  copies the DEREFERENCED value (`reference-code/sci/src/sci/core.cljc:
+  111-136`), so an sci-side var is invisible to compiled code and a
+  per-cluster SCI var cannot serve it either (probed: `(binding
+  [seon.db/*conn* :SCI-VALUE] (host-peek))` → `nil`). Baking custody at
+  the seam would therefore have to fork `seon.instrument` into
+  interpreted and compiled halves and would cost live redefinition —
+  both disqualifying. WHAT DELIVERS THE INTENT INSTEAD: the agent's own
+  world is established by REACHABILITY (what the install seam publishes
+  into its context) and custody flows from the CONTEXT, which is
+  per-cluster by construction — see `research/custody-isolation-design-
+  2026-08-02.md`. (8) CUSTODY IS SUPPLIED, NEVER REWRITTEN INTO
+  ARGUMENTS — this half survives the refutation and is what makes both
+  of ruling #41's interfaces work through ONE code path, positional and
+  argument-map alike. Custody answers only "which connection is mine";
+  the function's own body still decides placement, normalizing first
   through the dependency's own logic (`normalize-q-input`,
   `reference-code/datahike/src/datahike/query.cljc:97-122`, which
   disambiguates the argument-map form from map query syntax by `:query`
