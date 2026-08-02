@@ -10,10 +10,12 @@ tags: [issue, database, datahike]
 ## Problem
 
 Seon calls Datahike's storage GC in its weakest form. `d/gc-storage` with no
-`remove-before` cutoff reclaims only the garbage left by **deleted branches**
-— every intermediate commit's index nodes stay on disk forever. Since every
-Seon commit rewrites a root-to-leaf path per index, that is precisely the
-garbage that accumulates, and it is the garbage the current call cannot see.
+`remove-before` cutoff marks the complete commit ancestry of every extant
+branch. It can reclaim any object outside those graphs—deleted-branch objects,
+orphan nodes, or failed-write debris—but every intermediate commit's index
+nodes remain reachable and stay on disk forever. Since every Seon commit
+rewrites a root-to-leaf path per index, that retained ancestry is precisely the
+growth the current call cannot reclaim.
 
 The pin also ships a concurrent background collector that is safe against an
 active in-process writer. It is **not directly adoptable by Seon**, however:
@@ -29,9 +31,10 @@ owner and preserve the extended mark.
 `src/seon/cluster/registry.clj:293` —
 `(count @(d/gc-storage (:seon.store/connection store)))`, no cutoff argument.
 
-`reference-code/datahike/doc/gc.md:20-24` states that the plain form
-reclaims only deleted-branch garbage; actual eviction needs the cutoff form
-at `reference-code/datahike/src/datahike/gc.cljc:83,119`.
+`reference-code/datahike/doc/gc.md:20-24` highlights deleted-branch garbage.
+The source is broader: the plain form marks every extant branch and its full
+ancestry, then sweeps anything else; the cutoff form prunes ancestry before its
+date (`reference-code/datahike/src/datahike/gc.cljc:83,119`).
 
 `reference-code/datahike/src/datahike/gc.cljc:148,167-168` —
 `start-background-gc!` with `:interval-ms` (default 300000) and
