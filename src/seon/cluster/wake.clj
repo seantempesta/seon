@@ -223,7 +223,7 @@
              (async/offer! armer-channel ::wake))
 
            nil))
-       (catch #?(:clj Throwable :cljs :default) failure
+       (catch Throwable failure
          (async/offer! fault-channel failure)))))
   key)
 
@@ -236,5 +236,5 @@
     (d/unlisten connection key)
     ;; stop may arrive after a release, and an absent listener is the
     ;; state we wanted anyway
-    (catch #?(:clj Throwable :cljs :default) _ nil))
+    (catch Throwable _ nil))
   nil)
