@@ -442,10 +442,15 @@ without collisions:
 - **Ruling #40 seals the history dial.** An isolated eval root may be created
   with Datahike history disabled because grading forks branches from the
   ending commit and goal tests read the ending database value; neither depends
-  on transaction history. Slice 1 applies `DATAHIKE_KEEP_HISTORY=false` to
-  every operator command for that root. Every sample records its shared-store
-  before/after interval, overlapping sample ids, and aggregate growth through
-  that sample; the run also retains an exact root baseline-to-final summary.
+  on transaction history. The first live smoke showed that this is not yet a
+  small creation-seam addition: `seon.schema`, `seon.reconcile`, and the
+  cluster store/registry currently call `d/history`, so a history-off root
+  fails boot with "history is only allowed on temporal indexed databases."
+  Slice 1 therefore keeps normal history and records the history-off path as a
+  follow-up backed by the 198-sample store-growth measurement. Every sample
+  records its shared-store before/after interval, overlapping sample ids, and
+  aggregate growth through that sample; the run also retains an exact root
+  baseline-to-final summary.
 
 ### Slice 1 — one Task, five goals, three scorer kinds, end to end
 

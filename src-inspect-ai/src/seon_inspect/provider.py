@@ -16,7 +16,7 @@ from inspect_ai.model import (
 )
 from inspect_ai.tool import ToolChoice, ToolInfo
 
-from seon_inspect.host import EPISODE_SEMANTICS, SeonHost
+from seon_inspect.host import EPISODE_SEMANTICS, HISTORY_ENABLED, SeonHost
 
 
 def _text_content(message: ChatMessage) -> str:
@@ -84,7 +84,7 @@ class SeonModelAPI(ModelAPI):
         )
         output.metadata = {
             "seon_episode_semantics": EPISODE_SEMANTICS,
-            "seon_history_enabled": False,
+            "seon_history_enabled": HISTORY_ENABLED,
             "seon_episode": episode,
         }
         return output

@@ -17,6 +17,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EPISODE_SEMANTICS = "one Inspect completion is one seeded Seon agent episode"
+HISTORY_ENABLED = True
 _ADVERTISEMENT_FIELD = re.compile(
     r":seon\.boot/(?P<name>prepl-host|prepl-port)\s+(?P<value>\"(?:\\.|[^\"])*\"|\d+)"
 )
@@ -118,7 +119,7 @@ class SeonHost:
         atexit.register(self.close)
 
     def _environment(self) -> dict[str, str]:
-        return {**os.environ, "DATAHIKE_KEEP_HISTORY": "false"}
+        return dict(os.environ)
 
     def _operator(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
@@ -154,7 +155,7 @@ class SeonHost:
         summary = {
             "seon_episode_semantics": EPISODE_SEMANTICS,
             "operator_root": str(self.root),
-            "history_enabled": False,
+            "history_enabled": HISTORY_ENABLED,
             "completed_samples": self._completed_samples,
             "errored_samples": self._errored_samples,
             "baseline": asdict(self._baseline),

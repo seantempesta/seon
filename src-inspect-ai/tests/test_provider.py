@@ -8,7 +8,12 @@ from inspect_ai.model import ChatMessageSystem, ChatMessageUser, GenerateConfig
 from inspect_ai.scorer import CORRECT, INCORRECT, Target
 
 from seon_inspect import host as host_module
-from seon_inspect.host import EPISODE_SEMANTICS, SeonHost, StoreSnapshot
+from seon_inspect.host import (
+    EPISODE_SEMANTICS,
+    HISTORY_ENABLED,
+    SeonHost,
+    StoreSnapshot,
+)
 from seon_inspect.provider import SeonModelAPI, objective_message
 from seon_inspect.scorers import seon_terminal_honesty
 from seon_inspect.tasks.gpqa import gpqa_diamond
@@ -77,6 +82,7 @@ def test_provider_maps_completed_episode_and_metadata(monkeypatch):
     )
     assert output.completion == "ANSWER: B"
     assert output.metadata["seon_episode_semantics"] == EPISODE_SEMANTICS
+    assert output.metadata["seon_history_enabled"] == HISTORY_ENABLED
     assert output.metadata["seon_episode"]["seon.eval.drive/completed-result"] == "ANSWER: B"
 
 
