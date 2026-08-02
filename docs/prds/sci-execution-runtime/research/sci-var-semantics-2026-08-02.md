@@ -132,10 +132,155 @@ with that value (`sci/impl/namespaces.cljc:610-634`). The probe returned:
 It does not create a Clojure Var and does not establish any link to a compiled
 same-named Var.
 
-## Question 2 — pending integrated findings
+### Explicit SCI-context access is possible but is not same-name resolution
 
-The source and cross-context/fork probes are complete; synthesis is pending in
-the next incremental commit.
+A specially written compiled function can call `sci.ctx-store/get-ctx` while
+SCI is evaluating it, then explicitly resolve or intern an SCI Var in that
+context. `eval-form` establishes the current SCI context around evaluation
+(`reference-code/sci/src/sci/impl/interpreter.cljc:80-83`). A probe using such
+a host function returned the per-context value while called through SCI and
+failed with `No context found` outside SCI. This is an explicit dependency on
+SCI internals, not transparent resolution of the compiled function's
+same-named Var. It would also make `seon.db` calls outside SCI require a second
+custody path, so it is not the smallest design.
+
+## Question 2 — symbols bind to Var objects during analysis
+
+**Verdict:** ordinary namespace symbols are resolved during analysis to a
+specific object. They are not looked up again by name in the context current at
+each invocation.
+
+`lookup*` reads the analyzing context's env and namespace map
+(`reference-code/sci/src/sci/impl/resolve.cljc:40-53,71-72,137-153`), and
+`resolve-symbol` either returns that object or raises an analysis-phase error
+(`sci/impl/resolve.cljc:323-334`). In value position the analyzer embeds a node
+that closes over the resolved SCI Var and dereferences it when evaluated
+(`sci/impl/analyzer.cljc:2296-2321`). Call position also resolves during
+analysis and embeds the resulting callee in the call node
+(`sci/impl/analyzer.cljc:1909-1926,2085-2127`). Function construction retains
+the analyzed body and creating context (`sci/impl/analyzer.cljc:356-386`;
+`sci/impl/fns.cljc:39-53,63-78`).
+
+Two explicit exceptions delimit that statement:
+
+- `(resolve 'x)` deliberately performs a runtime lookup through the context
+  SCI has made current. A function from A with a static `x` returned A's value
+  when invoked by B, while an A-created function using `@(resolve 'x)` returned
+  B's value.
+- A `^:const` SCI Var is even earlier-bound: the analyzer embeds its current
+  value rather than a Var dereference (`sci/impl/analyzer.cljc:2306-2309`). A
+  probe defining const `x=1`, defining `f`, then redefining `x=2` returned
+  `{:x 2 :old-f 1}`.
+
+**Confidence: high (0.99)** for ordinary-symbol timing and the two stated
+exceptions.
+
+### A closure from context A invoked by context B
+
+The probe created independent contexts A and B, defined `x` and `f` in A,
+installed the root function value of A's `f` under the name `from-a` in B, and
+called `(from-a)` through B:
+
+```clojure
+{:cross-context
+ {:before :a1
+  :after-b-redef :a1
+  :after-a-redef :a2}
+ :redefinition
+ {:same-var-object? true
+  :a-root :a2}}
+```
+
+B's own `x` and its redefinition were irrelevant. Redefining A's `x` changed
+what the old closure returned because `init-var!` creates a Var only when the
+name is absent (`sci/impl/analyzer.cljc:775-806`) and `eval-def` reuses the
+existing Var and calls `bindRoot` (`sci/impl/evaluator.cljc:25-47`). Thus normal
+same-context `def` and `defn` redefinition preserves Var identity, and already
+analyzed closures observe the new root.
+
+Replacing an env entry by unmap plus reintern is different: old closures keep
+the old object even when the namespace name later maps to a new Var.
+
+### Session-image restore creates a fresh object graph
+
+`install-session-image!` has three ordered passes:
+
+1. create namespaces and `sci/intern` every name unbound;
+2. bind faithful inline or blob-backed values; and
+3. evaluate proven source rows in the cold context.
+
+The implementation is `src/seon/sci/eval.clj:1148-1201`; unrestorable names
+remain pre-interned but unbound at lines 1202-1209. Re-interning binds the
+existing Var root rather than replacing the Var
+(`sci/impl/namespaces.cljc:610-634`).
+
+Consequently, restore does not preserve the hot process's Var identity or an
+old closure. It creates fresh cold Vars, then source evaluation is reanalyzed
+against those fresh objects. Future ordinary redefinitions in the restored
+context mutate those same fresh objects. A phase-equivalent raw SCI probe
+returned:
+
+```clojure
+{:old-and-restored-var-same? false
+ :before :restored-x
+ :after-redef :restored-x2}
+```
+
+The repository's existing cold-restore proof exercises the complete database
+path, including a closure over a later-redefined `limit` and a function nested
+in a map (`test/seon/sci/session_image_test.clj:239-317`). This research did
+not invoke the database-backed restore because the task prohibited cluster
+writes and test execution; the new runnable probe directly verifies the SCI
+object semantics, while the cited recurring test is existing evidence.
+
+**Confidence: high (0.97).** The SCI semantics and Seon pass ordering are
+verified; a new end-to-end database-backed invocation was intentionally not
+run.
+
+### `sci/fork` is structural isolation, not Var-root isolation
+
+`sci/fork` is exactly:
+
+```clojure
+(update ctx :env (fn [env] (atom @env)))
+```
+
+(`sci/core.cljc:326-331`). The env atoms differ, but the persistent map's
+existing Var values are the same objects. The probe returned:
+
+```clojure
+{:env-atoms-same? false
+ :existing-var-same? true
+ :base-sees-root :fork-root
+ :fork-only-in-fork 9
+ :fork-only-in-base nil}
+```
+
+Defining a new name in the fork changes only its env map. Redefining an existing
+name calls `bindRoot` on the shared Var and is immediately visible in both
+contexts. Any code relying on `fork` as a transactional or general isolation
+boundary is therefore incorrect.
+
+Seon forks only the namespace-unmap evaluation path
+(`src/seon/sci/eval.clj:1451-1454`), captures the fork's namespace state, and
+installs that state into the live context only after the terminal transaction
+commits (`src/seon/sci/eval.clj:891-900`). A simple `ns-unmap` is a namespace-map
+`dissoc`, so that structural removal stays isolated until install. However:
+
+- any root mutation performed while evaluating the unmap form or its arguments
+  leaks immediately through a preexisting shared Var and cannot be rolled back
+  by discarding the fork; and
+- a previously analyzed closure retains its old Var object after the name is
+  unmapped and re-interned. Installing the fork's namespace state changes
+  future name resolution, not pointers embedded in old bodies.
+
+Whether Seon's declaration dependency validation permits that second dangling
+reference to become durable is **unverified** here. The fork's root-sharing
+property and the first leak are directly verified; they are sufficient to rule
+out treating `fork` as full separation.
+
+**Confidence: high (0.99)** for fork sharing and structural behavior; the
+application-level reachability of a durable dangling reference is unverified.
 
 ## Question 3 — pending integrated findings
 
