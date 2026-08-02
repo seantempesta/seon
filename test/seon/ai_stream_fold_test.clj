@@ -31,6 +31,7 @@
             [datahike.api :as d]
             [org.httpkit.server :as http]
             [seon.ai :as ai]
+            [seon.blob :as blob]
             [seon.cluster.loop]
             [seon.render.hiccup :as hiccup]
             [seon.render.root :as root]
@@ -44,6 +45,11 @@
 (defn- content-chunk
   [text]
   (str "data: {\"choices\":[{\"delta\":{\"content\":" (pr-str text) "}}]}"))
+
+(defn- reasoning-chunk
+  [text]
+  (str "data: {\"choices\":[{\"delta\":{\"reasoning_content\":"
+       (pr-str text) "}}]}"))
 
 (def ^:private caps
   "The one cap set every surfaces request carries (context-blocks seal)."
@@ -82,6 +88,14 @@
     (is (= 7 (:seon.ai/tokens snapshot))
         "the provider's own completion_tokens, once it has told us")
     (is (= 3 (get (:seon.ai/usage snapshot) "prompt_tokens")))))
+
+(deftest the-fold-accumulates-reasoning-separately-from-visible-text
+  (let [snapshot (ai/stream-fold [(reasoning-chunk "first\n")
+                                  (reasoning-chunk "second")
+                                  (content-chunk "reply")]
+                                 nil)]
+    (is (= "first\nsecond" (:seon.ai/reasoning-partial snapshot)))
+    (is (= "reply" (:seon.ai/text snapshot)))))
 
 (deftest usage-is-retained-independently-of-choices
   ;; Two provider shapes, one fold, and neither assumed.
@@ -131,6 +145,22 @@
     (is (= "Hello, world" (:seon.ai/text snapshot)))
     (testing "and it is not called for chunks that added no text"
       (is (= 3 (count @seen)) "the usage chunk and [DONE] are not partials"))))
+
+(deftest a-sink-publishes-when-either-reasoning-or-visible-text-changes
+  (let [seen (atom [])]
+    (ai/stream-fold [(reasoning-chunk "think")
+                     usage-chunk
+                     (content-chunk "act")]
+                    #(swap! seen conj %))
+    (is (= [{:seon.ai/text ""
+             :seon.ai/reasoning-partial "think"
+             :seon.ai/tokens 1}
+            {:seon.ai/text "act"
+             :seon.ai/reasoning-partial "think"
+             :seon.ai/tokens 8
+             :seon.ai/usage {"completion_tokens" 7
+                             "prompt_tokens" 3}}]
+           @seen))))
 
 (deftest a-throwing-sink-cannot-change-the-completion
   ;; THE invariant, from the direction that breaks it in practice.
@@ -256,6 +286,48 @@
               (is (= 502 (:seon.ai/http-status attempt)))
               (is (some? (:seon.ai.attempt/error attempt))
                   "the provider error and attempt committed together"))))))))
+
+(deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
+  (support/with-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.config.eval.result/blob-threshold 65536}
+                   {:seon.cluster.agent/id "reasoning-agent"}
+                   {:seon.cluster.run/id "reasoning-run"}])
+      (let [inline-reasoning "private reasoning"
+            large (apply str (repeat 65537 "x"))
+            cluster {:seon.store/branch-connection connection
+                     :seon.cluster.run/process "process/reasoning-test"
+                     :seon.config.error/recurrence-limit 3
+                     :seon.sci.admit/caps caps}
+            base-request {:seon.ai/target
+                          {:seon.ai/endpoint "http://provider.invalid"
+                           :seon.ai/model "fixture"}
+                          :seon.ai/settings {}
+                          :seon.cluster.run/id "reasoning-run"
+                          :seon.cluster.agent/id "reasoning-agent"}]
+        (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
+          ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+           cluster
+           (assoc base-request
+                  :seon.ai.attempt/ordinal ordinal
+                  :seon.ai/reasoning-content reasoning)
+           (Date. 1785319000000)))
+        (let [inline (d/pull @connection '[*]
+                             [:seon.ai.attempt/id
+                              "reasoning-run-attempt-0"])
+              oversized (d/pull @connection '[*]
+                                [:seon.ai.attempt/id
+                                 "reasoning-run-attempt-1"])]
+          (is (= inline-reasoning (:seon.ai.attempt/reasoning inline)))
+          (is (not (contains? inline :seon.ai.attempt/reasoning-blob)))
+          (is (not (contains? oversized :seon.ai.attempt/reasoning)))
+          (is (= (long (count large))
+                 (:seon.ai.attempt/reasoning-size oversized)))
+          (is (= (blob/put! connection large)
+                 (:seon.ai.attempt/reasoning-blob oversized))
+              "the row carries the content-addressed digest; file-backed
+               blob readback is covered by seon.blob-settlement-test"))))))
 
 (deftest a-broken-sink-cannot-fail-a-real-call
   (with-provider {}

@@ -385,7 +385,7 @@
    "total_tokens" 133
    "completion_tokens_details" {"reasoning_tokens" 40}})
 
-(deftest a-thinking-response-retains-visible-text-finish-and-complete-usage
+(deftest a-thinking-response-retains-reasoning-visible-text-and-terminal-evidence
   (let [completion
         (ai/completion-text
          {"choices" [{"message" {"role" "assistant"
@@ -394,12 +394,11 @@
                       "finish_reason" "stop"}]
           "usage" thinking-usage})]
     (is (= "OK" (:seon.ai/text completion)))
+    (is (= "private reasoning" (:seon.ai/reasoning-content completion)))
     (is (= "stop" (:seon.ai/finish-reason completion)))
     (is (= 42 (:seon.ai/tokens completion)))
     (is (= thinking-usage (:seon.ai/usage completion)))
-    (is (schema/valid-candidate-value? :seon.ai/completion completion))
-    (is (not (contains? completion :seon.ai/reasoning-content))
-        "reasoning is not reply text and no unsupported continuation is implied")))
+    (is (schema/valid-candidate-value? :seon.ai/completion completion))))
 
 (deftest a-reasoning-starved-response-is-a-named-evidenced-error
   (let [usage {"prompt_tokens" 104
@@ -419,6 +418,9 @@
     (is (= 8 (get-in failure
                       [:seon.error/data :seon.ai/usage
                        "completion_tokens_details" "reasoning_tokens"])))
+    (is (= "all reasoning"
+           (get-in failure
+                   [:seon.error/data :seon.ai/reasoning-content])))
     (is (schema/valid-candidate-value? :seon.error/value failure))))
 
 (deftest streaming-reasoning-never-becomes-text-and-retains-terminal-evidence
@@ -433,10 +435,17 @@
         seen (atom [])
         body (java.io.ByteArrayInputStream.
               (.getBytes (str/join "\n" lines) "UTF-8"))
-        completion (#'seon.ai/streamed-completion
-                    body #(swap! seen conj (:seon.ai/text %)))]
-    (is (= ["OK"] @seen))
+        completion (#'seon.ai/streamed-completion body #(swap! seen conj %))]
+    (is (= [{:seon.ai/text ""
+             :seon.ai/reasoning-partial "private"
+             :seon.ai/tokens 1}
+            {:seon.ai/text "OK"
+             :seon.ai/reasoning-partial "private"
+             :seon.ai/tokens 2}]
+           @seen)
+        "reasoning and visible text publish separately without mixing")
     (is (= "OK" (:seon.ai/text completion)))
+    (is (= "private" (:seon.ai/reasoning-content completion)))
     (is (= "stop" (:seon.ai/finish-reason completion)))
     (is (= thinking-usage (:seon.ai/usage completion)))))
 
@@ -456,7 +465,9 @@
     (is (= :seon.ai/token-starvation (:seon.error/kind failure)))
     (is (= "length" (get-in failure
                              [:seon.error/data :seon.ai/finish-reason])))
-    (is (= usage (get-in failure [:seon.error/data :seon.ai/usage])))))
+    (is (= usage (get-in failure [:seon.error/data :seon.ai/usage])))
+    (is (= "x" (get-in failure
+                        [:seon.error/data :seon.ai/reasoning-content])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; complete — one attempt, four failure shapes, never a throw

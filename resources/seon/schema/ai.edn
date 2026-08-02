@@ -32,6 +32,11 @@
  ; error value, never a bug report.
  :seon.ai/timeout-ms [:int {:min 1}]
  :seon.ai/text [:string {:min 1}]
+ ; Provider reasoning is a separate projection from visible reply text.
+ ; The settled value is persisted on the attempt; the partial exists only
+ ; while the same lossy stream snapshot is in flight.
+ :seon.ai/reasoning-content [:string {:min 1}]
+ :seon.ai/reasoning-partial :string
  ; STREAMING is a transport choice and nothing more
  ; (docs/seon/reference/llm-adapters.md:545-563: wire transport and reply
  ; evaluation are independent). Its one invariant, quoted from that
@@ -85,6 +90,7 @@
  :seon.ai/partial
  [:map {:closed true}
   [:seon.ai/text :string]
+  [:seon.ai/reasoning-partial {:optional true} :seon.ai/reasoning-partial]
   [:seon.ai/tokens :seon.ai/tokens]
   [:seon.ai/usage {:optional true} :seon.ai/usage]
   [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]]
@@ -93,7 +99,7 @@
  [:or
   [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
   [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
- :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
+ :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
 
  ; ---------------------------------------------------------------------
  ; THE DESCRIPTOR ROW. A target is one callable model: the four wire
@@ -161,6 +167,11 @@
  ; EDN because its string-keyed, provider-owned shape is deliberately
  ; open; cached-token normalization remains a read-time derivation.
  :seon.ai.attempt/usage-edn :string
+ ; The SAME inline/blob split as eval results, using the same configured
+ ; threshold. Digest shape is direct so schema-derived history GC reaches it.
+ :seon.ai.attempt/reasoning :string
+ :seon.ai.attempt/reasoning-blob :seon.blob/digest
+ :seon.ai.attempt/reasoning-size [:int {:min 1}]
  ; The complete resolved config map used for this attempt. It is an
  ; observation of the call, not a provider usage field or derived warning.
  :seon.ai.attempt/settings-edn :string
@@ -185,7 +196,7 @@
  ; pure functions of the durable evidence (`seon.ai/disposition`,
  ; `status-class`, the error fact's data-edn), derived at read rather
  ; than frozen beside the facts they restate.
- :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+ :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning] [:seon.ai.attempt/reasoning-blob {:optional true} :seon.ai.attempt/reasoning-blob] [:seon.ai.attempt/reasoning-size {:optional true} :seon.ai.attempt/reasoning-size] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
 
  ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:

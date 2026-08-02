@@ -2086,6 +2086,7 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"one\")"
+                         :seon.ai/reasoning-content "private reasoning"
                          :seon.ai/usage usage
                          :seon.ai/finish-reason "stop"}])]
           (binding [*evaluation* {:seon.cluster.eval/result-edn
@@ -2097,6 +2098,9 @@
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn row)))
               "the provider-owned map survives the database round trip")
+          (is (= "private reasoning"
+                 (:seon.ai.attempt/reasoning row))
+              "settled reasoning reaches the same durable attempt row")
           (is (= "stop" (:seon.ai.attempt/finish-reason row))
               "finish reason is its own fact, never inserted into usage"))))))
 
@@ -2114,6 +2118,7 @@
                      :seon.error/data
                      {:seon.ai/finish-reason "length"
                       :seon.ai/usage usage
+                      :seon.ai/reasoning-content "all reasoning"
                       :seon.ai/error-class :response
                       :seon.ai/request-transmitted? true
                       :seon.ai/response-started? true
@@ -2127,6 +2132,8 @@
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn row))))
           (is (= "length" (:seon.ai.attempt/finish-reason row)))
+          (is (= "all reasoning" (:seon.ai.attempt/reasoning row))
+              "reasoning-only starvation still persists the settled trace")
           (is (= :seon.ai/token-starvation (:seon.error/kind error-fact))
               "the receipt points at the named starvation error fact"))))))
 

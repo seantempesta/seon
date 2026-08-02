@@ -779,11 +779,18 @@
          ordinal :seon.ai.attempt/ordinal
          usage :seon.ai/usage
          settings :seon.ai/settings
+         reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
         connection (:seon.store/branch-connection cluster)
         db @connection
+        reasoning-size (when (seq reasoning-content)
+                         (long (count reasoning-content)))
+        threshold (result-blob-threshold db)
+        reasoning-blob (when (and reasoning-size threshold
+                                  (> reasoning-size threshold))
+                         (blob/put! connection reasoning-content))
         commit (when failure
                  (error-tx cluster db failure now
                            {:seon.cluster.agent/id agent-id
@@ -807,6 +814,11 @@
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
               usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
+              (and reasoning-size (nil? reasoning-blob))
+              (assoc :seon.ai.attempt/reasoning reasoning-content)
+              reasoning-blob
+              (assoc :seon.ai.attempt/reasoning-blob reasoning-blob
+                     :seon.ai.attempt/reasoning-size reasoning-size)
               finish-reason
               (assoc :seon.ai.attempt/finish-reason finish-reason)
               ;; ROLE BY CONNECTION: only the backup points back, so a
@@ -1113,6 +1125,10 @@
                   usage (or (:seon.ai/usage completion)
                             (get-in completion
                                     [:seon.error/data :seon.ai/usage]))
+                  reasoning-content
+                  (or (:seon.ai/reasoning-content completion)
+                      (get-in completion
+                              [:seon.error/data :seon.ai/reasoning-content]))
                   finish-reason
                   (or (:seon.ai/finish-reason completion)
                       (get-in completion
@@ -1132,6 +1148,9 @@
                                                  :seon.cluster.agent/id agent-id
                                                  :seon.ai.attempt/ordinal ordinal}
                                           usage (assoc :seon.ai/usage usage)
+                                          reasoning-content
+                                          (assoc :seon.ai/reasoning-content
+                                                 reasoning-content)
                                           finish-reason
                                           (assoc :seon.ai/finish-reason
                                                  finish-reason)

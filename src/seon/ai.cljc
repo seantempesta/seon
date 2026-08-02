@@ -428,12 +428,20 @@
       snapshot
       (let [chunk (try (json/read-str payload) (catch Throwable _ nil))
             choice (some-> chunk (get "choices") first)
-            delta (some-> choice (get "delta") (get "content"))
+            delta-document (some-> choice (get "delta"))
+            delta (some-> delta-document (get "content"))
+            reasoning-delta (some-> delta-document (get "reasoning_content"))
             finish-reason (some-> choice (get "finish_reason"))
             usage (get chunk "usage")
             text (cond-> (:seon.ai/text snapshot)
-                   (string? delta) (str delta))]
+                   (string? delta) (str delta))
+            reasoning (when (or (contains? snapshot :seon.ai/reasoning-partial)
+                                (string? reasoning-delta))
+                        (str (:seon.ai/reasoning-partial snapshot)
+                             reasoning-delta))]
         (cond-> (assoc snapshot :seon.ai/text text)
+          (some? reasoning)
+          (assoc :seon.ai/reasoning-partial reasoning)
           ;; newest usage wins, and only when the provider sent one
           (map? usage) (assoc :seon.ai/usage usage)
           (string? finish-reason)
@@ -466,16 +474,21 @@
   [lines sink]
   (reduce (fn [snapshot line]
             (let [next-snapshot (stream-event snapshot line)]
-              (when (and sink (not= (:seon.ai/text snapshot)
-                                    (:seon.ai/text next-snapshot)))
+              (when (and sink
+                         (or (not= (:seon.ai/text snapshot)
+                                   (:seon.ai/text next-snapshot))
+                             (not= (:seon.ai/reasoning-partial snapshot)
+                                   (:seon.ai/reasoning-partial next-snapshot))))
                 (try (sink next-snapshot) (catch Throwable _ nil)))
               next-snapshot))
           {:seon.ai/text "" :seon.ai/tokens 0}
           lines))
 
 (defn- parsed-completion
-  [content finish-reason usage tokens body-shape]
+  [content reasoning-content finish-reason usage tokens body-shape]
   (let [evidence (cond-> {::body-shape body-shape}
+                   (and (string? reasoning-content) (seq reasoning-content))
+                   (assoc ::reasoning-content reasoning-content)
                    (string? finish-reason)
                    (assoc ::finish-reason finish-reason)
                    (map? usage) (assoc ::usage usage))]
@@ -488,6 +501,8 @@
 
       (and (string? content) (seq content))
       (cond-> {:seon.ai/text content}
+        (and (string? reasoning-content) (seq reasoning-content))
+        (assoc :seon.ai/reasoning-content reasoning-content)
         (map? usage) (assoc :seon.ai/usage usage)
         (some? tokens) (assoc :seon.ai/tokens tokens)
         (string? finish-reason)
@@ -508,11 +523,14 @@
   {:malli/schema [:=> [:cat :any] :seon.ai/completion]}
   [body]
   (let [choice (when (map? body) (some-> (get body "choices") first))
-        content (some-> choice (get "message") (get "content"))
+        message (some-> choice (get "message"))
+        content (some-> message (get "content"))
+        reasoning-content (some-> message (get "reasoning_content"))
         finish-reason (some-> choice (get "finish_reason"))
         usage (when (map? body) (get body "usage"))]
     (parsed-completion
      content
+     reasoning-content
      finish-reason
      usage
      (some-> usage (get "completion_tokens"))
@@ -672,6 +690,7 @@
     (let [snapshot (stream-fold (line-seq reader) sink)]
       (parsed-completion
        (:seon.ai/text snapshot)
+       (:seon.ai/reasoning-partial snapshot)
        (:seon.ai/finish-reason snapshot)
        (:seon.ai/usage snapshot)
        (:seon.ai/tokens snapshot)
