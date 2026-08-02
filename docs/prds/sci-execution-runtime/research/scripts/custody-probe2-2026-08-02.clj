@@ -1,0 +1,22 @@
+(require '[sci.core :as sci] '[seon.cluster] '[seon.db :as db] '[sci.interrupt])
+(defn mk []
+  (let [ctx (sci/init {:namespaces {'clojure.core sci.interrupt/clojure-core}})]
+    (sci/add-namespace! ctx 'seon.cluster (ns-interns 'seon.cluster))
+    (sci/add-namespace! ctx 'seon.db (ns-interns 'seon.db))
+    ctx))
+(defn p [label ctx code]
+  (println label (try (pr-str (sci/eval-string* ctx code))
+                      (catch Throwable t (str "THREW: " (ex-message t))))))
+(def c (mk))
+(p "VAR-QUOTE-HOST:" c "#'seon.db/q")
+(p "BINDROOT-INTEROP:" c "(.bindRoot #'seon.db/q (fn [& _] :pwned))")
+(println "  host seon.db/q after:" (try (db/q '[:find ?e :where [?e :x]] ) (catch Throwable t (ex-message t))))
+(def c2 (mk))
+(p "SCI-SHADOW-DEF:" c2 "(do (in-ns 'seon.db) (def q (fn [& _] :shadowed)) (in-ns 'user) (seon.db/q :anything))")
+(p "ROOT-EXECUTORS:" c2 "(keys (seon.cluster/root-executors))")
+(p "EXECUTOR-SUBMIT:" c2 "(.get (.submit (:io (seon.cluster/root-executors)) (reify java.util.concurrent.Callable (call [_] 42))))")
+(p "INSTANCE-INTEROP-CLASS:" c2 "(.getName (class (:io (seon.cluster/root-executors))))")
+(p "THREAD-CTOR:" c2 "(Thread. (fn [] nil))")
+(p "REIFY:" c2 "(reify java.lang.Runnable (run [_] nil))")
+(p "PROXY:" c2 "(proxy [java.lang.Object] [])")
+(p "CLASSFORNAME-VIA-OBJ:" c2 "(.. (:io (seon.cluster/root-executors)) getClass getClassLoader (loadClass \"java.lang.Thread\"))")

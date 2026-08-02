@@ -1,0 +1,31 @@
+(require '[sci.core :as sci] '[sci.interrupt])
+(defn mk [] (sci/init {:namespaces {'clojure.core sci.interrupt/clojure-core}}))
+(def ctx3 (mk))
+(sci/eval-string* ctx3 "(def base 1) (defn f [] base) (def g f)")
+(sci/eval-string* ctx3 "(def base 2)")
+(println "redef-through-closure [f g]:" (sci/eval-string* ctx3 "[(f) (g)]"))
+(def f4 (sci/eval-string* ctx3 "(fn [] base)"))
+(sci/eval-string* ctx3 "(def base 3)")
+(println "captured-fn-after-redef:" (f4))
+(def ctx4 (mk))
+(sci/eval-string* ctx4 "(def base :CTX4)")
+(println "ctx3-fn-called-from-host-while-ctx4-exists:" (try (pr-str (f4)) (catch Throwable t (ex-message t))))
+;; put ctx3's fn INTO ctx4 and call it there
+(sci/add-namespace! ctx4 'imported {'h (sci/new-var 'h f4 {:ns (sci/create-ns 'imported)})})
+(println "ctx3-fn-invoked-inside-ctx4:" (try (pr-str (sci/eval-string* ctx4 "(imported/h)")) (catch Throwable t (ex-message t))))
+;; fork behaviour
+(def ctx5 (mk))
+(sci/eval-string* ctx5 "(def shared 1)")
+(def forked (sci/fork ctx5))
+(sci/eval-string* forked "(def shared 99)")
+(println "fork: original sees forked redef?:" (sci/eval-string* ctx5 "shared"))
+(sci/eval-string* ctx5 "(def newvar 5)")
+(println "fork: forked sees post-fork original def?:" (try (pr-str (sci/eval-string* forked "newvar")) (catch Throwable t (ex-message t))))
+;; dynamic sci var per-ctx
+(def nsx (sci/create-ns 'my))
+(def dv (sci/new-dynamic-var '*c* :DEFAULT {:ns nsx}))
+(def ctx6 (sci/init {:namespaces {'clojure.core sci.interrupt/clojure-core 'my {'*c* dv}}}))
+(println "pure sci dynvar bind:" (sci/eval-string* ctx6 "(binding [my/*c* 7] my/*c*)"))
+(println "same var object shared into second ctx -> is binding thread-local?:"
+  (let [ctx7 (sci/init {:namespaces {'clojure.core sci.interrupt/clojure-core 'my {'*c* dv}}})]
+    (sci/eval-string* ctx6 "(binding [my/*c* :SIX] my/*c*)")))
