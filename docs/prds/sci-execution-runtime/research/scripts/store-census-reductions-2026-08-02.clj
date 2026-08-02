@@ -12,7 +12,7 @@
          '[datahike.datom :as datom]
          '[konserve.core :as k]
          '[org.replikativ.persistent-sorted-set.fressian :as pss-fress]
-         '[seon.blob :as blob]
+         '[seon.cluster.loop :as loop]
          '[seon.cluster.store :as seon-store])
 
 (import '[java.io File]
@@ -288,7 +288,13 @@
 
 (defn- threshold-schema
   []
-  [{:db/ident :store.reduction.result/id
+  [{:db/ident :seon.config.eval.result/blob-threshold
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.render.value/max-collection
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :store.reduction.result/id
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
@@ -303,12 +309,6 @@
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}])
 
-(defn- result-window
-  [result-size]
-  (pr-str {:seon.print/face :seon.print/truncated-string
-           :seon.print/value ""
-           :seon.print/length result-size}))
-
 (defn- measure-threshold-cell!
   [root threshold]
   (let [label (keyword (str "threshold-" threshold))
@@ -319,24 +319,35 @@
       (try
         (let [created (stage path :created)]
           (d/transact connection (threshold-schema))
-          (let [schema-installed (stage path :schema-installed)
+          (let [schema-installed (stage path :schema-installed)]
+            (d/transact
+             connection
+             [{:seon.config.eval.result/blob-threshold (long threshold)
+               :seon.render.value/max-collection 8}])
+            (let [config-installed (stage path :config-installed)
                 blob-count (atom 0)]
             (doseq [[index result-size]
                     (map-indexed vector threshold-result-sizes)]
               (let [result-edn (exact-result-edn result-size index)
-                    oversized? (> result-size threshold)
-                    digest (when oversized?
-                             (swap! blob-count inc)
-                             (blob/put! connection result-edn))
+                    settlement
+                    (#'loop/settlement-result
+                     {:seon.store/branch-connection connection
+                      :seon.sci.admit/caps
+                      {:seon.sci.admit/max-depth 64
+                       :seon.sci.admit/max-collection 8192
+                       :seon.sci.admit/max-string 262144
+                       :seon.sci.admit/max-nodes 65536}}
+                     {:seon.cluster.eval/result-edn result-edn})
+                    _ (when (:seon.cluster.eval/result-blob settlement)
+                        (swap! blob-count inc))
                     row
-                    (cond->
-                     {:store.reduction.result/id (str "result-" index)
-                      :seon.cluster.eval/result-edn
-                      (if oversized? (result-window result-size) result-edn)}
-                      oversized?
-                      (assoc :seon.cluster.eval/result-blob digest
-                             :seon.cluster.eval/result-size
-                             (long result-size)))]
+                    (assoc
+                     (select-keys
+                      settlement
+                      [:seon.cluster.eval/result-edn
+                       :seon.cluster.eval/result-blob
+                       :seon.cluster.eval/result-size])
+                     :store.reduction.result/id (str "result-" index))]
                 (d/transact connection [row])))
             (let [results-committed (stage path :results-committed)]
               {:store.reduction/label label
@@ -344,11 +355,11 @@
                :store.reduction/commits threshold-commit-count
                :store.reduction/blob-count @blob-count
                :store.reduction/stages
-               [created schema-installed results-committed]
+               [created schema-installed config-installed results-committed]
                :store.reduction/growth-bytes
-               (growth schema-installed results-committed)
+               (growth config-installed results-committed)
                :store.reduction/final-bytes
-               (:store.reduction/bytes results-committed)})))
+               (:store.reduction/bytes results-committed)}))))
         (finally
           (d/release connection))))))
 
