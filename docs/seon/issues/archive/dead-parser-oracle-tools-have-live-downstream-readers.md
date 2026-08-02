@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, evaluation, deletion, tooling]
 ---
@@ -61,3 +61,19 @@ their downstream package, not as a second Seon parser/runtime under root
 - Every surviving evaluation task has a recurring liveness test that executes
   its real selected implementation rather than accepting an existing path as
   proof of life.
+
+## Resolution
+
+Resolved by `0925286cd` (with `45ee34f33` preserving pre-existing untracked
+historical Diffusion run files). The root parser/oracle tools, ACME gym and
+scenarios, downstream Diffusion package, Inspect oracle scorers/tasks/tests,
+and the oracle-dependent file-edit row were deleted as one reader closure.
+The active segmenter page now documents only `seon.sci.reader` and
+`seon.cluster.reply` with the recurring `bin/test` proof surface.
+
+Post-cut active-source searches found no parser/oracle, self-host bundle,
+Diffusion package, gym, or file-edit reader in the owned closure. Focused
+verification passed 107 Python tests and 24 Clojure tests / 184 assertions.
+The full Inspect suite reached 502 passes with two unrelated concurrent
+scorecard-default expectation failures at `tests/test_scorecard.py:231,284`;
+this deletion did not edit that owner.
