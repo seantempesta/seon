@@ -11,23 +11,18 @@
 
     clojure -M:dev -m seon.bootstrap-drive
     clojure -M:dev -m seon.bootstrap-drive REQUEST_EDN"
-  (:require [clojure.core.async :as async]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
-            [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
-            [seon.cluster.work :as work]
             [seon.config :as config]
-            [seon.print :as print]
-            [seon.render.transcript :as transcript]
+            [seon.eval.drive :as eval.drive]
             [seon.sci.eval :as sci.eval])
-  (:import [java.util Date UUID]))
+  (:import [java.util UUID]))
 
 (def ^:private default-run-cap 6)
 
@@ -100,11 +95,6 @@
 (defn- agent-namespace [agent-id]
   (sci.eval/agent-namespace agent-id))
 
-(defn- creation-request [cluster-name agent-id]
-  {:seon.cluster.agent/id agent-id
-   :seon.cluster/name cluster-name
-   :seon.ns/name (agent-namespace agent-id)})
-
 (defn- objective-data [objective peer-id]
   (let [definition
         (or (get objectives objective)
@@ -114,79 +104,6 @@
                              (set (keys objectives))})))]
     (update definition :seon.bootstrap-drive/objective
             str/replace "%PEER%" (or peer-id ""))))
-
-(defn- bootstrap-complete? [db agent-id]
-  (let [run-id (bootstrap/run-id agent-id)]
-    (when-let [closed-at
-               (d/q '[:find ?closed .
-                      :in $ ?run-id
-                      :where
-                      [?run :seon.cluster.run/id ?run-id]
-                      [?run :seon.cluster.run/closed-at ?closed]]
-                    db run-id)]
-      (let [receipt-count
-            (or (d/q '[:find (count ?receipt) .
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?receipt :seon.cluster.eval/run ?run]]
-                     db run-id)
-                0)]
-        (when (= (count (bootstrap/sources (agent-namespace agent-id)))
-                 receipt-count)
-          {:seon.cluster.run/id run-id
-           :seon.cluster.run/closed-at closed-at
-           :seon.bootstrap-drive/receipt-count receipt-count})))))
-
-(defn- await-fact!
-  "Wait for a database fact. The timeout guards only the remote-provider run."
-  [connection timeout-ms label probe]
-  (let [events (async/promise-chan)
-        listener-key (keyword "seon.bootstrap-drive" (uuid-text))]
-    (d/listen connection listener-key
-              (fn [report]
-                (when-let [value (probe (:db-after report))]
-                  (async/offer! events value))))
-    (try
-      (when-let [value (probe @connection)]
-        (async/offer! events value))
-      (let [[value selected]
-            (async/alts!! [events (async/timeout timeout-ms)] :priority true)]
-        (when-not (= selected events)
-          (throw (ex-info (str "Timed out awaiting " label ".")
-                          {:seon.bootstrap-drive/label label
-                           :seon.bootstrap-drive/timeout-ms timeout-ms})))
-        value)
-      (finally
-        (d/unlisten connection listener-key)))))
-
-(defn- inbound!
-  [connection cluster-name process agent-id content]
-  (let [caps (config/result-caps
-              (config/effective @connection cluster-name))
-        request {:seon.cluster.agent/id agent-id
-                 :seon.cluster.message/inbound-content content
-                 :seon.cluster.message/at (Date.)
-                 :seon.config.eval.result/max-string
-                 (:seon.config.eval.result/max-string caps)}
-        before (message/inbound-tx @connection request)]
-    (when-not (vector? before)
-      (throw (ex-info "The objective message was refused."
-                      {:seon.bootstrap-drive/refusal before})))
-    (d/transact connection
-                {:tx-data [[:db.fn/call #'message/inbound-tx request]]
-                 :tx-meta {:seon.db/process
-                           [:seon.db.process/id process]}})
-    (or (d/q '[:find ?id .
-               :in $ ?agent-id ?content
-               :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?message :seon.cluster.message/to ?agent]
-               [?message :seon.cluster.message/content ?content]
-               [?message :seon.cluster.message/id ?id]]
-             @connection agent-id content)
-        (throw (ex-info "The committed objective message has no identity."
-                        {:seon.cluster.agent/id agent-id})))))
 
 (defn- objective-run-ids [db message-id]
   (->> (d/q '[:find ?run-id ?opened-tx
@@ -198,86 +115,6 @@
             db message-id)
        (sort-by second)
        (mapv first)))
-
-(defn- read-result [serialized]
-  (when (string? serialized)
-    (try
-      (let [parsed (edn/read-string {:default (fn [_ value] value)}
-                                    serialized)]
-        (if (:seon.print/face parsed)
-          (edn/read-string {:default (fn [_ value] value)}
-                           (print/emit-text parsed {}))
-          parsed))
-      (catch Throwable _ ::unreadable))))
-
-(defn- run-receipts [db run-ids]
-  (if (seq run-ids)
-    (->> (d/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
-                :in $ [?run-id ...]
-                :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?form :seon.cluster.run.form/run ?run]
-                [?form :seon.cluster.run.form/ordinal ?ordinal]
-                [?form :seon.cluster.run.form/source ?source]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                [?receipt :seon.cluster.eval/at ?at]
-                [(get-else $ ?receipt :seon.cluster.eval/result-edn "") ?result]
-                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
-                [(get-else $ ?receipt :seon.error/kind :seon.bootstrap-drive/absent)
-                 ?error-kind]]
-              db run-ids)
-         (sort-by (juxt #(inst-ms (nth % 6)) second))
-         (mapv (fn [[run-id ordinal source result error error-kind at]]
-                 {:seon.cluster.run/id run-id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.run.form/source source
-                  :seon.cluster.eval/result-edn result
-                  :seon.cluster.eval/value (read-result result)
-                  :seon.cluster.eval/error error
-                  :seon.error/kind error-kind
-                  :seon.cluster.eval/at at})))
-    []))
-
-(defn- completion-values [receipts]
-  (into []
-        (comp (map :seon.cluster.eval/value)
-              (filter #(= :completed (:my.run/disposition %))))
-        receipts))
-
-(defn- terminal-state [db agent-id process message-id run-cap]
-  (let [run-ids (objective-run-ids db message-id)
-        receipts (run-receipts db run-ids)
-        completions (completion-values receipts)
-        closed-count
-        (if (seq run-ids)
-          (count
-           (d/q '[:find [?run ...]
-                  :in $ [?run-id ...]
-                  :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?run :seon.cluster.run/closed-at _]]
-                db run-ids))
-          0)
-        idle? (and (seq run-ids)
-                   (nil? (work/next-agent-work
-                          db
-                          {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/process process})))]
-    (cond
-      (seq completions)
-      {:seon.bootstrap-drive/outcome :completed
-       :seon.bootstrap-drive/run-ids run-ids}
-
-      (and idle? (>= closed-count run-cap))
-      {:seon.bootstrap-drive/outcome :capped
-       :seon.bootstrap-drive/run-ids run-ids}
-
-      (and idle? (= closed-count (count run-ids)))
-      {:seon.bootstrap-drive/outcome :stopped
-       :seon.bootstrap-drive/run-ids run-ids}
-
-      :else nil)))
 
 (defn- candidate-functions [db run-ids namespace-name]
   (if (seq run-ids)
@@ -319,12 +156,9 @@
     {:seon.bootstrap-drive/value (:seon.sci.admit/value evaluation)
      :seon.cluster.eval/error (:seon.cluster.eval/error evaluation)}))
 
-(defn- completed-result [receipts]
-  (:my.run/result (last (completion-values receipts))))
-
-(defn- grade-o1 [connection cluster-name agent-id run-ids]
+(defn- grade-o1
+  [connection cluster-name agent-id run-ids completed-result]
   (let [db @connection
-        receipts (run-receipts db run-ids)
         candidates (candidate-functions db run-ids (agent-namespace agent-id))
         executions
         (mapv (fn [{function-symbol :seon.fn/sym :as candidate}]
@@ -341,18 +175,17 @@
               executions)]
     {:p1a (boolean (seq candidates))
      :p1b (boolean working)
-     :p1c (= (pr-str o1-answer) (completed-result receipts))
+     :p1c (= (pr-str o1-answer) completed-result)
      :seon.bootstrap-drive/candidates executions
-     :seon.bootstrap-drive/completed-result (completed-result receipts)}))
+     :seon.bootstrap-drive/completed-result completed-result}))
 
-(defn- grade-o2 [db run-ids]
-  (let [receipts (run-receipts db run-ids)]
-    {:p2a
-     (boolean
-      (some #(re-find #":seon\.fn(?:\.arity/input-refs|/spec)"
-                      (:seon.cluster.run.form/source %))
-            receipts))
-     :p2b (= "discovered-by-contract" (completed-result receipts))}))
+(defn- grade-o2 [receipts completed-result]
+  {:p2a
+   (boolean
+    (some #(re-find #":seon\.fn(?:\.arity/input-refs|/spec)"
+                    (:seon.cluster.run.form/source %))
+          receipts))
+   :p2b (= "discovered-by-contract" completed-result)})
 
 (defn- public-my-message-count [db]
   (or (d/q '[:find (count ?function) .
@@ -367,9 +200,9 @@
   (when (and (string? text) (re-matches #"[0-9]+" text))
     (parse-long text)))
 
-(defn- grade-o3 [db run-ids]
+(defn- grade-o3 [db completed-result]
   (let [expected (public-my-message-count db)
-        actual (decimal (completed-result (run-receipts db run-ids)))]
+        actual (decimal completed-result)]
     {:p3 (= expected actual)
      :seon.bootstrap-drive/expected expected
      :seon.bootstrap-drive/actual actual}))
@@ -385,9 +218,9 @@
           [?message :seon.cluster.message/to ?to]]
         db from-id to-id)))
 
-(defn- grade-o4 [db agent-id peer-id run-ids]
-  (let [receipts (run-receipts db run-ids)
-        peer-message-ids
+(defn- grade-o4
+  [db agent-id peer-id receipts completed-result]
+  (let [peer-message-ids
         (d/q '[:find [?message-id ...]
                :in $ ?from-id ?to-id
                :where
@@ -417,21 +250,20 @@
                (messages-between? db peer-id agent-id))
      :p4b (boolean (seq peer-functions))
      :p4c (boolean called)
-     :p4d (= "42" (completed-result receipts))
+     :p4d (= "42" completed-result)
      :seon.bootstrap-drive/peer-functions (vec (sort peer-functions))
      :seon.bootstrap-drive/called called}))
 
 (defn- defined-name [source]
   (some->> source (re-find #"\(defn\s+([^\s\[\](){}]+)") second))
 
-(defn- grade-o5 [db agent-id run-ids]
-  (let [receipts (run-receipts db run-ids)
-        refused-names
+(defn- grade-o5 [db agent-id run-ids receipts]
+  (let [refused-names
         (into #{}
               (comp
                (filter
                 #(= :seon.schema/open-argument-map
-                    (get-in % [:seon.cluster.eval/value
+                    (get-in % [:seon.eval.drive/value
                                :seon.error/data
                                :seon.sci.eval/data
                                :seon.schema/error])))
@@ -448,30 +280,18 @@
      :seon.bootstrap-drive/repaired-names repaired}))
 
 (defn- grade!
-  [connection cluster-name objective agent-id peer-id message-id]
+  [connection cluster-name objective agent-id peer-id episode]
   (let [db @connection
-        run-ids (objective-run-ids db message-id)]
+        run-ids (:seon.eval.drive/run-ids episode)
+        receipts (:seon.eval.drive/receipts episode)
+        completed-result (:seon.eval.drive/completed-result episode)]
     (case objective
-      :o1 (grade-o1 connection cluster-name agent-id run-ids)
-      :o2 (grade-o2 db run-ids)
-      :o3 (grade-o3 db run-ids)
-      :o4 (grade-o4 db agent-id peer-id run-ids)
-      :o5 (grade-o5 db agent-id run-ids))))
-
-(defn- full-transcript [db agent-id cluster-name]
-  (transcript/render-ai
-   {:seon.db/db db
-    :seon.cluster.agent/id agent-id
-    :seon.sci.admit/caps
-    (config/result-caps (config/effective db cluster-name))
-    ::transcript/token-budget 1000000000}))
-
-(defn- grading-branch! [store ending-commit drive-id]
-  (let [branch (keyword (str "bootstrap-grade-" drive-id))]
-    (registry/branch! {:seon.store/store store
-                       :seon.cluster.registry/from ending-commit
-                       :seon.store/branch branch})
-    branch))
+      :o1 (grade-o1 connection cluster-name agent-id run-ids
+                    completed-result)
+      :o2 (grade-o2 receipts completed-result)
+      :o3 (grade-o3 db completed-result)
+      :o4 (grade-o4 db agent-id peer-id receipts completed-result)
+      :o5 (grade-o5 db agent-id run-ids receipts))))
 
 (defn- write-report! [report]
   (let [directory (io/file "tmp" "bootstrap-drives")
@@ -499,38 +319,30 @@
 
 (defn- one-drive!
   [instance objective attempt run-cap remote-timeout-ms]
-  (let [connection (:seon.boot/cluster-connection instance)
-        process (cluster/process-identity (:seon.boot/advertisement instance))
-        cluster-name (get-in instance [:seon.boot/config
+  (let [cluster-name (get-in instance [:seon.boot/config
                                        :seon.boot/cluster-name])
         drive-id (str (name objective) "-" attempt "-"
                       (subs (uuid-text) 0 8))
         agent-id (str "bootstrap-" drive-id)
         peer-id (when (= :o4 objective) (str agent-id "-peer"))
         definition (objective-data objective peer-id)
-        agent-ids (cond-> [agent-id] peer-id (conj peer-id))]
-    (doseq [id agent-ids]
-      (cluster/ensure-entity! connection process
-                              (creation-request cluster-name id)))
-    (doseq [id agent-ids]
-      (await-fact! connection 120000 (str "bootstrap " id)
-                   #(bootstrap-complete? % id)))
-    (let [message-id
-          (inbound! connection cluster-name process agent-id
-                    (:seon.bootstrap-drive/objective definition))
-          terminal
-          (await-fact!
-           connection remote-timeout-ms (str "objective " drive-id)
-           #(terminal-state % agent-id process message-id run-cap))
-          ending-db @connection
-          ending-commit (d/commit-id ending-db)
-          transcript-text (full-transcript ending-db agent-id cluster-name)
-          store (:seon.store/store instance)
-          grade-branch (grading-branch! store ending-commit drive-id)
-          grade-connection (store/open-branch! store grade-branch)]
-      (try
+        agent-ids (cond-> [agent-id] peer-id (conj peer-id))
+        episode
+        (eval.drive/run-episode!
+         instance
+         {:seon.eval.drive/id drive-id
+          :seon.eval.drive/objective
+          (:seon.bootstrap-drive/objective definition)
+          :seon.eval.drive/agent-ids agent-ids
+          :seon.eval.drive/run-cap run-cap
+          :seon.eval.drive/remote-timeout-ms remote-timeout-ms})
+        store (:seon.store/store instance)
+        grade-branch (:seon.eval.drive/grading-branch episode)
+        grade-connection (store/open-branch! store grade-branch)]
+    (try
         (let [grade (grade! grade-connection cluster-name objective agent-id
-                            peer-id message-id)
+                            peer-id episode)
+              episode-terminal (:seon.eval.drive/terminal episode)
               report
               {:seon.bootstrap-drive/id drive-id
                :seon.bootstrap-drive/objective objective
@@ -538,22 +350,27 @@
                :seon.bootstrap-drive/agent-id agent-id
                :seon.bootstrap-drive/peer-id peer-id
                :seon.bootstrap-drive/model
-               (:seon.config.ai/model
-                (config/effective ending-db cluster-name))
+               (:seon.eval.drive/model episode)
                :seon.bootstrap-drive/thinking
-               (:seon.config.ai/thinking
-                (config/effective ending-db cluster-name))
-               :seon.bootstrap-drive/message-id message-id
-               :seon.bootstrap-drive/ending-commit ending-commit
-               :seon.bootstrap-drive/terminal terminal
+               (:seon.eval.drive/thinking episode)
+               :seon.bootstrap-drive/message-id
+               (:seon.eval.drive/message-id episode)
+               :seon.bootstrap-drive/ending-commit
+               (:seon.eval.drive/ending-commit episode)
+               :seon.bootstrap-drive/terminal
+               {:seon.bootstrap-drive/outcome
+                (:seon.eval.drive/outcome episode-terminal)
+                :seon.bootstrap-drive/run-ids
+                (:seon.eval.drive/run-ids episode-terminal)}
                :seon.bootstrap-drive/grade grade
-               :seon.bootstrap-drive/transcript transcript-text}
+               :seon.bootstrap-drive/transcript
+               (:seon.eval.drive/transcript episode)}
               path (write-report! report)]
           (assoc report :seon.bootstrap-drive/report-path path))
-        (finally
-          (d/release grade-connection)
-          (registry/retire-branch!
-           {:seon.store/store store :seon.store/branch grade-branch}))))))
+      (finally
+        (d/release grade-connection)
+        (registry/retire-branch!
+         {:seon.store/store store :seon.store/branch grade-branch})))))
 
 (defn- run-drives!
   "Run `:runs` bounded attempts and return their report maps.
