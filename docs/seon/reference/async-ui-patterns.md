@@ -19,4 +19,4 @@ The surviving design constraints are implemented in fresh source: remote calls
 and SSE writes run on `:io`; settled presentation derives from database facts;
 in-flight partials use lossy channels; and a slow tab receives the newest
 complete page snapshot. Current evidence is in `src/seon/render/web.clj` and
-`src/seon/cluster/loop.cljc`.
+`src/seon/cluster/loop.clj`.

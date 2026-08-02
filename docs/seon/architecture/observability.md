@@ -199,7 +199,7 @@ uses an isolated cluster fork and the ordinary message/run path.
 - The context, AI, run, error, program, and test sections of
   `resources/seon/schema.edn` own the durable evidence shapes.
 - `src/seon/context.clj` commits captures from rendered context.
-- `src/seon/cluster/loop.cljc` opens attempts and receipts, persists blobs and
+- `src/seon/cluster/loop.clj` opens attempts and receipts, persists blobs and
   session definitions, and settles the fold.
 - `src/seon/cluster/run.clj` owns settle-once and recovery transitions.
 - `src/seon/render/transcript.clj` owns the message/receipt queries and REPL
