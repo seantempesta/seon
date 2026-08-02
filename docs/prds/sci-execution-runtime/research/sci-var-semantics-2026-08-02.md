@@ -16,15 +16,17 @@ SCI Vars, not alternate bindings of the compiled Var. `sci/binding` therefore
 changes what interpreted code sees through that SCI Var but does not change
 what a compiled callee sees.
 
-The nearest design that preserves an SCI-side agent-facing name is explicit
-custody transfer at the evaluator boundary: obtain the cluster connection from
-the evaluation request or cluster context, then either pass it to compiled code
-as an argument or establish a Clojure thread binding on the real compiled
-`seon.db/*conn*` for the complete call and result-realization interval. An
-SCI-side Var may separately provide the interpreted name, but it cannot be the
-mechanism by which the compiled function receives custody. The current
-`evaluate` implementation already uses the latter compiled-Var binding
-(`src/seon/sci/eval.clj:1421-1446`).
+The nearest design is explicit custody transfer at the evaluator boundary:
+store the cluster connection on the per-cluster context map outside SCI's env,
+then have `evaluate` establish a Clojure thread binding on the real compiled
+`seon.db/*conn*` for the complete call and result-realization interval. That is
+the ctx-derived design independently selected in
+`custody-isolation-design-2026-08-02.md`; it avoids the current request/ambient
+fallback becoming a second source of cluster identity. An SCI-side Var may
+separately provide an interpreted name, or a compiled accessor may expose the
+current connection, but neither is the mechanism by which compiled functions
+receive custody. The current `evaluate` implementation already proves the host
+binding half of this shape (`src/seon/sci/eval.clj:1421-1446`).
 
 **Confidence: high.** This verdict is supported by the maintained SCI source
 and a JVM probe against the repository dependency graph.
@@ -418,6 +420,14 @@ Make the one-line `ns-publics` substitution at the existing compiled namespace
 install seam and add a recurring acquisition assertion that private host Vars
 are absent while public host Var identity is retained. Do not add a name list
 or second install path.
+
+Treat that as the exact private-API hygiene slice, not the whole custody wave.
+The concurrent `custody-isolation-design-2026-08-02.md` separately owns the
+ctx-derived compiled binding, write-custody validation, and relocation or
+classification of still-public lifecycle/custody functions. Those companion
+changes are necessary to satisfy the filed issue's cross-cluster and runtime-
+root acceptance criteria; broadening this one install edit would obscure that
+dependency rather than close it.
 
 Record the ruling-#20 interpretation explicitly when implementing it: private
 rows remain in the database program graph for source and call analysis, and
