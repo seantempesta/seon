@@ -1861,6 +1861,23 @@ may reintroduce a shadow build into the dev feedback path.
   smart fast and cheap" (median turn 9.8 s vs 21.3 s thinking-high,
   $0.0003 vs $0.0007 off-peak); thinking is an opt-IN per-agent
   override (planners), never the shipped posture.
+  **Ruling 2026-08-02 #36 (owner, night): INSPECT AI IS THE AGENT-EVAL
+  SURFACE, GRADED BY OUR OWN TESTS** — sealed per
+  `plan/inspect-ai-adaptation-2026-08-02.md`. Goal grading IS
+  clojure.test + test.check properties run against the ending commit's
+  grading fork (implementing the 2026-07-29 test-based-goal ruling for
+  evals); objective scorers GATE, LLM judges (DeepSeek thinking-high
+  via Inspect's own provider path, raw `thinking` body, no Python
+  effort table) ADVISE on cheating and open-ended quality. Crossing:
+  one warm operator-root JVM per eval run, one cluster per sample over
+  the advertised io-prepl; the sandbox protocol and MCP-as-runner are
+  REJECTED. Owner answers: goal directories live in `evals/goals/`
+  (never discovered by bin/test); test.check is PROMOTED to default
+  deps (simple wiring; generative properties may become load-bearing
+  beyond tests); the terminal-honesty check GATES alongside goal tests
+  (a capped-but-lucky episode never scores as success). Slice 1
+  reproduces the six graded O1 drives through a real Inspect Task and
+  deletes the pod adapters (~11k lines of Python out, ~600-800 in).
   **Ruling 2026-08-01 #35 (owner, late night): MODEL REASONING IS
   DURABLE FOR HUMANS AND ABSENT FROM AGENT CONTEXT.** Retain provider
   `reasoning_content` on every completed attempt. Reuse ruling #25's
