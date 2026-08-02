@@ -410,18 +410,27 @@
                            (case var-symbol
                              source-observations observations
                              prepl-value! {"alive" true
-                                           "degraded" false}))}
+                                           "degraded" false}))
+                         (bridge-var 'clj-sessions)
+                         (atom {[root "alive" "investigation"] {}})}
           #((bridge-var 'execute-runtime-status) {:root root}))
-        text (get-in result [:content 0 :text])
-        lines (str/split-lines text)]
-    (is (str/includes? (second lines) "alive state=alive") text)
-    (is (str/includes? text "degraded state=degraded") text)
-    (is (str/includes? text "cluster-layer=degraded") text)
-    (is (str/includes? text "unknown state=unknown") text)
-    (is (not (str/includes? text "unknown state=alive")) text)
-    (is (str/includes? text "stale state=stale") text)
-    (is (str/includes? text "invalid state=invalid") text)
-    (is (str/includes? text (str "under " root)) text)))
+        data (result-data result)
+        rows (:seon.dev.mcp/clusters data)
+        by-cluster (into {} (map (juxt :seon.dev.mcp/cluster identity)) rows)]
+    (is (= root (:seon.dev.mcp/root data)))
+    (is (= "inventory" (name (:seon.dev.mcp/view data))))
+    (is (= "alive" (name (get-in by-cluster ["alive" :seon.dev.mcp/state]))))
+    (is (= "degraded"
+           (name (get-in by-cluster ["degraded" :seon.dev.mcp/state]))))
+    (is (= "unknown"
+           (name (get-in by-cluster ["unknown" :seon.dev.mcp/state]))))
+    (is (= "stale" (name (get-in by-cluster ["stale" :seon.dev.mcp/state]))))
+    (is (= "invalid"
+           (name (get-in by-cluster ["invalid" :seon.dev.mcp/state]))))
+    (is (= [{:seon.dev.mcp/root root
+             :seon.dev.mcp/cluster "alive"
+             :seon.dev.mcp/session-id "investigation"}]
+           (:seon.dev.mcp/sessions data)))))
 
 (deftest transport-errors-echo-the-attempted-evaluation-coordinates
   (let [result
@@ -601,7 +610,7 @@
         eval-tool (some #(when (= "eval_clj" (:name %)) %)
                         (get-in listed [:result :tools]))]
     (is (= "seon" (get-in initialized [:result :serverInfo :name])))
-    (is (= #{"eval_clj" "list_sessions" "runtime_status"}
+    (is (= #{"eval_clj" "runtime_status"}
            (into #{} (map :name) (get-in listed [:result :tools]))))
     (is (str/includes? (:description eval-tool) "max_output_tokens"))
     (is (str/includes? (:description eval-tool)
@@ -629,6 +638,18 @@
     (is (true? (:isError result)))
     (is (str/includes? (get-in result [:content 0 :text])
                        "Unknown tool: eval_cljs"))))
+
+(deftest deleted-list-sessions-name-is-an-unknown-tool
+  (let [[response]
+        (rpc-responses
+         [{:jsonrpc "2.0"
+           :id 1
+           :method "tools/call"
+           :params {:name "list_sessions" :arguments {}}}])
+        result (:result response)]
+    (is (true? (:isError result)))
+    (is (str/includes? (get-in result [:content 0 :text])
+                       "Unknown tool: list_sessions"))))
 
 (deftest parent-watchdog-observes-the-captured-parent-exit
   (let [fixture-root (io/file project-root "tmp"

@@ -893,49 +893,27 @@
                    :seon.dev.mcp/error (ex-message throwable)}
                   (ex-data throwable)))))))))
 
-(defn- execute-list-sessions
-  [_]
-  (mcp-success
-   (str "CLJ io-prepl sessions: "
-        (if (seq @clj-sessions)
-          (str/join ", "
-                    (sort (map (fn [[root cluster session-id]]
-                                 (str root " :: " cluster "/" session-id))
-                               (keys @clj-sessions))))
-          "(none)"))))
-
-(defn- row-status-line
-  [{root :seon.dev.mcp/root
-    cluster :seon.dev.mcp/cluster
-    state :seon.dev.mcp/state
-    advertisement :seon.dev.mcp/advertisement
-    path :seon.dev.mcp/path
-    error :seon.dev.mcp/error}]
-  (str "  " cluster
-       " state=" (name state)
-       " root=" root
-       (when-let [pid (:seon.boot/pid advertisement)]
-         (str " pid=" pid))
-       (when-let [port (:seon.boot/prepl-port advertisement)]
-         (str " prepl=" (:seon.boot/prepl-host advertisement) ":" port))
-       (when-let [url (:seon.render.web/url advertisement)]
-         (str " url=" url))
-       (when path (str " advertisement=" path))
-       (when (= :degraded state)
-         " cluster-layer=degraded")
-       (when error (str " error=" error))))
+(defn- session-rows
+  [root]
+  (into
+   []
+   (comp
+    (filter (fn [[session-root _ _]] (= root session-root)))
+    (map (fn [[session-root cluster session-id]]
+           {:seon.dev.mcp/root session-root
+            :seon.dev.mcp/cluster cluster
+            :seon.dev.mcp/session-id session-id})))
+   (sort (keys @clj-sessions))))
 
 (defn- execute-runtime-status
   [{:keys [root]}]
   (let [root (canonical-root root)
-        rows (discovery-rows root)
-        status-lines (mapv row-status-line rows)]
+        rows (discovery-rows root)]
     (mcp-success
-     (str "fresh JVM clusters under " root ":\n"
-          (if (seq status-lines)
-            (str/join "\n" status-lines)
-            "  (none)")
-          "\nCLJ io-prepl sessions: " (count @clj-sessions)))))
+     {:seon.dev.mcp/root root
+      :seon.dev.mcp/view :inventory
+      :seon.dev.mcp/clusters rows
+      :seon.dev.mcp/sessions (session-rows root)})))
 
 (def tools
   [{:name "eval_clj"
@@ -951,12 +929,8 @@
                                :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
                   :required ["code"]}}
 
-   {:name "list_sessions"
-    :description "List the bridge's active CLJ io-prepl sessions."
-    :inputSchema {:type "object" :properties {} :required []}}
-
    {:name "runtime_status"
-    :description "Report root-scoped JVM clusters derived from the fresh operator's advertisements and degraded process-record census, plus the current bridge session count."
+    :description "Report root-scoped JVM clusters and the active stateful io-prepl sessions under that root."
     :inputSchema {:type "object"
                   :properties {:root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}}
                   :required []}}])
@@ -972,7 +946,6 @@
       (case name
         "eval_clj" (execute-clj-eval arguments)
         "runtime_status" (execute-runtime-status arguments)
-        "list_sessions" (execute-list-sessions arguments)
         (throw (ex-info (str "Unknown tool: " name)
                         {:seon.dev.mcp/tool name}))))))
 
