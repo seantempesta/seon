@@ -10,6 +10,7 @@
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -21,7 +22,9 @@
             [seon.cluster.work :as work]
             [seon.db :as db]
             [seon.instrument :as instrument]
+            [sci.addons.future :as sci.future]
             [sci.core :as sci]
+            [sci.impl.vars :as sci.vars]
             [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as eval]
@@ -29,6 +32,40 @@
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
+
+(defn- compiled-runtime-victim
+  []
+  :original)
+
+(def ^:dynamic ^:private *compiled-runtime-dynamic-victim* :original)
+
+(defn- compiled-runtime-ctx
+  []
+  (let [ctx (eval/build-base-ctx)]
+    (sci/add-namespace!
+     ctx
+     'stability.host
+     {'victim #'compiled-runtime-victim
+      '*dynamic-victim* #'*compiled-runtime-dynamic-victim*})
+    ctx))
+
+(def ^:private concurrency-capability-classes
+  [java.lang.Thread
+   java.util.concurrent.Executor
+   java.util.concurrent.Future
+   java.util.concurrent.CompletionStage
+   java.util.concurrent.ThreadFactory])
+
+(defn- exposed-class
+  [candidate]
+  (if (map? candidate) (:class candidate) candidate))
+
+(defn- concurrency-capability-class?
+  [candidate]
+  (let [candidate (exposed-class candidate)]
+    (and (class? candidate)
+         (some #(.isAssignableFrom ^Class % ^Class candidate)
+               concurrency-capability-classes))))
 
 (defn- run-in
   [ctx source time-limit-ms]
@@ -218,6 +255,96 @@
            (sci/eval-string*
             ctx-b
             "(clojure.walk/macroexpand-all '(when true :ok))")))))
+
+(deftest agent-context-exposes-no-concurrency-capability
+  (let [ctx (eval/build-base-ctx)
+        env @(:env ctx)
+        future-addon-symbols
+        (set (keys (get-in (sci.future/install {})
+                           [:namespaces 'clojure.core])))
+        exposed-core-symbols
+        (set (keys (get-in env [:namespaces 'clojure.core])))
+        exposed-classes (vals (:raw-classes env))]
+    (is (seq future-addon-symbols)
+        "SCI's optional future add-on must remain a real test subject")
+    (is (empty? (set/intersection future-addon-symbols
+                                  exposed-core-symbols))
+        "the actual ctx excludes every primitive from SCI's concurrency add-on")
+    (is (seq exposed-classes)
+        "the class-gate assertion must not pass over a missing class surface")
+    (is (empty? (filter concurrency-capability-class? exposed-classes))
+        "no class exposed by the actual ctx can create or carry thread work")))
+
+(deftest compiled-runtime-roots-cannot-be-redefined-by-agent-code
+  (let [ctx (compiled-runtime-ctx)
+        victim-root (var-get #'compiled-runtime-victim)
+        dynamic-root (var-get #'*compiled-runtime-dynamic-victim*)
+        mutation-forms
+        ["(alter-var-root #'stability.host/victim (constantly (fn [] :changed)))"
+         (str "(with-redefs [stability.host/victim (fn [] :changed)] "
+              "(stability.host/victim))")
+         "(var-set #'stability.host/victim (fn [] :changed))"
+         "(intern 'stability.host 'victim (fn [] :changed))"
+         (str "(binding [stability.host/*dynamic-victim* :changed] "
+              "stability.host/*dynamic-victim*)")
+         (str "(do (push-thread-bindings "
+              "{#'stability.host/*dynamic-victim* :changed}) "
+              "(try :changed (finally (pop-thread-bindings))))")]]
+    (try
+      (doseq [form mutation-forms]
+        (let [evaluation (run-in ctx form 2000)]
+          (is (failed? evaluation) form)
+          (is (identical? victim-root
+                          (var-get #'compiled-runtime-victim))
+              form)
+          (is (identical? dynamic-root
+                          (var-get #'*compiled-runtime-dynamic-victim*))
+              form)))
+      (finally
+        (alter-var-root #'compiled-runtime-victim (constantly victim-root))
+        (alter-var-root #'*compiled-runtime-dynamic-victim*
+                        (constantly dynamic-root))))))
+
+(deftest ^{:seon.test/characterization true
+           :seon.test/open-issue
+           "agent-evals-reach-every-cluster-and-the-runtime-roots"}
+  known-gap-agent-code-can-change-compiled-var-metadata
+  (let [ctx (compiled-runtime-ctx)
+        before (meta #'compiled-runtime-victim)
+        marker ::agent-metadata-change]
+    (try
+      (let [evaluation
+            (run-in
+             ctx
+             (str "(do (alter-meta! #'stability.host/victim assoc "
+                  (pr-str marker) " true) :changed)")
+             2000)]
+        (is (ok? evaluation))
+        (is (= :changed (:seon.sci.admit/value evaluation)))
+        (is (true? (get (meta #'compiled-runtime-victim) marker))
+            "KNOWN GAP: agent mutation of compiled Var metadata is process-global"))
+      (finally
+        (reset-meta! #'compiled-runtime-victim before)))))
+
+(deftest current-sci-fork-shares-existing-var-roots
+  ;; CHARACTERIZATION FOR PHASE 4: copy-on-write deliberately flips the two
+  ;; leaking assertions while preserving isolation of the new name.
+  (let [parent (eval/build-base-ctx)
+        _ (sci/eval-string* parent "(def shared :parent)")
+        forked (sci/fork parent)
+        _ (sci/eval-string* forked "(def fork-only :fork-only)")
+        _ (sci/eval-string* forked "(def shared :fork-redefinition)")
+        parent-var (sci/resolve parent 'shared)
+        fork-var (sci/resolve forked 'shared)]
+    (is (nil? (sci/resolve parent 'fork-only))
+        "a new fork name changes only the fork's env map")
+    (is (identical? parent-var fork-var)
+        "CURRENT SCI: an existing name retains one shared Var object")
+    (is (= :fork-redefinition (sci/eval-string* parent "shared"))
+        "CURRENT SCI: eval-def bindRoot leaks a redefinition to the parent")
+    (sci.vars/bindRoot fork-var :fork-bind-root)
+    (is (= :fork-bind-root (sci/eval-string* parent "shared"))
+        "CURRENT SCI: direct bindRoot on a forked Var also leaks")))
 
 (deftest require-context-rows-persist-namespace-lookup-refs
   (let [ctx (eval/build-base-ctx)
