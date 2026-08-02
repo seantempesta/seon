@@ -29,16 +29,6 @@
     (.mkdirs root)
     root))
 
-(defn- runnable-root!
-  [root]
-  (doseq [path ["config" "deps.edn" "reference-code" "resources"
-                "src" "test"]]
-    (Files/createSymbolicLink
-     (.toPath (io/file root path))
-     (.toPath (io/file project-root path))
-     (make-array java.nio.file.attribute.FileAttribute 0)))
-  root)
-
 (defn- delete-recursively!
   [root]
   (test-support/delete-recursively! root))
@@ -890,6 +880,14 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest every-child-jvm-command-uses-the-shared-launch-owner
+  (let [source (slurp (io/file project-root "script" "seon"
+                               "fresh_operator.clj"))]
+    (is (= 1 (count (re-seq #"\[\"clojure\"" source)))
+        "only the shared owner may construct the Clojure command")
+    (is (= 3 (count (re-seq #"\(start-child-jvm!" source)))
+        "offline status, cluster start, and initialization use one owner")))
+
 (deftest reset-refuses-while-the-existing-store-flock-is-held
   (let [root (fresh-root)
         lock-path (io/file root "data" "clusters" "store.lock")]
@@ -964,7 +962,7 @@
         (delete-recursively! root)))))
 
 (deftest init-owns-current-source-and-dormant-cluster-lifecycle
-  (let [root (runnable-root! (fresh-root))
+  (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))
         name "init-command"
         current-digest
@@ -977,6 +975,12 @@
             (::output bare))
         (is (str/includes? (::output bare) current-digest)
             (::output bare)))
+      (let [status (run-operator root "status")]
+        (is (= 0 (::exit status)) (::output status))
+        (is (str/includes? (::output status) "0/0 clusters alive")
+            (::output status))
+        (is (not (str/includes? (::output status) "roster unreadable"))
+            (::output status)))
       (let [created (run-operator root "init" name)
             refused (run-operator root "init" name)
             reforked (run-operator root "init" name "--force")]
@@ -998,6 +1002,25 @@
             (is (contains? roster (registry/cluster-branch name)))
             (is (not (contains? roster :cluster-default))
                 "bare init does not invent a default cluster"))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest source-less-root-reset-republishes-and-reforks-default
+  (let [root (fresh-root)
+        store-dir (str (io/file root "data" "clusters" "store"))]
+    (try
+      (let [reset (run-operator root "reset" "--force")]
+        (is (= 0 (::exit reset)) (::output reset))
+        (is (str/includes? (::output reset)
+                           "reset republished current-src and reforked default")
+            (::output reset)))
+      (let [opened (store/open-store! {:seon.store/dir store-dir})]
+        (try
+          (let [roster (registry/roster opened)]
+            (is (contains? roster source/current-branch))
+            (is (contains? roster :cluster-default)))
           (finally
             (store/release-store! opened))))
       (finally
@@ -1055,7 +1078,7 @@
     (edn/read-string (prepl-eval advertisement form))))
 
 (deftest populated-stopped-cluster-reopens-after-full-operator-restart
-  (let [root (runnable-root! (fresh-root))
+  (let [root (fresh-root)
         name "restart-populated"
         marker "restart-populated-marker"
         launched-identities (atom [])]
@@ -1184,7 +1207,7 @@
         (reset! (var-get instances-var) instances-before)))))
 
 (deftest fresh-process-loads-schema-before-every-operator-instrumentation
-  (let [root (runnable-root! (fresh-root))]
+  (let [root (fresh-root)]
     (try
       (let [initialized (run-operator root "init")]
         (is (= 0 (::exit initialized)) (::output initialized))

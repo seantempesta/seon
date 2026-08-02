@@ -237,6 +237,26 @@
   ;; The invoking environment wins. The file is data, never shell code.
   (merge (dotenv root) (into {} (System/getenv))))
 
+(defn- start-child-jvm!
+  [{:seon.fresh-operator/keys [root jvm-options arguments detach]}]
+  (let [root (.getCanonicalPath (io/file root))
+        child-command
+        (into ["clojure" (str "-J-Dseon.operator.root=" root)]
+              (concat jvm-options ["-M:dev"] arguments))
+        command
+        (if detach
+          (into ["python3" "-c" detach-python
+                 (str (repository-root))
+                 (:seon.fresh-operator/log detach)
+                 (:seon.fresh-operator/adoption-path detach)]
+                child-command)
+          child-command)
+        builder (doto (ProcessBuilder. ^java.util.List command)
+                  (.directory (repository-root))
+                  (.redirectErrorStream true))
+        _ (.putAll (.environment builder) (child-environment root))]
+    (.start builder)))
+
 (defn- valid-name!
   [name]
   (when-not (and (string? name)
@@ -727,15 +747,11 @@
   [root]
   (if-not (fs/directory? (fs/path (cluster-root root) "store"))
     #{}
-    (let [builder
-          (doto
-           (ProcessBuilder.
-            ^java.util.List
-            ["clojure" "-M:dev" "-e" (offline-roster-form root)])
-            (.directory (.toFile (fs/path root)))
-            (.redirectErrorStream true))
-          _ (.putAll (.environment builder) (child-environment root))
-          process (.start builder)
+    (let [process
+          (start-child-jvm!
+           {:seon.fresh-operator/root root
+            :seon.fresh-operator/arguments
+            ["-e" (offline-roster-form root)]})
           output (slurp (.getInputStream process))
           exit (.waitFor process)]
       (when-not (zero? exit)
@@ -1442,18 +1458,17 @@
         adoption-path (process-adoption-path root generation)
         _ (do (fs/create-dirs (fs/parent adoption-path))
               (fs/delete-if-exists adoption-path))
-        command ["python3" "-c" detach-python
-                 (str (repository-root)) (str log) (str adoption-path)
-                 "clojure"
-                 (str "-J-Dseon.operator.root=" root)
-                 (str "-J-Dseon.operator.generation=" generation)
-                 (str "-J-Dseon.operator.log=" log)
-                 "-M:dev" "-e" (launch-form root name manifest ready-port)]
-        builder (doto (ProcessBuilder. ^java.util.List command)
-                  (.directory (repository-root))
-                  (.redirectErrorStream true))
-        _ (.putAll (.environment builder) (child-environment root))
-        process (.start builder)
+        process
+        (start-child-jvm!
+         {:seon.fresh-operator/root root
+          :seon.fresh-operator/jvm-options
+          [(str "-J-Dseon.operator.generation=" generation)
+           (str "-J-Dseon.operator.log=" log)]
+          :seon.fresh-operator/arguments
+          ["-e" (launch-form root name manifest ready-port)]
+          :seon.fresh-operator/detach
+          {:seon.fresh-operator/log (str log)
+           :seon.fresh-operator/adoption-path (str adoption-path)}})
         output (str/trim (slurp (.getInputStream process)))
         exit (.waitFor process)]
     (when-not (zero? exit)
@@ -1826,15 +1841,10 @@
 
 (defn- source-process-value!
   [root form]
-  (let [builder
-        (doto
-         (ProcessBuilder.
-          ^java.util.List
-          ["clojure" "-M:dev" "-e" form])
-          (.directory (.toFile (fs/path root)))
-          (.redirectErrorStream true))
-        _ (.putAll (.environment builder) (child-environment root))
-        process (.start builder)
+  (let [process
+        (start-child-jvm!
+         {:seon.fresh-operator/root root
+          :seon.fresh-operator/arguments ["-e" form]})
         output (slurp (.getInputStream process))
         exit (.waitFor process)]
     (when-not (zero? exit)
