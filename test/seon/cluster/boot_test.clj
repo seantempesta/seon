@@ -18,6 +18,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
             [seon.cluster.source :as source]
@@ -51,6 +52,34 @@
 
 (defn- delete-recursively! [path]
   (test-support/delete-recursively! path))
+
+(defn- await-fact
+  "Return the first truthy `probe` result published by a database value."
+  [connection probe]
+  (let [events (async/promise-chan)
+        key (keyword (str (ns-name *ns*)) (str (gensym "fact-")))]
+    (d/listen connection key
+              (fn [report]
+                (when-let [value (probe (:db-after report))]
+                  (async/offer! events value))))
+    (try
+      (when-let [value (probe @connection)]
+        (async/offer! events value))
+      (test-support/await-event! events "database fact")
+      (finally
+        (d/unlisten connection key)))))
+
+(defn- await-bootstrap!
+  [connection agent-id]
+  (await-fact
+   connection
+   (fn [db]
+     (d/q '[:find ?closed-at .
+            :in $ ?run-id
+            :where
+            [?run :seon.cluster.run/id ?run-id]
+            [?run :seon.cluster.run/closed-at ?closed-at]]
+          db (bootstrap/run-id agent-id)))))
 
 (defn- write-source!
   [root relative-path source]
@@ -632,6 +661,7 @@
                   (d/q '[:find ?source .
                          :where [?source :seon.source/digest _]]
                        @connection)]
+              (await-bootstrap! connection "root")
               (d/transact
                connection
                [[:db.fn/retractAttribute source-eid :seon.source/digest]
@@ -674,6 +704,7 @@
     (try
       (let [instance (cluster/start! request)
             connection (:seon.boot/cluster-connection instance)]
+        (await-bootstrap! connection "root")
         (testing "a fresh fork is born at the current source digest"
           (is (= current-digest
                  (d/q '[:find ?digest .
@@ -720,6 +751,7 @@
           :seon.boot/root root})]
     (try
       (let [old-connection (:seon.boot/cluster-connection old-world)
+            _ (await-bootstrap! old-connection "root")
             old-basis (:max-tx @old-connection)
             refreshed (cluster/refresh-source!
                        root ["src/seon/ai/tokens.cljc"])
@@ -1053,6 +1085,7 @@
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
+        (await-bootstrap! connection "root")
         (d/transact connection [{:seon.cluster.agent/id "alice"}])
         (d/transact connection
                     [{:seon.cluster.run/id "run-crashed"

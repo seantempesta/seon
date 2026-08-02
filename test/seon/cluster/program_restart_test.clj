@@ -7,8 +7,8 @@
             [datahike.core :as datahike]
             [sci.core :as sci]
             [seon.ai :as ai]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
@@ -47,8 +47,7 @@
                            (mapv #(d/pull @connection
                                           [:seon.cluster.eval/ordinal
                                            :seon.cluster.eval/result-edn
-                                           {:seon.cluster.eval/error
-                                            [:seon.error/message]}]
+                                           :seon.cluster.eval/error]
                                           %)
                                  (d/q '[:find [?receipt ...]
                                         :where
@@ -69,15 +68,35 @@
                   [:seon.test/sym
                    "my.agents.restart-a/persisted-test"]))))
 
-(defn- receipt-count
-  [db]
+(defn- authored-receipt-count
+  [db agent-id]
   (d/q '[:find (count ?receipt) .
-         :where [?receipt :seon.cluster.eval/id _]]
-       db))
+         :in $ ?agent-id ?bootstrap-run-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.cluster.run/id ?run-id]
+         [(not= ?run-id ?bootstrap-run-id)]
+         [?receipt :seon.cluster.eval/run ?run]]
+       db agent-id (bootstrap/run-id agent-id)))
 
 (defn- semantic-result
   [result-edn]
   (#'admit/semantic-value (edn/read-string result-edn)))
+
+(defn- authored-result
+  [db agent-id ordinal]
+  (d/q '[:find ?result .
+         :in $ ?agent-id ?bootstrap-run-id ?ordinal
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.cluster.run/id ?run-id]
+         [(not= ?run-id ?bootstrap-run-id)]
+         [?receipt :seon.cluster.eval/run ?run]
+         [?receipt :seon.cluster.eval/ordinal ?ordinal]
+         [?receipt :seon.cluster.eval/result-edn ?result]]
+       db agent-id (bootstrap/run-id agent-id) ordinal))
 
 (defn- active-agent-id
   "The agent whose durable run is currently open."
@@ -100,22 +119,34 @@
           (not [?run :seon.cluster.run/closed-at _])]
         db agent-id)))
 
-(defn- agent-closed-run-count
+(defn- agent-authored-closed-run-count
   [db agent-id]
   (d/q '[:find (count ?run) .
-         :in $ ?agent-id
+         :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
          [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.cluster.run/id ?run-id]
+         [(not= ?run-id ?bootstrap-run-id)]
          [?run :seon.cluster.run/closed-at _]]
-       db agent-id))
+       db agent-id (bootstrap/run-id agent-id)))
+
+(defn- await-bootstrap!
+  [connection agent-id]
+  (await-commit!
+   connection
+   (fn [db]
+     (:seon.cluster.run/closed-at
+      (d/pull db [:seon.cluster.run/closed-at]
+              [:seon.cluster.run/id (bootstrap/run-id agent-id)])))
+   (constantly nil)))
 
 (defn- authored-program-settled?
   "The complete first-agent plan committed, including its final disposition."
   [db]
   (and (program-present? db)
-       (= 21 (receipt-count db))
-       (= 1 (agent-closed-run-count db "restart-a"))
+       (= 21 (authored-receipt-count db "restart-a"))
+       (= 1 (agent-authored-closed-run-count db "restart-a"))
        (not (agent-open-run? db "restart-a"))))
 
 (defn- restarted-call-present?
@@ -143,12 +174,16 @@
                              :seon.boot/root root})
             connection (:seon.boot/cluster-connection first-instance)]
         (try
-          (d/transact
+          (await-bootstrap! connection "root")
+          (cluster/ensure-entity!
            connection
-           (agent/creation-tx
-            {:seon.cluster.agent/id "restart-a"
-             :seon.cluster/name cluster-name
-             :seon.ns/name 'my.agents.restart-a}))
+           (get-in first-instance
+                   [:seon.cluster.loop/cluster
+                    :seon.cluster.run/process])
+           {:seon.cluster.agent/id "restart-a"
+            :seon.cluster/name cluster-name
+            :seon.ns/name 'my.agents.restart-a})
+          (await-bootstrap! connection "restart-a")
           (with-redefs
             [ai/complete
              (fn [_]
@@ -191,25 +226,18 @@
              #(transact-inbound! connection "restart-a"
                                  "Define a durable function, schema, and test.")))
           (is (program-present? @connection))
-          (is (= 21 (receipt-count @connection))
+          (is (= 21 (authored-receipt-count @connection "restart-a"))
               "twenty valid forms and one independent refusal settle")
-          (is (= 1 (agent-closed-run-count @connection "restart-a"))
+          (is (= 1 (agent-authored-closed-run-count
+                    @connection "restart-a"))
               "the terminal disposition closes the original run")
           (is (= 4
                  (semantic-result
-                  (d/q '[:find ?result .
-                         :where
-                         [?receipt :seon.cluster.eval/ordinal 10]
-                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                       @connection)))
+                  (authored-result @connection "restart-a" 10)))
               "a process-local scratch def is lintable by the next form")
           (is (= 5
                  (semantic-result
-                  (d/q '[:find ?result .
-                         :where
-                         [?receipt :seon.cluster.eval/ordinal 12]
-                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                       @connection)))
+                  (authored-result @connection "restart-a" 12)))
               "a private scratch def remains callable inside its namespace")
           (is (nil? (d/pull @connection [:db/id]
                             [:seon.fn/sym
@@ -217,25 +245,17 @@
               "an uncontracted scratch def remains outside the program graph")
           (is (= {:resolved :clojure.set/after-require}
                  (semantic-result
-                  (d/q '[:find ?result .
-                         :where
-                         [?receipt :seon.cluster.eval/ordinal 14]
-                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                       @connection)))
+                  (authored-result @connection "restart-a" 14)))
               "a computed require changes lint and eval state for the next form")
           (is (= :seon.cluster.loop/lint-rejected
                  (:seon.error/kind
                   (semantic-result
-                   (d/q '[:find ?result .
-                          :where
-                          [?receipt :seon.cluster.eval/ordinal 15]
-                          [?receipt :seon.cluster.eval/result-edn ?result]]
-                        @connection))))
+                   (authored-result @connection "restart-a" 15))))
               "the invalid ordinal is one flat value, not a plan-wide abort")
           (is (nil? (d/pull @connection [:db/id]
                             [:seon.fn/sym
                              "my.agents.restart-a/removed-before-restart"])))
-          (is (pos? (receipt-count @connection)))
+          (is (pos? (authored-receipt-count @connection "restart-a")))
           (let [namespace-row
                 (d/pull @connection
                         [{:seon.ns/requires [:seon.ns/name]}]
@@ -264,13 +284,15 @@
                              :my.agents.restart-a/nonnegative])
                     :seon.schema/ns))
               "the reopened global schema identity has no namespace owner")
-          (let [receipts-before-acquire (receipt-count @connection)
+          (let [receipts-before-acquire
+                (authored-receipt-count @connection "restart-a")
                 ctx (:seon.sci.eval/ctx second-instance)
                 projection (:seon.schema/projection ctx)
                 validate-nonnegative
                 (schema/projection-validator
                  projection :my.agents.restart-a/nonnegative)]
-            (is (= receipts-before-acquire (receipt-count @connection))
+            (is (= receipts-before-acquire
+                   (authored-receipt-count @connection "restart-a"))
                 "reopen acquisition materializes current state without replay")
             (is (true? (validate-nonnegative 4)))
             (is (false? (validate-nonnegative -1))
@@ -311,12 +333,15 @@
                    "(resolve 'String)"
                    {:ns (sci/create-ns 'my.agents.restart-a)})))
                 "an import-only ns-unmap survives cluster reopen"))
-          (d/transact
+          (cluster/ensure-entity!
            connection
-           (agent/creation-tx
-            {:seon.cluster.agent/id "restart-b"
-             :seon.cluster/name cluster-name
-             :seon.ns/name 'my.agents.restart-b}))
+           (get-in second-instance
+                   [:seon.cluster.loop/cluster
+                    :seon.cluster.run/process])
+           {:seon.cluster.agent/id "restart-b"
+            :seon.cluster/name cluster-name
+            :seon.ns/name 'my.agents.restart-b})
+          (await-bootstrap! connection "restart-b")
           (with-redefs
             [ai/complete
              (fn [_]

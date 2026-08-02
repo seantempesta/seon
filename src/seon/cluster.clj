@@ -892,7 +892,10 @@
          :inst
          :seon.cluster.agent/creation-request]
     :seon.store/transaction-data]}
-  [db process now {agent-id :seon.cluster.agent/id :as request}]
+  [db process now
+   {agent-id :seon.cluster.agent/id
+    namespace-name :seon.ns/name
+    :as request}]
   (if (d/q '[:find ?agent .
              :in $ ?agent-id
              :where [?agent :seon.cluster.agent/id ?agent-id]]
@@ -900,9 +903,10 @@
     []
     (into (cluster.agent/creation-tx request)
           (bootstrap/seed-tx
-           (assoc request
-                  :seon.cluster.run/process process
-                  :seon.cluster.run/opened-at now)))))
+           {:seon.cluster.agent/id agent-id
+            :seon.ns/name namespace-name
+            :seon.cluster.run/process process
+            :seon.cluster.run/opened-at now}))))
 
 (defn ensure-entity!
   "Create one absent agent atomically; an existing agent resumes untouched."
