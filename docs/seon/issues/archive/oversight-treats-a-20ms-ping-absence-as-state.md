@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, flow, render, clocks]
 ---
@@ -41,3 +41,13 @@ oversight render's query over those observable facts.
   and unavailable owner with evidence for each.
 - A stress regression delays scheduling beyond 20 ms and proves no false
   mid-turn state.
+
+## Supersession
+
+Superseded during the 2026-08-02 rot audit by
+[[static-render-blocks-survive-the-one-walk-cutover]]. A complete reader chase
+found no production namespace or schema selecting `seon.oversight`; only its
+direct test and CSS/comments keep it present. Repairing the ping classifier
+would preserve a dead static render mechanism. The standing great-deletion
+ruling therefore deletes the namespace and its reader closure instead; no
+replacement fleet classifier is authorized by this note.

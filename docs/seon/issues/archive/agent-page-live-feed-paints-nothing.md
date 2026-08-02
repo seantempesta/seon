@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, web, render, flow]
 ---
@@ -43,3 +43,13 @@ error registry or a second logging-only path.
 - The socket and tap still close exactly once after the fault.
 - Existing initial-paint, committed-message, and reconnect tests remain green;
   no second page producer is introduced.
+
+## Supersession
+
+Superseded during the 2026-08-02 issue-graph reconciliation by
+[[render-resolution-and-feed-swallow-failures]]. Commit `2c74a2353` already
+resolved this note's original empty-feed defect. Its only surviving evidence
+is the same `seon.render.web` swallowed writer failure now owned by the broader
+render-resolution issue, which also carries the upstream declaration and
+schema-resolution failures. Keeping both notes would schedule one catch site
+twice.

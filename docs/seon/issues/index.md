@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (22)
+## Blocker (19)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -24,13 +24,11 @@ See `README.md` for the convention.
 | [Make every fresh recursive delete refuse symlink traversal](fresh-recursive-deletion-reintroduces-symlink-traversal.md) | blocker | filesystem safety wave |
 | [Delete the writer build that still packages the old host server](writer-build-still-packages-the-deleted-host-server.md) | blocker | great-deletion build wave |
 | [Reconcile the conventions document with the fresh runtime](docs-rot-conventions-describes-the-pre-fresh-runtime.md) | blocker | doc-rot fix wave |
-| [Retire active ADRs that authorize the deleted topology](docs-rot-active-adrs-authorize-deleted-topology-and-protocol.md) | blocker | doc-rot fix wave |
 | [Re-ground the Datahike fork skill at the selected revision](datahike-skill-claims-an-obsolete-fork-pin-is-current.md) | blocker | skill-rot fix wave |
 | [Remove dead parser and oracle tools from live evaluation chains](dead-parser-oracle-tools-have-live-downstream-readers.md) | blocker | rot deletion wave |
 | [Teach the durable SCI session image in the foundational data skills](schema-skills-deny-the-durable-sci-session-image.md) | blocker | skill-rot fix wave |
 | [Re-ground the web UI skills in the live namespace-page renderer](skill-web-ui-route-map-predates-namespace-pages.md) | blocker | skill-rot fix wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
-| [Rebuild the current library grounding map from fresh owners](docs-rot-library-grounding-map-sends-readers-into-the-quarry.md) | blocker | doc-rot fix wave |
 | [Re-ground the flow skill after the virtual-I/O and live-context waves](flow-skill-teaches-overturned-runtime-facts.md) | blocker | skill-rot fix wave |
 | [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
 | [Re-ground root AGENTS vocabulary in fresh owners](docs-rot-root-agents-names-moved-and-deleted-runtime-owners.md) | blocker | doc-rot fix wave |
@@ -39,11 +37,10 @@ See `README.md` for the convention.
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
-| [Make the agent page's live feed paint the page a GET already renders](agent-page-live-feed-paints-nothing.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (49)
+## Friction (48)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -52,7 +49,6 @@ See `README.md` for the convention.
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
 | [Delete static render blocks left by the one-walk cutover](static-render-blocks-survive-the-one-walk-cutover.md) | friction | render deletion wave |
 | [Preserve render resolution and feed failure evidence](render-resolution-and-feed-swallow-failures.md) | friction | render error-evidence wave |
-| [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | Flow observability wave |
 | [Keep session-image refusal evidence as facts, not derived prose](session-image-stores-derived-unrestorable-prose.md) | friction | session-image evidence wave |
 | [Derive namespace context without a stored `my.*` roster](cluster-toolkit-stores-a-prefix-derived-projection.md) | friction | context derivation wave |
 | [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
@@ -99,10 +95,11 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Make the ACME wrapper speak the fresh operator command language](acme-wrapper-speaks-deleted-operator-command-language.md) | friction | adversarial-audit fix wave |
 
-## Cleanup (10)
+## Cleanup (11)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
 | [Remove deleted quarry gates from the Clojure testing skill](clojure-testing-skill-points-at-deleted-quarry-gates.md) | cleanup | skill-rot fix wave |
 | [Delete root operator files with no live reader](old-detach-helper-and-operator-alias-have-no-live-reader.md) | cleanup | rot deletion wave |

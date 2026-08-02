@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: superseded
 severity: friction
 tags: [issue, render, schema, context]
 ---
@@ -62,9 +62,9 @@ entry order leaves every family's detection unchanged.
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
 
-## Resolution
+## Supersession
 
-Resolved by `0fdc50615` (`Make render walk membership universal`). The walk no
+Superseded by `0fdc50615` (`Make render walk membership universal`). The walk no
 longer derives or consults registered entity families: it pulls the concrete
 entity's actual attributes and derives reverse edges from every installed ref
 attribute. Schema declaration order therefore cannot change membership or
