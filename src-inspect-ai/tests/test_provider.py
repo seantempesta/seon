@@ -13,6 +13,7 @@ from seon_inspect.host import (
     HISTORY_ENABLED,
     SeonHost,
     StoreSnapshot,
+    _store_snapshot,
 )
 from seon_inspect.provider import SeonModelAPI, objective_message
 from seon_inspect.scorers import seon_terminal_honesty
@@ -61,6 +62,34 @@ def test_fresh_eval_root_publishes_source_before_cluster_start(tmp_path, monkeyp
     host._closed = True
 
     assert commands == [("init",), ("start", "eval-host")]
+
+
+def test_store_snapshot_skips_a_file_that_vanishes_during_stat(tmp_path, monkeypatch):
+    class VanishedEntry:
+        path = str(tmp_path / "gone.ksv")
+
+        def is_symlink(self):
+            return False
+
+        def is_dir(self, *, follow_symlinks):
+            return False
+
+        def is_file(self, *, follow_symlinks):
+            return True
+
+        def stat(self, *, follow_symlinks):
+            raise FileNotFoundError(self.path)
+
+    class Entries(list):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(host_module.os, "scandir", lambda _path: Entries([VanishedEntry()]))
+
+    assert _store_snapshot(tmp_path) == StoreSnapshot(0, 0, 0)
 
 
 def test_provider_maps_completed_episode_and_metadata(monkeypatch):

@@ -43,17 +43,24 @@ def _store_snapshot(path: Path) -> StoreSnapshot:
         directory = pending.pop()
         if not directory.is_dir():
             continue
-        with os.scandir(directory) as entries:
+        try:
+            entries = os.scandir(directory)
+        except FileNotFoundError:
+            continue
+        with entries:
             for entry in entries:
-                if entry.is_symlink():
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        stat = entry.stat(follow_symlinks=False)
+                        logical += stat.st_size
+                        allocated += getattr(stat, "st_blocks", 0) * 512
+                        files += 1
+                except FileNotFoundError:
                     continue
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(Path(entry.path))
-                elif entry.is_file(follow_symlinks=False):
-                    stat = entry.stat(follow_symlinks=False)
-                    logical += stat.st_size
-                    allocated += getattr(stat, "st_blocks", 0) * 512
-                    files += 1
     return StoreSnapshot(logical, allocated, files)
 
 
