@@ -31,9 +31,9 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.run :as run]
-            [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
@@ -330,7 +330,7 @@
         (let [connection (:seon.boot/cluster-connection instance)
               routing (:seon.cluster.agent/routing instance)
               entry (agent/armed routing "root")
-              transact! store/transact!]
+              transact! db/transact!]
           (with-redefs
             [ai/complete
              (fn [_]
@@ -339,7 +339,7 @@
              (fn [_]
                {:seon.sci.admit/value 1
                 :seon.cluster.eval/result-edn "1"})
-             store/transact!
+             db/transact!
              (fn [target transaction]
                (cond
                  (transition-transaction?

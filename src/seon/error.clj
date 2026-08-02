@@ -10,10 +10,10 @@
   `:seon.fault/*`; the rename merged it into this one family, and
   `:seon.fault/*` no longer exists.
 
-  THIS NAMESPACE IS PURE. It normalizes, it projects, and it returns
-  TRANSACTION DATA; it never transacts, so it needs no store — which is
-  what lets `seon.cluster.store` depend on it (for `refusal`) instead of
-  the other way round. Its two callers commit through the one door:
+  THIS NAMESPACE DOES NOT TRANSACT. It normalizes, it projects, and it
+  returns TRANSACTION DATA. Cause-chain reading lives in the lower
+  `seon.error.refusal` leaf so `seon.db` does not acquire this namespace's
+  rendering dependencies. Its two callers commit through the one boundary:
   `seon.cluster/commit-fault!` for Throwables off flow's error channel,
   and the run loop for a refused transaction.
 
@@ -38,7 +38,7 @@
      only `#::flow{:ex :pid :cid :xform}`. `::flow/ex` is the one key
      all three share, which is what makes the family recognizable
      without a shape list.
-  2. A flat `:seon.error/value` — what `store/transact!`, `ai/complete`,
+  2. A flat `:seon.error/value` — what `db/transact!`, `ai/complete`,
      `config/apply!` and `reconcile` return. Nothing throws into the run
      loop, so a system failure normally arrives as a value.
   3. A transition refusal's `ex-data` — the map `refusal` (below) digs
@@ -143,6 +143,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.error.refusal :as error.refusal]
             [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
@@ -171,20 +172,12 @@
   a throwable that carries no data anywhere in its chain — which is
   itself information, and the caller treats it as unclassifiable.
 
-  MOVED HERE from `seon.cluster.store` (2026-07-27, the grounding's own
-  recommendation): it is about throwables, not about stores, and it had
-  two consumers pulling in opposite directions — the store's own
-  `transact!` and this normalizer. With it here the dependency runs one
-  way, `store -> error`, and this namespace stays PURE."
+  The pure cause-chain owner is `seon.error.refusal`, below both this
+  rendering-aware normalizer and `seon.db`; this public entry delegates
+  so existing callers retain one behavior without a dependency cycle."
   {:malli/schema [:=> [:cat :any] [:maybe :map]]}
   [throwable]
-  (loop [candidate throwable
-         deepest nil]
-    (if (nil? candidate)
-      deepest
-      (let [data (ex-data candidate)]
-        (recur (ex-cause candidate)
-               (if (seq data) data deepest))))))
+  (error.refusal/refusal throwable))
 
 (defn- throwable
   "The Throwable in `source`, or nil.
@@ -701,7 +694,7 @@
 (defn commit-tx
   "Transaction data committing one error and everything it must say.
   PURE over a database value: the fact, and zero to two explanation
-  messages, in ONE vector so `store/transact!` commits them together and
+  messages, in ONE vector so `db/transact!` commits them together and
   there is no torn window where an error exists that nobody was told
   about. Returning data rather than transacting is what keeps this
   namespace free of the store — the dependency runs `store -> error`,

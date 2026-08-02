@@ -21,7 +21,7 @@
   transaction is followed by a separate minimal terminal commit carrying
   the admitted flat ERROR value, its durable error fact, and the run
   close, but no program row or agent disposition. Under
-  `store/transact!` that is a branch on a returned value, not a catch,
+  `db/transact!` that is a branch on a returned value, not a catch,
   which is strictly better.
 
   NOTHING RETRIES A PAID CALL, and recovery is not a code path: a turn
@@ -45,10 +45,10 @@
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
             [seon.cluster.run :as run]
-            [seon.cluster.store :as store]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.fn.analyzer :as fn.analyzer]
@@ -648,7 +648,7 @@
   `(if (refused! …) :error :released)` and the recording is not a
   second branch to keep in sync.
 
-  THIS IS THE HOLE D3 NAMED. `store/transact!` preserves a transition's
+  THIS IS THE HOLE D3 NAMED. `db/transact!` preserves a transition's
   own rule verbatim — the exact CAS fence, the exact schema violation —
   and four of these five branches threw it away one line later, reducing
   it to the keyword `:error` in a turn report that goes to an out
@@ -665,7 +665,7 @@
   The recording's own outcome is deliberately ignored. This is the
   recursion fence for a refusal that owns no running receipt: if the
   database refuses the error fact too, the answer is not to record
-  THAT — `store/transact!` never throws, the loop keeps its pass, and
+  THAT — `db/transact!` never throws, the loop keeps its pass, and
   the visible symptom stays the original refusal rather than an
   infinite regress of them. A refused terminal receipt uses
   `terminal-refused!` below instead, because recording alone cannot
@@ -675,7 +675,7 @@
    (when-let [kind (:seon.error/kind outcome)]
      (let [connection (:seon.store/branch-connection cluster)
            db @connection]
-       (store/transact!
+       (db/transact!
         connection
         (error-tx cluster db outcome now attribution)))
      kind)))
@@ -786,7 +786,7 @@
           {::admitted-outcome
            (:seon.sci.admit/value admitted)}))
        (let [settlement
-             (store/transact! connection (into terminal recording))]
+             (db/transact! connection (into terminal recording))]
          (when (:seon.error/kind settlement)
            ;; The fault committer may itself write an explanation
            ;; message. Fence that message from re-entering this exact
@@ -968,7 +968,7 @@
               failover-from (assoc :seon.ai.attempt/failover-from
                                    [:seon.ai.attempt/id failover-from])
               delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms))
-        outcome (store/transact! connection (conj (vec commit) row))]
+        outcome (db/transact! connection (conj (vec commit) row))]
     (when-not (:seon.error/kind outcome)
       (some-> commit first (dissoc :db/id)))))
 
@@ -1070,7 +1070,7 @@
   [cluster run-id now]
   (let [connection (:seon.store/branch-connection cluster)
         process (:seon.cluster.run/process cluster)
-        claimed (store/transact!
+        claimed (db/transact!
                  connection
                  (run/claim-tx {:seon.cluster.run/id run-id
                                 :seon.cluster.run/process process
@@ -1080,7 +1080,7 @@
                                 :seon.cluster.run/now now}))]
     (if (:seon.error/kind claimed)
       false
-      (let [closed (store/transact!
+      (let [closed (db/transact!
                     connection
                     (run/close-tx {:seon.cluster.run/id run-id
                                    :seon.cluster.run/process process
@@ -1101,7 +1101,7 @@
     ;; before the expensive part, and the trigger rides as tx-meta so
     ;; answeredness needs no flag.
     (let [id (str (random-uuid))
-          outcome (store/transact!
+          outcome (db/transact!
                    connection
                    {:tx-data
                     (into (run/open-tx {:seon.cluster.run/id id
@@ -1192,7 +1192,7 @@
                   ;; evaporated — the drive sat claimed-with-no-plan
                   ;; for two minutes and the operator had to reproduce
                   ;; the call by hand to learn it was a missing key.
-                  (store/transact!
+                  (db/transact!
                    connection
                    (into [[:db/add [:seon.cluster.run/id run-id]
                            :seon.cluster.run/error
@@ -1215,7 +1215,7 @@
                                  namespace-name)]
               (if (:seon.error/kind sources)
                 (fail! sources)
-                (let [outcome (store/transact!
+                (let [outcome (db/transact!
                                connection
                                (run/plan-tx
                                 {:seon.cluster.run/id run-id
@@ -1238,7 +1238,7 @@
           ;; refuses by throwing (`::no-trigger`, `::missing-input`),
           ;; and this one call site turns that refusal into the flat
           ;; error value the loop already records — the same shape a
-          ;; refused transaction takes through `store/transact!`.
+          ;; refused transaction takes through `db/transact!`.
           rendered (try
                      (prompt/prompt @connection
                                     {:seon.cluster.run/id run-id
@@ -1268,7 +1268,7 @@
                      ;; outcome — there is nothing to capture and no
                      ;; provider call to make
                      rendered
-                     (store/transact!
+                     (db/transact!
                       connection
                       (context/capture-tx
                        {:seon.cluster.run/id run-id
@@ -1409,7 +1409,7 @@
         (let [receipt-id (pr-str [run-id ordinal])
               problem-id (work/problem-id run-id ordinal)
               started
-              (store/transact!
+              (db/transact!
                connection
                (conj
                 (run/receipt-start-tx
@@ -1506,7 +1506,7 @@
                   session-evaluation
                   (store-session-values! connection evaluation)
                   outcome
-                  (store/transact!
+                  (db/transact!
                    connection
                    (cond->
                     {:tx-data
@@ -1598,7 +1598,7 @@
     (let [held (d/pull @connection [:seon.cluster.run/process]
                        [:seon.cluster.run/id run-id])
           claimed (when-not (= process (:seon.cluster.run/process held))
-                    (store/transact!
+                    (db/transact!
                      connection
                      (run/claim-tx {:seon.cluster.run/id run-id
                                     :seon.cluster.run/process process
@@ -1609,7 +1609,7 @@
                     ;; somebody else holds it: not ours to close, and
                     ;; not an error of ours either
                     claimed
-                    (store/transact!
+                    (db/transact!
                      connection
                      (run/close-tx {:seon.cluster.run/id run-id
                                     :seon.cluster.run/process process

@@ -8,19 +8,17 @@
   `refusal` is pure and needs no database — the whole point of probe
   D's finding is that a transition's own data survives at the third
   link of the cause chain, so classification is a walk over values. It
-  now LIVES in `seon.error` (2026-07-27: it is about throwables, not
-  stores, and moving it made the dependency one-way so the error owner
-  could stay pure); these tests follow the function to its owner rather
-  than being duplicated there.
-  `transact!` is then live against a real connection, because the
+  now lives in the lower `seon.error.refusal` namespace, with the existing
+  `seon.error/refusal` entry delegating to it. `transact!` is then live
+  against a real connection, because the
   outcome that matters most (a refusing transaction function) can only
   be produced by a real writer."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
-            [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]))
@@ -88,7 +86,7 @@
 (deftest a-committed-transaction-returns-its-report
   (with-connection
     (fn [connection]
-      (let [outcome (store/transact! connection
+      (let [outcome (db/transact! connection
                                      [{:seon.cluster.agent/id "agent-a"}])]
         (is (map? outcome))
         (is (contains? outcome :db-after) "the report, not a wrapper")
@@ -97,7 +95,7 @@
 (deftest our-own-refusal-comes-back-by-name
   (with-connection
     (fn [connection]
-      (let [outcome (store/transact!
+      (let [outcome (db/transact!
                      connection
                      [[:db.fn/call #'refusing-call {:probe true}]])]
         (is (= :seon.cluster.run/refused (:seon.error/kind outcome))
@@ -110,7 +108,7 @@
 (deftest a-datahike-abort-is-distinguishable-from-ours
   (with-connection
     (fn [connection]
-      (let [outcome (store/transact! connection
+      (let [outcome (db/transact! connection
                                      [{:seon.cluster.eval/ordinal
                                        "not-an-int"}])]
         (is (= :seon.db/rejected (:seon.error/kind outcome)))
@@ -124,7 +122,7 @@
                        [[:db.fn/call #'refusing-call {}]]
                        [{:seon.cluster.eval/ordinal "nope"}]
                        [[:db/add "nonsense" :nothing/here 1]]]]
-        (is (map? (store/transact! connection tx-data))
+        (is (map? (db/transact! connection tx-data))
             "every outcome is a value the run loop can branch on")))))
 
 (defn- with-mixed-connection
@@ -146,7 +144,7 @@
   (doseq [logical ["forty-two" 42]]
     (with-mixed-connection
       (fn [connection]
-        (let [outcome (store/transact! connection [{::mixed-value logical}])
+        (let [outcome (db/transact! connection [{::mixed-value logical}])
               stored (d/q '[:find ?value .
                             :where [_ ::mixed-value ?value]]
                           @connection)]
@@ -159,7 +157,7 @@
 (deftest invalid-logical-and-storage-values-refuse-loudly
   (with-mixed-connection
     (fn [connection]
-      (let [outcome (store/transact! connection [{::mixed-value true}])]
+      (let [outcome (db/transact! connection [{::mixed-value true}])]
         (is (= :user-input (:seon.error/kind outcome)))
         (is (empty? (d/q '[:find ?value
                            :where [_ ::mixed-value ?value]]

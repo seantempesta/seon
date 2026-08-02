@@ -1,16 +1,59 @@
 (ns seon.db
-  "The one database namespace for all things Datahike. Reads run over an
-  explicit immutable database value or, when the argument is elided, the
-  current database of the calling agent's cluster (`*conn*`, bound per
-  evaluation). Failures return flat `:seon.error` values. Today this
-  namespace holds `q`, `pull`, and `pull-many`; ruling #41 moves
-  `transact!` here and adds the remaining core functions."
-  (:require [datahike.api :as d]
-            [datahike.db.utils :as db.utils]))
+  "The one database namespace for all things Datahike. Reads and writes use
+  an explicit immutable database value or connection, or, when custody is
+  elided, the current connection of the calling agent's cluster (`*conn*`,
+  bound per evaluation). Failures return flat `:seon.error` values."
+  (:require [clojure.walk :as walk]
+            [datahike.api :as d]
+            [datahike.connector :as connector]
+            [datahike.db.utils :as db.utils]
+            [datahike.query :as query]
+            [clojure.test.check.generators :as gen]
+            [seon.error.refusal :as error.refusal]
+            [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
 ;;; ---------------------------------------------------------------------------
+
+(defn connection?
+  "True for a live (unreleased) Datahike connection."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (connector/connection? value)
+       (some? (:wrapped-atom value))
+       (not= @(:wrapped-atom value) :released)))
+
+(defn database-value?
+  "True for any Datahike database value."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (db.utils/db? value))
+
+(schema/register-core-predicate! 'seon.db/connection? connection?)
+(schema/register-core-predicate! 'seon.db/database-value? database-value?)
+
+(defn- fresh-connection
+  []
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write}]
+    (d/create-database configuration)
+    (d/connect configuration)))
+
+(def connection-generator
+  (gen/fmap (fn [_] (fresh-connection)) (gen/return nil)))
+
+(def database-value-generator
+  (gen/fmap
+   (fn [variant]
+     (let [database @(fresh-connection)]
+       (case variant
+         :current database
+         :as-of (d/as-of database (:max-tx database))
+         :since (d/since database 0)
+         :history (d/history database))))
+   (gen/elements [:current :as-of :since :history])))
 
 (def ^:dynamic *conn*
   "The current cluster's live branch connection, bound by its owning pass."
@@ -42,6 +85,14 @@
        (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
 
+(defn- resolve-database-value
+  [connection]
+  (try
+    ;; Resolve latest exactly once at the public-call boundary.
+    (d/db connection)
+    (catch Throwable cause
+      (dependency-error ::db cause))))
+
 (defn- current-database-value
   []
   (if (nil? *conn*)
@@ -49,17 +100,30 @@
      ::missing-connection-binding
      "No current cluster connection is bound to seon.db/*conn*."
      {::binding 'seon.db/*conn*})
-    (try
-      ;; Resolve latest exactly once at the public-call boundary.
-      (d/db *conn*)
-      (catch Throwable error
-        (dependency-error ::resolve-current-database error)))))
+    (resolve-database-value *conn*)))
+
+(defn- current-connection
+  []
+  (if (nil? *conn*)
+    (error-value
+     ::missing-connection-binding
+     "No current cluster connection is bound to seon.db/*conn*."
+     {::binding 'seon.db/*conn*})
+    *conn*))
 
 (defn- append-read-evidence!
   [evidence]
   (when *capture-context*
     (swap! *capture-context* conj evidence))
   nil)
+
+(defn- append-database-evidence!
+  [database plan]
+  (when (db.utils/db? database)
+    (append-read-evidence!
+     {:seon.db/db database
+      :seon.db/source-argument-position 0
+      :datahike.read/dependency-plan plan})))
 
 (defn- append-query-evidence!
   [arguments response]
@@ -84,15 +148,26 @@
 
 (defn- append-pull-evidence!
   [database response]
-  (append-read-evidence!
-   {:seon.db/db database
-    :seon.db/source-argument-position 0
-    :datahike.read/dependency-plan
-    (:datahike.read/dependency-plan response)}))
+  (append-database-evidence!
+   database
+   (:datahike.read/dependency-plan response)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Reads over one immutable database value
+;;; Reads over immutable database values
 ;;; ---------------------------------------------------------------------------
+
+(defn db
+  "Current immutable database value for an explicit or ambient connection."
+  {:malli/schema
+   [:function
+    [:=> [:cat]
+     [:or :seon.db/database-value :seon.error/value]]
+    [:=> [:cat :seon.db/connection]
+     [:or :seon.db/database-value :seon.error/value]]]}
+  ([]
+   (current-database-value))
+  ([connection]
+   (resolve-database-value connection)))
 
 (defn- aligned-query-arguments
   [explicit-database query-form arguments]
@@ -121,40 +196,43 @@
       :else nil)))
 
 (defn q
-  "Run a Datalog query over an explicit or current database value."
+  "Run a Datalog query over explicit inputs or the current database value."
   {:malli/schema
    [:=>
     [:catn
      [::query-or-database
       [:or
        :seon.db/database-value
-       [:sequential :seon.schema/value]
-       :map
-       :string]]
+       :seon.db/query
+       :seon.db/query-args]]
      [::arguments [:* :seon.schema/value]]]
     [:or :seon.schema/value :seon.error/value]]}
   [query-or-database & arguments]
   (let [explicit-database? (db.utils/db? query-or-database)
-        query-form
+        query-input
         (if explicit-database?
           (first arguments)
           query-or-database)
-        arguments
+        argument-inputs
         (if explicit-database?
           (rest arguments)
           arguments)]
     (try
-      (let [aligned
+      ;; This disambiguates a Datalog map query from Datahike's argument map
+      ;; before Seon decides where the ambient database belongs.
+      (let [normalized (query/normalize-q-input query-input argument-inputs)
+            aligned
             (aligned-query-arguments
              (when explicit-database? query-or-database)
-             query-form
-             arguments)]
+             (:query normalized)
+             (:args normalized))]
         (cond
           (error-value? aligned)
           aligned
 
           aligned
-          (let [response (apply d/q-with-evidence query-form aligned)]
+          (let [request (assoc normalized :args aligned)
+                response (d/q-with-evidence request)]
             (append-query-evidence! aligned response)
             (:datahike.query/result response))
 
@@ -162,83 +240,278 @@
           (error-value
            ::invalid-read
            "The query arguments do not align with its declared inputs."
-           {::query-form query-form
-            ::argument-count (count arguments)})))
-      (catch Throwable error
+           {::query-form (:query normalized)
+            ::argument-count (count (:args normalized))})))
+      (catch Throwable cause
         (when explicit-database?
-          (append-read-evidence!
-           {:seon.db/db query-or-database
-            :seon.db/source-argument-position 0
-            :datahike.read/dependency-plan :all}))
-        (dependency-error ::q error)))))
+          (append-database-evidence! query-or-database :all))
+        (dependency-error ::q cause)))))
 
-(defn- pull*
-  [database pattern entity-id]
+(defn- pull-call
+  [database arguments operation result-key]
   (if (error-value? database)
     database
     (try
-      (let [response (d/pull-with-evidence database pattern entity-id)]
+      (let [response (apply operation database arguments)]
         (append-pull-evidence! database response)
-        (:datahike.pull/result response))
-      (catch Throwable error
-        (append-read-evidence!
-         {:seon.db/db database
-          :seon.db/source-argument-position 0
-          :datahike.read/dependency-plan :all})
-        (dependency-error ::pull error)))))
+        (get response result-key))
+      (catch Throwable cause
+        (append-database-evidence! database :all)
+        (dependency-error result-key cause)))))
 
 (defn pull
   "Pull one entity over an explicit or current database value."
   {:malli/schema
    [:function
-    [:=>
-     [:cat
-      [:vector :seon.schema/value]
-      :seon.schema/value]
+    [:=> [:cat :seon.db/pull-options]
+     [:or :nil :map :seon.error/value]]
+    [:=> [:cat
+          [:or :seon.db/database-value :seon.db/pull-selector]
+          [:or :seon.db/pull-options :seon.db/entity-id]]
      [:or :nil :map :seon.error/value]]
     [:=>
-     [:cat
-      :seon.db/database-value
-      [:vector :seon.schema/value]
-      :seon.schema/value]
+     [:cat :seon.db/database-value
+      :seon.db/pull-selector
+      :seon.db/entity-id]
      [:or :nil :map :seon.error/value]]]}
-  ([pattern entity-id]
-   (pull* (current-database-value) pattern entity-id))
-  ([database pattern entity-id]
-   (pull* database pattern entity-id)))
-
-(defn- pull-many*
-  [database pattern entity-ids]
-  (if (error-value? database)
-    database
-    (try
-      (let [response
-            (d/pull-many-with-evidence database pattern entity-ids)]
-        (append-pull-evidence! database response)
-        (:datahike.pull-many/result response))
-      (catch Throwable error
-        (append-read-evidence!
-         {:seon.db/db database
-          :seon.db/source-argument-position 0
-          :datahike.read/dependency-plan :all})
-        (dependency-error ::pull-many error)))))
+  ([options]
+   (pull-call (current-database-value)
+              [options]
+              d/pull-with-evidence
+              :datahike.pull/result))
+  ([database-or-selector options-or-eid]
+   (if (db.utils/db? database-or-selector)
+     (pull-call database-or-selector
+                [options-or-eid]
+                d/pull-with-evidence
+                :datahike.pull/result)
+     (pull-call (current-database-value)
+                [database-or-selector options-or-eid]
+                d/pull-with-evidence
+                :datahike.pull/result)))
+  ([database selector entity-id]
+   (pull-call database
+              [selector entity-id]
+              d/pull-with-evidence
+              :datahike.pull/result)))
 
 (defn pull-many
-  "Pull input-aligned entities over an explicit or current database value."
+  "Pull aligned entities over an explicit or current database value."
   {:malli/schema
    [:function
-    [:=>
-     [:cat
-      [:vector :seon.schema/value]
-      [:sequential :seon.schema/value]]
+    [:=> [:cat :seon.db/pull-many-options]
      [:or [:vector [:or :nil :map]] :seon.error/value]]
     [:=>
      [:cat
-      :seon.db/database-value
-      [:vector :seon.schema/value]
-      [:sequential :seon.schema/value]]
+      [:or :seon.db/database-value :seon.db/pull-selector]
+      [:or :seon.db/pull-many-options
+       [:sequential :seon.db/entity-id]]]
+     [:or [:vector [:or :nil :map]] :seon.error/value]]
+    [:=>
+     [:cat :seon.db/database-value
+      :seon.db/pull-selector
+      [:sequential :seon.db/entity-id]]
      [:or [:vector [:or :nil :map]] :seon.error/value]]]}
-  ([pattern entity-ids]
-   (pull-many* (current-database-value) pattern entity-ids))
-  ([database pattern entity-ids]
-   (pull-many* database pattern entity-ids)))
+  ([options]
+   (pull-call (current-database-value)
+              [options]
+              d/pull-many-with-evidence
+              :datahike.pull-many/result))
+  ([database-or-selector options-or-eids]
+   (if (db.utils/db? database-or-selector)
+     (pull-call database-or-selector
+                [options-or-eids]
+                d/pull-many-with-evidence
+                :datahike.pull-many/result)
+     (pull-call (current-database-value)
+                [database-or-selector options-or-eids]
+                d/pull-many-with-evidence
+                :datahike.pull-many/result)))
+  ([database selector entity-ids]
+   (pull-call database
+              [selector entity-ids]
+              d/pull-many-with-evidence
+              :datahike.pull-many/result)))
+
+(defn- entity-call
+  [database entity-id]
+  ;; Wildcard pull is Datahike's eager ordinary-data form: component refs
+  ;; expand recursively and ordinary refs remain plain {:db/id ...} maps.
+  (pull-call database
+             [['*] entity-id]
+             d/pull-with-evidence
+             :datahike.pull/result))
+
+(defn entity
+  "Eager ordinary data for one entity in an explicit or current database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/entity-id]
+     [:or :nil :map :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.db/entity-id]
+     [:or :nil :map :seon.error/value]]]}
+  ([entity-id]
+   (entity-call (current-database-value) entity-id))
+  ([database entity-id]
+   (entity-call database entity-id)))
+
+(defn- datom->data
+  [datom]
+  {:e (:e datom)
+   :a (:a datom)
+   :v (:v datom)
+   :tx (:tx datom)
+   :added (:added datom)})
+
+(defn- datoms-call
+  [database arguments]
+  (if (error-value? database)
+    database
+    (try
+      ;; Datahike's index cursor is lazy and each element is a host Datom.
+      ;; Realize both layers here so no process-local cursor escapes to SCI.
+      (let [result (mapv datom->data (apply d/datoms database arguments))]
+        (append-database-evidence! database :all)
+        result)
+      (catch Throwable cause
+        (append-database-evidence! database :all)
+        (dependency-error ::datoms cause)))))
+
+(defn datoms
+  "Eager ordinary datoms from an explicit or current database value."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:or :seon.db/database-value :seon.db/index-lookup :keyword]
+     [:* :seon.schema/value]]
+    [:or :seon.db/datoms :seon.error/value]]}
+  [database-or-index & arguments]
+  (if (db.utils/db? database-or-index)
+    (datoms-call database-or-index arguments)
+    (datoms-call (current-database-value)
+                 (cons database-or-index arguments))))
+
+(defn- database-view
+  [operation database arguments]
+  (if (error-value? database)
+    database
+    (try
+      (let [result (apply operation database arguments)]
+        (append-database-evidence! database :all)
+        result)
+      (catch Throwable cause
+        (append-database-evidence! database :all)
+        (dependency-error ::temporal-read cause)))))
+
+(defn history
+  "Historical view of an explicit or current database value."
+  {:malli/schema
+   [:function
+    [:=> [:cat]
+     [:or :seon.db/database-value :seon.error/value]]
+    [:=> [:cat :seon.db/database-value]
+     [:or :seon.db/database-value :seon.error/value]]]}
+  ([]
+   (database-view d/history (current-database-value) []))
+  ([database]
+   (database-view d/history database [])))
+
+(defn as-of
+  "Database view at a time point from an explicit or current database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/time-point]
+     [:or :seon.db/database-value :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.db/time-point]
+     [:or :seon.db/database-value :seon.error/value]]]}
+  ([time-point]
+   (database-view d/as-of (current-database-value) [time-point]))
+  ([database time-point]
+   (database-view d/as-of database [time-point])))
+
+(defn since
+  "Database view since a time point from an explicit or current database."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/time-point]
+     [:or :seon.db/database-value :seon.error/value]]
+    [:=> [:cat :seon.db/database-value :seon.db/time-point]
+     [:or :seon.db/database-value :seon.error/value]]]}
+  ([time-point]
+   (database-view d/since (current-database-value) [time-point]))
+  ([database time-point]
+   (database-view d/since database [time-point])))
+
+;;; ---------------------------------------------------------------------------
+;;; Writes through the one synchronous transaction boundary
+;;; ---------------------------------------------------------------------------
+
+(defn- panic-on-core-error?
+  [connection]
+  (= :panic
+     (d/q '[:find ?mode .
+            :where [_ :seon.config/on-core-error ?mode]]
+          (d/db connection))))
+
+(defn- jdk-integers->long
+  [transaction]
+  (walk/postwalk
+   (fn [value]
+     (if (instance? Integer value)
+       (long value)
+       value))
+   transaction))
+
+(defn- transact-call
+  [connection transaction]
+  (if (error-value? connection)
+    connection
+    (try
+      (d/transact connection
+                  (schema.datahike/encode-transaction
+                   (jdk-integers->long transaction)))
+      (catch Throwable throwable
+        (let [data (error.refusal/refusal throwable)]
+          (cond
+            ;; A Seon transition refusal returns its own value verbatim.
+            (some? (:seon.error/kind data))
+            data
+
+            ;; A Datahike abort keeps the dependency's classification.
+            (some? (:error data))
+            {:seon.error/kind :seon.db/rejected
+             :seon.error/message
+             (or (ex-message throwable) "transaction rejected")
+             :seon.error/data data}
+
+            :else
+            (let [failure
+                  {:seon.error/kind :seon.db/unknown-failure
+                   :seon.error/message
+                   (or (ex-message throwable)
+                       (.getName (class throwable)))
+                   :seon.error/data (or data {})}]
+              (when (panic-on-core-error? connection)
+                (throw
+                 (ex-info (:seon.error/message failure)
+                          failure
+                          throwable)))
+              failure)))))))
+
+(defn transact!
+  "Commit a transaction through an explicit or ambient connection."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.store/transaction]
+     [:or :map :seon.error/value]]
+    [:=> [:cat :seon.db/connection :seon.store/transaction]
+     [:or :map :seon.error/value]]]}
+  ([transaction]
+   (transact-call (current-connection) transaction))
+  ([connection transaction]
+   (if (connection? connection)
+     (transact-call connection transaction)
+     (dependency-error
+      ::transact!
+      (ex-info "The explicit transaction connection is not live."
+               {::connection connection})))))

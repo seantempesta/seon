@@ -9,7 +9,7 @@
   test here removes it in a `finally`, and that discipline is the reason
   the whole gate is deterministic with this namespace in it.
 
-  THE FIXTURE IS THE ARCHIVED DEFECT. `seon.cluster.store/transact!`
+  THE FIXTURE IS THE ARCHIVED DEFECT. `seon.db/transact!`
   declared `[:vector :any]` while the run loop's `:open` branch passed
   Datahike's argument map, and it worked only because Datahike's own
   spec admits a map by accident — see

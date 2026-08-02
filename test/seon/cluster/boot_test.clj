@@ -27,6 +27,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
             [seon.program :as program]
@@ -577,7 +578,7 @@
         finish-pass (CountDownLatch. 1)
         stop-commanded (CountDownLatch. 1)
         transaction-outcome (promise)
-        original-transact! store/transact!
+        original-transact! db/transact!
         original-stop flow/stop]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name "stopping"
@@ -585,7 +586,7 @@
             connection (:seon.boot/cluster-connection instance)]
         (try
           (with-redefs
-            [store/transact!
+            [db/transact!
              (fn [conn tx-data]
                (.countDown pass-entered)
                (.await finish-pass)
@@ -594,7 +595,7 @@
                  outcome))
              work/next-agent-work
              (fn [_db _request]
-               (store/transact! connection
+               (db/transact! connection
                                 [{:seon.cluster.agent/id "root"}])
                nil)
              flow/stop

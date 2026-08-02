@@ -34,6 +34,7 @@
             [seon.cluster.store :as store]
             [clojure.string :as str]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
             [seon.operator.runtime :as operator.runtime
@@ -806,7 +807,7 @@
                    :where [?entity :seon.db.process/id ?process]]
                  @connection process)
     (require-committed!
-     (store/transact!
+     (db/transact!
       connection
       {:tx-data [{:seon.db.process/id process}]
        :tx-meta {:seon.db/process
@@ -858,7 +859,7 @@
                         (update :seon.cluster/toolkit set))]
     (when-not (= expected-current current)
       (require-committed!
-       (store/transact!
+       (db/transact!
         connection
         {:tx-data
          (cond-> []
@@ -909,7 +910,7 @@
          :seon.cluster.agent/creation-request]
     [:or [:map] :seon.error/value]]}
   [connection process request]
-  (store/transact!
+  (db/transact!
    connection
    {:tx-data [[:db.fn/call #'ensure-entity-call
                process (java.util.Date.) request]]
@@ -1003,7 +1004,7 @@
   render proc — attributes to NO run, and that is correct rather than
   missing: it is not a run's fault. The serial-era fallback query is
   gone (F2 §3.3). It goes through
-  `store/transact!`, which never throws, and it ignores its own
+  `db/transact!`, which never throws, and it ignores its own
   outcome — if the database refuses the fault, the answer is not to
   fault about the fault (the recursion fence)."
   [connection cluster-name process caps fault]
@@ -1012,7 +1013,7 @@
           dials (config/effective db cluster-name)
           agent-id (:seon.cluster.agent/id fault)
           run-id (when agent-id (tagged-run db agent-id process))]
-      (store/transact!
+      (db/transact!
        connection
        (error/commit-tx
         db

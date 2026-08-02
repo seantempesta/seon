@@ -30,9 +30,9 @@
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
-            [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.instrument :as instrument]
             [sci.core :as sci.core]
             [seon.sci.admit :as admit]
@@ -650,7 +650,7 @@
                            'seon.sci.eval/evaluate)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)
-            transact! store/transact!]
+            transact! db/transact!]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -660,7 +660,7 @@
            (fn [request]
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))
-           store/transact!
+           db/transact!
            (fn [target transaction]
              (let [tx-data (if (map? transaction)
                              (:tx-data transaction)
@@ -747,7 +747,7 @@
                                'seon.sci.eval/evaluate)
                 connection (:seon.store/branch-connection cluster)
                 calls (atom [])
-                transact! store/transact!
+                transact! db/transact!
                 original-install! sci.eval/install-program-row!
                 installations (atom [])]
             (d/transact
@@ -774,7 +774,7 @@
                   (if (= 1 (count @calls))
                     "(ns-unmap (quote seon.config) (quote defaults))"
                     "(my.run/complete \"recovered\")")})
-               store/transact!
+               db/transact!
                (fn [target transaction]
                  (let [tx-data (if (map? transaction)
                                  (:tx-data transaction)
@@ -997,10 +997,10 @@
           (let [receipt
                 (running-refusal-receipt! cluster "injected-commit")
                 run-id (:seon.cluster.run/id receipt)
-                transact! store/transact!
+                transact! db/transact!
                 failure
                 (with-redefs
-                  [store/transact!
+                  [db/transact!
                    (fn [target transaction]
                      (if (transition-transaction?
                           transaction #'run/receipt-refusal-call)
@@ -1270,7 +1270,7 @@
                            'seon.sci.eval/evaluate)
             connection (:seon.store/branch-connection cluster)
             schema-key :my.agents.agent-a/not-committed
-            transact! store/transact!
+            transact! db/transact!
             install! sci.eval/install-program-row!
             installations (atom [])
             global-forms (schema/registered-schemas)]
@@ -1282,7 +1282,7 @@
                "(require '[seon.schema :as schema])\n"
                "(schema/register! ::not-committed "
                "(vector :int {:seon.db/index true}))")})
-           store/transact!
+           db/transact!
            (fn [target transaction]
              (let [tx-data (if (map? transaction)
                              (:tx-data transaction)
@@ -1544,7 +1544,7 @@
                       (str
                        "(my.run/complete "
                        "(str (my.agents.agent-a/refused-live 41)))")])
-            transact! store/transact!]
+            transact! db/transact!]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1552,7 +1552,7 @@
               (let [reply (first @replies)]
                 (swap! replies subvec 1)
                 reply)})
-           store/transact!
+           db/transact!
            (fn [target transaction]
              (let [tx-data (if (map? transaction)
                              (:tx-data transaction)

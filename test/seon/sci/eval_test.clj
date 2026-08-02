@@ -917,8 +917,7 @@
                 write
                 (evaluate
                  ctx-a
-                 (str "(seon.cluster.store/transact! "
-                      "@#'seon.db/*conn* "
+                 (str "(seon.db/transact! "
                       "[{:seon.cluster.message/id \"ambient-message\"}])"))
                 read-written
                 (evaluate
@@ -929,8 +928,7 @@
                 rejected
                 (evaluate
                  ctx-a
-                 (str "(seon.cluster.store/transact! "
-                      "@#'seon.db/*conn* "
+                 (str "(seon.db/transact! "
                       "[{:seon.sci.eval-test/undeclared true}])"))
                 unbound-after
                 (binding [db/*conn* connection-b]

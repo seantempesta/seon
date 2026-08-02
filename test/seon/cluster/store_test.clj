@@ -18,6 +18,7 @@
             [konserve.filestore :as filestore]
             [konserve.utils :as konserve.utils]
             [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.schema]
             [seon.test-support :as test-support])
   (:import [java.io File]
@@ -191,7 +192,7 @@
           (d/transact connection probe-schema)
           (testing "Integer values commit from entity maps and datom vectors"
             (let [outcome
-                  (store/transact!
+                  (db/transact!
                    connection
                    [{:seon.store.test/marker "entity-map"
                      :seon.store.test/measurement (Integer/valueOf 7)}
@@ -214,7 +215,7 @@
               (is (every? #(identical? Long (class %)) (vals stored)))))
           (testing "Double remains invalid for a long attribute"
             (let [outcome
-                  (store/transact!
+                  (db/transact!
                    connection
                    [{:seon.store.test/marker "double"
                      :seon.store.test/measurement (Double/valueOf 9.0)}])]

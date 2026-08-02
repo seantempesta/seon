@@ -2629,8 +2629,57 @@
  ; its maintained `datahike.db.utils/db?` predicate covers current, as-of,
  ; since, and history values. The generator constructs all four variants.
  :seon.db/database-value
- [:fn {:gen/gen seon.cluster.store/database-value-generator}
-  seon.cluster.store/database-value?]
+ [:fn {:gen/gen seon.db/database-value-generator}
+  seon.db/database-value?]
+ :seon.db/connection
+ [:fn {:gen/gen seon.db/connection-generator} seon.db/connection?]
+ ; Datahike's own read arguments, named once for every public contract.
+ ; The unqualified option keys belong to the dependency
+ ; (`reference-code/datahike/src/datahike/api/types.cljc:102-130,175-179`).
+ :seon.db/query
+ [:or [:vector :seon.schema/value] :map :string]
+ :seon.db/query-args
+ [:map {:closed true}
+  [:query :seon.db/query]
+  [:args {:optional true} [:sequential :seon.schema/value]]
+  [:request-id {:optional true} :string]
+  [:limit {:optional true} :int]
+  [:offset {:optional true} :int]
+  [:max-work {:optional true} [:int {:min 1}]]
+  [:max-results {:optional true} [:int {:min 1}]]
+  [:max-result-weight {:optional true} [:int {:min 1}]]]
+ :seon.db/entity-id
+ [:or :int [:sequential :seon.schema/value] :keyword]
+ :seon.db/pull-selector [:vector :seon.schema/value]
+ :seon.db/pull-options
+ [:map {:closed true}
+  [:selector :seon.db/pull-selector]
+  [:eid :seon.db/entity-id]
+  [:max-work {:optional true} [:int {:min 1}]]
+  [:max-results {:optional true} [:int {:min 1}]]
+  [:max-result-weight {:optional true} [:int {:min 1}]]]
+ :seon.db/pull-many-options
+ [:map {:closed true}
+  [:selector :seon.db/pull-selector]
+  [:eids [:sequential :seon.db/entity-id]]
+  [:max-work {:optional true} [:int {:min 1}]]
+  [:max-results {:optional true} [:int {:min 1}]]
+  [:max-result-weight {:optional true} [:int {:min 1}]]]
+ :seon.db/index-lookup
+ [:map {:closed true}
+  [:index [:enum :eavt :aevt :avet]]
+  [:components {:optional true}
+   [:or :nil [:sequential :seon.schema/value]]]]
+ ; An eager ordinary projection of Datahike's Datom lookup keys.
+ :seon.db/datom
+ [:map {:closed true}
+  [:e :seon.schema/value]
+  [:a :seon.schema/value]
+  [:v :seon.schema/value]
+  [:tx :int]
+  [:added :boolean]]
+ :seon.db/datoms [:vector :seon.db/datom]
+ :seon.db/time-point [:or :inst :int]
  ; Transaction operations are dependency-owned open data: entity maps or
  ; Datahike operation vectors. Their values are genuinely polymorphic at this
  ; boundary, so the one named `:seon.schema/value` exception is referenced

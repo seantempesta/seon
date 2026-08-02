@@ -38,21 +38,43 @@
            (is (= expected (db/q database exam-query)))
            (is (= expected (db/q exam-query database)))))
        (binding [db/*conn* connection]
+         (testing "db resolves explicit and ambient connections"
+           (is (= (db/db connection) (db/db))))
          (testing "q inserts current database at source position zero"
            (is (= expected (db/q exam-query)))
            (is (= (db/q database exam-query)
                   (db/q exam-query))))
+         (testing "q accepts Datahike's argument map explicitly and ambiently"
+           (is (= expected
+                  (db/q database {:query exam-query})
+                  (db/q {:query exam-query})))
+           (is (= (db/q database nonzero-source-query "my.message")
+                  (db/q database {:query nonzero-source-query
+                                  :args ["my.message"]})
+                  (db/q {:query nonzero-source-query
+                         :args ["my.message"]}))))
          (testing "q inserts current database at the parsed source position"
            (is (= (db/q database nonzero-source-query "my.message")
                   (db/q nonzero-source-query "my.message"))))
          (testing "pull has equivalent explicit and current forms"
            (is (= (db/pull database schema-pattern schema-ref)
-                  (db/pull schema-pattern schema-ref))))
+                  (db/pull schema-pattern schema-ref)))
+           (is (= (db/pull database {:selector schema-pattern
+                                     :eid schema-ref})
+                  (db/pull {:selector schema-pattern
+                            :eid schema-ref}))))
          (testing "pull-many has equivalent explicit and current forms"
            (is (= (db/pull-many database schema-pattern
                                 [schema-ref missing-schema-ref schema-ref])
                   (db/pull-many schema-pattern
-                                [schema-ref missing-schema-ref schema-ref])))))))))
+                                [schema-ref missing-schema-ref schema-ref])))
+           (is (= (db/pull-many
+                   database
+                   {:selector schema-pattern
+                    :eids [schema-ref missing-schema-ref schema-ref]})
+                  (db/pull-many
+                   {:selector schema-pattern
+                    :eids [schema-ref missing-schema-ref schema-ref]})))))))))
 
 (deftest current-database-resolves-once-per-call
   (test-support/with-database
@@ -122,13 +144,78 @@
                (pull-many-with-evidence database schema-pattern entity-ids))
               (:datahike.read/dependency-plan (first @entries))))))))
 
-(deftest slice-one-exposes-no-lazy-entity-read
+(deftest entity-and-datoms-return-eager-ordinary-data
   (test-support/with-database
    (fn [connection]
-     (let [pulled (db/pull @connection schema-pattern schema-ref)]
-       (is (nil? (ns-resolve 'seon.db 'entity)))
-       (is (map? pulled))
-       (is (not (instance? datahike.impl.entity.Entity pulled)))))))
+     (let [database @connection
+           explicit-entity (db/entity database schema-ref)
+           ambient-entity (binding [db/*conn* connection]
+                            (db/entity schema-ref))
+           explicit-datoms (db/datoms database :avet :seon.schema/key)
+           mapped-datoms (db/datoms database
+                                    {:index :avet
+                                     :components [:seon.schema/key]})
+           ambient-datoms (binding [db/*conn* connection]
+                            (db/datoms {:index :avet
+                                       :components [:seon.schema/key]}))]
+       (is (= explicit-entity ambient-entity))
+       (is (map? explicit-entity))
+       (is (not-any? #(instance? datahike.impl.entity.Entity %)
+                     (tree-seq coll? seq explicit-entity)))
+       (is (= explicit-datoms mapped-datoms ambient-datoms))
+       (is (vector? explicit-datoms))
+       (is (seq explicit-datoms))
+       (is (every? #(= #{:e :a :v :tx :added} (set (keys %)))
+                   explicit-datoms))
+       (is (not-any? #(instance? datahike.datom.Datom %)
+                     explicit-datoms))))))
+
+(deftest transact-supports-both-native-interfaces-and-ambient-custody
+  (test-support/with-database
+   (fn [connection]
+     (binding [db/*conn* connection]
+       (let [positional
+             (db/transact!
+              [{:seon.cluster.message/id "db-test-positional"}])
+             argument-map
+             (db/transact!
+              {:tx-data
+               [{:seon.cluster.message/id "db-test-argument-map"}]
+               :tx-meta {:seon.db/user "db-test"}})
+             explicit
+             (db/transact!
+              connection
+              {:tx-data
+               [{:seon.cluster.message/id "db-test-explicit-map"}]})]
+         (is (every? #(contains? % :db-after)
+                     [positional argument-map explicit]))
+         (is (= #{"db-test-positional"
+                  "db-test-argument-map"
+                  "db-test-explicit-map"}
+                (set
+                 (db/q
+                  '[:find [?id ...]
+                    :where [_ :seon.cluster.message/id ?id]])))))))))
+
+(deftest temporal-reads-use-explicit-and-ambient-database-values
+  (test-support/with-database
+   (fn [connection]
+     (let [before @connection
+           before-t (:t before)]
+       (db/transact! connection
+                     [{:seon.cluster.message/id "db-test-temporal"}])
+       (let [after @connection]
+         (binding [db/*conn* connection]
+           (is (= (db/q exam-query (db/history after))
+                  (db/q exam-query (db/history))))
+           (is (= (db/q exam-query (db/as-of after before-t))
+                  (db/q exam-query (db/as-of before-t))))
+           (is (= (db/q '[:find [?id ...]
+                          :where [_ :seon.cluster.message/id ?id]]
+                        (db/since after before-t))
+                  (db/q '[:find [?id ...]
+                          :where [_ :seon.cluster.message/id ?id]]
+                        (db/since before-t))))))))))
 
 (deftest the-exam-query-returns-the-fixtures-true-count
   (test-support/with-database

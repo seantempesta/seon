@@ -1,5 +1,5 @@
 (ns seon.cluster.store
-  "Owns Datahike stores, branch connections, and transaction admission.
+  "Owns Datahike store, branch-connection, and flock custody.
 
   `open-store!` canonicalizes a store directory and acquires its
   non-blocking exclusive flock before checking or creating the
@@ -10,23 +10,19 @@
 
   `open-branch!` opens one existing roster branch and refuses a second
   connection to that branch in the process. Datahike's `:self` writer
-  owns transaction serialization. `transact!` returns transaction
-  reports or classified error values, with the configured core-error
-  mode deciding whether an unclassified failure also panics."
+  owns transaction serialization; `seon.db/transact!` owns transaction
+  admission and failure values."
   (:require [clojure.java.io :as io]
-            [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connections :as connections]
-            [datahike.db.utils :as db.utils]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
-            [seon.error :as error]
+            [seon.db :as db]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.channels FileChannel FileLock OverlappingFileLockException]
            [java.nio.file OpenOption StandardOpenOption]))
@@ -42,9 +38,7 @@
   (reference-code/datahike/src/datahike/connector.cljc:104)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (and (instance? datahike.connector.Connection value)
-       (some? (:wrapped-atom value))
-       (not= @(:wrapped-atom value) :released)))
+  (db/connection? value))
 
 (defn connection-object?
   "True for a Datahike connection, live or RELEASED.
@@ -55,7 +49,7 @@
   receives a released one. Requiring liveness there made the contract
   forbid the case the function exists to handle, which instrumentation
   found on its first run. Liveness stays required where work is done
-  through it (`transact!`, the loop handle, the wake listener)."
+  through it (`seon.db/transact!`, the loop handle, the wake listener)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (instance? datahike.connector.Connection value))
@@ -71,7 +65,7 @@
   "True for any Datahike database value."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (db.utils/db? value))
+  (db/database-value? value))
 
 (schema/register-core-predicate! 'seon.cluster.store/connection-object?
                                  connection-object?)
@@ -82,13 +76,6 @@
                                  file-lock?)
 (schema/register-core-predicate! 'seon.cluster.store/database-value?
                                  database-value?)
-
-(defn- fresh-connection
-  []
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}]
-    (d/create-database configuration)
-    (d/connect configuration)))
 
 (defn- fresh-file-lock
   []
@@ -109,24 +96,12 @@
           {:seon.error/kind :core-bug
            ::lock-file (.getPath lock-file)})))))
 
-(def connection-generator
-  ;; Generated lifecycles may release their connection, so every sample owns
-  ;; a new one rather than mutating a singleton used by later samples.
-  (gen/fmap (fn [_] (fresh-connection)) (gen/return nil)))
+(def connection-generator db/connection-generator)
 (def file-lock-generator
   ;; Each generated store lifecycle owns and releases its lock. Reusing one
   ;; singleton made later samples invalid after the first generated stop!.
   (gen/fmap (fn [_] (fresh-file-lock)) (gen/return nil)))
-(def database-value-generator
-  (gen/fmap
-   (fn [variant]
-     (let [database @(fresh-connection)]
-       (case variant
-         :current database
-         :as-of (d/as-of database (:max-tx database))
-         :since (d/since database 0)
-         :history (d/history database))))
-   (gen/elements [:current :as-of :since :history])))
+(def database-value-generator db/database-value-generator)
 
 (schema.edn/load! {})
 
@@ -392,110 +367,3 @@
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
       (d/connect configuration))))
-
-;;; ---------------------------------------------------------------------------
-;;; Writing — ACCRETION (drafted 2026-07-27, N3 package 2, from n3-plan §8)
-;;;
-;;; New functions only; nothing above this line changed. The store owns
-;;; "how we write", so the one transaction wrapper and its refusal
-;;; classification live here rather than in a second owner.
-;;;
-;;; THE ISSUE'S CONCLUSION WAS WRONG, and probe D shows why: the
-;;; transition's own ex-data is INTACT at the third link of the cause
-;;; chain. `throwable-promise`'s deref
-;;; (`reference-code/datahike/src/datahike/tools.cljc:93-107`) wraps the
-;;; ExecutionException in a fresh ex-info with empty data — it WRAPS, it
-;;; does not discard. Datahike's own aborts (`:transact/cas`,
-;;; `:transact/schema`) are equally distinguishable by value. No fork
-;;; change is required; the issue note is corrected at seal.
-;;; ---------------------------------------------------------------------------
-
-(defn- panic-on-core-error?
-  "True when this branch's config says development panics (R41).
-  Read straight off the connection's own database value: there is one
-  config singleton per cluster branch, so the dial needs no cluster name
-  to find. A database with no config yet is a database before boot
-  finished — it records rather than panics, because the dial has not
-  been applied, not because the failure is acceptable."
-  [connection]
-  (= :panic
-     (d/q '[:find ?mode .
-            :where [_ :seon.config/on-core-error ?mode]]
-          @connection)))
-
-(defn- jdk-integers->long
-  "Change exactly `java.lang.Integer` values to `java.lang.Long`."
-  [tx-data]
-  (walk/postwalk
-   (fn [value]
-     (if (instance? Integer value)
-       (long value)
-       value))
-   tx-data))
-
-(defn transact!
-  "Commit tx-data. Returns a value on success AND on refusal; never throws.
-  Nothing throws into the run loop, so this is the one door every write
-  goes through. Before Datahike sees the transaction, this boundary walks
-  its data and changes exactly `java.lang.Integer` values to Long; other
-  numeric classes stay untouched and Datahike continues to refuse them.
-  Four outcomes, four shapes:
-
-  - committed → the transaction report;
-  - OUR transition refused → the transition's own map, verbatim, under
-    `{:seon.error/kind :seon.cluster.run/refused ::rule … ::transition …}`
-    — a caller can branch on the exact rule it predicted, which is what
-    makes a fence test honest rather than green-for-the-wrong-reason;
-  - datahike aborted (`:transact/cas`, `:transact/schema`, …) →
-    `{:seon.error/kind :seon.db/rejected :seon.error/data <its own data>}`;
-  - nothing classifiable → `{:seon.error/kind :seon.db/unknown-failure …}`
-    and, on the `:seon.config/on-core-error` dial, dev PANICS. An
-    unclassifiable transaction failure is a bug, not a condition, and
-    absorbing it is how a typo passes for a fence.
-
-  `tx-data` is a VECTOR or Datahike's own argument map (`:tx-data` +
-  `:tx-meta`, its vocabulary, not ours). The map form was already on the
-  live critical path — the run loop's `:open` branch carries the trigger
-  as transaction metadata — while this contract said vector, and it
-  passed only because Datahike's `STransactions` spec accidentally
-  admits a map (`spec.cljc:66-67`: every map entry is a `coll?`). The
-  contract now says what the callers do; instrumentation would have
-  caught it, which is the whole argument for instrumentation.
-
-  The cause-chain walk this uses lives in `seon.error/refusal`: it is
-  about throwables, not stores, and moving it there made the dependency
-  one-way (`store -> error`) so the error owner can stay pure."
-  {:malli/schema [:=> [:cat :seon.store/branch-connection
-                       :seon.store/transaction]
-                  [:or [:map] :seon.error/value]]}
-  [connection tx-data]
-  (try
-    (d/transact connection
-                (schema.datahike/encode-transaction
-                 (jdk-integers->long tx-data)))
-    (catch Throwable throwable
-      (let [data (error/refusal throwable)]
-        (cond
-          ;; OUR transition: its own map, verbatim. The caller branches
-          ;; on the exact rule it predicted.
-          (some? (:seon.error/kind data))
-          data
-
-          ;; datahike's own abort, distinguishable BY VALUE
-          (some? (:error data))
-          {:seon.error/kind :seon.db/rejected
-           :seon.error/message (or (ex-message throwable) "transaction rejected")
-           :seon.error/data data}
-
-          ;; nothing classifiable. This is a bug, not a condition —
-          ;; absorbing it is how a typo passes for a fence — so it is
-          ;; loud by the one dial rather than by judgement here.
-          :else
-          (let [failure {:seon.error/kind :seon.db/unknown-failure
-                         :seon.error/message
-                         (or (ex-message throwable)
-                             (.getName (class throwable)))
-                         :seon.error/data (or data {})}]
-            (when (panic-on-core-error? connection)
-              (throw (ex-info (:seon.error/message failure) failure throwable)))
-            failure))))))
