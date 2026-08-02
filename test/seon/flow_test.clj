@@ -1,5 +1,6 @@
 (ns seon.flow-test
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow-monitor :as flow-monitor]
             [clojure.datafy :as datafy]
@@ -807,12 +808,24 @@
                     [:eval ::sut/submission]
                     [(throwing-work-message 0)])
       (test-support/await-event! commit-entered ::fault-commit-entered)
-      (let [stopped (future (sut/stop-error-fanout! fanout))]
-        (is (= ::still-stopping
-               (deref stopped 1000 ::still-stopping))
+      (let [awaiting-completion (CountDownLatch. 1)
+            completion (::sut/completion fanout)
+            observed-completion
+            (reify async.impl/ReadPort
+              (take! [_ handler]
+                (.countDown awaiting-completion)
+                (async.impl/take! completion handler)))
+            stopped
+            (future
+              (sut/stop-error-fanout!
+               (assoc fanout ::sut/completion observed-completion)))]
+        (test-support/await-event!
+         awaiting-completion
+         ::fanout-awaiting-completion)
+        (is (false? (realized? stopped))
             "the fanout keeps its database dependency while commit is active")
         (.countDown finish-commit)
-        (is (true? (deref stopped 5000 ::stop-stuck))
+        (is (true? (test-support/await-event! stopped ::fanout-stopped))
             "the fault proc publishes completion after the commit returns"))
       (finally
         (.countDown finish-commit)
