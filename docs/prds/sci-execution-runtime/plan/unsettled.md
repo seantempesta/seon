@@ -55,6 +55,66 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 11 — 2026-08-02 midday, FULL HANDOFF (orchestrator near
+token limit; next session resumes from THIS block + `bin/codex-agent
+status` + git log).**
+
+STATE: gate was GREEN 804/4003/0 pre-PRD-wave; PRD refactor mid-flight
+so the next full gate comes at its close. Rulings #36-#40 sealed today
+(Inspect+tests-as-grading; provider seam+guardrails; assigned-ns eval;
+TOOL-LESS — forms are the interface; keep-history per-cluster dial) +
+the NO-COINED-WORDS style order (call things by code names). Jar
+artifact LANDED: cold 20.7s (12.1 load + 7.4 install, measured 3x),
+reopen 13.4s (56ms idempotence), digest `e7a6f69…`, embedded prepped
+rows (option 1), fusion+diff-buf on fresh stores. KEY CORRECTION: the
+"2.23s source load" is a JULY fossil — matched measurement TODAY:
+11.8s dev vs 12.1s jar (identical; both compile source; tree grew
+10x). That BREACHES the ten-second law → `load-time-incident` lane
+dispatched (profile per-namespace; likely fix = AOT class cache with
+newer-wins source preference; CAVEAT: AOT'd go blocks compile to IOC
+on our core.async pin — vthreads property inert, reverted upstream).
+AOT-for-jar downsides recorded in conversation: build-time execution
+of top-level forms; binary coupling; the go/IOC pin issue (advance pin
+= prerequisite); ship classes+source to keep hot reload.
+
+IN FLIGHT (7 lanes, all resumable by name): (1) `prd-loop-split`
+S1-S3 committed (`f978179a8` chars-tests mutation-proven,
+`f75623175`, `d1acee726`, `9e41255fa`), S4-S6 finishing + live
+same-receipt-datoms proof owed. (2) `prd-eval-split` falsifier
+`85af34005` + S7 `ed7d69f05` + S8 `0c5a657e0` committed, S9
+implemented-green awaiting its commit + live proof (I unblocked its
+gate by contracting seon.artifact/-main `897fc86d1`). (3)
+`inspect-slice-1` THIRD gpqa attempt RUNNING (provider+task+guardrails
+landed `c6d79f817`; the two prior blocks were operator --root launch
+sites, class-dissolved at `b98728d5a` start-child-jvm!); report owes
+verdict/accuracy/store-growth. (4) `bootstrap-facts-conversion`:
+resources/seon/bootstrap.edn shipped default + per-cluster plan facts
+(ordinal+source rows, the run.form pattern) + seed-tx reads facts +
+digest-on-read; CORRECTED: schema block into existing run.edn, NO new
+schema file. (5) `schema-edn-consolidation` executing ruling #14 (36
+files → ONE resource; the GLOB MACHINERY DIES — single io/resource
+read; ancestor digest hashes one file; ORCHESTRATOR OWES the 4-point
+independent verification at landing: rg no-directory-refs, loader
+shape, fresh-root boot, duplicate-refusal across sections). (6)
+`load-time-incident` above. (7) `r1-deletion-wave` COMPLETE except
+final full suite (blocked on PRD churn — rerun at wave close); closed
+3 blockers; bin/acme repointed; bin/css verified live.
+
+PENDING THE OWNER: his SPECIFIC bootstrap critique ("pretty terrible"
+— known weaknesses listed in conversation: dense help prose, form-6
+line noise, send never exercised, no pull example, one refusal class
+of five); firing the full O1-O5 matrix (pennies; do after
+bootstrap-facts lands so digests key the A/B); the PRD-wave completion
+review. QUEUED NEXT: ruling #38 assigned-ns slice (behind PRD lanes —
+edits agent-namespace in eval.clj + reply-freeze in loop.cljc);
+AGENT WRITE SURFACE design (the named biggest hole — commission it);
+keep-history dial implementation; addendum-8 residue queue.
+ORCHESTRATOR PROCESS NOTES for the successor: launch/resume codex
+lanes BARE (no tail/filters — wrapper stdout IS the owner's panel;
+relapsed twice, memory updated); lane heartbeat = commits not process;
+weather rule 60-90s x5 in every spec; independent verification before
+accepting big returns.
+
 **ADDENDUM 10 — 2026-08-02 morning.** Rulings #38-#40 sealed (assigned-
 namespace eval; tool-less — forms are the interface; keep-history as a
 per-cluster dial) + the no-coined-words style order. Ruling #27 is now
