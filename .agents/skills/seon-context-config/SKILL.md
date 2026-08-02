@@ -87,9 +87,11 @@ input; the database row is runtime truth.
 Applying a row does not magically rebuild a proc, executor, web server, or
 other process-local structure.
 
-The registered-dial census and its owning consumer are checked by
-`test/seon/config_application_test.clj:17-150`. Read the source boundary too;
-the grouped current matrix is:
+`test/seon/config_application_test.clj:17-150` owns the recurring census
+mechanism: it compares the exact default-manifest key set with an application
+ledger and fails on any missing or extra consumer row. Treat that equality
+check as the gate; never copy its momentary count into this skill. Read the
+source boundary too; the acquisition matrix is:
 
 | acquisition | dials | source and update truth |
 |---|---|---|
@@ -98,6 +100,7 @@ the grouped current matrix is:
 | graph-arm-time loop handle | result caps, eval time limit, message-chain limit; one copy of recurrence/escalation and core-error mode | `loop-handle` reads one effective map and carries these values into agent graphs (`src/seon/cluster.clj:1043-1077,1118-1125`) |
 | per-episode pass | maximum runs per episode | the work derivation queries the current database value, so the next pass sees the change (`src/seon/cluster/work.cljc:424-441`) |
 | per-turn | every registered AI setting plus the agent overlay | the `:call` branch resolves both from one immutable database value once per turn; a config apply or override changes the next turn, never the attempts already derived for this turn (`src/seon/cluster/loop.cljc:975-989`) |
+| per-terminal evaluation | session-value blob threshold | `store-session-values!` reads the threshold from the current database immediately before terminal transaction data is committed; the next terminal evaluation sees an applied change (`src/seon/cluster/loop.cljc:432-458,1411-1424`) |
 | per-render pass/request | render coalescing; data-drill collection page size | the render proc queries coalescing before each pass; `/data` reads page size from the request's database value (`src/seon/render/web.clj:473-480,636-662,1126-1145`) |
 | explicit walk fallback | result caps | an agent walk normally receives the arm-time caps in its ambient context; only a call lacking those caps re-reads the current cluster config (`src/seon/render.clj:169-211`) |
 | program-row installation | core-error mode and result caps | installing a contracted interpreted function reads the committed row's database value before wrapping it, both on cold acquisition and after a successful terminal transaction (`src/seon/sci/eval.clj:762-786,789-895`) |
