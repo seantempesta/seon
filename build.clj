@@ -20,6 +20,8 @@
 (def launcher-file "target/seon")
 (def initialization-resource
   "seon/artifact/current-src.edn")
+(def initialization-build-file
+  "target/current-src-build.edn")
 
 (def jvm-options
   ["--add-modules" "jdk.incubator.vector"
@@ -52,7 +54,10 @@
 
 (defn- initialization-pages
   []
-  (let [expression
+  (let [output (.getCanonicalPath (io/file initialization-build-file))
+        _ (.mkdirs (.getParentFile (io/file output)))
+        _ (b/delete {:path output})
+        expression
         (str
          "(do "
          "(require 'clojure.java.io 'clojure.string "
@@ -68,11 +73,17 @@
          "(str (.relativize root# (.toPath (clojure.java.io/file path#)))) "
          "\"\\\\\" \"/\")))) "
          "(:seon.fn.manifest/artifacts manifest#)) "
-         "portable# (seon.fn/replace-manifest-artifacts manifest# artifacts#)] "
-         "(prn {:seon.source/digest "
+         "portable# (seon.fn/replace-manifest-artifacts "
+         "(assoc manifest# "
+         ":seon.fn.manifest/roots seon.fn/source-roots "
+         ":seon.fn.manifest/artifacts []) artifacts#)] "
+         "(let [pages# {:seon.source/digest "
          "(seon.cluster.source/digest "
          "{:seon.source/roots [\"src\" \"test\" \"resources\"]}) "
-         ":seon.fn/manifest portable#})) "
+         ":seon.fn/manifest portable#}] "
+         "(spit " (pr-str output) " (str (pr-str pages#) \"\\n\")) "
+         "(prn {:seon.source/digest (:seon.source/digest pages#) "
+         ":seon.fn/artifact-count (count artifacts#)}))) "
          "(shutdown-agents))")
         result
         (checked-process!
@@ -80,7 +91,11 @@
           :out :capture
           :err :capture}
          "Fresh initialization-page generation failed")]
-    (edn/read-string (last (str/split-lines (:out result))))))
+    (when-not (str/includes? (:out result) ":seon.fn/artifact-count")
+      (throw (ex-info "Fresh initialization pages returned no summary."
+                      {:out (:out result)
+                       :err (:err result)})))
+    (edn/read-string (slurp output))))
 
 (defn- write-artifact-resources!
   [pages]
