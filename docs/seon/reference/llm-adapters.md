@@ -14,10 +14,13 @@ workers, or `:seon.ai/config` singleton in the fresh tree.
 
 ## Configuration authority
 
-AI settings are ordinary `:seon.config.ai/*` dials declared in
-`resources/seon/schema/config.edn`. `config/default.edn` owns shipped values and
-their provenance. A sparse manifest overrides those defaults and is applied
-through the standard config path:
+AI settings are ordinary `:seon.config.ai/*` dials declared by the admitted
+schema resources. `resources/seon/schema/config.edn` declares the provider,
+request, backup, and retry dials; `resources/seon/schema/ai.edn` declares the
+mutually exclusive literal `:seon.config.ai/no-auth` dial alongside the request
+unions that consume it. `config/default.edn` owns shipped values and their
+provenance. A sparse manifest overrides those defaults and is applied through
+the standard config path:
 
 ```sh
 bin/seon start research --config config/research.edn
@@ -174,8 +177,9 @@ deleted from this maintained reference.
   leaf, streaming fold, disposition, and usage normalization.
 - `src/seon/cluster/loop.cljc` — one-resolution-per-turn and durable attempt
   transactions.
-- `resources/seon/schema/config.edn` — current dials and per-agent metadata.
-- `resources/seon/schema/ai.edn` — request, completion, target, retry, evidence,
-  and attempt schemas.
+- `resources/seon/schema/config.edn` — provider, request, backup, and retry
+  dials plus their per-agent metadata.
+- `resources/seon/schema/ai.edn` — the `no-auth` dial plus request, completion,
+  target, retry, evidence, and attempt schemas.
 - `src/seon/schema/edn.clj` — schema-derived effective and agent-overlay maps.
 - `config/default.edn` — shipped decisions and provenance.

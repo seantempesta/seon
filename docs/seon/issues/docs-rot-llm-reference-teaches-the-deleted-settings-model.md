@@ -84,8 +84,10 @@ configuration surface.
 Proof:
 
 - `seon.dev.markdown/validate-file` reports no violations.
-- Every documented dial exists in `resources/seon/schema/config.edn`; every
-  shipped value is copied from `config/default.edn`.
+- Every documented dial exists in the admitted schema resources
+  (`resources/seon/schema/config.edn`, with the literal `no-auth` dial in
+  `resources/seon/schema/ai.edn`); every shipped value is copied from
+  `config/default.edn`.
 - Resolution and attempt claims were checked against
   `src/seon/ai.cljc`, `src/seon/cluster/loop.cljc`,
   `src/seon/schema/edn.clj`, and `resources/seon/schema/ai.edn`.
