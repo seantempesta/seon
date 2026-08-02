@@ -10,6 +10,7 @@
   no paid call anywhere); the injected evaluator is source-driven so it
   needs no thread-local binding to reach a proc's own virtual thread."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -32,7 +33,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]
-           [java.util.concurrent CountDownLatch]))
+           [java.util.concurrent CountDownLatch Executor]))
 
 (set! *warn-on-reflection* true)
 
@@ -588,6 +589,64 @@
                           :seon.cluster.agent/routing routing}))
         (is (= {:routed? false :armed? false} @observed)
             "the route is already absent when orderly teardown closes")))))
+
+(deftest disarm-does-not-depend-on-the-turn-proc-starting
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            tasks (atom [])
+            executor
+            (reify Executor
+              (execute [_ task]
+                (swap! tasks conj task)))
+            original-definition agent/graph-definition
+            take-result (async/promise-chan)]
+        (d/transact connection [{:seon.cluster.agent/id "withheld-turn"}])
+        (with-redefs
+          [agent/graph-definition
+           (fn [request]
+             (let [definition (original-definition request)]
+               (assoc definition
+                      :io-exec executor
+                      :procs (select-keys (:procs definition) [::agent/turn])
+                      :conns [])))]
+          (let [entry (arm-one! connection ctx routing "withheld-turn")
+                completion (:seon.cluster.loop/completion entry)
+                observed-completion
+                (reify
+                  async.impl/ReadPort
+                  (take! [_ handler]
+                    (let [result (async.impl/take! completion handler)]
+                      (async/put! take-result (some? result))
+                      result))
+
+                  async.impl/WritePort
+                  (put! [_ value handler]
+                    (async.impl/put! completion value handler))
+
+                  async.impl/Channel
+                  (close! [_]
+                    (async.impl/close! completion))
+                  (closed? [_]
+                    (async.impl/closed? completion)))
+                _ (swap! routing assoc-in
+                         [::agent/armed "withheld-turn"
+                          :seon.cluster.loop/completion]
+                         observed-completion)
+                stopped
+                (future
+                  (agent/disarm! {:seon.cluster.agent/id "withheld-turn"
+                                  :seon.cluster.agent/routing routing}))]
+            (try
+              (is (= 1 (count @tasks))
+                  "Flow accepted the turn runnable without starting it")
+              (is (true? (test-support/await-event!
+                          take-result ::parked-turn-completion-ready))
+                  "arming publishes parked completion before the turn runs")
+              (finally
+                (doseq [^Runnable task @tasks]
+                  (.run task))
+                (test-support/await-event! stopped ::withheld-turn-disarmed)))))))))
 
 (deftest park-wake-test
   (with-connection
