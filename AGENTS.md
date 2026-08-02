@@ -736,12 +736,13 @@ error-value and ambient-custody semantics. All first-party code calls
 `seon.db`, never `datahike.api` directly; only `seon.db` itself plus
 the store/registry custody owners (flock, open/release, branch
 management) require `datahike.api`. MIGRATION IN FLIGHT: until the
-seon.db wave lands
-(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`),
-`transact!` still lives at `seon.cluster.store/transact!` and today's
-`seon.db` exposes only `q`/`pull`/`pull-many` — new code targets the
-ruling's shape, never adds a new direct `datahike.api` call site. There
-is no pod, remote replica, or second writer.
+34-namespace call-site sweep lands
+(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`), old
+first-party direct `datahike.api` calls remain. The core namespace wave
+has landed: `transact!` moved out of `seon.cluster.store`, and `seon.db`
+owns `q`/`pull`/`pull-many`/`entity`/`datoms`/`db`/`history`/`as-of`/
+`since`/`transact!`. New code never adds a direct `datahike.api` call
+site. There is no pod, remote replica, or second writer.
 
 An explicitly selected config manifest reconciles its declared subset into
 database facts. Runtime reads the database, not environment variables or the

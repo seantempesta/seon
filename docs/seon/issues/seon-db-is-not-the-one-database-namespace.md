@@ -73,3 +73,47 @@ ends transfer here: `bootstrap_drive.clj:141-155` holds a connection it
 does not yet pass in its evaluation request, and the render walk's own
 binding site remains the render owner (custody during an agent
 evaluation now comes from the evaluator request, not the walk).
+
+## Core namespace wave evidence — 2026-08-02
+
+Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
+4 while leaving this issue open for the counted call-site sweep:
+
+- `transact!` moved into `seon.db`; `seon.cluster.store` retains store,
+  branch-connection, and flock custody. The four outcomes, schema encode,
+  and exact Integer→Long walk moved with their tests.
+- The dependency order is now Datahike + `seon.schema` +
+  `seon.schema.datahike` + the leaf `seon.error.refusal` → `seon.db` →
+  `seon.cluster.store` → higher cluster/render owners. `seon.db` requires
+  neither the custody owner nor the rendering-aware `seon.error` namespace.
+  Connection/database predicates and their honest generators moved down;
+  the store's existing public predicates delegate to that one
+  implementation. This removes the observed
+  `render → error → store → db → render` load cycle.
+- `entity` returns wildcard-pull ordinary data: an eager map, component
+  refs recursively expanded, and ordinary refs represented as `{:db/id
+  ...}`. It costs time and memory proportional to the entity plus its
+  component closure and gives up lazy attribute-by-attribute navigation.
+- `datoms` returns an eager vector of ordinary `{:e :a :v :tx :added}`
+  maps. It costs O(n) realization time and memory and gives up Datahike's
+  lazy cursor and host `Datom` operations; neither process-local value can
+  escape into agent evaluation.
+- Focused gate: `seon.db-test`, `seon.cluster.store-transact-test`, and
+  `seon.cluster.store-test` — 32 tests, 122 assertions, zero failures or
+  errors. Changed-caller gate: `seon.cluster.armed-test`,
+  `seon.cluster.boot-test`, `seon.cluster.turn-test`,
+  `seon.instrument-test`, and `seon.sci.eval-test` — 133 tests, 677
+  assertions, zero failures or errors.
+- Fresh live proof used the isolated operator root `tmp/r41-one-db`, forked
+  cluster `r41` from the newly published source, and booted it without a
+  cyclic load. One SCI-door evaluation ambiently exercised positional and
+  Datahike argument-map forms of `q`, `pull`, and `transact!`; both writes
+  returned transaction reports, both queries returned
+  `#{"r41-map" "r41-positional"}`, both pulls returned their matching
+  declared `:seon.cluster.message/id`, and `history` returned both ids. A
+  write of undeclared `:seon.r41/undeclared` returned
+  `:seon.db/rejected` carrying Datahike's `:transact/schema`. The operator
+  root was taken down after the proof.
+
+Still open: acceptance item 3's 34-namespace direct-call sweep, its write-site
+classification, and the authority updates that graduate the complete issue.

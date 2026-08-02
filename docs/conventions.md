@@ -385,10 +385,11 @@ Datahike's calls only for error-value and ambient-custody semantics.
 
 All first-party code calls `seon.db`; only `seon.db` itself and the
 store/registry custody owners (flock, open/release, branch management)
-require `datahike.api`. Migration in flight: `transact!` still lives at
-`seon.cluster.store/transact!` until the seon.db wave lands
-(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`); new
-code never adds a direct `datahike.api` call site.
+require `datahike.api`. Migration in flight: `transact!` now lives at
+`seon.db/transact!`, and the core namespace surface has landed. The
+remaining migration is the counted first-party direct-call sweep in
+`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`; new code
+never adds a direct `datahike.api` call site.
 
 ```clojure
 (require '[seon.db :as db])
@@ -585,8 +586,8 @@ generated value, and shrunk check on failure.
     (is (m/validate ::output (foo input)))))
 ;; Missing: example tests showing intended usage patterns!
 
-;; BAD: scattering datahike.api through domain logic. Application reads use
-;; seon.db; system writes stay at seon.cluster.store/transact!.
+;; BAD: scattering datahike.api through domain logic. Reads and writes use
+;; seon.db; store and registry retain custody operations only.
 (defn summarize [conn] (d/transact conn tx-data) ...)
 ```
 
