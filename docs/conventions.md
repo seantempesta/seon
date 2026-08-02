@@ -327,7 +327,7 @@ Not everything is agent-facing. Core code that runs INSIDE a transaction is the
 deliberate exception: a `[:db.fn/call ...]` transition REFUSES an ineligible
 request by throwing, which aborts the whole transaction atomically. That is the
 database enforcing a fence, not an error-handling style — see
-`src/seon/cluster/run.cljc`.
+`src/seon/cluster/run.clj`.
 
 Use a qualified, source-owned `:seon.error/kind`; do not maintain a closed
 central enum of error kinds. The error section of `resources/seon/schema.edn`

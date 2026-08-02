@@ -201,7 +201,7 @@ uses an isolated cluster fork and the ordinary message/run path.
 - `src/seon/context.clj` commits captures from rendered context.
 - `src/seon/cluster/loop.cljc` opens attempts and receipts, persists blobs and
   session definitions, and settles the fold.
-- `src/seon/cluster/run.cljc` owns settle-once and recovery transitions.
+- `src/seon/cluster/run.clj` owns settle-once and recovery transitions.
 - `src/seon/render/transcript.clj` owns the message/receipt queries and REPL
   interleave.
 - `src/seon/render/{agent,root,ns,web}.clj` owns current agent, root, namespace,

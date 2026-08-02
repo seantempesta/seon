@@ -494,7 +494,7 @@
    "EDN schema data has a different grammar and proves EOF separately."
    "src/seon/schema.clj"
    "Schema candidate encoding is an ordinary EDN codec."
-   "src/seon/cluster/run.cljc"
+   "src/seon/cluster/run.clj"
    "Run values use an ordinary EDN result codec."})
 
 (def ^:private accepted-source-reader-pattern

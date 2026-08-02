@@ -622,13 +622,13 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
 | `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
 | `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
-| `:seon.cluster.run/process` | **claimant** | the process holding a run; the run section of `resources/seon/schema.edn` + `src/seon/cluster/run.cljc` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
+| `:seon.cluster.run/process` | **claimant** | the process holding a run; the run section of `resources/seon/schema.edn` + `src/seon/cluster/run.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
 | initialization rows, transaction data | seed bundle, sidecar | one admitted source population; `src/seon/cluster.clj` (`populate-source!`) + `src/seon/fn.clj` (`index!`) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/fresh_operator.clj` + `script/seon/dev/state.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
 | reduce (plan execution) | fold | executing a plan is a reduce over its forms; the accumulator is the basis; `clojure.core/reduce` ↔ the Datahike transaction report's `:db-after` (`r/fold` is parallel — wrong word) |
-| run loop | driver, driving | the per-agent proc reducing one claimed run over ordered forms; `src/seon/cluster/loop.cljc` ↔ custody transitions in `src/seon/cluster/run.cljc` |
+| run loop | driver, driving | the per-agent proc reducing one claimed run over ordered forms; `src/seon/cluster/loop.clj` ↔ custody transitions in `src/seon/cluster/run.clj` |
 | `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — the door is about effects crossing out, never about which functions an agent may call (ruling #20); effects carry the one request identity |
 | every function is callable | toolkit, grants, home-requires, agent-facing surface (as a limit), allowlist | ruling #20: an agent may call ANY function in its cluster's program graph. Per-agent GRANTS do not exist; what differs per agent is only what is RENDERED into its context, which never gates execution. The guarded door bounds EFFECTS (fs/web/llm/db), not callability |
 | program graph | corpus | the collective name for `:seon.fn`/`:seon.ns`/`:seon.schema` facts; owners rename to `seon.code.fn`/`.ns`/`.schema`/`.test` |
@@ -998,7 +998,7 @@ bb --config bb.edn --deps-root . -e \
   "(require 'seon.dev.changed-test) \
    (prn (seon.dev.changed-test/run-changed! \
          (seon.dev.changed-test/configuration \".\") \
-         [\"src/seon/cluster/run.cljc\"]))"
+         [\"src/seon/cluster/run.clj\"]))"
 ```
 
 Do not discard type-checker output. clj-kondo `:type-mismatch` findings remain

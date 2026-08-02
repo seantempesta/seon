@@ -976,7 +976,7 @@
   [receipt]
   (some-> (:seon.cluster.eval/result-edn receipt)
           (#(try (edn/read-string %)
-                 (catch #?(:clj Throwable :cljs :default) _
+                 (catch Throwable _
                    nil)))))
 
 (defn- unfinished-warning
