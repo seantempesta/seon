@@ -1,6 +1,6 @@
 ---
 name: datahike
-description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, or working with resources/seon/schema.edn, seon.schema.edn, or the Malli-to-Datahike bridge. Use for d/transact argument maps or raw vectors, d/q, d/pull, d/entity, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, :db.fn/call transition functions, CAS fences, as-of/since history, listen!, or any 'where do I put this data / how do I read it back' question."
+description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, or working with resources/seon/schema.edn, seon.schema.edn, or the Malli-to-Datahike bridge. Use for seon.db/transact! argument maps or raw vectors, seon.db/q, pull, entity, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, :db.fn/call transition functions, CAS fences, as-of/since history, listen!, or any 'where do I put this data / how do I read it back' question."
 ---
 
 # Datahike — Seon Database Patterns
@@ -62,14 +62,28 @@ on the database path.
   (`src/seon/cluster/store.clj:155-183,266-346,369-398`;
   `reference-code/datahike/src/datahike/connector.cljc:183-237,343-362`;
   `test/seon/cluster/store_test.clj:94-162,248-266`).
-- **Reads are synchronous and local.** `d/q` / `d/pull` / `d/entity` resolve
-  against an immutable database value — a pointer, not a fetch. Compose reads
-  in straight-line code.
-- **Writes are a function call.** Current core owners and test fixtures call
-  `datahike.api/transact` on the co-located connection. Do not recreate the
-  retired `seon.db` pod facade.
+- **Reads are synchronous and local.** `seon.db/q`, `pull`, `pull-many`,
+  `entity`, and `datoms` accept an explicit immutable database value or elide
+  it for the calling agent's current cluster database. `entity` and `datoms`
+  realize eager ordinary data so process-local Datahike objects never cross
+  into SCI (`src/seon/db.clj:198-248,262-392`;
+  `test/seon/db_test.clj:31-77,147-171`). Compose reads in straight-line code.
+- **Writes are a function call returning a value.** `seon.db/transact!`
+  accepts an explicit live connection or elides it for ambient custody, and
+  accepts Datahike's positional transaction data or its `{:tx-data :tx-meta}`
+  argument map. Rejections are flat `:seon.error` values, not throws from the
+  public boundary (`src/seon/db.clj:465-517`;
+  `test/seon/db_test.clj:173-198`).
+- **`seon.db` is the one database namespace, never a facade.** New first-party
+  code calls it for `q`, `pull`, `pull-many`, `entity`, `datoms`, `db`,
+  `history`, `as-of`, `since`, and `transact!`. Only `seon.db` itself and the
+  store/registry custody owners for open, release, and branch lifecycle may
+  require `datahike.api` directly. The pre-ruling 34-namespace call-site sweep
+  is still in flight; do not copy those old direct calls
+  (`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md:77-125`;
+  `src/seon/db.clj:1-14,159-170,198-248,262-443,501-517`).
 
-A db is a **value, not a place**. The "race" you think you have ("the DB moved
+A database is a **value, not a place**. The "race" you think you have ("the database moved
 between deciding and acting") is almost always re-reading the connection three
 times instead of threading one value. Better still: don't pre-read — decide
 inside the transaction (below).
@@ -87,7 +101,7 @@ Applied to datahike, four moves replace every "for each kind":
 - **FIND** a set → query by **attribute presence**: `[?e :my.kb.source/id]`
   enumerates every source. There is no "list all of kind K".
 - **IDENTIFY** one → a `:db.unique/identity` **attribute**. That is also how
-  `d/transact` upserts (same identity value ⇒ update in place, no duplicate).
+  `db/transact!` upserts (same identity value ⇒ update in place, no duplicate).
 - **RELATE / REMOVE** → follow **refs**. Cascade is a property of the
   connection (`:db/isComponent` retracts children), never a kind operation.
 - **SCOPE** is two independent axes, don't conflate them:
@@ -105,16 +119,18 @@ attributes, then query by attribute presence:
 
 ```clojure
 ;; every installed domain attribute, including attrs with no live values
-(->> (keys (:schema @connection))
+(->> (keys (:schema (db/db connection)))
      (filter keyword?)
      (filter #(= "seon.cluster.run" (namespace %)))
      sort)
 
 ;; enumerate entities BY ID-ATTR PRESENCE (scan that attr's index)
-(d/q '[:find ?id :where [?e :seon.cluster.run/id ?id]] @connection)
+(db/q '[:find ?id :where [?e :seon.cluster.run/id ?id]]
+      (db/db connection))
 
 ;; count by identity attribute, never by a "kind"
-(d/q '[:find (count ?e) . :where [?e :seon.cluster.agent/id]] @connection)
+(db/q '[:find (count ?e) . :where [?e :seon.cluster.agent/id]]
+      (db/db connection))
 ```
 
 The grouping label is always an **attribute** (a namespace or an id-attr), never
@@ -133,7 +149,7 @@ from registry key to Malli form; section comments are only editorial.
 ```
 
 ```clojure
-(require '[datahike.api :as d]
+(require '[seon.db :as db]
          '[seon.schema :as schema]
          '[seon.schema.datahike :as schema.datahike]
          '[seon.schema.edn :as schema.edn])
@@ -144,27 +160,55 @@ from registry key to Malli form; section comments are only editorial.
 
 ;; 2. Install the derived declarations. Production cluster population owns
 ;;    this step; a focused REPL probe can perform it explicitly.
-(d/transact connection
-            (schema.datahike/malli->datahike-schema
-             [:my.kb.source/id :my.kb.source/title :my.kb.source/rank]))
+(db/transact! connection
+              (schema.datahike/malli->datahike-schema
+               [:my.kb.source/id :my.kb.source/title :my.kb.source/rank]))
 
 ;; 3. Transact ordinary data, every key namespaced.
-(d/transact connection
-            [{:my.kb.source/id "s1"
-              :my.kb.source/title "Alpha"
-              :my.kb.source/rank 1}])
+(db/transact! connection
+              [{:my.kb.source/id "s1"
+                :my.kb.source/title "Alpha"
+                :my.kb.source/rank 1}])
 
 ;; 4. Query — synchronous; pick the :find shape:
-(d/q '[:find ?t :where [?e :my.kb.source/title ?t]] @connection)
-(d/q '[:find [?t ...] :where [?e :my.kb.source/title ?t]] @connection)
-(d/q '[:find (count ?e) . :where [?e :my.kb.source/id]] @connection)
+(db/q '[:find ?t :where [?e :my.kb.source/title ?t]] (db/db connection))
+(db/q '[:find [?t ...] :where [?e :my.kb.source/title ?t]]
+      (db/db connection))
+(db/q '[:find (count ?e) . :where [?e :my.kb.source/id]]
+      (db/db connection))
 
 ;; 5. Pull/entity — read one entity by lookup-ref [identity-attr value]:
-(d/pull @connection '[*] [:my.kb.source/id "s1"])
-(d/entity @connection [:my.kb.source/id "s1"])
+(db/pull (db/db connection) '[*] [:my.kb.source/id "s1"])
+(db/entity (db/db connection) [:my.kb.source/id "s1"])
 ```
 
-The run section of `resources/seon/schema.edn`, `src/seon/cluster/run.cljc`, and
+Use Datahike's own argument-map keys when that operation defines them; never
+invent a Seon envelope. These are equivalent to their positional forms, and
+each ambient form elides only the database value or connection:
+
+```clojure
+(db/q (db/db connection) {:query query-form :args inputs})
+(binding [db/*conn* connection]
+  (db/q {:query query-form :args inputs}))
+
+(db/pull (db/db connection) {:selector '[*] :eid entity-id})
+(binding [db/*conn* connection]
+  (db/pull {:selector '[*] :eid entity-id}))
+
+(db/pull-many (db/db connection)
+              {:selector '[*] :eids entity-ids})
+(db/datoms (db/db connection)
+           {:index :avet :components [:my.kb.source/id]})
+
+(db/transact! connection {:tx-data transaction-data
+                          :tx-meta transaction-metadata})
+```
+
+The accepted shapes and ambient parity are the public contracts at
+`src/seon/db.clj:198-248,262-334,380-443,501-517` and the recurring proofs at
+`test/seon/db_test.clj:31-77,147-218`.
+
+The run section of `resources/seon/schema.edn`, `src/seon/cluster/run.clj`, and
 `test/seon/cluster/run_test.clj` are the live worked set: declarations,
 identity attributes, refs, in-transaction transitions, and properties over the
 real database.
@@ -172,7 +216,7 @@ real database.
 ## Schema: one EDN population, one admission gate
 
 Declare the **Malli type** in `resources/seon/schema.edn`; the bridge
-(`seon.schema.datahike/malli->datahike-attr`, `src/seon/schema/datahike.cljc`)
+(`seon.schema.datahike/malli->datahike-attr`, `src/seon/schema/datahike.clj`)
 derives every Datahike facet — `:db/valueType`, `:db/cardinality`, `:db/unique`,
 `:db/isComponent`, `:db/index`, `:db/noHistory`. Never write `:db.type/*`
 yourself.
@@ -217,7 +261,7 @@ Keep four states separate; the checked semantic source is
    contracted function, admitted schema, test, or namespace-context row can
    reach the terminal transaction. An uncontracted function never becomes a
    `:seon.fn` row (`src/seon/sci/eval.clj:427-450,789-850,1323-1456`;
-   `src/seon/cluster/run.cljc:645-742`).
+   `src/seon/cluster/run.clj:645-742`).
 3. **The process-live cluster SCI ctx** is one mutable interpreter context per
    cluster, shared by that cluster's agents and absent from other clusters
    (`src/seon/cluster.clj:1337-1363`;
@@ -228,7 +272,7 @@ Keep four states separate; the checked semantic source is
    value, proven deterministic pure source form, or explicit unrestorable row;
    cold cluster acquisition installs that image into the new ctx
    (`resources/seon/schema.edn:2151`;
-   `src/seon/cluster/loop.cljc:325-458,1411-1424`;
+   `src/seon/cluster/loop.clj:377-465,1513-1520`;
    `src/seon/sci/eval.clj:1142-1228`;
    `test/seon/sci/session_image_test.clj:99-217,239-323`).
 
@@ -242,14 +286,14 @@ admission or publish scratch definitions as `:seon.fn` program rows
 Schemas are globally identified by `:seon.schema/key`, never owned by the
 namespace where registration happened. Runtime `schema/unregister!` only
 stages removal inside the current evaluation delta
-(`src/seon/schema.cljc:1110-1127`). Seon's terminal transaction refuses
+(`src/seon/schema.clj:1072-1092`). Seon's terminal transaction refuses
 replacement or removal while any directly or transitively affected Datahike
 attribute—including an entity schema's child attributes—has current datoms.
 Removal also refuses while another schema or function contract depends on the
 key. After current datoms and dependencies are retracted, the operation may
 commit atomically with the program row and derived Datahike declarations
-(`src/seon/schema.cljc:1929-1958`;
-`src/seon/cluster/run.cljc:580-742`;
+(`src/seon/schema.clj:1894-1958`;
+`src/seon/cluster/run.clj:580-742`;
 `test/seon/schema_usage_guard_test.clj:80-397`).
 
 The maintained Datahike fork independently refuses schema-attribute
@@ -284,7 +328,7 @@ installed:
 Shapes used in two+ schemas get **declared once and referenced** — never
 inlined twice. The canonical example is `:seon.db/ref` (every ref attr
 references it). If the bridge can't map a shape you need, **fix the bridge**
-(`src/seon/schema/datahike.cljc`) — don't inline.
+(`src/seon/schema/datahike.clj`) — don't inline.
 
 ### Omission ruling — stored and in-memory contracts differ
 
@@ -297,22 +341,32 @@ third-party boundaries such as a raw Datahike connection or database value.
 
 ## Write path
 
-`datahike.api/transact` accepts BOTH of its documented compatibility shapes:
+`seon.db/transact!` preserves BOTH of Datahike's documented transaction
+shapes, with either an explicit connection or the calling agent's ambient
+cluster connection:
 
 ```clojure
-(d/transact connection {:tx-data [{::id "s1"}]
-                        :tx-meta {:seon.db/process process-ref}})
-(d/transact connection [{::id "s1"}]) ; raw vector/sequence shorthand
+(db/transact! connection {:tx-data [{::id "s1"}]
+                          :tx-meta {:seon.db/process process-ref}})
+(db/transact! connection [{::id "s1"}]) ; positional vector/sequence
+
+(binding [db/*conn* connection]
+  (db/transact! {:tx-data [{::id "s2"}]})
+  (db/transact! [{::id "s3"}]))
 ```
 
 The arg-map is canonical when transaction metadata is needed. A map without
 `:tx-data` is rejected; vectors and sequences are wrapped internally as
 `{:tx-data ...}`. Grounding:
-`reference-code/datahike/src/datahike/api/impl.cljc:30-48`.
+`reference-code/datahike/src/datahike/api/impl.cljc:30-48` ↔
+`src/seon/db.clj:465-517`; explicit/ambient parity is asserted at
+`test/seon/db_test.clj:173-198`.
 
-`d/transact` THROWS on a rejected transaction — that is the fence working, and
-core code inside a transaction relies on it. Agent-facing boundaries convert
-the failure to a flat `:seon.error` value.
+Datahike throws internally on a rejected transaction — that is the fence
+working — while public `db/transact!` returns the transition's own flat error,
+a classified `:seon.db/rejected`, or `:seon.db/unknown-failure`. Development
+may rethrow only the unknown core failure under the one panic config
+(`src/seon/db.clj:465-499`).
 
 **Gotcha: inspect the complete cause chain, not only `(ex-data error)`.**
 Datahike's `throwable-promise` wraps the writer's `ExecutionException` in an
@@ -320,31 +374,31 @@ outer `ex-info` whose data is `{}`; it does not discard the original throwable.
 The refusing transition's intact `ex-data` is at the third link, and Datahike's
 own CAS/schema rejection data is recoverable the same way (probe and output:
 `docs/prds/sci-execution-runtime/research/n3-plan-2026-07-27.md` §8). At the
-one transact wrapper, walk `ex-cause` to the end and select the deepest
+one `seon.db/transact!` boundary, walk `ex-cause` to the end and select the deepest
 non-empty `ex-data`. Classify that value; never parse the message. Treat a
 chain with no classifiable data as an unknown core failure, not as a refusal.
 
 ```clojure
 ;; UPSERT by identity — same identity value ⇒ same entity, no duplicate.
 ;; OMITTED keys are LEFT UNCHANGED (absent ≠ cleared):
-(d/transact connection [{::id "s1" ::title "Alpha v2"}])
+(db/transact! connection [{::id "s1" ::title "Alpha v2"}])
 
 ;; CLEAR one field — retraction is EXPLICIT (omission does nothing):
-(d/transact connection [[:db/retract [::id "s1"] ::title]])
+(db/transact! connection [[:db/retract [::id "s1"] ::title]])
 
 ;; DELETE the whole entity (component children cascade):
-(d/transact connection [[:db.fn/retractEntity [::id "s1"]]])
+(db/transact! connection [[:db.fn/retractEntity [::id "s1"]]])
 
 ;; CARDINALITY-MANY: transacting a value ADDS to the set. To REPLACE,
 ;; retract-all then add, bundled BEFORE the add-map in ONE ordered tx:
-(d/transact connection [[:db/retract [::id "s1"] ::tags]
-                        {::id "s1" ::tags [:lisp :db]}])
+(db/transact! connection [[:db/retract [::id "s1"] ::tags]
+                          {::id "s1" ::tags [:lisp :db]}])
 
 ;; LINK new entities in ONE tx via shared TEMPID strings. Assume ::person-id
 ;; and ::author are already declared in resources/seon/schema.edn. A
 ;; lookup-ref does not resolve forward; a tempid does.
-(d/transact connection [{:db/id "p1" ::person-id "alice"}
-                        {::id "s2" ::author "p1"}])
+(db/transact! connection [{:db/id "p1" ::person-id "alice"}
+                          {::id "s2" ::author "p1"}])
 ```
 
 ### Decide INSIDE the transaction — `[:db.fn/call f request]`
@@ -357,15 +411,15 @@ So one pure function can read current state, REFUSE an ineligible request by
 throwing — aborting the whole transaction atomically — and return plain tx-data
 otherwise. No caller pre-reads, no observed-* request fields, no window between
 deciding and acting. The abort is atomic: every other operation in the same
-`d/transact` vector is discarded too (REPL-verified).
+transaction vector is discarded too (REPL-verified).
 
 ```clojure
 (defn claim-unheld-call
   "Claim an existing open run only when no process currently holds it."
-  [db request]
+  [database request]
   (let [id (:seon.cluster.run/id request)
         process (:seon.cluster.run/process request)
-        run (d/entity db [:seon.cluster.run/id id])]
+        run (db/entity database [:seon.cluster.run/id id])]
     (cond
       (nil? run)
       (throw (ex-info "run does not exist" {:seon.cluster.run/id id}))
@@ -382,7 +436,7 @@ deciding and acting. The abort is atomic: every other operation in the same
       :else
       [[:db/add (:db/id run) :seon.cluster.run/process process]])))
 
-(d/transact connection [[:db.fn/call claim-unheld-call request]])
+(db/transact! connection [[:db.fn/call claim-unheld-call request]])
 ```
 
 `f` here is a resolved function, so this form is for co-located core code.
@@ -390,10 +444,10 @@ Current run custody is process presence: absent is unheld and present is held;
 there is no epoch or lease. The production `claim-call` additionally recovers
 custody from a process absent from the supplied live-process set and stamps
 that holder's running receipts interrupted
-(`src/seon/cluster/run.cljc:18-30,265-309`).
+(`src/seon/cluster/run.clj:18-30,264-309`).
 `test/seon/cluster/run_test.clj:14-23,487-514` independently models the same
 custody fence.
-`src/seon/cluster/run.cljc` is the worked example;
+`src/seon/cluster/run.clj` is the worked example;
 `test/seon/cluster/run_test.clj` asserts both rails.
 
 ### The CAS work-fence (commit iff the database fact has not moved)
@@ -412,25 +466,33 @@ value equals `old`". CAS is pure transaction data, unlike a
 
 ## Read path — Datalog, synchronous
 
-`d/q` takes the query, then the database value, then any `:in` inputs (`$` is
-the db, implicit and first).
+`db/q` preserves Datahike's positional query interface and its `{:query :args}`
+argument-map interface. The database value is an ordinary `:in` input; when
+the one `$` source is omitted, `db/q` inserts the calling agent's current
+database at its parsed source position (`src/seon/db.clj:172-248`;
+`test/seon/db_test.clj:31-58`).
 
 ```clojure
 ;; relation / scalar / collection / single-tuple — chosen by :find shape:
-(d/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] db)   ;=> #{["A" 1] …}
-(d/q '[:find ?n . :where [?e ::name ?n]] db)                   ;=> "A"  (one scalar)
-(d/q '[:find [?n ...] :where [?e ::name ?n]] db)               ;=> ["A" "B"]
-(d/q '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] db) ;=> ["A" 1]
+(db/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] database)   ;=> #{["A" 1] …}
+(db/q '[:find ?n . :where [?e ::name ?n]] database)                   ;=> "A"  (one scalar)
+(db/q '[:find [?n ...] :where [?e ::name ?n]] database)               ;=> ["A" "B"]
+(db/q '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] database) ;=> ["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
-(d/q '[:find [?n ...] :in $ ?min
-       :where [?e ::rank ?r] [(>= ?r ?min)] [?e ::name ?n]] db 5)
+(db/q '[:find [?n ...] :in $ ?min
+        :where [?e ::rank ?r] [(>= ?r ?min)] [?e ::name ?n]]
+      database 5)
 
 ;; predicate + binding-expr inside :where:
-(d/q '[:find ?s :where [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]] db)
+(db/q '[:find ?s :where
+        [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]]
+      database)
 
 ;; pull inside a query — navigate refs:
-(d/q '[:find (pull ?e [::name {::parent [::name]}]) :where [?e ::name _]] db)
+(db/q '[:find (pull ?e [::name {::parent [::name]}])
+        :where [?e ::name _]]
+      database)
 ```
 
 Advanced shapes (aggregates, rules, `not`/`or`, the `:with` aggregate footgun)
@@ -441,12 +503,15 @@ Advanced shapes (aggregates, rules, `not`/`or`, the `:with` aggregate footgun)
 ```clojure
 ;; REF-JOIN, not keyword-in-slot. A ref attr stores an EID, not the target's
 ;; value. To match by the target's name, JOIN through it:
-(d/q '[:find (count ?e) . :where [?e ::run ?r] [?r ::id "run-1"]] db)   ; GOOD
-;; (d/q '[:find ?e :where [?e ::run "run-1"]] db)   ; a ref slot holds an EID
+(db/q '[:find (count ?e) .
+        :where [?e ::run ?r] [?r ::id "run-1"]]
+      database) ; GOOD
+;; (db/q '[:find ?e :where [?e ::run "run-1"]] database)
+;; a ref slot holds an EID
 
 ;; LOOKUP-REF value is the STORED type. :seon.fn/sym is a :string, so pass the
 ;; STRING — a quoted symbol throws "Cannot compare String to Symbol":
-(d/pull db '[*] [::sym "seon.config/effective"])   ; GOOD
+(db/pull database '[*] [::sym "seon.config/effective"]) ; GOOD
 ```
 
 Want a number? Put `(count …)` in the query rather than listing then counting;
@@ -460,7 +525,7 @@ is almost certainly misspelled or uninstalled.
 ;; EVERY attr installed on the db, including attrs with no live values.
 ;; Filter keyword? — the map is also keyed by numeric attr-eid (a datahike
 ;; internal):
-(->> (keys (:schema @connection)) (filter keyword?)
+(->> (keys (:schema (db/db connection))) (filter keyword?)
      (filter #(= "seon.cluster.run" (namespace %))) sort)
 ```
 
@@ -473,7 +538,7 @@ entities carry it. Check before inventing an attr.
   was loaded but never INSTALLED on this connection. Transact
   `(schema.datahike/malli->datahike-schema [attr …])` first. There is no lazy
   install under `:schema-flexibility :write`.
-- **An uninstalled attr also throws on read** — a `d/datoms` scan or explicit
+- **An uninstalled attr also throws on read** — a `db/datoms` scan or explicit
   pull of an unknown attribute throws rather than returning empty. Gate a raw
   scan on `(contains? (:schema @connection) attr)`.
 - **Empty results** — wrong attr spelling, a type mismatch (querying `30` where
@@ -503,14 +568,14 @@ Who/process/when wrote a datom is therefore a join:
 
 ```clojure
 ;; which database user and process wrote this title?
-(d/q '[:find ?user ?process-id ?at
-       :where [?e :my.kb.source/id "src-1"]
-              [?e :my.kb.source/title _ ?tx]
-              [?tx :seon.db/user ?user]
-              [?tx :seon.db/process ?process]
-              [?process :seon.db.process/id ?process-id]
-              [?tx :db/txInstant ?at]]
-     db)
+(db/q '[:find ?user ?process-id ?at
+        :where [?e :my.kb.source/id "src-1"]
+               [?e :my.kb.source/title _ ?tx]
+               [?tx :seon.db/user ?user]
+               [?tx :seon.db/process ?process]
+               [?process :seon.db.process/id ?process-id]
+               [?tx :db/txInstant ?at]]
+      database)
 ```
 
 Do not register provenance projections such as `created-by`, `created-at`,
@@ -530,33 +595,39 @@ capture entity's creation transaction cannot derive that earlier basis
 
 ```clojure
 ;; Time-travel: derive a db VALUE at another point, pass it as the db.
-(d/q '[:find ?v :where [?e ::name ?v]] (d/as-of @connection some-tx))
-(d/q '[:find ?e :where [?e ::status :done]] (d/since @connection last-seen))
-(d/q '[:find ?v ?tx ?added :where [?e ::name ?v ?tx ?added]]
-     (d/history @connection))
+(db/q '[:find ?v :where [?e ::name ?v]]
+      (db/as-of (db/db connection) some-tx))
+(db/q '[:find ?e :where [?e ::status :done]]
+      (db/since (db/db connection) last-seen))
+(db/q '[:find ?v ?tx ?added :where [?e ::name ?v ?tx ?added]]
+      (db/history (db/db connection)))
 ```
 
-`as-of` reports its ORIGIN db's basis-t, not the as-of point — don't read the
-returned value's `:t` as the time you asked for.
+`as-of` reports its origin database value's basis transaction, not the as-of
+point — don't read the returned value's `:t` as the time you asked for.
 
-`d/listen!` installs a transaction listener by key; the handler receives the
-transaction report (`:db-before`, `:db-after`, `:tx-data`) — never reach back to
-the connection from inside it. Event-driven detection through a listener is the
-sanctioned alternative to polling or a tuned timeout.
+Datahike's `listen!` installs a transaction listener by key; the handler
+receives the transaction report (`:db-before`, `:db-after`, `:tx-data`) — never
+reach back to the connection from inside it. It remains system-side rather
+than part of the agent-first core surface. Event-driven detection through a
+listener is the sanctioned alternative to polling or a tuned timeout
+(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md:44-59`).
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
 | `resources/seon/schema.edn` | first-party attribute/entity/value schemas |
+| `src/seon/db.clj` | one database namespace: explicit/ambient reads, writes, ordinary-data projection, flat errors |
+| `test/seon/db_test.clj` | positional/argument-map and explicit/ambient parity; eager return proofs |
 | `src/seon/schema/edn.clj` | classpath loading, config derivation, population admission |
-| `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
-| `src/seon/schema/datahike.cljc` | the Malli→Datahike bridge (extend it here) |
-| `src/seon/cluster/run.cljc` | EXEMPLAR: identity, refs, in-transaction transitions |
+| `src/seon/schema.clj` | registry, activation, entity-schema decomposition |
+| `src/seon/schema/datahike.clj` | the Malli→Datahike bridge (extend it here) |
+| `src/seon/cluster/run.clj` | EXEMPLAR: identity, refs, in-transaction transitions |
 | `test/seon/cluster/run_test.clj` | the fixture + how to assert commit and refusal |
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
-| `src/seon/cluster/loop.cljc` | terminal receipt plus exact `:seon.code.def` reconciliation |
+| `src/seon/cluster/loop.clj` | terminal receipt plus exact `:seon.code.def` reconciliation |
 | program section of `resources/seon/schema.edn` | program rows and durable session-image schemas |
 | `test/seon/sci/session_image_test.clj` | cold session-image restoration acceptance |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
