@@ -31,7 +31,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
-  (:import [java.util Date]))
+  (:import [java.util Date]
+           [java.util.concurrent CountDownLatch]))
 
 (set! *warn-on-reflection* true)
 
@@ -644,8 +645,9 @@
     (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])
-            latch (promise)
-            in-flight (promise)]
+            release-provider (CountDownLatch. 1)
+            provider-entered (CountDownLatch. 1)
+            events (database-events connection)]
         (d/transact connection
                     [{:seon.cluster.agent/id "pausable"}
                      (config-row "pause-2026072813"
@@ -654,33 +656,37 @@
           (with-redefs [ai/complete
                         (fn [request]
                           (swap! ledger conj request)
-                          (deliver in-flight true)
-                          @latch
+                          (.countDown provider-entered)
+                          (.await release-provider)
                           {:seon.ai/text "(my.run/complete \"done\")"})]
             (let [entry (arm-one! connection ctx routing "pausable")
                   graph (:seon.flow/graph entry)]
               (outside-trigger! connection "pausable"
                                 "m-2026072813-a" "slow work")
               (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-              (is (await-until #(realized? in-flight))
+              (is (test-support/await-event! provider-entered
+                                             ::provider-entered)
                   "the provider call is in flight")
               (testing "pause returns immediately — fire-and-forget"
-                (let [began (System/nanoTime)]
-                  (flow/pause graph)
-                  (is (< (quot (- (System/nanoTime) began) 1000000) 1000))))
+                (is (test-support/await-event! (future (flow/pause graph))
+                                               ::pause-returned))
+                (is (= :paused
+                       (:clojure.core.async.flow/status
+                        (flow/ping-proc graph ::agent/mailbox)))
+                    "the mailbox acknowledged pause before work continued"))
               (testing "the in-flight call completes and its terminal
               facts COMMIT while paused"
-                (deliver latch true)
-                (is (await-until
+                (.countDown release-provider)
+                (is (test-support/await-event!
+                     (:seon.cluster.agent-test/events events)
+                     ::plan-frozen
                      #(some? (d/q '[:find ?digest . :where
-                                    [_ :seon.cluster.run/plan-digest
-                                     ?digest]]
-                                  @connection)))
+                                    [_ :seon.cluster.run/plan-digest ?digest]]
+                                  (:db-after %))))
                     "the plan freeze landed")
-                (is (await-until #(= :paused
-                                     (:clojure.core.async.flow/status
-                                      (flow/ping-proc graph
-                                                      ::agent/mailbox))))
+                (is (= :paused
+                       (:clojure.core.async.flow/status
+                        (flow/ping-proc graph ::agent/mailbox)))
                     "and the mailbox then parked paused"))
               (testing "a second trigger committed while paused stays an
               unanswered row — no run opens"
@@ -688,23 +694,26 @@
                                   "m-2026072813-b" "queued work")
                 (async/offer! (:seon.cluster.wake/channel entry) ::wake)
                 (let [deliveries (::agent/deliveries (mailbox-ping entry))]
-                  (Thread/sleep 300)
                   (is (= deliveries (::agent/deliveries
                                      (mailbox-ping entry)))
-                      "the paused mailbox consumed nothing"))
+                      "a later acknowledged ping finds no paused delivery"))
                 (is (contains? (set (map :seon.cluster.message/id
                                          (work/unanswered-triggers
                                           @connection "pausable")))
                                "m-2026072813-b")))
               (testing "resume answers everything exactly once"
                 (flow/resume graph)
-                (is (await-until #(quiescent? @connection ["pausable"])))
+                (is (test-support/await-event!
+                     (:seon.cluster.agent-test/events events)
+                     ::resumed-quiescence
+                     #(quiescent? (:db-after %) ["pausable"])))
                 (is (= {"m-2026072813-a" 1 "m-2026072813-b" 1}
                        (answers-by-trigger @connection)))
                 (is (= 2 (count @ledger))
                     "one provider call per run — the pause added none"))))
           (finally
-            (deliver latch true)
+            (.countDown release-provider)
+            (stop-database-events! connection events)
             (disarm-all! routing)))))))
 
 ;;; ---------------------------------------------------------------------------
