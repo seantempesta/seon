@@ -74,3 +74,12 @@ constructs one context per cluster and `src/seon/cluster/loop.cljc:1139-1168`
 uses it directly, so this residue is the only reproduced cross-cluster path in
 the audited turn mechanism. No source after `b114ac29d` applies the queued SCI
 metadata fix.
+
+## Triage 2026-08-02
+
+**Still real; destination: per-cluster live-graph wave, slice 2B.** The parent
+still points at maintained SCI `a27e2c0`, whose changes observe built-in calls
+but do not stamp the 17 shared writable Vars. No root commit after the
+independent recheck changes `reference-code/sci` for this isolation boundary.
+`plan/refactor-wave-2026-08-01.md` slice 2B still requires a derived
+zero-writable-shared-Var assertion across two independent `sci/init` contexts.

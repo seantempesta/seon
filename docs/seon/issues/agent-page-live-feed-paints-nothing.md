@@ -5,62 +5,41 @@ severity: blocker
 tags: [issue, web, render, flow]
 ---
 
-# Make the agent page's live feed paint the page a GET already renders
+# Commit feed-writer failures instead of swallowing them
 
 ## Problem
 
-`GET /feed/{id}` opens, returns SSE headers, and then sends ZERO bytes —
-no initial paint and no morph, ever. The agent page is therefore static: a
-fact committed while the tab is open never appears until the human reloads.
-
-The cause is not the writer. `seon.render.web/page-of` returns `{}` for every
-agent, because `seon.render.block/membership` returns `[]` for every agent:
-`blocks` finds no installed `:seon.cluster.agent/blocks` children (agent
-creation deliberately stores none) and `derived`
-(`src/seon/render/block.clj:236-247`) is `[]` by construction pre-N5. The
-whole snapshot/mult/tap/diff machinery is wired to a producer that is
-structurally empty, while the GET page renders through the walk path instead.
-
-The `/feed/{id}?debug=true` path works — it paints through `debug-page-of`,
-which does not go through `membership`.
+The original empty-feed defect is fixed: namespace-page GET and SSE now call
+the same `seon.render.web/page-of`, and an opening feed paints every walked
+unit. The note remains actionable only for its second acceptance boundary.
+The feed's virtual writer still catches every `Throwable` and returns `nil`,
+so a render, serialization, or socket-writing defect closes the SSE stream
+without one durable core-fault fact. A tab can stop painting with no queryable
+explanation.
 
 ## Evidence
 
-Observed 2026-07-31 on cluster `visual-qa` at `ef8cc6f77`:
-
-```text
-$ timeout 20 curl -sN http://127.0.0.1:7758/feed/scout > feed.sse
-HTTP/1.1 200 OK   Content-Type: text/event-stream
-bytes: 0                      # after a committed message during the window
-$ timeout 18 curl -sN 'http://127.0.0.1:7758/feed/scout?debug=true&path=%5B%5D&offset=0'
-bytes: 71558                  # 5 datastar-patch-elements events
-```
-
-REPL at the same basis:
-
-```clojure
-(count (seon.render.block/surfaces @conn {:seon.cluster.agent/id "scout"
-                                          :seon.render/kind :seon.render/html
-                                          :seon.sci.admit/caps caps
-                                          :seon.cluster.run/live-processes #{}}))
-;; => 0
-(count (#'seon.render.block/membership @conn "scout")) ;; => 0
-```
-
-A plain re-GET of `/agent/scout` after the same commit DOES show the new
-message, so the fact committed and only the live path is dead.
-
-Secondary: the feed's writer thread wraps everything in
-`(catch Throwable _ nil)` (`src/seon/render/web.clj:756`), so a genuine paint
-failure would also be silent. Nothing appeared in `bin/seon logs visual-qa`.
+- `2c74a2353` replaced the structurally empty block-membership producer with
+  namespace-walk units. `src/seon/render/web.clj:300-340` derives the page, and
+  `feed` and `page-response` both consume that function.
+- `test/seon/render/web_test.clj:285-296` asserts that an opening feed paints
+  every unit returned by `page-of`; the socket tests also prove a committed
+  message appears and reconnect repaints current facts.
+- `src/seon/render/web.clj:792` still implements `(catch Throwable _ nil)` in
+  the writer thread. No fault channel or committer call receives the thrown
+  value before `finally` closes the SSE generator.
 
 ## Owner
 
-`seon.render.web` / `seon.render.block` — the one paint producer.
+`seon.render.web/feed` at the existing cluster fault-committer boundary. The
+destination is the **render writer fault-provenance wave**; do not add a web
+error registry or a second logging-only path.
 
 ## Acceptance
 
-With a tab open on `/agent/{id}`, committing one fact delivers at least one
-`datastar-patch-elements` event carrying the changed block, and the initial
-connection paints the same bytes the GET renders. A paint that throws is
-recorded as a fault, not swallowed.
+- A deliberately failing initial paint and a deliberately failing later patch
+  each become one durable core-fault fact with cluster, agent, and feed
+  provenance.
+- The socket and tap still close exactly once after the fault.
+- Existing initial-paint, committed-message, and reconnect tests remain green;
+  no second page producer is introduced.

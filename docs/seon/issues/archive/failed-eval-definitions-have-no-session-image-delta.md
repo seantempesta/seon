@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, eval, agent, database]
 ---
@@ -45,3 +45,13 @@ terminal session-image transaction.
 - A recurring process-loss regression proves that a definition executed
   before a later throw is either faithfully restored or explicitly absent;
   silent disappearance is impossible.
+
+## Resolved 2026-08-01
+
+Resolved by `d57f5977c`. The evaluator snapshots the live intern delta from
+the caught failure after SCI stops running, and the terminal transaction uses
+the same session-image path as a successful evaluation. The recurring
+`failed-evaluation-delta-restores-values-but-never-replays-source` and
+`time-limited-evaluation-reports-its-earlier-def-delta` tests in
+`test/seon/sci/session_image_test.clj` prove faithful restore and explicit
+unrestorable state across a fresh context.

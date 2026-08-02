@@ -54,3 +54,16 @@ refuses with a steering message naming the missing rows and the exact repair
 command, and leaves no half-populated branch behind: a repeat `bin/seon start`
 either succeeds or repeats the same steering message, never a Datahike stack
 trace.
+
+## Triage 2026-08-02
+
+**Still real; destination: cluster population prerequisite wave.** The later
+coherence gate catches absent namespace/function populations, but it does not
+prove that every lookup ref the current population will name exists.
+`src/seon/cluster.clj:504-525` accepts any single recorded digest with at least
+one namespace and function. `ensure-cluster-entity!` then names every current
+`instruction/instruction-ids` lookup ref at lines 830-849. A complete older
+program graph that predates one of those instruction rows therefore still
+passes the first gate and reaches Datahike's missing-entity refusal. The
+current boot test proves partial-program steering, not this transitive
+population prerequisite.

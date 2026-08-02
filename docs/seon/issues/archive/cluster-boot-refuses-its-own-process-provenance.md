@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, boot, datahike]
 ---
@@ -74,3 +74,11 @@ site: a boot-path assertion that every transaction naming
 `:seon.db/process` provenance resolves that entity at `db-before`. The current
 `seon.cluster.boot-test` suite did not catch this, so the replacement proof
 must exercise the real `start!` population path.
+
+## Resolved 2026-07-31
+
+Resolved by `370de74f0`. `seon.cluster/ensure-cluster-entity!` now commits the
+runtime process under bootstrap provenance before any cluster transaction can
+name it, and only then commits the cluster row with that process as metadata.
+`test/seon/cluster/instruction_test.clj` exercises the real process-first
+ordering and the later complete cluster population.

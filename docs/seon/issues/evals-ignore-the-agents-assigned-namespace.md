@@ -57,3 +57,14 @@ the guarantees and the capability boundary.
   binding path or an eval-specific database side channel.
 - Recurring run-loop and direct-evaluation proofs cover both default-namespace and
   assigned-namespace agents.
+
+## Triage 2026-08-02
+
+**Still real; destination: SCI eval-context owner design gate.** Current HEAD
+still derives the reply reader namespace with
+`sci.eval/agent-namespace` at `src/seon/cluster/loop.cljc:1018`, and the
+evaluation fallback still uses the same ID-derived function later in the
+settlement path. `src/seon/sci/eval.clj:230-234` still constructs
+`my.agents.<id>` without reading `:seon.cluster.agent/namespace`. The parsed
+contract, live-context, and stateless-resume waves preserve this namespace
+choice; they do not reconcile it with the agent's database ref.

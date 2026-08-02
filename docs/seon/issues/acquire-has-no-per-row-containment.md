@@ -40,3 +40,14 @@ regression covers the class. Related open ruling (owner, from the
 same research): whether rewriting CORE-provenanced namespaces is
 permitted at all, and the irreversibility of the `:agent` provenance
 flip.
+
+## Triage 2026-08-02
+
+**Still real; destination: per-cluster live-graph wave, slice 1B.** At current
+HEAD, `src/seon/sci/eval.clj:1075-1087` calls
+`install-program-row!` without containment, and the namespace-ordered reduces
+at lines 1093-1125 propagate that failure out of `acquire!`. Tonight's
+contract, session-image, and settings landings changed what a successful row
+installs; none added a per-row error value or allowed the remaining rows to
+continue. `plan/refactor-wave-2026-08-01.md` slice 1B still names the poisoned
+row plus subsequent real turn as its live exit.

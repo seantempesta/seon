@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, agent, schema]
 ---
@@ -34,3 +34,13 @@ input through the door returns the same flat
 `::contract-violated` error value a host var produces; output
 violations likewise; the `:record` dial removes the wrappers; a
 recurring test covers agent→agent calls through the live ctx.
+
+## Resolved 2026-08-01
+
+Resolved by `8d251b76d` (with live config projection completed by
+`231bf5798` and parsed runtime contract derivation completed by `406347c86`).
+`seon.sci.eval/install-program-row!` now installs interpreted functions
+through `seon.instrument/instrument-interpreted`, and
+`test/seon/cluster/turn_test.clj` proves a second agent receives the flat
+`:seon.instrument/contract-violated` value. `test/seon/sci/eval_test.clj`
+proves the same contract after `acquire!` and cold context reconstruction.

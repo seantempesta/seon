@@ -82,3 +82,14 @@ Candidate shapes to evaluate (not a ruling): a `go`-loop instead of
 `pipeline`, one `async/merge` over every agent's error channel with the tag
 applied at the source graph, or `pipeline-async` on the `:io` executor. The
 first two need no new mechanism.
+
+## Triage 2026-08-02
+
+**Still real; destination: flow-protocol wave.** `4ac039c7b` correctly moved
+Seon's graph `:io` executor onto core.async's virtual-thread executor, but it
+did not touch this fan-out. `src/seon/flow.clj:685-701` still calls
+`async/pipeline`; pinned core.async `dc35f3e0` implements the default pipeline
+worker with `thread`, and `thread` dispatches to `:mixed`, not `:io`
+(`reference-code/core.async/src/main/clojure/clojure/core/async.clj:509-536,
+590-599`). The executor repair therefore does not dissolve the measured
+per-armed-agent platform thread.

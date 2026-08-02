@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, eval, agent, database]
 ---
@@ -55,3 +55,13 @@ The session-source replay predicate shared by `seon.sci.eval` and
   neither defining form is re-executed on cold install.
 - A recurring fresh-context regression compares the live and restored
   function result and observes any defining-form output.
+
+## Resolved 2026-08-01
+
+Resolved by `8e1ea52c2` and maintained SCI commit `a27e2c0`. SCI now reports
+the built-in calls that actually executed during an armed evaluation; the
+session-image owner classifies the source-grounded closed nondeterministic and
+effectful sets allowed by ruling #32 and refuses source replay for either.
+`test/seon/sci/session_image_test.clj` proves that the `gensym` closure and the
+printing closure are stated unrestorable after a fresh context, while a
+faithfully storable random value restores as data and is never re-executed.
