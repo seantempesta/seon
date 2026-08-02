@@ -169,9 +169,11 @@
   non-recursive. Failures inside the pass stay VALUES (the existing
   `refused!`/`error-tx` owners); a Throwable that escapes anyway is a
   core fault and rides this graph's error channel into the cluster's
-  fault committer, tagged with the agent. The stop transition publishes
-  the orderly-stop completion only after the active transform has
-  returned, so disarm honestly joins a seconds-long model call."
+  fault committer, tagged with the agent. The completion channel is an
+  armed-ready permit: arm publishes it before Flow scheduling, an active
+  transform holds it, and `finally` republishes it. Disarm consumes and
+  closes that event, so it waits for real active work without depending
+  on a proc that may never have started."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
@@ -187,51 +189,53 @@
                                        :seon.cluster.run/id]))})
   ([args]
    (assoc args ::passes 0 ::turns 0))
-  ([state transition]
-   (when (= ::flow/stop transition)
-     (async/put! (:seon.cluster.loop/completion
-                  (:seon.cluster.loop/cluster state))
-                 ::stopped))
+  ([state _transition]
    state)
   ([state _input _message]
    (let [cluster (:seon.cluster.loop/cluster state)
-         agent-id (:seon.cluster.agent/id state)
-         connection (:seon.store/branch-connection cluster)
-         process (:seon.cluster.run/process cluster)
-         now (Date.)
-         ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
-         ;; run keeps its agent busy, and per-agent graphs settle their
-         ;; own orphan (conservation §5)
-         _ (when-let [orphan (work/interruption @connection agent-id)]
-             (cluster.loop/settle-interruption!
-              cluster (:seon.cluster.run/id orphan) now))
-         request {:seon.cluster.agent/id agent-id
-                  :seon.cluster.run/process process
-                  :seon.cluster.work/now now}
-         ;; ONE database value for the derivation
-         next (work/next-agent-work @connection request)]
-     (if (nil? next)
-       [(-> state
-            (update ::passes inc)
-            (dissoc :seon.cluster.run/id))
-        nil]
-       (let [report (cluster.loop/turn
-                     {:seon.cluster.loop/cluster cluster
-                      :seon.cluster.work/next next}
-                     now)]
-         ;; self-rewake into this agent's OWN mailbox, coalescing on
-         ;; its (sliding-buffer 1): it cannot recurse, because the pass
-         ;; is only re-entered after this transform returns
-         (when (work/more-agent-work? @connection request)
-           (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
-         [(let [run-id (held-run-id @connection agent-id process)]
-            (cond-> (-> state
-                        (update ::passes inc)
-                        (update ::turns inc)
-                        (dissoc :seon.cluster.run/id))
-              run-id (assoc :seon.cluster.run/id run-id)))
-          ;; flow's own report channel: observation, never a dependency
-          {::flow/report [report]}])))))
+         completion (:seon.cluster.loop/completion cluster)]
+     (if-some [_ready (async/<!! completion)]
+       (try
+         (let [agent-id (:seon.cluster.agent/id state)
+               connection (:seon.store/branch-connection cluster)
+               process (:seon.cluster.run/process cluster)
+               now (Date.)
+               ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
+               ;; run keeps its agent busy, and per-agent graphs settle their
+               ;; own orphan (conservation §5)
+               _ (when-let [orphan (work/interruption @connection agent-id)]
+                   (cluster.loop/settle-interruption!
+                    cluster (:seon.cluster.run/id orphan) now))
+               request {:seon.cluster.agent/id agent-id
+                        :seon.cluster.run/process process
+                        :seon.cluster.work/now now}
+               ;; ONE database value for the derivation
+               next (work/next-agent-work @connection request)]
+           (if (nil? next)
+             [(-> state
+                  (update ::passes inc)
+                  (dissoc :seon.cluster.run/id))
+              nil]
+             (let [report (cluster.loop/turn
+                           {:seon.cluster.loop/cluster cluster
+                            :seon.cluster.work/next next}
+                           now)]
+               ;; self-rewake into this agent's OWN mailbox, coalescing on
+               ;; its (sliding-buffer 1): it cannot recurse, because the pass
+               ;; is only re-entered after this transform returns
+               (when (work/more-agent-work? @connection request)
+                 (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
+               [(let [run-id (held-run-id @connection agent-id process)]
+                  (cond-> (-> state
+                              (update ::passes inc)
+                              (update ::turns inc)
+                              (dissoc :seon.cluster.run/id))
+                    run-id (assoc :seon.cluster.run/id run-id)))
+                ;; flow's own report channel: observation, never a dependency
+                {::flow/report [report]}])))
+         (finally
+           (async/>!! completion ::ready)))
+       [state nil]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The ONE blueprint
@@ -241,8 +245,8 @@
   "The ONE blueprint: (agent-id, handle) → a `create-flow` definition.
   Pure data — `create-flow` allocates no threads, so a stamped
   definition costs nothing until started. The handle already carries
-  this agent's own mailbox channel and completion (`arm!` puts them
-  there), so the definition is a projection of its request. The one
+  this agent's own mailbox channel and armed-ready completion permit
+  (`arm!` puts them there), so the definition is a projection of its request. The one
   conn rides `(sliding-buffer 1)`: a wake says only \"look\", the turn
   pass derives ALL of this agent's work from one fresh database value,
   so coalescing is free by the same argument that made the central
@@ -369,7 +373,8 @@
                                 {:seon.error/kind ::no-such-agent
                                  :seon.cluster.agent/id agent-id})))
             wake-channel (async/chan (async/sliding-buffer 1))
-            completion (async/promise-chan)
+            completion (async/chan 1)
+            _ (async/>!! completion ::ready)
             agent-handle (assoc handle
                                 :seon.cluster.wake/channel wake-channel
                                 :seon.cluster.loop/completion completion)
@@ -399,11 +404,13 @@
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.
-  Stop, JOIN the turn proc's completion (which flow publishes only
-  after the active transform — including a seconds-long model call —
-  has returned), then drop the routing entry and close the mailbox.
-  Stop drops conn contents — safe by the transport law; triggers are
-  rows and survive.
+  Arm publishes one completion permit before scheduling the turn proc.
+  An active transform holds it and republishes it from `finally`; an idle
+  graph leaves it ready. Stop, consume that event, and close it before
+  dropping the routing entry and mailbox. Thus disarm waits through a
+  seconds-long active model call, while an accepted-but-never-started proc
+  cannot strand teardown. Stop drops conn contents — safe by the transport
+  law; triggers are rows and survive.
 
   THE ORDER OF THE LAST TWO STEPS IS LOAD-BEARING, not stylistic: the
   entry is dropped BEFORE the channel is closed, so `wake/route!` can
@@ -419,6 +426,7 @@
   (when-let [entry (armed routing agent-id)]
     (flow/stop (:seon.flow/graph entry))
     (async/<!! (:seon.cluster.loop/completion entry))
+    (async/close! (:seon.cluster.loop/completion entry))
     (swap! routing
            (fn [current]
              (-> current

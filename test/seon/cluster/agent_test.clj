@@ -937,11 +937,13 @@
                 ;; proc is built from the captured fn VALUE — hot
                 ;; reload must NOT reach it
                 control-channel (async/chan (async/sliding-buffer 1))
+                control-completion (async/chan 1)
+                _ (async/>!! control-completion ::ready)
                 control-handle (assoc base
                                       :seon.cluster.wake/channel
                                       control-channel
                                       :seon.cluster.loop/completion
-                                      (async/promise-chan))
+                                      control-completion)
                 control (flow/create-flow
                          {:procs
                           {::agent/mailbox
