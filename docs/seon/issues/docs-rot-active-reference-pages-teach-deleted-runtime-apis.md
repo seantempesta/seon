@@ -103,3 +103,10 @@ from `bin/lint`, `bin/seon-hook`, and `seon.fn.analyzer`, and corrected the
 render boundary to the actual public `seon.render.web/surface-html` and
 `seon.render.web/feed` functions. Both pages pass
 `seon.dev.markdown/validate-file`.
+
+The same pass found two pages outside the initial evidence list that still
+carried executable old guidance: the completed Gemini proposal and the active
+direct-`codex exec` orchestration manual. Their deleted provider recipe is now
+a short abandoned-history pointer, and the orchestration page now separates
+Codex-native lanes from the Claude-only `bin/codex-agent` wrapper using that
+script and root `AGENTS.md` as its sources.
