@@ -159,7 +159,7 @@
   (let [guard @process-interrupt-guard
         run-ns (sci/create-ns 'my.run)
         message-ns (sci/create-ns 'my.message)
-        core-ns (sci/create-ns 'clojure.core)
+        bootstrap-ns (sci/create-ns 'seon.bootstrap)
         schema-ns (sci/create-ns 'seon.schema)
         test-ns (sci/create-ns 'clojure.test)
         ctx
@@ -208,23 +208,22 @@
                    'java.lang.Throwable Throwable
                    'Error Error
                    'java.lang.Error Error}})
-        help-fn
-        (sci/binding [sci/ns core-ns]
-          (sci/eval-string*
-           ctx
-           (str "(fn help [] (print " (pr-str bootstrap/help-text) "))")))]
+        help-var (sci/copy-var bootstrap/help bootstrap-ns)
+        dir-var (sci/copy-var bootstrap/dir bootstrap-ns)
+        doc-var (sci/copy-var bootstrap/doc bootstrap-ns)]
     ;; `dir` and `doc` are REPL operations, so every namespace resolves
     ;; them bare through the same clojure.core refer it already receives.
     ;; `acquire!` replaces only `doc` with its program-row-derived macro.
     (sci/add-namespace!
      ctx 'clojure.core
-      {'dir (sci/resolve ctx 'clojure.repl/dir)
-      'doc (sci/resolve ctx 'clojure.repl/doc)
-      'help (sci/new-var
-             'help help-fn
-             {:ns core-ns
-              :doc "Print the guide to this REPL and its run loop."
-              :arglists '([])})})
+     {'dir dir-var
+      'doc doc-var
+      'help help-var})
+    (sci/add-namespace!
+     ctx 'seon.bootstrap
+     {'dir dir-var
+      'doc doc-var
+      'help help-var})
     (assoc ctx ::interrupt-guard guard)))
 
 (defn agent-namespace

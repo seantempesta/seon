@@ -28,6 +28,21 @@
    "first — your next run starts fresh, so put everything it will need into\n"
    "that note.\n"))
 
+(defmacro help
+  "Print the one prose guide to the agent REPL."
+  []
+  (list 'clojure.core/print help-text))
+
+(defmacro dir
+  "List the public names in `namespace-name` through Clojure's REPL macro."
+  [namespace-name]
+  (list 'clojure.repl/dir namespace-name))
+
+(defmacro doc
+  "Print documentation for `symbol` through Clojure's REPL macro."
+  [documented-symbol]
+  (list 'clojure.repl/doc documented-symbol))
+
 (defn run-id
   "The deterministic id of `agent-id`'s system-authored bootstrap run."
   {:malli/schema [:=> [:cat :seon.cluster.agent/id]
@@ -47,7 +62,7 @@
                      {:seon.cluster.run.form/source source
                       :seon.ns/name namespace-name})
         function-symbol (str namespace-name "/largest")]
-    [(user-form "(help)")
+    [(agent-form "(help)")
      (user-form (str "(in-ns '" namespace-name ")"))
      (agent-form "(dir my.run)")
      (agent-form "(doc my.run/complete)")
@@ -105,11 +120,28 @@
     process :seon.cluster.run/process
     opened-at :seon.cluster.run/opened-at}]
   (let [id (run-id agent-id)
-        ordered-sources (sources namespace-name)]
+        ordered-sources (sources namespace-name)
+        namespace-row
+        {:seon.ns/name namespace-name
+         :seon.ns/requires
+         [[:seon.ns/name 'my.run]
+          [:seon.ns/name 'my.message]
+          [:seon.ns/name 'seon.bootstrap]]
+         :seon.ns/refers
+         [{:seon.ns.refer/local 'help
+           :seon.ns.refer/target-ns 'seon.bootstrap
+           :seon.ns.refer/target-name 'help}
+          {:seon.ns.refer/local 'dir
+           :seon.ns.refer/target-ns 'seon.bootstrap
+           :seon.ns.refer/target-name 'dir}
+          {:seon.ns.refer/local 'doc
+           :seon.ns.refer/target-ns 'seon.bootstrap
+           :seon.ns.refer/target-name 'doc}]}]
     (into
      []
      cat
-     [(run/open-tx
+     [[namespace-row]
+      (run/open-tx
        {:seon.cluster.run/id id
         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
         :seon.cluster.run/opened-at opened-at})

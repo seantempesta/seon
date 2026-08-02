@@ -23,10 +23,10 @@
             "(doc my.run/complete)"
             "(dir my.message)"]
            (subvec texts 0 5)))
-    (is (= ['user 'user]
+    (is (= [namespace-name 'user]
            (mapv :seon.ns/name (take 2 sources))))
     (is (every? #(= namespace-name (:seon.ns/name %))
-                (drop 2 sources)))
+                (cons (first sources) (drop 2 sources))))
     (testing "the refusal is followed immediately by its closed-map repair"
       (is (str/includes? (nth texts 7) "[:map [:label :string]"))
       (is (not (str/includes? (nth texts 7) "{:closed true}")))
@@ -75,6 +75,18 @@
                (:seon.cluster.run/plan-digest before)))
         (is (= process (:seon.cluster.run/process before)))
         (is (not (contains? before :seon.bootstrap/pinned?)))
+        (is (= #{['help 'seon.bootstrap 'help]
+                 ['dir 'seon.bootstrap 'dir]
+                 ['doc 'seon.bootstrap 'doc]}
+               (d/q '[:find ?local ?target-ns ?target-name
+                      :in $ ?namespace-name
+                      :where
+                      [?namespace :seon.ns/name ?namespace-name]
+                      [?namespace :seon.ns/refers ?refer]
+                      [?refer :seon.ns.refer/local ?local]
+                      [?refer :seon.ns.refer/target-ns ?target-ns]
+                      [?refer :seon.ns.refer/target-name ?target-name]]
+                    @connection namespace-name)))
         (is (= {:seon.cluster.work/situation :resume
                 :seon.cluster.run/id run-id
                 :seon.cluster.agent/id agent-id
