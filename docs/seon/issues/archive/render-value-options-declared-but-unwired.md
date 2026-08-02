@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context]
 ---
@@ -42,3 +42,13 @@ This issue stays open because `max-depth`, `max-map-visits`, `max-string`,
 `shape-sample`, and `width` are still declared but not presentation inputs.
 Acceptance requires those remaining options to have honest consumers rather
 than merely riding through the map.
+
+## Resolution
+
+Resolved by `ebfaa4900` and `9acc78cd9`. The first commit wired the positive
+database page-size dial with admission caps as its outer ceiling; the sealed
+print migration deleted the dead private option family and made the remaining
+presentation controls references to the one `:seon.print/*` grammar.
+`seon.render.value/print-options` consumes those keys and both sinks consume
+the one prepared projection. The “remaining options” named by the partial
+resolution no longer exist in the admitted schema.
