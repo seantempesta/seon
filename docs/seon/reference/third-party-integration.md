@@ -46,7 +46,25 @@ The build writes `target/seon-standalone.jar`, its SHA-256 file, and the
 `java -jar target/seon-standalone.jar --root ./seon-root` is the direct entry.
 The artifact embeds the build-time `current-src` initialization pages and
 installs their rows idempotently when the selected root is empty. It does not
-need a source checkout at runtime.
+need a source checkout at runtime. Those pages are prepared transaction data:
+the build performs the source analysis and packages its manifest, while first
+boot only installs the derived schema and program rows. The empty file store is
+created with fused index roots, and Datahike writes each commit through the
+file backend's ordered batch operation (`build.clj:65-100`;
+`src/seon/artifact.clj:45-68`; `src/seon/cluster/store.clj:156-179`;
+`reference-code/datahike/src/datahike/writing.cljc:497-528`).
+
+Standalone cold initialization is a deployment cost, not the development-loop
+clock. The ten-second law governs source development through the operator; the
+owner accepted the source-loaded jar's longer first process start and ruled out
+AOT machinery. On 2026-08-02, three independent empty roots reached READY and
+served the root namespace page in 20,914.273 ms, 20,717.948 ms, and 19,693.582
+ms (median 20,717.948 ms). The median measured phase split was 12,068.300 ms
+loading the `seon.artifact` namespace closure and 7,431.300 ms installing the
+initialization rows. Reopening the first root reached READY in 13,368.212 ms;
+its converged installation check took 56.547 ms and preserved the exact
+`current-src` commit ID. These are deployment measurements, not performance
+guarantees across machines.
 
 Custom AppCDS is deliberately absent. The five-run comparison in
 `jvm-tuning-2026-08-01.md` found no meaningful startup improvement, produced a

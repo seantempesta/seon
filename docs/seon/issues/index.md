@@ -16,12 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (7)
+## Blocker (6)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Make superseded PRD runbooks fail closed](docs-rot-superseded-prd-runbooks-still-sequence-current-work.md) | blocker | doc-rot fix wave |
-| [Delete the writer build that still packages the old host server](writer-build-still-packages-the-deleted-host-server.md) | blocker | great-deletion build wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
