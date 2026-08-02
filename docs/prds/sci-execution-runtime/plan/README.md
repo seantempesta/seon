@@ -1876,6 +1876,32 @@ may reintroduce a shadow build into the dev feedback path.
   undeclared-refusal + unwind proven; the binding spans the complete
   guarded evaluation through admit's realization, so a lazy value
   cannot lose custody before it is realized).
+  AMENDED again same afternoon (owner): (7) AGENTS GET THEIR OWN LITTLE
+  WORLD — "I do want the functions to operate differently whether they
+  are system executed or agent executed." The cost flagged at the
+  design gate (one name resolving to different function objects for
+  compiled core code versus interpreted agent code) is ACCEPTED
+  DELIBERATELY, not merely tolerated: the agent-facing surface is
+  per-cluster BY CONSTRUCTION, so the function installed in cluster A's
+  context carries A's custody and an agent has no name for any other
+  cluster's. (8) CUSTODY INJECTION SUPPLIES CUSTODY; IT NEVER REWRITES
+  ARGUMENTS — this is what makes both of ruling #41's interfaces work
+  through ONE code path, positional and argument-map alike. The
+  installed closure answers only "which connection is mine"; the
+  function's own body still decides placement, normalizing first
+  through the dependency's own logic (`normalize-q-input`,
+  `reference-code/datahike/src/datahike/query.cljc:97-122`, which
+  disambiguates the argument-map form from map query syntax by `:query`
+  /`:args` key presence). After normalization the database lands at the
+  source position Datahike's own `query-source-bindings`/
+  `query-input-count` report — the derivation `seon.db` already
+  performs in `aligned-query-arguments` (`src/seon/db.clj:92-116`). For
+  `pull`/`transact!`/`datoms`/`entity` the connection or database is a
+  genuine first parameter, so elision dispatches on the predicate
+  (`db.utils/db?`, `store/connection?`) exactly as today's `q` does. No
+  per-function placement table exists at any point, and which functions
+  need custody stays the ruling-#33 contract query (9 declaring a
+  branch connection, 42 a database value, counted live 2026-08-02).
   **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
   PERSISTENCE — restrict nothing an agent can call; gate only what it
   may persist.** The session is a faithful Clojure REPL first: a def an
