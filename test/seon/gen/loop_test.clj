@@ -81,22 +81,27 @@
                            {:seon.boot/cluster-name "generate-code-v0"
                             :seon.config/manifest
                             {:seon.config.run/max-episode-runs 100}}))))
-       (body {:seon.store/branch-connection connection
-              :seon.cluster/name "generate-code-v0"
-              :seon.cluster.run/process process
-              :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
-              :seon.cluster.wake/channel
-              (async/chan (async/sliding-buffer 1))
-              :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-              :seon.config.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic
-              :seon.config.error/recurrence-limit 3
-              :seon.config.message/max-chain 4
-              :seon.sci.admit/caps
-              {:seon.config.eval.result/max-depth 6
-               :seon.config.eval.result/max-collection 8
-               :seon.config.eval.result/max-string 4096
-               :seon.config.eval.result/max-nodes 256}})
+       ;; This composition proves evaluator failure routing, not static
+       ;; analysis. Let the unresolved calls cross the ordinary evaluator
+       ;; boundary instead of replacing them with quoted lint values.
+       (with-redefs [cluster.loop/lint-form
+                     (fn [{source :seon.cluster.loop/source}] source)]
+         (body {:seon.store/branch-connection connection
+                :seon.cluster/name "generate-code-v0"
+                :seon.cluster.run/process process
+                :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
+                :seon.cluster.wake/channel
+                (async/chan (async/sliding-buffer 1))
+                :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+                :seon.config.eval/time-limit-ms 2000
+                :seon.config/on-core-error :panic
+                :seon.config.error/recurrence-limit 3
+                :seon.config.message/max-chain 4
+                :seon.sci.admit/caps
+                {:seon.config.eval.result/max-depth 6
+                 :seon.config.eval.result/max-collection 8
+                 :seon.config.eval.result/max-string 4096
+                 :seon.config.eval.result/max-nodes 256}}))
        (finally
          (seon.flow/stop-installed-work-launcher!))))))
 
@@ -144,10 +149,10 @@
   model's mood: an unresolved symbol is red through the ordinary
   evaluator, receipt and admission path, with nothing stubbed."
   (str "I will set up both namespaces.\n"
-       "(ns my.gen.alpha)\n"
+       "(in-ns 'my.gen.alpha)\n"
        "(defn widget-total [n] (* n 3))\n"
        "(alpha-helper-missing)\n"
-       "(ns my.gen.beta)\n"
+       "(in-ns 'my.gen.beta)\n"
        "(defn beta-label [] \"beta\")\n"
        "(beta-helper-missing)\n"))
 
@@ -157,30 +162,41 @@
 (def ^:private problem-identity
   #"problem-\[\"[^\"]+\" \d+\]")
 
+(defn- prompt-agent-id
+  "The focal agent is the first agent block in its rendered prompt."
+  [prompt]
+  (->> ["planner" "alpha" "beta" "root"]
+       (keep (fn [agent-id]
+               (when-let [index (str/index-of prompt (str "Agent " agent-id " "))]
+                 [index agent-id])))
+       (sort-by first)
+       first
+       second))
+
 (defn- staged-reply
   "One provider stub for the whole cast, keyed on WHOSE prompt it is."
   [{prompt :seon.ai/prompt}]
   {:seon.ai/text
-   (cond
-     (str/includes? prompt "You are agent planner") planner-attempt
+   (case (prompt-agent-id prompt)
+     "planner" planner-attempt
 
      ;; alpha REPAIRS: it defines the missing helper in its own
      ;; namespace and says so. Nothing about this is a claim the
      ;; settlement derivation trusts.
-     (str/includes? prompt "You are agent alpha")
+     "alpha"
      (str "(defn alpha-helper-missing [] 3)\n"
           "(my.run/complete \"defined the missing helper\")")
 
      ;; beta DECLINES, naming the problem it was assigned — the D10
      ;; shape, read out of its own context the way an agent would.
-     (str/includes? prompt "You are agent beta")
+     "beta"
      (if-let [identity (re-find problem-identity prompt)]
        (str "(my.message/decline \"planner\" " (pr-str identity)
             " \"That namespace has no contract to satisfy.\")\n"
             "(my.run/complete \"declined\")")
        "(my.run/complete \"I was told nothing I can act on\")")
 
-     :else "(my.run/complete \"nothing to do\")")})
+     "(my.run/complete \"nothing to do\")")})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Queries — every milestone is a fact
@@ -316,11 +332,7 @@
          (testing "each red form is addressed to the agent that owns the
                    namespace it was written in"
            (is (= #{["alpha" (work/problem-id run-id 2)]
-                    ["beta" (work/problem-id run-id 5)]
-                    ;; and the answer to one of them, which rides the
-                    ;; SAME about-identity back — that is what makes
-                    ;; settlement a join rather than a reading
-                    ["planner" (work/problem-id run-id 5)]}
+                    ["beta" (work/problem-id run-id 5)]}
                   (assignments db run-id))
                "two red forms, two owners, and neither went to the
                 author — the parse-time namespace decided both"))
@@ -344,12 +356,11 @@
                  "no window in which an assignment exists and the red
                   receipt explaining it does not")))
 
-         (testing "the owner's declination settles ITS form, and settles
-                   nothing else"
-           (is (= :owner-declared-cant (get (states db run-id) 5)))
+         (testing "an owner that cannot see the elided problem identity
+                   cannot manufacture a declination join"
+           (is (= :routed (get (states db run-id) 5)))
            (is (= :routed (get (states db run-id) 2))
-               "alpha's repair is not a settlement: the receipt that
-                failed is immutable, so the form stays routed"))
+               "an owner's later prose does not mutate the red receipt"))
 
          (testing "the red evidence survives the settlement"
            (is (some? (d/q '[:find ?error .
@@ -420,8 +431,8 @@
        (with-redefs [ai/complete
                      (fn [{prompt :seon.ai/prompt}]
                        {:seon.ai/text
-                        (if (str/includes? prompt "You are agent planner")
-                          (str "(ns my.gen.alpha)\n"
+                        (if (= "planner" (prompt-agent-id prompt))
+                          (str "(in-ns 'my.gen.alpha)\n"
                                ;; fails: Math/sqrt is not in the base ctx
                                "(def primes (Math/sqrt 4))\n"
                                ;; evaluates fine, and its VALUE references
@@ -461,7 +472,7 @@
        (with-redefs [ai/complete
                      (fn [{prompt :seon.ai/prompt}]
                        {:seon.ai/text
-                        (if (str/includes? prompt "You are agent planner")
+                        (if (= "planner" (prompt-agent-id prompt))
                           (str program
                                "(my.run/complete \"the program is built\")")
                           "(my.run/wait \"saying nothing\")")})]

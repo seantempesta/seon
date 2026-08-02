@@ -39,6 +39,7 @@
             [seon.error :as error]
             [seon.render :as render]
             [seon.schema]
+            [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
             [datahike.api :as d]))
 
@@ -215,18 +216,22 @@
   ;; the marker prints `#:seon.sci.admit{:reference …}` and a string
   ;; match would be testing the printer's settings
   (let [fact (error/normalize (request (transform-error (ex-info "boom" {}))))
-        read-back (edn/read-string (:seon.error/data-edn fact))]
+        read-back (#'admit/semantic-value
+                   (edn/read-string (:seon.error/data-edn fact)))]
     (testing "a value pr-str cannot survive reads back as EDN"
       (is (map? read-back)))
-    (testing "the live reference is NAMED, never entered — which is what
+    (testing "the live reference is OPAQUE, never entered — which is what
     makes the cycle unrepresentable rather than detected"
-      (is (= {:seon.sci.admit/reference "clojure.lang.Atom"}
+      (is (= {:seon.sci.admit/opaque "clojure.lang.Atom"}
              (get-in read-back [::flow/state
                                 :seon.cluster.loop/cluster
                                 :seon.store/branch-connection]))))
-    (testing "and the Throwable itself is a marker, not an interpretation"
-      (is (= {:seon.sci.admit/opaque "clojure.lang.ExceptionInfo"}
-             (get read-back ::flow/ex))))))
+    (testing "and the Throwable is the printer's bounded data projection,
+    never the live Throwable"
+      (let [projected (get read-back ::flow/ex)]
+        (is (map? projected))
+        (is (= "boom" (:cause projected)))
+        (is (= {} (:data projected)))))))
 
 (deftest capping-is-honest
   ;; `capped?` is admission's own signal and means ELIDED OR TRUNCATED,
@@ -238,7 +243,7 @@
         wide (error/normalize
               (request {:seon.error/kind :seon.ai/timeout
                         :seon.error/message "slow"
-                        :seon.error/data {:rows (vec (range 500))}}))]
+                        :seon.error/data {:rows (vec (range 10000))}}))]
     (is (false? (:seon.error/capped? small))
         "a source that fits is not reported as capped")
     (is (true? (:seon.error/capped? wide))
@@ -254,7 +259,7 @@
                                         :seon.error/message "rejected"
                                         :seon.error/data {:rows exploding}}))]
     (is (seon.schema/valid-candidate-value? :seon.error/fact fact))
-    (is (str/includes? (:seon.error/data-edn fact) "projection-error"))))
+    (is (str/includes? (:seon.error/data-edn fact) "seon.print/failed"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The three shapes lift exactly what they carry

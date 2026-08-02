@@ -31,8 +31,10 @@
             [seon.cluster.run :as run]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.instrument :as instrument]
             [sci.core :as sci.core]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -64,6 +66,10 @@
   "The stand-in evaluator, for the cases that pin an exact value."
   [_request]
   *evaluation*)
+
+(defn- semantic-result
+  [result-edn]
+  (#'admit/semantic-value (edn/read-string result-edn)))
 
 ;;; THE REAL EVALUATOR, injected through the same seam. The one thing it
 ;;; adds is the deadline: `turn` passes source + caps only, so the time
@@ -98,13 +104,27 @@
                    {:seon.ns/name 'clojure.test}
                    {:seon.ns/name 'seon.schema}
                    (agent-row "agent-a")
-                   ;; the episode dial, planted the way production
-                   ;; ships it (config/default.edn): an ABSENT dial is
-                   ;; FAIL-CLOSED for agent-sent triggers, so the
-                   ;; delegation fixtures need the fact the defaults
-                   ;; document provides
-                   {:seon.config/cluster "turn-test"
-                    :seon.config.run/max-episode-runs 100}
+                   ;; The loop resolves the one current config row at every
+                   ;; :call. Compile the complete production shape, changing
+                   ;; only the values that make this an inert paid-call
+                   ;; fixture. A sparse hand-built row would pin the deleted
+                   ;; boot-captured target shape.
+                   (:seon.config/desired-row
+                    (config/compile-manifest
+                     {:seon.boot/cluster-name "turn-test"
+                      :seon.config/manifest
+                      {:seon.config.run/max-episode-runs 100
+                       :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
+                       :seon.config.ai/model "probe"
+                       :seon.config.ai/max-tokens 32
+                       :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
+                       :seon.config.ai/timeout-ms 200
+                       :seon.config.ai.retry/base-delay-ms 1
+                       :seon.config.ai.retry/multiplier 2.0
+                       :seon.config.ai.retry/jitter-fraction 0.0
+                       :seon.config.ai.retry/maximum-delay-ms 1
+                       :seon.config.ai.retry/maximum-retries 0
+                       :seon.config.ai.retry/maximum-total-delay-ms 0}}))
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "count the widgets"
@@ -119,28 +139,11 @@
         [cluster.loop/lint-form
          (fn [{source :seon.cluster.loop/source}] source)]
         (body {:seon.store/branch-connection connection
+               :seon.cluster/name "turn-test"
                :seon.cluster.run/process process
                :seon.sci.eval/ctx (sci.eval/build-base-ctx)
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
-             ;; ONE target and NO backup: the default shape, where
-             ;; `disposition` can never return :failover-now. The
-             ;; failover fixtures add :seon.ai/backup explicitly.
-             :seon.ai/primary
-             {:seon.ai/endpoint "http://127.0.0.1:1/v1"
-              :seon.ai/model "probe"
-              :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
-              :seon.ai/timeout-ms 200}
-             ;; a strategy with ZERO retries: the fixtures that want
-             ;; backoff configure it, and every other test proves the
-             ;; no-wait path without sleeping
-             :seon.ai.retry/strategy
-             {:seon.ai.retry/base-delay-ms 1
-              :seon.ai.retry/multiplier 2.0
-              :seon.ai.retry/jitter-fraction 0.0
-              :seon.ai.retry/maximum-delay-ms 1
-              :seon.ai.retry/maximum-retries 0
-              :seon.ai.retry/maximum-total-delay-ms 0}
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
              :seon.config.eval/time-limit-ms 2000
              :seon.config/on-core-error :panic
@@ -337,21 +340,25 @@
                 "open, model, then ONE fold — the whole plan over one ctx")
             (testing "the receipts carry what sci actually produced"
               (let [results (into {}
+                                  (map (fn [[ordinal result-edn]]
+                                         [ordinal
+                                          (semantic-result result-edn)]))
                                   (d/q '[:find ?ordinal ?edn
                                          :where
                                          [?e :seon.cluster.eval/ordinal ?ordinal]
                                          [?e :seon.cluster.eval/result-edn ?edn]]
                                        @connection))]
-                (is (= (str "#:seon.sci.admit{:reference \"sci.lang.Var\", "
-                            ":name \"#'my.agents.agent-a/widgets\"}")
+                (is (= {:seon.sci.admit/reference "sci.lang.Var"
+                        :seon.sci.admit/name
+                        "#'my.agents.agent-a/widgets"}
                        (get results 0))
                     "a def evaluates to a VAR, admission names it without
                      dereferencing it, and it landed in the AGENT'S
                      namespace — no in-ns anywhere")
-                (is (= "[1 2 3]" (get results 1))
+                (is (= '(1 2 3) (get results 1))
                     "form 1 SAW form 0's def — one ctx per run, not per
                      form — and its lazy sequence came back REALIZED")
-                (is (= (pr-str (my.run/complete "counted 6"))
+                (is (= (my.run/complete "counted 6")
                        (get results 2))
                     "and the disposition round-tripped through admission")))
             (testing "every receipt settled clean — no interrupt, no error"
@@ -442,12 +449,13 @@
                            [?receipt :seon.cluster.eval/result-edn _]]
                          @connection)))))
           (testing "installation derives from db-after before the next form"
-            (is (= "43"
-                   (d/q '[:find ?result .
+            (is (= 43
+                   (semantic-result
+                    (d/q '[:find ?result .
                           :where
                           [?receipt :seon.cluster.eval/ordinal 2]
                           [?receipt :seon.cluster.eval/result-edn ?result]]
-                        @connection))))
+                         @connection)))))
           (testing "only the contracted defn enters the program graph"
             (is (= #{"my.agents.agent-a/durable"}
                    (set
@@ -513,13 +521,15 @@
           (drive! cluster 10)
           (let [results
                 (into {}
+                      (map (fn [[ordinal result-edn]]
+                             [ordinal (semantic-result result-edn)]))
                       (d/q '[:find ?ordinal ?result
                              :where
                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
                              [?receipt :seon.cluster.eval/result-edn ?result]]
                            @connection))]
-            (is (= "{:x :clojure.string/after-alias}" (get results 1)))
-            (is (= "{:x :clojure.set/after-dynamic-require}" (get results 3))
+            (is (= {:x :clojure.string/after-alias} (get results 1)))
+            (is (= {:x :clojure.set/after-dynamic-require} (get results 3))
                 "later sources are read only after prior namespace effects")))))))
 
 (deftest qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
@@ -565,12 +575,13 @@
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))]
           (drive! cluster 10)
-          (is (= "nil"
-                 (d/q '[:find ?result .
+          (is (nil?
+               (semantic-result
+                (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 0]
                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+                     @connection)))
               "an absent program identity is still a successful REPL ns-unmap")
           (is (nil?
                (sci.core/eval-string*
@@ -597,12 +608,13 @@
              (reset! evaluated-ctx (:seon.sci.eval/ctx request))
              (original-evaluate request))]
           (drive! cluster 10)
-          (is (= "nil"
-                 (d/q '[:find ?result .
+          (is (nil?
+               (semantic-result
+                (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 1]
                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+                     @connection)))
               "the next form sees the committed import removal")
           (is (nil?
                (:val
@@ -888,9 +900,12 @@
             [["ordinary"
               {:seon.error/kind :seon.db/rejected
                :seon.error/message "ordinary terminal program refusal."}]
-             ["huge-message"
+             ["bounded-hostile-data"
               {:seon.error/kind :seon.db/rejected
-               :seon.error/message (apply str (repeat 200000 "X"))
+               ;; Error messages remain strings in the durable schema. The
+               ;; session-repair printer bounds structured data; it does not
+               ;; turn a truncated string node into a string a second time.
+               :seon.error/message (apply str (repeat 4000 "X"))
                :seon.error/data {:big (vec (range 20000))}}]
              ["empty-message"
               {:seon.error/kind :seon.db/unknown-failure
@@ -1037,12 +1052,13 @@
                "[x] (inc x))\n"
                "(f 1)")})]
           (drive! cluster 10)
-          (is (= "2"
-                 (d/q '[:find ?result .
+          (is (= 2
+                 (semantic-result
+                  (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 2]
                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection))
+                       @connection)))
               "in-ns governs the later definition and call")
           (is (= "my.gen.alpha/f"
                  (d/q '[:find ?sym .
@@ -1079,12 +1095,13 @@
                "[x] (+ x 2))\n"
                "(f 1)")})]
           (drive! cluster 10)
-          (is (= "3"
-                 (d/q '[:find ?result .
+          (is (= 3
+                 (semantic-result
+                  (d/q '[:find ?result .
                         :where
                         [?receipt :seon.cluster.eval/ordinal 2]
                         [?receipt :seon.cluster.eval/result-edn ?result]]
-                      @connection)))
+                       @connection))))
           (let [row (d/pull @connection
                             '[*]
                             [:seon.fn/sym "my.agents.agent-a/f"])]
@@ -1195,12 +1212,14 @@
           (let [db @connection
                 results
                 (into {}
+                      (map (fn [[ordinal result-edn]]
+                             [ordinal (semantic-result result-edn)]))
                       (d/q '[:find ?ordinal ?result
                              :where
                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
                              [?receipt :seon.cluster.eval/result-edn ?result]]
                            db))]
-            (is (= (pr-str schema-key) (get results 2))
+            (is (= schema-key (get results 2))
                 "unregister has ordinary REPL return semantics")
             (is (nil? (d/pull db [:db/id]
                               [:seon.schema/key schema-key])))
@@ -1321,16 +1340,18 @@
           (drive! cluster 12)
           (let [results
                 (into {}
+                      (map (fn [[ordinal result-edn]]
+                             [ordinal (semantic-result result-edn)]))
                       (d/q '[:find ?ordinal ?result
                              :where
                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
                              [?receipt :seon.cluster.eval/result-edn ?result]]
                            @connection))]
-            (is (= ":v1" (get results 2))
+            (is (= :v1 (get results 2))
                 "V1 resolves and its SCI :test function runs")
-            (is (= ":v2" (get results 4))
+            (is (= :v2 (get results 4))
                 "V2 replaces the live test exactly")
-            (is (= "nil" (get results 6))
+            (is (nil? (get results 6))
                 "ns-unmap removes the live SCI binding")
             (is (nil? (d/pull @connection [:db/id]
                               [:seon.test/sym test-sym]))
@@ -1941,6 +1962,17 @@
    :seon.ai/api-key-variable "SEON_AI_TEST_BACKUP_KEY"
    :seon.ai/timeout-ms 200})
 
+(defn- configure-backup!
+  [connection]
+  (d/transact
+   connection
+   [{:seon.config/cluster "turn-test"
+     :seon.config.ai.backup/endpoint (:seon.ai/endpoint backup-target)
+     :seon.config.ai.backup/model (:seon.ai/model backup-target)
+     :seon.config.ai.backup/api-key-variable
+     (:seon.ai/api-key-variable backup-target)
+     :seon.config.ai.backup/timeout-ms (:seon.ai/timeout-ms backup-target)}]))
+
 (defn- failure
   "One model failure value carrying the evidence the leaf would record."
   [kind evidence]
@@ -1984,7 +2016,7 @@
   restate this derivation (owner ruling 2026-07-28)."
   [db row backup-configured?]
   (let [fact (d/pull db '[*] (:db/id (:seon.ai.attempt/error row)))
-        value (edn/read-string (:seon.error/data-edn fact))]
+        value (semantic-result (:seon.error/data-edn fact))]
     (ai/disposition
      {:seon.error/value value
       :seon.ai/backup? (boolean
@@ -2101,9 +2133,9 @@
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.ai/backup backup-target)
-            connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.store/branch-connection cluster)
             requests (atom [])]
+        (configure-backup! connection)
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -2293,10 +2325,6 @@
                             :seon.ai.retry/maximum-retries
                             (::maximum-retries scenario)
                             :seon.ai.retry/maximum-total-delay-ms 1000}
-            cluster (cond-> (assoc cluster
-                                   :seon.ai.retry/strategy retry-strategy)
-                      (::backup? scenario)
-                      (assoc :seon.ai/backup backup-target))
             completions (mapv turn-completion (::outcomes scenario))
             requests (atom [])
             committed-prefixes (atom [])
@@ -2308,6 +2336,30 @@
                         (let [ordinal (count @requests)]
                           (swap! requests conj request)
                           (nth completions ordinal (last completions))))]
+        (d/transact
+         connection
+         [(cond-> {:seon.config/cluster "turn-test"
+                   :seon.config.ai.retry/base-delay-ms
+                   (:seon.ai.retry/base-delay-ms retry-strategy)
+                   :seon.config.ai.retry/multiplier
+                   (:seon.ai.retry/multiplier retry-strategy)
+                   :seon.config.ai.retry/jitter-fraction
+                   (:seon.ai.retry/jitter-fraction retry-strategy)
+                   :seon.config.ai.retry/maximum-delay-ms
+                   (:seon.ai.retry/maximum-delay-ms retry-strategy)
+                   :seon.config.ai.retry/maximum-retries
+                   (:seon.ai.retry/maximum-retries retry-strategy)
+                   :seon.config.ai.retry/maximum-total-delay-ms
+                   (:seon.ai.retry/maximum-total-delay-ms retry-strategy)}
+            (::backup? scenario)
+            (assoc :seon.config.ai.backup/endpoint
+                   (:seon.ai/endpoint backup-target)
+                   :seon.config.ai.backup/model
+                   (:seon.ai/model backup-target)
+                   :seon.config.ai.backup/api-key-variable
+                   (:seon.ai/api-key-variable backup-target)
+                   :seon.config.ai.backup/timeout-ms
+                   (:seon.ai/timeout-ms backup-target)))])
         (with-redefs [ai/complete complete!]
           (binding [*evaluation*
                     {:seon.cluster.eval/result-edn
