@@ -2979,7 +2979,8 @@
                       :seon.cluster.message/at (Date.)}])
         ;; NOBODY reads the conn for the whole run: every offer must
         ;; still return immediately, which is what sliding-1 buys
-        (let [offers (atom [])
+        (let [offer-results (atom [])
+              completed-producers (atom #{})
               texts {"agent-a" "(my.run/complete \"alpha\")"
                      "agent-b" "(my.run/complete \"beta\")"}
               completer
@@ -2993,11 +2994,11 @@
                                  "agent-a")
                       text (get texts agent-id)]
                   (doseq [n (range 1 (inc (count text)))]
-                    (let [started (System/nanoTime)]
-                      (when sink
-                        (sink {:seon.ai/text (subs text 0 n)
-                               :seon.ai/tokens n}))
-                      (swap! offers conj (- (System/nanoTime) started))))
+                    (swap! offer-results conj
+                           (when sink
+                             (sink {:seon.ai/text (subs text 0 n)
+                                    :seon.ai/tokens n}))))
+                  (swap! completed-producers conj agent-id)
                   {:seon.ai/text text}))]
           (try
             (with-redefs [ai/complete completer]
@@ -3035,16 +3036,13 @@
                            "the frozen plan, not the shared conn")))))
 
             (testing "the producers' fold threads were NEVER parked"
-              (is (seq @offers) "the sinks really ran")
-              ;; sliding-1 never parks a producer: it drops the older
-              ;; value. The oracle is the offers' own durations — an
-              ;; offer that parked on an unread channel would be orders
-              ;; of magnitude slower than one that slid.
-              (let [slowest (apply max @offers)]
-                (is (< slowest 100000000)
-                    (str "the slowest offer took " slowest
-                         " ns — a parked producer would never return
-                          while nothing reads the conn"))))
+              (is (= (set (keys texts)) @completed-producers)
+                  "both producers completed while nobody read the conn")
+              (is (= (reduce + (map count (vals texts)))
+                     (count @offer-results))
+                  "every emitted prefix reached the sink")
+              (is (every? true? @offer-results)
+                  "every `offer!` completed immediately on sliding-1"))
 
             (testing "a displaced snapshot is superseded, never lost work"
               ;; only ONE value is ever pending, and it is the newest
