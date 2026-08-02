@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, agent, schema, database]
 ---
@@ -69,3 +69,20 @@ belong in archived research, not in current-state sections.
   ceremony, Integrant reconstruction, or nonexistent database function names.
 - The skills and reference pages that cite conventions are checked in the same
   wave so they cannot preserve a stale paraphrase.
+
+## Resolution
+
+Resolved by the conventions rewrite on 2026-08-01. `docs/conventions.md` now
+names the process-root JVM/branch-per-cluster topology from
+`src/seon/cluster.clj` and `src/seon/cluster/store.clj`; shipped schema EDN from
+`src/seon/schema/edn.clj`; runtime registration from `src/seon/sci/eval.clj`;
+host and interpreted instrumentation from `src/seon/instrument.clj`; the
+`seon.db` `q`/`pull`/`pull-many` read facade; the co-located
+`seon.cluster.store/transact!` write owner; the one-walk prompt/debug boundary;
+the `seon.print` sinks; and the live `seon.render.web` Flow and virtual-thread
+feed. Deleted allowlists, pod/CLJS APIs, remote database calls, section-bracket
+grammar, provider multimethods, and Integrant/clj-reload recipes were removed.
+
+Proof: `seon.dev.markdown/validate-file` reports the revised document valid;
+`git diff --check` passes; and stale-owner searches find no deleted database,
+context, instrumentation, or reload API in current guidance.
