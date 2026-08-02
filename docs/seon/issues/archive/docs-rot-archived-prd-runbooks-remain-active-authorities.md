@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, orchestrator, documentation]
 ---
@@ -68,3 +68,29 @@ rule that archived/history documents never sequence current work.
   before giving any historical source-reading guidance.
 - A root-to-leaf instruction-chain audit proves that entering any archived PRD
   cannot override the fresh CLJ-only system boundary.
+
+## Resolution — 2026-08-02
+
+Commit `45cf03d92` replaced all eighteen archived localized runbooks with the
+same inert historical boundary. The sixteen runbooks already changed from
+`active` to `archived` by earlier commit `3d706726e` no longer retain stale
+commands beneath that status. The remaining two `completed` runbooks are now
+normalized to `archived`, matching their adjacent roadmaps. No archived
+localized authority names a pod, CLJS gate, moved roadmap, old checkpoint, or
+implementation sequence.
+
+This boundary cannot be missed: the entire executable localized authority is
+the historical boundary, not a warning followed by stale instructions. It
+points outward to the active SCI runbook, the one program ordering, and the
+working edge before identifying the adjacent roadmap and research as quarry.
+
+The recurring `bin/test` check derives archived authorities from the archive
+path segment, forces `status: archived`, requires status equality with the
+sibling roadmap, and requires the exact inert body. It discovers every PRD
+`AGENTS.md` recursively rather than maintaining a directory roster. An empty
+discovery is a named failure, not health. The deliberate stale mutation failed
+with the exact runbook path and both violated rules; after restoration the
+focused gate passed 26 tests / 350 assertions. Markdown validation passed all
+25 changed documentation subjects with zero invalid files.
+`bin/issues-index --check` passed with 90 open and 861 archived notes after
+this blocker left the ranked queue.
