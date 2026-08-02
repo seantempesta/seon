@@ -469,7 +469,7 @@
            [[:db/add [:seon.ai.attempt/id "reasoning-inline"]
              :seon.ai.attempt/reasoning reasoning]])
           (let [after (full-agent-ai @connection)
-                without-basis #(str/replace % #"basis=\\d+" "basis=<same>")]
+                without-basis #(str/replace % #"basis=\d+" "basis=<same>")]
             (is (= (without-basis before) (without-basis after))
                 "the complete agent projection is byte-identical when reasoning appears")
             (is (not (str/includes? after reasoning)))

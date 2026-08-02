@@ -25,5 +25,5 @@
               :seon.sci.admit/caps caps}
              {:query-string ""})]
         (is (= 200 (:status response)))
-        (is (str/includes? (:body response) "showing 1–2 of")
+        (is (str/includes? (:body response) "showing 1–3 of")
             "the database-backed dial sizes this request's window")))))
