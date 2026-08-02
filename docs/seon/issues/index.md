@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (27)
+## Blocker (22)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -36,22 +36,18 @@ See `README.md` for the convention.
 | [Re-ground root AGENTS vocabulary in fresh owners](docs-rot-root-agents-names-moved-and-deleted-runtime-owners.md) | blocker | doc-rot fix wave |
 | [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
 | [Reconcile the architecture model with the admitted fresh schema](docs-rot-architecture-model-names-deleted-entities-and-attributes.md) | blocker | doc-rot fix wave |
-| [State live definitions left behind by a failed evaluation](failed-eval-definitions-have-no-session-image-delta.md) | blocker | stateless-resume repair wave |
-| [Prove SCI built-ins are deterministic before replaying session forms](session-replay-treats-effectful-sci-builtins-as-pure.md) | blocker | stateless-resume repair wave |
-| [Enforce agent-authored contracts in the live ctx](agent-authored-contracts-do-not-enforce-in-the-live-ctx.md) | blocker | live-ctx contract slice |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Make the agent page's live feed paint the page a GET already renders](agent-page-live-feed-paints-nothing.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
-| [Seed the cluster's process row before naming it as provenance](cluster-boot-refuses-its-own-process-provenance.md) | blocker | turn-loop preflight fix lane |
-| [Eval-time schema and test rows have no recurring proof](eval-time-schema-and-test-rows-have-no-recurring-proof.md) | blocker | Core |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (51)
+## Friction (50)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
 | [Delete static render blocks left by the one-walk cutover](static-render-blocks-survive-the-one-walk-cutover.md) | friction | render deletion wave |
@@ -80,13 +76,11 @@ See `README.md` for the convention.
 | [Wire `:seon.render.value/options` so presentation decouples from admission caps](render-value-options-declared-but-unwired.md) | friction | caps-blob-print wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
-| [Restore the message bar to the page the agent route serves](agent-page-has-no-message-form.md) | friction | visual-QA fix wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
 | [Give `ai-prose` the ref shape the render walk actually hands it](error-render-puts-its-own-failure-in-agent-context.md) | friction | turn-loop preflight fix lane |
 | [Give render token budgets one config owner instead of private dials](render-token-budgets-are-private-dials-no-producer-supplies.md) | friction | context wave fix lane |
 | [Make the render wave's properties able to produce their failing cases](render-wave-properties-cannot-produce-their-failing-cases.md) | friction | context wave fix lane |
-| [Derive walk family detection from identity, not declaration order](walk-family-detection-depends-on-schema-declaration-order.md) | friction | context wave fix lane |
 | [Return the SCI re-arm refusal as a value and seal the guard's invariants](sci-evaluate-throws-when-a-guarded-context-is-re-armed.md) | friction | Core |
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
