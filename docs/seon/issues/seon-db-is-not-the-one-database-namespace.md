@@ -82,6 +82,12 @@ Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
 - `transact!` moved into `seon.db`; `seon.cluster.store` retains store,
   branch-connection, and flock custody. The four outcomes, schema encode,
   and exact Integer→Long walk moved with their tests.
+- The moved call sites are named explicitly: production callers
+  `src/seon/cluster.clj` and `src/seon/cluster/loop.clj`; regression callers
+  `test/seon/cluster/armed_test.clj`, `boot_test.clj`, `store_test.clj`,
+  `store_transact_test.clj`, `turn_test.clj`, `test/seon/instrument_test.clj`,
+  and the two through-door forms in `test/seon/sci/eval_test.clj`. No other
+  call site was migrated in this wave.
 - The dependency order is now Datahike + `seon.schema` +
   `seon.schema.datahike` + the leaf `seon.error.refusal` → `seon.db` →
   `seon.cluster.store` → higher cluster/render owners. `seon.db` requires
