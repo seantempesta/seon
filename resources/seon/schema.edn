@@ -2440,7 +2440,7 @@
  ; class, same commit. `/run` is optional because an idle agent has no
  ; current run, and absence IS idle (there is no status to read).
  ; The family lens is declared WHERE THE FAMILY IS (the `:seon.fn` /
- ; `:seon.ns` / `:seon.schema` idiom in seon.schema.cljc):
+ ; `:seon.ns` / `:seon.schema` idiom in seon.schema.clj):
  ; `seon.render.walk/projection` reads it off the matched entity map, so
  ; a family gains a default render by adding one line here and writing
  ; one plain function. No registry, no table, no dispatch.
@@ -2497,7 +2497,7 @@
  ; The ordered form entity. Same reason as the message map: without it
  ; only `/id` installed, so a frozen plan could not be transacted on the
  ; live boot path. Every entry is required — `plan-call` writes all four
- ; together or writes none (run.cljc:409-417).
+ ; together or writes none (run.clj:409-417).
  :seon.cluster.run.form/form
  [:map {:seon.db/entity true
         :seon.render/ai seon.cluster.run/render-form-ai

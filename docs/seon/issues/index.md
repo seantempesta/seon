@@ -33,7 +33,7 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (63)
+## Friction (64)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -51,6 +51,7 @@ See `README.md` for the convention.
 | [Delete dev feedback gates that observe deleted owners](dev-feedback-gates-observe-deleted-owners.md) | friction | dev feedback deletion wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
 | [Let `eval_clj` reach any root, cluster, namespace, and the agent door](mcp-eval-cannot-reach-every-jvm-cluster-and-namespace.md) | friction | MCP probe-surface wave |
+| [Give MCP results the value system instead of a second truncation](mcp-truncates-instead-of-using-the-value-system.md) | friction | MCP surface PRD |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
 | [Make `:keep-history? false` actually bootable](history-off-is-not-a-creation-seam-toggle.md) | friction | eval-scale economics wave |
 | [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
