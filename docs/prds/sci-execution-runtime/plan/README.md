@@ -1751,10 +1751,9 @@ may reintroduce a shadow build into the dev feedback path.
   is NOT the sharing mechanism — measured, a `def` propagates to sibling
   forks only when the base entry is already a `sci.lang.Var`, and what
   `acquire!` installs is host `clojure.lang.Var`s, which do not
-  propagate. Today's cross-agent visibility comes entirely from the
-  per-turn reinstall from the database. Ruling #29's ONE LIVE CTX PER
-  CLUSTER is what actually makes this sharing true; it cannot be bought
-  by forking.)
+  propagate. Before ruling #29 landed, cross-agent visibility came entirely
+  from the per-turn reinstall from the database. The ONE LIVE CTX PER CLUSTER
+  now makes this sharing true; it cannot be bought by forking.)
   The boundary is the CLUSTER, matching the database boundary that
   already exists: no cross-cluster sharing, ever. This boundary is closed:
   `ac9de46b9` made the live ctx per cluster, maintained SCI `6de1568`

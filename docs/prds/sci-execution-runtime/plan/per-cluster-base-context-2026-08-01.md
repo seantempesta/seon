@@ -31,7 +31,7 @@ Yes, multiple base contexts — and they are nearly free. A base ctx costs
 removes from the hot path entirely. So: **per-cluster `sci/init` (option
 a), no sci fork change required for the boundary itself.** One small sci
 fork change is still warranted, for a different and much narrower reason
-— a residue of ~19 process-global writable Vars that survive independent
+— a residue of 17 process-global writable Vars that survive independent
 `init` calls (§3.4).
 
 ## 1. What a base context actually costs
