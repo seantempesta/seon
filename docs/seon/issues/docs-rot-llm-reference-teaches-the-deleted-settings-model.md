@@ -71,3 +71,36 @@ per-turn resolution/attempt commit.
   schema-derived overlay mechanism and ruling #34.
 - Root, downstream integration, AI-setting plans, and quarry runbooks are
   chased so none re-promotes a deleted configuration recipe.
+
+## Progress — 2026-08-01
+
+Commit `e0c937757` replaced the mixed pod/fresh page with one maintained
+reference for `seon.ai`, the `:seon.config.ai/*` dials, schema-derived
+per-agent overlays, one-resolution-per-turn, OpenAI-compatible wire mapping,
+payment-safe disposition, streaming, and durable attempt facts. Commit
+`116cc7854` also rewrote the downstream integration page around that fresh
+configuration surface.
+
+Proof:
+
+- `seon.dev.markdown/validate-file` reports no violations.
+- Every documented dial exists in `resources/seon/schema/config.edn`; every
+  shipped value is copied from `config/default.edn`.
+- Resolution and attempt claims were checked against
+  `src/seon/ai.cljc`, `src/seon/cluster/loop.cljc`,
+  `src/seon/schema/edn.clj`, and `resources/seon/schema/ai.edn`.
+- Searches find the deleted adapter namespaces, singleton, pod workers, and
+  `SEON_AI_*` variables only in explicit statements that they do not exist.
+
+Protected inbounds remain before this issue can close:
+
+- `src-old/seon/ai/AGENTS.md:53` directs quarry maintainers to a deleted
+  `llm-adapters` "Model catalog" section.
+- `docs/prds/sci-execution-runtime/plan/ai-settings-design-2026-08-01.md`
+  lines 40, 87, 89, 408, and 512 cite the deleted descriptor-row sections as
+  current grounding.
+- `docs/prds/sci-execution-runtime/plan/unsettled.md:1827` cites a deleted line
+  range for the streaming invariant.
+
+This lane is forbidden from editing `docs/prds/**` and does not own the quarry
+runbook.

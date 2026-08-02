@@ -69,3 +69,37 @@ it impossible to treat as current API guidance.
   examples, and runbooks so no outer reader re-promotes a demoted page.
 - Preserve genuinely useful dependency research as clearly historical source
   material rather than deleting it blindly.
+
+## Progress — 2026-08-01
+
+Commit `116cc7854` rewrote the maintained operator, integration, Datastar, and
+Flow references against fresh source; corrected the active linting examples;
+and replaced the abandoned project-specific recipes with short fail-closed
+historical notes. It removed 7,784 lines of deleted pod, writer, atom-watch,
+`refresh-all!`, external-agent, and separate-JVM guidance.
+
+Proof:
+
+- `seon.dev.markdown/validate-file` reports no violations for all fourteen
+  changed reference pages.
+- The only remaining old runtime names in `docs/seon/reference/` occur in
+  explicit statements that those APIs do not exist.
+- The active implementation claims were checked against
+  `script/seon/fresh_operator.clj`, `src/seon/{config,flow}.clj*`,
+  `src/seon/cluster/agent.clj`, `src/seon/render/{route,web}.clj`,
+  `resources/seon/schema/config.edn`, `config/default.edn`, and the pinned
+  Datastar and core.async sources.
+
+One protected inbound remains before this issue can close:
+`docs/seon/concepts/feeds.md:22` says `flow-foundation.md` contains a
+`status-aggregator-step`/`::agent-heartbeat` signal pattern. The fresh Flow
+reference and source contain no such mechanism. This lane does not own
+`docs/seon/concepts/**`.
+
+An independent acceptance pass found that the first rewrite had retained the
+obsolete standalone-lint narrative and named a nonexistent
+`seon.render.web/block-fragment`. Commit `c9d428250` replaced the lint page
+from `bin/lint`, `bin/seon-hook`, and `seon.fn.analyzer`, and corrected the
+render boundary to the actual public `seon.render.web/surface-html` and
+`seon.render.web/feed` functions. Both pages pass
+`seon.dev.markdown/validate-file`.
