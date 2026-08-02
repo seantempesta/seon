@@ -71,7 +71,7 @@
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/registry.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

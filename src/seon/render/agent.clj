@@ -60,7 +60,7 @@
   "`:seon.render/ai` — one agent, as its neighbours see it.
 
   The agent family's own lens, declared on `:seon.cluster.agent/agent`
-  in `src/seon/schema/run.edn`. Deliberately ONE sentence: an agent
+  in `resources/seon/schema.edn`. Deliberately ONE sentence: an agent
   reached as a neighbour wants a name and whether it is busy, and
   everything else about it is its own neighbourhood's business, one hop
   further out.

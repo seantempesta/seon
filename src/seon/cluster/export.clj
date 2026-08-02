@@ -68,7 +68,7 @@
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/export.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

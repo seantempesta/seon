@@ -75,7 +75,7 @@
            [java.util.concurrent CompletableFuture Executors]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/web.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (defn server?

@@ -66,7 +66,7 @@
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/wake.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

@@ -183,7 +183,7 @@
      leaf)))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/block.edn (the population is global, so the
+;;; Schemas — resources/seon/schema.edn (the population is global, so the
 ;;; file that owns a kind's first consumer owns its declaration)
 ;;;
 ;;; The grammar is a REGISTERED core predicate, not merely a resolvable

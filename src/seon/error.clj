@@ -150,7 +150,7 @@
             [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/error.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
@@ -837,7 +837,7 @@
 (defn render-ai
   "`:seon.render/ai` — one STORED error fact, as steering prose.
 
-  Declared on `:seon.error/fact` in `src/seon/schema/error.edn`, so an
+  Declared on `:seon.error/fact` in `resources/seon/schema.edn`, so an
   agent that reaches a recorded error by walking its own neighbourhood
   is told what a notice would have told it — WHAT happened, WHAT it
   means for its work, WHERE the evidence is. There is no second prose

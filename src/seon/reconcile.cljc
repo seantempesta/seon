@@ -47,7 +47,7 @@
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas: seon/schema/reconcile.edn owns this namespace's registrations.
+;;; Schemas: resources/seon/schema.edn owns this namespace's registrations.
 ;;; ---------------------------------------------------------------------------
 
 ;;; ---------------------------------------------------------------------------

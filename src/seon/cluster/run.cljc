@@ -939,7 +939,7 @@
 ;;; The family default renders — what a run, a form and a receipt LOOK
 ;;; LIKE to an agent reading its own neighbourhood.
 ;;;
-;;; Declared on the registered entity maps in `src/seon/schema/run.edn`
+;;; Declared on the registered entity maps in `resources/seon/schema.edn`
 ;;; (`:seon.render/ai` properties), which is `seon.schema`'s own idiom
 ;;; for `:seon.fn`, `:seon.ns` and `:seon.schema` — so a family declares
 ;;; its lens where it declares everything else about itself, and

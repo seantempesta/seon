@@ -59,7 +59,7 @@
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/message.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
@@ -428,7 +428,7 @@
   "`:seon.render/ai` — one message, as the sentence it was.
 
   Declared on `:seon.cluster.message/message` in
-  `src/seon/schema/message.edn`, so every reader of a message — a
+  `resources/seon/schema.edn`, so every reader of a message — a
   prompt, a page, an agent's neighbourhood — is handed the same
   sentence by the same function.
 

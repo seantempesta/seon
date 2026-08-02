@@ -56,7 +56,7 @@
             [seon.sci.reader :as reader]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/reply.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

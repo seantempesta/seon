@@ -90,7 +90,7 @@
             [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/instrument.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

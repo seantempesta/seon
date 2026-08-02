@@ -71,7 +71,7 @@
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — src/seon/schema/agent.edn
+;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
