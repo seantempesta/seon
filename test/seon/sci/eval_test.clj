@@ -19,6 +19,7 @@
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
+            [seon.db :as db]
             [seon.instrument :as instrument]
             [sci.core :as sci]
             [seon.render :as render]
@@ -695,6 +696,83 @@
         (is (= 'my.agents.probe (:seon.sci.admit/value evaluation)))
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
+
+(deftest evaluation-custody-is-the-requested-cluster-connection
+  (test-support/with-database
+    (fn [connection-a]
+      (test-support/with-database
+        (fn [connection-b]
+          (d/transact connection-a [{:seon.cluster/name "ambient-a"}])
+          (d/transact connection-b [{:seon.cluster/name "ambient-b"}])
+          (let [ctx-a (eval/cluster-ctx @connection-a connection-a)
+                ctx-b (eval/cluster-ctx @connection-b connection-b)
+                evaluate
+                (fn [ctx connection source]
+                  (eval/evaluate
+                   (cond->
+                    {:seon.cluster.run.form/source source
+                     :seon.cluster.run.form/ns [:seon.ns/name 'user]
+                     :seon.sci.eval/ctx ctx
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/time-limit-ms 5000
+                     :seon.config/on-core-error :panic}
+                     connection
+                     (assoc :seon.store/branch-connection connection))))
+                cluster-names-source
+                (str "(seon.db/q "
+                     "'[:find [?name ...] "
+                     ":where [_ :seon.cluster/name ?name]])")
+                unbound
+                (binding [db/*conn* nil]
+                  (evaluate ctx-a nil cluster-names-source))
+                read-a (evaluate ctx-a connection-a cluster-names-source)
+                read-b (evaluate ctx-b connection-b cluster-names-source)
+                read-a-again
+                (evaluate ctx-a connection-a cluster-names-source)
+                write
+                (evaluate
+                 ctx-a connection-a
+                 (str "(seon.cluster.store/transact! "
+                      "@#'seon.db/*conn* "
+                      "[{:seon.cluster.message/id \"ambient-message\"}])"))
+                read-written
+                (evaluate
+                 ctx-a connection-a
+                 (str "(seon.db/q "
+                      "'[:find ?id . "
+                      ":where [_ :seon.cluster.message/id ?id]])"))
+                rejected
+                (evaluate
+                 ctx-a connection-a
+                 (str "(seon.cluster.store/transact! "
+                      "@#'seon.db/*conn* "
+                      "[{:seon.sci.eval-test/undeclared true}])"))
+                unbound-after
+                (binding [db/*conn* nil]
+                  (evaluate ctx-a nil cluster-names-source))]
+            (is (= :seon.db/missing-connection-binding
+                   (get-in unbound
+                           [:seon.sci.admit/value :seon.error/kind])))
+            (is (= ["ambient-a"] (:seon.sci.admit/value read-a)))
+            (is (= ["ambient-b"] (:seon.sci.admit/value read-b))
+                "a sibling cluster never inherits the first binding")
+            (is (= ["ambient-a"] (:seon.sci.admit/value read-a-again)))
+            (is (nil? (:seon.cluster.eval/error write)))
+            (is (= "ambient-message"
+                   (:seon.sci.admit/value read-written))
+                "a declared write is visible to the next evaluation")
+            (is (= :seon.db/rejected
+                   (get-in rejected
+                           [:seon.sci.admit/value :seon.error/kind])))
+            (is (= :transact/schema
+                   (get-in rejected
+                           [:seon.sci.admit/value
+                            :seon.error/data
+                            :error])))
+            (is (= :seon.db/missing-connection-binding
+                   (get-in unbound-after
+                           [:seon.sci.admit/value :seon.error/kind]))
+                "evaluation custody always unwinds on the caller thread")))))))
 
 (deftest public-walk-is-callable-through-an-agent-sci-eval
   (test-support/with-database

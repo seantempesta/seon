@@ -1039,6 +1039,8 @@
     agent-id :seon.cluster.agent/id}]
   (merge form
          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
+          :seon.store/branch-connection
+          (:seon.store/branch-connection cluster)
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
           :seon.sci.eval/ctx ctx
           :seon.cluster.agent/id agent-id
@@ -1387,17 +1389,14 @@
     ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
     (let [compiled-evaluate
           (requiring-resolve (:seon.cluster.loop/evaluate cluster))
-          ;; The closure runs on the actual compute worker, so JVM dynamic
-          ;; custody encloses compiled host calls made by SCI. Binding around
-          ;; `submit-evaluation!!` would rely on executor thread propagation.
-          ;; `call-with-walk-context` binds this exact live branch connection
-          ;; through seon.db custody; no database value is injected into the
-          ;; interpreter context.
+          ;; Walk context supplies the agent and render caps only. `evaluate`
+          ;; owns database custody from its request on the actual compute
+          ;; worker, so compiled host calls and admitted lazy values see this
+          ;; cluster without relying on executor thread propagation.
           evaluate
           (fn [request]
             (render/call-with-walk-context
-             {:seon.store/branch-connection connection
-              :seon.cluster.agent/id agent-id
+             {:seon.cluster.agent/id agent-id
               :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
              #(compiled-evaluate request)))
           ;; the message this run is answering, read ONCE per turn: it

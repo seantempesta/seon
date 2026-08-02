@@ -111,6 +111,7 @@
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.program :as program]
@@ -1397,14 +1398,16 @@
   caller's work launcher.
 
   Order is the contract:
-  1. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
+  1. bind the request's branch connection on this evaluation thread,
+     preserving an existing ambient binding when the request omits it;
+  2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
-  2. arm its stable interrupt-fn on the current thread with
+  3. arm its stable interrupt-fn on the current thread with
      `::time-limit-ms`, the ONLY limit;
-  3. consume THE ONE reader event; source is never reparsed;
-  4. evaluate;
-  5. ADMIT the value — realized and bounded — while still armed;
-  6. disarm in `finally`.
+  4. consume THE ONE reader event; source is never reparsed;
+  5. evaluate;
+  6. ADMIT the value — realized and bounded — while still armed;
+  7. disarm in `finally`.
 
   Never throws. A failure of any kind returns an ordinary map whose
   `:seon.sci.admit/value` is a flat `:seon.error` value. PRESENCE IS
@@ -1419,6 +1422,7 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     namespace-ref :seon.cluster.run.form/ns
+    connection :seon.store/branch-connection
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
   (let [;; a supplied ctx is used AS GIVEN — forking it here would
@@ -1438,8 +1442,9 @@
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         session-observation (volatile! nil)]
-    (try
-      (let [before-reader-context
+    (binding [db/*conn* (or connection db/*conn*)]
+      (try
+        (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (one-event source namespace-name evaluation-ctx)
             form (:seon.sci.reader/form event)
@@ -1547,7 +1552,7 @@
             :seon.print/options @print-options
             :seon.sci.eval/session-defs session-defs
             :seon.sci.eval/program-row row}))
-      (catch Throwable throwable
+        (catch Throwable throwable
           (let [record (record (if (interrupted? throwable) :time :error))
                 session-defs
                 (when-let [{failed-ctx :seon.sci.eval/ctx
@@ -1569,20 +1574,20 @@
                   :seon.sci.admit/caps caps
                   :seon.config/on-core-error :record
                   :seon.sci.admit/record record})]
-            (failed-evaluation
-             (cond-> {:seon.sci.eval/admitted admitted
-                      :seon.sci.admit/caps caps
-                      :seon.sci.eval/printed printed
-                      :seon.sci.eval/namespace-name namespace-name
-                      :seon.print/options @print-options
-                      :seon.sci.eval/session-defs session-defs
-                      :seon.sci.admit/record record
-                      :seon.sci.admit/value value}
-               ;; the instant the interrupt was OBSERVED — the one
-               ;; genuinely new fact a cut evaluation leaves. Its
-               ;; presence IS the interrupted state; there is no label.
-               (= :time (:seon.eval/outcome record))
-               (assoc :seon.cluster.eval/interrupted-at
-                      (java.util.Date.))))))
-      (finally
-        (stop!)))))
+          (failed-evaluation
+           (cond-> {:seon.sci.eval/admitted admitted
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/printed printed
+                    :seon.sci.eval/namespace-name namespace-name
+                    :seon.print/options @print-options
+                    :seon.sci.eval/session-defs session-defs
+                    :seon.sci.admit/record record
+                    :seon.sci.admit/value value}
+             ;; the instant the interrupt was OBSERVED — the one
+             ;; genuinely new fact a cut evaluation leaves. Its
+             ;; presence IS the interrupted state; there is no label.
+             (= :time (:seon.eval/outcome record))
+             (assoc :seon.cluster.eval/interrupted-at
+                    (java.util.Date.))))))
+        (finally
+          (stop!))))))
