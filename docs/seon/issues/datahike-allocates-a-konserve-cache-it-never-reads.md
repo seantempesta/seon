@@ -37,6 +37,17 @@ threshold.
 Separately, `:store-cache-size` is never set by Seon
 (`src/seon/cluster/store.clj:164-174`), so both LRUs run at the default 1000.
 
+The retained probe
+`docs/prds/sci-execution-runtime/research/scripts/store-options-before-after-2026-08-02.clj`
+reopened a fresh 3,600-datom file database and measured both caches. The outer
+Konserve cache was present with threshold 1,000 and stayed at **0 entries**
+before and after three direct `konserve.core/get` reads. A first cold Datahike
+query made the independent `CachedStorage` perform five storage reads; the same
+query a second time added **zero** reads (`:reads` stayed 5), proving the inner
+node cache serves hits while the outer LRU remains unused. The script also
+reports that both cache atoms exist and are not identical, so deleting the
+outer allocation has a direct before/after capability measure.
+
 Full sweep:
 `docs/prds/sci-execution-runtime/research/upstream-delta-sweep-2026-07-31.md`.
 
@@ -51,3 +62,12 @@ Full sweep:
 - `:store-cache-size` names exactly one cache, and what it sizes is stated.
 - Datahike's suite passes at the change, and a probe shows the surviving
   cache serving hits.
+
+## Current disposition 2026-08-02
+
+**Safe fork cleanup, proven but not yet applied.** Current Datahike source has
+no `konserve.cache` call site besides `ensure-cache`; changing every database
+read to the cache API would introduce a second read mechanism, while deleting
+the unused wrapper leaves the measured `CachedStorage` hit path unchanged. The
+before metric is: two distinct cache atoms allocated, outer 0 → 0 entries on
+core reads, inner five backing reads on the first query and none on the second.

@@ -9,36 +9,51 @@ tags: [issue, datahike, architecture, evidence]
 
 ## Problem
 
-One small Datahike commit on Seon's file store costs **~123 ms**, and ~99 % of
-that is konserve fsyncing one object at a time: a commit rewrites the
-root-to-leaf path of every index (times the temporal indices), plus the
-schema-meta record, the commit record and the branch head — **18 to 24 objects
-at ~5–8 ms of APFS metadata fsync each**. The konserve filestore is not
-`multi-key-capable?`, so Datahike takes the sequential branch and pays every
-fsync serially (`datahike/writing.cljc:528-552`,
-`konserve/impl/defaults.cljc:104-117`).
+The title and original problem describe the pre-`c5c55809d` /
+`393198915` path, not a newly created Seon store. Current
+`seon.cluster.store/datahike-configuration` enables fused index roots and a
+256-entry diff buffer (`src/seon/cluster/store.clj:156-179`), and the selected
+Datahike/Konserve revisions execute an ordered multi-key file-store batch
+(`reference-code/datahike/src/datahike/writing.cljc:497-528`;
+`reference-code/konserve/src/konserve/filestore.clj:324-328`).
 
-This is not a regression — every serial file-store measurement in this
-repository agrees (45 ms in 2026-07, 125 ms today at 161k datoms), and the
-"thousands of tx/s" numbers are the writer's concurrent coalescing, which still
-works (1,477 tx/s at 1,024 callers, measured today). The defect is that Seon's
-store is created **without any of the three write-amplification options the
-maintained Datahike fork already ships**, and without the writer's one batching
-dial.
+Two unsettled facts remain:
+
+- Konserve's file batch is an **ordered durable-prefix operation, not one
+  atomic write or one fsync**. It stages, blob-forces, renames, and
+  directory-forces every pair in sequence
+  (`reference-code/konserve/src/konserve/filestore.clj:121-153`). It preserves
+  Datahike's children → schema metadata → immutable commit → mutable branch-head
+  order, but does not itself coalesce local filesystem barriers.
+- Seon still leaves the writer's `:commit-wait-time` at Datahike's zero default.
+  The wait happens after one committed batch and before the commit loop takes
+  the next item (`reference-code/datahike/src/datahike/writer.cljc:201-268`),
+  allowing queued logical transactions to form a larger following commit at a
+  direct serial-latency cost.
 
 ## Evidence
 
-`docs/prds/sci-execution-runtime/research/transact-throughput-regression-2026-07-31.md`,
-probes at `research/scripts/transact-throughput-2026-07-31/`. Freshly built
-~21,000-datom stores, 5-datom commits, one serial caller, n=25:
+The retained reproduction is
+`docs/prds/sci-execution-runtime/research/scripts/store-options-before-after-2026-08-02.clj`.
+Its 2026-08-02 run used fresh private stores under `tmp/`, 3,623 current datoms,
+two warmups, and seven measured single-row replacements:
 
-| configuration | objects | median | gain |
-|---|---:|---:|---:|
-| today's default | 18 | 99.9 ms | 1× |
-| `:fuse-index-roots? true` + `:index-config {:diff-buf-size 256}` | 1 | **19.0 ms** | **5.3×** |
+| configuration | blob forces / commit | median |
+|---|---:|---:|
+| legacy roots + no diff buffer, forced sequential | 14 | 74.0 ms |
+| legacy roots + no diff buffer, ordered file batch | 14 | 117.0 ms |
+| fused roots only, ordered file batch | 10 | 83.8 ms |
+| current fused roots + diff buffer, ordered file batch | **2** | **18.1 ms** |
+| current path + `commit-wait-time 5`, serial | 2 | 23.6 ms |
 
-Separately, `commit-wait-time 5` on the writer costs 15 % of serial latency
-(45.2 → 51.9 ms) and takes 64 concurrent callers from 247 to **564 tx/s**.
+The ordered file batch alone was slower than the forced sequential fallback on
+this APFS run; it is a crash-order/capability result, not the source of the
+latency win. Fusion plus diff buffering cut blob forces 14 → 2 and latency
+74.0 → 18.1 ms. With three bursts of 24 logical transactions,
+`commit-wait-time 5` changed six physical commits to three and median burst
+time 36.8 → 27.0 ms (652 → 890 logical tx/s), while adding 5.5 ms to the
+serial median. These are local-workstation numbers, not a universal tuning
+constant.
 
 Neither change trades any durability: every object is still fsynced, the branch
 head still lands last, and the crash model (nothing re-executes; facts survive)
@@ -46,19 +61,21 @@ is untouched.
 
 ## Owner
 
-`seon.cluster.store/datahike-configuration`
-(`src/seon/cluster/store.clj:155-174`) — it hard-codes a three-key `:store` map
-and an empty `{:backend :self}` writer map, so neither the index options nor
-`commit-wait-time` can be expressed today.
+`seon.cluster.store/datahike-configuration` for the remaining writer setting;
+the two store-fixed index settings are already adopted. A database-backed
+config fact cannot simply be read before the database connection that owns
+that fact exists: writer configuration is captured by `d/connect`, so its
+acquisition/reconnect boundary must be explicit rather than presented as a
+live dial.
 
 ## Acceptance criteria
 
-- `datahike-configuration` emits `:fuse-index-roots? true`,
-  `:index-config {:diff-buf-size 256}` and a writer `:commit-wait-time`, with
-  the wait exposed as a config fact rather than a literal.
-- A store created with those options shows a serial small-commit median at or
-  below **25 ms** at ~20k datoms, reproduced with
-  `research/scripts/transact-throughput-2026-07-31/options-admissible.clj`.
+- The retained script continues to prove the fused/diff path's blob-force and
+  latency advantage against the legacy shapes.
+- If a nonzero `:commit-wait-time` lands, its database-fact acquisition and
+  reconnect boundary are stated and both serial latency and concurrent
+  coalescing are measured; no workstation-specific literal is silently made
+  policy.
 - `bin/test` green, and one live proof on a freshly forked cluster that reads
   back a fact committed through `store/transact!` — the representation changed,
   so a fixture-only proof is not sufficient.
@@ -79,14 +96,11 @@ and an empty `{:backend :self}` writer map, so neither the index options nor
   head pointing at nodes that were never written — the precise failure
   `writing.cljc:502-511` orders its writes to prevent.
 
-## Backlog triage 2026-08-02
+## Current disposition 2026-08-02
 
-**Still real, narrowed to the writer wait and recurring measurement.**
-`c5c55809d` now creates stores with fused roots and the 256-entry diff buffer;
-`393198915` made the file store execute Datahike's ordered batch. Current
-`seon.cluster.store/datahike-configuration` still emits only
-`{:backend :self}` for the writer, and `commit-wait-time` has no fresh config
-fact or consumer. The remaining destination is the store/performance follow-up:
-derive that writer setting from facts and rerun the retained serial/concurrent
-measurement on a newly created store. The original 18-object default-path claim
-no longer describes newly created Seon stores.
+**Fusion and diff buffering are proven and already live. Ordered multi-key
+writes are live but are a safety/order capability, not a proven filestore
+speedup.** `:commit-graph? false` and `:sync-blob? false` remain inadmissible.
+The only unadopted performance candidate in this note is writer waiting; its
+coalescing benefit and serial cost are proven, while its Seon config acquisition
+mechanism remains design work.

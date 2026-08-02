@@ -9,23 +9,25 @@ tags: [issue, database, datahike, architecture]
 
 ## Problem
 
-Every Seon store runs with full bitemporal history because Datahike's
-default is `true` and Seon never says otherwise. History doubles the index
-set (temporal EAVT and AVET on top of the current indices) and multiplies
-the nodes written per commit — so the single largest multiplier on Seon's
-write amplification is an inherited default, not a decision.
+Rulings #23 and #40 settled the policy: history is on by default, while
+scratch/eval use may run history-off once the mechanism exists. Seon's store
+configuration still inherits Datahike's `true` rather than stating the default
+explicitly. This note is now about making the settled default visible and
+measured, not choosing the policy again.
 
 ## Evidence
 
 `reference-code/datahike/src/datahike/config.cljc:21` —
 `(def ^:dynamic *default-keep-history?* true)`.
 
-`src/seon/cluster/store.clj:164-174` is the one place the configuration
-shape lives, and it emits exactly three keys: `:store`, `:writer`, and
-`:schema-flexibility`. Grep confirms `keep-history` appears **nowhere** in
-`src/`, `config/`, or `resources/`; the only occurrences are three tests
-that set it explicitly (`test/seon/flow_test.clj:1095`,
-`test/seon/flow/loop_test.clj:124`, `test/seon/schema/admission_test.clj:26`).
+`src/seon/cluster/store.clj:156-179` is the creation configuration and emits
+the file store, self writer, fused roots, diff buffer, and schema flexibility,
+but no `:keep-history?`. Datahike's config normalization supplies `true`
+(`reference-code/datahike/src/datahike/config.cljc:21,224-238`) and
+`empty-db` creates three temporal indices when that value is true
+(`reference-code/datahike/src/datahike/db.cljc:897-957`). The writer updates
+temporal EAVT/AEVT and temporal AVET for indexed attributes
+(`reference-code/datahike/src/datahike/db/transaction.cljc:446-484`).
 
 Seon does read temporal data — `d/history`, `as-of`, and `since` have a
 handful of call sites — so history may well be earned. The defect is that
@@ -36,6 +38,22 @@ configuration shape lives" while omitting the dial with the largest effect.
 Full sweep:
 `docs/prds/sci-execution-runtime/research/upstream-delta-sweep-2026-07-31.md`.
 
+The retained private-store reproduction is
+`docs/prds/sci-execution-runtime/research/scripts/store-options-before-after-2026-08-02.clj`.
+For the same fused-root/diff-buffer workload:
+
+| setting | blob forces / small update | final objects | final bytes |
+|---|---:|---:|---:|
+| history on | 2 | 99 | 709,478 |
+| history off | 2 | 60 | 362,844 |
+
+History-off reduced this small run's store bytes by 48.9 % and objects by
+39.4 %. It did **not** reduce the two per-commit blob forces after fusion and
+diff buffering: those are the immutable commit record and mutable branch head,
+whose fused records carry either three or six root nodes. The policy therefore
+matters primarily to bytes and long-run growth on the current store path, not
+to this serial fsync count.
+
 ## Owner
 
 `seon.cluster.store/datahike-configuration` (`src/seon/cluster/store.clj:155-174`),
@@ -44,11 +62,8 @@ the same function named by
 
 ## Acceptance
 
-- `datahike-configuration` states `:keep-history?` explicitly, whichever way
-  the decision goes, with the reason recorded where a reader will find it.
-- If it stays on, the temporal reads that justify it are named; if it goes
-  off, every `d/history`/`as-of`/`since` call site is shown to be either
-  removed or served another way.
+- `datahike-configuration` states the settled default `:keep-history? true`
+  explicitly, with the reason recorded where a reader will find it.
 - The write cost of the choice is measured with the existing throughput
   harness so the number sits next to the fusion and batching numbers.
 - `:keep-history?` is fixed at database creation, so landing a change means
@@ -56,9 +71,8 @@ the same function named by
 
 ## Backlog triage 2026-08-02
 
-**Still real, narrowed to making the settled decision explicit and measured.**
-Ruling #23 chose retained time travel, and current blob GC now correctly marks
-history. `seon.cluster.store/datahike-configuration` nevertheless still omits
-`:keep-history?` and inherits Datahike's default silently. The store/performance
-wave must write `true` at creation and record the measured temporal-index cost;
-the design choice itself is no longer open.
+**Still real, narrowed to one safe explicit-default edit.** Writing `true`
+does not change current/new Seon store behavior: existing stores were normalized
+and stored with `true`, and new stores already inherit it. Per-cluster
+history-off is a separate mechanism issue in
+[[history-off-is-not-a-creation-seam-toggle]].
