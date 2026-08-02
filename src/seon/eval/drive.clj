@@ -178,7 +178,8 @@
                    (nil? (work/next-agent-work
                           db
                           {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/process process})))]
+                           :seon.cluster.run/process process
+                           :seon.cluster.work/now (java.util.Date.)})))]
     (cond
       (seq completions)
       {:seon.eval.drive/outcome :completed
