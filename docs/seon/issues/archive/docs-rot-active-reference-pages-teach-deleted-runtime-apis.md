@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, reference, web, flow, agent]
 ---
@@ -110,3 +110,19 @@ direct-`codex exec` orchestration manual. Their deleted provider recipe is now
 a short abandoned-history pointer, and the orchestration page now separates
 Codex-native lanes from the Claude-only `bin/codex-agent` wrapper using that
 script and root `AGENTS.md` as its sources.
+
+## Resolution — 2026-08-01
+
+Commit `3d706726e` repaired the final inbound. `docs/seon/concepts/feeds.md`
+now describes the live fleet mechanism: `seon.oversight` joins timeout-bounded
+Flow ping replies from each armed agent and the cluster plumbing graph with
+current database facts. It no longer promotes the deleted
+`status-aggregator-step`/`::agent-heartbeat` example.
+
+Proof:
+
+- the claim was checked against `src/seon/oversight.clj:87-156` and
+  `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:135-155`;
+- `seon.dev.markdown/validate-file` reports no violations for `feeds.md`; and
+- the old heartbeat names remain only in the explicit statement that fresh
+  fleet oversight does not use them.

@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (10)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,14 +25,13 @@ See `README.md` for the convention.
 | [Remove dead parser and oracle tools from live evaluation chains](dead-parser-oracle-tools-have-live-downstream-readers.md) | blocker | rot deletion wave |
 | [Make archived PRD runbooks fail closed as historical](docs-rot-archived-prd-runbooks-remain-active-authorities.md) | blocker | doc-rot fix wave |
 | [Replace Inspect container adapters that launch the deleted pod](inspect-container-adapters-launch-the-deleted-pod.md) | blocker | rot deletion wave |
-| [Rewrite the LLM reference around the fresh settings model](docs-rot-llm-reference-teaches-the-deleted-settings-model.md) | blocker | doc-rot fix wave |
 | [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Make the interpreted program graph per cluster, never process-wide](one-program-graph-is-shared-across-clusters.md) | blocker | per-cluster live-graph wave |
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 
-## Friction (50)
+## Friction (49)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -51,7 +50,6 @@ See `README.md` for the convention.
 | [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
 | [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
 | [Delete the pod CLJS reader closure](pod-cljs-reader-closure-teaches-a-deleted-runtime.md) | friction | rot deletion wave |
-| [Demote active reference pages that teach deleted runtime APIs](docs-rot-active-reference-pages-teach-deleted-runtime-apis.md) | friction | doc-rot fix wave |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |

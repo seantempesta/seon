@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, reference, agent, config]
 ---
@@ -106,3 +106,26 @@ Protected inbounds remain before this issue can close:
 
 This lane is forbidden from editing `docs/prds/**` and does not own the quarry
 runbook.
+
+## Resolution — 2026-08-01
+
+Commit `3d706726e` closed the protected inbound chase after the maintained
+reference rewrite in `e0c937757` and the downstream integration rewrite in
+`116cc7854`. The active AI-settings design and working edge now cite the
+maintained reference's current configuration, provider-scope, attempt-fact,
+and request/response sections instead of deleted line ranges. The generate-code
+runbook labels its named-profile proposal historical and points to the current
+schema-derived per-agent/per-turn section. The pod-era AI runbook now marks its
+former model-catalog pointer as historical quarry.
+
+Proof:
+
+- searches over the root authority, maintained downstream integration guide,
+  active AI-settings plan, working edge, generate-code runbook, and quarry AI
+  runbook find no pointer to a deleted `llm-adapters` line range or “Model
+  catalog” section;
+- the maintained reference's deleted adapter namespaces, singleton, and
+  `SEON_AI_*` variables occur only in explicit statements that those surfaces
+  do not exist; and
+- `seon.dev.markdown/validate-file` reports no violations for every changed
+  `docs/**` inbound.
