@@ -62,7 +62,7 @@ another build overlay.
 
 ## Resolution
 
-Commits `9fd1c5cd3`, `cae9203d8`, and `691517def` deleted the complete live
+Commits `9fd1c5cd3`, `cae9203d8`, `691517def`, and `b2c6cff75` deleted the complete live
 reader closure:
 
 - the `:cljs` dependency alias, Shadow configuration, Node externs, downstream
@@ -73,7 +73,9 @@ reader closure:
 - pod-only environment examples and the stale root README/dashboard claims;
   and
 - Inspect source-admission rows that treated the quarry, Shadow, nonexistent
-  package lock, ACME package, and alternate operator as runtime inputs.
+  package lock, ACME package, and alternate operator as runtime inputs; and
+- the residual Needle CLJS audit harness, its executable manifest/report
+  drivers, and Inspect's direct `out-bench/client/main.js` reader/tests.
 
 `package.json` and `bun.lock` now contain only Tailwind CSS dependencies.
 `resources/public/css/input.css` scans the fresh JVM source roots, and
@@ -89,6 +91,8 @@ reader closure:
   pruned lock and built the stylesheet in 65 ms.
 - `bun.lock` contains no Shadow, fake IndexedDB, websocket, provider SDK,
   browser DOM, or pod dependency.
+- The final Inspect cluster/catalog gate passed 46 tests after removing its
+  frozen Shadow-output identity seam.
 - Post-cut path searches found deleted build names only in dated research,
   archived evidence, explicit quarry guidance, or negative tombstones—not in
   an executable reader or build instruction.
