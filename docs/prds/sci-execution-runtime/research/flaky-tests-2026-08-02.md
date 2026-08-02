@@ -345,5 +345,5 @@ Two additional source-proven risks have dedicated notes:
 | Infinite-evaluation exact repetition | 20/20 tests / 0 failures / 0 errors |
 | Instrumentation focused namespace | 12 tests / 55 assertions / 0 failures / 0 errors |
 | Integrated turn/eval/instrumentation gate | 98 tests / 484 assertions / 0 failures / 0 errors |
-| `bin/issues-index --check` | Pending |
-| `bin/test` on quiet tree | Pending |
+| `bin/issues-index --check` | Clean; 90 open / 857 archived |
+| `bin/test` on quiet tree | Not started: two other orphaned full-gate JVMs (PIDs 7519 and 8569, both parent PID 1 and sleeping for more than 86 minutes) already occupied the owner's maximum of two concurrent test invocations. Starting a third would violate the explicit load bound. Their runner/liveness repair belongs to the active external `gate-refusal` and `suite-liveness` lanes, so this lane stopped without killing, resuming, or editing either lane. |
