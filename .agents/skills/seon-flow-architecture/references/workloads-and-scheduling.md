@@ -47,26 +47,31 @@ rebuilding the graph.
 
 ## Current executor ownership
 
-Do not flatten four distinct owners into “the executor”:
+Do not flatten four distinct executor roles into “the executor”:
 
-| owner | construction | current consumers |
-|---|---|---|
-| core.async default I/O | virtual-per-task when available | ordinary agent and cluster graph proc loops |
-| process-root `:io` | cached platform pool | work-launcher graph proc loop |
-| process-root `:compute` | fixed platform pool, size `availableProcessors` | work-launcher graph compute transforms |
-| work task executor | virtual-per-task | submitted SCI evaluation tasks |
+| owner | construction | current consumers | source |
+|---|---|---|---|
+| core.async default/root-held `:io` | core.async memoized virtual-per-task when available, cached-platform fallback | every current production graph's `:io` proc loop, including work launcher, cluster, agent, and fault graphs | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-105`; `src/seon/cluster.clj:158-182,1079-1096`; `src/seon/cluster/agent.clj:337-390`; `src/seon/flow.clj:381-423,626-666` |
+| process-root `:compute` | Seon fixed platform pool, size `availableProcessors` | work-launcher graph `:compute` transforms | `src/seon/cluster.clj:158-182`; `src/seon/flow.clj:381-423` |
+| core.async default `:compute` | core.async memoized cached platform pool | any graph with a `:compute` proc and no `:compute-exec` override | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:91-105`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:145-148` |
+| work task executor | Seon virtual-thread-per-task | submitted SCI evaluation tasks | `src/seon/flow.clj:135-137,199-229,401-430`; `src/seon/cluster/loop.cljc:509-525` |
 
-The process-root pair is created at `src/seon/cluster.clj:156-179`. The
-work-launcher graph receives it at `src/seon/flow.clj:381-425`. Per-agent
-graphs call `seon.flow/create-flow` without executor overrides at
-`src/seon/cluster/agent.clj:328-389`; the cluster graph does the same at
-`src/seon/cluster.clj:638-783`. Those graphs therefore use the core.async
-defaults.
+Core.async constructs and memoizes the default executors at
+`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-105`;
+flow's resolver uses them exactly when a graph omits the matching override
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:50-56,145-148`).
+The process-root pair holds that same dependency-owned `:io` object beside
+Seon's fixed `:compute` pool (`src/seon/cluster.clj:158-182`). The work-launcher
+graph supplies only the root `:compute` override, so its custom proc loop also
+resolves core.async's default `:io` (`src/seon/flow.clj:285-305,381-423`).
+Per-agent graphs omit executor overrides at
+`src/seon/cluster/agent.clj:337-390`; the cluster and fault graphs do the same
+at `src/seon/cluster.clj:1079-1096` and `src/seon/flow.clj:626-666`.
 
 The work-launcher task executor is deliberately separate from the graph's
 I/O executor. Launcher construction creates a virtual-per-task executor at
-`src/seon/flow.clj:402-432`. `execute-work!` submits each task there
-(`src/seon/flow.clj:199-277`).
+`src/seon/flow.clj:135-137,401-430`. `execute-work!` submits each task there
+(`src/seon/flow.clj:199-229`).
 
 ## Parking, occupation, and pinning
 
@@ -89,7 +94,7 @@ still consume application-level admission and retain their live state.
 
 `seon.flow/submit!!` is the one public submission operation
 (`src/seon/flow.clj:469-497`). The production turn path uses it at
-`src/seon/cluster/loop.cljc:218-234`; do not evaluate inline on the turn proc.
+`src/seon/cluster/loop.cljc:509-525`; do not evaluate inline on the turn proc.
 
 The launcher owns:
 

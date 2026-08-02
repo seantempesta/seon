@@ -13,7 +13,7 @@ alternative was rejected.
 - [Presence, not kinds](#presence-not-kinds)
 - [Derive, do not store](#derive-do-not-store)
 - [One mechanism](#one-mechanism)
-- [UI restoration is tabled](#ui-restoration-is-tabled)
+- [Namespace UI is built; canvas remains target](#namespace-ui-is-built-canvas-remains-target)
 
 ## Use the ruling ledger
 
@@ -42,8 +42,8 @@ Plan ruling: the 2026-07-28 agents-are-flows ruling at
 
 Current proof:
 
-- two-proc blueprint at `src/seon/cluster/agent.clj:246-270`;
-- derive-all armer at `src/seon/cluster/agent.clj:426-475`; and
+- two-proc blueprint at `src/seon/cluster/agent.clj:240-264`;
+- derive-all armer at `src/seon/cluster/agent.clj:435-484`; and
 - measured parked-proc cost in
   `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
 
@@ -74,8 +74,8 @@ Recovery does not replay an interrupted effect, plan suffix, or turn.
 Reopening the database marks dangling receipts interrupted, rebuilds graphs,
 and lets the agent adapt from durable facts.
 
-Read `src/seon/cluster/run.cljc:725-757` and the boot recovery position at
-`src/seon/cluster.clj:843-922`. The database records what settled; absence or
+Read `src/seon/cluster/run.cljc:866-930` and the boot recovery position at
+`src/seon/cluster.clj:1322-1328`. The database records what settled; absence or
 an interrupted receipt is evidence for the next agent decision, not authority
 for an automatic retry.
 
@@ -95,9 +95,9 @@ The transport law divides values by recovery need:
   backpressure, or observation may drop.
 
 Current examples are the sliding agent wake at
-`src/seon/cluster/agent.clj:246-270`, render/stream taps at
-`src/seon/cluster.clj:638-783`, and counted-dropping fault observation at
-`src/seon/flow.clj:635-711`.
+`src/seon/cluster/agent.clj:240-264`, render/stream inputs at
+`src/seon/cluster.clj:1119-1148`, and counted-dropping fault observation at
+`src/seon/flow.clj:633-701`.
 
 Plan ruling: the channel-versus-database boundary commissioned by the
 agents-are-flows decision at
@@ -115,7 +115,7 @@ presence in the armed map. There is no `:type`, `:kind`, active-set row, or
 status flag.
 
 Current derivation is explicit in the routing map and armer at
-`src/seon/cluster/agent.clj:276-326,441-490`. The data-model ruling is maintained in
+`src/seon/cluster/agent.clj:270-335,472-484`. The data-model ruling is maintained in
 `docs/seon/architecture/data-model.md`.
 
 Plan ruling: presence-not-kinds decision 2 at
@@ -135,7 +135,7 @@ Current examples:
 - armer derives missing graph custody from agents minus armed agents;
 - turn passes derive work after a payload-free wake; and
 - the renderer derives page snapshots from the current database value and
-  suppresses equal bytes (`src/seon/render/web.clj:229-285,360-480`).
+  suppresses equal bytes (`src/seon/render/web.clj:300-350,443-549`).
 
 Plan ruling 19 derives reactivity from render input and display-fact presence:
 `docs/prds/sci-execution-runtime/plan/README.md:961-981`.
@@ -163,16 +163,28 @@ Plan law L17:
 This replaced “temporary” duplication that preserved both models and made
 tests unable to identify the real owner.
 
-## UI restoration is tabled
+## Namespace UI is built; canvas remains target
 
-Ruling 12 tables the broader UI until context rendering is understood:
-`docs/prds/sci-execution-runtime/plan/README.md:1087-1097`.
+The current JVM renderer has canonical namespace pages, root and agent aliases,
+and namespace/agent debug variants in the one Reitit route table
+(`src/seon/render/route.clj:5-34`). Namespace routes resolve through the owning
+agent, while the debug response shows the AI and HTML projections together
+(`src/seon/render/web.clj:1041-1102,1176-1220`). Both projections use the same
+deterministic walk membership and ordering seam
+(`src/seon/render/web.clj:300-350,988-1009`;
+`src/seon/render/walk.clj:693-876`). Do not describe context rendering,
+namespace pages, or debug pages as tabled.
 
-The fresh tree still contains a narrow JVM web renderer in
-`src/seon/render/web.clj`; it is valid current implementation. Database-backed
-route restoration, agent-controlled canvas, generalized controls, and the
-revisioned package/keyframe protocol remain designs, not usable APIs.
+The generalized agent-authored canvas/control API and guarded `/call` route
+remain **[TARGET]**: the live route table has neither, and current interaction
+is the fixed inbound-message route plus a page-local checkbox
+(`src/seon/render/route.clj:5-27`;
+`src/seon/render/web.clj:1027-1037,1104-1110`). Revisioned packages/keyframes
+and agent-owned `::renders` also remain **[TARGET]**; current delivery uses
+complete snapshots with per-tab comparison and the agent graph still contains
+only mailbox and turn (`src/seon/render/web.clj:497-804`;
+`src/seon/cluster/agent.clj:240-264`).
 
-This replaced an attempted direct port of the deleted pod UI. Future work must
-apply the simpler facts/channels/derived-render model rather than restore the
-old CLJS mechanisms.
+These built and target boundaries apply the simpler facts/channels/derived-
+render model without restoring the deleted CLJS mechanisms
+(`AGENTS.md:20-52`).

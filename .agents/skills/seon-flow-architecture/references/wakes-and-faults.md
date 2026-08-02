@@ -17,7 +17,7 @@ or changing fault capture and `:record`/`:panic` behavior.
 ## One listener router
 
 Fresh Seon installs one Datahike `listen!` router per cluster. `route!` lives at
-`src/seon/cluster/wake.cljc:156-217` and receives transaction reports.
+`src/seon/cluster/wake.cljc:163-228` and receives transaction reports.
 
 The router currently:
 
@@ -72,7 +72,7 @@ and listener registration.
 
 Agent arming follows this rule: the cluster starts the graph, installs wake
 routing, then invokes the armer's derive-all pass directly
-(`src/seon/cluster.clj:755-783`). Keep that direct pass. A synthetic “boot
+(`src/seon/cluster.clj:1191-1229`). Keep that direct pass. A synthetic “boot
 wake” sent before route registration is not equivalent.
 
 ## Current interest routing
@@ -86,11 +86,11 @@ Current routing is intentionally incomplete:
 | cluster renderer | every transaction report |
 
 Verify the actual datom extraction and offers at
-`src/seon/cluster/wake.cljc:156-217`.
+`src/seon/cluster/wake.cljc:163-228`.
 
 Do not describe the current renderer as attribute-selective. It receives every
 report, then its own equality checks suppress unchanged output
-(`src/seon/render/web.clj:360-480`). Attribute/query interest derivation is
+(`src/seon/render/web.clj:497-549`). Attribute/query interest derivation is
 target work needed by agent-owned renders.
 
 ## Historical E/A/V machinery worth reusing
@@ -134,8 +134,8 @@ them into one fan-out:
 - each agent graph joins the cluster fault channel; and
 - a `fault-committer-proc` turns each fault into durable database data.
 
-Read `src/seon/flow.clj:593-711`. The committer proc itself is defined at
-`src/seon/flow.clj:593-602`.
+Read `src/seon/flow.clj:553-715`. The committer proc itself is defined at
+`src/seon/flow.clj:553-602`.
 
 A counted-dropping channel means overload may drop observations. That is
 acceptable only because a fault record is observational data about a core
@@ -150,7 +150,7 @@ system defects.
 ## The config dial
 
 The cluster reads one `:seon.config/on-core-error` decision and passes it to
-the fan-out at `src/seon/cluster.clj:708-747`.
+the fan-out at `src/seon/cluster.clj:1151-1190`.
 
 Current modes are declared at `resources/seon/schema/config.edn:7-8`:
 

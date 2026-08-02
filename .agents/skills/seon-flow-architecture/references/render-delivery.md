@@ -26,11 +26,17 @@ One cluster render proc consumes:
 It emits a complete page snapshot map
 `{agent-id {surface-id serialized-html}}`, suppresses unchanged surfaces, and
 mults snapshots to connected tabs
-(`src/seon/render/web.clj:360-480,530-608`).
+(`src/seon/render/web.clj:497-671,692-804`).
 
-This is the narrow built surface. The broader UI restoration is tabled by
-ruling 12 at `docs/prds/sci-execution-runtime/plan/README.md:1087-1097`.
-Do not describe the target protocol below as already live.
+The built surface also includes canonical namespace pages, root/agent aliases,
+and namespace/agent debug variants in the one route table
+(`src/seon/render/route.clj:5-34`). HTML pages and AI context share the same
+walk membership and ordering, and debug renders both projections from one
+database value (`src/seon/render/web.clj:300-350,1041-1102`;
+`src/seon/render/walk.clj:693-876`). The package/keyframe protocol below and a
+generalized canvas/control surface remain **[TARGET]**
+(`src/seon/render/route.clj:5-27`;
+`src/seon/render/web.clj:132-169,1027-1037`).
 
 ## Blocks and stable identity
 
@@ -41,8 +47,8 @@ A block is one render function's identified output:
 - its current serialized bytes.
 
 The current renderer's `page-of` serializes surfaces by stable ID at
-`src/seon/render/web.clj:229-259`. `changed` compares current and prior
-surface bytes at `src/seon/render/web.clj:261-285`.
+`src/seon/render/web.clj:300-350`. `changed` compares current and prior
+surface bytes at `src/seon/render/web.clj:443-467`.
 
 Keep identity stable across updates. Datastar morphs the targeted element; a
 new ID turns an update into removal plus insertion and loses browser-local
@@ -63,7 +69,7 @@ The live delivery sequence is:
 5. For subsequent snapshots, compare against that tab's prior snapshot and
    send changed surfaces.
 
-Read `src/seon/render/web.clj:229-285,530-608`.
+Read `src/seon/render/web.clj:300-350,443-467,497-804`.
 
 The per-tab prior snapshot means delta selection is currently repeated for
 each connection. Serialization of each surface happens in `page-of` before the
@@ -109,7 +115,7 @@ Choose each buffer from its loss semantics:
 The research table and measured conditions are at
 `docs/prds/sci-execution-runtime/research/render-pipeline-design-2026-07-29.md`.
 Current concrete taps and inputs are visible at
-`src/seon/cluster.clj:638-783` and `src/seon/render/web.clj:530-608`.
+`src/seon/cluster.clj:1119-1148` and `src/seon/render/web.clj:551-671,692-804`.
 
 Never use a channel for state recovery. If dropping the value makes reconnect
 or restart incorrect, commit the required identity/receipt/final value as a
@@ -123,7 +129,7 @@ pending bytes and a completion that settles drained or closed
 (`reference-code/http-kit/src/org/httpkit/server.clj:321-326`).
 
 Fresh Seon reads this state after each patch and joins the drain completion on
-its `:io` virtual thread (`src/seon/render/web.clj:502-528`). Parking here
+its `:io` virtual thread (`src/seon/render/web.clj:701-725`). Parking here
 applies real socket backpressure without blocking a compute executor.
 
 If the fork interface changes, verify both sides: the Clojure wrapper and the

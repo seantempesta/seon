@@ -9,7 +9,7 @@ lane's cluster to obtain a cleaner signal.
 `seon.cluster/start!` opens and advertises `io-prepl` first. Every later tower
 layer republishes the instance as it stands; a later failure throws with that
 value under `:seon.boot/instance`, while the REPL, advertisement, and registry
-entry survive (`src/seon/cluster.clj:845-924,926-1023`).
+entry survive (`src/seon/cluster.clj:1388-1485`).
 
 Start diagnosis with the exception's `:seon.boot/instance`. If another
 `io-prepl` in that JVM is reachable, the same value is in the private registry:
@@ -41,21 +41,24 @@ Read absence from the bottom upward:
 | no advertisement | namespace/JVM launch or layer-0 REPL failed; layer 0 unwinds completely |
 | advertisement, no `:seon.store/store` | REPL stands; process-root store acquisition failed |
 | store, no `:seon.boot/cluster-connection` | ancestor, branch creation, or branch open failed |
-| connection, no `:seon.boot/config-result` | schema accretion, recovery, or config application failed; use the exception cause to select among them |
-| config result, no routing/served value | root seed, work launcher, flow arm, or web serve failed |
+| connection, no `:seon.boot/config-result` | coherent-program validation, schema accretion, recovery, or config application failed; use the exception cause to select among them |
+| config result, no `:seon.sci.eval/ctx` | cluster/root-agent fact convergence, cold program acquisition, or durable session-image restoration failed |
+| SCI ctx, no routing/served value | work-launcher install, agent arm, or web serve failed |
 | `:seon.boot/ready-ms` | the complete tower returned |
 
 This table follows the actual publish points and order at
-`src/seon/cluster.clj:845-924,926-1023`; do not infer a higher layer from a pid
-or open socket alone.
+`src/seon/cluster.clj:1289-1386,1388-1485`; context construction and
+session-image restoration are at `src/seon/sci/eval.clj:1142-1228`. Do not
+infer a higher layer from a pid or open socket alone.
 
 ## 2. Inspect the advertisement before touching lifecycle
 
 The per-cluster advertisement is
 `<bootstrap-root>/<cluster-name>/prepl.edn`
-(`src/seon/cluster.clj:98-150`). A valid advertisement carries cluster name,
-pid, process start instant, and the bound REPL endpoint; the final tower adds
-the web URL (`src/seon/cluster.clj:963-986,909-924`).
+(`src/seon/cluster.clj:135-152`). JVM process identity is only
+`(pid, start-instant)` (`src/seon/cluster/process.clj:2-28`); the advertisement
+adds cluster name and the bound REPL endpoint, and the final tower adds the web
+URL (`src/seon/cluster.clj:1371-1386,1434-1452`).
 
 For the shared default root, use:
 
@@ -63,20 +66,18 @@ For the shared default root, use:
 bin/seon status
 ```
 
-`bin/seon` enters `seon.fresh-operator`; `bin/seon-fresh` is a compatibility
-alias to it (`bin/seon:4-7`; `bin/seon-fresh:5-6`). Both status commands were
-executed after the operator repair and produced the same rows.
+`bin/seon` accepts `--root PATH` and enters `seon.fresh-operator` with that
+canonical operator root; `bin/seon-fresh` is only a compatibility alias
+(`bin/seon:4-18`; `bin/seon-fresh:1-6`). Process records, advertisements,
+discovered JVMs, roster reads, and anchor selection are root-scoped
+(`script/seon/fresh_operator.clj:96-120,789-866,1041-1113,1593-1627`).
+Cross-root JVMs are excluded before probing and therefore cannot become an
+anchor for `start` (`script/seon/fresh_operator.clj:808-866,1139-1148`).
 
-An alternate operator root does not currently guarantee JVM isolation.
-`start` discovery can select a live JVM from a different root, and a partial
-start can then be unaddressable. Verify the selected pid and store path before
-using the result; stop rather than touching a foreign process or cluster
-(`docs/seon/issues/operator-start-discovers-jvms-from-other-roots.md`).
-
-The fresh status path reads every `prepl.edn`, checks `(pid, start-instant)`
+The fresh status path reconciles observations, checks `(pid, start-instant)`
 liveness, and separately reports detached operator JVMs with no live
-advertisement
-(`script/seon/fresh_operator.clj:192-230,237-269,553-577`). Therefore the
+advertisement (`script/seon/fresh_operator.clj:604-619,789-866,1927-2016`).
+Therefore the
 scratch cluster did not survive only when:
 
 1. its row is absent or stale;
@@ -85,7 +86,7 @@ scratch cluster did not survive only when:
 
 A file's mere presence is not proof of a live cluster. Seon's own
 `read-advertisement` rejects stale process identity for this reason
-(`src/seon/cluster.clj:1197-1221`).
+(`src/seon/cluster.clj:1679-1703`).
 
 ## 3. Avoid the stale-JVM trap
 
@@ -98,7 +99,7 @@ that already-running JVM; only an empty root launches
 A long-lived JVM can therefore still hold old Var roots even when the checkout
 is correct. A failure in a newly added cluster does not prove the current file
 still fails. For boot-sensitive proof, use a lane-owned operator root with no
-live advertisements. The verified isolation shape is a directory under
+live advertisements. The verified filesystem shape is a directory under
 repository-local `tmp/` whose code/config entries are symlinks to the current
 checkout and whose `data/` is its own
 (`docs/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md`
@@ -115,16 +116,17 @@ do
   ln -s "$PWD/$path" "$operator_root/$path"
 done
 
-bb --config "$PWD/bb.edn" --deps-root "$PWD" --classpath "$PWD/script" \
-  -m seon.fresh-operator --seon-root "$operator_root" start scratch-name
+bin/seon --root "$operator_root" start scratch-name
 ```
 
-The custom root is the fresh operator's explicit first argument
-(`script/seon/fresh_operator.clj:29-47`), and an empty root selects its new-JVM
-branch (`script/seon/fresh_operator.clj:495-522`). Use the same direct command
-with `status`, `logs scratch-name`, and `stop scratch-name` so discovery and
-cleanup stay inside that root. A custom-root cluster is intentionally invisible
-to the default MCP discovery path
+`bin/seon --root` requires an existing root and forwards it as the fresh
+operator's explicit root (`bin/seon:7-18`;
+`script/seon/fresh_operator.clj:44-52`). An operator root with no reachable
+anchor selects the new-JVM branch (`script/seon/fresh_operator.clj:1593-1688`).
+Use the same `--root` option with `status`, `logs scratch-name`, and
+`stop scratch-name` so discovery and cleanup stay inside that root. A
+custom-root cluster is intentionally invisible to the default MCP discovery
+path
 (`docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
 §1).
 

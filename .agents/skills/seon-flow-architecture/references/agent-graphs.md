@@ -17,7 +17,7 @@ limits, or the proposed agent-owned render proc.
 ## Current blueprint
 
 Each agent owns one independent core.async.flow graph. The graph definition is
-data built by `src/seon/cluster/agent.clj:246-270`; it currently has exactly:
+data built by `src/seon/cluster/agent.clj:240-264`; it currently has exactly:
 
 - `::mailbox`, workload `:io`;
 - `::turn`, workload `:io`; and
@@ -32,11 +32,11 @@ ports, or buffers change (`src/seon/flow.clj:83-115`).
 
 ## Mailbox and turn procs
 
-The mailbox step at `src/seon/cluster/agent.clj:123-149` is deliberately
+The mailbox step at `src/seon/cluster/agent.clj:117-143` is deliberately
 small. On input it emits a payload-free wake. The connection is sliding-1, so
 many messages may collapse into one signal without losing durable work.
 
-The turn step at `src/seon/cluster/agent.clj:166-240` treats the wake as “derive
+The turn step at `src/seon/cluster/agent.clj:160-234` treats the wake as “derive
 current work from facts.” It invokes the cluster turn pass and returns proc
 state. It does not carry a durable message or run through the channel.
 
@@ -50,18 +50,18 @@ This separation makes the loss rule explicit:
 
 ## Arming and the derive-all pass
 
-`arm-agent!` creates and starts or resumes one graph, joins its error fan-out,
+`arm!` creates and starts or resumes one graph, joins its error fan-out,
 registers the route, and primes its mailbox
-(`src/seon/cluster/agent.clj:328-389`).
+(`src/seon/cluster/agent.clj:337-398`).
 
 The armer proc derives the set difference between database agents and already
 armed agents, sorts it, and arms every missing agent
-(`src/seon/cluster/agent.clj:426-475`). Do not replace this derive-all pass
+(`src/seon/cluster/agent.clj:435-484`). Do not replace this derive-all pass
 with a one-event “new agent” payload. A wake can collapse, so the consumer must
 recover every missing graph from current facts.
 
 Boot performs the same derive-all work directly after the cluster graph starts
-(`src/seon/cluster.clj:755-783`). That direct first pass closes the
+(`src/seon/cluster.clj:1208-1229`). That direct first pass closes the
 register-interest-before-read boundary: the armer route exists before current
 database state is derived.
 
@@ -80,19 +80,19 @@ Keep this distinction:
 - a “status” field duplicating that relationship would become stale.
 
 Read the routing map and armer's `agents`/`armed` set derivation at
-`src/seon/cluster/agent.clj:276-326,441-490`.
+`src/seon/cluster/agent.clj:270-335,472-484`.
 
 ## Episode caps and retry semantics
 
 The maximum consecutive runs per episode is a database-backed config dial.
 Its schema and default live at `resources/seon/schema/config.edn` and
-`config/default.edn:67-81`. The work loop reads and enforces it in
-`src/seon/cluster/work.cljc:365-454`.
+`config/default.edn:81-95`. The work loop reads and enforces it in
+`src/seon/cluster/work.cljc:424-441,484-517`.
 
 The cap is runaway protection, not a retry scheduler. Nothing re-fires a
 failed turn after recovery. Recovery marks dangling receipts interrupted and
 the agent adapts from durable context
-(`src/seon/cluster/run.cljc:725-757`; `src/seon/cluster.clj:843-922`).
+(`src/seon/cluster/run.cljc:866-930`; `src/seon/cluster.clj:1322-1328`).
 
 Do not add:
 
@@ -132,7 +132,7 @@ heap total.
 The intended third proc, `::renders`, would own the agent's derived AI and HTML
 views in one memoized proc state. It is **not built**: current
 `graph-definition` has only mailbox and turn
-(`src/seon/cluster/agent.clj:246-270`).
+(`src/seon/cluster/agent.clj:240-264`).
 
 The July 29 falsifier compared 100 parked agents in an in-memory database on
 JDK 26 with `-Xmx512m -XX:+UseG1GC`; it discarded two warm-ups, forced three
