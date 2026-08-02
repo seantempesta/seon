@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Compatibility alias for muscle memory; bin/seon is the one operator.
-set -euo pipefail
-
-SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "$SEON_ROOT/bin/seon" "$@"
