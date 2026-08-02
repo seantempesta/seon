@@ -48,12 +48,55 @@ Mitigations already landed that did NOT prevent this: the blob tier
 diff buffer on fresh stores (`store.clj:177` — the eval roots had
 them).
 
+## MEASURED 2026-08-02 — the fixed-cost claim is FALSE; payload
+## amplification and transaction count are the real costs
+
+Twelve cells on isolated scratch stores (`tmp/store-amplification/`,
+lane stopped before writing its source-anatomy report — the numbers
+stand, the konserve/datahike WHY is still unread):
+
+| cell | per-transaction |
+|---|---:|
+| 1 / 10 / 100 empty txs | 2.81 / 3.53 / 10.84 KB |
+| 100 txs, `:keep-history? false` | 5.02 KB |
+| 100 txs, fusion off | 11.12 KB |
+| 100 txs, stock defaults | 11.09 KB |
+| **100 datoms in ONE tx** | **25.38 KB TOTAL** |
+| **one 4 KB payload** | **350.19 KB** |
+| **one 64 KB payload** | **5,510.19 KB** |
+
+Three conclusions, all directly actionable:
+
+1. **A small transaction costs kilobytes, not 1.5 MB.** The
+   "~1.5 MB regardless of payload" figure in
+   `plan/state-of-the-design-2026-08-01.md:102` is WRONG and must be
+   corrected wherever it is repeated.
+2. **Payload amplification is ~86x and it is the dominant cost.** Our
+   `:seon.config.eval.result/blob-threshold` is 65,536 CHARACTERS, so
+   a payload just under it stays inline and costs **5.5 MB**. The July
+   probe placed the knee "between 10 KB and 100 KB"; this data shows
+   87x amplification already at 4 KB. The threshold is roughly an
+   order of magnitude too high.
+3. **Batching is worth 42x.** 100 datoms in one transaction cost
+   25 KB; the same datoms in 100 transactions cost 1,084 KB. An
+   episode commits ~28 transactions that could be far fewer
+   (the bootstrap's 13 form receipts are the obvious batch).
+
+History-off roughly halves the empty-transaction cost; fusion and the
+diff buffer are noise at this scale (10.84 vs 11.12 KB) — they were
+adopted for different, larger-scale reasons.
+
 ## Acceptance
 
-1. Decompose the 42 MB: count transactions per episode and measure
-   per-transaction growth on an eval-shaped cluster; confirm or
-   falsify the "transactions x fixed cost" hypothesis with numbers.
-2. State which lever actually moves it, measured, not assumed:
+1. DONE above for the mechanism; still owed: the per-episode
+   decomposition on a real eval cluster (how much of the 42 MB is
+   receipt payloads at 86x, how much is transaction count, how much is
+   the cluster fork itself) and the source anatomy the stopped lane
+   never wrote (konserve/datahike/psset file:line for WHY 86x).
+2. Land the three measured levers, each with before/after: LOWER
+   `blob-threshold` (re-derive the knee from this data — 4 KB already
+   costs 87x), BATCH the episode's transactions (bootstrap receipts
+   first), and history-off for eval roots. Also consider:
    fewer transactions per episode (batching bootstrap receipts and
    terminal writes), `:keep-history? false` for eval roots (see
    [[history-off-is-not-a-creation-seam-toggle]] — it is not a simple
