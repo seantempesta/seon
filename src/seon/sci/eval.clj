@@ -1232,6 +1232,70 @@
         connection (assoc :seon.store/branch-connection connection)))
      ctx)))
 
+(defn- declared-row
+  [{event :seon.sci.eval/event
+    eval-form! :seon.sci.eval/eval-form!
+    projection :seon.schema/projection}]
+  (let [raw-row (program-row event projection)
+        unregister-key (deleted-schema-key raw-row)
+        schema-delta
+        (when (or (:seon.schema/key raw-row) unregister-key)
+          (schema/begin-registration-delta projection))
+        schema-value
+        (when schema-delta
+          (schema/call-with-registration-delta schema-delta eval-form!))
+        live-declaration? (and raw-row (nil? schema-delta))
+        base-declared-row
+        (if schema-delta
+          (if unregister-key
+            (do
+              (when-not (and (= unregister-key schema-value)
+                             (nil? (schema/registration-delta-form
+                                    schema-delta unregister-key)))
+                (throw
+                 (ex-info
+                  "Schema deletion did not unregister its reader identity."
+                  {:seon.error/kind ::schema-refused
+                   :seon.schema/key unregister-key
+                   :seon.sci.eval/value schema-value})))
+              ;; Dependency validation is pure here. Current database data
+              ;; is fenced by the terminal transaction against db-before.
+              (schema/projection-without-schema projection unregister-key)
+              raw-row)
+            (let [schema-key (:seon.schema/key raw-row)
+                  definition
+                  (schema/registration-delta-form schema-delta schema-key)]
+              (when-not (and (= schema-key schema-value) definition)
+                (throw
+                 (ex-info
+                  "Schema declaration did not register its reader identity."
+                  {:seon.error/kind ::schema-refused
+                   :seon.schema/key schema-key
+                   :seon.sci.eval/value schema-value})))
+              ;; Validate the actual evaluated value while the overlay is
+              ;; isolated. The terminal transaction repeats this pure
+              ;; candidate validation against its mid-transaction db value.
+              (schema/projection-with-schema
+               projection schema-key definition
+               {:seon.schema.admission/source :agent})
+              (assoc raw-row :seon.schema/form (pr-str definition))))
+          raw-row)
+        base-declared-row
+        (if (:seon.fn/spec base-declared-row)
+          (program/with-contract-facts
+           {:seon.program/row base-declared-row
+            :seon.program/compile-options
+            (:seon.schema.projection/compile-options projection)
+            :seon.program/predicate-functions
+            (:seon.schema.projection/predicate-functions projection)
+            :seon.program/schema-keys
+            (set (keys (:seon.schema.projection/forms projection)))})
+          base-declared-row)]
+    {:seon.sci.eval/base-declared-row base-declared-row
+     :seon.sci.eval/live-declaration? live-declaration?
+     :seon.sci.eval/schema-value schema-value
+     :seon.sci.eval/unregister-key unregister-key}))
+
 (defn- unmap-row
   [{execution-ctx :seon.sci.eval/execution-ctx
     before-interns :seon.sci.eval/before-interns
@@ -1258,20 +1322,20 @@
           (program/deletion-row
            (assoc event :seon.sci.reader/ns-unmap-identities
                   removed-identities)))
-        declared-row (or deletion-row base-declared-row)
+        selected-row (or deletion-row base-declared-row)
         ;; Standalone REPL `require` is namespace registration too. Its
         ;; committed row carries the complete dependency set derived from
         ;; SCI's namespace table, so fresh acquisition reconstructs the
         ;; same reader/evaluator context before installing declarations.
         context-row
-        (when-not declared-row
+        (when-not selected-row
           (namespace-context-row
            namespace-name source before-reader-context
            (reader-context execution-ctx namespace-name)
            namespace-changed?))
-        row (cond-> (or declared-row context-row)
+        row (cond-> (or selected-row context-row)
               live-declaration? (assoc ::evaluated? true)
-              (and namespace-changed? (or declared-row context-row))
+              (and namespace-changed? (or selected-row context-row))
               (assoc ::namespace-state after-namespace-state))]
     {:seon.sci.eval/program-row row
      :seon.sci.eval/context-row context-row
@@ -1416,63 +1480,16 @@
                               :seon.print/level @sci/print-level})))))
             projection
             (evaluation-projection {:seon.sci.eval/ctx evaluation-ctx})
-            raw-row (program-row event projection)
-            unregister-key (deleted-schema-key raw-row)
-            schema-delta
-            (when (or (:seon.schema/key raw-row) unregister-key)
-              (schema/begin-registration-delta projection))
-            schema-value
-            (when schema-delta
-              (schema/call-with-registration-delta
-               schema-delta
-               eval-form!))
-            live-declaration?
-            (and raw-row (nil? schema-delta))
-            base-declared-row
-            (if schema-delta
-              (if unregister-key
-                (do
-                  (when-not (and (= unregister-key schema-value)
-                                 (nil? (schema/registration-delta-form
-                                        schema-delta unregister-key)))
-                    (throw
-                     (ex-info
-                      "Schema deletion did not unregister its reader identity."
-                      {:seon.error/kind ::schema-refused
-                       :seon.schema/key unregister-key
-                       :seon.sci.eval/value schema-value})))
-                  ;; Dependency validation is pure here. Current database data
-                  ;; is fenced by the terminal transaction against db-before.
-                  (schema/projection-without-schema projection unregister-key)
-                  raw-row)
-                (let [schema-key (:seon.schema/key raw-row)
-                      definition
-                      (schema/registration-delta-form schema-delta schema-key)]
-                  (when-not (and (= schema-key schema-value) definition)
-                    (throw
-                     (ex-info "Schema declaration did not register its reader identity."
-                              {:seon.error/kind ::schema-refused
-                               :seon.schema/key schema-key
-                               :seon.sci.eval/value schema-value})))
-                  ;; Validate the actual evaluated value while the overlay is
-                  ;; isolated. The terminal transaction repeats this pure
-                  ;; candidate validation against its mid-transaction db value.
-                  (schema/projection-with-schema
-                   projection schema-key definition
-                   {:seon.schema.admission/source :agent})
-                  (assoc raw-row :seon.schema/form (pr-str definition))))
-              raw-row)
-            base-declared-row
-            (if (:seon.fn/spec base-declared-row)
-              (program/with-contract-facts
-               {:seon.program/row base-declared-row
-                :seon.program/compile-options
-                (:seon.schema.projection/compile-options projection)
-                :seon.program/predicate-functions
-                (:seon.schema.projection/predicate-functions projection)
-                :seon.program/schema-keys
-                (set (keys (:seon.schema.projection/forms projection)))})
-              base-declared-row)
+            {base-declared-row :seon.sci.eval/base-declared-row
+             live-declaration? :seon.sci.eval/live-declaration?
+             schema-value :seon.sci.eval/schema-value
+             unregister-key :seon.sci.eval/unregister-key}
+            ;; Keep this call inside the total evaluation try: declared-row
+            ;; deliberately throws ::schema-refused for an agent mistake.
+            (declared-row
+             {:seon.sci.eval/event event
+              :seon.sci.eval/eval-form! eval-form!
+              :seon.schema/projection projection})
             evaluated-value
             (if base-declared-row
               (do

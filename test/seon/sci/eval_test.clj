@@ -418,6 +418,31 @@
            (:seon.sci.eval/namespace-state row)))
     (is (nil? (:seon.sci.eval/context-row result)))))
 
+(deftest declared-row-evaluates-a-schema-once-inside-its-delta
+  (let [ctx (eval/build-base-ctx)
+        source "(seon.schema/register! :user/direct-schema [:int {:min 0}])"
+        event (#'eval/one-event source 'user ctx)
+        projection
+        (#'eval/evaluation-projection {:seon.sci.eval/ctx ctx})
+        calls (atom 0)
+        before (seon.schema/registered-schemas)
+        result
+        (#'eval/declared-row
+         {:seon.sci.eval/event event
+          :seon.sci.eval/eval-form!
+          (fn []
+            (swap! calls inc)
+            (seon.schema/register! :user/direct-schema [:int {:min 0}]))
+          :seon.schema/projection projection})]
+    (is (= 1 @calls))
+    (is (= {:seon.schema/key :user/direct-schema
+            :seon.schema/form "[:int {:min 0}]"}
+           (:seon.sci.eval/base-declared-row result)))
+    (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
+    (is (false? (:seon.sci.eval/live-declaration? result)))
+    (is (= before (seon.schema/registered-schemas))
+        "the evaluated registration remains isolated from global candidates")))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))
