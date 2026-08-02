@@ -1952,6 +1952,47 @@ may reintroduce a shadow build into the dev feedback path.
   deliberate, attributable capability rather than a consequence of
   publishing private vars — recorded now so the containment work does
   not foreclose it.
+  **Ruling 2026-08-02 #43 (owner, evening): THE CUSTODY/ISOLATION
+  PROGRAM IS APPROVED IN FIVE PHASES; COW YES, ENVBOX DEFERRED.**
+  Approved after the owner was shown, and explicitly accepted, that a
+  non-swappable env does NOT simplify existing code: the mechanism is a
+  type test (`swap!*` checks `(instance? clojure.lang.IAtom ref)`,
+  `reference-code/sci/src/sci/impl/core_protocols.cljc:196-204`, so a
+  deftype with `IDeref` and without `IAtom` fails the same way
+  `alter-var-root` on a compiled Var fails today), but it costs ~87
+  call sites across 15 files in our fork, forever, and it closes
+  EXACTLY ONE escalation — wholesale program substitution via `swap!`.
+  It does not reduce the reachability work, because a read-only env
+  still hands over the live connection (`d/transact` is not an env
+  mutation), the flock, `release-store!`, the flow graph, the routing
+  atom, the prepl socket, and every Var object (`alter-meta!` still
+  succeeds process-wide). DECISION: COPY-ON-WRITE ONLY for now, ENVBOX
+  REVISITED LATER once reachability is proven in a live drive. COW's
+  three touch points are `fork`, `eval-def`, AND `bindRoot` — the third
+  is not optional: `bindRoot` bypasses `eval-def`, and Seon calls it
+  directly at `install-function-contract!` (`src/seon/sci/eval.clj:790`),
+  so without it contract installation inside a candidate context
+  corrupts the parent cluster, the exact failure candidates prevent.
+  Compiled first-party Vars stay exempt (`utils/var?` tests
+  `sci.lang.Var`), so hot reload is untouched when the COW clause sits
+  after that branch. THE APPROVED PHASE ORDER, each phase independently
+  valuable and none blocked by a later one:
+  0. the `.cljc` → `.clj` honesty conversion (owner-ordered, in flight);
+  1. PIN WHAT ALREADY HOLDS — properties for the guarantees we have by
+     accident and could lose silently: no thread spawning, no
+     compiled-Var mutation, the deny-by-default class list, and the
+     derived custody-returning-function check. In-memory connections,
+     seeded, nothing touching disk (owner: "as cheaply as possible …
+     I don't want to fill up my disk"). FIRST, because these are
+     regression guards for properties the later phases change;
+  2. REACHABILITY, the primary control — `ns-publics` at the install
+     seam, then the four custody-returning public functions and
+     relocating the process-global roots. Owner chose step 1 alone,
+     then reassess;
+  3. CTX-DERIVED CUSTODY — attach at `cluster-ctx` build, bind the
+     compiled var in `evaluate`, delete the request field;
+  4. THE SCI FORK CHANGE — copy-on-write;
+  5. THE `seon.db` SURFACE (ruling #41), then the call-site sweep.
   **Ruling 2026-08-01 #30 (owner, evening): FAITHFUL SESSION, GATED
   PERSISTENCE — restrict nothing an agent can call; gate only what it
   may persist.** The session is a faithful Clojure REPL first: a def an
