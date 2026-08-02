@@ -21,7 +21,7 @@ both are wrong in production:
   block, and no caller; 595 lines are reachable only from its test.
 - `src/seon/render/ns.clj` — `(some-> (::token-budget unit) long (max 1))`,
   nil meaning NO bound. `seon.render.ns` IS wired as the `:seon.ns/ns`
-  family lens (`resources/seon/schema/program.edn`), so its entire
+  family lens (the PROGRAM section of `resources/seon/schema.edn`), so its entire
   "bounded, whole-form assembly" section is dead on every production
   path.
 

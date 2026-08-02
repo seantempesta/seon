@@ -25,7 +25,7 @@ When every function has:
 - **Malli schemas** → Contracts are machine-readable, generatively testable, and the thing a review checks a call against.
 - **Fully spec'd args (the hard rule)** → Contracts are complete. Map-in/map-out helps API *accretion* (add an optional field without breaking callers); fully-spec'd positional (`:catn`) is often the better shape for utilities. Pick by fit; the invariant is that every arg is named, spec'd, and validated.
 - **Registered schemas** → One admitted population of queryable shapes.
-  First-party declarations live under `resources/seon/schema/`; runtime
+  First-party declarations live in `resources/seon/schema.edn`; runtime
   registrations pass through the same admission rules.
 
 The result: agents can discover, compose, and validate code without
@@ -116,14 +116,14 @@ or docstring examples showing external callers.
 
 ### Schema Registration
 
-Author shipped first-party schemas as one EDN map under
-`resources/seon/schema/`. File boundaries are editorial: `seon.schema.edn`
-loads the complete population, refuses duplicate keys or unresolved
+Author shipped first-party schemas in the one EDN map at
+`resources/seon/schema.edn`. Section comments are editorial:
+`seon.schema.edn` loads the complete population, refuses duplicate keys or unresolved
 references, and `seon.schema.datahike` derives Datahike attribute declarations
 from the admitted Malli forms.
 
 ```clojure
-;; resources/seon/schema/search.edn
+;; resources/seon/schema.edn — search section
 {:seon.search/pattern
  [:string {:min 1 :description "ripgrep regex pattern"}]
 
@@ -299,7 +299,7 @@ retract it explicitly — omitting a key means "leave unchanged".)
 
 Expected failures at an agent/runtime boundary are flat `:seon.error` values;
 they do not throw into the run loop. The shared shape is declared once in
-`resources/seon/schema/error.edn`:
+the error section of `resources/seon/schema.edn`:
 
 ```clojure
 {:seon.error/kind :seon.example/invalid-request
@@ -330,7 +330,8 @@ database enforcing a fence, not an error-handling style — see
 `src/seon/cluster/run.cljc`.
 
 Use a qualified, source-owned `:seon.error/kind`; do not maintain a closed
-central enum of error kinds. `resources/seon/schema/error.edn` deliberately
+central enum of error kinds. The error section of `resources/seon/schema.edn`
+deliberately
 defines it as a qualified keyword.
 
 ---
@@ -427,7 +428,7 @@ same move: declare each leaf once and reference it from composite EDN forms.
 Every public function carries a correct `:malli/schema`, including functions
 that accept connections, channels, sinks, or other process-local objects.
 Declare a named predicate schema with an honest generator, as
-`resources/seon/schema/store.edn` and `resources/seon/schema/web.edn` do. Do not
+the store and web sections of `resources/seon/schema.edn` do. Do not
 omit the contract merely because the value is opaque.
 
 ### `:any` at third-party interface boundaries
@@ -593,8 +594,7 @@ Promote heavy plumbing to a sibling `<ns>.internal` namespace (see
 split into `core.clj` / `schema.clj` prematurely.
 
 ```
-resources/seon/schema/
-└── schema.edn                ; admitted first-party declarations
+resources/seon/schema.edn     ; admitted first-party declarations
 
 src/seon/
 ├── schema.cljc                ; registry and runtime registration

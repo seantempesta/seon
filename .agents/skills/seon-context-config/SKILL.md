@@ -1,6 +1,6 @@
 ---
 name: seon-context-config
-description: "Change or diagnose Seon's fresh database-backed cluster configuration. Load this when editing config/default.edn, adding a resources/seon/schema config dial, applying a sparse cluster overlay, tracing a runtime config read, or deciding whether a change is live versus arm-time. Also load it when old instructions mention config/system.edn, SEON_CONFIG, context-block manifests, routes, or skill corpus so you do not restore the deleted pod model."
+description: "Change or diagnose Seon's fresh database-backed cluster configuration. Load this when editing config/default.edn, adding a config dial to resources/seon/schema.edn, applying a sparse cluster overlay, tracing a runtime config read, or deciding whether a change is live versus arm-time. Also load it when old instructions mention config/system.edn, SEON_CONFIG, context-block manifests, routes, or skill corpus so you do not restore the deleted pod model."
 ---
 
 # Seon cluster configuration
@@ -10,7 +10,7 @@ It is not the deleted pod's Aero-style `config/system.edn` manifest.
 
 Read these current owners:
 
-- `resources/seon/schema/config.edn` — registered config attributes;
+- the config section of `resources/seon/schema.edn` — registered config attributes;
 - `config/default.edn` — one shipped decision for every dial;
 - `src/seon/config.cljc` — read, validate, compile, reconcile, and query;
 - `src/seon/cluster.clj` — boot ordering and consumers; and
@@ -23,8 +23,8 @@ historical quarry only.
 
 Configuration design and database schema design are one act:
 
-1. Declare the namespaced attribute and value schema under
-   `resources/seon/schema/*.edn`.
+1. Declare the namespaced attribute and value schema in the config section of
+   `resources/seon/schema.edn`.
 2. Add its explicit shipped decision to `config/default.edn`.
 3. Read the value from `seon.config/effective` at the owning runtime boundary.
 4. Prove whether the consumer reads live database values or captures the value

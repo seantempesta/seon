@@ -37,7 +37,7 @@ and `test/` through clj-kondo, then slices exact source from analyzer locations.
 It records namespace rows plus every function/test definition, including
 private and uncontracted helpers, without evaluating application forms.
 Dependency caches improve resolution but never publish external definitions.
-Global schemas come from the separately admitted `resources/seon/schema/` EDN
+Global schemas come from the separately admitted `resources/seon/schema.edn`
 population and are never namespace-owned. The source owners are
 `src/seon/fn/analyzer.clj` and `src/seon/fn.clj`; clj-kondo source is pinned at
 `reference-code/clj-kondo`.

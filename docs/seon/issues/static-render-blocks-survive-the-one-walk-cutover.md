@@ -35,7 +35,7 @@ docstrings that describe the superseded static-block model.
   `transcript-html`, `namespace-ai`, and `namespace-html`. Their readers are
   confined to `test/seon/render/agent_test.clj`; the live schema selects only
   the family lenses `agent-ai` and `agent-html` at
-  `resources/seon/schema/run.edn:17-18`.
+  the RUN section of `resources/seon/schema.edn`.
 - `src/seon/context.clj:58-70,162-168` retains the old scaffold
   `execution-ai` and a duplicate `contribution-tokens` estimator with no live
   reader. `seon.cluster.prompt` calls `tokens/estimate` directly while

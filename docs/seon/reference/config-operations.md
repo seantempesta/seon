@@ -59,8 +59,8 @@ The full command grammar is printed by `bin/seon --help` and is owned by
 
 ## Dial authority
 
-`resources/seon/schema/config.edn` declares the config attributes and their
-value schemas. Other schema resources may also register dials; the config
+The config section of `resources/seon/schema.edn` declares the config
+attributes and value schemas. Other sections may also register dials; the config
 compiler derives the closed manifest and effective-map schemas from those
 registrations. Do not maintain a second dial table in documentation.
 
@@ -84,8 +84,7 @@ or environment-driven watchdog configuration path in fresh Seon.
 
 - `src/seon/config.cljc` — manifest compilation, absence, reconciliation, and
   database reads.
-- `resources/seon/schema/config.edn` plus the other
-  `resources/seon/schema/*.edn` registrations — admitted dials.
+- `resources/seon/schema.edn` — the one admitted population, including all dials.
 - `config/default.edn` — shipped decisions and provenance.
 - `script/seon/fresh_operator.clj` — operator grammar and live apply path.
 - `src/seon/cluster/loop.cljc` and `src/seon/ai.cljc` — per-turn AI resolution.

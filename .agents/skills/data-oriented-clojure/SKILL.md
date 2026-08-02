@@ -42,11 +42,11 @@ as-of point; `memoize` on a db value walks the entire index on a cache *hit*;
 and under `:schema-flexibility :write` an attribute is NOT installed lazily —
 transacting an uninstalled attribute throws.
 
-**Current schema path:** first-party attribute/entity/value schemas are EDN
-maps under `resources/seon/schema/`, loaded by `seon.schema.edn/load!` as one
+**Current schema path:** first-party attribute/entity/value schemas are one EDN
+map at `resources/seon/schema.edn`, loaded by `seon.schema.edn/load!` as one
 validated population. Shipped Clojure does not author those schemas with
 load-time `schema/register!`. Runtime agent registrations still pass through
-the same admission gate (`src/seon/schema/edn.clj:195-240,317-348`).
+the same admission gate (`src/seon/schema/edn.clj:143-225,234-324`).
 
 **One config authority:** declare a config attribute once in that EDN
 population. `seon.schema.edn/derive-config-forms` derives the manifest,
@@ -282,7 +282,7 @@ shape once, reference everywhere": duplication guarantees drift.
 
 ### Schema EDN and function code have separate homes
 
-Put shipped schema declarations in `resources/seon/schema/*.edn`, then require
+Put shipped schema declarations in `resources/seon/schema.edn`, then require
 only what function code actually calls:
 
 ```clojure
@@ -293,14 +293,14 @@ only what function code actually calls:
 ```
 
 ```clojure
-;; resources/seon/schema/expense.edn
+;; resources/seon/schema.edn — expense section
 {:seon.expense/amount :int}
 ```
 
-`seon.schema.edn/load!` reads the classpath directory. File boundaries are
+`seon.schema.edn/load!` reads that one classpath resource. Section comments are
 editorial only: duplicate keys refuse, every reference must resolve, and
 predicate schemas require registered predicates plus honest generators
-(`src/seon/schema/edn.clj:195-240,317-348`).
+(`src/seon/schema/edn.clj:143-225,234-324`).
 
 ### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 

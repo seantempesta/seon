@@ -86,7 +86,7 @@ separate invocations are separate JVMs.
 
 Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
-the current `resources/seon/schema/*.edn` population and program rows, and
+the current `resources/seon/schema.edn` population and program rows, and
 releases and deletes it in a `finally`. There is no ambient connection
 (`test/seon/test_support.clj:184-216`).
 
@@ -194,7 +194,7 @@ old value is intentionally unavailable
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Bad entity attribute … not defined in current schema` | current EDN population was not installed on this connection | use `test-support/with-database`; add `extra-schema` only when installation is the subject |
-| "Unregistered attributes" from a Seon boundary | missing `resources/seon/schema/*.edn` declaration or activation | add it to the owning EDN file and use the production population owner |
+| "Unregistered attributes" from a Seon boundary | missing `resources/seon/schema.edn` declaration or activation | add it to the one EDN resource and use the production population owner |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
 | A property passes but the code is wrong | the property observes only the returned value, or its checker never reads the facts the command wrote | observe durable facts independently of the return; extend the checker |
 | Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per mutating generative trial; nothing global to restore |

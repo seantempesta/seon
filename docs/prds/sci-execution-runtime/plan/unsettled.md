@@ -609,7 +609,8 @@ before acting on it.
   default); apply → launcher → arm ordering with the locked-state
   repair drill; all 30 configured entries proven CONSUMED by the
   running system with per-entry update modes documented; multi-cluster
-  no-bleed; all schema EDN moved to `resources/seon/schema/`.
+  no-bleed; all global schema EDN consolidated in
+  `resources/seon/schema.edn`.
 - **THE UNIVERSAL VALUE RENDERER** (`263de0563`, ported per ruling 14)
   — the old structural skeleton renderer (bounded depth/breadth,
   navigation-preserving, lazy-safe, opaque handles, controllable caps)

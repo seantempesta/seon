@@ -13,7 +13,7 @@ Four findings against the W3 floor unification, all confirmed by
 reading the landed source at HEAD.
 
 **A shipped second set of size dials survives.**
-`resources/seon/schema/render_value.edn` still declares
+The RENDER_VALUE section of `resources/seon/schema.edn` still declares
 `:seon.render.value/max-depth` (default 3), `max-collection` (8),
 `max-map-visits` (32), `max-string` (80), `shape-sample` (8), `width`
 (72), and `:seon.render.value/options`. Every one of those keys has

@@ -1,12 +1,12 @@
 ---
 name: data-modeling
-description: "Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, authoring resources/seon/schema EDN, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a function contract over the data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to declare and why); the datahike skill owns the resulting query/transact/pull mechanics."
+description: "Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, authoring resources/seon/schema.edn, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a function contract over the data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to declare and why); the datahike skill owns the resulting query/transact/pull mechanics."
 ---
 
 # Data Modeling — schema design IS database design
 
 In Seon, modeling data, validating it, and storing it are **one act**. Declare
-first-party shapes as EDN under `resources/seon/schema/`; the one classpath
+first-party shapes in `resources/seon/schema.edn`; the one classpath
 population
 
 - **validates** values through the active projection and live instrumentation,
@@ -46,12 +46,12 @@ If you write "for each kind" or a `:kind` enum, stop and reframe.
 
 Namespace every attr `:seon.<ns>/<name>` where the namespace is a real code
 namespace that owns the data. In EDN, write the full qualified keyword.
-`seon.schema.edn/load!` merges every direct `.edn` child beneath the classpath
-resource `seon/schema`; `seon.schema.datahike/malli->datahike-attr` derives the
+`seon.schema.edn/load!` reads the classpath resource `seon/schema.edn`;
+`seon.schema.datahike/malli->datahike-attr` derives the
 Datahike facet. The design choice is which Malli shape expresses the intent:
 
 ```clojure
-;; resources/seon/schema/kb.edn
+;; resources/seon/schema.edn — knowledge-base section
 {:my.kb.source/title :string
  :my.kb.source/rank :int
  :my.kb.source/ratio :double
@@ -124,7 +124,7 @@ duct-tape by inlining.
 
 ## Config is derived from one leaf declaration
 
-Declare each config attribute exactly once in `resources/seon/schema/*.edn`.
+Declare each config attribute exactly once in `resources/seon/schema.edn`.
 `seon.schema.edn/derive-config-forms` discovers those leaf registrations and
 derives the closed `:seon.config/manifest`, `:seon.config/effective`, and
 `:seon.config/entity` schemas. Never add the same dial to hand-maintained
@@ -185,7 +185,7 @@ ACCRETES safely — add an optional field to the request and old callers don't
 break.
 
 ```clojure
-;; resources/seon/schema/kb.edn
+;; resources/seon/schema.edn — knowledge-base section
 {:my.kb.source/add-request
  [:map
   [:my.kb.source/title :my.kb.source/title]
@@ -243,7 +243,7 @@ defs also accumulate immediately in the cluster's one process-live SCI context
 restart contract is the separate durable `:seon.code.def` session image:
 faithful inline/blob values, proven deterministic pure forms, or explicit
 unrestorable rows, cold-restored once into that context
-(`resources/seon/schema/program.edn:188-211`;
+(`resources/seon/schema.edn:2151`;
 `src/seon/cluster/loop.cljc:325-430`;
 `src/seon/sci/eval.clj:1142-1228`). Read the one shared semantic source,
 [`program-state.md`](../data-oriented-clojure/references/program-state.md),
@@ -326,7 +326,7 @@ Model a knowledge base: a **source** (natural key, owns its **findings**, cites 
 shared **author**).
 
 ```clojure
-;; resources/seon/schema/kb.edn
+;; resources/seon/schema.edn — knowledge-base section
 {:my.kb.source/id [:string {:seon.db/identity true}]
  :my.kb.source/title :string
  :my.kb.source/rating [:int {:min 1 :max 5}]
@@ -358,14 +358,14 @@ shared **author**).
                    [:my.kb.source/rating :my.kb.source/rating]])
 ```
 
-`resources/seon/schema/run.edn` and `src/seon/cluster/run.cljc` are the live
+The run section of `resources/seon/schema.edn` and `src/seon/cluster/run.cljc` are the live
 worked pair: identity attributes, refs, and transition contracts.
 
 ## Key files
 
 | File | What it gives you |
 |---|---|
-| `resources/seon/schema/*.edn` | first-party attribute/entity/value schemas |
+| `resources/seon/schema.edn` | first-party attribute/entity/value schemas |
 | `src/seon/schema/edn.clj` | loading, config derivation, one admission gate |
 | `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.cljc` | `malli->datahike-attr` — the bridge (extend it here) |

@@ -455,7 +455,7 @@ datom and therefore no routed wake.
 provenance — so "who should fix this" is a query, not a router. Agent
 *mistakes* are different: they never touch these channels, they become
 flat `:seon.error` values the agent sees. One config dial selects `:record` or
-`:panic` (`resources/seon/schema/config.edn:7-8`). In current `:panic` mode the
+`:panic` (`resources/seon/schema.edn:595`). In current `:panic` mode the
 cluster handler still commits the fault and prints it; it does not throw from
 the recorder (`src/seon/cluster.clj:1151-1190`).
 

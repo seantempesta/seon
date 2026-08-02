@@ -622,7 +622,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
 | `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
 | `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
-| `:seon.cluster.run/process` | **claimant** | the process holding a run; `resources/seon/schema/run.edn` + `src/seon/cluster/run.cljc` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
+| `:seon.cluster.run/process` | **claimant** | the process holding a run; the run section of `resources/seon/schema.edn` + `src/seon/cluster/run.cljc` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
 | initialization rows, transaction data | seed bundle, sidecar | one admitted source population; `src/seon/cluster.clj` (`populate-source!`) + `src/seon/fn.clj` (`index!`) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/fresh_operator.clj` + `script/seon/dev/state.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
@@ -702,7 +702,7 @@ The compact invariants are:
 - immutable data and pure transformations first;
 - derive projections instead of storing them;
 - fully namespaced map keys and database attributes, without exceptions;
-- globally identified schemas declared once under `resources/seon/schema/`;
+- globally identified schemas declared once in `resources/seon/schema.edn`;
 - errors as values at agent/runtime boundaries;
 - one namespaced map in/out for API-like functions, or fully named/spec'd
   positional arguments for ordinary functions;

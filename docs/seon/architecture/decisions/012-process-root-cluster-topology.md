@@ -64,7 +64,7 @@ lease clock.
 - `src/seon/db.clj` — co-located application reads over immutable database
   values.
 - `src/seon/sci/eval.clj` — one live cluster `ctx` and cold acquisition.
-- `src/seon/cluster/run.cljc` and `resources/seon/schema/run.edn` — presence
+- `src/seon/cluster/run.cljc` and the run section of `resources/seon/schema.edn` — presence
   custody and transactional recovery.
 
 ## Related

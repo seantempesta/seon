@@ -53,7 +53,7 @@ kept in a process/classpath that cannot load the fresh owner twice.
 ## Triage 2026-07-27
 
 - **OPEN-DEFERRED.** Fresh ownership has moved to
-  `resources/seon/schema/flow.edn:1-2`, but the duplicate declarations remain only in
+  the FLOW section of `resources/seon/schema.edn`, but the duplicate declarations remain only in
   quarry configuration at `src-old/seon/config/resolve.cljc:343-365`; the
   explicit old-system alias at `deps.edn:75-84` is the remaining collision
   surface and dies with that machinery.

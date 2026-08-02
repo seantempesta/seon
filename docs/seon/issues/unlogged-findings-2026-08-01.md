@@ -120,7 +120,7 @@ stays as archive material.
 ## 7. `:seon.render.value/max-collection` now has TWO defaults authorities
 
 The caps/blob wave added `:seon.render.value/max-collection 8` to
-`config/default.edn:39` while `resources/seon/schema/render_value.edn`
+`config/default.edn:39` while the RENDER_VALUE section of `resources/seon/schema.edn`
 still declares `:seon.render.value/default 8` for the same attribute —
 two places shipping the same number, which is the second-registry smell
 the repo forbids. The schema file's own comment argues against exactly
@@ -158,7 +158,7 @@ must not remain scheduled as open work:
 - **Item 4 was resolved by `393198915`.** The fetchable Konserve revision and
   root pointer landed with the ordered file-store batch.
 - **Item 7 was resolved by `ebfaa4900` plus the sealed print migration.**
-  `resources/seon/schema/render_value.edn` no longer carries a default; the
+  the RENDER_VALUE section of `resources/seon/schema.edn` no longer carries a default; the
   shipped page-size decision lives in `config/default.edn`, while print
   presentation uses the `:seon.print/*` family.
 

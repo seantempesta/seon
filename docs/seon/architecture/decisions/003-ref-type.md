@@ -21,7 +21,7 @@ attribute names it. The bridge in `seon.schema.datahike` derives
 `{:seon.db/component true}` derives component ownership.
 
 The portable schema authority defines the shared shape once. Shipped
-attributes and entity maps refer to it from `resources/seon/schema/`:
+attributes and entity maps refer to it from `resources/seon/schema.edn`:
 
 ```clojure
 :seon.cluster.run/agent :seon.db/ref
@@ -40,5 +40,5 @@ attributes and entity maps refer to it from `resources/seon/schema/`:
 
 - `src/seon/schema.cljc` — shared reference grammar.
 - `src/seon/schema/datahike.cljc` — Malli-to-Datahike derivation.
-- `resources/seon/schema/` — shipped attribute and entity declarations.
+- `resources/seon/schema.edn` — shipped attribute and entity declarations.
 - [[data-model]] — reference, identity, and component semantics.

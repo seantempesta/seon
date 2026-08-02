@@ -20,7 +20,7 @@ outcome, host-interop count, unproven Vars, nondeterministic calls, and impure
 calls. Its terminal branches dissoc those observations at lines 371-397 and
 store a derived sentence under `:seon.code.def/unrestorable` at lines 399-410.
 
-`resources/seon/schema/program.edn:188-210` declares that conclusion as a
+The PROGRAM section of `resources/seon/schema.edn` declares that conclusion as a
 string while exposing no structured refusal evidence on the definition row.
 `test/seon/sci/session_image_test.clj:117-123`, `166-177`, `212-217`, and
 `318-323` assert the exact English strings and, in the first case, explicitly

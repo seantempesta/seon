@@ -152,7 +152,7 @@ system defects.
 The cluster reads one `:seon.config/on-core-error` decision and passes it to
 the fan-out at `src/seon/cluster.clj:1151-1190`.
 
-Current modes are declared at `resources/seon/schema/config.edn:7-8`:
+Current modes are declared at `resources/seon/schema.edn:595`:
 
 - `:record`: commit the fault and keep the graph operating where possible;
 - `:panic`: call the supplied panic handler.

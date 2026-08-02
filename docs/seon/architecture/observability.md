@@ -196,8 +196,8 @@ uses an isolated cluster fork and the ordinary message/run path.
 
 ## Source authority
 
-- `resources/seon/schema/{context,ai,run,error,program,test}.edn` owns the
-  durable evidence shapes.
+- The context, AI, run, error, program, and test sections of
+  `resources/seon/schema.edn` own the durable evidence shapes.
 - `src/seon/context.clj` commits captures from rendered context.
 - `src/seon/cluster/loop.cljc` opens attempts and receipts, persists blobs and
   session definitions, and settles the fold.

@@ -33,7 +33,7 @@ does not carry current run, session-image, capability, or fault semantics.
 - `test/seon/flow_test.clj:91-210,489-599,921-981` is the only reader of the
   simulated eval/mailbox procs. `source-enumerator-proc` and `indexer-proc`
   have no reader outside their own definitions.
-- `resources/seon/schema/flow.edn:1-88` retains callback, outcome, lineage,
+- The FLOW section of `resources/seon/schema.edn` retains callback, outcome, lineage,
   planner, namespace-owner, source-enumerator, indexer, eval, and mailbox
   schemas solely for this prototype closure.
 - The live half must remain: `seon.flow`'s work launcher, capacity observer,

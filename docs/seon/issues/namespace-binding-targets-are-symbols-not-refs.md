@@ -17,7 +17,7 @@ represented in two incompatible ways.
 
 ## Evidence
 
-- `resources/seon/schema/program.edn:39-48,61-68,81-88` declares requires as
+- The PROGRAM section of `resources/seon/schema.edn` declares requires as
   refs while both `/target-ns` attributes remain symbols.
 - `src/seon/fn.clj:173-191` converts static requires to namespace lookup refs
   but writes alias and refer target namespaces as symbols.

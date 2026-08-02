@@ -26,7 +26,7 @@ supply the live store handle their contracts require.
   `reidentify!` only in `src/seon/cluster/export.clj` and
   `test/seon/cluster/export_test.clj`; no production namespace requires
   `seon.cluster.export`.
-- `resources/seon/schema/export.edn` exists only to contract
+- The EXPORT section of `resources/seon/schema.edn` exists only to contract
   `:seon.export/request` and its paths for that namespace.
 - `docs/prds/sci-execution-runtime/plan/unsettled.md:1432-1441` records
   `seon.cluster.export` as a B2 implementation unit, while the current

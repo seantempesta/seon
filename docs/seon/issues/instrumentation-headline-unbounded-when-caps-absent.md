@@ -17,7 +17,7 @@ reporter's docstring describes a flat, bounded value.
 
 ## Evidence
 
-- `resources/seon/schema/instrument.edn:13-16` declares
+- The INSTRUMENT section of `resources/seon/schema.edn` declares
   `:seon.sci.admit/caps` optional.
 - `src/seon/instrument.clj:156-188` sends problems through admission only when
   caps exist and otherwise calls `pr-str` without a bound.

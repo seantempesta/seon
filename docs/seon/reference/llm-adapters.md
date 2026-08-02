@@ -15,8 +15,8 @@ workers, or `:seon.ai/config` singleton in the fresh tree.
 ## Configuration authority
 
 AI settings are ordinary `:seon.config.ai/*` dials declared by the admitted
-schema resources. `resources/seon/schema/config.edn` declares the provider,
-request, backup, and retry dials; `resources/seon/schema/ai.edn` declares the
+schema resource. The config section of `resources/seon/schema.edn` declares the
+provider, request, backup, and retry dials; its AI section declares the
 mutually exclusive literal `:seon.config.ai/no-auth` dial alongside the request
 unions that consume it. `config/default.edn` owns shipped values and their
 provenance. A sparse manifest overrides those defaults and is applied through
@@ -177,9 +177,7 @@ deleted from this maintained reference.
   leaf, streaming fold, disposition, and usage normalization.
 - `src/seon/cluster/loop.cljc` — one-resolution-per-turn and durable attempt
   transactions.
-- `resources/seon/schema/config.edn` — provider, request, backup, and retry
-  dials plus their per-agent metadata.
-- `resources/seon/schema/ai.edn` — the `no-auth` dial plus request, completion,
-  target, retry, evidence, and attempt schemas.
+- The config and AI sections of `resources/seon/schema.edn` — provider dials,
+  their per-agent metadata, and request/completion/attempt schemas.
 - `src/seon/schema/edn.clj` — schema-derived effective and agent-overlay maps.
 - `config/default.edn` — shipped decisions and provenance.

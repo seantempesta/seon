@@ -1555,6 +1555,10 @@ may reintroduce a shadow build into the dev feedback path.
   behind the context-mvp lane's landing (it owns instruction.edn
   in flight); the family-lens entity maps and all registration
   semantics are unchanged — this is file layout, not model.
+  **Executed 2026-08-02:** the global population is the one
+  `resources/seon/schema.edn` resource; its loader, ancestor digest,
+  artifact input, edit-hook fallback, tests, docs, and skills use that
+  exact file and retain no schema-directory enumeration path.
   **Ruling 2026-07-31 #15 (owner): `:my/*` KEYS AND `my.<capability>`
   TOOL NAMESPACES.** The attributes STORED ON THE AGENT'S ENTITY
   rename to `:my/*` — `:my/id`, `:my/namespace`, `:my/instructions`,

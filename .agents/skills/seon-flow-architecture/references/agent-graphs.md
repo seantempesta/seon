@@ -85,7 +85,7 @@ Read the routing map and armer's `agents`/`armed` set derivation at
 ## Episode caps and retry semantics
 
 The maximum consecutive runs per episode is a database-backed config dial.
-Its schema and default live at `resources/seon/schema/config.edn` and
+Its schema and default live in the config section of `resources/seon/schema.edn` and
 `config/default.edn:81-95`. The work loop reads and enforces it in
 `src/seon/cluster/work.cljc:424-441,484-517`.
 

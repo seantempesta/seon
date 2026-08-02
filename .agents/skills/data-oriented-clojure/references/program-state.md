@@ -36,7 +36,7 @@ Ordinary session definitions are a separate `:seon.code.def` fact family, not
 contracted `:seon.fn` rows. The schema permits exactly identified namespace
 definitions carrying a faithful inline value, a blob-backed value, a proven
 source form, or an explicit unrestorable reason
-(`resources/seon/schema/program.edn:188-211`). The loop exact-reconciles those
+(`resources/seon/schema.edn:2151`). The loop exact-reconciles those
 rows beside the terminal receipt (`src/seon/cluster/loop.cljc:325-430,1411-1424`).
 
 Prefer a faithful value whenever `store-faithful-edn` proves class, metadata,

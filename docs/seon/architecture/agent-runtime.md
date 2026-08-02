@@ -206,8 +206,8 @@ committer. Agent mistakes become flat values and receipts.
 
 ## Source authority
 
-- `resources/seon/schema/{agent,run,message,context,ai,eval,program}.edn` owns
-  runtime shapes.
+- The agent, run, message, context, AI, eval, and program sections of
+  `resources/seon/schema.edn` own runtime shapes.
 - `src/seon/cluster/run.cljc` owns in-transaction run and receipt transitions.
 - `src/seon/cluster/{agent,wake,work,loop}.clj*` owns per-agent graph lifecycle,
   wake routing, work derivation, and the fold.

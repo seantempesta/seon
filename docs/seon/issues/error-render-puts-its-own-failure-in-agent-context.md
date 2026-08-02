@@ -63,7 +63,7 @@ The same string reached a real prompt: it is inside the committed capture
 - `walk/projection` returning `nil` for a stored error entity is a second
   question worth answering in the same fix: the family declares
   `:seon.render/ai seon.error/render-ai`
-  (`resources/seon/schema/error.edn:77`), so the resolution chain not finding it
+  (the ERROR section of `resources/seon/schema.edn`), so the resolution chain not finding it
   deserves its own look.
 - `docs/prds/sci-execution-runtime/research/turn-loop-preflight-2026-07-31.md`.
 

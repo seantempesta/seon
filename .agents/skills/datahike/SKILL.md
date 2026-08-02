@@ -1,12 +1,12 @@
 ---
 name: datahike
-description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, or working with resources/seon/schema EDN, seon.schema.edn, or the Malli-to-Datahike bridge. Use for d/transact argument maps or raw vectors, d/q, d/pull, d/entity, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, :db.fn/call transition functions, CAS fences, as-of/since history, listen!, or any 'where do I put this data / how do I read it back' question."
+description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, or working with resources/seon/schema.edn, seon.schema.edn, or the Malli-to-Datahike bridge. Use for d/transact argument maps or raw vectors, d/q, d/pull, d/entity, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, :db.fn/call transition functions, CAS fences, as-of/since history, listen!, or any 'where do I put this data / how do I read it back' question."
 ---
 
 # Datahike — Seon Database Patterns
 
-First-party attribute and entity schemas are EDN maps under
-`resources/seon/schema/`. `seon.schema.edn/load!` loads that one classpath
+First-party attribute and entity schemas are one EDN map at
+`resources/seon/schema.edn`. `seon.schema.edn/load!` loads that one classpath
 population, and `seon.schema.datahike/malli->datahike-schema` derives the
 Datahike declarations — never hand-write Datahike schema. This skill owns the
 database-specific facts: EDN population + bridge, query/pull/transact,
@@ -122,12 +122,11 @@ a "kind".
 
 ## Quick start — declare in EDN, load, transact, read back
 
-Put first-party schema forms in the schema owner's classpath directory. Each
-file is one EDN map from registry key to Malli form; file boundaries are only
-editorial.
+Put first-party schema forms in the one classpath resource. It is one EDN map
+from registry key to Malli form; section comments are only editorial.
 
 ```clojure
-;; resources/seon/schema/kb.edn
+;; resources/seon/schema.edn — knowledge-base section
 {:my.kb.source/id [:string {:seon.db/identity true}]
  :my.kb.source/title :string
  :my.kb.source/rank :int}
@@ -165,21 +164,21 @@ editorial.
 (d/entity @connection [:my.kb.source/id "s1"])
 ```
 
-`resources/seon/schema/run.edn`, `src/seon/cluster/run.cljc`, and
+The run section of `resources/seon/schema.edn`, `src/seon/cluster/run.cljc`, and
 `test/seon/cluster/run_test.clj` are the live worked set: declarations,
 identity attributes, refs, in-transaction transitions, and properties over the
 real database.
 
 ## Schema: one EDN population, one admission gate
 
-Declare the **Malli type** in `resources/seon/schema/*.edn`; the bridge
+Declare the **Malli type** in `resources/seon/schema.edn`; the bridge
 (`seon.schema.datahike/malli->datahike-attr`, `src/seon/schema/datahike.cljc`)
 derives every Datahike facet — `:db/valueType`, `:db/cardinality`, `:db/unique`,
 `:db/isComponent`, `:db/index`, `:db/noHistory`. Never write `:db.type/*`
 yourself.
 
-`schema.edn/load!` merges every direct `.edn` child under `seon/schema` on the
-classpath, refuses duplicate keys and unreadable files, and contributes
+`schema.edn/load!` reads `seon/schema.edn` with one classpath resource lookup,
+refuses duplicate keys and an unreadable resource, and contributes
 candidates without activation. Activation admits the whole population:
 references must resolve and every predicate must be registered and carry an
 honest generator. Production cluster population then installs the derived
@@ -198,7 +197,7 @@ population through the same `schema.edn/admit` gate.
 
 ### Config dial authority is the leaf registration
 
-A config attribute is declared once in `resources/seon/schema/*.edn`.
+A config attribute is declared once in `resources/seon/schema.edn`.
 `seon.schema.edn/derive-config-forms` derives
 `:seon.config/manifest`, `:seon.config/effective`, and
 `:seon.config/entity` from those leaf declarations. Never hand-maintain those
@@ -228,7 +227,7 @@ Keep four states separate; the checked semantic source is
    terminal receipt as a metadata-faithful EDN value, blob-backed faithful
    value, proven deterministic pure source form, or explicit unrestorable row;
    cold cluster acquisition installs that image into the new ctx
-   (`resources/seon/schema/program.edn:188-211`;
+   (`resources/seon/schema.edn:2151`;
    `src/seon/cluster/loop.cljc:325-458,1411-1424`;
    `src/seon/sci/eval.clj:1142-1228`;
    `test/seon/sci/session_image_test.clj:99-217,239-323`).
@@ -236,7 +235,7 @@ Keep four states separate; the checked semantic source is
 The session image preserves REPL state; it does not weaken program-row contract
 admission or publish scratch definitions as `:seon.fn` program rows
 (`src/seon/sci/eval.clj:427-450`;
-`resources/seon/schema/program.edn:188-211`).
+`resources/seon/schema.edn:2151`).
 
 ### Global schema replacement and removal
 
@@ -342,7 +341,7 @@ chain with no classifiable data as an unknown core failure, not as a refusal.
                         {::id "s1" ::tags [:lisp :db]}])
 
 ;; LINK new entities in ONE tx via shared TEMPID strings. Assume ::person-id
-;; and ::author are already declared in resources/seon/schema/*.edn. A
+;; and ::author are already declared in resources/seon/schema.edn. A
 ;; lookup-ref does not resolve forward; a tempid does.
 (d/transact connection [{:db/id "p1" ::person-id "alice"}
                         {::id "s2" ::author "p1"}])
@@ -524,7 +523,7 @@ about a database value observed before the entity's own transaction. The
 current example is `:seon.context.capture/basis-t`, the `:max-tx` of the
 database value used to render the prompt; intervening transactions mean the
 capture entity's creation transaction cannot derive that earlier basis
-(`resources/seon/schema/context.edn:18-29`;
+(`resources/seon/schema.edn:878`;
 `src/seon/context.clj:121-140`). Genuinely underivable → a real domain attr.
 
 ## Temporal, listeners, triggers (brief)
@@ -549,7 +548,7 @@ sanctioned alternative to polling or a tuned timeout.
 
 | File | Purpose |
 |------|---------|
-| `resources/seon/schema/*.edn` | first-party attribute/entity/value schemas |
+| `resources/seon/schema.edn` | first-party attribute/entity/value schemas |
 | `src/seon/schema/edn.clj` | classpath loading, config derivation, population admission |
 | `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.cljc` | the Malli→Datahike bridge (extend it here) |
@@ -558,7 +557,7 @@ sanctioned alternative to polling or a tuned timeout.
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
 | `src/seon/cluster/loop.cljc` | terminal receipt plus exact `:seon.code.def` reconciliation |
-| `resources/seon/schema/program.edn` | program rows and durable session-image schemas |
+| program section of `resources/seon/schema.edn` | program rows and durable session-image schemas |
 | `test/seon/sci/session_image_test.clj` | cold session-image restoration acceptance |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |

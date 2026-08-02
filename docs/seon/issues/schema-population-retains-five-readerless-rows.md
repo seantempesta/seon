@@ -22,34 +22,34 @@ mechanisms the runtime no longer has.
 
 A reference-graph sweep treated production function contracts, entity maps,
 `{:seon.db/attributes true}` maps, and config dials as roots, then followed
-every keyword reference through `resources/seon/schema/*.edn`. These five
+every keyword reference through `resources/seon/schema.edn`. These five
 top-level rows were unreachable, and an independent literal plus owning-
 namespace `::keyword` search over `src/`, `script/`, and `bin/` found no
 reader:
 
-- `resources/seon/schema/loop.edn:29` declares
+- The LOOP section of `resources/seon/schema.edn` declares
   `:seon.cluster.loop/evaluation`. The live evaluator returns the stricter
-  `:seon.sci.eval/evaluation` at `resources/seon/schema/eval.edn:58`, which is
+  `:seon.sci.eval/evaluation` in the EVAL section of that resource, which is
   consumed by `src/seon/sci/eval.clj:1255` and
   `src/seon/cluster/loop.cljc:1308`. No source or schema references the loop
   copy.
-- `resources/seon/schema/data.edn:27-33` declares
+- The DATA section of `resources/seon/schema.edn` declares
   `:seon.render.data/window`, including `/entries`, `/total`, and resume
   offsets. Commit `d6399b4b8` deleted the second HTML data floor; the surviving
   floor now creates `:seon.render.value/window` at
   `src/seon/render/value.cljc:86-136`. No current source or schema references
   the old window.
-- `resources/seon/schema/block.edn:6-8` declares
+- The BLOCK section of `resources/seon/schema.edn` declares
   `:seon.render.block/band` and says it is a temporary context-contribution
   dependency. Commit `580de2f50` deleted stored band ordering, and the later
   one-walk cut removed the contribution reader. No current schema or source
   references the enum.
-- `resources/seon/schema/render.edn:38-53` declares
+- The RENDER section of `resources/seon/schema.edn` declares
   `:seon.render/literal`, but no function contract or schema references that
   key. The live runtime rule is the direct `seon.render/declaration?`
   predicate at `src/seon/render.clj:232-245`; it does not consume the named
   schema.
-- `resources/seon/schema/flow.edn:48` declares `:seon.flow/future`, whose only
+- The FLOW section of `resources/seon/schema.edn` declares `:seon.flow/future`, whose only
   purpose is its `seon.flow/java-future-generator`. No source contract or
   other schema references the key. The broader opaque-generator defect is
   already owned by [[flow-generators-reuse-one-mutable-sample]]; its repair

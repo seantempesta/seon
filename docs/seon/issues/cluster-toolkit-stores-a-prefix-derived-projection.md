@@ -21,7 +21,7 @@ result is sufficient to derive the projection from any database value.
 
 Instead, `src/seon/cluster.clj:831-881` computes that result during cluster
 reconciliation, compares it with `:seon.cluster/toolkit`, retracts the old set,
-and stores the new one. `resources/seon/schema/instruction.edn:31-42` makes the
+and stores the new one. The INSTRUCTION section of `resources/seon/schema.edn` makes the
 copied set part of every cluster entity. The regression at
 `test/seon/cluster/instruction_test.clj:117-144` proves convergence by first
 corrupting the stored copy and invoking reconciliation; it does not remove the

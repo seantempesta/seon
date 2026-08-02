@@ -9,8 +9,8 @@ tags: [architecture, schema, database, agent]
 > **Target design** (present tense). Implementation state, gaps, order, and
 > evidence live only in [[roadmap]].
 
-Seon's durable model is the admitted EDN population under
-`resources/seon/schema/`. A database entity is identified by the attributes it
+Seon's durable model is the admitted EDN population in
+`resources/seon/schema.edn`. A database entity is identified by the attributes it
 carries and the connections it follows; there are no entity kinds, route rows,
 turn rows, or compatibility identities. This document names the durable
 families that architecture prose may rely on. Function request/response maps
@@ -21,7 +21,7 @@ own their projections. [[observability]] owns forensic use of the receipts.
 
 ## Modeling laws
 
-- Every stored attribute is declared once in `resources/seon/schema/*.edn`.
+- Every stored attribute is declared once in `resources/seon/schema.edn`.
   `seon.schema.datahike/malli->datahike-schema` derives Datahike value type,
   cardinality, uniqueness, indexing, component ownership, and history facets.
 - An entity is found by attribute presence and identified by a unique identity
@@ -335,10 +335,9 @@ per-agent AI overlay plus attempt settings use the families above.
 
 ## Source authority
 
-- `resources/seon/schema/{run,agent,message,context,ai,program,error}.edn` owns
-  the entity attributes in this census.
-- `resources/seon/schema/{instruction,config,provenance,test}.edn` owns cluster,
-  configuration, transaction provenance, and test observation facts.
+- The named family sections in `resources/seon/schema.edn` own the entity,
+  cluster, configuration, transaction-provenance, and test-observation facts
+  in this census. Sections are editorial; every identity is global.
 - `src/seon/cluster/{agent,run,message,loop}.clj*` owns agent creation, run
   transitions, message derivation, receipt settlement, and session-image
   persistence.

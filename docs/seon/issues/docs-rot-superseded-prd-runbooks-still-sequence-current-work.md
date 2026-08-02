@@ -37,7 +37,7 @@ root authority.
 - The generate-code runbook also treats `:seon.eval/ns` and persisted
   eval/program/plan entities from the old workflow as current. Fresh run
   schema instead names the parse-time namespace
-  `:seon.cluster.eval/namespace` in `resources/seon/schema/run.edn:77-80`.
+  `:seon.cluster.eval/namespace` in the RUN section of `resources/seon/schema.edn`.
 - `docs/prds/sci-execution-runtime/research/generate-code-quarry-2026-07-29.md:56-74`
   explicitly identifies the old implementation as pod-era quarry, and
   lines 274-286 say not to restore `seon.ai.generate-code`, its observer
