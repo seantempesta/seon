@@ -429,8 +429,12 @@
         refused-names
         (into #{}
               (comp
-               (filter #(= :seon.schema/open-argument-map
-                           (:seon.error/kind %)))
+               (filter
+                #(= :seon.schema/open-argument-map
+                    (get-in % [:seon.cluster.eval/value
+                               :seon.error/data
+                               :seon.sci.eval/data
+                               :seon.schema/error])))
                (keep #(defined-name (:seon.cluster.run.form/source %))))
               receipts)
         repaired
