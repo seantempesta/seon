@@ -160,6 +160,37 @@
 (defn- completed-result [receipts]
   (:my.run/result (last (completion-values receipts))))
 
+(defn- model-attempts [db run-ids]
+  (if (seq run-ids)
+    (->> (d/q '[:find [?attempt ...]
+                :in $ [?run-id ...]
+                :where
+                [?run :seon.cluster.run/id ?run-id]
+                [?attempt :seon.ai.attempt/run ?run]]
+              db run-ids)
+         (map #(d/pull
+                db
+                '[:seon.ai.attempt/id
+                  :seon.ai.attempt/ordinal
+                  :seon.ai.attempt/at
+                  :seon.ai/endpoint
+                  :seon.ai/model
+                  :seon.ai.attempt/settings-edn
+                  :seon.ai.attempt/usage-edn
+                  :seon.ai.attempt/finish-reason
+                  :seon.ai/http-status
+                  :seon.ai/request-transmitted?
+                  :seon.ai/response-started?
+                  :seon.ai/output-observed?
+                  {:seon.ai.attempt/error
+                   [:seon.error/kind
+                    :seon.error/message
+                    :seon.error/data-edn]}]
+                %))
+         (sort-by (juxt :seon.ai.attempt/at :seon.ai.attempt/ordinal))
+         vec)
+    []))
+
 (defn- terminal-state [db agent-id process message-id run-cap]
   (let [run-ids (objective-run-ids db message-id)
         receipts (run-receipts db run-ids)
@@ -264,6 +295,7 @@
        :seon.eval.drive/grading-branch grading-branch
        :seon.eval.drive/terminal terminal
        :seon.eval.drive/run-ids run-ids
+       :seon.eval.drive/model-attempts (model-attempts ending-db run-ids)
        :seon.eval.drive/receipts receipts
        :seon.eval.drive/completed-result (completed-result receipts)
        :seon.eval.drive/transcript
