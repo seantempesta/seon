@@ -243,6 +243,43 @@
   (when (schema/valid-candidate-value? :my.message/value value)
     value))
 
+(defn- receipt-request
+  "Terminal receipt request projected from one completed evaluation."
+  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
+           :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
+           :seon.problems/form-problem :my.run/value]
+    settlement-evaluation ::settlement-evaluation}]
+  (let [error (or (:seon.cluster.eval/error evaluation)
+                  (:seon.cluster.eval/error form-problem))
+        kind (or (:seon.error/kind (:seon.sci.admit/value evaluation))
+                 (:seon.error/kind form-problem))]
+    (cond-> {:seon.cluster.run/id id
+             :seon.cluster.run/process process
+             :seon.cluster.run.form/ordinal ordinal}
+      (:seon.cluster.eval/result-edn settlement-evaluation)
+      (assoc :seon.cluster.eval/result-edn
+             (:seon.cluster.eval/result-edn settlement-evaluation))
+      (:seon.cluster.eval/result-blob settlement-evaluation)
+      (assoc :seon.cluster.eval/result-blob
+             (:seon.cluster.eval/result-blob settlement-evaluation))
+      (:seon.cluster.eval/result-size settlement-evaluation)
+      (assoc :seon.cluster.eval/result-size
+             (:seon.cluster.eval/result-size settlement-evaluation))
+      error (assoc :seon.cluster.eval/error error)
+      (:seon.cluster.eval/interrupted-at evaluation)
+      (assoc :seon.cluster.eval/interrupted-at
+             (:seon.cluster.eval/interrupted-at evaluation))
+      kind (assoc :seon.error/kind kind)
+      (:seon.cluster.eval/output evaluation)
+      (assoc :seon.cluster.eval/output
+             (:seon.cluster.eval/output evaluation))
+      (:seon.cluster.eval/ns evaluation)
+      (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
+      (:seon.sci.eval/program-row evaluation)
+      (assoc :seon.sci.eval/program-row
+             (:seon.sci.eval/program-row evaluation))
+      value (assoc :my.run/value value))))
+
 (defn terminal-tx
   "The ONE transaction ending a form: its receipt AND the disposition.
   Pure tx-data. When the admitted value carries a disposition, that
@@ -1365,49 +1402,14 @@
                     settlement-evaluation
                     (settlement-result cluster evaluation)
                     receipt
-                    (cond-> {:seon.cluster.run/id run-id
-                             :seon.cluster.run/process process
-                             :seon.cluster.run.form/ordinal ordinal}
-                      (:seon.cluster.eval/result-edn settlement-evaluation)
-                      (assoc :seon.cluster.eval/result-edn
-                             (:seon.cluster.eval/result-edn
-                              settlement-evaluation))
-                      (:seon.cluster.eval/result-blob settlement-evaluation)
-                      (assoc :seon.cluster.eval/result-blob
-                             (:seon.cluster.eval/result-blob
-                              settlement-evaluation))
-                      (:seon.cluster.eval/result-size settlement-evaluation)
-                      (assoc :seon.cluster.eval/result-size
-                             (:seon.cluster.eval/result-size
-                              settlement-evaluation))
-                      (or (:seon.cluster.eval/error evaluation)
-                          (:seon.cluster.eval/error problem))
-                      (assoc :seon.cluster.eval/error
-                             (or (:seon.cluster.eval/error evaluation)
-                                 (:seon.cluster.eval/error problem)))
-                      ;; the cut instant rides through as the one
-                      ;; interrupted fact — presence is the state
-                      (:seon.cluster.eval/interrupted-at evaluation)
-                      (assoc :seon.cluster.eval/interrupted-at
-                             (:seon.cluster.eval/interrupted-at evaluation))
-                      (or (:seon.error/kind
-                           (:seon.sci.admit/value evaluation))
-                          (:seon.error/kind problem))
-                      (assoc :seon.error/kind
-                             (or (:seon.error/kind
-                                  (:seon.sci.admit/value evaluation))
-                                 (:seon.error/kind problem)))
-                      (:seon.cluster.eval/output evaluation)
-                      (assoc :seon.cluster.eval/output
-                             (:seon.cluster.eval/output evaluation))
-                      (:seon.cluster.eval/ns evaluation)
-                      (assoc :seon.cluster.eval/ns
-                             (:seon.cluster.eval/ns evaluation))
-                      (:seon.sci.eval/program-row evaluation)
-                      (assoc :seon.sci.eval/program-row
-                             (:seon.sci.eval/program-row evaluation))
-                      settled
-                      (assoc :my.run/value settled))
+                    (receipt-request
+                     (cond-> {:seon.cluster.run/id run-id
+                              :seon.cluster.run/process process
+                              :seon.cluster.run.form/ordinal ordinal
+                              :seon.sci.eval/evaluation evaluation
+                              ::settlement-evaluation settlement-evaluation}
+                       problem (assoc :seon.problems/form-problem problem)
+                       settled (assoc :my.run/value settled)))
                     session-evaluation
                     (store-session-values! connection evaluation)
                     outcome

@@ -40,6 +40,53 @@
 (def ^:private now (Date. 1700000000000))
 (def ^:private process "process/one")
 
+(defn- private-loop-fn
+  [function-name]
+  (deref (ns-resolve 'seon.cluster.loop function-name)))
+
+(deftest receipt-request-projects-one-schema-valid-terminal-request
+  (let [result-blob (apply str (repeat 64 "a"))
+        completed (my.run/complete "done")
+        program-row {:seon.schema/key :my.agent/registered
+                     :seon.schema/form ":string"}
+        request
+        ((private-loop-fn 'receipt-request)
+         {:seon.cluster.run/id "run-1"
+          :seon.cluster.run/process process
+          :seon.cluster.run.form/ordinal 2
+          :seon.sci.eval/evaluation
+          {:seon.sci.admit/value
+           {:seon.error/kind :evaluation/kind}
+           :seon.cluster.eval/error "evaluation error"
+           :seon.cluster.eval/interrupted-at now
+           :seon.cluster.eval/output "printed\n"
+           :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
+           :seon.sci.eval/program-row program-row}
+          :seon.cluster.loop/settlement-evaluation
+          {:seon.cluster.eval/result-edn "{:result :projected}"
+           :seon.cluster.eval/result-blob result-blob
+           :seon.cluster.eval/result-size 100}
+          :seon.problems/form-problem
+          {:seon.cluster.eval/error "problem error"
+           :seon.error/kind :problem/kind}
+          :my.run/value completed})]
+    (is (= {:seon.cluster.run/id "run-1"
+            :seon.cluster.run/process process
+            :seon.cluster.run.form/ordinal 2
+            :seon.cluster.eval/result-edn "{:result :projected}"
+            :seon.cluster.eval/result-blob result-blob
+            :seon.cluster.eval/result-size 100
+            :seon.cluster.eval/error "evaluation error"
+            :seon.cluster.eval/interrupted-at now
+            :seon.error/kind :evaluation/kind
+            :seon.cluster.eval/output "printed\n"
+            :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
+            :seon.sci.eval/program-row program-row
+            :my.run/value completed}
+           request))
+    (is (schema/valid-candidate-value?
+         :seon.cluster.loop/terminal-request request))))
+
 (deftest two-agents-resolve-one-config-row-with-ordinary-inheritance
   (test-support/with-database
     (fn [connection]
