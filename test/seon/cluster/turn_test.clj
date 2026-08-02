@@ -18,6 +18,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [my.message :as my.message]
             [my.run :as my.run]
             [seon.ai :as ai]
             [seon.flow :as seon.flow]
@@ -1905,6 +1906,76 @@
                             @connection))
                 "the run closed in the SAME transaction as its receipt")))))))
 
+(deftest a-combined-evaluation-projects-every-terminal-receipt-datom
+  ;; Characterization before receipt-request extraction: these facts used to
+  ;; be assembled by one inline cond-> and must survive together, not only in
+  ;; the separate examples that cover each attribute alone.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            result (my.run/complete "combined receipt")
+            result-edn (pr-str result)
+            result-blob (apply str (repeat 64 "a"))
+            program-row {:seon.schema/key
+                         :my.agents.agent-a/combined-receipt
+                         :seon.schema/form ":string"}
+            installed (atom [])]
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         "(my.run/complete \"combined receipt\")"})
+                      sci.eval/install-program-row!
+                      (fn [request]
+                        (swap! installed conj request))]
+          (binding [*evaluation*
+                    {:seon.sci.admit/value result
+                     :seon.cluster.eval/result-edn result-edn
+                     :seon.cluster.eval/result-blob result-blob
+                     :seon.cluster.eval/interrupted-at now
+                     :seon.cluster.eval/error "combined error"
+                     :seon.cluster.eval/output "combined output\n"
+                     :seon.sci.eval/program-row program-row}]
+            (is (= [:open :call :resume]
+                   (mapv :seon.cluster.work/situation
+                         (drive-agent! cluster "agent-a" 10))))
+            (let [receipt
+                  (d/q '[:find (pull ?receipt
+                                    [:seon.cluster.eval/result-edn
+                                     :seon.cluster.eval/result-blob
+                                     :seon.cluster.eval/result-size
+                                     :seon.cluster.eval/interrupted-at
+                                     :seon.cluster.eval/error
+                                     :seon.cluster.eval/output]) .
+                         :where
+                         [?receipt :seon.cluster.eval/ordinal 0]]
+                       @connection)
+                  terminal-txs
+                  (d/q '[:find [?tx ...]
+                         :where
+                         [?receipt :seon.cluster.eval/ordinal 0]
+                         [?receipt :seon.cluster.eval/result-edn _ ?tx]
+                         [?receipt :seon.cluster.eval/result-blob _ ?tx]
+                         [?receipt :seon.cluster.eval/result-size _ ?tx]
+                         [?receipt :seon.cluster.eval/interrupted-at _ ?tx]
+                         [?receipt :seon.cluster.eval/error _ ?tx]
+                         [?receipt :seon.cluster.eval/output _ ?tx]
+                         [?run :seon.cluster.run/closed-at _ ?tx]
+                         [?schema :seon.schema/key
+                          :my.agents.agent-a/combined-receipt ?tx]]
+                       @connection)]
+              (is (= {:seon.cluster.eval/result-edn result-edn
+                      :seon.cluster.eval/result-blob result-blob
+                      :seon.cluster.eval/result-size (long (count result-edn))
+                      :seon.cluster.eval/interrupted-at now
+                      :seon.cluster.eval/error "combined error"
+                      :seon.cluster.eval/output "combined output\n"}
+                     receipt))
+              (is (= 1 (count terminal-txs))
+                  "receipt facts, program row, and completion close commit together")
+              (is (= [program-row]
+                     (mapv :seon.sci.eval/program-row @installed))
+                  "installation receives the committed program row afterwards"))))))))
+
 (deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note
   ;; REVISED TWICE, each time toward one commit. First: a wait used to
   ;; leave the run open forever because the close refused (the measured
@@ -2482,6 +2553,54 @@
                            @connection)))
                 "the conversation's depth is walkable from committed
                  transaction metadata alone — no hop counter anywhere")))))))
+
+(deftest delivery-rows-and-refusal-facts-share-the-terminal-transaction
+  ;; Characterization before delivery-rows extraction: one delivery result can
+  ;; contain both rails, and neither may be lost when their tx-data is named.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)
+            asked [(my.message/send "agent-b" "delivered together")
+                   (my.message/send "missing-agent" "refused together")]]
+        (d/transact connection [(agent-row "agent-b")])
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text "[:delivery-characterization]"})]
+          (binding [*evaluation* {:seon.sci.admit/value asked
+                                  :seon.cluster.eval/result-edn
+                                  (pr-str asked)}]
+            (is (= [:open :call :resume :close]
+                   (mapv :seon.cluster.work/situation
+                         (drive-agent! cluster "agent-a" 10))))
+            (let [terminal-txs
+                  (d/q '[:find [?tx ...]
+                         :where
+                         [?receipt :seon.cluster.eval/result-edn _ ?tx]
+                         [?message :seon.cluster.message/content
+                          "delivered together" ?tx]
+                         [?error :seon.error/kind
+                          :seon.cluster.message/unknown-recipient ?tx]]
+                       @connection)]
+              (is (= 1 (count terminal-txs))
+                  "the delivered row, refusal fact, and receipt commit together")
+              (is (= "agent-b"
+                     (d/q '[:find ?id .
+                            :where
+                            [?message :seon.cluster.message/content
+                             "delivered together"]
+                            [?message :seon.cluster.message/to ?agent]
+                            [?agent :seon.cluster.agent/id ?id]]
+                          @connection)))
+              (is (= "missing-agent"
+                     (get-in
+                      (semantic-result
+                       (d/q '[:find ?data .
+                              :where
+                              [?error :seon.error/kind
+                               :seon.cluster.message/unknown-recipient]
+                              [?error :seon.error/data-edn ?data]]
+                            @connection))
+                      [:seon.error/data :my.message/to]))))))))))
 
 (deftest a-refused-delivery-becomes-a-durable-error-fact
   ;; The bound itself is proven exhaustively in the messaging suite's
