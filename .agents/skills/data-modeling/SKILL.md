@@ -231,20 +231,23 @@ every loaded public var carrying `:malli/schema` in development, with no
 namespace allow list. Tests and generators still prove the contract rather
 than relying only on runtime checks.
 
-### Source-graph completeness and runtime admission
+### Program rows, the live context, and the session image
 
-Build indexing statically analyzes first-party `src/` and `test/` through
-clj-kondo and exact source spans. It records every function/test definition,
-including private and uncontracted helpers, without evaluating application
-forms. Global schemas remain the separately admitted
-`resources/seon/schema/` population; classpath analysis improves resolution but
-never publishes dependency code (`src/seon/fn/analyzer.clj`;
-`src/seon/fn.clj`). Runtime publication is deliberately stricter: an
-agent-authored function needs a complete Malli contract, while schema and test
-declarations use their own admitted row shapes and schema changes stage in an
-isolated registration delta (`src/seon/sci/eval.clj:320-345,793-825`).
-Arbitrary evals, scratch defs, and atoms remain context-local; receipts preserve
-history but never reconstruct code.
+Keep four boundaries distinct. Static indexing analyzes first-party `src/` and
+`test/` without evaluation (`src/seon/fn/analyzer.clj:117-145`;
+`src/seon/fn.clj:19-21`). Runtime publication is stricter: contracted
+functions and admitted schema/test declarations become program rows through
+the terminal transaction (`src/seon/cluster/loop.cljc:1411-1447`). Ordinary
+defs also accumulate immediately in the cluster's one process-live SCI context
+(`src/seon/cluster.clj:1337-1363`; `src/seon/sci/eval.clj:1230-1275`). Their
+restart contract is the separate durable `:seon.code.def` session image:
+faithful inline/blob values, proven deterministic pure forms, or explicit
+unrestorable rows, cold-restored once into that context
+(`resources/seon/schema/program.edn:188-211`;
+`src/seon/cluster/loop.cljc:325-430`;
+`src/seon/sci/eval.clj:1142-1228`). Read the one shared semantic source,
+[`program-state.md`](../data-oriented-clojure/references/program-state.md),
+instead of restating this contract elsewhere.
 
 ### Global schema lifecycle
 
