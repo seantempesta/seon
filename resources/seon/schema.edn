@@ -278,7 +278,7 @@
  ; The provider's open usage document after JSON decoding. Persisted as
  ; EDN because its string-keyed, provider-owned shape is deliberately
  ; open; cached-token normalization remains a read-time derivation.
- :seon.ai.attempt/usage-edn :string
+ :seon.ai.attempt/usage-edn [:string {:seon.db/no-history? true}]
  ; The SAME inline/blob split as eval results, using the same configured
  ; threshold. Digest shape is direct so schema-derived history GC reaches it.
  :seon.ai.attempt/reasoning :string
@@ -286,7 +286,7 @@
  :seon.ai.attempt/reasoning-size [:int {:min 1}]
  ; The complete resolved config map used for this attempt. It is an
  ; observation of the call, not a provider usage field or derived warning.
- :seon.ai.attempt/settings-edn :string
+ :seon.ai.attempt/settings-edn [:string {:seon.db/no-history? true}]
  :seon.ai.attempt/finish-reason :seon.ai/finish-reason
  ; The error FACT this attempt produced — the whole normalized record
  ; with its signature, prose projection and evidence, never a copy of
@@ -891,7 +891,8 @@
  ; the blob-ref cutover named as an accretion at that rung (§9 of the
  ; owning contract package). Never admitted/capped: capping the capture
  ; would make the evidence lie about what was sent.
- :seon.context.capture/prompt [:string {:min 1}]
+ :seon.context.capture/prompt
+ [:string {:min 1 :seon.db/no-history? true}]
 
  ; The one honest non-database input, recorded so the projection is
  ; reproducible. Present exactly when the membership required it —
@@ -1529,7 +1530,8 @@
  ; an inbound message. No delivery/ack/read semantics —
  ; the messaging rung owns that shape when it exists (n3-plan §11.8).
  :seon.cluster.message/at :inst
- :seon.cluster.message/content [:string {:min 1}]
+ :seon.cluster.message/content
+ [:string {:min 1 :seon.db/no-history? true}]
  :seon.cluster.message/id [:string {:min 1 :seon.db/identity true}]
  ; the WAKE attribute: a new datom on this ref is the one thing that
  ; wakes the loop. It is a ref so "who was triggered" is a follow, and
@@ -2458,11 +2460,12 @@
  ; What the form PRINTED. Agent-visible evidence about its own work, so
  ; it is durable rather than dropped on the floor; bounded by the same
  ; string cap the projection uses.
- :seon.cluster.eval/output [:string {:min 1}]
+ :seon.cluster.eval/output
+ [:string {:min 1 :seon.db/no-history? true}]
  :seon.cluster.eval/id [:string {:min 1 :seon.db/identity true}]
  :seon.cluster.eval/ordinal [:int {:min 0}]
  :seon.cluster.eval/ns :seon.db/ref
- :seon.cluster.eval/result-edn :string
+ :seon.cluster.eval/result-edn [:string {:seon.db/no-history? true}]
  ; Full result text moves to a content-addressed blob once it crosses the
  ; configured threshold. The receipt retains a presentation projection and
  ; these primitive facts; capped state is derived at render time.
@@ -2549,7 +2552,8 @@
  :seon.cluster.run.form/ns :seon.db/ref
  :seon.cluster.run.form/ordinal [:int {:min 0}]
  :seon.cluster.run.form/run :seon.db/ref
- :seon.cluster.run.form/source [:string {:min 1}]
+ :seon.cluster.run.form/source
+ [:string {:min 1 :seon.db/no-history? true}]
 
  ; Bootstrap-plan declarations extend the ordered run.form family in this
  ; owner-ruled global schema resource.
