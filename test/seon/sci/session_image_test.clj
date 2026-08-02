@@ -323,7 +323,7 @@
                           "my.agents.session-image/dropped"]))))
          )))))
 
-(deftest two-hundred-form-image-install-stays-bounded
+(deftest two-hundred-form-image-installs-each-source-once
   (test-support/with-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-cost
@@ -342,12 +342,25 @@
            _ (d/transact connection {:tx-data rows})
            ctx (eval/build-base-ctx)
            _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
-           started (System/nanoTime)
-           _ (eval/install-session-image!
-              {:seon.sci.eval/ctx ctx :seon.db/db @connection})
-           elapsed-ms (/ (- (System/nanoTime) started) 1000000.0)]
-       (is (< elapsed-ms 50.0)
-           (str "200-form session install took " elapsed-ms " ms"))
+           evaluated (atom [])
+           real-eval-form sci/eval-form
+           installed
+           (with-redefs [sci/eval-form
+                         (fn [candidate-ctx form]
+                           (swap! evaluated conj form)
+                           (real-eval-form candidate-ctx form))]
+             (eval/install-session-image!
+              {:seon.sci.eval/ctx ctx :seon.db/db @connection}))]
+       (is (identical? ctx (:seon.sci.eval/ctx installed)))
+       (is (empty? (:seon.sci.eval/unrestorable installed)))
+       (is (= 200 (count @evaluated))
+           "each admitted source row is evaluated exactly once")
+       (is (= 200
+              (count (filter
+                      (get (sci/namespace-interns ctx) namespace-name)
+                      (map #(symbol (str "n" %)) (range 200)))))
+           "all 200 declared names are installed")
+       (is (= 0 @(sci/resolve ctx 'my.agents.session-cost/n0)))
        (is (= 199 @(sci/resolve ctx 'my.agents.session-cost/n199)))))))
 
 (deftest equal-large-values-share-the-content-addressed-blob
