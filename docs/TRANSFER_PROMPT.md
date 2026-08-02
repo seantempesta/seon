@@ -262,15 +262,28 @@ unbuilt is largely built and live-proven:
   not a bug to fix in code — it is the empirical question the whole
   apparatus exists to answer. Edit `resources/seon/bootstrap.edn` (or
   transact a plan edit), run drives, compare by digest.
-- **Store economics at eval scale** (blocker). Measured 2026-08-02:
-  small transactions cost KILOBYTES (2.8-10.8 KB), but inline payloads
-  amplify **~86x** (4 KB costs 350 KB; 64 KB costs 5.5 MB) and
-  batching is worth **42x** (100 datoms in one transaction: 25 KB; in
-  100 transactions: 1,084 KB). The blob threshold was lowered to 4,096
-  characters on that evidence. Trap: an earlier claim of "~1.5 MB per
-  transaction regardless of payload" is FALSE and may still be quoted
-  in older documents — do not plan against it. Still owed: the
-  konserve/datahike source anatomy explaining WHY 86x.
+- **Store economics at eval scale** (blocker). READ THE ANATOMY BEFORE
+  QUOTING ANY NUMBER HERE:
+  `research/store-amplification-anatomy-2026-08-02.md`. TWO EARLIER
+  FIGURES ARE NOW DISPROVEN and both were quoted in rulings and issue
+  notes before anyone modelled them:
+  - **"~86x inline payload amplification" is a MISREADING.** Payload
+    growth is LINEAR in payload size and QUADRATIC in sequential commit
+    count while roots stay shallow: the coefficient came from 40
+    retained growing snapshots, `4 × (N(N+1)/2 + N)`. The model is
+    validated, not asserted — a held-out 16 KiB prediction of
+    56,648,465 B against 56,618,147 B measured, 0.05% error.
+  - **"~42 MB per eval sample" is WRONG by ~4x**; it summed
+    overlapping shared-store intervals. The reconstruction is
+    9.793 MB/sample (1.939 GB selected for the 198-sample run).
+  What the run actually holds: history is 47.25% of it, the commit
+  record averages 969 B per transaction, and **blob content is exactly
+  0 B** — the blob tier is not being exercised at eval scale at all.
+  The blob threshold was lowered to 4,096 characters on the DISPROVEN
+  reading, so whether that value is right is now an open question, not
+  a settled one. The older "~1.5 MB per transaction regardless of
+  payload" claim is also false. Three wrong numbers in one area is the
+  lesson: measure before repeating, and model before tuning.
 - **The agent write surface** — the hole is ergonomics and gating, not
   capability. Agents CAN transact any declared attribute (ruling #20
   makes `store/transact!` callable; `:schema-flexibility :write`

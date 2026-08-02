@@ -1939,9 +1939,18 @@ may reintroduce a shadow build into the dev feedback path.
   proc is genuinely unobservable without asking. (4) STORE ECONOMICS:
   UNDERSTAND FIRST. Owner: "I'm more worried about explosive storage
   growth if we don't understand what's going on and fix it now than I
-  am about 2GB per failed run." The measured 86× inline amplification
-  is still UNEXPLAINED — the konserve/datahike anatomy owed since
-  2026-08-02 is the prerequisite, not the fixes. Only then the known
+  am about 2GB per failed run." SETTLED SAME EVENING, and it vindicated
+  the sequencing: the anatomy DISPROVED both quoted figures. The "86×
+  inline amplification" was a misreading — growth is LINEAR in payload
+  size and QUADRATIC in sequential commit count (`4 × (N(N+1)/2 + N)`
+  over 40 retained snapshots), with the model validated by a held-out
+  prediction to 0.05%; and "42 MB per sample" summed overlapping
+  shared-store intervals, the real figure being 9.793 MB. History is
+  47.25% of the run and blob content is 0 B. Full account:
+  `research/store-amplification-anatomy-2026-08-02.md`. CONSEQUENCE TO
+  REVISIT: the 4,096-character blob threshold was lowered on the
+  disproven reading, so its value is now unjustified rather than wrong
+  — it needs deciding against the real model. Only then the known
   wins, all filed and none adopted: the store is created WITHOUT any of
   the three write-amplification options our Datahike fork already ships
   and without the writer's batching dial (one small commit costs ~123

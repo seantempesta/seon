@@ -55,6 +55,34 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 18 — 2026-08-02 night, THE STORE NUMBERS WERE WRONG AND ARE
+NOW MODELLED.** `research/store-amplification-anatomy-2026-08-02.md`
+disproves both figures this program has been quoting. "86x inline
+payload amplification" was a misreading: growth is LINEAR in payload
+size and QUADRATIC in sequential commit count while roots stay shallow
+(`4 x (N(N+1)/2 + N)` over 40 retained snapshots). The model is
+VALIDATED, not asserted — a held-out 16 KiB prediction of 56,648,465 B
+against 56,618,147 B measured, 0.05% error. "~42 MB per eval sample"
+summed overlapping shared-store intervals; the reconstruction is
+9.793 MB/sample, 1.939 GB for the 198-sample run. Composition: history
+47.25%, commit-record envelope 969 B/transaction, blob content EXACTLY
+0 B — the blob tier is not exercised at eval scale at all.
+LANDED: ordinary stores now set `:keep-history? true` explicitly
+(`db4efb4fd`); the unused outer konserve LRU is removed from our
+Datahike fork (`0e8601d7`, pinned by `ccde63a4c`). Fused roots and the
+diff buffer were verified already landed (14 to 2 forced blobs,
+73.967 to 18.113 ms). NO DISK SAVING IS CLAIMED from either landed
+change — the lane refused to claim what it did not measure, and an
+identical 198-sample run still costs ~1.939 GB.
+NOT LANDED, each with a named blocker: history-off would cut the run to
+5.166 MB/sample but boot-critical `d/history` and inherited branch
+representation still block a safe toggle; cutoff GC reclaimed 95.3% in
+an isolated cell but has no commit-ID/database-value retention
+contract; the writer wait improved burst throughput 652 to 890 tx/s but
+raised serial latency and has no valid configuration-acquisition seam.
+OPEN CONSEQUENCE: the 4,096-character blob threshold was lowered on the
+disproven reading and now needs deciding against the real model.
+
 **ADDENDUM 17 — 2026-08-02 evening, THE CUSTODY/ISOLATION RESEARCH IS
 COMPLETE AND FUSED.** Three research reports landed and agree:
 `custody-isolation-design-2026-08-02.md` (§1-8 no-fork baseline, §9
