@@ -29,6 +29,23 @@ operator/process surface.
   references are dated research that records the compatibility decision; all
   current operator guidance and automation use `bin/seon`.
 
+## Current progress
+
+Commit `34cd8a5e8` deleted both `script/seon/dev/detach.py` and
+`bin/seon-fresh`. The evaluation deletion lane replaced the source-admission
+fixture's `detach.py` path with a neutral fixture path in its current cut wave.
+
+The issue remains open because two protected, active skill resources still
+teach the deleted alias:
+
+- `.agents/skills/seon-flow-architecture/SKILL.md:122-124`
+- `.agents/skills/seon-flow-architecture/references/degraded-start.md:70-71`
+
+The great-deletion build wave explicitly protects `.agents/skills/**`, so
+those live reader references must be removed by their owner before this issue
+can be archived. Dated research and archived issue evidence may retain the old
+name as archaeology.
+
 ## Owner
 
 The fresh operator/tooling boundary.
