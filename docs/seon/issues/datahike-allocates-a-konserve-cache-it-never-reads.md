@@ -65,9 +65,13 @@ Full sweep:
 
 ## Current disposition 2026-08-02
 
-**Safe fork cleanup, proven but not yet applied.** Current Datahike source has
-no `konserve.cache` call site besides `ensure-cache`; changing every database
-read to the cache API would introduce a second read mechanism, while deleting
-the unused wrapper leaves the measured `CachedStorage` hit path unchanged. The
-before metric is: two distinct cache atoms allocated, outer 0 → 0 entries on
-core reads, inner five backing reads on the first query and none on the second.
+**Applied in maintained Datahike commit `0e8601d7` and pinned by Seon commit
+`ccde63a4c`.** Datahike now passes the raw Konserve store directly to its
+persistent-set handler. Before: two distinct cache atoms, outer 0 → 0 entries
+on core reads, inner five backing reads on the first query and none on the
+second. After: the same probe reports no outer cache, the inner cache present,
+and the same query result; the focused store test asserts that one-cache shape.
+The post-fix retained-script run reports outer cache absent, inner cache with
+five entries after the first query, and still five after the second. Its
+current-path file store remains exactly 99 objects / 709,478 bytes, confirming
+this is a retained-memory cleanup rather than a disk-growth claim.

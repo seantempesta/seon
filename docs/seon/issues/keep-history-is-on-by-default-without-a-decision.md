@@ -71,8 +71,11 @@ the same function named by
 
 ## Backlog triage 2026-08-02
 
-**Still real, narrowed to one safe explicit-default edit.** Writing `true`
-does not change current/new Seon store behavior: existing stores were normalized
-and stored with `true`, and new stores already inherit it. Per-cluster
-history-off is a separate mechanism issue in
-[[history-off-is-not-a-creation-seam-toggle]].
+**Applied in `db4efb4fd`.** The creation owner now emits
+`:keep-history? true` with rulings #23/#40 at the decision site. This is a
+zero-byte behavior change—before and after both normalize to history-on—and
+makes the inherited policy explicit. Per-cluster history-off remains the
+separate mechanism issue in [[history-off-is-not-a-creation-seam-toggle]].
+The post-fix retained-script run reports `:keep-history? true` in Seon's
+creation map and the identical controlled-store result: 99 objects / 709,478
+bytes before and after.

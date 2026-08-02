@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [database, datahike, performance, evidence]
 ---
 
@@ -348,3 +348,23 @@ snapshot count. Episode transaction batching remains the other high-leverage
 storage win, but its complete run/receipt transaction boundary is protected in
 this wave and no eval-scale saving is claimed without measuring that integrated
 change.
+
+## Verification
+
+- `store-options-before-after-2026-08-02.clj` passed after both fixes. The
+  current creation map now states history `true`; the current file cell remains
+  exactly 99 objects / 709,478 B; the outer cache fields are absent; and the
+  inner cache remains at five entries across the repeat query.
+- Datahike's focused `datahike.test.store-test/test-db-mem-store` passed one
+  test / five assertions, including the new one-cache regression.
+- An isolated operator root at `tmp/store-amplification-proof-20260802`
+  published current source commit
+  `6a6fa20a-fc0a-587f-8f2b-860fe67e17ea`, booted `store-proof`, committed a
+  schema and marker through `seon.cluster.store/transact!`, and read entity
+  `10316` back. After a full process stop/start, the live database again
+  reported `:keep-history? true`, outer cache absent, inner cache present, and
+  marker entity `10316`. The isolated JVM was then stopped with `bin/seon down`.
+- `seon.dev.markdown` accepts this report and the changed issue notes;
+  `bin/issues-index --check` is clean. The shared Seon suite was already under
+  the serialized test lock in another lane, so this wave did not start a
+  competing suite.
