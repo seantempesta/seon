@@ -3,9 +3,11 @@
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [seon.dev.clj-kondo :as dev.kondo])
-  (:import [java.io PushbackReader]
+            [seon.dev.clj-kondo :as dev.kondo]
+            [seon.dev.state :as state])
+  (:import [java.io PushbackReader RandomAccessFile]
            [java.net InetSocketAddress ServerSocket Socket]
+           [java.nio.file Files LinkOption Path]
            [java.time Instant]
            [java.util.concurrent CompletableFuture ExecutionException
             TimeUnit TimeoutException]
@@ -16,13 +18,21 @@
 (def ^:private advertisement-wait-ms 30000)
 (def ^:private prepl-connect-ms 3000)
 (def ^:private prepl-eval-ms 30000)
+(def ^:private operator-probe-ms 3000)
+(def ^:private shutdown-grace-ms 5000)
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
 (def ^:private detach-python
-  (str "import subprocess,sys\n"
+  (str "import os,subprocess,sys,time\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
-       "p=subprocess.Popen(sys.argv[3:],cwd=sys.argv[1],"
+       "child='import os,sys,time\\n'"
+       "+'gate=sys.argv[1]; deadline=time.monotonic()+30\\n'"
+       "+'while not os.path.exists(gate):\\n'"
+       "+'  if time.monotonic() >= deadline: sys.exit(75)\\n'"
+       "+'  time.sleep(0.01)\\n'"
+       "+'os.execvp(sys.argv[2],sys.argv[2:])\\n'\n"
+       "p=subprocess.Popen([sys.executable,'-c',child,sys.argv[3],*sys.argv[4:]],cwd=sys.argv[1],"
        "stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,"
        "close_fds=True,start_new_session=True)\n"
        "print(p.pid,flush=True)\n"))
@@ -56,6 +66,131 @@
 (defn- log-path
   [root name]
   (fs/path (cluster-directory root name) "logs" log-name))
+
+(defn- process-record-directory
+  [root]
+  (fs/path (cluster-root root) "processes"))
+
+(defn- process-record-path
+  [root generation]
+  (fs/path (process-record-directory root) (str generation ".edn")))
+
+(defn- process-adoption-path
+  [root generation]
+  (fs/path root "data" "operator" "adoptions"
+           (str generation ".ready")))
+
+(defn- valid-process-record?
+  [record]
+  (and (map? record)
+       (uuid? (:seon.dev.process/generation record))
+       (pos-int? (:seon.dev.process/pid record))
+       (string? (:seon.dev.process/start-instant record))
+       (try
+         (Instant/parse (:seon.dev.process/start-instant record))
+         true
+         (catch Throwable _ false))
+       (string? (:seon.dev.process/root record))
+       (string? (:seon.dev.process/log record))))
+
+(defn- read-process-records
+  [root]
+  (let [canonical-root (.getCanonicalPath (java.io.File. root))
+        directory (process-record-directory canonical-root)]
+    (if-not (fs/directory? directory)
+      {:seon.fresh-operator/process-records []
+       :seon.fresh-operator/process-record-errors []}
+      (reduce
+       (fn [result path]
+         (try
+           (let [record (state/read-edn path)]
+            (if (and (valid-process-record? record)
+                     (= canonical-root (:seon.dev.process/root record)))
+              (update result :seon.fresh-operator/process-records conj record)
+              (update result :seon.fresh-operator/process-record-errors conj
+                       {:seon.fresh-operator/path (str path)
+                        :seon.fresh-operator/error
+                        (if (valid-process-record? record)
+                          "The recorded child process belongs to another operator root."
+                          "The recorded child process file is invalid.")})))
+           (catch Throwable error
+             (update result :seon.fresh-operator/process-record-errors conj
+                     {:seon.fresh-operator/path (str path)
+                      :seon.fresh-operator/error (ex-message error)}))))
+       {:seon.fresh-operator/process-records []
+        :seon.fresh-operator/process-record-errors []}
+       (sort-by str (fs/list-dir directory))))))
+
+(defn- write-process-record!
+  [root record]
+  (when-not (valid-process-record? record)
+    (fail! "Refusing to publish an invalid child process record."
+           {:seon.fresh-operator/process-record record}))
+  (state/write-edn!
+   (process-record-path root (:seon.dev.process/generation record))
+   record))
+
+(defn- clear-process-record!
+  [root record]
+  (let [generation (:seon.dev.process/generation record)
+        deleted? (state/delete-edn! (process-record-path root generation))]
+    (fs/delete-if-exists (process-adoption-path root generation))
+    deleted?))
+
+(defn- record-process-identity
+  [record]
+  (select-keys record
+               [:seon.dev.process/pid :seon.dev.process/start-instant]))
+
+(defn- record-alive?
+  [record]
+  (state/process-identity-alive? (record-process-identity record)))
+
+(defn- record->boot-process
+  [record]
+  {:seon.boot/pid (:seon.dev.process/pid record)
+   :seon.boot/start-instant
+   (java.util.Date/from
+    (Instant/parse (:seon.dev.process/start-instant record)))
+   :seon.fresh-operator/alive? (record-alive? record)})
+
+(defn- process-record-matches-advertisement?
+  [record advertisement]
+  (and (= (:seon.dev.process/pid record)
+          (:seon.boot/pid advertisement))
+       (inst? (:seon.boot/start-instant advertisement))
+       (= (.toEpochMilli
+           (Instant/parse (:seon.dev.process/start-instant record)))
+          (.getTime ^java.util.Date
+                    (:seon.boot/start-instant advertisement)))))
+
+(defn- matching-process-handle
+  [record]
+  (try
+    (let [optional
+          (java.lang.ProcessHandle/of
+           (long (:seon.dev.process/pid record)))]
+      (when (.isPresent optional)
+        (let [handle (.get optional)
+              start (.startInstant (.info handle))]
+          (when (and (.isAlive handle)
+                     (.isPresent start)
+                     (= (:seon.dev.process/start-instant record)
+                        (str (.get start))))
+            handle))))
+    (catch Throwable _ nil)))
+
+(defn- with-operator-lock
+  [root transition]
+  (let [directory (fs/path root "data" "operator")
+        path (fs/path directory "lifecycle.lock")]
+    (fs/create-dirs directory)
+    (with-open [file (RandomAccessFile. (str path) "rw")
+                channel (.getChannel file)]
+      ;; The kernel publishes lock release when the current command finishes.
+      ;; No clock stands in for that observable event.
+      (.lock channel)
+      (transition))))
 
 (defn- unquote-value
   [value]
@@ -129,16 +264,6 @@
                  (assoc selected
                         :seon.fresh-operator/name (valid-name! argument))))))))
 
-(defn- explicit-start-name?
-  [arguments]
-  (loop [remaining (seq arguments)]
-    (when remaining
-      (let [argument (first remaining)]
-        (cond
-          (= "--config" argument) (recur (nnext remaining))
-          (str/starts-with? argument "--") (recur (next remaining))
-          :else true)))))
-
 (defn- parse-config-apply-arguments
   [arguments]
   (let [[name path]
@@ -178,6 +303,21 @@
                  (assoc selected
                         :seon.fresh-operator/name
                         (valid-name! argument))))))))
+
+(defn- parse-down-arguments
+  [arguments]
+  (case arguments
+    [] {:seon.fresh-operator/force? false}
+    ["--force"] {:seon.fresh-operator/force? true}
+    (fail! "Use `down [--force]`; `down` always stops every recorded JVM."
+           {:seon.fresh-operator/arguments arguments})))
+
+(defn- parse-reset-arguments
+  [arguments]
+  (when-not (= ["--force"] arguments)
+    (fail! "Use `reset --force`; reset destroys this operator root."
+           {:seon.fresh-operator/arguments arguments}))
+  {:seon.fresh-operator/force? true})
 
 (defn- parse-init-arguments
   [arguments]
@@ -360,14 +500,19 @@
     (catch Throwable _
       nil)))
 
-(defn- process-root-property
-  [^java.lang.ProcessHandle handle]
+(defn- process-property
+  [^java.lang.ProcessHandle handle property-name]
   (let [arguments (some-> (optional-value (.arguments (.info handle))) vec)]
     (some
      (fn [argument]
-       (when (str/starts-with? argument "-Dseon.operator.root=")
-         (subs argument (count "-Dseon.operator.root="))))
+       (let [prefix (str "-D" property-name "=")]
+         (when (str/starts-with? argument prefix)
+           (subs argument (count prefix)))))
      arguments)))
+
+(defn- process-root-property
+  [handle]
+  (process-property handle "seon.operator.root"))
 
 (defn- proc-working-directory
   [pid]
@@ -414,13 +559,64 @@
          (keep
           (fn [^java.lang.ProcessHandle handle]
             (when-let [start (process-start-instant (.pid handle))]
-              {:seon.fresh-operator/root (process-root handle)
-               :seon.fresh-operator/process
-               {:seon.boot/pid (.pid handle)
-                :seon.boot/start-instant (java.util.Date/from start)
-                :seon.fresh-operator/alive? true}})))
+              (let [generation-text
+                    (process-property handle "seon.operator.generation")]
+                {:seon.fresh-operator/root (process-root handle)
+                 :seon.fresh-operator/generation
+                 (when generation-text
+                   (try (parse-uuid generation-text)
+                        (catch Throwable _ nil)))
+                 :seon.fresh-operator/log
+                 (process-property handle "seon.operator.log")
+                 :seon.fresh-operator/process
+                 {:seon.boot/pid (.pid handle)
+                  :seon.boot/start-instant (java.util.Date/from start)
+                  :seon.fresh-operator/alive? true}}))))
          (sort-by #(get-in % [:seon.fresh-operator/process :seon.boot/pid]))
          vec)))
+
+(defn- observation->process-record
+  [observation]
+  (when-let [root (:seon.fresh-operator/root observation)]
+    (let [pid
+          (get-in observation [:seon.fresh-operator/process :seon.boot/pid])
+          start-instant
+          (str (.toInstant
+                ^java.util.Date
+                (get-in observation
+                        [:seon.fresh-operator/process
+                         :seon.boot/start-instant])))
+          generation
+          (or
+           (:seon.fresh-operator/generation observation)
+           (java.util.UUID/nameUUIDFromBytes
+            (.getBytes (str root "\u0000" pid "\u0000" start-instant)
+                       java.nio.charset.StandardCharsets/UTF_8)))]
+      {:seon.dev.process/generation generation
+       :seon.dev.process/pid pid
+       :seon.dev.process/start-instant start-instant
+       :seon.dev.process/root root
+       :seon.dev.process/log
+       (or (:seon.fresh-operator/log observation)
+           (str (fs/path root "data" "clusters" "processes"
+                         (str "recovered-" pid ".log"))))})))
+
+(defn- reconcile-process-records!
+  [root]
+  (let [canonical-root (.getCanonicalPath (java.io.File. root))
+        existing (read-process-records canonical-root)
+        generations
+        (into #{}
+              (map :seon.dev.process/generation)
+              (:seon.fresh-operator/process-records existing))]
+    (doseq [observation (operator-process-observations)
+            :when (= canonical-root (:seon.fresh-operator/root observation))
+            :let [record (observation->process-record observation)]
+            :when (and record
+                       (not (contains? generations
+                                       (:seon.dev.process/generation record))))]
+      (write-process-record! canonical-root record))
+    (read-process-records canonical-root)))
 
 (defn- branch-cluster-name
   [branch]
@@ -546,8 +742,11 @@
 (declare prepl-eval! terminal-value)
 
 (defn- prepl-value!
-  [advertisement form]
-  (edn/read-string (terminal-value (prepl-eval! advertisement form))))
+  ([advertisement form]
+   (prepl-value! advertisement form prepl-eval-ms))
+  ([advertisement form timeout-ms]
+   (edn/read-string
+    (terminal-value (prepl-eval! advertisement form timeout-ms)))))
 
 (defn- process-matches-advertisement?
   [process advertisement]
@@ -577,7 +776,7 @@
       (try
         (merge
          process-observation
-         (prepl-value! probe (jvm-snapshot-form))
+         (prepl-value! probe (jvm-snapshot-form) operator-probe-ms)
          {:seon.fresh-operator/probe-advertisement probe
           :seon.fresh-operator/reachable? true})
         (catch Throwable error
@@ -587,12 +786,33 @@
                  :seon.fresh-operator/error (ex-message error)))))))
 
 (defn- source-observations
-  [root]
-  (let [root (.getCanonicalPath (java.io.File. root))
-        discovered-processes (operator-process-observations)
-        roots (into #{root}
-                    (keep :seon.fresh-operator/root)
-                    discovered-processes)
+  ([root]
+   (source-observations
+    root {:seon.fresh-operator/probe-jvms? true}))
+  ([root options]
+   (let [root (.getCanonicalPath (java.io.File. root))
+        probe-jvms?
+        (not= false (:seon.fresh-operator/probe-jvms? options))
+        {:seon.fresh-operator/keys
+         [process-records process-record-errors]}
+        (reconcile-process-records! root)
+        recorded-processes
+        (into
+         []
+         (map
+          (fn [record]
+            {:seon.fresh-operator/root (:seon.dev.process/root record)
+             :seon.fresh-operator/process-record record
+             :seon.fresh-operator/process (record->boot-process record)}))
+         process-records)
+        discovered-processes
+        (filterv
+         #(= root (:seon.fresh-operator/root %))
+         (operator-process-observations))
+        ;; An operator root is sovereign. Cross-root JVMs and advertisements
+        ;; are outside this invocation's observation graph, not merely filtered
+        ;; from its destructive selection after probing.
+        roots #{root}
         advertisements (into [] (mapcat advertisement-observations) roots)
         advertised-processes
         (into
@@ -617,7 +837,8 @@
                   :seon.fresh-operator/alive? true)}))))
          advertisements)
         processes
-        (->> (concat discovered-processes advertised-processes)
+        (->> (concat discovered-processes advertised-processes
+                     recorded-processes)
              (reduce
               (fn [by-process process]
                 (assoc
@@ -635,10 +856,14 @@
         jvms
         (into
          []
-         (map #(observe-jvm % advertisements))
+         (map #(if probe-jvms?
+                 (observe-jvm % advertisements)
+                 (assoc % :seon.fresh-operator/reachable? false)))
          processes)]
     {:seon.fresh-operator/advertisements advertisements
-     :seon.fresh-operator/jvms jvms}))
+     :seon.fresh-operator/jvms jvms
+     :seon.fresh-operator/process-records process-records
+     :seon.fresh-operator/process-record-errors process-record-errors})))
 
 (defn- expected-branch
   [cluster-name]
@@ -817,26 +1042,71 @@
   ([root]
    (cluster-truth
     root {:seon.fresh-operator/read-offline-roster? true}))
-  ([root {:seon.fresh-operator/keys [read-offline-roster?]}]
-   (let [{:seon.fresh-operator/keys [advertisements jvms]}
-         (source-observations root)
+  ([root {:seon.fresh-operator/keys [read-offline-roster? probe-jvms?]}]
+   (let [{:seon.fresh-operator/keys
+          [advertisements jvms process-records process-record-errors]}
+         (if (nil? probe-jvms?)
+           (source-observations root)
+           (source-observations
+            root {:seon.fresh-operator/probe-jvms? probe-jvms?}))
          canonical-root (.getCanonicalPath (java.io.File. root))
-         persisted-branches
-         (or
+         live-roster
+         (some
+          (fn [jvm]
+            (when (and (= canonical-root
+                          (:seon.fresh-operator/root jvm))
+                       (:seon.fresh-operator/reachable? jvm)
+                       (:seon.fresh-operator/persisted-branches-observed?
+                        jvm))
+              (:seon.fresh-operator/persisted-branches jvm)))
+          jvms)
+         live-recorded-process?
+         (boolean
           (some
-           (fn [jvm]
-             (when (and (= canonical-root
-                           (:seon.fresh-operator/root jvm))
-                        (:seon.fresh-operator/reachable? jvm)
-                        (:seon.fresh-operator/persisted-branches-observed?
-                         jvm))
-               (:seon.fresh-operator/persisted-branches jvm)))
-           jvms)
-          (when read-offline-roster?
-            (offline-roster canonical-root))
-          #{})]
-     (derive-cluster-truth canonical-root persisted-branches
-                           advertisements jvms))))
+           #(and (= canonical-root (:seon.fresh-operator/root %))
+                 (:seon.fresh-operator/process-record %)
+                 (get-in % [:seon.fresh-operator/process
+                            :seon.fresh-operator/alive?]))
+           jvms))
+         roster-observation
+         (cond
+           live-roster
+           {:seon.fresh-operator/roster-readable? true
+            :seon.fresh-operator/roster-source :live-jvm
+            :seon.fresh-operator/persisted-branches live-roster}
+
+           live-recorded-process?
+           {:seon.fresh-operator/roster-readable? false
+            :seon.fresh-operator/roster-source :recorded-process
+            :seon.fresh-operator/roster-error
+            (str "A recorded JVM is alive but its prepl is unreachable; "
+                 "the offline reader was not allowed to contend for its flock.")}
+
+           (not read-offline-roster?)
+           {:seon.fresh-operator/roster-readable? false
+            :seon.fresh-operator/roster-source :skipped}
+
+           :else
+           (try
+             {:seon.fresh-operator/roster-readable? true
+              :seon.fresh-operator/roster-source :offline-jvm
+              :seon.fresh-operator/persisted-branches
+              (offline-roster canonical-root)}
+             (catch Throwable error
+               {:seon.fresh-operator/roster-readable? false
+                :seon.fresh-operator/roster-source :offline-jvm
+                :seon.fresh-operator/roster-error (ex-message error)
+                :seon.fresh-operator/roster-error-data (ex-data error)})))
+         persisted-branches
+         (or (:seon.fresh-operator/persisted-branches roster-observation) #{})
+         truth
+         (derive-cluster-truth canonical-root persisted-branches
+                               advertisements jvms)]
+     (with-meta
+       truth
+       {:seon.fresh-operator/roster roster-observation
+        :seon.fresh-operator/process-records process-records
+        :seon.fresh-operator/process-record-errors process-record-errors}))))
 
 (defn- own-cluster-truth
   [truth]
@@ -848,6 +1118,20 @@
         (comp
          (filter :seon.fresh-operator/operator-root?)
          (filter :seon.fresh-operator/persisted?)
+         (map :seon.fresh-operator/name)
+         (distinct))
+        truth))
+
+(defn- destructive-names
+  [truth]
+  (into []
+        (comp
+         (filter :seon.fresh-operator/operator-root?)
+         (filter #(or (:seon.fresh-operator/persisted? %)
+                      (:seon.fresh-operator/advertised? %)
+                      (:seon.fresh-operator/registered? %)
+                      (:seon.fresh-operator/branch-open? %)
+                      (:seon.fresh-operator/process-alive? %)))
          (map :seon.fresh-operator/name)
          (distinct))
         truth))
@@ -900,7 +1184,7 @@
   (if requested-name
     (:seon.fresh-operator/name
      (named-cluster-row truth (valid-name! requested-name)))
-    (let [candidates (existing-names truth)]
+    (let [candidates (destructive-names truth)]
       (case (count candidates)
         0 (fail! (str "There are no clusters to " command ".")
                  {:seon.fresh-operator/candidates []
@@ -1003,44 +1287,46 @@
   (valid-name! (or argument "default")))
 
 (defn- prepl-eval!
-  [advertisement form]
-  (with-open [socket (Socket.)]
-    (.connect socket
-              (InetSocketAddress.
-               ^String (:seon.boot/prepl-host advertisement)
-               (int (:seon.boot/prepl-port advertisement)))
-              prepl-connect-ms)
-    (.setSoTimeout socket prepl-eval-ms)
-    (with-open [writer (java.io.OutputStreamWriter.
-                        (.getOutputStream socket)
-                        java.nio.charset.StandardCharsets/UTF_8)
-                reader (PushbackReader.
-                        (java.io.InputStreamReader.
-                         (.getInputStream socket)
-                         java.nio.charset.StandardCharsets/UTF_8))]
-      (.write writer form)
-      (.write writer "\n")
-      (.flush writer)
-      (loop [events []]
-        (let [event (edn/read {:eof ::eof} reader)]
-          (cond
-            (= ::eof event)
-            (fail! "The cluster closed its prepl before returning."
-                   {:seon.fresh-operator/events events})
+  ([advertisement form]
+   (prepl-eval! advertisement form prepl-eval-ms))
+  ([advertisement form timeout-ms]
+   (with-open [socket (Socket.)]
+     (.connect socket
+               (InetSocketAddress.
+                ^String (:seon.boot/prepl-host advertisement)
+                (int (:seon.boot/prepl-port advertisement)))
+               prepl-connect-ms)
+     (.setSoTimeout socket timeout-ms)
+     (with-open [writer (java.io.OutputStreamWriter.
+                         (.getOutputStream socket)
+                         java.nio.charset.StandardCharsets/UTF_8)
+                 reader (PushbackReader.
+                         (java.io.InputStreamReader.
+                          (.getInputStream socket)
+                          java.nio.charset.StandardCharsets/UTF_8))]
+       (.write writer form)
+       (.write writer "\n")
+       (.flush writer)
+       (loop [events []]
+         (let [event (edn/read {:eof ::eof} reader)]
+           (cond
+             (= ::eof event)
+             (fail! "The cluster closed its prepl before returning."
+                    {:seon.fresh-operator/events events})
 
-            (not (map? event))
-            (fail! "The cluster returned malformed prepl data."
-                   {:seon.fresh-operator/event event})
+             (not (map? event))
+             (fail! "The cluster returned malformed prepl data."
+                    {:seon.fresh-operator/event event})
 
-            (= :ret (:tag event))
-            (let [events (conj events event)]
-              (when (:exception event)
-                (fail! "The cluster rejected the prepl operation."
-                       {:seon.fresh-operator/events events}))
-              events)
+             (= :ret (:tag event))
+             (let [events (conj events event)]
+               (when (:exception event)
+                 (fail! "The cluster rejected the prepl operation."
+                        {:seon.fresh-operator/events events}))
+               events)
 
-            :else
-            (recur (conj events event))))))))
+             :else
+             (recur (conj events event)))))))))
 
 (defn- terminal-value
   [events]
@@ -1138,10 +1424,16 @@
 (defn- launch!
   [root name manifest ready-port]
   (let [log (create-log! root name)
+        generation (random-uuid)
+        adoption-path (process-adoption-path root generation)
+        _ (do (fs/create-dirs (fs/parent adoption-path))
+              (fs/delete-if-exists adoption-path))
         command ["python3" "-c" detach-python
-                 (str (fs/path root)) (str log)
+                 (str (fs/path root)) (str log) (str adoption-path)
                  "clojure"
                  (str "-J-Dseon.operator.root=" root)
+                 (str "-J-Dseon.operator.generation=" generation)
+                 (str "-J-Dseon.operator.log=" log)
                  "-M:dev" "-e" (launch-form name manifest ready-port)]
         builder (doto (ProcessBuilder. ^java.util.List command)
                   (.directory (.toFile (fs/path root)))
@@ -1154,54 +1446,90 @@
       (fail! "The detached cluster launcher failed."
              {:seon.fresh-operator/exit exit
               :seon.fresh-operator/output output}))
-    {:seon.fresh-operator/pid (parse-long output)
+    {:seon.fresh-operator/generation generation
+     :seon.fresh-operator/pid (parse-long output)
+     :seon.fresh-operator/adoption-path (str adoption-path)
      :seon.fresh-operator/log (str log)}))
 
-(defn- process-descendants
-  [^java.lang.ProcessHandle handle]
-  (with-open [stream (.descendants handle)]
-    (vec (iterator-seq (.iterator stream)))))
-
-(defn- await-process-tree-exit!
-  [handles]
-  (let [completions
-        (into-array
-         CompletableFuture
-         (map #(.onExit ^java.lang.ProcessHandle %) handles))]
-    (.get (CompletableFuture/allOf completions)
-          5 TimeUnit/SECONDS)))
-
-(defn- signal-process-tree!
-  [^java.lang.ProcessHandle root descendants force?]
-  (doseq [candidate (conj (vec descendants) root)
-          :when (.isAlive ^java.lang.ProcessHandle candidate)]
-    (if force?
-      (.destroyForcibly ^java.lang.ProcessHandle candidate)
-      (.destroy ^java.lang.ProcessHandle candidate))))
-
-(defn- terminate-process-tree!
-  "Terminate one launched JVM tree and await observed process exits."
-  [pid]
-  (when-let [handle (live-process-handle pid)]
-    (let [descendants (process-descendants handle)
-          handles (conj descendants handle)]
-      (signal-process-tree! handle descendants false)
+(defn- record-launched-process!
+  [root {:seon.fresh-operator/keys
+         [generation pid log adoption-path]}]
+  (let [start-instant (state/process-start-instant pid)]
+    (when-not start-instant
+      (fail! "The cluster JVM exited before its identity could be recorded."
+             {:seon.boot/pid pid
+              :seon.fresh-operator/log log}))
+    (let [record
+          {:seon.dev.process/generation generation
+           :seon.dev.process/pid pid
+           :seon.dev.process/start-instant start-instant
+           :seon.dev.process/root (.getCanonicalPath (java.io.File. root))
+           :seon.dev.process/log log}]
       (try
-        (await-process-tree-exit! handles)
-        (catch TimeoutException _
-          (let [remaining-descendants
-                (into []
-                      (filter #(.isAlive ^java.lang.ProcessHandle %))
-                      (process-descendants handle))
-                remaining
-                (cond-> remaining-descendants
-                  (.isAlive handle) (conj handle))]
-            (signal-process-tree! handle remaining-descendants true)
-            (try
-              (await-process-tree-exit! remaining)
-              (catch TimeoutException _
-                (fail! "The failed cluster JVM tree survived termination."
-                       {:seon.boot/pid pid})))))))))
+        (write-process-record! root record)
+        (spit adoption-path "adopted\n")
+        record
+        (catch Throwable error
+          (throw
+           (ex-info "The child process identity could not be adopted."
+                    {:seon.fresh-operator/process-record record}
+                    error)))))))
+
+(defn- signal-recorded-process!
+  [^java.lang.ProcessHandle handle force?]
+  (if force?
+    (.destroyForcibly handle)
+    (.destroy handle)))
+
+(defn- terminate-recorded-process!
+  "Terminate only the exact recorded process generation."
+  [record]
+  (if-let [handle (matching-process-handle record)]
+    (do
+      (signal-recorded-process! handle false)
+      (try
+        (.get (.onExit handle) shutdown-grace-ms TimeUnit/MILLISECONDS)
+        (catch TimeoutException _))
+      ;; `onExit` is only notification for a detached/non-child process. Re-read
+      ;; the recorded identity before escalation so PID reuse is never signaled.
+      (if-let [remaining (matching-process-handle record)]
+        (do
+          (signal-recorded-process! remaining true)
+          (try
+            (.get (.onExit remaining) shutdown-grace-ms TimeUnit/MILLISECONDS)
+            (catch TimeoutException _))
+          (when (matching-process-handle record)
+            (fail! "The recorded cluster JVM survived SIGKILL."
+                   {:seon.dev.process/generation
+                    (:seon.dev.process/generation record)
+                    :seon.dev.process/pid (:seon.dev.process/pid record)}))
+          :sigkill)
+        :sigterm))
+    (if (some? (state/process-start-instant
+                (:seon.dev.process/pid record)))
+      :pid-reused
+      :already-exited)))
+
+(defn- terminate-observed-process!
+  "Terminate the process generation observed at this call site."
+  [pid]
+  (when-let [start-instant (state/process-start-instant pid)]
+    (terminate-recorded-process!
+     {:seon.dev.process/generation (random-uuid)
+      :seon.dev.process/pid pid
+      :seon.dev.process/start-instant start-instant
+      :seon.dev.process/root ""
+      :seon.dev.process/log ""}))
+  nil)
+
+(defn- process-path-label
+  [path]
+  (case path
+    :sigterm "SIGTERM"
+    :sigkill "SIGKILL"
+    :pid-reused "pid-reused"
+    :already-exited "already-exited"
+    (clojure.core/name path)))
 
 (defn- await-advertisement!
   [root name pid ^ServerSocket ready-server]
@@ -1266,7 +1594,6 @@
   [root arguments]
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-start-arguments arguments)
-        explicit-name? (boolean (explicit-start-name? arguments))
         manifest (if config-path (sparse-manifest root config-path) {})
         truth
         (reconciled-truth!
@@ -1276,7 +1603,11 @@
          #(when (and (:seon.fresh-operator/operator-root? %)
                      (= name (:seon.fresh-operator/name %)))
             %)
-         truth)]
+         truth)
+        anchor (select-anchor truth)
+        live-process-records
+        (filterv record-alive?
+                 (:seon.fresh-operator/process-records (meta truth)))]
     (when (and existing
                (or (:seon.fresh-operator/advertised? existing)
                    (:seon.fresh-operator/registered? existing)
@@ -1285,14 +1616,12 @@
              {:seon.fresh-operator/name name
               :seon.fresh-operator/inconsistencies
               (:seon.fresh-operator/inconsistencies existing)}))
-    (when (and
-           explicit-name?
-           (some
-            #(and (not (:seon.fresh-operator/operator-root? %))
-                  (= name (:seon.fresh-operator/name %)))
-            truth))
-      (named-cluster-row truth name))
-    (if-let [anchor (select-anchor truth)]
+    (when (and (seq live-process-records) (nil? anchor))
+      (fail!
+       (str "A recorded cluster JVM is alive but unreachable; refusing to "
+            "launch another JVM into its flock. Use `down` or `down --force`.")
+       {:seon.fresh-operator/process-records live-process-records}))
+    (if anchor
       (let [anchor-ad
             (:seon.fresh-operator/transport-advertisement anchor)
             _
@@ -1326,14 +1655,36 @@
       (with-open [ready-server
                   (ServerSocket.
                    0 1 (java.net.InetAddress/getLoopbackAddress))]
-        (let [{pid :seon.fresh-operator/pid}
+        (let [launch-result
               (launch! root name manifest (.getLocalPort ready-server))
+              pid (:seon.fresh-operator/pid launch-result)
+              record
+              (try
+                (record-launched-process! root launch-result)
+                (catch Throwable failure
+                  (when-let [failed-record
+                             (:seon.fresh-operator/process-record
+                              (ex-data failure))]
+                    (terminate-recorded-process! failed-record)
+                    (when-not (record-alive? failed-record)
+                      (clear-process-record! root failed-record)))
+                  (throw failure)))
               value
               (try
                 (await-advertisement! root name pid ready-server)
                 (catch Throwable failure
-                  (terminate-process-tree! pid)
+                  (terminate-recorded-process! record)
+                  (when-not (record-alive? record)
+                    (clear-process-record! root record))
                   (throw failure)))]
+          (when-not (process-record-matches-advertisement? record value)
+            (terminate-recorded-process! record)
+            (when-not (record-alive? record)
+              (clear-process-record! root record))
+            (fail! "The ready advertisement does not match the launched JVM."
+                   {:seon.dev.process/generation
+                    (:seon.dev.process/generation record)
+                    :seon.fresh-operator/advertisement value}))
           (print-started! root name value))))))
 
 (defn- config-apply-form
@@ -1543,14 +1894,16 @@
     (when (and force? live-target)
       (stop-empty-jvm!
        root
-       (get-in live-target [:seon.fresh-operator/process :seon.boot/pid])
+       (or (:seon.fresh-operator/transport-advertisement live-target)
+           (:seon.fresh-operator/advertisement live-target)
+           (:seon.fresh-operator/registered-advertisement live-target))
        name))))
 
 (defn- row-state
   [row]
   (cond
-    (and (:seon.fresh-operator/registered? row)
-         (:seon.fresh-operator/branch-open? row)
+    (and (or (:seon.fresh-operator/advertised? row)
+             (:seon.fresh-operator/registered? row))
          (:seon.fresh-operator/process-alive? row))
     "alive"
 
@@ -1577,8 +1930,16 @@
     (fail! "`status` takes no arguments."
            {:seon.fresh-operator/arguments arguments}))
   (let [root (.getCanonicalPath (java.io.File. root))
-        truth (reconciled-truth! root)
+        truth
+        (reconciled-truth!
+         root {:seon.fresh-operator/read-offline-roster? true
+               :seon.fresh-operator/probe-jvms? false})
         rows (own-cluster-truth truth)
+        roster (:seon.fresh-operator/roster (meta truth))
+        process-records
+        (:seon.fresh-operator/process-records (meta truth))
+        process-record-errors
+        (:seon.fresh-operator/process-record-errors (meta truth))
         associated-pids
         (into
          #{}
@@ -1594,8 +1955,9 @@
          (operator-process-observations))
         alive-count
         (count
-         (filter
-          #(and (:seon.fresh-operator/registered? %)
+        (filter
+          #(and (or (:seon.fresh-operator/advertised? %)
+                    (:seon.fresh-operator/registered? %))
                 (:seon.fresh-operator/process-alive? %))
           rows))
         live-state-count
@@ -1631,6 +1993,22 @@
                  (str/join ", " (map clojure.core/name inconsistencies))
                  "-")))))
     (println (str alive-count "/" live-state-count " clusters alive"))
+    (println
+     (if (:seon.fresh-operator/roster-readable? roster)
+       (str "roster readable via "
+            (clojure.core/name (:seon.fresh-operator/roster-source roster)))
+       (str "roster unreadable"
+            (when-let [reason (:seon.fresh-operator/roster-error roster)]
+              (str ": " reason)))))
+    (doseq [record process-records]
+      (println
+       (str "recorded JVM pid " (:seon.dev.process/pid record)
+            " generation " (:seon.dev.process/generation record)
+            " " (if (record-alive? record) "alive" "not alive"))))
+    (doseq [error process-record-errors]
+      (println
+       (str "record unreadable " (:seon.fresh-operator/path error)
+            ": " (:seon.fresh-operator/error error))))
     (println
      (str "orphan seon JVMs: "
           (if (seq orphan-pids)
@@ -1688,15 +2066,20 @@
          (map :seon.fresh-operator/name))
         truth))
 
+(defn- process-record-for-advertisement
+  [records advertisement]
+  (some #(when (process-record-matches-advertisement? % advertisement) %)
+        records))
+
 (defn- sigterm!
-  [truth name ad reason force?]
+  [root truth records name ad reason force?]
   (let [pid (:seon.boot/pid ad)
         siblings (sibling-names truth pid name)
-        handle (java.lang.ProcessHandle/of (long pid))]
-    (when-not (.isPresent handle)
-      (fail! "The advertised process disappeared before SIGTERM."
-             {:seon.fresh-operator/name name
-              :seon.boot/pid pid}))
+        record
+        (or (process-record-for-advertisement records ad)
+            (fail! "Refusing to signal a JVM without its exact process record."
+                   {:seon.fresh-operator/name name
+                    :seon.boot/pid pid}))]
     (when (and (seq siblings) (not force?))
       (fail!
        (str "Refusing SIGTERM for shared JVM pid " pid
@@ -1711,32 +2094,36 @@
     (println (str "! prepl unavailable (" reason "); SIGTERM pid " pid
                   " affects shared-JVM clusters: "
                   (str/join ", " (cons name siblings))))
-    (.destroy ^java.lang.ProcessHandle (.get handle))
-    (println (str "● " name " stop path=SIGTERM"))))
+    (let [path (terminate-recorded-process! record)]
+      (when-not (record-alive? record)
+        (clear-process-record! root record))
+      (println (str "● " name " stop path=" (process-path-label path))))))
 
 (defn- stop-empty-jvm!
-  [root pid stopped-name]
-  (let [truth (reconciled-truth! root)]
+  [root advertisement stopped-name]
+  (let [pid (:seon.boot/pid advertisement)
+        truth
+        (reconciled-truth!
+         root {:seon.fresh-operator/read-offline-roster? false})]
     (when (empty? (sibling-names truth pid stopped-name))
-      (when-let [handle
-                 (let [optional (java.lang.ProcessHandle/of (long pid))]
-                   (when (.isPresent optional) (.get optional)))]
-        (when (.isAlive ^java.lang.ProcessHandle handle)
-          (.destroy ^java.lang.ProcessHandle handle)
-          (try
-            (.get (.onExit ^java.lang.ProcessHandle handle)
-                  5 TimeUnit/SECONDS)
-            (catch java.util.concurrent.TimeoutException _
-              (fail! "The empty cluster JVM did not exit after SIGTERM."
-                     {:seon.boot/pid pid}))))
-        (println (str "● empty JVM pid " pid " exited"))))))
+      (let [records (:seon.fresh-operator/process-records (meta truth))
+            record (process-record-for-advertisement records advertisement)]
+        (when record
+          (let [path (terminate-recorded-process! record)]
+            (when-not (record-alive? record)
+              (clear-process-record! root record))
+            (println (str "● empty JVM pid " pid " exited path="
+                          (process-path-label path)))))))))
 
 (defn- stop!
   [root arguments]
   (let [{requested-name :seon.fresh-operator/name
          force? :seon.fresh-operator/force?}
         (parse-stop-arguments arguments)
-        truth (reconciled-truth! root)
+        truth
+        (reconciled-truth!
+         root {:seon.fresh-operator/read-offline-roster? false})
+        records (:seon.fresh-operator/process-records (meta truth))
         name (select-destructive-name truth requested-name "stop")
         row (named-cluster-row truth name)
         ad
@@ -1750,7 +2137,7 @@
         (try
           (prepl-eval! ad (stop-form name))
           (catch Throwable error
-            (sigterm! truth name ad (ex-message error) force?)
+            (sigterm! root truth records name ad (ex-message error) force?)
             nil))]
     (when events
       (let [value (terminal-value events)]
@@ -1762,7 +2149,244 @@
         (println (str "● " name " stop path=prepl"))
         ;; Reading :ret is the observable flush boundary. Only then may
         ;; the client terminate a JVM whose last advertisement is gone.
-        (stop-empty-jvm! root (:seon.boot/pid ad) name)))))
+        (stop-empty-jvm! root ad name)))))
+
+(defn- stop-all-form
+  []
+  (pr-str
+   `(let [instances# @@(ns-resolve 'seon.cluster
+                                   (symbol "running-instances"))
+          names# (vec (sort (keys instances#)))]
+      (doseq [[name# instance#] instances#]
+        (if (map? instance#)
+          (seon.cluster/stop! instance#)
+          (swap! (var-get
+                  (ns-resolve 'seon.cluster (symbol "running-instances")))
+                 dissoc name#)))
+      names#)))
+
+(defn- advertisement-for-process-record
+  [root record]
+  (some
+   (fn [observation]
+     (let [advertisement (:seon.fresh-operator/advertisement observation)]
+       (when (and (:seon.fresh-operator/process-alive? observation)
+                  (process-record-matches-advertisement?
+                   record advertisement))
+         advertisement)))
+   (advertisement-observations root)))
+
+(defn- clear-stale-advertisements!
+  [root]
+  (doseq [observation (advertisement-observations root)
+          :when (not (:seon.fresh-operator/process-alive? observation))]
+    (fs/delete-if-exists (:seon.fresh-operator/path observation))
+    (println
+     (str "↻ repaired " (:seon.fresh-operator/name observation)
+          ": removed stale advertisement"))))
+
+(defn- require-readable-process-records!
+  [root]
+  (let [result (reconcile-process-records! root)
+        errors (:seon.fresh-operator/process-record-errors result)]
+    (when (seq errors)
+      (fail! "Refusing destructive action with unreadable process records."
+             {:seon.fresh-operator/process-record-errors errors}))
+    (:seon.fresh-operator/process-records result)))
+
+(defn- print-process-record-census!
+  [root records record-errors]
+  (println
+   (str "PROCESS RECORD CENSUS root="
+        (.getCanonicalPath (java.io.File. root))
+        " records=" (count records)
+        " unreadable=" (count record-errors)))
+  (doseq [record (sort-by :seon.dev.process/pid records)]
+    (println
+     (str "  pid=" (:seon.dev.process/pid record)
+          " start=" (:seon.dev.process/start-instant record)
+          " generation=" (:seon.dev.process/generation record)
+          " state=" (if (record-alive? record) "alive" "not-alive"))))
+  (doseq [error record-errors]
+    (println
+     (str "  unreadable=" (:seon.fresh-operator/path error)
+          " error=" (:seon.fresh-operator/error error)))))
+
+(defn- down-recorded-processes!
+  ([root force? verify-store?]
+   (down-recorded-processes! root force? verify-store? false))
+  ([root force? verify-store? discard-unreadable-after-flock?]
+   (let [record-result (reconcile-process-records! root)
+         record-errors
+         (:seon.fresh-operator/process-record-errors record-result)
+         records (:seon.fresh-operator/process-records record-result)
+         _ (print-process-record-census! root records record-errors)
+         _
+         (when (seq record-errors)
+           (if discard-unreadable-after-flock?
+             (doseq [error record-errors]
+               (println
+                (str "! reset will discard unreadable process record "
+                     (:seon.fresh-operator/path error)
+                     " only after the store flock proves free")))
+             (fail! "Refusing destructive action with unreadable process records."
+                    {:seon.fresh-operator/process-record-errors
+                     record-errors})))
+         ]
+    (if (seq records)
+      (let [failures
+            (reduce
+             (fn [failures record]
+               (let [pid (:seon.dev.process/pid record)]
+                 (try
+                   (let [advertisement
+                         (when-not force?
+                           (advertisement-for-process-record root record))
+                         graceful
+                         (when (and advertisement (record-alive? record))
+                           (try
+                             (prepl-eval! advertisement (stop-all-form))
+                             :prepl
+                             (catch Throwable error
+                               (println
+                                (str "! prepl unavailable for recorded JVM pid "
+                                     pid " (" (ex-message error) ")"))
+                               nil)))
+                         signal-path (terminate-recorded-process! record)]
+                     (when (record-alive? record)
+                       (fail! "The exact recorded JVM remained alive after down."
+                              {:seon.dev.process/generation
+                               (:seon.dev.process/generation record)
+                               :seon.dev.process/pid pid}))
+                     (clear-process-record! root record)
+                     (println
+                      (str "● JVM pid " pid " path="
+                           (if graceful
+                             (str "prepl+" (process-path-label signal-path))
+                             (process-path-label signal-path))))
+                     failures)
+                   (catch Throwable error
+                     (conj failures
+                           {:seon.dev.process/generation
+                            (:seon.dev.process/generation record)
+                            :seon.dev.process/pid pid
+                            :seon.fresh-operator/error (ex-message error)})))))
+             []
+             records)]
+        (when (seq failures)
+          (fail! "One or more recorded JVMs could not be stopped."
+                 {:seon.fresh-operator/process-failures failures})))
+      (println "● no recorded JVMs to stop"))
+    (clear-stale-advertisements! root)
+    (when verify-store?
+      (let [roster (offline-roster root)]
+        (println (str "● flock free; roster readable ("
+                      (count roster) " branches)")))))))
+
+(defn- down!
+  [root arguments]
+  (let [{force? :seon.fresh-operator/force?}
+        (parse-down-arguments arguments)]
+    (down-recorded-processes! root force? true)))
+
+(defn- with-store-flock!
+  [root transition]
+  (let [path (fs/path (cluster-root root) "store.lock")]
+    (fs/create-dirs (fs/parent path))
+    (with-open [file (RandomAccessFile. (str path) "rw")
+                channel (.getChannel file)]
+      (let [lock
+            (try
+              (.tryLock channel)
+              (catch Throwable error
+                (if (= "java.nio.channels.OverlappingFileLockException"
+                       (.getName (class error)))
+                  nil
+                  (throw error))))]
+        (when-not lock
+          (fail! "Refusing reset while the existing store flock is held."
+                 {:seon.fresh-operator/path (str path)}))
+        ;; Closing the channel releases the FileLock. Keep the callback inside
+        ;; this scope so proof and destruction are one indivisible ownership
+        ;; interval rather than a check-then-act race.
+        (transition path)))))
+
+(defn- assert-store-flock-free!
+  [root]
+  (with-store-flock! root (fn [_] nil)))
+
+(defn- delete-path-no-follow!
+  [root target]
+  (let [operator-root
+        (.normalize (.toAbsolutePath (.toPath (java.io.File. root))))
+        target (.normalize (.toAbsolutePath ^Path target))
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
+    (when-not (and (.startsWith ^Path target ^Path operator-root)
+                   (not= target operator-root))
+      (fail! "Refusing broad operator-root deletion."
+             {:seon.fresh-operator/root (str operator-root)
+              :seon.fresh-operator/target (str target)}))
+    (letfn [(under-root? [^Path path]
+              (.startsWith (.normalize (.toAbsolutePath path)) operator-root))
+            (delete-one! [^Path path]
+              (when-not (under-root? path)
+                (fail! "Operator reset reached outside its root."
+                       {:seon.fresh-operator/path (str path)}))
+              (Files/deleteIfExists path))
+            (walk! [^Path path]
+              (when-not (Files/isSymbolicLink path)
+                (when (Files/isDirectory path no-follow)
+                  (with-open [children (Files/newDirectoryStream path)]
+                    (run! walk! (vec children)))))
+              (delete-one! path))]
+      (when (Files/exists target no-follow)
+        (walk! target)))))
+
+(defn- delete-cluster-root-no-follow!
+  [root]
+  (let [operator-root
+        (.normalize (.toAbsolutePath (.toPath (java.io.File. root))))
+        target
+        (.normalize (.toAbsolutePath (.toPath (.toFile (cluster-root root)))))
+        expected (.resolve ^Path operator-root "data/clusters")]
+    (when-not (= target expected)
+      (fail! "Refusing broad operator-root deletion."
+             {:seon.fresh-operator/root (str operator-root)
+              :seon.fresh-operator/target (str target)}))
+    (delete-path-no-follow! root target)))
+
+(defn- destroy-cluster-data-with-flock!
+  [root]
+  (with-store-flock!
+    root
+    (fn [lock-path]
+      (let [directory
+            (.normalize (.toAbsolutePath
+                         (.toPath (.toFile (cluster-root root)))))
+            lock-path
+            (.normalize (.toAbsolutePath (.toPath (.toFile lock-path))))]
+        (with-open [children (Files/newDirectoryStream directory)]
+          (doseq [^Path child (vec children)
+                  :when (not= (.normalize (.toAbsolutePath child)) lock-path)]
+            (delete-path-no-follow! root child)))))))
+
+(defn- reset!
+  [root arguments]
+  (parse-reset-arguments arguments)
+  (down-recorded-processes! root true false true)
+  (when (seq (:seon.fresh-operator/process-records
+              (reconcile-process-records! root)))
+    (fail! "Recorded JVMs remain after forced down; reset refused."
+           {:seon.fresh-operator/root root}))
+  ;; The old store may be impossible to open because its persisted creation
+  ;; config predates the current one. Destruction holds the existing flock,
+  ;; precedes every Datahike operation, and never follows repository links.
+  ;; The lock file remains as the stable inode handed to the new store.
+  (destroy-cluster-data-with-flock! root)
+  (println "● destroyed operator cluster data under the held flock")
+  (init! root [])
+  (init! root ["default"])
+  (println "● reset republished current-src and reforked default"))
 
 (defn- logs!
   [root arguments]
@@ -1790,7 +2414,9 @@
   []
   (println
    (str
-    "Usage: bin/seon COMMAND\n\n"
+    "Usage: bin/seon [--root PATH] COMMAND\n\n"
+    "  --root PATH    use an existing isolated operator root; its process\n"
+    "                 records, advertisements, logs, and store are separate\n"
     "  start [CLUSTER] [--config PATH]\n"
     "                 start one cluster; absent cluster means default\n"
     "  config apply [CLUSTER] PATH\n"
@@ -1805,9 +2431,13 @@
     "                 refuse an existing cluster unless --force destroys it\n"
     "  status         reconcile and list every cluster in this operator root\n"
     "  open [NAME]    open the advertised web URL\n"
-    "  stop|down [--force] [NAME]\n"
+    "  stop [--force] [NAME]\n"
     "                 omit NAME only when exactly one cluster exists;\n"
     "                 force permits shared-JVM SIGTERM after prepl failure\n"
+    "  down [--force]\n"
+    "                 stop every recorded JVM; force skips graceful prepl\n"
+    "  reset --force  down all JVMs, destroy the cluster root, republish,\n"
+    "                 and refork default without opening the old store\n"
     "  logs [NAME]    show the cluster log\n")))
 
 (defn -main
@@ -1815,21 +2445,29 @@
   [& raw-arguments]
   (let [[root arguments] (parse-root raw-arguments)
         command (first arguments)
-        command-arguments (vec (rest arguments))]
+        command-arguments (vec (rest arguments))
+        run-command
+        (fn []
+          (case command
+            "start" (start! root command-arguments)
+            "config" (config! root command-arguments)
+            "init" (init! root command-arguments)
+            "status" (status! root command-arguments)
+            "open" (open! root command-arguments)
+            "stop" (stop! root command-arguments)
+            "down" (down! root command-arguments)
+            "reset" (reset! root command-arguments)
+            "logs" (logs! root command-arguments)
+            ("help" "--help" "-h" nil) (help!)
+            (fail! "Unknown fresh Seon command."
+                   {:seon.fresh-operator/command command
+                    :seon.fresh-operator/usage? true})))]
     (try
-      (case command
-        "start" (start! root command-arguments)
-        "config" (config! root command-arguments)
-        "init" (init! root command-arguments)
-        "status" (status! root command-arguments)
-        "open" (open! root command-arguments)
-        "stop" (stop! root command-arguments)
-        "down" (stop! root command-arguments)
-        "logs" (logs! root command-arguments)
-        ("help" "--help" "-h" nil) (help!)
-        (fail! "Unknown fresh Seon command."
-               {:seon.fresh-operator/command command
-                :seon.fresh-operator/usage? true}))
+      (if (contains? #{"start" "config" "init" "status"
+                       "stop" "down" "reset"}
+                     command)
+        (with-operator-lock root run-command)
+        (run-command))
       (catch Throwable error
         (binding [*out* *err*]
           (println (str "✗ " (ex-message error)))

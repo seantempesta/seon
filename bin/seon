@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SEON_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec bb --config "$SEON_ROOT/bb.edn" --deps-root "$SEON_ROOT" \
-  --classpath "$SEON_ROOT/script" \
-  -m seon.fresh-operator --seon-root "$SEON_ROOT" "$@"
+SEON_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SEON_OPERATOR_ROOT="$SEON_SOURCE_ROOT"
+
+if [[ "${1:-}" == "--root" ]]; then
+  if [[ -z "${2:-}" || ! -d "$2" ]]; then
+    echo "✗ --root requires an existing isolated operator-root directory." >&2
+    exit 1
+  fi
+  SEON_OPERATOR_ROOT="$(cd "$2" && pwd -P)"
+  shift 2
+fi
+
+exec bb --config "$SEON_SOURCE_ROOT/bb.edn" --deps-root "$SEON_SOURCE_ROOT" \
+  --classpath "$SEON_SOURCE_ROOT/script" \
+  -m seon.fresh-operator --seon-root "$SEON_OPERATOR_ROOT" "$@"

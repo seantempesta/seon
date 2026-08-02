@@ -11,7 +11,8 @@
             [seon.config :as config]
             [seon.instrument :as instrument]
             [seon.test-support :as test-support])
-  (:import [java.net ServerSocket]
+  (:import [java.io RandomAccessFile]
+           [java.net ServerSocket]
            [java.nio.file Files]
            [java.util Date]
            [java.util.concurrent CompletableFuture ExecutionException
@@ -436,29 +437,65 @@
           (.waitFor child 10 TimeUnit/SECONDS))
         (delete-recursively! root)))))
 
-(deftest failed-launch-cleanup-terminates-the-whole-process-tree
+(deftest process-records-cannot-authorize-another-operator-root
+  (let [root (fresh-root)
+        foreign-root (fresh-root)
+        record
+        {:seon.dev.process/generation (random-uuid)
+         :seon.dev.process/pid 1
+         :seon.dev.process/start-instant "2026-08-01T00:00:00Z"
+         :seon.dev.process/root (.getCanonicalPath foreign-root)
+         :seon.dev.process/log (str (io/file foreign-root "foreign.log"))}]
+    (try
+      (operator-private-value 'write-process-record! (str root) record)
+      (let [read-result
+            (operator-private-value 'read-process-records (str root))]
+        (is (empty? (:seon.fresh-operator/process-records read-result)))
+        (is (str/includes?
+             (get-in read-result
+                     [:seon.fresh-operator/process-record-errors 0
+                      :seon.fresh-operator/error])
+             "another operator root")
+            (pr-str read-result)))
+      (let [outcome
+            (operator-private-outcome
+             'require-readable-process-records! (str root))]
+        (is (str/includes?
+             (:seon.dev.fresh-operator-test/message outcome)
+             "unreadable process records")
+            (pr-str outcome)))
+      (finally
+        (delete-recursively! root)
+        (delete-recursively! foreign-root)))))
+
+(deftest failed-launch-cleanup-signals-only-the-recorded-generation
   (let [parent (start-disposable-process-tree!)
         child-pid (parse-long (.readLine (io/reader (.getInputStream parent))))]
     (try
       (is (some? child-pid))
       (is (nil?
-           (operator-private-value 'terminate-process-tree! (.pid parent))))
+           (operator-private-value 'terminate-observed-process! (.pid parent))))
       (is (true? (.waitFor parent 10 TimeUnit/SECONDS)))
-      (is (not
-           (true?
-            (some-> (java.lang.ProcessHandle/of child-pid)
-                    (.orElse nil)
-                    .isAlive)))
-          "failed readiness cleanup left no descendant alive")
+      (is (true?
+           (some-> (java.lang.ProcessHandle/of child-pid)
+                   (.orElse nil)
+                   .isAlive))
+          "an unrecorded descendant was never authorized for signaling")
       (finally
         (when (.isAlive parent)
-          (terminate-process-tree! parent))))))
+          (terminate-process-tree! parent))
+        (when-let [^java.lang.ProcessHandle child
+                   (some-> (java.lang.ProcessHandle/of child-pid)
+                           (.orElse nil))]
+          (when (.isAlive child)
+            (.destroyForcibly child)
+            (.get (.onExit child) 10 TimeUnit/SECONDS)))))))
 
 (deftest failed-launch-cleanup-escalates-after-bounded-term-grace
   (let [process (start-sigterm-resistant-process!)]
     (try
       (is (nil?
-           (operator-private-value 'terminate-process-tree! (.pid process))))
+           (operator-private-value 'terminate-observed-process! (.pid process))))
       (is (true? (.waitFor process 10 TimeUnit/SECONDS)))
       (is (not (.isAlive process))
           "the SIGTERM-resistant generation was forcibly reaped")
@@ -494,6 +531,17 @@
         (is (= 0 (::exit outcome)) (::output outcome))
         (is (not (str/includes? (::output outcome) "ambiguous"))
             (::output outcome))
+        (let [census-index
+              (str/index-of (::output outcome) "PROCESS RECORD CENSUS")
+              action-index (str/index-of (::output outcome) "● JVM pid")]
+          (is (some? census-index) (::output outcome))
+          (is (some? action-index) (::output outcome))
+          (is (< census-index action-index)
+              "the complete custody census is printed before any action")
+          (is (str/includes?
+               (::output outcome)
+               (str "root=" (.getCanonicalPath root)))
+              (::output outcome)))
         (doseq [child children]
           (is (str/includes? (::output outcome) (str "JVM pid " (.pid child)))
               (::output outcome))
@@ -507,6 +555,36 @@
                 :when (.isAlive child)]
           (.destroyForcibly child)
           (.waitFor child 10 TimeUnit/SECONDS))
+        (delete-recursively! root)))))
+
+(deftest bin-root-option-selects-an-isolated-operator-root
+  (let [root (fresh-root)
+        record
+        {:seon.dev.process/generation (random-uuid)
+         :seon.dev.process/pid 1
+         :seon.dev.process/start-instant "2026-08-01T00:00:00Z"
+         :seon.dev.process/root (.getCanonicalPath root)
+         :seon.dev.process/log (str (io/file root "isolated.log"))}]
+    (try
+      (operator-private-value 'write-process-record! (str root) record)
+      (let [process
+            (.start
+             (doto
+              (ProcessBuilder.
+               ^java.util.List
+               [(str (io/file project-root "bin" "seon"))
+                "--root" (str root) "status"])
+              (.directory project-root)
+              (.redirectErrorStream true)))
+            output-future (process-output process)
+            outcome (await-process! process output-future "isolated status")]
+        (is (::completed? outcome) (::output outcome))
+        (is (= 0 (::exit outcome)) (::output outcome))
+        (is (str/includes? (::output outcome) "recorded JVM pid 1")
+            (::output outcome))
+        (is (.isFile (io/file root "data" "operator" "lifecycle.lock"))
+            "the public root seam owns a separate lifecycle lock"))
+      (finally
         (delete-recursively! root)))))
 
 (deftest reset-deletion-does-not-follow-links-outside-the-cluster-root
@@ -719,6 +797,16 @@
     (is (= "only"
            (operator-private-value
             'select-destructive-name [(row "only")] nil "stop")))
+    (is (= "zombie"
+           (operator-private-value
+            'select-destructive-name
+            [{:seon.fresh-operator/name "zombie"
+              :seon.fresh-operator/operator-root? true
+              :seon.fresh-operator/advertised? true
+              :seon.fresh-operator/process-alive? true}]
+            nil
+            "stop"))
+        "a sole advertised zombie remains the unambiguous stop target")
     (let [outcome
           (operator-private-outcome
            'select-destructive-name
@@ -740,6 +828,79 @@
              (cold-start-calls root))
           "cold start launched one JVM without an offline roster JVM")
       (finally
+        (delete-recursively! root)))))
+
+(deftest reset-refuses-while-the-existing-store-flock-is-held
+  (let [root (fresh-root)
+        lock-path (io/file root "data" "clusters" "store.lock")]
+    (try
+      (.mkdirs (.getParentFile lock-path))
+      (with-open [file (RandomAccessFile. lock-path "rw")
+                  channel (.getChannel file)
+                  _ (.lock channel)]
+        (let [outcome
+              (operator-private-outcome
+               'assert-store-flock-free! (str root))]
+          (is (str/includes?
+               (:seon.dev.fresh-operator-test/message outcome)
+               "existing store flock is held")
+              (pr-str outcome))))
+      (is (nil?
+           (operator-private-value
+            'assert-store-flock-free! (str root)))
+          "closing the probe channel releases a free flock without SCI calls")
+      (finally
+        (delete-recursively! root)))))
+
+(deftest reset-flock-remains-held-through-its-destructive-callback
+  (let [root (fresh-root)
+        code
+        (pr-str
+         `(do
+            (require 'seon.fresh-operator)
+            ((var-get
+              (ns-resolve 'seon.fresh-operator
+                          (symbol "with-store-flock!")))
+             ~(str root)
+             (fn [_#]
+               (println "locked")
+               (flush)
+               (read-line)))
+            (println "released")))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" (str (io/file project-root "script"))
+            "-e" code])
+          (.directory project-root)
+          (.redirectErrorStream true)))
+        reader (io/reader (.getInputStream process))
+        writer (io/writer (.getOutputStream process))]
+    (try
+      (is (= "locked" (.readLine ^java.io.BufferedReader reader)))
+      (let [outcome
+            (operator-private-outcome
+             'assert-store-flock-free! (str root))]
+        (is (str/includes?
+             (:seon.dev.fresh-operator-test/message outcome)
+             "existing store flock is held")
+            (pr-str outcome)))
+      (.write ^java.io.Writer writer "continue\n")
+      (.flush ^java.io.Writer writer)
+      (is (.waitFor process 10 TimeUnit/SECONDS))
+      (is (= 0 (.exitValue process)))
+      (is (= "released" (.readLine ^java.io.BufferedReader reader)))
+      (finally
+        (try (.close ^java.io.Writer writer) (catch Throwable _))
+        (try (.close ^java.io.Reader reader) (catch Throwable _))
+        (when (.isAlive process)
+          (.destroyForcibly process)
+          (.waitFor process 10 TimeUnit/SECONDS))
         (delete-recursively! root)))))
 
 (deftest init-owns-current-source-and-dormant-cluster-lifecycle
