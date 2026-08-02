@@ -338,7 +338,7 @@
 ;;; Fair scoring (scoring v3) — static layer columns
 ;;;
 ;;; Emitted as a :fair block ONLY when the input row carries "plan-state"
-;;; (the fair_score.py driver's runs); kt3_redux.py extended calls and the
+;;; (the historical scoring-v3 runs); kt3_redux.py extended calls and the
 ;;; legacy array mode are byte-stable.
 ;;;
 ;;; Layers (docs/prds/repl-autosuggest/research/fair-scoring-2026-07-12.md):

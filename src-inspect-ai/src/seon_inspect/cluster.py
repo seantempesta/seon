@@ -23,33 +23,8 @@ from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# Temporary observation-only identity for the retired frozen output. The
-# operator now publishes the maintained target artifact in structured status;
-# no caller may build this legacy path. Keeping read-only identity lets
-# existing offline contamination tests remain meaningful until the lease
-# carries the canonical manifest.
-BENCH_BUNDLE = REPO_ROOT / "out-bench" / "client" / "main.js"
-BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
-
 # Matches seon.dev.branch/::name, the public operator target contract.
 _NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-
-class FrozenBundleChanged(RuntimeError):
-    """The frozen bench bundle changed under a run — the run is contaminated.
-
-    Raised by the end-of-run assertion (`catalog.run_bench` per-sample mode).
-    Classify the run's executions as the flake class `frozen_bundle_changed`
-    and publish NO capability number from it (the uniform-0 law's sibling:
-    contamination is voided, never scored through). Carries both identities
-    and, when raised after an eval, the inspect logs — the evidence is never
-    lost to the raise."""
-
-    def __init__(self, message: str, *, start: dict[str, Any] | None = None,
-                 end: dict[str, Any] | None = None, logs: Any = None) -> None:
-        super().__init__(message)
-        self.start = start
-        self.end = end
-        self.logs = logs
 
 
 class ClusterLeaseUnavailable(RuntimeError):
@@ -63,29 +38,6 @@ def _lease_unavailable(operation: str) -> None:
         "artifact flavor/digest, dynamic web/CLJ/CLJS endpoints, and "
         "ownership-fenced restart/release. The retired cluster commands are "
         "intentionally not invoked.")
-
-
-def bundle_identity() -> dict[str, Any] | None:
-    """Observe the legacy frozen output without building or selecting it."""
-    if not BENCH_BUNDLE.is_file():
-        return None
-    stat = BENCH_BUNDLE.stat()
-    sha = (BENCH_BUNDLE_SHA.read_text().strip()
-           if BENCH_BUNDLE_SHA.is_file() else None)
-    return {"sha256": sha, "mtime": stat.st_mtime, "size": stat.st_size,
-            "path": str(BENCH_BUNDLE.relative_to(REPO_ROOT))}
-
-
-def bundle_violation(start: dict[str, Any] | None) -> str | None:
-    """Report when an observed frozen output changed during an offline run."""
-    if start is None:
-        return None
-    end = bundle_identity()
-    if end == start:
-        return None
-    return (f"frozen bench bundle changed mid-run (start={start}, end={end}) "
-            "— the run is contaminated; classify its executions as "
-            "'frozen_bundle_changed' and publish no capability number")
 
 
 def static_target_snapshot(
@@ -374,13 +326,6 @@ def mlx_model_server_snapshot(
         },
     }
     return validate_model_server_identity(identity)
-
-
-def ensure_bench_bundle(runner: Callable[..., Any] = subprocess.run
-                        ) -> dict[str, Any] | None:
-    """Fail until the operator can lease a pinned artifact flavor."""
-    del runner
-    _lease_unavailable("prepare a frozen benchmark artifact")
 
 
 @dataclass(frozen=True)

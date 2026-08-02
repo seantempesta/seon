@@ -996,13 +996,13 @@ def run_report(_args):
               f"{l.get('gen_tps_median', '—')} | {l.get('peak_mem_gb', '—')} GB | "
               f"{l.get('hit_token_cap', '—')} |")
 
-    # Fair-scored columns (scoring v3, fair_score.py) — shown when the fair
+    # Historical fair-scored columns (scoring v3) — shown when the fair
     # rescore has run for this run's arms.
     fair_dir = OUTDIR.parent / "fair"
     fair = [json.loads(p.read_text())
             for p in sorted(fair_dir.glob("summary-fair-kt3redux-*.json"))]
     if fair:
-        print("\n## Fair-scored (scoring v3 — see fair_score.py report for all arms)\n")
+        print("\n## Fair-scored (historical scoring v3)\n")
         print("| arm | n | L2 gated | L3 fired | L4 useful | FAIR useful | Δ |")
         print("|---|---|---|---|---|---|---|")
         for s in fair:

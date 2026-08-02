@@ -278,13 +278,6 @@ def test_ephemeral_fork_fails_before_yield_or_subprocess():
     assert runner.calls == []
 
 
-def test_ensure_bench_bundle_refuses_removed_artifact_flavor():
-    runner = FakeRunner()
-    with pytest.raises(cl.ClusterLeaseUnavailable, match="artifact"):
-        cl.ensure_bench_bundle(runner=runner)
-    assert runner.calls == []
-
-
 def test_destroy_cluster_refuses_unfenced_release():
     runner = FakeRunner()
     with pytest.raises(cl.ClusterLeaseUnavailable, match="release"):
@@ -299,10 +292,3 @@ def test_create_cluster_frozen_override_flags_are_never_shelled():
             cl.create_cluster("bench-f1", frozen=frozen, runner=runner,
                               ready=lambda n: 1)
         assert runner.calls == []
-
-
-def test_absent_legacy_bundle_is_not_an_artifact_identity(tmp_path, monkeypatch):
-    monkeypatch.setattr(cl, "BENCH_BUNDLE", tmp_path / "missing.js")
-    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA", tmp_path / "missing.sha256")
-    assert cl.bundle_identity() is None
-    assert cl.bundle_violation(None) is None

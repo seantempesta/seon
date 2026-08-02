@@ -483,11 +483,7 @@ def run_bench(
     `config.BENCH_CLUSTER_PARALLELISM`) is bench-cluster-N: that many
     ephemeral clusters live at once — inspect dispatches that many samples
     concurrently, each minting its OWN cluster (still ONE sample per pod).
-    In per-sample mode the frozen bench bundle is pre-built ONCE up front
-    (`cluster.ensure_bench_bundle`) — freshness is RUN-level; creates never
-    rebuild, so concurrent creates can't race a compile and mid-run src
-    saves can't swap code under the run. `limit` keeps baselines cheap;
-    `epochs` enables
+    `limit` keeps baselines cheap; `epochs` enables
     pass^k. Timeouts/concurrency default from `seon_inspect.config`
     (calibration-derived) and are overridable here per-run — but `max_samples`
     above `config.POD_MAX_SAMPLES` (1) against a SINGLE cluster corrupts
@@ -525,25 +521,11 @@ def run_bench(
     # Bench-specific solver bridge (bfcl needs text->tool_call); default =
     # swap_generate. An explicit `adapt=` argument overrides the registry.
     adapt_fn = adapt or (spec.adapter if spec else None) or swap_generate
-    bundle_start = None
     if per_sample_cluster:
         parallelism = cluster_parallelism or config.BENCH_CLUSTER_PARALLELISM
-        # Build ONCE up front — freshness is RUN-level: creates only
-        # build-if-missing (a per-create staleness rebuild swaps code under
-        # the run whenever src/ is saved mid-run), so the run starts on
-        # current code HERE and the identity stays pinned for the run.
-        cluster_mod.ensure_bench_bundle()
         the_solver = seon_cluster_solver(
             timeout_s=run_timeout_s,
             evidence_root=(evidence_dir / "blobs") if evidence_dir else None)
-        # Per-sample clusters run the FROZEN bench bundle (the supervisor's
-        # --ephemeral default). Pin its identity NOW and record it in the
-        # run's own artifacts (EvalLog metadata) — the end-of-run assertion
-        # below makes any mid-run bundle change DETECTED, not scored through.
-        bundle_start = cluster_mod.bundle_identity()
-        md = dict(eval_kwargs.pop("metadata", None) or {})
-        md["seon_bundle"] = bundle_start
-        eval_kwargs["metadata"] = md
     else:
         the_solver = seon_pod_solver(cluster_url=cluster_url,
                                      timeout_s=run_timeout_s)
@@ -563,13 +545,4 @@ def run_bench(
         max_samples=max_samples,
         **eval_kwargs,
     )
-    if per_sample_cluster:
-        violation = cluster_mod.bundle_violation(bundle_start)
-        if violation:
-            # Contamination is a HARNESS flake, never a capability number:
-            # raise loud, with the logs + both identities attached as
-            # evidence (scorecard flake class: frozen_bundle_changed).
-            raise cluster_mod.FrozenBundleChanged(
-                violation, start=bundle_start,
-                end=cluster_mod.bundle_identity(), logs=logs)
     return logs

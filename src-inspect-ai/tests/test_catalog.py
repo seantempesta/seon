@@ -415,18 +415,9 @@ def test_run_bench_max_samples_overridable(monkeypatch):
     assert captured["kw"]["max_samples"] == 4
 
 
-def _stub_prebuild(monkeypatch):
-    # the default BENCH_CLUSTER_PARALLELISM (2) pre-builds the bundle via
-    # bin/seon — offline tests stub it (its own behavior has its own tests)
-    from seon_inspect import cluster as cluster_mod
-    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle",
-                        lambda *a, **k: None)
-
-
 def test_run_bench_per_sample_cluster_mode(monkeypatch):
     # per_sample_cluster=True selects the ephemeral-cluster solver …
     captured = {}
-    _stub_prebuild(monkeypatch)
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval", lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     def fake_cluster_solver(**kw):
@@ -445,91 +436,26 @@ def test_run_bench_per_sample_cluster_mode(monkeypatch):
                           cluster_url="http://x.test/agents/run")
 
 
-def test_run_bench_per_sample_records_bundle_identity(monkeypatch):
-    # frozen-bundle pinning: the identity at run start lands in the run's
-    # own artifacts (EvalLog metadata), and an unchanged bundle returns clean
-    from seon_inspect import cluster as cluster_mod
-    captured = {}
-    _stub_prebuild(monkeypatch)
-    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
-
-    def fake_eval(*a, **k):
-        captured["kw"] = k
-        return ["log"]
-
-    monkeypatch.setattr(catalog, "inspect_eval", fake_eval)
-    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
-    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "aaa"})
-    logs = catalog.run_bench("gsm8k", per_sample_cluster=True)
-    assert captured["kw"]["metadata"]["seon_bundle"] == {"sha256": "aaa"}
-    assert logs == ["log"]
-
-
-def test_run_bench_bundle_change_is_loud_with_evidence(monkeypatch):
-    # a mid-run bundle change (tooling-lane save → cluster-create rebuild)
-    # must raise FrozenBundleChanged carrying the logs + both identities —
-    # the run classifies as the harness flake, never a capability number
-    from seon_inspect import cluster as cluster_mod
-    ident = {"v": {"sha256": "aaa"}}
-    _stub_prebuild(monkeypatch)
-    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
-    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
-    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: ident["v"])
-
-    def fake_eval(*a, **k):
-        ident["v"] = {"sha256": "bbb"}  # the bundle changes DURING the run
-        return ["log"]
-
-    monkeypatch.setattr(catalog, "inspect_eval", fake_eval)
-    with pytest.raises(cluster_mod.FrozenBundleChanged) as e:
-        catalog.run_bench("gsm8k", per_sample_cluster=True)
-    assert e.value.start == {"sha256": "aaa"}
-    assert e.value.end == {"sha256": "bbb"}
-    assert e.value.logs == ["log"]
-    assert "frozen_bundle_changed" in str(e.value)
-
-
 def test_run_bench_cluster_parallelism_sets_max_samples(monkeypatch):
-    # bench-cluster-N: N concurrent samples = N live ephemeral clusters;
-    # above 1 the bundle is pre-built ONCE before dispatch
-    from seon_inspect import cluster as cluster_mod
-    captured = {"prepared": 0}
+    # bench-cluster-N: N concurrent samples = N live ephemeral clusters
+    captured = {}
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval",
                         lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
-    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "a"})
-
-    def fake_prepare(*a, **k):
-        captured["prepared"] += 1
-        return {"sha256": "a"}
-
-    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle", fake_prepare)
     catalog.run_bench("gsm8k", per_sample_cluster=True, cluster_parallelism=4)
     assert captured["kw"]["max_samples"] == 4
-    assert captured["prepared"] == 1  # ONE up-front build
 
 
-def test_run_bench_serial_still_prebuilds_and_stays_max_samples_one(monkeypatch):
-    # parallelism 1 (serial dispatch) STILL pre-builds once — freshness is
-    # RUN-level (creates never rebuild; a per-create staleness rebuild swaps
-    # code under the run) — and max_samples stays 1
-    from seon_inspect import cluster as cluster_mod
-    captured = {"prepared": 0}
+def test_run_bench_serial_per_sample_stays_max_samples_one(monkeypatch):
+    captured = {}
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval",
                         lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
-    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "a"})
-
-    def fake_prepare(*a, **k):
-        captured["prepared"] += 1
-
-    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle", fake_prepare)
     monkeypatch.setattr(catalog.config, "BENCH_CLUSTER_PARALLELISM", 1)
     catalog.run_bench("gsm8k", per_sample_cluster=True)
     assert captured["kw"]["max_samples"] == 1
-    assert captured["prepared"] == 1
 
 
 def test_run_bench_parallelism_requires_per_sample_mode():
