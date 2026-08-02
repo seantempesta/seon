@@ -1756,11 +1756,11 @@ may reintroduce a shadow build into the dev feedback path.
   CLUSTER is what actually makes this sharing true; it cannot be bought
   by forking.)
   The boundary is the CLUSTER, matching the database boundary that
-  already exists: no cross-cluster sharing, ever. Today's base ctx is a
-  process `defonce` and one JVM hosts many clusters, so the boundary is
-  currently violated — filed as
-  `issues/one-program-graph-is-shared-across-clusters.md`, and it
-  blocks parked hot ctxs. Agents stay in their own NAMESPACE LANES;
+  already exists: no cross-cluster sharing, ever. This boundary is closed:
+  `ac9de46b9` made the live ctx per cluster, maintained SCI `6de1568`
+  marked the remaining 17 process-shared stock Vars read-only, and root
+  `8d32828c9` pinned the fork plus the zero-writable-shared-Var regression.
+  Agents stay in their own NAMESPACE LANES;
   enforcing that (a write to a namespace you do not own is refused) is
   an open design question, and `:seon.cluster.agent/namespace` already
   carries the ownership fact.
