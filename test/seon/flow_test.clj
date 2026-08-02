@@ -19,8 +19,10 @@
            [java.net URI]
            [java.net.http HttpClient HttpRequest HttpResponse$BodyHandlers
             WebSocket WebSocket$Listener]
-            [java.util.concurrent CountDownLatch ExecutorService Future
-            TimeUnit]))
+           [java.nio.file ClosedWatchServiceException StandardWatchEventKinds
+            WatchEvent$Kind WatchService]
+           [java.util.concurrent CompletableFuture CountDownLatch
+            ExecutorService Future TimeUnit]))
 
 (def ^:private callback-schema-keys
   [:seon.flow/commit-drop!
@@ -150,17 +152,13 @@
   (get-in (datafy/datafy graph) [:chans :ins [pid input-id]]))
 
 (defn- work-message
-  ([completed value]
-   (work-message completed value 0))
-  ([completed value work-ms]
-   {::sut/work-fn
-    (fn [{::sut/keys [interrupt-fn]}]
-      (interrupt-fn)
-      (when (pos? work-ms)
-        (Thread/sleep work-ms))
-      (swap! completed conj value)
-      value)
-    ::sut/wedged? false}))
+  [completed value]
+  {::sut/work-fn
+   (fn [{::sut/keys [interrupt-fn]}]
+     (interrupt-fn)
+     (swap! completed conj value)
+     value)
+   ::sut/wedged? false})
 
 (defn- single-eval-testbed
   [buffer-size]
@@ -1075,6 +1073,29 @@
           database-path (.getPath (File. root "db"))
           ready-file (File. root "committed.ready")
           _ (.mkdirs root)
+          root-path (.toPath root)
+          watch-service (.newWatchService (.getFileSystem root-path))
+          _ (.register
+             root-path
+             watch-service
+             (into-array WatchEvent$Kind
+                         [StandardWatchEventKinds/ENTRY_CREATE]))
+          readiness (CompletableFuture.)
+          watcher
+          (future
+            (try
+              (loop []
+                (let [watch-key (.take ^WatchService watch-service)
+                      ready?
+                      (some
+                       #(= (.getFileName (.toPath ready-file))
+                           (.context ^java.nio.file.WatchEvent %))
+                       (.pollEvents watch-key))]
+                  (.reset watch-key)
+                  (if ready?
+                    (.complete readiness ::child-committed)
+                    (recur))))
+              (catch ClosedWatchServiceException _)))
           java-command
           (.getPath
            (File. (System/getProperty "java.home") "bin/java"))
@@ -1091,6 +1112,12 @@
              (.getPath ready-file)])
            (.redirectErrorStream true)
            (.start))
+          _
+          (.thenAccept
+           (.onExit process)
+           (reify java.util.function.Consumer
+             (accept [_ exited]
+               (.complete readiness exited))))
           configuration
           {:store {:backend :file
                    :path database-path
@@ -1101,25 +1128,15 @@
         ;; A cold JVM must load Clojure and Datahike before it can publish the
         ;; committed-fact event. The event is authoritative; this longer clock
         ;; is only the foreign-process failure backstop.
-        (let [limit (+ (System/nanoTime)
-                       (.toNanos TimeUnit/SECONDS 20))]
-          (loop []
-            (cond
-              (.exists ready-file) true
-              (not (.isAlive process))
-              (throw
-               (ex-info
-                "The child JVM exited before committing its durable fact."
-                {::event ::child-exited
-                 ::exit (.exitValue process)
-                 ::output (slurp (.getInputStream process))}))
-              (< (System/nanoTime) limit)
-              (do (Thread/sleep 10) (recur))
-              :else
-              (throw
-               (ex-info
-                "The child JVM did not publish committed-fact readiness."
-                {::event ::child-committed})))))
+        (let [observed
+              (test-support/await-event! readiness ::child-readiness)]
+          (when (instance? Process observed)
+            (throw
+             (ex-info
+              "The child JVM exited before committing its durable fact."
+              {::event ::child-exited
+               ::exit (.exitValue process)
+               ::output (slurp (.getInputStream process))}))))
         (let [kill-process
               (.start
                (ProcessBuilder.
@@ -1145,6 +1162,8 @@
             (finally
               (d/release connection))))
         (finally
+          (.close ^WatchService watch-service)
+          (future-cancel watcher)
           (when (.isAlive process)
             (.destroyForcibly process))
           (when (d/database-exists? configuration)
