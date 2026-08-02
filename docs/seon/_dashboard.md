@@ -1,62 +1,40 @@
 ---
-type: dashboard
+type: reference
 status: active
-tags: [dashboard, index]
+tags: [reference, index]
 ---
 
-# Seon System Map
+# Seon system map
 
-Seon is one active application split at a data boundary:
-
-- the Node ClojureScript pod runs agents, derives context and surfaces, and
-  serves the Datastar web UI on `http://127.0.0.1:7890`; and
-- the JVM `seon.db.server` is the authoritative Datahike writer, committed
-  transaction feed, replay source, and host for selected heavy database work.
-
-The pod reads its local immutable replica and sends writes through the typed
-database protocol. There is no embedded JVM application, Integrant lifecycle,
-core.async flow topology, JVM renderer, or nREPL operator path. Those sources
-were removed and are identified only by
-[[architecture/archive/jvm-main-app]].
+Seon is one JVM process that can host several sovereign clusters. The process
+owns the process-root Datahike store and shared executors; each cluster owns a
+named branch, database connection, agents, Flow graphs, and web surfaces.
 
 ## Start here
 
-- [[architecture/architecture]] — canonical target architecture and vocabulary
-- [[../prds/archive/runtime-reliability/roadmap]] — current implementation state and
-  ordered work
-- [[../prds/archive/runtime-reliability/AGENTS]] — active runbook and settled decisions
-- [[process-management]] — process operations
-- [[components/testing]] — focused test doors
+- [[architecture/architecture]] — intended system and vocabulary
+- [[../prds/sci-execution-runtime/plan/README]] — current program ordering
+- [[../prds/sci-execution-runtime/plan/unsettled]] — working edge and evidence
+- [[../prds/sci-execution-runtime/AGENTS]] — active runtime runbook
 
-## Canonical architecture
+## Architecture
 
 | Domain | Document |
 |---|---|
-| Database facts and schema | [[architecture/data-model]] |
-| Context blocks and render twins | [[architecture/context]] |
+| Database facts and schemas | [[architecture/data-model]] |
+| Context derivation | [[architecture/context]] |
 | Agent lifecycle and recovery | [[architecture/agent-runtime]] |
-| Web UI and reactive channel | [[architecture/ui]] |
-| Forensics and replay | [[architecture/observability]] |
-| Agent function surface | [[architecture/toolkit]] |
+| Web UI and render pipeline | [[architecture/ui]] |
+| Forensics | [[architecture/observability]] |
+| Agent-authored functions | [[architecture/toolkit]] |
 
-## Active component notes
+## Recurring surfaces
 
-| Component | Summary |
-|---|---|
-| [[components/database]] | One writer protocol, local replica, replay, and Datahike boundary |
-| [[components/schema-system]] | Shared Malli registry and Datahike schema bridge |
-| [[components/web-ui]] | One CLJS Datastar web UI |
-| [[components/web-brand]] | Database-derived product branding |
-| [[components/agent-reply-segmenter]] | Reply parsing into executable forms and prose |
-| [[components/namespaces-render]] | Database-backed namespace context render |
-| [[components/capability-gates]] | Host-owned grants for agent operations |
-| [[components/testing]] | Focused CLJS and JVM database-server gates |
+- `bin/seon` — development operator and isolated `--root` deployments
+- `bin/test` — JVM correctness gate
+- `bin/css` — standalone Tailwind stylesheet build
+- `src-inspect-ai/` — model and agent evaluation surface
 
-Component notes marked `type: archive` describe deleted implementations and are
-not operational guidance. Git preserves the complete historical source.
-
-## Documentation rule
-
-Architecture docs describe the one intended system in present tense. The active
-PRD records what is implemented and what remains. Dated research preserves
-evidence; it is not a runbook.
+Git and archived research preserve deleted implementations. Active pages do
+not instruct readers to run the retired pod, writer server, Shadow build, or
+their adapters.

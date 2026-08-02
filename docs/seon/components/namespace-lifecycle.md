@@ -9,4 +9,4 @@ tags: [archive, component, flow]
 This note described the deleted mutable-context namespace lifecycle and old
 `/ns` routes. It is historical, not an active runtime path. See
 [[../architecture/archive/jvm-main-app]] for the archive boundary and
-[[namespaces-render]] for the current namespace context render.
+[[../architecture/context]] for the current namespace context contract.

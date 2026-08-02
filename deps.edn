@@ -174,38 +174,4 @@
   ;; Usage: bb -M:lint src src-old        (Splint)
   ;;        clj-kondo --lint src src-old  (system clj-kondo)
   :lint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
-         :main-opts ["-m" "noahtheduke.splint"]}
-
-  ;; CLJS build — DEAD (owner ruling 2026-07-27: the CLJS build is off;
-  ;; CLJ and the JVM only). Retained solely so the alias name still parses
-  ;; for historical scripts; nothing may invoke it.
-  :cljs {:jvm-opts ["--sun-misc-unsafe-memory-access=allow"
-                    "-Xms256m" "-Xmx3g"]
-         :extra-paths ["test-old" "script"]
-         :extra-deps {org.babashka/sci {:local/root "reference-code/sci"}
-                      org.clojure/clojurescript {:mvn/version "1.12.145"}
-                      org.clojure/core.async {:mvn/version "1.10.874-alpha3"}
-                      thheller/shadow-cljs
-                      {:git/url "https://github.com/seantempesta/shadow-cljs"
-                       :git/sha "c98bf60f70c102abda0fd385f78cc0fcd9c25408"}
-                      aero/aero {:mvn/version "1.1.6"}
-                      com.taoensso/timbre {:mvn/version "6.5.0"}
-                      parinferish/parinferish {:mvn/version "0.8.0"}
-                      rewrite-clj/rewrite-clj {:mvn/version "1.2.51"}
-                      org.replikativ/datahike {:mvn/version "0.8.1681"}
-                      org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
-                      com.cognitect/transit-cljs {:mvn/version "0.8.280"}
-                      metosin/reitit-ring {:mvn/version "0.10.1"}
-                      metosin/reitit-malli {:mvn/version "0.10.1"}}
-         :override-deps {org.replikativ/datahike
-                         {:local/root "reference-code/datahike"}
-                         org.replikativ/konserve
-                         {:git/url "https://github.com/seantempesta/konserve"
-                          :git/sha "737697d9205e5e8f0bc08a666e4c97dad55e9dbe"}
-                         org.replikativ/superv.async
-                         {:git/url "https://github.com/seantempesta/superv.async"
-                          :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}
-                         is.simm/partial-cps
-                         {:git/url "https://github.com/simm-is/partial-cps"
-                          :git/sha "1e119b03ea908ad925b98f9ba0a26371c65441e3"}}
-         :main-opts ["-m" "shadow.cljs.devtools.cli"]}}}
+         :main-opts ["-m" "noahtheduke.splint"]}}}

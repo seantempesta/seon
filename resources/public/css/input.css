@@ -7,11 +7,8 @@
 @import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
-/* Scan Clojure source files for classes — .clj (JVM), .cljs (pod UI),
-   .cljc (shared components). The pod web UI lives in .cljs files;
-   without these globs its classes silently fall out of output.css. */
+/* Scan the fresh JVM source files for classes. */
 @source "../../../src/**/*.clj";
-@source "../../../src/**/*.cljs";
 @source "../../../src/**/*.cljc";
 
 /* ============================================================
