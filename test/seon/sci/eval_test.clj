@@ -239,6 +239,70 @@
     (is (= 1 (count (:seon.fn/arities row))))
     (is (map? (:seon.fn/ast row)))))
 
+(deftest evaluate-invokes-eval-form-exactly-once-on-every-path
+  (let [ctx (eval/build-base-ctx)
+        eval-form sci/eval-form
+        call-with-registration-delta
+        seon.schema/call-with-registration-delta
+        calls (atom [])
+        delta-observations (atom [])
+        run-counted
+        (fn [source]
+          (reset! calls [])
+          (let [evaluation (run-in ctx source 10000)]
+            {:evaluation evaluation
+             :calls (count @calls)}))]
+    (sci/eval-string* ctx "(def plain-count 0) (def schema-count 0)")
+    (with-redefs
+      [sci/eval-form
+       (fn [execution-ctx form]
+         (swap! calls conj form)
+         (eval-form execution-ctx form))
+       seon.schema/call-with-registration-delta
+       (fn
+         ([delta body]
+          (let [before
+                (seon.schema/registration-delta-form
+                 delta :user/once-schema)
+                value (call-with-registration-delta delta body)
+                after
+                (seon.schema/registration-delta-form
+                 delta :user/once-schema)]
+            (swap! delta-observations conj
+                   {:before before :after after :value value})
+            value))
+         ([delta admission body]
+          (call-with-registration-delta delta admission body)))]
+      (let [plain
+            (run-counted "(def plain-count (inc plain-count))")
+            contracted
+            (run-counted
+             (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                  "once-function [x] x)"))
+            schema
+            (run-counted
+             (str "(seon.schema/register! :user/once-schema "
+                  "(do (def schema-count (inc schema-count)) "
+                  "[:int {:min 0}]))"))
+            intern-values (#'eval/intern-values ctx)]
+        (is (= 1 (:calls plain)) "the plain call site fires once")
+        (is (= 1 (:calls contracted))
+            "the live-declaration call site fires once")
+        (is (= 1 (:calls schema))
+            "the registration-delta call site fires once")
+        (is (= 1 (get intern-values 'user/plain-count)))
+        (is (ifn? (get intern-values 'user/once-function)))
+        (is (= 1 (get intern-values 'user/schema-count))
+            "the schema expression's side effect occurs once")
+        (is (= [{:before nil
+                 :after [:int {:min 0}]
+                 :value :user/once-schema}]
+               @delta-observations)
+            "the schema form becomes visible only inside its delta")
+        (is (nil? (get (seon.schema/registered-schemas)
+                       :user/once-schema))
+            "evaluation never publishes the isolated schema delta")))))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))
