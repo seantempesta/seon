@@ -1135,14 +1135,13 @@ Everything goes in the repository from the first keystroke:
   top-level package is also valid; a scratch directory is not.
 
 The test: if the machine were wiped right now, what would be lost? If the
-answer is anything, it was in the wrong place. Leave ACME
-alone while another lane owns it. After runtime/source changes, prove the
-default cluster before coordinating a downstream update.
+answer is anything, it was in the wrong place. After runtime/source changes,
+prove the default cluster before coordinating a downstream update.
 
-`bin/acme` still speaks the deleted operator command language and is not a
-current operational surface. Its repair is tracked by
-`docs/seon/issues/acme-wrapper-speaks-deleted-operator-command-language.md`.
-Do not use it to infer fresh process, config, dependency, or runtime ownership.
+`bin/acme` is a thin root-scoped wrapper over the fresh operator. It always
+selects cluster `acme` in an isolated operator root and accepts only the fresh
+`start`, `config apply`, `init`, `status`, `open`, `stop`, `down`, and `logs`
+forms. It owns no pod, build, source overlay, or writer-port mechanism.
 
 ## Provider and optional subsystem boundaries
 
