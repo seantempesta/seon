@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, render]
 ---
@@ -40,3 +40,11 @@ Screenshots `tmp/visual-qa/agent-scout.png`, `tmp/visual-qa/root.png`,
 
 Every agent page serves the message form and the feed opener, and a human
 can send a message to an agent from the page without a terminal.
+
+## Resolution
+
+Resolved by `2c74a2353` (`Drive namespace pages from render walk units`). That
+commit put `message-bar-html` back in the one `shell` used by the namespace and
+agent page responses while retaining the hidden feed opener outside morph
+targets. The current route therefore serves both the `content` form and the
+feed bootstrap through the same page boundary.
