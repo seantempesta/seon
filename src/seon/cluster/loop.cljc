@@ -945,6 +945,59 @@
                [:seon.ns/name
                 (get-in form [:seon.cluster.run.form/ns :seon.ns/name])])))))
 
+(defn- admitted-form
+  "One run form after namespace-sensitive static admission."
+  [{db :seon.db/db
+    run-id :seon.cluster.run/id
+    ordinal :seon.cluster.run.form/ordinal
+    ctx :seon.sci.eval/ctx
+    current-namespace ::current-namespace
+    fallback-namespace ::fallback-namespace}]
+  (let [form (form-data db run-id ordinal)
+        evaluation-namespace
+        (or current-namespace
+            (second (:seon.cluster.run.form/ns form))
+            fallback-namespace)
+        namespace-row
+        (d/pull db
+                '[* {:seon.ns/requires [:seon.ns/name]}
+                    {:seon.ns/aliases [*]}
+                    {:seon.ns/imports [*]}
+                    {:seon.ns/refers [*]}]
+                [:seon.ns/name evaluation-namespace])
+        admitted-source
+        (lint-form
+         (cond->
+          {:seon.ns/name evaluation-namespace
+           ::available-functions (available-functions db ctx)
+           ::source
+           {:seon.cluster.run.form/source
+            (:seon.cluster.run.form/source form)
+            :seon.ns/name evaluation-namespace}}
+           namespace-row (assoc ::namespace-row namespace-row)))]
+    (assoc form
+           :seon.cluster.run.form/source
+           (:seon.cluster.run.form/source admitted-source)
+           :seon.cluster.run.form/ns
+           [:seon.ns/name evaluation-namespace])))
+
+(defn- evaluation-request
+  "One admitted form projected into the guarded evaluation request."
+  [{form ::admitted-form
+    evaluation-namespace ::evaluation-namespace
+    cluster ::cluster
+    ctx :seon.sci.eval/ctx
+    agent-id :seon.cluster.agent/id}]
+  (merge form
+         {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
+          :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+          :seon.sci.eval/ctx ctx
+          :seon.cluster.agent/id agent-id
+          :seon.sci.eval/time-limit-ms
+          (:seon.config.eval/time-limit-ms cluster)
+          :seon.config/on-core-error
+          (:seon.config/on-core-error cluster)}))
+
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
   Planned or unplanned, an unheld run is not work: there is no cold
@@ -1331,50 +1384,28 @@
                           {:seon.cluster.agent/id agent-id
                            :seon.cluster.run/id run-id})
               (report :error ran)
-              (let [form (form-data @connection run-id ordinal)
+              (let [db-before-evaluation @connection
+                    form
+                    (admitted-form
+                     {:seon.db/db db-before-evaluation
+                      :seon.cluster.run/id run-id
+                      :seon.cluster.run.form/ordinal ordinal
+                      :seon.sci.eval/ctx ctx
+                      ::current-namespace namespace-name
+                      ::fallback-namespace
+                      (sci.eval/agent-namespace agent-id)})
                     evaluation-namespace
-                    (or namespace-name
-                        (second (:seon.cluster.run.form/ns form))
-                        (sci.eval/agent-namespace agent-id))
-                    db-before-evaluation @connection
-                    namespace-row
-                    (d/pull db-before-evaluation
-                            '[* {:seon.ns/requires [:seon.ns/name]}
-                                {:seon.ns/aliases [*]}
-                                {:seon.ns/imports [*]}
-                                {:seon.ns/refers [*]}]
-                            [:seon.ns/name evaluation-namespace])
-                    admitted-source
-                    (lint-form
-                     (cond->
-                       {:seon.ns/name evaluation-namespace
-                       ::available-functions
-                       (available-functions db-before-evaluation ctx)
-                       ::source
-                       {:seon.cluster.run.form/source
-                        (:seon.cluster.run.form/source form)
-                        :seon.ns/name evaluation-namespace}}
-                       namespace-row
-                       (assoc ::namespace-row namespace-row)))
-                    admitted-form
-                    (assoc form :seon.cluster.run.form/source
-                           (:seon.cluster.run.form/source admitted-source))
+                    (second (:seon.cluster.run.form/ns form))
                     evaluation
                     (submit-evaluation!!
                      evaluate
                      receipt-id
-                    (merge
-                      admitted-form
-                      {:seon.cluster.run.form/ns
-                       [:seon.ns/name evaluation-namespace]
-                      :seon.sci.admit/caps
-                      (:seon.sci.admit/caps cluster)
-                      :seon.sci.eval/ctx ctx
-                      :seon.cluster.agent/id agent-id
-                      :seon.sci.eval/time-limit-ms
-                      (:seon.config.eval/time-limit-ms cluster)
-                      :seon.config/on-core-error
-                      (:seon.config/on-core-error cluster)}))
+                     (evaluation-request
+                      {::admitted-form form
+                       ::evaluation-namespace evaluation-namespace
+                       ::cluster cluster
+                       :seon.sci.eval/ctx ctx
+                       :seon.cluster.agent/id agent-id}))
                     problem
                     (problems/form-problem
                      @connection

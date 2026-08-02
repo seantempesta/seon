@@ -138,6 +138,74 @@
              @calls)
           "a configured backup makes the schedule empty without deriving delays"))))
 
+(deftest admitted-form-preserves-current-namespace-and-lints-one-source
+  (let [db {:immutable :database-value}
+        ctx {:live :context}
+        form {:seon.cluster.run.form/source "(+ 1 2)"
+              :seon.cluster.run.form/ns [:seon.ns/name 'parse.namespace]}
+        namespace-row {:seon.ns/name 'current.namespace
+                       :seon.ns/requires [{:seon.ns/name 'clojure.set}]}
+        available [{:seon.fn/sym 'clojure.core/+}]
+        calls (atom [])]
+    (with-redefs-fn
+      {(ns-resolve 'seon.cluster.loop 'form-data)
+       (fn [actual-db run-id ordinal]
+         (swap! calls conj [:form actual-db run-id ordinal])
+         form)
+       #'d/pull
+       (fn [actual-db pattern lookup-ref]
+         (swap! calls conj [:pull actual-db pattern lookup-ref])
+         namespace-row)
+       (ns-resolve 'seon.cluster.loop 'available-functions)
+       (fn [actual-db actual-ctx]
+         (swap! calls conj [:available actual-db actual-ctx])
+         available)
+       #'cluster.loop/lint-form
+       (fn [request]
+         (swap! calls conj [:lint request])
+         (assoc (::cluster.loop/source request)
+                :seon.cluster.run.form/source "(inc 2)"))}
+      (fn []
+        (is (= {:seon.cluster.run.form/source "(inc 2)"
+                :seon.cluster.run.form/ns
+                [:seon.ns/name 'current.namespace]}
+               ((private-loop-fn 'admitted-form)
+                {:seon.db/db db
+                 :seon.cluster.run/id "run-1"
+                 :seon.cluster.run.form/ordinal 3
+                 :seon.sci.eval/ctx ctx
+                 :seon.cluster.loop/current-namespace 'current.namespace
+                 :seon.cluster.loop/fallback-namespace 'fallback.namespace})))
+        (is (= [:form db "run-1" 3] (first @calls)))
+        (is (= [:seon.ns/name 'current.namespace]
+               (last (nth @calls 1)))
+            "the per-form namespace pull uses the current evaluation namespace")
+        (is (= [:available db ctx] (nth @calls 2)))
+        (is (= 'current.namespace
+               (get-in (last @calls) [1 :seon.ns/name])))))))
+
+(deftest evaluation-request-projects-the-admitted-form-and-cluster-controls
+  (let [ctx {:live :context}
+        form {:seon.cluster.run.form/source "(inc 2)"
+              :seon.cluster.run.form/ns [:seon.ns/name 'old.namespace]}
+        caps {:seon.config.eval.result/max-depth 4}
+        cluster {:seon.sci.admit/caps caps
+                 :seon.config.eval/time-limit-ms 500
+                 :seon.config/on-core-error :panic}]
+    (is (= {:seon.cluster.run.form/source "(inc 2)"
+            :seon.cluster.run.form/ns [:seon.ns/name 'current.namespace]
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/ctx ctx
+            :seon.cluster.agent/id "agent-1"
+            :seon.sci.eval/time-limit-ms 500
+            :seon.config/on-core-error :panic}
+           ((private-loop-fn 'evaluation-request)
+            {:seon.cluster.loop/admitted-form form
+             :seon.cluster.loop/evaluation-namespace 'current.namespace
+             :seon.cluster.loop/cluster cluster
+             :seon.sci.eval/ctx ctx
+             :seon.cluster.agent/id "agent-1"})))))
+
 (deftest receipt-request-projects-one-schema-valid-terminal-request
   (let [result-blob (apply str (repeat 64 "a"))
         completed (my.run/complete "done")
