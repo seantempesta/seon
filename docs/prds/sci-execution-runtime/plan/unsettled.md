@@ -55,6 +55,71 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 19 — 2026-08-02 night, THE CUSTODY/RELIABILITY WAVE LANDED.
+START A NEW SESSION FROM HERE.**
+
+LANDED AND VERIFIED TONIGHT, each independently re-checked by the
+orchestrator before acceptance:
+
+- REACHABILITY (phase 2 of ruling #43) — `0c3a3d535`, live-proven in
+  `ca00eb12a`. The install seam publishes `ns-publics`, so agents no
+  longer receive private implementation Vars and the route to every
+  other cluster's connection, flock, flow graph, and ctx env atom is
+  gone. LIVE, not fixture: fresh isolated root READY in 1,449 ms, a
+  real DeepSeek turn evaluated `(+ 40 2)` and settled through
+  `my.run/complete`, render context 5,529 tokens, all four page routes
+  200, clean teardown. Ruling #20 is preserved, not narrowed —
+  `:seon.fn/private?` was already the computed boundary every other
+  agent-facing projection honored.
+- STREAM INTEGRITY (ruling #45) — `cbaffa1f0`. An unparseable `data:`
+  payload returns `:seon.ai/unparseable-body` and the fold STOPS, so
+  text either side of a dropped chunk can never concatenate into a
+  program the provider did not send. Terminal `:fail`, no retry, no
+  failover. Presentation noise still passes silently. Covered the whole
+  class (reasoning deltas, non-string fields, provider-error
+  documents). Red 29 failures → green 98/463; proved through canned SSE
+  on the production JDK body handler, no paid call. No loop change was
+  needed — the existing error rail already records it.
+- SUITE LIVENESS AND ISOLATION (ruling #45 part 2) — `6829c2db3`,
+  `f2b2e26b0`. Per-run operator-root isolation with copy-on-write
+  first-party roots, so lanes test concurrently; per-test progress and
+  a loud 300 s silence backstop. THE ACTUAL HANG WAS NOT A CHILD JVM:
+  two captured JVMs had no descendants and were parked at `<!!` inside
+  `seon.cluster.agent/disarm!` during test cleanup — filed as its own
+  blocker (`abbd6c4c2`).
+- FLAKY TESTS — `flow/pause` is asynchronous from dependency source;
+  the race reproduced 53/100 deterministically with NO machine load and
+  is fixed with ordered `ping-proc` acknowledgement (100/100 quiet and
+  under bounded load). Clocks replaced with observed events across
+  Flow, agent, store, SCI, instrumentation, schema, source, and turn
+  tests.
+- ANALYSIS GATE — `9e635c7dc`. The phantom blocking finding was our
+  PARALLEL clj-kondo pass cross-wiring an outer call's arity with an
+  inner function's identity. Sequential analysis fixes it with no
+  linter weakened: 152 files, 0 errors.
+- `.cljc` HONESTY — 14 false portability claims converted to `.clj`,
+  7 genuinely portable files left, CLJS lint clean on all 7.
+- STORE ANATOMY — see ADDENDUM 18. Both quoted figures disproven, the
+  replacement model validated to 0.05%.
+
+OPEN, IN PRIORITY ORDER, none blocked by another:
+1. The custody residue on
+   `agent-evals-reach-every-cluster-and-the-runtime-roots.md`:
+   `release-store!` is public and the store is process-root-wide; the
+   four custody-returning public functions each need a decision; the
+   process-root registry should move to a never-installed operator
+   namespace so a future `defn-` → `defn` slip cannot reopen the hole.
+2. `seon.cluster.agent/disarm!` unbounded wait (new blocker).
+3. The 4,096-character blob threshold, lowered on the disproven
+   reading and now needing a decision against the real model.
+4. Ruling #43 phases 3-5: ctx-derived custody, then the `seon.db`
+   namespace (ruling #41), then the call-site sweep (34 namespaces, 16
+   direct writes, ~58 test files).
+5. MCP implementation, now ratified by ruling #44 (three tools,
+   blob-backed results, ping window as a config fact).
+6. The remaining audit blockers: Flow submission can block before its
+   time limit; agent renderers cannot enter the guarded SCI context.
+
 **ADDENDUM 18 — 2026-08-02 night, THE STORE NUMBERS WERE WRONG AND ARE
 NOW MODELLED.** `research/store-amplification-anatomy-2026-08-02.md`
 disproves both figures this program has been quoting. "86x inline
