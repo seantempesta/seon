@@ -11,6 +11,7 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source_root=$PWD
 
 source bin/_java-home-resolver
 
@@ -39,7 +40,7 @@ if [ "$skills_root" != "$runtime_skills_root" ] ||
 fi
 
 result_cluster=${SEON_TEST_RESULT_CLUSTER:-}
-result_root=${SEON_TEST_RESULT_ROOT:-data/clusters}
+result_root=${SEON_TEST_RESULT_ROOT:-}
 namespaces=()
 
 while [ $# -gt 0 ]; do
@@ -81,6 +82,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+selection="${namespaces[*]:-full suite}"
+
 if [ ${#namespaces[@]} -gt 0 ]; then
   :
 else
@@ -99,48 +102,88 @@ if [ ${#namespaces[@]} -eq 0 ]; then
   exit 1
 fi
 
-if [ -n "$result_cluster" ]; then
-  if [ "$result_cluster" = "default" ]; then
-    echo "bin/test: refusing to write result facts into the default cluster" >&2
-    exit 2
-  fi
-  git_sha=$(git rev-parse HEAD)
-  exec clojure -M:test -m seon.test.runner \
-    "$result_cluster" "$result_root" "$git_sha" "${namespaces[@]}"
+if [ "$result_cluster" = "default" ]; then
+  echo "bin/test: refusing to write result facts into the default cluster" >&2
+  exit 2
 fi
 
-requires=""
-symbols=""
-for ns in "${namespaces[@]}"; do
-  requires+=" (require '$ns)"
-  symbols+=" '$ns"
-done
+git_sha=$(git rev-parse HEAD)
 
-exec clojure -M:test -e \
-  "$requires
-   (let [selected-namespaces (set [$symbols])
-         failures (atom #{})
-         default-report clojure.test/report
-         summary
-         (binding
-          [clojure.test/report
-           (fn [event]
-             (when (contains? #{:fail :error} (:type event))
-               (when-let [test-var
-                          (or (:var event)
-                              (first clojure.test/*testing-vars*))]
-                 (let [{:keys [name ns]} (meta test-var)]
-                   (when (and name
-                              ns
-                              (contains? selected-namespaces (ns-name ns)))
-                     (swap! failures
-                            conj
-                            (symbol (str (ns-name ns)) (str name)))))))
-             (default-report event))]
-          (apply clojure.test/run-tests [$symbols]))]
-     (when (seq @failures)
-       (println \"\\nFailing tests:\")
-       (doseq [test-symbol (sort @failures)]
-         (println \" -\" test-symbol)))
-     (System/exit
-      (if (zero? (+ (:fail summary) (:error summary))) 0 1)))"
+# A suite is a complete isolated operator root and working directory. The
+# checkout's tracked top-level entries are projected as symlinks so source and
+# dependency code remain live, while every relative mutable root is private to
+# this invocation. The shared dependency class cache is projected read-only in
+# practice: the test gate consumes it, while only the separate :dev-cache alias
+# writes it.
+run_parent=${SEON_TEST_RUN_PARENT:-$source_root/tmp/test-runs}
+mkdir -p "$run_parent"
+run_parent=$(cd "$run_parent" && pwd -P)
+run_root=$(mktemp -d "$run_parent/run.XXXXXX")
+mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
+
+while IFS= read -r entry; do
+  case "$entry" in
+    data|logs|target|tmp) ;;
+    *) ln -s "$source_root/$entry" "$run_root/$entry" ;;
+  esac
+done < <(git -C "$source_root" ls-files | awk -F/ '{print $1}' | sort -u)
+
+ln -s "$source_root/.git" "$run_root/.git"
+if [ -e "$source_root/.env" ]; then
+  ln -s "$source_root/.env" "$run_root/.env"
+fi
+if [ -d "$source_root/target/dev-dependency-classes" ]; then
+  ln -s "$source_root/target/dev-dependency-classes" \
+    "$run_root/target/dev-dependency-classes"
+fi
+
+if [ -z "$result_root" ]; then
+  result_root="$run_root/data/clusters"
+fi
+
+printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
+  "$$" \
+  "$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')" \
+  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  "$git_sha" \
+  "$selection" >"$run_root/test-run.txt"
+
+retain_run_root() {
+  signal=$1
+  status=$2
+  echo "bin/test: interrupted by $signal; retained isolated operator root $run_root" >&2
+  trap - HUP INT TERM
+  exit "$status"
+}
+trap 'retain_run_root HUP 129' HUP
+trap 'retain_run_root INT 130' INT
+trap 'retain_run_root TERM 143' TERM
+
+echo "bin/test: isolated operator root $run_root pid=$$ selection=$selection"
+cd "$run_root"
+set +e
+clojure \
+  "-J-Dseon.operator.root=$run_root" \
+  "-J-Dseon.test.root=$run_root" \
+  -M:test -m seon.test.runner \
+  "${result_cluster:--}" "$result_root" "$git_sha" "${namespaces[@]}"
+status=$?
+set -e
+cd "$source_root"
+
+if [ "$status" -eq 0 ]; then
+  case "$run_root" in
+    "$run_parent"/run.*)
+      rm -rf -- "$run_root"
+      echo "bin/test: removed successful isolated operator root $run_root"
+      ;;
+    *)
+      echo "bin/test: refusing unexpected run-root cleanup: $run_root" >&2
+      exit 70
+      ;;
+  esac
+else
+  echo "bin/test: retained failed isolated operator root $run_root" >&2
+fi
+
+exit "$status"
