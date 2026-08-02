@@ -16,6 +16,17 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-01, RULING #34 LIVE.** Uniform per-agent AI settings are
+landed and proven through real DeepSeek calls in a fresh private operator root.
+One agent inherited shipped `thinking :disabled`; one same-ident agent fact
+selected `:high`, and their attempt rows recorded 0 versus 519 reasoning
+tokens with the divergent effective settings. A sparse config apply changed
+the same worker's next call from `deepseek-v4-flash` to `deepseek-v4-pro`
+without changing PID or graph identity. Focused gate: 148 tests / 643
+assertions. Full evidence:
+`research/ai-settings-live-proof-2026-08-01.md`. The next boundary is the
+owner's frozen full gate on the quiet tree.
+
 **ADDENDUM 7 — 2026-08-01, 1C CHECKPOINT.** Stateless resume and its
 required value/blob tier are landed at `92d2e39be`, `78b1e6eca`,
 `c4002a83a`, and `319fc6ccb`: intern-all → bind faithful values → re-evaluate
