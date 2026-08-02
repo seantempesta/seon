@@ -88,7 +88,7 @@ Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
 the current `resources/seon/schema/*.edn` population and program rows, and
 releases and deletes it in a `finally`. There is no ambient connection
-(`test/seon/test_support.clj:151-183`).
+(`test/seon/test_support.clj:184-216`).
 
 ```clojure
 (ns seon.cluster.run-test
@@ -278,11 +278,13 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
    but never compared receipt facts with its own map. Extend the checker before
    extending the generator.
 4. **The oracle must re-derive the invariant, not restate the
-   implementation.** An oracle written by the contract's own author inherits
-   that author's blind spot: one oracle treated holder+epoch as sufficient
-   custody and therefore *agreed* with the lease-expiry defect it existed to
-   catch. Write it from the stated invariant ("custody is process AND epoch AND
-   live lease"), then have someone adversarial ask which one it restated.
+   implementation.** For run custody, presence of the exact process is the
+   fence: absence means unheld; release, close, and plan require the requesting
+   process; claim may take unheld custody or recover custody from a process
+   absent from the supplied live-process set. There is no epoch or lease.
+   Derive that independently in the model, as the current oracle does
+   (`test/seon/cluster/run_test.clj:14-23,487-514`), then ask adversarially
+   which implementation assumption the oracle may merely repeat.
 
 ### The classes properties do not reach
 
@@ -300,14 +302,14 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
   in-process refusal, another proved the cross-process fence; neither did both
   at once, and the real bug was that `fcntl` drops every lock on a file when
   any descriptor closes, so performing the refusal silently unlocked the store
-  (`test/seon/cluster/store_test.clj:223-257` is the admitted falsifier).
+  (`test/seon/cluster/store_test.clj:323-357` is the admitted falsifier).
 
 Live falsifiers — real sockets, real files, real child JVMs, real SIGKILL —
 belong IN the suite, discovered by the runner: a proof that ran once in a lane
 counts as not covered. Write one per interaction class, never one per scenario.
 Wait on an observed event (a ready file, a latch); a clock is only the backstop
 for a foreign process, and its firing is a bug report
-(`test/seon/cluster/store_test.clj:196-207`).
+(`test/seon/cluster/store_test.clj:279-321`).
 
 Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
