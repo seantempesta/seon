@@ -303,6 +303,73 @@
                        :user/once-schema))
             "evaluation never publishes the isolated schema delta")))))
 
+(deftest success-evaluation-assembles-every-optional-projection
+  (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))
+        record {:seon.eval/outcome :ok}
+        row {:seon.fn/sym "user/f"}
+        session-defs [{:seon.code.def/id "user/x"}]
+        evaluation
+        (#'eval/success-evaluation
+         {:seon.sci.eval/admitted
+          {:seon.sci.admit/value 7
+           :seon.cluster.eval/result-edn "7"
+           :seon.sci.admit/capped? false
+           :seon.sci.admit/record record}
+          :seon.sci.admit/caps
+          (assoc caps :seon.config.eval.result/max-string 3)
+          :seon.sci.eval/printed printed
+          :seon.sci.eval/namespace-name 'user
+          :seon.sci.eval/ending-namespace 'next
+          :seon.print/options {:seon.print/length 4}
+          :seon.sci.eval/session-defs session-defs
+          :seon.sci.eval/program-row row})]
+    (is (= {:seon.sci.admit/value 7
+            :seon.cluster.eval/result-edn "7"
+            :seon.print/options {:seon.print/length 4}
+            :seon.cluster.eval/ns [:seon.ns/name 'user]
+            :seon.sci.eval/ending-ns 'next
+            :seon.sci.admit/capped? false
+            :seon.sci.admit/record record
+            :seon.sci.eval/program-row row
+            :seon.sci.eval/session-defs session-defs
+            :seon.cluster.eval/output "abc"}
+           evaluation))))
+
+(deftest failed-evaluation-assembles-failure-presence-facts
+  (let [printed (doto (java.io.StringWriter.) (.write "before failure"))
+        interrupted-at (java.util.Date. 1785000000000)
+        record {:seon.eval/outcome :time}
+        value {:seon.error/kind :seon.sci.eval/time-limit
+               :seon.error/message "Ran out of time."}
+        admitted {:seon.sci.admit/value value
+                  :seon.cluster.eval/result-edn (pr-str value)
+                  :seon.sci.admit/capped? false}
+        session-defs [{:seon.code.def/id "user/x"}]
+        evaluation
+        (#'eval/failed-evaluation
+         {:seon.sci.eval/admitted admitted
+          :seon.sci.admit/caps
+          (assoc caps :seon.config.eval.result/max-string 6)
+          :seon.sci.eval/printed printed
+          :seon.sci.eval/namespace-name 'user
+          :seon.print/options {:seon.print/level 3}
+          :seon.sci.eval/session-defs session-defs
+          :seon.sci.admit/record record
+          :seon.sci.admit/value value
+          :seon.cluster.eval/interrupted-at interrupted-at})]
+    (is (= {:seon.sci.admit/value value
+            :seon.cluster.eval/result-edn (pr-str value)
+            :seon.print/options {:seon.print/level 3}
+            :seon.cluster.eval/ns [:seon.ns/name 'user]
+            :seon.sci.eval/ending-ns 'user
+            :seon.cluster.eval/error "Ran out of time."
+            :seon.sci.admit/capped? false
+            :seon.sci.admit/record record
+            :seon.sci.eval/session-defs session-defs
+            :seon.cluster.eval/interrupted-at interrupted-at
+            :seon.cluster.eval/output "before"}
+           evaluation))))
+
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(my.run/complete \"done\")")]
     (is (ok? evaluation))

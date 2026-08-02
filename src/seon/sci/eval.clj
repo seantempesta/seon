@@ -1226,6 +1226,54 @@
         connection (assoc :seon.store/branch-connection connection)))
      ctx)))
 
+(defn- success-evaluation
+  [{admitted :seon.sci.eval/admitted
+    caps :seon.sci.admit/caps
+    printed :seon.sci.eval/printed
+    namespace-name :seon.sci.eval/namespace-name
+    ending-namespace :seon.sci.eval/ending-namespace
+    print-options :seon.print/options
+    session-defs :seon.sci.eval/session-defs
+    row :seon.sci.eval/program-row}]
+  (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
+           :seon.cluster.eval/result-edn
+           (:seon.cluster.eval/result-edn admitted)
+           :seon.print/options print-options
+           :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+           :seon.sci.eval/ending-ns ending-namespace
+           :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
+           :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+    row (assoc :seon.sci.eval/program-row row)
+    (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
+    (seq (str printed))
+    (assoc :seon.cluster.eval/output (bounded-output printed caps))))
+
+(defn- failed-evaluation
+  [{admitted :seon.sci.eval/admitted
+    caps :seon.sci.admit/caps
+    printed :seon.sci.eval/printed
+    namespace-name :seon.sci.eval/namespace-name
+    print-options :seon.print/options
+    session-defs :seon.sci.eval/session-defs
+    record :seon.sci.admit/record
+    value :seon.sci.admit/value
+    interrupted-at :seon.cluster.eval/interrupted-at
+    :as request}]
+  (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
+           :seon.cluster.eval/result-edn
+           (:seon.cluster.eval/result-edn admitted)
+           :seon.print/options print-options
+           :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+           :seon.sci.eval/ending-ns namespace-name
+           :seon.cluster.eval/error (:seon.error/message value)
+           :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
+           :seon.sci.admit/record record}
+    (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
+    (contains? request :seon.cluster.eval/interrupted-at)
+    (assoc :seon.cluster.eval/interrupted-at interrupted-at)
+    (seq (str printed))
+    (assoc :seon.cluster.eval/output (bounded-output printed caps))))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs synchronously on the caller's `:compute` workload task — this
@@ -1442,20 +1490,15 @@
                          ;; evaluator does not default one
                          :seon.config/on-core-error on-core-error
                          :seon.sci.admit/record evaluation-record})]
-          (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
-                   :seon.cluster.eval/result-edn
-                   (:seon.cluster.eval/result-edn admitted)
-                   :seon.print/options @print-options
-                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                   :seon.sci.eval/ending-ns @ending-namespace
-                   :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
-                   :seon.sci.admit/record (:seon.sci.admit/record admitted)}
-            row (assoc :seon.sci.eval/program-row row)
-            (seq session-defs)
-            (assoc :seon.sci.eval/session-defs session-defs)
-            (seq (str printed))
-            (assoc :seon.cluster.eval/output
-                   (bounded-output printed caps))))
+          (success-evaluation
+           {:seon.sci.eval/admitted admitted
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/printed printed
+            :seon.sci.eval/namespace-name namespace-name
+            :seon.sci.eval/ending-namespace @ending-namespace
+            :seon.print/options @print-options
+            :seon.sci.eval/session-defs session-defs
+            :seon.sci.eval/program-row row}))
       (catch Throwable throwable
           (let [record (record (if (interrupted? throwable) :time :error))
                 session-defs
@@ -1478,27 +1521,20 @@
                   :seon.sci.admit/caps caps
                   :seon.config/on-core-error :record
                   :seon.sci.admit/record record})]
-            (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
-                     :seon.cluster.eval/result-edn
-                     (:seon.cluster.eval/result-edn admitted)
-                     :seon.print/options @print-options
-                     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                     :seon.sci.eval/ending-ns namespace-name
-                     :seon.cluster.eval/error (:seon.error/message value)
-                     :seon.sci.admit/capped?
-                     (:seon.sci.admit/capped? admitted)
-                     :seon.sci.admit/record record}
-              (seq session-defs)
-              (assoc :seon.sci.eval/session-defs session-defs)
-              ;; the instant the interrupt was OBSERVED — the one
-              ;; genuinely new fact a cut evaluation leaves. Its
-              ;; presence IS the interrupted state; there is no label.
-              (= :time (:seon.eval/outcome record))
-              (assoc :seon.cluster.eval/interrupted-at (java.util.Date.))
-              ;; whatever it printed BEFORE it failed is often the whole
-              ;; story of why
-              (seq (str printed))
-              (assoc :seon.cluster.eval/output
-                     (bounded-output printed caps)))))
+            (failed-evaluation
+             (cond-> {:seon.sci.eval/admitted admitted
+                      :seon.sci.admit/caps caps
+                      :seon.sci.eval/printed printed
+                      :seon.sci.eval/namespace-name namespace-name
+                      :seon.print/options @print-options
+                      :seon.sci.eval/session-defs session-defs
+                      :seon.sci.admit/record record
+                      :seon.sci.admit/value value}
+               ;; the instant the interrupt was OBSERVED — the one
+               ;; genuinely new fact a cut evaluation leaves. Its
+               ;; presence IS the interrupted state; there is no label.
+               (= :time (:seon.eval/outcome record))
+               (assoc :seon.cluster.eval/interrupted-at
+                      (java.util.Date.))))))
       (finally
         (stop!)))))
