@@ -55,6 +55,16 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 13 — KNOWN RED AT HEAD (2026-08-02 afternoon): the schema
+merge (4b1740cec) regressed the Datahike schema INSTALL on fresh
+branches/fixtures** — declarations parse (one form, 652 keys verified)
+but `bin/seon init` fails transacting provenance seeds
+(:seon.db.process/id "not defined in current schema"; bootstrap-plan
+same class in fixtures). PUBLICATION IS BROKEN until the consolidation
+lane's fix lands (resumed with assembled evidence; load-time lane
+yielded its blocked slot). Found by the orchestrator's independent
+verification BEFORE acceptance — the check working as designed.
+
 **ADDENDUM 12 — THE turn/evaluate REFACTOR IS COMPLETE.** Both PRD
 lanes retired with full acceptance: loop-split S1-S6 (`f978179a8`…
 `113e7e465` — `turn` is four situation arms; characterization tests
