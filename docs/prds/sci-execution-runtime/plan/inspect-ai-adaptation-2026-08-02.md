@@ -53,9 +53,13 @@ passing namespace means. Nothing here restores the gym or adds a third runner.
 
 ### Inspect AI — vendored at `reference-code/inspect-ai`
 
-Pin: `05322696a`, tag **0.3.246**, dated 2026-07-15. `pyproject.toml:20-22`
-installs both Inspect packages from the submodule paths, so the submodule SHA
-*is* the pin (installed dist-info agrees: `inspect_ai-0.3.247.dev0+g05322696a`).
+Pin advanced by slice 1 to `8ebc782ec`, tag **0.3.249**, dated 2026-07-29.
+`pyproject.toml:20-22` installs both Inspect packages from the submodule paths,
+so the submodule SHA *is* the pin (installed dist-info agrees:
+`inspect_ai-0.3.250.dev0+g8ebc782ec.d20260802`). The cited `ModelAPI`,
+`@modelapi`, `multiple_choice`, `choice`, scorer, task, sample, and eval-log
+interfaces were re-read at this revision before the root Gitlink moved; none
+moved incompatibly.
 
 | Interface | Vendored source | What it establishes |
 |---|---|---|
@@ -429,6 +433,20 @@ without collisions:
 
 ## 8. The adaptation plan
 
+### Post-seal rulings
+
+- **Ruling #39 seals the tool-less provider posture.** The `seon` model
+  provider raises when Inspect supplies any tools. Inspect records that as the
+  sample's error; no scorer receives it and no compatibility shim may turn it
+  into a score.
+- **Ruling #40 seals the history dial.** An isolated eval root may be created
+  with Datahike history disabled because grading forks branches from the
+  ending commit and goal tests read the ending database value; neither depends
+  on transaction history. Slice 1 applies `DATAHIKE_KEEP_HISTORY=false` to
+  every operator command for that root. Every sample records its shared-store
+  before/after interval, overlapping sample ids, and aggregate growth through
+  that sample; the run also retains an exact root baseline-to-final summary.
+
 ### Slice 1 — one Task, five goals, three scorer kinds, end to end
 
 Scope, exactly:
@@ -495,16 +513,29 @@ into `clojure.test` where it belongs.
 
 ### The inspect-ai pin
 
-Vendored at 0.3.246 (2026-07-15). Upstream has shipped **0.3.247, 0.3.248,
-0.3.249** since; the local mirror's `origin/main` is stale so this session
-could not enumerate their changelogs — the one delta visible at the mirror's
-Unreleased section (`EvalSample.turn_count`, `token_limit`,
-`token_limit_type`, `token_limit_usage`, and the matching `samples_df` columns)
-is directly useful for §6's horizon work. **Recommendation:** fetch the
-submodule and move the pin to 0.3.249 as the first act of slice 1, read the
-three changelogs, and record the delta in the dependency ledger. Nothing in
-this design depends on an interface that has moved. `inspect-evals` at v0.14.3
-matches its installed version and needs no change.
+Vendored at 0.3.249 (`8ebc782ec`) after the required first-act advance from
+0.3.246. Releases 0.3.247 through 0.3.249 add eval-log fields including
+`EvalSample.turn_count`, token-limit projections, scorer-profile support, and
+model/provider fixes; the slice-1 interfaces named in the dependency ledger
+remain compatible. `inspect-evals` stays at v0.14.3 (`97c99f5`) and is an
+acceptance-protected, read-only source: the provider and task require zero
+changes there.
+
+### Slice 1 live checkpoint
+
+The provider, shared drive, guardrails, history-off root, store measurement,
+GPQA task, and terminal-honesty scorer are committed. A one-sample
+`gpqa_diamond` smoke and its single permitted retry both stopped before model
+generation. The retry's native Inspect log is
+`evals/runs/2026-08-02-gpqa-seon-smoke-retry/2026-08-02T12-27-07-00-00_gpqa-diamond_4DTBYH3XEEspAwKkznxN7p.eval`.
+It retains the mandatory `seon_episode_semantics` label and records the exact
+boundary: fresh-root `bin/seon init` starts its initialization JVM from the
+source-less operator root, where `seon.fn.analyzer` is absent from the
+classpath. `bd29da1f0` moved cluster launches to the repository checkout but
+did not move `source-process-value!` (`script/seon/fresh_operator.clj`) there.
+No sample completed, so the 198-sample falsifier, accuracy, choice-seam
+verdict, and per-sample growth measurement remain unrun rather than being
+reported from partial evidence.
 
 ## 9. Open owner questions (recommendation first)
 
