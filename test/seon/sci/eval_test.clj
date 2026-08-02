@@ -794,12 +794,22 @@
                 :seon.config/on-core-error :panic
                 :seon.config/applied-manifest-digest "live-proof"}
                caps)])
-      (instrument/apply! {:seon.config/on-core-error :panic})
-      (try
-        (is (map? (eval/acquire! {:seon.sci.eval/ctx (eval/build-base-ctx)
-                                  :seon.db/db @connection})))
-        (finally
-          (instrument/apply! {:seon.config/on-core-error :record}))))))
+      (let [entering-roots
+            (into {}
+                  (map (fn [instrumented-var]
+                         [instrumented-var @instrumented-var]))
+                  (instrument/instrumented))]
+        (try
+          (instrument/apply! {:seon.config/on-core-error :panic})
+          (is (map? (eval/acquire!
+                     {:seon.sci.eval/ctx (eval/build-base-ctx)
+                      :seon.db/db @connection})))
+          (finally
+            (instrument/remove!)
+            (doseq [[instrumented-var root] entering-roots]
+              (alter-var-root instrumented-var (constantly root)))))
+        (is (= (set (keys entering-roots)) (instrument/instrumented))
+            "the test restores the exact entering wrapper set")))))
 
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
