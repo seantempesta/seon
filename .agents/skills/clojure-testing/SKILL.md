@@ -15,9 +15,12 @@ over the real database.
 > **`datahike`**; what shape to declare and why → **`data-modeling`**;
 > errors-as-values / no-bare-keys mindset → **`data-oriented-clojure`**.
 
-**The CLJS build is OFF** (owner ruling 2026-07-27) — `bin/test-cljs` and
-`bin/test-writer` serve the `src-old/`/`test-old/` quarry and are NOT the gate.
-Nothing new goes there, and a `cljs.test` namespace is not a Seon test today.
+**The CLJS build is OFF.** The one current correctness gate is `bin/test`; it
+discovers only `*_test.clj` and `*_test.cljc` beneath fresh `test/`
+(`bin/test:1-22,84-99`). The retained `:cljs` alias is explicitly dead, and
+the old `:writer`/`:writer-test` aliases are quarry-only
+(`deps.edn:101-110,162-184`). Do not look for, restore, or invent a CLJS or
+writer test command to satisfy an old instruction.
 
 ## Running
 
@@ -30,7 +33,7 @@ Source classpath, no artifact and no operator: the exit code is the verdict.
 Use one explicit multi-namespace selection while iterating and the full run at
 the natural unit boundary. `bin/test` discovers files, converts paths to
 namespaces, requires the selected namespaces, and calls one `run-tests`
-invocation in one JVM (`bin/test:1-89`).
+invocation in one JVM (`bin/test:84-94,112-135`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A
