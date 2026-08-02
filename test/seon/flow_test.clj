@@ -448,6 +448,134 @@
           (.countDown release)
           (sut/stop-installed-work-launcher!))))))
 
+(deftest saturated-submission-refuses-without-blocking-the-caller
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        launcher
+        (sut/install-work-launcher!
+         {::sut/configuration
+          {:seon.config.flow.compute/queue-depth 1
+           :seon.config.flow.compute/concurrency 1}})
+        graph (::sut/graph launcher)
+        occupied
+        (future
+          (sut/submit!!
+           {::sut/submission-id ::occupied-for-refusal
+            ::sut/workload :compute
+            ::sut/time-limit-ms 60000
+            ::sut/work-fn
+            (fn [{::sut/keys [started!]}]
+              (started!)
+              (.countDown entered)
+              (.await release)
+              ::released)}))]
+    (try
+      (test-support/await-event! entered ::refusal-owner-entered)
+      (let [buffered-result (promise)
+            buffered-status (atom ::sut/queued)
+            buffered
+            {::sut/submission-id ::buffered-before-refusal
+             ::sut/workload :compute
+             ::sut/work-fn (fn [_] ::buffered-completed)
+             ::sut/result buffered-result
+             ::sut/status buffered-status}]
+        (.get ^Future
+              (flow/inject
+               graph
+               [::sut/work-launcher ::sut/compute-submission]
+               [buffered])
+              test-support/event-backstop-seconds
+              TimeUnit/SECONDS)
+        (let [refused
+              (future
+                (sut/submit!!
+                 {::sut/submission-id ::refused-at-capacity
+                  ::sut/workload :compute
+                  ::sut/time-limit-ms 60000
+                  ::sut/work-fn (fn [_] ::unexpected-refused-run)}))
+              result
+              (test-support/await-event!
+               refused
+               ::saturated-submission-refused)]
+          (is (= ::sut/completed (::sut/outcome result)))
+          (is (= ::sut/submission-capacity
+                 (get-in result [::sut/value :seon.error/kind])))
+          (is (= ::sut/queued @buffered-status)
+              "capacity refusal retains the already-buffered submission"))
+        (.countDown release)
+        (is (= ::released
+               (::sut/value
+                (test-support/await-event!
+                 occupied
+                 ::refusal-owner-released))))
+        (is (= ::buffered-completed
+               (::sut/value
+                (test-support/await-event!
+                 (future @buffered-result)
+                 ::buffered-submission-completed)))))
+      (finally
+        (.countDown release)
+        (sut/stop-installed-work-launcher!)))))
+
+(deftest launcher-stop-precedes-ready-submissions
+  (let [launcher
+        (sut/install-work-launcher!
+         {::sut/configuration
+          {:seon.config.flow.compute/queue-depth 1
+           :seon.config.flow.compute/concurrency 1}})
+        graph (::sut/graph launcher)
+        step-var (ns-resolve 'seon.flow 'work-launcher-step)
+        original-step @step-var
+        stop-transition (CountDownLatch. 1)
+        queued-result (promise)
+        queued-status (atom ::sut/queued)
+        queued
+        {::sut/submission-id ::queued-before-stop
+         ::sut/workload :compute
+         ::sut/work-fn (fn [_] ::unexpected-queued-run)
+         ::sut/result queued-result
+         ::sut/status queued-status}]
+    (try
+      (flow/pause graph)
+      (is (= :paused
+             (::flow/status
+              (flow/ping-proc graph ::sut/work-launcher)))
+          "the launcher observes pause before its queue is filled")
+      (.get ^Future
+            (flow/inject
+             graph
+             [::sut/work-launcher ::sut/compute-submission]
+             [queued])
+            test-support/event-backstop-seconds
+            TimeUnit/SECONDS)
+      (alter-var-root
+       step-var
+       (constantly
+        (fn
+          ([]
+           (original-step))
+          ([args]
+           (original-step args))
+          ([state transition]
+           (let [next-state (original-step state transition)]
+             (when (= ::flow/stop transition)
+               (.countDown stop-transition))
+             next-state))
+          ([state input-id message]
+           (original-step state input-id message)))))
+      (flow/resume graph)
+      (flow/stop graph)
+      (test-support/await-event!
+       stop-transition
+       ::work-launcher-stop-transition)
+      (is (= ::sut/queued @queued-status)
+          "control wins while the submission channel is ready")
+      (is (false? (realized? queued-result))
+          "stop does not drain queued work")
+      (finally
+        (alter-var-root step-var (constantly original-step))
+        (sut/stop-installed-work-launcher!)))))
+
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
   (sut/install-work-launcher!
    {::sut/configuration

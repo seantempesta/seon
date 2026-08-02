@@ -12,13 +12,12 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
-            [clojure.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
-           [java.util.concurrent Executor ExecutorService Executors Future
-            TimeUnit]))
+           [java.util.concurrent Executor ExecutorService Executors Future]
+           [java.util.concurrent.atomic AtomicLong]))
 
 (set! *warn-on-reflection* true)
 
@@ -185,19 +184,73 @@
   [request]
   (var-process #'capacity-observer-step :compute request))
 
-(defn- launcher-ping
-  [pid status count ins outs parallelism active-work]
-  (walk/postwalk
-   datafy/datafy
-   #::flow{:pid pid
-           :status status
-           :count count
-           :ins (dissoc ins ::flow/control ::flow/casts)
-           :outs (dissoc outs ::flow/error ::flow/report)
-           :state (capacity-facts parallelism active-work)}))
+(defn- submission-capacity-error
+  [submission-id]
+  {:seon.error/kind ::submission-capacity
+   :seon.error/message "The bounded compute submission queue is full."
+   :seon.error/data {::submission-id submission-id}})
+
+(defn- refuse-submission!
+  [{::keys [submission-id result status]}]
+  (when (compare-and-set! status ::queued ::refused)
+    (deliver result {::started-at (System/nanoTime)
+                     ::value (submission-capacity-error submission-id)})))
+
+(defn- acquire-admission!
+  [^AtomicLong admitted capacity]
+  (loop [current (.get admitted)]
+    (cond
+      (>= current capacity)
+      false
+
+      (.compareAndSet admitted current (inc current))
+      true
+
+      :else
+      (recur (.get admitted)))))
+
+(deftype RefusingBuffer
+  [^LinkedList buffer ^long capacity ^AtomicLong admitted refuse!]
+  async.impl/UnblockingBuffer
+  async.impl/Buffer
+  (full? [_]
+    false)
+  (remove! [_]
+    (.removeLast buffer))
+  (add!* [this value]
+    (when (= ::queued @(::status value))
+      (if (acquire-admission! admitted capacity)
+        (.addFirst buffer value)
+        (refuse! value)))
+    this)
+  (close-buf! [_])
+  Counted
+  (count [_]
+    (.size buffer))
+  async.impl/Capacity
+  (capacity [_]
+    capacity)
+  core.protocols/Datafiable
+  (datafy [_]
+    {:type 'RefusingBuffer
+     :count (.size buffer)
+     :admitted (.get admitted)
+     :capacity capacity}))
+
+(defn- refusing-buffer
+  [capacity]
+  (RefusingBuffer.
+   (LinkedList.)
+   (long capacity)
+   (AtomicLong.)
+   refuse-submission!))
+
+(defn- release-admission!
+  [^RefusingBuffer buffer]
+  (.decrementAndGet ^AtomicLong (.-admitted buffer)))
 
 (defn- execute-work!
-  [pid compute-executor error report completion active-work
+  [compute-executor completion active-work
    {::keys [submission-id work-fn result status] :as work}]
   (if-not (compare-and-set! status ::queued ::running)
     (async/offer!
@@ -224,140 +277,107 @@
                  started!
                  (fn []
                    (when (nil? @started-at)
-                     (vreset! started-at (System/nanoTime))))]
-             (try
-               (let [value (work-fn {::started! started!})]
-                 (started!)
-                 (deliver result {::started-at @started-at
-                                  ::value value})
-                 (async/offer!
-                  report
-                  {::pid pid
-                   ::event ::work-complete
-                   ::submission-id submission-id
-                   ::value value}))
-               (catch Throwable throwable
-                 (started!)
-                 (deliver result {::started-at @started-at
-                                  ::throwable throwable})
-                 (async/>!!
-                  error
-                  #::flow{:pid pid
-                          :status :running
-                          :cid ::compute-submission
-                          :msg (dissoc work ::work-fn ::result ::status)
-                          :op ::work
-                          :ex throwable}))
-               (finally
-                 (reset! status ::completed)
-                 (swap! active-work dissoc submission-id)
-                 (when-not
-                  (async/offer!
-                   completion
-                   {::submission-id submission-id
-                    ::workload :compute})
-                   (async/offer!
-                    error
-                    #::flow{:pid pid
-                            :status :running
-                            :cid ::compute-submission
-                            :op ::completion-overflow
-                            :ex
-                            (ex-info
-                             "The launcher completion channel overflowed."
-                             {::submission-id submission-id})})))))))
+                     (vreset! started-at (System/nanoTime))))
+                 terminal
+                 (try
+                   (let [value (work-fn {::started! started!})]
+                     (started!)
+                     {::started-at @started-at
+                      ::value value})
+                   (catch Throwable throwable
+                     (started!)
+                     {::started-at @started-at
+                      ::throwable throwable}))]
+             (reset! status ::completed)
+             (swap! active-work dissoc submission-id)
+             (deliver result terminal)
+             (async/offer!
+              completion
+              (assoc terminal
+                     ::submission-id submission-id
+                     ::workload :compute
+                     ::work
+                     (dissoc work ::work-fn ::result ::status))))))
         (catch Throwable throwable
           (reset! status ::completed)
           (swap! active-work dissoc submission-id)
-          (deliver result {::started-at (System/nanoTime)
-                           ::throwable throwable})
-          (async/offer!
-           completion
-           {::submission-id submission-id
-            ::workload :compute}))))))
+          (let [terminal
+                {::started-at (System/nanoTime)
+                 ::throwable throwable}]
+            (deliver result terminal)
+            (async/offer!
+             completion
+             (assoc terminal
+                    ::submission-id submission-id
+                    ::workload :compute
+                    ::work
+                    (dissoc work ::work-fn ::result ::status)))))))))
 
-(defn- work-launcher-description
-  []
-  {:ins {::compute-submission
-         "One disposable compute submission backed by durable work."}
-   :workload :io})
+(defn- with-submission-filter
+  [{::keys [parallelism active-count] :as state}]
+  (assoc
+   state
+   ::flow/input-filter
+   (fn [input-id]
+     (or (not= ::compute-submission input-id)
+         (< active-count parallelism)))))
+
+(defn- work-launcher-step
+  ([]
+   {:ins {::compute-submission
+          "One disposable compute submission backed by durable work."}
+    :workload :io
+    :ping-map-fn
+    (fn [{::keys [parallelism active-work]}]
+      (capacity-facts parallelism active-work))})
+  ([{::keys [parallelism] :as args}]
+   (with-submission-filter
+     (assoc args
+            ::active-count 0
+            ::flow/in-ports
+            {::completion (async/chan parallelism)})))
+  ([{::keys [task-executor] :as state} transition]
+   (when (= ::flow/stop transition)
+     (.shutdownNow ^ExecutorService task-executor))
+   state)
+  ([{::keys [active-count active-work admission-buffer task-executor]
+     :as state}
+    input-id
+    message]
+   (case input-id
+     ::compute-submission
+     (do
+       (execute-work!
+        task-executor
+        (get-in state [::flow/in-ports ::completion])
+        active-work
+        message)
+       [(with-submission-filter
+          (assoc state ::active-count (inc active-count)))
+        nil])
+
+     ::completion
+     (do
+       (release-admission! admission-buffer)
+       [(with-submission-filter
+          (assoc state ::active-count (dec active-count)))
+        (if-let [throwable (::throwable message)]
+          {::flow/error
+           [#::flow{:pid (::flow/pid state)
+                    :status :running
+                    :cid ::compute-submission
+                    :msg (::work message)
+                    :op ::work
+                    :ex throwable}]}
+          {::flow/report
+           [{::pid (::flow/pid state)
+             ::event ::work-complete
+             ::submission-id (::submission-id message)
+             ::value (::value message)}]})]))))
 
 (defn- work-launcher-proc
-  [{::keys [parallelism active-work task-executor]}]
-  (reify
-    core.protocols/Datafiable
-    (datafy [_]
-      {::launcher ::work-launcher
-       :desc (work-launcher-description)})
-
-    flow.spi/ProcLauncher
-    (describe [_]
-      (work-launcher-description))
-    (start [_ {:keys [pid ins outs resolver]}]
-      (let [control (::flow/control ins)
-            submission (::compute-submission ins)
-            error (::flow/error outs)
-            report (::flow/report outs)
-            completion (async/chan parallelism)
-            compute-executor
-            (or task-executor (flow.spi/get-exec resolver :compute))]
-        (.execute
-         ^Executor (flow.spi/get-exec resolver :io)
-         ^Runnable
-         (fn []
-           ;; A channel is a scheduling buffer over durable work, never the
-           ;; record of the work. Its fixed buffer parks submitters. Only this
-           ;; loop consumes class channels and accounts live compute slots.
-           (loop [status :paused
-                  count 0
-                  active-count 0]
-             (let [channels
-                   (cond-> [control completion]
-                     (and (= status :running)
-                          (< active-count parallelism))
-                     (conj submission))
-                   [message channel] (async/alts!! channels)]
-               (cond
-                 (= channel completion)
-                 (recur status count (dec active-count))
-
-                 (= channel submission)
-                 (do
-                   (execute-work!
-                    pid compute-executor error report completion active-work
-                    message)
-                   (recur status (inc count) (inc active-count)))
-
-                 (= channel control)
-                 (let [command (::flow/command message)
-                       addressed?
-                       (contains? #{pid ::flow/all} (::flow/to message))]
-                   (cond
-                     (not addressed?)
-                     (recur status count active-count)
-
-                     (= command ::flow/stop)
-                     nil
-
-                     (= command ::flow/pause)
-                     (recur :paused count active-count)
-
-                     (= command ::flow/resume)
-                     (recur :running count active-count)
-
-                     (= command ::flow/ping)
-                     (do
-                       (async/>!!
-                        (::flow/reply-chan message)
-                        (launcher-ping
-                         pid status count ins outs parallelism active-work))
-                       (recur status count active-count))
-
-                     :else
-                     (recur status count active-count)))
-
-                 :else
-                 nil)))))))))
+  [request]
+  (var-process #'work-launcher-step :io request))
 
 (def flow-workload-attributes
   "Flat config-singleton attributes consumed by the work launcher."
@@ -381,22 +401,25 @@
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
             task-executor]}]
-  {:procs
-   {::work-launcher
-    {:proc
-     (work-launcher-proc
-      {::parallelism parallelism
-       ::active-work active-work
-       ::task-executor task-executor})
-     :chan-opts
-     {::compute-submission {:buf-or-n queue-depth}}}
-    ::capacity-observer
-    {:proc
-     (capacity-observer-proc
-      {::parallelism parallelism
-       ::active-work active-work})}}
-   :conns []
-   :compute-exec compute-executor})
+  (let [admission-buffer
+        (refusing-buffer (+ parallelism queue-depth))]
+    {:procs
+     {::work-launcher
+      {:proc
+       (work-launcher-proc
+        {::parallelism parallelism
+         ::active-work active-work
+         ::admission-buffer admission-buffer
+         ::task-executor task-executor})
+       :chan-opts
+       {::compute-submission {:buf-or-n admission-buffer}}}
+      ::capacity-observer
+      {:proc
+       (capacity-observer-proc
+        {::parallelism parallelism
+         ::active-work active-work})}}
+     :conns []
+     :compute-exec compute-executor}))
 
 (defn start-work-launcher!
   "Start the one bounded work launcher from acquired config facts."
@@ -411,7 +434,7 @@
         (:seon.config.flow.compute/concurrency configuration)
         active-work (atom {})
         root-executors
-        ((requiring-resolve 'seon.cluster/root-executors))
+        ((requiring-resolve 'seon.operator.runtime/root-executors))
         task-executor (virtual-task-executor)
         graph
         (flow/create-flow
@@ -477,7 +500,13 @@
         {:seon.error/kind :configuration}))))
 
 (defn submit!!
-  "Submit compute work with fixed-buffer backpressure and await its result."
+  "Submit bounded compute work and await its terminal value.
+
+  Admission never blocks: a full queue completes immediately with a flat
+  `::submission-capacity` error value. For accepted work, `time-limit-ms`
+  bounds the interval from the injection request through queued waiting and
+  execution. `::submission-wait-ms` measures time to start, refusal, or the
+  limit, whichever terminates the submission wait."
   {:malli/schema
    [:=> [:cat :seon.flow/work-submission] :seon.flow/work-result]}
   [{::keys [submission-id workload work-fn time-limit-ms]}]
@@ -486,7 +515,7 @@
         status (atom ::queued)
         work-fn (bound-fn* work-fn)
         submitted-at (System/nanoTime)
-        injection
+        _
         (flow/inject
          graph
          [::work-launcher ::compute-submission]
@@ -494,31 +523,33 @@
            ::workload workload
            ::work-fn work-fn
            ::result result
-           ::status status}])]
-    (.get ^Future injection)
-    (let [settled (deref result time-limit-ms ::time-limit)
-          settled-at (System/nanoTime)
-          submission-wait-ms
-          (quot (- (long (if (= ::time-limit settled)
-                           settled-at
-                           (::started-at settled)))
-                   submitted-at)
-                1000000)]
-      (if (= ::time-limit settled)
-        (do
-          (when-not (compare-and-set! status ::queued ::cancelled)
-            (swap! active-work
-                   (fn [active]
-                     (if (contains? active submission-id)
-                       (assoc-in active [submission-id ::wedged?] true)
-                       active))))
-          {::outcome ::time-limit
-           ::submission-wait-ms submission-wait-ms})
-        (if-let [throwable (::throwable settled)]
-          (throw throwable)
-          {::outcome ::completed
-           ::value (::value settled)
-           ::submission-wait-ms submission-wait-ms})))))
+           ::status status}])
+        injection-elapsed-ms
+        (quot (+ (- (System/nanoTime) submitted-at) 999999) 1000000)
+        remaining-ms (max 0 (- time-limit-ms injection-elapsed-ms))
+        settled (deref result remaining-ms ::time-limit)
+        settled-at (System/nanoTime)
+        submission-wait-ms
+        (quot (- (long (if (= ::time-limit settled)
+                         settled-at
+                         (::started-at settled)))
+                 submitted-at)
+              1000000)]
+    (if (= ::time-limit settled)
+      (do
+        (when-not (compare-and-set! status ::queued ::cancelled)
+          (swap! active-work
+                 (fn [active]
+                   (if (contains? active submission-id)
+                     (assoc-in active [submission-id ::wedged?] true)
+                     active))))
+        {::outcome ::time-limit
+         ::submission-wait-ms submission-wait-ms})
+      (if-let [throwable (::throwable settled)]
+        (throw throwable)
+        {::outcome ::completed
+         ::value (::value settled)
+         ::submission-wait-ms submission-wait-ms}))))
 
 (deftype CountedDroppingBuffer
   [^LinkedList buffer ^long capacity drop!]
