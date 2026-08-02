@@ -30,6 +30,29 @@
          (set (keys (config/default-decisions))))
       "the shipped document makes one decision for every registered config attribute"))
 
+(deftest packaged-defaults-use-the-same-shipped-document-authority
+  (let [directory (io/file "tmp/config-test-packaged")
+        packaged-file (io/file directory "default.edn")
+        repository-decisions (edn/read-string
+                              (slurp config/default-manifest-path))
+        packaged-decisions
+        (assoc repository-decisions
+               :seon.config.flow.compute/queue-depth 19)]
+    (.mkdirs directory)
+    (spit packaged-file (str (pr-str packaged-decisions) "\n"))
+    (try
+      (with-redefs [io/resource
+                    (fn [path]
+                      (when (= config/default-manifest-path path)
+                        (-> packaged-file .toURI .toURL)))]
+        (is (= 19
+               (:seon.config.flow.compute/queue-depth
+                (config/default-decisions)))
+            "a packaged resource wins without copying the decision roster"))
+      (finally
+        (.delete packaged-file)
+        (.delete directory)))))
+
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
   (let [compiled (config/compile-manifest {})
         effective (:seon.config/effective compiled)

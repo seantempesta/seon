@@ -143,7 +143,10 @@
   absence decisions are resolved only by `compile-manifest`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [document (read-edn-map default-manifest-path)
+  (let [document (read-edn-map
+                  (or #?(:clj (io/resource default-manifest-path)
+                         :cljs nil)
+                      default-manifest-path))
         dials (dial-attributes)
         decisions (merge (registration-defaults) document)
         missing (set/difference dials (set (keys decisions)))]

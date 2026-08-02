@@ -22,6 +22,8 @@
   "seon/artifact/current-src.edn")
 (def initialization-build-file
   "target/current-src-build.edn")
+(def default-manifest-path
+  "config/default.edn")
 
 (def jvm-options
   ["--add-modules" "jdk.incubator.vector"
@@ -157,6 +159,8 @@
     (b/delete {:path artifact-file})
     (b/copy-dir {:src-dirs ["src" "resources"]
                  :target-dir class-dir})
+    (b/copy-file {:src default-manifest-path
+                  :target (str class-dir "/" default-manifest-path)})
     (b/javac {:basis basis
               :src-dirs ["java"]
               :class-dir class-dir
