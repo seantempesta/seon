@@ -590,63 +590,81 @@
         (is (= {:routed? false :armed? false} @observed)
             "the route is already absent when orderly teardown closes")))))
 
+(defn- withheld-turn-trial
+  [connection ctx routing original-definition agent-id]
+  (let [tasks (atom [])
+        executor
+        (reify Executor
+          (execute [_ task]
+            (swap! tasks conj task)))
+        take-result (async/promise-chan)]
+    (with-redefs
+      [agent/graph-definition
+       (fn [request]
+         (let [definition (original-definition request)]
+           (assoc definition
+                  :io-exec executor
+                  :procs (select-keys (:procs definition) [::agent/turn])
+                  :conns [])))]
+      (let [entry (arm-one! connection ctx routing agent-id)
+            completion (:seon.cluster.loop/completion entry)
+            observed-completion
+            (reify
+              async.impl/ReadPort
+              (take! [_ handler]
+                (let [result (async.impl/take! completion handler)]
+                  (async/put! take-result (some? result))
+                  result))
+
+              async.impl/WritePort
+              (put! [_ value handler]
+                (async.impl/put! completion value handler))
+
+              async.impl/Channel
+              (close! [_]
+                (async.impl/close! completion))
+              (closed? [_]
+                (async.impl/closed? completion)))
+            _ (swap! routing assoc-in
+                     [::agent/armed agent-id :seon.cluster.loop/completion]
+                     observed-completion)
+            stopped
+            (future
+              (agent/disarm! {:seon.cluster.agent/id agent-id
+                              :seon.cluster.agent/routing routing}))]
+        (try
+          {:seon.cluster.agent-test/runnable-count (count @tasks)
+           :seon.cluster.agent-test/completion-ready?
+           (test-support/await-event!
+            take-result ::parked-turn-completion-ready)}
+          (finally
+            (doseq [^Runnable task @tasks]
+              (.run task))
+            (test-support/await-event! stopped ::withheld-turn-disarmed)))))))
+
 (deftest disarm-does-not-depend-on-the-turn-proc-starting
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
-            tasks (atom [])
-            executor
-            (reify Executor
-              (execute [_ task]
-                (swap! tasks conj task)))
-            original-definition agent/graph-definition
-            take-result (async/promise-chan)]
-        (d/transact connection [{:seon.cluster.agent/id "withheld-turn"}])
-        (with-redefs
-          [agent/graph-definition
-           (fn [request]
-             (let [definition (original-definition request)]
-               (assoc definition
-                      :io-exec executor
-                      :procs (select-keys (:procs definition) [::agent/turn])
-                      :conns [])))]
-          (let [entry (arm-one! connection ctx routing "withheld-turn")
-                completion (:seon.cluster.loop/completion entry)
-                observed-completion
-                (reify
-                  async.impl/ReadPort
-                  (take! [_ handler]
-                    (let [result (async.impl/take! completion handler)]
-                      (async/put! take-result (some? result))
-                      result))
-
-                  async.impl/WritePort
-                  (put! [_ value handler]
-                    (async.impl/put! completion value handler))
-
-                  async.impl/Channel
-                  (close! [_]
-                    (async.impl/close! completion))
-                  (closed? [_]
-                    (async.impl/closed? completion)))
-                _ (swap! routing assoc-in
-                         [::agent/armed "withheld-turn"
-                          :seon.cluster.loop/completion]
-                         observed-completion)
-                stopped
-                (future
-                  (agent/disarm! {:seon.cluster.agent/id "withheld-turn"
-                                  :seon.cluster.agent/routing routing}))]
-            (try
-              (is (= 1 (count @tasks))
-                  "Flow accepted the turn runnable without starting it")
-              (is (true? (test-support/await-event!
-                          take-result ::parked-turn-completion-ready))
-                  "arming publishes parked completion before the turn runs")
-              (finally
-                (doseq [^Runnable task @tasks]
-                  (.run task))
-                (test-support/await-event! stopped ::withheld-turn-disarmed)))))))))
+            agent-ids (mapv #(str "withheld-turn-" %) (range 100))
+            original-definition agent/graph-definition]
+        (d/transact connection
+                    (mapv (fn [agent-id]
+                            {:seon.cluster.agent/id agent-id})
+                          agent-ids))
+        (let [results
+              (mapv #(withheld-turn-trial
+                      connection ctx routing original-definition %)
+                    agent-ids)
+              ready-count
+              (count (filter :seon.cluster.agent-test/completion-ready?
+                             results))]
+          (is (every? #(= 1 (:seon.cluster.agent-test/runnable-count %))
+                      results)
+              "Flow accepted every turn runnable without starting it")
+          (is (= 100 ready-count)
+              (str "arming published parked completion in " ready-count
+                   "/100 controlled stop interleavings")))))))
 
 (deftest park-wake-test
   (with-connection
