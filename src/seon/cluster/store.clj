@@ -158,9 +158,10 @@
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
   must be the ONE store), fused persistent-set roots with a 256-entry
-  diff buffer, and write-time schema flexibility. Fusion and index
-  settings are creation-only; reopen configurations omit them so
-  Datahike adopts the stored values."
+  diff buffer, retained history by the settled default policy, and
+  write-time schema flexibility. Fusion and index settings are
+  creation-only; reopen configurations omit them so Datahike adopts the
+  stored values."
   {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
   [store-dir]
   (let [path (canonical-path store-dir)]
@@ -174,6 +175,10 @@
              :id (java.util.UUID/nameUUIDFromBytes
                   (.getBytes ^String path "UTF-8"))}
      :writer {:backend :self}
+     ; Rulings #23/#40: ordinary stores retain history. Scratch/eval stores
+     ; may be non-temporal only after their separate creation + reader
+     ; mechanism is proven; do not inherit this decision from Datahike.
+     :keep-history? true
      :fuse-index-roots? true
      :index-config {:diff-buf-size 256}
      :schema-flexibility :write}))
