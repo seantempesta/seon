@@ -492,7 +492,7 @@
 (def ^:private surface-exemptions
   {"src/seon/schema/edn.clj"
    "EDN schema data has a different grammar and proves EOF separately."
-   "src/seon/schema.cljc"
+   "src/seon/schema.clj"
    "Schema candidate encoding is an ordinary EDN codec."
    "src/seon/cluster/run.cljc"
    "Run values use an ordinary EDN result codec."})

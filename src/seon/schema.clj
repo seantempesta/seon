@@ -25,9 +25,8 @@
             [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
-            #?(:clj [clojure.edn :as edn]
-               :cljs [cljs.reader :as reader]))
-  #?(:clj (:import [java.security MessageDigest])))
+            [clojure.edn :as edn])
+  (:import [java.security MessageDigest]))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -114,9 +113,8 @@
 
 (defn- runtime-predicate [predicate]
   (try
-    #?(:clj (some-> (requiring-resolve predicate) deref)
-       :cljs nil)
-    (catch #?(:clj Throwable :cljs :default) _
+    (some-> (requiring-resolve predicate) deref)
+    (catch Throwable _
       nil)))
 
 (defn bind-predicates
@@ -135,8 +133,7 @@
        (and (map? value)
             (qualified-symbol? (:gen/gen value)))
        (assoc value :gen/gen
-              #?(:clj (some-> (:gen/gen value) requiring-resolve deref)
-                 :cljs (:gen/gen value)))
+              (some-> (:gen/gen value) requiring-resolve deref))
 
        (and (vector? value) (= :fn (first value)))
        (let [predicate-index (if (map? (second value)) 2 1)
@@ -144,11 +141,10 @@
              bound
              (when (qualified-symbol? predicate)
                (or (get predicate-functions predicate)
-                   #?(:clj (when (= "clojure.core" (namespace predicate))
-                             (some-> (ns-resolve 'clojure.core
-                                                 (symbol (name predicate)))
-                                     deref))
-                      :cljs nil)))]
+                   (when (= "clojure.core" (namespace predicate))
+                     (some-> (ns-resolve 'clojure.core
+                                         (symbol (name predicate)))
+                             deref))))]
          (cond
            (and (ifn? predicate)
                 (not (or (symbol? predicate)
@@ -256,7 +252,7 @@
                     :else value))]
           (canonicalize definition false))
         encoded (pr-str canonical)
-        decoded (#?(:clj edn/read-string :cljs reader/read-string) encoded)]
+        decoded (edn/read-string encoded)]
     (when-not (= canonical decoded)
       (throw
        (ex-info
@@ -290,7 +286,7 @@
              (bind-predicates definition predicate-functions)
              options)
             canonical-keys)
-           (catch #?(:clj Exception :cljs :default) _
+           (catch Exception _
              ;; The ordinary compilation gate owns malformed and unresolved
              ;; forms. This preflight owns only the reference graph needed to
              ;; make recursive expansion unrepresentable.
@@ -300,13 +296,7 @@
 (declare canonical-data-string)
 
 (defn- portable-string-hash [s]
-  #?(:clj (.hashCode ^String s)
-     :cljs
-     (loop [i 0 result 0]
-       (if (= i (.-length s))
-         result
-         (recur (inc i)
-                (bit-or 0 (+ (* 31 result) (.charCodeAt s i))))))))
+  (.hashCode ^String s))
 
 (defn canonical-data-fingerprint
   "Portable content fingerprint for ordinary data."
@@ -474,14 +464,8 @@
    when the release manifest contains the preprocessed projection artifact;
    every process still verifies the same digest against cluster facts before
    admitting executable work."
-  (let [application
-        #?(:clj (System/getenv "SEON_APPLICATION_DIGEST")
-           :cljs (some-> js/process .-env
-                         (aget "SEON_APPLICATION_DIGEST")))
-        preprocessed
-        #?(:clj (System/getenv "SEON_PREPROCESSED_RELEASE_IDENTITY")
-           :cljs (some-> js/process .-env
-                         (aget "SEON_PREPROCESSED_RELEASE_IDENTITY")))]
+  (let [application (System/getenv "SEON_APPLICATION_DIGEST")
+        preprocessed (System/getenv "SEON_PREPROCESSED_RELEASE_IDENTITY")]
     (when (and (re-matches #"[0-9a-f]{64}" (or application ""))
                (= application preprocessed))
       application)))
@@ -544,7 +528,7 @@
 (defn- history-value [db]
   (try
     (d/history db)
-    (catch #?(:clj Throwable :cljs :default) _
+    (catch Throwable _
       nil)))
 
 (defn- source-seal-tx [db history]
@@ -759,14 +743,14 @@
   [value]
   (try
     (let [encoded (pr-str value)
-          decoded (#?(:clj edn/read-string :cljs reader/read-string) encoded)]
+          decoded (edn/read-string encoded)]
       (and (= value decoded)
            (some? (m/schema
                    (bind-predicates
                     decoded
                     (core-predicate-functions))
                    {:registry (candidate-registry)}))))
-    (catch #?(:clj Exception :cljs :default) _
+    (catch Exception _
       false)))
 
 (defonce ^:private _malli-form-predicate
@@ -991,11 +975,8 @@
         validate
         (fn [advisories request]
           (into advisories (assert-complete-contract! request)))]
-    #?(:clj
-       ((requiring-resolve 'clojure.core.reducers/fold)
-        *contract-validation-fold-size* combine validate requests)
-       :cljs
-       (reduce validate (combine) requests))))
+    ((requiring-resolve 'clojure.core.reducers/fold)
+     *contract-validation-fold-size* combine validate requests)))
 
 (defn identity-attr?
   "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
@@ -1048,14 +1029,11 @@
                          [::definition ::definition]]
                   ::registry-key]}
   [k v]
-  ;; CLJS-only until the JVM's legacy `:form/*` registrations are renamed.
-  #?(:cljs (internal/assert-multi-segment-namespace! k)
-     :clj  nil)
   (internal/assert-non-nilable-value-schema! (candidate-forms) k v)
   (let [encoded (pr-str v)
         decoded (try
-                  (#?(:clj edn/read-string :cljs reader/read-string) encoded)
-                  (catch #?(:clj Exception :cljs :default) e
+                  (edn/read-string encoded)
+                  (catch Exception e
                     (throw
                       (ex-info
                         (str "schema/register! " k
@@ -1080,30 +1058,14 @@
   ;; they must exist before the EDN loader and its admission gate can compile.
   ;; Every other JVM registration flows through seon.schema.edn/admit once that
   ;; namespace has finished loading; there is no hand-maintained exception set.
-  #?(:clj
-     (when-let [admit (some-> (find-ns 'seon.schema.edn)
-                              (ns-resolve 'admit))]
-       (when-not *verified-release-identity*
-         (admit
-          {:seon.schema/forms (assoc (candidate-forms) k v)
-           :seon.schema/identity k
-           :seon.schema/admission
-           {:seon.schema.admission/source *registration-admission-source*}})))
-     :cljs
-     ;; The retired CLJS tier has no schema-EDN loader. Preserve its existing
-     ;; complete-population validation until that source is deleted.
-     (when-not *verified-release-identity*
-       (try
-         (assert-complete-contract!
-          {:seon.schema/identity k
-           :seon.schema/definition v
-           :seon.schema/forms (assoc (candidate-forms) k v)
-           :seon.schema/admission
-           {:seon.schema.admission/source *registration-admission-source*}
-           :seon.schema/predicate-functions (core-predicate-functions)})
-         (catch :default e
-           (when-not (= :malli.core/invalid-schema (:type (ex-data e)))
-             (throw e))))))
+  (when-let [admit (some-> (find-ns 'seon.schema.edn)
+                           (ns-resolve 'admit))]
+    (when-not *verified-release-identity*
+      (admit
+       {:seon.schema/forms (assoc (candidate-forms) k v)
+        :seon.schema/identity k
+        :seon.schema/admission
+        {:seon.schema.admission/source *registration-admission-source*}})))
   (update-candidate-forms! assoc k v)
   k)
 
@@ -1731,8 +1693,7 @@
                                      :seon.error/kind :core-bug})))
                   (assoc parsed identity
                          {:seon.schema.parsed/form
-                          (#?(:clj edn/read-string :cljs reader/read-string)
-                           form-string)
+                          (edn/read-string form-string)
                           :seon.schema.parsed/admission
                           (admission-from-asserting-transaction
                             database-value
@@ -2018,11 +1979,9 @@
    against the replacement schema population. Returns the activated projection."
   {:malli/schema [:=> [:catn [::forms :map]] :map]}
   [forms]
-  #?(:clj
-     (when-let [admit (some-> (find-ns 'seon.schema.edn)
-                              (ns-resolve 'admit))]
-       (admit {:seon.schema/forms forms}))
-     :cljs nil)
+  (when-let [admit (some-> (find-ns 'seon.schema.edn)
+                           (ns-resolve 'admit))]
+    (admit {:seon.schema/forms forms}))
   (activate-projection!
     (build-projection
       forms

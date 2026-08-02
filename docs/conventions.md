@@ -604,7 +604,7 @@ split into `core.clj` / `schema.clj` prematurely.
 resources/seon/schema.edn     ; admitted first-party declarations
 
 src/seon/
-├── schema.cljc                ; registry and runtime registration
+├── schema.clj                 ; registry and runtime registration
 └── schema/
     ├── internal.cljc          ; seon.schema.internal (form gates)
     ├── edn.clj                ; packaged population admission
