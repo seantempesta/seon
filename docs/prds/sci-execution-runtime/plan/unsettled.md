@@ -55,6 +55,21 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 12 — THE turn/evaluate REFACTOR IS COMPLETE.** Both PRD
+lanes retired with full acceptance: loop-split S1-S6 (`f978179a8`…
+`113e7e465` — `turn` is four situation arms; characterization tests
+mutation-proven first; live receipt datoms byte-equal pre/post,
+`:equal? true`; FULL SUITE 823/4,062/0) and eval-split S7-S9
+(`85af34005`…`bfc8f520f` — exactly-once `eval-form!` falsifier proven
+red under double-eval; live before/after receipts identical, nine
+attributes + same result-edn). The PRD's issue closes when its §9
+behavior questions get their notes. UNBLOCKED FOR NEXT SESSION (no new
+lanes by owner order): the ruling-#38 assigned-namespace slice (both
+its edit sites now small named functions). Still in flight:
+inspect-slice-1 (gpqa), bootstrap-facts (final cut), consolidation
+(merge), load-time (profile commits landing: `b963caa8f`,
+`79367fcaa`).
+
 **ADDENDUM 11 — 2026-08-02 midday, FULL HANDOFF (orchestrator near
 token limit; next session resumes from THIS block + `bin/codex-agent
 status` + git log).**
