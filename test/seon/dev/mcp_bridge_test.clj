@@ -366,6 +366,7 @@
         alive (advertisement "alive" pid started)
         stale (advertisement "stale" pid (java.util.Date. 0))
         degraded (advertisement "degraded" pid started)
+        unknown (advertisement "unknown" pid started)
         observations
         {:seon.fresh-operator/advertisements
          [{:seon.fresh-operator/name "alive"
@@ -387,7 +388,12 @@
            :seon.fresh-operator/root root
            :seon.fresh-operator/path (str root "/degraded/prepl.edn")
            :seon.fresh-operator/process-alive? true
-           :seon.fresh-operator/advertisement degraded}]
+           :seon.fresh-operator/advertisement degraded}
+          {:seon.fresh-operator/name "unknown"
+           :seon.fresh-operator/root root
+           :seon.fresh-operator/path (str root "/unknown/prepl.edn")
+           :seon.fresh-operator/process-alive? true
+           :seon.fresh-operator/advertisement unknown}]
          :seon.fresh-operator/jvms
          [{:seon.fresh-operator/root root
            :seon.fresh-operator/reachable? true
@@ -411,9 +417,33 @@
     (is (str/includes? (second lines) "alive state=alive") text)
     (is (str/includes? text "degraded state=degraded") text)
     (is (str/includes? text "cluster-layer=degraded") text)
+    (is (str/includes? text "unknown state=unknown") text)
+    (is (not (str/includes? text "unknown state=alive")) text)
     (is (str/includes? text "stale state=stale") text)
     (is (str/includes? text "invalid state=invalid") text)
     (is (str/includes? text (str "under " root)) text)))
+
+(deftest transport-errors-echo-the-attempted-evaluation-coordinates
+  (let [result
+        (with-redefs-fn
+          {(bridge-var 'current-clj-session!)
+           (fn [& _]
+             (throw (ex-info "fixture transport failed"
+                             {:seon.dev.mcp/failure :transport-fixture})))}
+          #((bridge-var 'execute-clj-eval)
+            {:root (.getCanonicalPath project-root)
+             :cluster "fixture"
+             :namespace "mcp.fixture.target"
+             :mode "door"
+             :session_id "coordinates"
+             :code "(+ 1 2)"}))
+        data (result-data result)]
+    (is (true? (:isError result)))
+    (is (= "door" (:seon.dev.mcp/mode data)))
+    (is (= "mcp.fixture.target" (:seon.dev.mcp/namespace data)))
+    (is (= "fixture" (:seon.dev.mcp/cluster data)))
+    (is (= "coordinates" (:seon.dev.mcp/session-id data)))
+    (is (= "transport-fixture" (:seon.dev.mcp/failure data)))))
 
 (deftest endpoint-selection-is-root-scoped-and-reaches-degraded-registrations
   (let [fixture-root (io/file project-root "tmp"

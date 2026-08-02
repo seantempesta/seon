@@ -337,7 +337,10 @@
        :seon.dev.mcp/cluster cluster
        :seon.dev.mcp/path (:seon.fresh-operator/path observation)
        :seon.dev.mcp/state
-       (if (false? (get layer-states cluster)) :degraded :alive)
+       (case (get layer-states cluster)
+         true :alive
+         false :degraded
+         :unknown)
        :seon.dev.mcp/advertisement advertisement
        :seon.dev.mcp/source :advertisement})))
 
@@ -391,7 +394,7 @@
                          (:seon.boot/start-instant advertisement)])))
          (registered-rows root observations))]
     (->> (concat advertisements registrations)
-         (sort-by (juxt #(not (contains? #{:alive :degraded}
+         (sort-by (juxt #(not (contains? #{:alive :degraded :unknown}
                                          (:seon.dev.mcp/state %)))
                         :seon.dev.mcp/cluster
                         #(get-in % [:seon.dev.mcp/advertisement
@@ -430,7 +433,7 @@
   (let [root (canonical-root root)
         rows (discovery-rows root)
         candidates (filterv #(and (= cluster (:seon.dev.mcp/cluster %))
-                                  (contains? #{:alive :degraded}
+                                  (contains? #{:alive :degraded :unknown}
                                              (:seon.dev.mcp/state %)))
                             rows)]
     (case (count candidates)
@@ -840,10 +843,10 @@
                :seon.dev.mcp/session-id session-id
                :seon.dev.mcp/error (ex-message throwable)}
               (ex-data throwable)))
-      (try
-        (let [mode (:seon.dev.mcp/mode validation)
-              namespace-symbol (:seon.dev.mcp/namespace-symbol validation)
-              remote-form
+      (let [mode (:seon.dev.mcp/mode validation)
+            namespace-symbol (:seon.dev.mcp/namespace-symbol validation)]
+        (try
+          (let [remote-form
               (remote-evaluation-form
                (:seon.dev.mcp/evaluation validation)
                mode cluster namespace-symbol)
@@ -871,6 +874,8 @@
                       :seon.dev.mcp/runtime "clj"
                       :seon.dev.mcp/root root
                       :seon.dev.mcp/cluster cluster
+                      :seon.dev.mcp/mode mode
+                      :seon.dev.mcp/namespace (str namespace-symbol)
                       :seon.dev.mcp/session-id session-id
                       :seon.dev.mcp/timeout-ms timeout-ms}))
         (catch Throwable throwable
@@ -882,9 +887,11 @@
                    :seon.dev.mcp/runtime "clj"
                    :seon.dev.mcp/root root
                    :seon.dev.mcp/cluster cluster
+                   :seon.dev.mcp/mode mode
+                   :seon.dev.mcp/namespace (str namespace-symbol)
                    :seon.dev.mcp/session-id session-id
                    :seon.dev.mcp/error (ex-message throwable)}
-                  (ex-data throwable))))))))
+                  (ex-data throwable)))))))))
 
 (defn- execute-list-sessions
   [_]
