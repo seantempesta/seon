@@ -1917,6 +1917,44 @@ may reintroduce a shadow build into the dev feedback path.
   per-function placement table exists at any point, and which functions
   need custody stays the ruling-#33 contract query (9 declaring a
   branch connection, 42 a database value, counted live 2026-08-02).
+  **Ruling 2026-08-02 #44 (owner, evening): THE MCP SURFACE IS
+  RATIFIED, AND STORE ECONOMICS IS UNDERSTOOD BEFORE IT IS FIXED.**
+  (1) MCP per `docs/prds/mcp-surface/README.md`: THREE tools —
+  `eval_clj` (JVM and SCI-door modes), `runtime_status` (inventory,
+  health, flow), and `get_value` for drilling an elided result;
+  `list_sessions` is deleted atomically when its data moves into
+  status. Defaults are repository root, selected/default cluster,
+  `user`, and unrestricted JVM mode, so a routine probe is just the
+  code. (2) MCP RESULTS ARE STORED WHEN A CONNECTION EXISTS: an
+  oversized result settles into the targeted cluster's blob tier and
+  returns a projected window plus a retrievable digest; against a
+  degraded JVM with no store it returns the window and STATES that the
+  remainder is not retrievable — honest rather than silently lossy.
+  This closes `mcp-truncates-instead-of-using-the-value-system.md`:
+  there is no second truncation and no MCP-only budget. (3) THE FLOW
+  PING WINDOW BECOMES A CONFIG FACT with provenance rather than a
+  literal, and a missing reply always reads as UNKNOWN, never as
+  healthy — the standing law that absence of signal is not health.
+  A bounded window is the right shape here because an unresponsive
+  proc is genuinely unobservable without asking. (4) STORE ECONOMICS:
+  UNDERSTAND FIRST. Owner: "I'm more worried about explosive storage
+  growth if we don't understand what's going on and fix it now than I
+  am about 2GB per failed run." The measured 86× inline amplification
+  is still UNEXPLAINED — the konserve/datahike anatomy owed since
+  2026-08-02 is the prerequisite, not the fixes. Only then the known
+  wins, all filed and none adopted: the store is created WITHOUT any of
+  the three write-amplification options our Datahike fork already ships
+  and without the writer's batching dial (one small commit costs ~123
+  ms, ~99% konserve fsyncing 18-24 objects serially —
+  `file-store-commits-pay-five-times-the-fsyncs-they-need.md`); GC runs
+  without a cutoff and reclaims almost nothing; we allocate a konserve
+  cache nothing reads; history is on by inheritance rather than
+  decision. The full O1-O5 matrix waits on that work; a small bootstrap
+  A/B does not. (5) PHASE 2 LANDS WITH A LIVE DRIVE, not tests alone —
+  a fixture load path is not the live boot path. (6) THREE LANES AT A
+  TIME, after an evening in which unbounded parallelism produced 25
+  JVMs, a load average of 69, and two orphaned suite runs that sat for
+  87 minutes producing nothing.
   **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
   THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
   (1) Owner verbatim: "we OWN sci now with our fork. Design with the
