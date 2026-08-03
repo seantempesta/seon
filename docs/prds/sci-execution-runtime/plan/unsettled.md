@@ -157,6 +157,19 @@ running lanes; relaunches the moment they commit. effect-capability
 landed `ba4d39423` + `7493c84bd` (capability indexing + effect/workload
 reachability separation).
 
+THE ADDENDUM 22 OWNER-DECISION BATCH IS FULLY RULED (with ruling #52):
+(1) ownership fact = the audit constraint; (2) stakeholders DISSOLVED by
+lazy agents; (3) repair acceptance = no-ack bootstrap query; (4) MY.WEB
+TIMING — slots inside the tools spine AFTER `my.fs`/`my.edit` and BEFORE
+`my.shell` (fetch first, search second; Hato-vs-JDK transport comparison
+runs as the research slot beforehand; jsoup for extraction, pins already
+named in the tools design); (5) SEARCH PROVIDER — Serper, adopted for
+planning with mandatory price/terms re-verification as the implementing
+lane's first step (Brave stays the independent-index fallback; provider
+is a config fact behind one schema, never a provider-shaped API);
+(6) schema split launched (see above). Nothing in the batch remains
+open.
+
 **ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
 THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
 
