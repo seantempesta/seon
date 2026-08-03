@@ -61,6 +61,10 @@
         ;; no-follow traversal, bounds, preconditions, and flat errors.
         babashka/fs {:local/root "reference-code/babashka/fs"}
 
+        ;; Foreground argv-vector subprocesses. Seon owns cwd policy,
+        ;; environment overrides, stream capture, deadlines, and tree reaping.
+        babashka/process {:local/root "reference-code/babashka-process"}
+
         ;; Lossless structural source selection and transformation. The edit
         ;; core additionally fences rewrite-clj's normalized render against an
         ;; exact splice into the original UTF-8 source.

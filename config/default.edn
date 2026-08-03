@@ -111,6 +111,29 @@
  ; Unit: directory edges descended by one glob.
  :seon.config.fs/max-depth 64
 
+ ; THE FOREGROUND SHELL CAPABILITY. Completion is observed from Process.onExit;
+ ; the time limit is only the legitimate foreign-process backstop. The 30 s /
+ ; 1 s pair retains the measured JVM/Bun quarry policy recorded in the timeout
+ ; census. Inline output reuses the 4,096-byte measured blob crossover; preview
+ ; is one quarter of that complete evidence window. Stdin matches the measured
+ ; largest-file filesystem ceiling, so composing a file into a child requires
+ ; no smaller unexplained bound. PATH/HOME/LANG are explicitly absent optional
+ ; overrides: the child inherits every parent variable, and a declared value
+ ; replaces only its named variable.
+ ; Unit: milliseconds until the foreign-process backstop fires.
+ :seon.config.shell/time-limit-ms 30000
+ ; Unit: milliseconds between polite and forced exact-tree termination.
+ :seon.config.shell/termination-grace-ms 1000
+ ; Unit: complete stdout or stderr bytes returned inline.
+ :seon.config.shell/inline-output-bytes 4096
+ ; Unit: UTF-8 prefix bytes attempted for blob-backed output evidence.
+ :seon.config.shell/preview-bytes 1024
+ ; Unit: bytes accepted on one child stdin stream.
+ :seon.config.shell/stdin-max-bytes 16777216
+ :seon.config.shell/path :seon.config/absent
+ :seon.config.shell/home :seon.config/absent
+ :seon.config.shell/lang :seon.config/absent
+
  ; Unit: count of same-signature faults since this process started.
  ; Provenance: the second escalation condition (the first is "no
  ; attributable agent"). Three says a fault that happened once was
