@@ -30,12 +30,12 @@
 
 (schema/register!
  ::load-request
- [:map {:closed true}
+ [:map
   [::resource {:optional true} ::resource]])
 
 (schema/register!
  ::loaded
- [:map {:closed true}
+ [:map
   [::file ::file]
   [::keys ::keys]])
 
@@ -113,14 +113,14 @@
                    :seon.config/entity]))
       (assoc forms
              :seon.config/manifest
-             (into [:map {:closed true}] manifest-entries)
+             (into [:map] manifest-entries)
              :seon.config/effective
-             (into [:map {:closed true}] effective-entries)
+             (into [:map] effective-entries)
              :seon.config/agent-overlay
-             (into [:map {:closed true}] agent-overlay-entries)
+             (into [:map] agent-overlay-entries)
              :seon.config/entity
              (into
-              [:map {:closed true :seon.db/entity true}
+              [:map {:seon.db/entity true}
                [:seon.config/cluster :seon.config/cluster]
                [:seon.config/applied-manifest-digest
                 :seon.config/applied-manifest-digest]]

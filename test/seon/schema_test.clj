@@ -85,14 +85,14 @@
       (finally
         (schema/restore-state! state)))))
 
-(deftest render-identification-ignores-additional-top-level-attributes
+(deftest map-shapes-accrete-additional-top-level-attributes
   (let [state (schema/snapshot-state)
         schema-key :seon.schema-test/rendered-entity
         render-html 'seon.schema-test/render-html]
     (try
       (schema/register!
        schema-key
-       [:map {:closed true :seon.render/html render-html}
+       [:map {:seon.render/html render-html}
         [:seon.schema-test/id :string]
         [:seon.schema-test/rank {:optional true} :int]])
       (schema/activate! (schema/build-projection
@@ -102,24 +102,30 @@
                               :seon.render/html
                               'my.agent/render-html)
             invalid (assoc additional :seon.schema-test/rank "first")]
-        (testing "closed validation remains load-bearing"
-          (is (= [schema-key]
-                 (mapv :seon.schema/key
-                       (schema/matching-shapes base))))
-          (is (empty? (schema/matching-shapes additional))))
-        (testing "render identification ignores only undeclared attributes"
+        (testing "shape identity survives accretion"
           (is (= [schema-key schema-key]
                  (mapv (fn [value]
-                         (-> (schema/render-matching-shapes value)
+                         (-> (schema/matching-shapes value)
                              first
                              :seon.schema/key))
                        [base additional])))
           (is (= render-html
-                 (-> (schema/render-matching-shapes additional)
+                 (-> (schema/matching-shapes additional)
                      first
                      :seon.render/html))
               "custom Malli render properties survive in the shape row")
-          (is (empty? (schema/render-matching-shapes invalid))
+          (is (empty? (schema/matching-shapes invalid))
               "an invalid declared optional attribute still refuses")))
       (finally
         (schema/restore-state! state)))))
+
+(deftest agent-authored-function-input-maps-accrete
+  (is (empty?
+       (schema/assert-complete-contract!
+        {:seon.schema/identity 'my.agent/accreting
+         :seon.schema/definition
+         [:=>
+          [:cat [:map [:my.agent/required :string]]]
+          :string]
+         :seon.schema/admission
+         {:seon.schema.admission/source :agent}}))))

@@ -131,7 +131,7 @@ from the admitted Malli forms.
  [:int {:min 1 :description "cap on matches returned"}]
 
  :seon.search/request
- [:map {:closed true}
+ [:map
   [:seon.search/pattern :seon.search/pattern]
   [:seon.search/max-results {:optional true} :seon.search/max-results]]}
 ```
@@ -142,6 +142,14 @@ isolated registry delta and publish only from the terminal transaction report's
 `db-after` in `seon.sci.eval`. Ordinary first-party namespaces call
 `schema.edn/load!` to activate the packaged population; they do not duplicate
 their declarations in Clojure forms.
+
+Malli maps are open by default, and Seon keeps them open so functions and data
+can accrete. A declared required key must still be present and every declared
+key must satisfy its schema; additional keys are accepted when the consumer
+does not use them. This rule applies equally to request, response, entity, and
+value maps. Do not add `{:closed true}` to catch misspelled optional keys: that
+would make every future producer addition a breaking change for existing
+consumers.
 
 Identity attributes are declared via `{:seon.db/identity true}` on the
 declared shape — there is **no** magic `:seon/id` key:
@@ -190,13 +198,13 @@ Define separate schemas for requests and responses with namespaced keys:
 
 ```clojure
 {:seon.search/request
- [:map {:closed true}
+ [:map
   [:seon.search/pattern :seon.search/pattern]
   [:seon.search/paths {:optional true} :seon.search/paths]
   [:seon.search/max-results {:optional true} :seon.search/max-results]]
 
  :seon.search/success
- [:map {:closed true}
+ [:map
   [:seon.search/matches :seon.search/matches]]
 
  :seon.search/response

@@ -22,10 +22,10 @@
  :seon.eval/host-interop-count [:int {:min 0}]
  :seon.eval/outcome [:enum :ok :time :error]
 
- :seon.sci.admit/caps [:map {:closed true} [:seon.config.eval.result/max-depth :seon.config.eval.result/max-depth] [:seon.config.eval.result/max-collection :seon.config.eval.result/max-collection] [:seon.config.eval.result/max-string :seon.config.eval.result/max-string] [:seon.config.eval.result/max-nodes :seon.config.eval.result/max-nodes]]
+ :seon.sci.admit/caps [:map  [:seon.config.eval.result/max-depth :seon.config.eval.result/max-depth] [:seon.config.eval.result/max-collection :seon.config.eval.result/max-collection] [:seon.config.eval.result/max-string :seon.config.eval.result/max-string] [:seon.config.eval.result/max-nodes :seon.config.eval.result/max-nodes]]
  :seon.sci.admit/capped? :boolean
  :seon.sci.admit/interrupt-fn [:fn {:gen/gen seon.sci.admit/interrupt-fn-generator} seon.sci.admit/interrupt-fn?]
- :seon.sci.admit/record [:map {:closed true} [:seon.eval/fn-entries :seon.eval/fn-entries] [:seon.eval/host-interop-count :seon.eval/host-interop-count] [:seon.eval/duration-ms :seon.eval/duration-ms] [:seon.eval/allocated-bytes :seon.eval/allocated-bytes] [:seon.eval/outcome :seon.eval/outcome]]
+ :seon.sci.admit/record [:map  [:seon.eval/fn-entries :seon.eval/fn-entries] [:seon.eval/host-interop-count :seon.eval/host-interop-count] [:seon.eval/duration-ms :seon.eval/duration-ms] [:seon.eval/allocated-bytes :seon.eval/allocated-bytes] [:seon.eval/outcome :seon.eval/outcome]]
  ; :any twice, both at the one genuine third-party boundary: IN, whatever
  ; object a sci evaluation produced; OUT, the projection, whose grammar is
  ; the admit docstring's and is deliberately NOT a second predicate
@@ -44,8 +44,8 @@
  ; measurements nobody took. Absent in, absent out: admission carries
  ; the record through untouched, and an absent record stays absent
  ; rather than becoming a stored nil.
- :seon.sci.admit/request [:map {:closed true} [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
- :seon.sci.admit/admitted [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/request [:map  [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/admitted [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
  :seon.sci.admit/value :any
 
 ;; ===========================================================================
@@ -75,7 +75,7 @@
  ; agent row in one transaction so a newly created agent is never
  ; ownerless at any committed basis.
  :seon.cluster.agent/creation-request
- [:map {:closed true}
+ [:map
  [:seon.cluster.agent/id :seon.cluster.agent/id]
  [:seon.ns/name :seon.ns/name]
   [:seon.cluster/name :seon.cluster/name]]
@@ -86,7 +86,7 @@
  ; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
  ; Two agents differ only in the agent-id their procs carry and the
  ; mailbox channel routed to them — there is no per-agent variation.
- :seon.cluster.agent/blueprint-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]
+ :seon.cluster.agent/blueprint-request [:map  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]
 
  ; THE ROUTING ENTRY: process-local map atom held on the cluster
  ; instance beside the connection — the sanctioned kind of process
@@ -97,13 +97,13 @@
  ; handler's delivery is one map lookup — no query, no park.
  :seon.cluster.agent/routing [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
 
- :seon.cluster.agent/arm-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+ :seon.cluster.agent/arm-request [:map  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
 
- :seon.cluster.agent/disarm-request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
+ :seon.cluster.agent/disarm-request [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
 
  ; One armed agent's process-local entry: its graph, its mailbox, the
  ; orderly-stop completion, and the entity id its routing rides on.
- :seon.cluster.agent/armed [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/eid :int] [:seon.flow/graph :seon.flow/graph] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel]]
+ :seon.cluster.agent/armed [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/eid :int] [:seon.flow/graph :seon.flow/graph] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel]]
 
  :seon.cluster.agent/eid :int
 
@@ -178,7 +178,7 @@
  :seon.ai/sent [:map-of :string :any]
  :seon.ai/inert [:set :qualified-keyword]
  :seon.ai/wire-settings
- [:map {:closed true}
+ [:map
   [:seon.ai/sent :seon.ai/sent]
   [:seon.ai/inert :seon.ai/inert]]
  :seon.ai/request-body [:or :seon.ai/sent :seon.error/value]
@@ -191,7 +191,7 @@
  :seon.ai.usage/total-tokens :seon.ai/tokens
  :seon.ai.usage/cached-tokens :seon.ai/tokens
  :seon.ai/normalized-usage
- [:map {:closed true}
+ [:map
   [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
   [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]
   [:seon.ai.usage/total-tokens {:optional true} :seon.ai.usage/total-tokens]
@@ -200,7 +200,7 @@
  ; One snapshot handed to the sink: everything so far, plus the live
  ; token count derived from the SAME fold rather than counted twice.
  :seon.ai/partial
- [:map {:closed true}
+ [:map
   [:seon.ai/text :string]
   [:seon.ai/reasoning-partial {:optional true} :seon.ai/reasoning-partial]
   [:seon.ai/tokens :seon.ai/tokens]
@@ -209,9 +209,9 @@
 
  :seon.ai/request
  [:or
-  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
-  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
- :seon.ai/completion [:or [:map {:closed true} [:seon.ai/text :seon.ai/text] [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
+  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
+  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
+ :seon.ai/completion [:or [:map  [:seon.ai/text :seon.ai/text] [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
 
  ; ---------------------------------------------------------------------
  ; THE DESCRIPTOR ROW. A target is one callable model: the four wire
@@ -226,12 +226,12 @@
  :seon.ai/backup :seon.ai/target
  :seon.ai/target
  [:or
-  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
-  [:map {:closed true} [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]]
+  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]]
  ; TWO ROLES, and the backup is ABSENT rather than nil when there is
  ; none — absence is the state, and `:seon.ai/backup?` downstream is
  ; literally `(contains? targets :seon.ai/backup)`.
- :seon.ai/targets [:map {:closed true} [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target]]
+ :seon.ai/targets [:map  [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target]]
 
  ; ---------------------------------------------------------------------
  ; THE BACKOFF STRATEGY, as data. Composed the way `again` composes it
@@ -247,7 +247,7 @@
  ; `:fail` by data rather than by a code branch.
  :seon.ai.retry/maximum-retries [:int {:min 0}]
  :seon.ai.retry/maximum-total-delay-ms [:int {:min 0}]
- :seon.ai.retry/strategy [:map {:closed true} [:seon.ai.retry/base-delay-ms :seon.ai.retry/base-delay-ms] [:seon.ai.retry/multiplier :seon.ai.retry/multiplier] [:seon.ai.retry/jitter-fraction :seon.ai.retry/jitter-fraction] [:seon.ai.retry/maximum-delay-ms :seon.ai.retry/maximum-delay-ms] [:seon.ai.retry/maximum-retries :seon.ai.retry/maximum-retries] [:seon.ai.retry/maximum-total-delay-ms :seon.ai.retry/maximum-total-delay-ms]]
+ :seon.ai.retry/strategy [:map  [:seon.ai.retry/base-delay-ms :seon.ai.retry/base-delay-ms] [:seon.ai.retry/multiplier :seon.ai.retry/multiplier] [:seon.ai.retry/jitter-fraction :seon.ai.retry/jitter-fraction] [:seon.ai.retry/maximum-delay-ms :seon.ai.retry/maximum-delay-ms] [:seon.ai.retry/maximum-retries :seon.ai.retry/maximum-retries] [:seon.ai.retry/maximum-total-delay-ms :seon.ai.retry/maximum-total-delay-ms]]
  :seon.ai.retry/delays [:vector [:int {:min 0}]]
 
  ; ---------------------------------------------------------------------
@@ -308,7 +308,7 @@
  ; pure functions of the durable evidence (`seon.ai/disposition`,
  ; `status-class`, the error fact's data-edn), derived at read rather
  ; than frozen beside the facts they restate.
- :seon.ai/attempt [:map {:closed true :seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning] [:seon.ai.attempt/reasoning-blob {:optional true} :seon.ai.attempt/reasoning-blob] [:seon.ai.attempt/reasoning-size {:optional true} :seon.ai.attempt/reasoning-size] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+ :seon.ai/attempt [:map {:seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning] [:seon.ai.attempt/reasoning-blob {:optional true} :seon.ai.attempt/reasoning-blob] [:seon.ai.attempt/reasoning-size {:optional true} :seon.ai.attempt/reasoning-size] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
 
  ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
@@ -335,7 +335,7 @@
  ; backup exists.
  :seon.ai/disposition [:enum :failover-now :backoff :fail]
  :seon.ai/backup? :boolean
- :seon.ai/disposition-request [:map {:closed true} [:seon.error/value :seon.error/value] [:seon.ai/backup? :seon.ai/backup?]]
+ :seon.ai/disposition-request [:map  [:seon.error/value :seon.error/value] [:seon.ai/backup? :seon.ai/backup?]]
 
 ;; ===========================================================================
 ;; BLOCK
@@ -390,28 +390,22 @@
  :seon.render/surface-id [:string {:min 9}]
 
  ; ONE RENDERED BLOCK. Success carries the output; failure carries the
- ; flat error value INSTEAD — never merged beside it, because
- ; `:seon.error/value` is a closed shape registered once and a map that
- ; is both is neither. The surface always carries its name and id, so a
+ ; flat error value INSTEAD. The surface always carries its name and id, so a
  ; failed block still has a place to put its error card and its
  ; neighbours are unaffected: per-block isolation is structural here, not
  ; a try/catch somebody remembered.
  ;
- ; A UNION OF TWO CLOSED MAPS rather than one map with two optional keys,
- ; and no discriminator: closedness already makes the two disjoint, and
- ; `:seon.error/value` presence is the same "did this render?" test the
- ; router's own wrap contract established. This is not the `:close`
- ; precedent — there the FOLD's end had to be visible in the value
- ; because an absent ordinal meant two different things; here nothing is
- ; inferred from an absence, only read from a presence.
+ ; The two required result attributes describe the current producer invariant:
+ ; success carries `:seon.render/output`, failure carries `:seon.error/value`.
+ ; Maps remain open for accretion; closedness is not the discriminator.
  :seon.render/surface
  [:or
-  [:map {:closed true}
+  [:map
    [:seon.render.block/name :seon.render.block/name]
    [:seon.render/surface-id :seon.render/surface-id]
    [:seon.render/kind :seon.render/kind]
    [:seon.render/output :seon.render/output]]
-  [:map {:closed true}
+  [:map
    [:seon.render.block/name :seon.render.block/name]
    [:seon.render/surface-id :seon.render/surface-id]
    [:seon.render/kind :seon.render/kind]
@@ -456,7 +450,7 @@
 
  ; The retained direct unit builder's input.
  :seon.render/unit-request
- [:map {:closed true}
+ [:map
   [:seon.db/db :seon.db/database-value]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -473,7 +467,7 @@
  ; DISTANCE is optional: absent means the caps alone bound the expansion;
  ; present means each ref hop spends one.
  :seon.render/expansion
- [:map {:closed true}
+ [:map
   [:seon.render/surfaces :seon.render/surfaces]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.render/distance {:optional true} :seon.render/distance]
@@ -522,7 +516,7 @@
  ; invisible here, which is the difference between a producer's rules
  ; and a dispatch table.
  :seon.render/selection
- [:map {:closed true}
+ [:map
   [:seon.render/kind :seon.render/kind]
   [:seon.render/default :seon.render/projection]
   [:seon.render/specialists [:vector :seon.render/specialist]]]
@@ -530,10 +524,10 @@
 ;; ===========================================================================
 ;; BOOT
 ;; ===========================================================================
-:seon.boot/advertisement [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant] [:seon.render.web/url {:optional true} :seon.render.web/url] [:seon.render.web/port {:optional true} :seon.render.web/port]]
+:seon.boot/advertisement [:map  [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant] [:seon.render.web/url {:optional true} :seon.render.web/url] [:seon.render.web/port {:optional true} :seon.render.web/port]]
  :seon.boot/cluster-name [:string {:min 1}]
- :seon.boot/config [:map {:closed true} [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/root :seon.boot/root] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port :seon.boot/prepl-port] [:seon.boot/log-dir :seon.boot/log-dir] [:seon.boot/store-dir :seon.boot/store-dir]]
- :seon.boot/instance [:map {:closed true} [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops] [:seon.render.web/view {:optional true} :seon.render.web/view] [:seon.render.web/served {:optional true} :seon.render.web/server] [:seon.cluster.agent/routing {:optional true} :seon.cluster.agent/routing] [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]]
+ :seon.boot/config [:map  [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/root :seon.boot/root] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port :seon.boot/prepl-port] [:seon.boot/log-dir :seon.boot/log-dir] [:seon.boot/store-dir :seon.boot/store-dir]]
+ :seon.boot/instance [:map  [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops] [:seon.render.web/view {:optional true} :seon.render.web/view] [:seon.render.web/served {:optional true} :seon.render.web/server] [:seon.cluster.agent/routing {:optional true} :seon.cluster.agent/routing] [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]]
  ; THE ARMED LAYERS, each optional because absence marks where boot
  ; stopped: the loop's handle, the graph it runs on, the error fan-out
  ; that makes flow's error channel more than a 100-deep buffer nobody
@@ -548,10 +542,10 @@
  ; checked. Instrumentation found it the moment it collected. Register
  ; shared shapes once and reference them; that rule exists for exactly
  ; this.
- :seon.boot/executors [:map {:closed true} [:compute [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]] [:io [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]]]
+ :seon.boot/executors [:map  [:compute [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]] [:io [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]]]
 
  :seon.boot/log-dir [:string {:min 1}]
- :seon.boot/overrides [:map {:closed true} [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name] [:seon.boot/root {:optional true} :seon.boot/root] [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host] [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port] [:seon.boot/log-dir {:optional true} :seon.boot/log-dir] [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]]
+ :seon.boot/overrides [:map  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name] [:seon.boot/root {:optional true} :seon.boot/root] [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host] [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port] [:seon.boot/log-dir {:optional true} :seon.boot/log-dir] [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]]
  :seon.boot/pid [:int {:min 1}]
  :seon.boot/prepl-host [:string {:min 1}]
  :seon.boot/prepl-port [:int {:min 0 :max 65535}]
@@ -570,7 +564,7 @@
  ; where the tower may not have reached — a degraded instance still has
  ; a readiness, and absence marks what never stood.
  :seon.boot/readiness
- [:map {:closed true}
+ [:map
   [:seon.boot/cluster-name :seon.boot/cluster-name]
   [:seon.boot/pid :seon.boot/pid]
   [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
@@ -823,7 +817,7 @@
   :seon.ai.retry/maximum-total-delay-ms]
 
  :seon.config/apply-request
- [:map {:closed true}
+ [:map
   ; A live Datahike connection is a genuine third-party boundary.
   [:seon.config/connection :any]
   [:seon.config/manifest {:optional true} :seon.config/manifest]
@@ -831,13 +825,13 @@
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
 
  :seon.config/compile-request
- [:map {:closed true}
+ [:map
   [:seon.config/manifest {:optional true} :seon.config/manifest]
   [:seon.config/environment {:optional true} :seon.config/manifest]
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
 
  :seon.config/compiled
- [:map {:closed true}
+ [:map
   [:seon.config/effective :seon.config/effective]
   [:seon.config/applied-manifest-digest
    :seon.config/applied-manifest-digest]
@@ -845,7 +839,7 @@
   [:seon.config/resolved-attributes [:set :qualified-keyword]]]
 
  :seon.boot/start-request
- [:map {:closed true}
+ [:map
   [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
   [:seon.boot/root {:optional true} :seon.boot/root]
   [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host]
@@ -966,7 +960,7 @@
  ; presence IS "failed"; :seon.render/kind rides here (request-argument
  ; territory) even though the durable row drops it.
  :seon.context/contribution
- [:map {:closed true}
+ [:map
   [:seon.render.block/name :seon.render.block/name]
   [:seon.render/kind :seon.render/kind]
   [:seon.context.contribution/position :seon.context.contribution/position]
@@ -981,7 +975,7 @@
  ; What capture-tx receives: the rendered context plus the run it is
  ; evidence for. Pure in, tx-data out; the LOOP commits.
  :seon.context/capture-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.prompt/rendered-context :seon.cluster.prompt/rendered-context]
   [:seon.cluster.run/live-processes {:optional true}
@@ -1007,7 +1001,7 @@
  :seon.render.data/offset [:int {:min 0}]
 
  :seon.render.data/cursor
- [:map {:closed true}
+ [:map
   [:seon.render.data/path :seon.render.data/path]
   [:seon.render.data/offset :seon.render.data/offset]]
 
@@ -1017,7 +1011,7 @@
  ; "is there a next page?" is key presence rather than arithmetic
  ; repeated at every call site.
  :seon.render.data/window
- [:map {:closed true}
+ [:map
   [:seon.render.data/entries [:vector [:tuple :any :any]]]
   [:seon.render.data/offset :seon.render.data/offset]
   [:seon.render.data/total [:int {:min 0}]]
@@ -1035,8 +1029,8 @@
  :my.run/disposition [:enum :wait :completed]
  :my.run/note [:string {:min 1}]
  :my.run/result [:string {:min 1}]
- :my.run/wait [:map {:closed true} [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note]]
- :my.run/completed [:map {:closed true} [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+ :my.run/wait [:map  [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note]]
+ :my.run/completed [:map  [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
  ; what an agent's last form may evaluate to and the loop will act on
  :my.run/value [:or :my.run/wait :my.run/completed]
 
@@ -1053,7 +1047,7 @@
  ;
  ;   :seon.error/value — the FLAT value. Nothing throws into the run
  ;     loop, so this is what a caller branches on and what an agent is
- ;     shown. Producers keep their own closed maps under `data`.
+ ;     shown. Producers keep their own namespaced data under `data`.
  ;   :seon.error/fact  — the DURABLE fact. One committed entity per
  ;     error worth remembering, carrying the projected evidence and
  ;     refs to what it interrupted. `seon.error/value` projects a fact
@@ -1073,12 +1067,12 @@
  ; --- the flat value -------------------------------------------------------
  ; `kind` is the namespaced rule that failed, `message` is what a reader
  ; (agent or human) is told, and `data` carries whatever the owner of
- ; that rule attached. Producers stay closed maps of their own; this is
- ; the shared floor.
+ ; that rule attached. Producer keys retain their own namespaced meanings;
+ ; this is the shared floor.
  :seon.error/data :map
  :seon.error/kind :keyword
  :seon.error/message [:string {:min 1}]
- :seon.error/value [:map {:closed true} [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]
+ :seon.error/value [:map  [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]]
 
  ; --- the durable fact -----------------------------------------------------
  ; Classification is the CHANNEL, not a predicate — `seon.sci.eval/evaluate`
@@ -1165,7 +1159,7 @@
  ; src-old/seon/error.cljc:738-745). Admission is therefore called in
  ; `:record` mode unconditionally, and a codec hole stays visible as a
  ; projection marker plus `capped?` rather than as a throw.
- :seon.error/normalize-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.error/normalize-request [:map  [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
 
  ; --- the notice: the derived routing unit ---------------------------------
  ; WHY an agent is being told. A derived clause, never boilerplate — and
@@ -1185,14 +1179,14 @@
  ; every route it declares, and the selected human presentation.
  :seon.error/evidence [:tuple [:enum :seon.error/id] :seon.error/id]
  :seon.error/presentation :seon.render/projection
- :seon.error/notice-request [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.error/notice-request [:map  [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; The notice is DERIVED and never stored: a fact plus the projection
  ; declarations, which is what makes it routable through the one generic
  ; router (`seon.render`). The projection keys ride on the notice rather
  ; than on the entity because a stored symbol identical on every row is
  ; stored-derived data, and because the ai projection needs the reason
  ; the entity cannot carry.
- :seon.error/notice [:map {:closed true} [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.error/presentation :seon.error/presentation] [:seon.render/kinds :seon.render/kinds] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.error/notice [:map  [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.error/presentation :seon.error/presentation] [:seon.render/kinds :seon.render/kinds] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
 
  ; How many faults the fan-out's bounded buffer had to DROP in this
  ; process. Process-local by nature — it counts what never became a
@@ -1210,7 +1204,7 @@
  ; one door. Slice 1's `commit-request`/`committed` shapes are GONE —
  ; they described an effectful function that no longer exists, and
  ; keeping them would have been a second contract for one mechanism.
- :seon.error/commit-tx-request [:map {:closed true} [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to]]
+ :seon.error/commit-tx-request [:map  [:seon.error/source :seon.error/source] [:seon.error/id :seon.error/id] [:seon.error/at :seon.error/at] [:seon.error/process :seon.error/process] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.error/basis-t {:optional true} :seon.error/basis-t] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to]]
 
  ; An explanation message carries a ref to what it explains. A user
  ; message has none — absence is the state, and it is what makes the
@@ -1245,7 +1239,7 @@
  :seon.sci.eval/nondeterministic-calls [:set :symbol]
  :seon.sci.eval/impure-calls [:set :symbol]
  :seon.sci.eval/session-def
- [:map {:closed true}
+ [:map
   [:seon.code.def/id :seon.code.def/id]
   [:seon.code.def/ns :seon.code.def/ns]
   [:seon.code.def/name :seon.code.def/name]
@@ -1259,16 +1253,16 @@
   [:seon.sci.eval/impure-calls :seon.sci.eval/impure-calls]]
  :seon.sci.eval/session-defs [:vector :seon.sci.eval/session-def]
  :seon.sci.eval/install-request
- [:map {:closed true}
+ [:map
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.db/db :seon.db/database-value]
   [:seon.sci.eval/program-row :seon.sci.eval/program-row]]
  :seon.sci.eval/acquire-request
- [:map {:closed true}
+ [:map
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.db/db :seon.db/database-value]]
  :seon.sci.eval/session-install-request
- [:map {:closed true}
+ [:map
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.db/db :seon.db/database-value]
   [:seon.store/branch-connection {:optional true}
@@ -1276,7 +1270,7 @@
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map {:closed true} [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; What one evaluation leaves behind: the terminal facts the receipt
  ; stores (result-edn always; error when it failed; interrupted-at when
  ; the time limit fired), the admitted value the loop reads a
@@ -1285,14 +1279,14 @@
  ; had no such thing, and PRESENCE IS THE STATE: there is no status
  ; label restating which keys exist (owner ruling 2026-07-28).
  :seon.sci.eval/ending-ns :symbol
- :seon.sci.eval/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options :seon.print/options] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
+ :seon.sci.eval/evaluation [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options :seon.print/options] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
 
 ;; ===========================================================================
 ;; EXPORT
 ;; ===========================================================================
 :seon.export/parent-dir [:string {:min 1}]
  :seon.export/path [:string {:min 1}]
- :seon.export/request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.export/parent-dir :seon.export/parent-dir]]
+ :seon.export/request [:map  [:seon.store/store :seon.store/store] [:seon.export/parent-dir :seon.export/parent-dir]]
 
 ;; ===========================================================================
 ;; FLOW
@@ -1323,7 +1317,7 @@
  :seon.flow/commit-fault!
  [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
  :seon.flow/changed-namespace-request
- [:map {:closed true}
+ [:map
   [:seon.flow/changed-namespace :seon.flow/changed-namespace]
   [:seon.flow/changed-source :seon.flow/changed-source]]
  :seon.flow/compile-namespace-fn
@@ -1349,10 +1343,10 @@
  :seon.flow/join-error-request [:map [:seon.flow/started [:map [:error-chan :seon.flow/channel]]] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/tag [:map-of :qualified-keyword :string]]]
  :seon.flow/indexer-proc-request [:map [:seon.flow/compile-namespace-fn :seon.flow/compile-namespace-fn] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
  :seon.flow/launcher [:fn {:gen/gen seon.flow/proc-launcher-generator} seon.flow/proc-launcher?]
- :seon.flow/launcher-configuration [:map {:closed true} [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]
- :seon.flow/started [:map {:closed true} [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]
+ :seon.flow/launcher-configuration [:map  [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]
+ :seon.flow/started [:map  [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]
  :seon.flow/work-launcher
- [:map {:closed true}
+ [:map
   [:seon.flow/graph :seon.flow/graph]
   [:seon.flow/started :seon.flow/started]
   [:seon.flow/active-work :seon.flow/active-work]
@@ -1381,10 +1375,10 @@
  :seon.flow/submission-wait-ms [:int {:min 0}]
  :seon.flow/work-result
  [:or
-  [:map {:closed true}
+  [:map
    [:seon.flow/outcome [:= :seon.flow/time-limit]]
    [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]
-  [:map {:closed true}
+  [:map
    [:seon.flow/outcome [:= :seon.flow/completed]]
    [:seon.flow/value :seon.sci.admit/value]
    [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]]
@@ -1393,14 +1387,14 @@
  :seon.flow/started! [:=> [:cat] :nil]
  :seon.flow/work-call
  [:or
-  [:map {:closed true}
+  [:map
    [:seon.flow/started! :seon.flow/started!]]
-  [:map {:closed true}
+  [:map
    [:seon.flow/interrupt-fn :seon.sci.admit/interrupt-fn]]]
  :seon.flow/work-fn
  [:=> [:cat :seon.flow/work-call] :seon.sci.admit/value]
- :seon.flow/work-launcher-request [:map {:closed true} [:seon.flow/configuration :seon.flow/launcher-configuration]]
- :seon.flow/work-submission [:map {:closed true} [:seon.flow/submission-id :seon.flow/submission-id] [:seon.flow/workload :seon.flow/workload] [:seon.flow/work-fn :seon.flow/work-fn] [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/work-launcher-request [:map  [:seon.flow/configuration :seon.flow/launcher-configuration]]
+ :seon.flow/work-submission [:map  [:seon.flow/submission-id :seon.flow/submission-id] [:seon.flow/workload :seon.flow/workload] [:seon.flow/work-fn :seon.flow/work-fn] [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]]
  :seon.flow/workload [:enum :compute]
 
 ;; ===========================================================================
@@ -1470,8 +1464,8 @@
  ; The dial decides, and the caps are optional because they are only
  ; needed to bound a violation's arguments — a REPL caller with no caps
  ; to hand gets a report with no args rather than an invented bound.
- :seon.instrument/request [:map {:closed true} [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]]
- :seon.instrument/applied [:map {:closed true} [:seon.instrument/registered :seon.instrument/registered] [:seon.instrument/instrumented :seon.instrument/instrumented]]
+ :seon.instrument/request [:map  [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]]
+ :seon.instrument/applied [:map  [:seon.instrument/registered :seon.instrument/registered] [:seon.instrument/instrumented :seon.instrument/instrumented]]
 
 ;; ===========================================================================
 ;; LOOP
@@ -1486,7 +1480,7 @@
  ; which the `:call` arm's sink offers complete `:seon.ai/partial`
  ; snapshots. OPTIONAL because a suite or a REPL drives a turn without a
  ; render pipeline — absent means the call runs one-shot.
- :seon.cluster.loop/cluster [:map {:closed true} [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ :seon.cluster.loop/cluster [:map  [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed
@@ -1500,25 +1494,25 @@
  ; and agent facts once per turn. The handle carries the cluster name
  ; needed for that live read, never a cached projection of its AI facts.
  ; `:seon.cluster.eval/output` is what the form PRINTED, captured as
- ; bounded receipt evidence. Both closed shapes below omitted it while
+ ; bounded receipt evidence. Both shapes below omitted it while
  ; the code has threaded it since the base-ctx fixes — a contract wrong
  ; about its own live input, exactly the class instrumentation found
  ; four of at step 4. Review-caught 2026-07-27.
- :seon.cluster.loop/evaluation [:map {:closed true} [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options {:optional true} :seon.print/options]]
- :seon.cluster.loop/turn-request [:map {:closed true} [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
- :seon.cluster.loop/terminal-request [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/result-blob {:optional true} :seon.cluster.eval/result-blob] [:seon.cluster.eval/result-size {:optional true} :seon.cluster.eval/result-size] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.error/kind {:optional true} :seon.error/kind] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:my.run/value {:optional true} :my.run/value]]
+ :seon.cluster.loop/evaluation [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options {:optional true} :seon.print/options]]
+ :seon.cluster.loop/turn-request [:map  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.work/next :seon.cluster.work/next]]
+ :seon.cluster.loop/terminal-request [:map  [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal] [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn] [:seon.cluster.eval/result-blob {:optional true} :seon.cluster.eval/result-blob] [:seon.cluster.eval/result-size {:optional true} :seon.cluster.eval/result-size] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.error/kind {:optional true} :seon.error/kind] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:my.run/value {:optional true} :my.run/value]]
  ; The central pass's own proc state and turn counter died with it
  ; (F2 §3.1); the surviving turn proc keeps its state keys in the AGENT section.
  :seon.cluster.loop/completion :seon.flow/channel
 
  ; One completed turn, for observation only. The run id is OPTIONAL
  ; because an `:open` turn reports before a run exists — the report is
- ; built by a `cond->` that omits it, and the closed shape said
+ ; built by a `cond->` that omits it, and the shape said
  ; required, so the contract had been wrong about its own most common
  ; report since it was written (instrumentation found it) — the loop's out port
  ; carries a report nothing depends on, so a dropped report costs
  ; nothing and no consumer can backpressure the loop.
- :seon.cluster.loop/turn-report [:map {:closed true} [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
+ :seon.cluster.loop/turn-report [:map  [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/situation :seon.cluster.work/situation] [:seon.cluster.loop/forms-run [:int {:min 0}]] [:seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]]]
  :seon.cluster.loop/forms-run [:int {:min 0}]
  :seon.cluster.loop/outcome [:enum :closed :released :error :interrupted]
 
@@ -1600,7 +1594,7 @@
  :my.message/about [:string {:min 1}]
  :my.message/reason [:string {:min 1}]
  :my.message/message
- [:map {:closed true}
+ [:map
   [:my.message/to :my.message/to]
   [:my.message/content :my.message/content]
   ; Optional identity of the fact this message concerns. Agent code
@@ -1612,7 +1606,7 @@
  ; is mandatory because an unjoinable declination cannot settle the
  ; routed form; `reason` is reader-facing and is never parsed.
  :my.message/declination
- [:map {:closed true}
+ [:map
   [:my.message/to :my.message/to]
   [:my.message/about :my.message/about]
   [:my.message/reason :my.message/reason]]
@@ -1634,7 +1628,7 @@
  ; to the error recorder, so a refused delivery is a durable fact and
  ; never a silent drop.
  :seon.cluster.message/delivery-request
- [:map {:closed true}
+ [:map
   [:my.message/value :my.message/value]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.run/id :seon.cluster.run/id]
@@ -1653,7 +1647,7 @@
  ; and it is what makes "reply to the asker" a derivation rather than
  ; a rule with an exception.
  :seon.cluster.message/reply-request
- [:map {:closed true}
+ [:map
   [:my.run/result :my.run/result]
   ; WHO IS COMPLETING, needed to ask the second question the chain
   ; answers: is this trigger an ANSWER to something I sent? A reply is
@@ -1663,7 +1657,7 @@
   [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
 
  :seon.cluster.message/delivery
- [:map {:closed true}
+ [:map
   [:seon.cluster.message/rows [:vector :map]]
   [:seon.error/values [:vector :seon.error/value]]]
 
@@ -1673,7 +1667,7 @@
  ; a VALUE; the durable `/content` attribute remains non-empty.
  :seon.cluster.message/inbound-content :string
  :seon.cluster.message/inbound-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.message/inbound-content
    :seon.cluster.message/inbound-content]
@@ -1724,113 +1718,113 @@
    {:seon.print/node*
     [:multi {:dispatch :seon.print/face}
      [:seon.print/nil
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/nil]]
        [:seon.print/value :nil]]]
      [:seon.print/boolean
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/boolean]]
        [:seon.print/value :boolean]]]
      [:seon.print/number
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/number]]
        [:seon.print/value
         [:fn {:gen/gen seon.print/number-generator}
          seon.print/print-number?]]]]
      [:seon.print/keyword
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/keyword]]
        [:seon.print/value :keyword]]]
      [:seon.print/symbol
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/symbol]]
        [:seon.print/value :symbol]]]
      [:seon.print/char
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/char]]
        [:seon.print/value
         [:fn {:gen/gen seon.print/char-generator}
          seon.print/print-char?]]]]
      [:seon.print/string
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/string]]
        [:seon.print/value :string]]]
      [:seon.print/inst
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/inst]]
        [:seon.print/value :inst]]]
      [:seon.print/uuid
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/uuid]]
        [:seon.print/value :uuid]]]
      [:seon.print/vector
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/vector]]
        [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
      [:seon.print/list
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/list]]
        [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
      [:seon.print/set
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/set]]
        [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
      [:seon.print/map
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/map]]
        [:seon.print/entries
         [:vector
          [:or
           [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
-          [:map {:closed true}
+          [:map
            [:seon.print/face [:= :seon.print/elided]]]]]]]]
      [:seon.print/record
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/record]]
        [:seon.print/name :string]
        [:seon.print/entries
         [:vector
          [:or
           [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
-          [:map {:closed true}
+          [:map
            [:seon.print/face [:= :seon.print/elided]]]]]]]]
      [:seon.print/var
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/var]]
        [:seon.print/name :string]]]
      [:seon.print/type
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/type]]
        [:seon.print/name :string]]]
      [:seon.print/class
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/class]]
        [:seon.print/name :string]]]
      [:seon.print/object
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/object]]
        [:seon.print/class :string]
        [:seon.print/address :string]
        [:seon.print/rep {:optional true} :string]]]
      [:seon.print/truncated-string
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/truncated-string]]
        [:seon.print/value :string]
        [:seon.print/length [:int {:min 0}]]]]
      [:seon.print/failed
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/failed]]
        [:seon.print/class :string]
        [:seon.print/message :string]]]
      [:seon.print/throwable
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/throwable]]
        [:seon.print/value [:ref :seon.print/node*]]]]
      [:seon.print/elided
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/elided]]]]
      [:seon.print/pruned
-      [:map {:closed true}
+      [:map
        [:seon.print/face [:= :seon.print/pruned]]]]]}}
   [:ref :seon.print/node*]]
 
@@ -1845,7 +1839,7 @@
  :seon.print/table?
  [:enum {:seon.print/default :derived} :derived true false]
  :seon.print/options
- [:map {:closed true}
+ [:map
   [:seon.print/length {:optional true} [:maybe :seon.print/length]]
   [:seon.print/level {:optional true} [:maybe :seon.print/level]]
   [:seon.print/width {:optional true} :seon.print/width]
@@ -1856,7 +1850,7 @@
  :seon.print/sink
  [:fn {:gen/gen seon.print/sink-generator} seon.print/sink?]
  :seon.print/result
- [:map {:closed true}
+ [:map
   [:seon.print/text :string]
   [:seon.print/hiccup :seon.render/hiccup]]
 
@@ -1885,29 +1879,29 @@
  ; identity on the receipt, not stored problem state: redness, routing and
  ; settlement remain pure derivations over current facts.
  :seon.problems/id [:string {:min 1 :seon.db/identity true}]
- :seon.problems/error-signature [:map {:closed true} [:seon.error/signature :seon.error/signature] [:seon.error/kind :seon.error/kind] [:seon.problems/occurrences :seon.problems/occurrences] [:seon.error/fact :seon.error/fact]]
+ :seon.problems/error-signature [:map  [:seon.error/signature :seon.error/signature] [:seon.error/kind :seon.error/kind] [:seon.problems/occurrences :seon.problems/occurrences] [:seon.error/fact :seon.error/fact]]
 
  ; A run held by a process that is NOT in the live set. Not "old" and
  ; not "expired" — no clock is consulted, because liveness is an
  ; observable fact about processes and a deadline standing in for it
  ; would be exactly the tuned constant the ruling bans.
- :seon.problems/wedged-run [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process]]
+ :seon.problems/wedged-run [:map  [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process]]
 
  ; A run that closed carrying WHY it closed. The agent reads this in its
  ; next prompt; a human reading `problems` sees the same fact from the
  ; other side.
- :seon.problems/failed-run [:map {:closed true} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/error :seon.cluster.run/error]]
+ :seon.problems/failed-run [:map  [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/error :seon.cluster.run/error]]
 
  ; One form of one plan that errored. An agent's own mistake is not a
  ; core fault and never becomes an error fact — but a plan that keeps
  ; erroring is something a human wants to see, so it is a problem
  ; without being a fault, and the distinction survives into this value.
- :seon.problems/errored-receipt [:map {:closed true} [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
+ :seon.problems/errored-receipt [:map  [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
 
  ; One red evaluation that may be assigned. The namespace owner is derived
  ; from the form's parse-time `/ns`; author is the total fallback.
  :seon.problems/form-problem
- [:map {:closed true}
+ [:map
   [:seon.problems/id :seon.problems/id]
   [:seon.cluster.eval/id :seon.cluster.eval/id]
   [:seon.cluster.run/id :seon.cluster.run/id]
@@ -1919,7 +1913,7 @@
   [:seon.cluster.eval/error :seon.cluster.eval/error]]
 
  :seon.problems/form-problem-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
   [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]
@@ -1931,12 +1925,12 @@
  ; agent-sent triggers the gate skips, and the whole row vanishes when
  ; the next outside trigger's run resets the derivation — no counter,
  ; no flag, no refusal message row anywhere.
- :seon.problems/deferred-agent [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
+ :seon.problems/deferred-agent [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
 
  ; A program namespace carrying source but no reverse namespace assignment.
  ; Presence is the problem; it vanishes when an agent gains the ref.
  :seon.problems/unowned-namespace
- [:map {:closed true} [:seon.ns/name :seon.ns/name]]
+ [:map  [:seon.ns/name :seon.ns/name]]
 
  ; The request. `live-processes` is the same set `run/recover-tx` takes,
  ; by the same name, because it is the same question: which holders are
@@ -1946,15 +1940,15 @@
  ; `live-processes` references the ONE global registration (CONTEXT section)
  ; — the same set, by the same name, as the capture and every request
  ; builder carry (§9 of the context-blocks contract package).
- :seon.problems/request [:map {:closed true} [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
+ :seon.problems/request [:map  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
 
- :seon.problems/problems [:map {:closed true} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]
+ :seon.problems/problems [:map  [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]
 
 ;; ===========================================================================
 ;; PROCESS
 ;; ===========================================================================
 :seon.cluster.process/identity
- [:map {:closed true}
+ [:map
   [:seon.boot/pid :seon.boot/pid]
   [:seon.boot/start-instant :seon.boot/start-instant]]
 
@@ -2139,7 +2133,7 @@
 
  :seon.fn/roots [:vector [:string {:min 1}]]
  :seon.fn/index-request
- [:map {:closed true}
+ [:map
   [:seon.store/branch-connection
    {:optional true}
    :seon.store/branch-connection]
@@ -2182,7 +2176,7 @@
  ; seon.cluster.message/trigger reads it back, so a later queued message
  ; can never replace the recorded cause (review finding 6, repaired).
  :seon.cluster.prompt/request
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -2204,7 +2198,7 @@
  ; accounting, cache measurement) reads WITHOUT rerunning a projection,
  ; and the exact database value it was derived at. In-memory only.
  :seon.cluster.prompt/rendered-context
- [:map {:closed true}
+ [:map
   [:seon.cluster.prompt/text :seon.cluster.prompt/text]
   [:seon.context/contributions :seon.context/contributions]
   [:seon.db/db :seon.db/database-value]]
@@ -2261,7 +2255,7 @@
  [:int {:min 0}]
 
  :seon.reconcile/request
- [:map {:closed true}
+ [:map
   [:seon.reconcile/desired :seon.reconcile/desired]
   [:seon.reconcile/process :seon.reconcile/process]
   [:seon.reconcile/adopt-identities
@@ -2269,19 +2263,19 @@
    :seon.reconcile/adopt-identities]]
 
  :seon.reconcile/result
- [:map {:closed true}
+ [:map
   [:seon.reconcile/converged? :seon.reconcile/converged?]
   [:seon.reconcile/operations :seon.reconcile/operations]]
 
 ;; ===========================================================================
 ;; REGISTRY
 ;; ===========================================================================
-:seon.cluster.registry/branch-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.store/branch :seon.store/branch]]
- :seon.cluster.registry/branch-commit-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
- :seon.cluster.registry/branch-result [:map {:closed true} [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]]
- :seon.cluster.registry/cluster-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.source/commit-id :seon.source/commit-id]]
+:seon.cluster.registry/branch-request [:map  [:seon.store/store :seon.store/store] [:seon.cluster.registry/from :seon.cluster.registry/from] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/branch-commit-request [:map  [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/branch-result [:map  [:seon.store/branch :seon.store/branch] [:seon.cluster/created? :seon.cluster/created?]]
+ :seon.cluster.registry/cluster-request [:map  [:seon.store/store :seon.store/store] [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.source/commit-id :seon.source/commit-id]]
  :seon.cluster.registry/from [:or :keyword :uuid]
- :seon.cluster.registry/retire-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
+ :seon.cluster.registry/retire-request [:map  [:seon.store/store :seon.store/store] [:seon.store/branch :seon.store/branch]]
  :seon.cluster.registry/roster [:set :keyword]
  :seon.cluster.registry/swept [:int {:min 0}]
  :seon.cluster/created? :boolean
@@ -2357,14 +2351,14 @@
  :seon.render/output :any
 
  :seon.render/request
- [:map {:closed true}
+ [:map
   [:seon.render/unit :seon.render/unit]
   [:seon.render/kind :seon.render/kind]]
  ; The output is WRAPPED, and that is deliberate: an unwrapped return
  ; would be indistinguishable from a flat `:seon.error/value` for any
  ; projection whose own output is a map. With the wrap, "did this
  ; render?" is `:seon.error/kind` presence, by construction.
- :seon.render/rendered [:map {:closed true} [:seon.render/kind :seon.render/kind] [:seon.render/output :seon.render/output]]
+ :seon.render/rendered [:map  [:seon.render/kind :seon.render/kind] [:seon.render/output :seon.render/output]]
 
  ; The two kinds the error family declares today. Registered here, in the
  ; router's own file, because a kind is a contract between the router and
@@ -2386,7 +2380,7 @@
  ; A render unit may combine the page-size dial with explicit print options,
  ; but every print key is declared exactly once in the PRINT section.
  :seon.render.value/options
- [:map {:closed true}
+ [:map
   [:seon.render.value/max-collection {:optional true}
    :seon.render.value/max-collection]
   [:seon.print/length {:optional true} [:maybe :seon.print/length]]
@@ -2402,7 +2396,7 @@
  :seon.render.value/text :string
  :seon.render.value/html :seon.render/hiccup
  :seon.render.value/projection
- [:map {:closed true}
+ [:map
   [:seon.render.value/tree :seon.render.value/tree]
   [:seon.render.value/truncated? :seon.render.value/truncated?]
   [:seon.render.value/text :seon.render.value/text]
@@ -2422,7 +2416,7 @@
  ; Absence is a real answer (a malformed declaration yields absence
  ; rather than inheritance), and it routes a red form to its author.
  :seon.cluster.reply/form
- [:map {:closed true}
+ [:map
   [:seon.cluster.run.form/source :seon.cluster.run.form/source]
   [:seon.ns/name {:optional true} :seon.ns/name]]
  :seon.cluster.reply/sources [:vector :seon.cluster.reply/form]
@@ -2565,7 +2559,7 @@
  :seon.cluster/bootstrap-plan :seon.db/ref
 
  :seon.bootstrap/default-form
- [:map {:closed true}
+ [:map
   [:seon.cluster.run.form/source :seon.cluster.run.form/source]
   [:seon.ns/name-designation :seon.ns/name-designation]
   [:seon.bootstrap.plan.form/context
@@ -2596,20 +2590,20 @@
  :seon.source/built-at :inst
  :seon.source/built? :boolean
  :seon.source/commit-id :uuid
- :seon.source/current [:map {:closed true} [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id]]
+ :seon.source/current [:map  [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id]]
  :seon.source/digest [:re {:seon.db/index true} "^[0-9a-f]{64}$"]
- :seon.source/digest-request [:map {:closed true} [:seon.source/roots :seon.source/roots]]
+ :seon.source/digest-request [:map  [:seon.source/roots :seon.source/roots]]
  :seon.source/expected-commit-id :uuid
  :seon.source/file-digests [:map-of :string :seon.source/digest]
  :seon.source/populate :qualified-symbol
  :seon.source/population [:map [:seon.store/branch-connection :seon.store/branch-connection] [:seon.source/digest :seon.source/digest]]
  :seon.source/population-data :map
- :seon.source/publish-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.source/digest :seon.source/digest] [:seon.source/populate :seon.source/populate] [:seon.source/population-data {:optional true} :seon.source/population-data]]
- :seon.source/published [:map {:closed true} [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/built? :seon.source/built?]]
+ :seon.source/publish-request [:map  [:seon.store/store :seon.store/store] [:seon.source/digest :seon.source/digest] [:seon.source/populate :seon.source/populate] [:seon.source/population-data {:optional true} :seon.source/population-data]]
+ :seon.source/published [:map  [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/built? :seon.source/built?]]
  :seon.source/rows [:vector :map]
  :seon.source/roots [:vector [:string {:min 1}]]
- :seon.source/snapshot [:map {:closed true} [:seon.source/digest :seon.source/digest] [:seon.source/file-digests :seon.source/file-digests]]
- :seon.source/upsert-request [:map {:closed true} [:seon.store/store :seon.store/store] [:seon.source/expected-commit-id :seon.source/expected-commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/rows :seon.source/rows] [:seon.db/process {:optional true} :seon.db/ref]]
+ :seon.source/snapshot [:map  [:seon.source/digest :seon.source/digest] [:seon.source/file-digests :seon.source/file-digests]]
+ :seon.source/upsert-request [:map  [:seon.store/store :seon.store/store] [:seon.source/expected-commit-id :seon.source/expected-commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/rows :seon.source/rows] [:seon.db/process {:optional true} :seon.db/ref]]
 
 ;; ===========================================================================
 ;; STORE
@@ -2638,7 +2632,7 @@
  :seon.db/query
  [:or [:vector :seon.schema/value] :map :string]
  :seon.db/query-args
- [:map {:closed true}
+ [:map
   [:query :seon.db/query]
   [:args {:optional true} [:sequential :seon.schema/value]]
   [:request-id {:optional true} :string]
@@ -2651,27 +2645,27 @@
  [:or :int [:sequential :seon.schema/value] :keyword]
  :seon.db/pull-selector [:vector :seon.schema/value]
  :seon.db/pull-options
- [:map {:closed true}
+ [:map
   [:selector :seon.db/pull-selector]
   [:eid :seon.db/entity-id]
   [:max-work {:optional true} [:int {:min 1}]]
   [:max-results {:optional true} [:int {:min 1}]]
   [:max-result-weight {:optional true} [:int {:min 1}]]]
  :seon.db/pull-many-options
- [:map {:closed true}
+ [:map
   [:selector :seon.db/pull-selector]
   [:eids [:sequential :seon.db/entity-id]]
   [:max-work {:optional true} [:int {:min 1}]]
   [:max-results {:optional true} [:int {:min 1}]]
   [:max-result-weight {:optional true} [:int {:min 1}]]]
  :seon.db/index-lookup
- [:map {:closed true}
+ [:map
   [:index [:enum :eavt :aevt :avet]]
   [:components {:optional true}
    [:or :nil [:sequential :seon.schema/value]]]]
  ; An eager ordinary projection of Datahike's Datom lookup keys.
  :seon.db/datom
- [:map {:closed true}
+ [:map
   [:e :seon.schema/value]
   [:a :seon.schema/value]
   [:v :seon.schema/value]
@@ -2690,7 +2684,7 @@
  :seon.store/transaction
  [:or
   :seon.store/transaction-data
-  [:map {:closed true}
+  [:map
    [:tx-data :seon.store/transaction-data]
    [:tx-meta {:optional true} :map]]]
  :seon.store/branch :keyword
@@ -2703,7 +2697,7 @@
  :seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection-object?]
  :seon.store/dir [:string {:min 1}]
  :seon.store/lock-file [:string {:min 1}]
- :seon.store/store [:map {:closed true} [:seon.store/dir :seon.store/dir] [:seon.store/lock-file :seon.store/lock-file] [:seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]] [:seon.store/lock [:fn {:gen/gen seon.cluster.store/file-lock-generator} seon.cluster.store/file-lock?]] [:seon.store/created? :boolean]]
+ :seon.store/store [:map  [:seon.store/dir :seon.store/dir] [:seon.store/lock-file :seon.store/lock-file] [:seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]] [:seon.store/lock [:fn {:gen/gen seon.cluster.store/file-lock-generator} seon.cluster.store/file-lock?]] [:seon.store/created? :boolean]]
 
 ;; ===========================================================================
 ;; TEST
@@ -2759,7 +2753,7 @@
  ; The capture boundary's ordinary values.
  :seon.test.runner/namespaces [:vector :symbol]
  :seon.test.runner/result
- [:map {:closed true}
+ [:map
   [:seon.test/sym :seon.test/sym]
   [:seon.ns/name :seon.ns/name]
   [:seon.test.result/outcome :seon.test.result/outcome]
@@ -2772,19 +2766,19 @@
  :seon.test.runner/fail-count [:int {:min 0}]
  :seon.test.runner/error-count [:int {:min 0}]
  :seon.test.runner/summary
- [:map {:closed true}
+ [:map
   [:seon.test.runner/test-count :seon.test.runner/test-count]
   [:seon.test.runner/pass-count :seon.test.runner/pass-count]
   [:seon.test.runner/fail-count :seon.test.runner/fail-count]
   [:seon.test.runner/error-count :seon.test.runner/error-count]]
  :seon.test.runner/run-request
- [:map {:closed true}
+ [:map
   [:seon.test.runner/namespaces :seon.test.runner/namespaces]
   [:seon.test.run/id :seon.test.run/id]
   [:seon.test.run/at :seon.test.run/at]
   [:seon.test.run/git-sha :seon.test.run/git-sha]]
  :seon.test.runner/run-result
- [:map {:closed true}
+ [:map
   [:seon.test.run/id :seon.test.run/id]
   [:seon.test.run/at :seon.test.run/at]
   [:seon.test.run/git-sha :seon.test.run/git-sha]
@@ -2792,13 +2786,13 @@
   [:seon.test.runner/results :seon.test.runner/results]]
 
  :seon.test.runner/record-request
- [:map {:closed true}
+ [:map
   [:seon.test.runner/run-result :seon.test.runner/run-result]
   [:seon.boot/cluster-name :seon.boot/cluster-name]
   [:seon.boot/root :seon.boot/root]]
  :seon.test.runner/record-tx [:vector :map]
  :seon.test.runner/recorded
- [:map {:closed true}
+ [:map
   [:seon.boot/cluster-name :seon.boot/cluster-name]
   [:seon.test.run/id :seon.test.run/id]
   [:seon.test.runner/recorded-count [:int {:min 0}]]]
@@ -2831,8 +2825,8 @@
  ; wake per REPORT, unconditionally, into the render proc's `::interest`
  ; in-port. Required, not optional — a cluster whose commits reach no
  ; render pass would serve a page that silently stops updating.
- :seon.cluster.wake/route-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/channels :seon.cluster.wake/channels] [:seon.cluster.wake/fenced? :seon.cluster.wake/fenced?] [:seon.cluster.wake/armer-channel :seon.flow/channel] [:seon.cluster.wake/render-channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
- :seon.cluster.wake/unlisten-request [:map {:closed true} [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+ :seon.cluster.wake/route-request [:map  [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/channels :seon.cluster.wake/channels] [:seon.cluster.wake/fenced? :seon.cluster.wake/fenced?] [:seon.cluster.wake/armer-channel :seon.flow/channel] [:seon.cluster.wake/render-channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+ :seon.cluster.wake/unlisten-request [:map  [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]
 
 ;; ===========================================================================
 ;; WALK
@@ -2866,7 +2860,7 @@
  :seon.render.walk/attribute :qualified-keyword
 
  :seon.render.walk/connection
- [:map {:closed true}
+ [:map
   [:seon.render.walk/attribute :seon.render.walk/attribute]
   [:seon.render.walk/target {:optional true} :seon.render.walk/target]
   [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
@@ -2892,7 +2886,7 @@
  :seon.render/floor :seon.render/projection
 
  :seon.render.walk/resolution
- [:map {:closed true}
+ [:map
   [:seon.render/kind :seon.render/kind]
   [:seon.render/floor :seon.render/floor]
   [:seon.render/overrides {:optional true} :seon.render/overrides]]
@@ -2908,7 +2902,7 @@
  ; the reverse-neighbour width is the same collection dial rather than a
  ; second one to drift from it.
  :seon.render.walk/request
- [:map {:closed true}
+ [:map
   [:seon.db/db :seon.db/database-value]
   [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.render.walk/lookup :seon.render.walk/lookup]
@@ -2931,7 +2925,7 @@
  :seon.render.walk/neighbours [:vector :map]
 
  :seon.render.walk/node
- [:map {:closed true}
+ [:map
   [:seon.render.walk/lookup :seon.render.walk/lookup]
   [:seon.render/distance :seon.render/distance]
   [:seon.render.walk/changed-at :seon.render.walk/changed-at]
@@ -2952,7 +2946,7 @@
  :seon.render.walk/found-depth [:int {:min 0}]
  :seon.render.walk/branch :seon.render.walk/path
  :seon.render.walk/unit
- [:map {:closed true}
+ [:map
   [:seon.render.walk/node :seon.render.walk/node]
   [:seon.render.walk/path :seon.render.walk/path]
   [:seon.render.walk/found-depth :seon.render.walk/found-depth]
@@ -3002,7 +2996,7 @@
  :seon.render.web/wanted-port :seon.render.web/port
 
  :seon.render.web/server
- [:map {:closed true}
+ [:map
   [:seon.render.web/server :seon.render.web/http-server]
   [:seon.render.web/port :seon.render.web/port]
   [:seon.render.web/url :seon.render.web/url]
@@ -3014,7 +3008,7 @@
  ; completion; the atom counts watched agents; the mult fans pages to tabs.
  ; Loss is free by the transport law, so none of this is database data.
  :seon.render.web/view
- [:map {:closed true}
+ [:map
   [:seon.render.web/render-channel :seon.flow/channel]
   [:seon.render.web/pages-channel :seon.flow/channel]
   [:seon.render.web/registration :seon.render.web/registration]
@@ -3035,7 +3029,7 @@
  ; a real wedge. A service that cannot say who is alive cannot render an
  ; honest page, so the refusal belongs at construction, not per card.
  :seon.render.web/service
- [:map {:closed true}
+ [:map
   [:seon.store/connection :seon.store/connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -3046,7 +3040,7 @@
   [:seon.render.web/port {:optional true} :seon.render.web/port]]
 
  :seon.render.web/feed-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.store/connection :seon.store/connection]
@@ -3057,7 +3051,7 @@
   [:seon.render.web/render-channel :seon.flow/channel]]
 
  :seon.render.web/page-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/page :seon.render/page]
   [:seon.render.web/feed-url [:string {:min 1}]]]
@@ -3067,7 +3061,7 @@
  ; a 422 refusal, not a schema/instrumentation throw. When present it may
  ; still be blank; the message family owns that refusal.
  :seon.render.web/inbound
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.message/inbound-content
    {:optional true}
@@ -3080,7 +3074,7 @@
  ; here, not the connection — a paint is derived at one basis and the
  ; whole page must be that basis.
  :seon.render.web/paint-request
- [:map {:closed true}
+ [:map
   [:seon.db/db :seon.db/database-value]
   [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
@@ -3094,7 +3088,7 @@
  ; socket costs and what suppression must compare — two values that
  ; serialize identically are the same page.
  :seon.render.web/repaint
- [:map {:closed true}
+ [:map
   [:seon.render.web/patches [:vector [:tuple :seon.render/surface-id :string]]]
   [:seon.render.web/delivered [:map-of :seon.render/surface-id :string]]]
 
@@ -3119,15 +3113,15 @@
  ;           instruction and must be visible in the VALUE, never inferred
  ;           from an absent key (seal revision, 2026-07-27)
  :seon.cluster.work/next [:multi {:dispatch :seon.cluster.work/situation}
-                          [:resume [:map {:closed true} [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
-                          [:call [:map {:closed true} [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
-                          [:open [:map {:closed true} [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
-                          [:close [:map {:closed true} [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
+                          [:resume [:map  [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
+                          [:call [:map  [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
+                          [:open [:map  [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
+                          [:close [:map  [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
  ; THE PER-AGENT DERIVATION'S REQUEST (F1): the same request narrowed
  ; to one agent. The episode dial is deliberately NOT here — it is a
  ; config fact the derivation reads from the database value itself, so
  ; a live dial change applies at the next pass with no handle rebuild.
- :seon.cluster.work/agent-request [:map {:closed true} [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
+ :seon.cluster.work/agent-request [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
  ; Runs since (and including) the one answering the last OUTSIDE
  ; trigger — the episode, derived purely from committed facts.
  :seon.cluster.work/episode-runs [:int {:min 0}]
@@ -3140,7 +3134,7 @@
   :owner-fixed :owner-declared-cant]
  :seon.cluster.work/settled? :boolean
  :seon.cluster.work/form-settlement
- [:map {:closed true}
+ [:map
   [:seon.cluster.run.form/id :seon.cluster.run.form/id]
   [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
@@ -3149,7 +3143,7 @@
   [:seon.cluster.work/form-state :seon.cluster.work/form-state]
   [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
  :seon.cluster.work/plan-settlement
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]]
   [:seon.cluster.work/settled? :seon.cluster.work/settled?]]

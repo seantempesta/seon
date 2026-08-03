@@ -87,18 +87,6 @@
                  "[:fn {:error/message \"must be ...\" "
                  ":gen/schema :string} 'my.domain/value?]).")
             {:seon.schema/schema-type schema-type}))
-         (when (and authored?
-                    (= :input role)
-                    (= :map schema-type)
-                    (not (true? (:closed properties))))
-           (contract-error!
-            identity definition path :seon.schema/open-argument-map
-            (str identity
-                 " has an open agent-authored argument map. Declare "
-                 "`{:closed true}` on every input map; `malli.util/closed-schema` "
-                 "shows the recursively closed shape, but admission will not "
-                 "rewrite the authored contract.")
-            {}))
          (when (and authored? (= :fn schema-type))
            (let [predicate (guarded-predicate-symbol schema)
                  prebound?
