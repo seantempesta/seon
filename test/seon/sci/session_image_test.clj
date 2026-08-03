@@ -6,7 +6,6 @@
             [datahike.api :as d]
             [sci.core :as sci]
             [sci.impl.vars :as sci.vars]
-            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.cluster.loop :as loop]
             [seon.sci.eval :as eval]
@@ -16,27 +15,14 @@
 
 (def ^:private caps (config/result-caps (config/defaults)))
 
-(defn- with-file-database
+(defn- with-memory-database
   [body]
-  (let [root (str "tmp/session-image-test/" (random-uuid))
-        configuration {:store {:backend :file
-                               :path root
-                               :id (random-uuid)}
-                       :schema-flexibility :write
-                       :keep-history? true}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (cluster/populate-source!
-       {:seon.store/branch-connection connection})
-      (d/transact connection
-                  {:tx-data [{:seon.source/digest
-                              (apply str (repeat 64 "0"))}]})
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)
-        (test-support/delete-recursively! root)))))
+  ;; Session values include store-global blob keys, so these cases use an
+  ;; isolated memory store rather than the shared branch base. Persistence
+  ;; belongs only to the two-child-JVM test below, where it is the subject.
+  (test-support/with-database
+   {::test-support/fresh-store? true}
+   body))
 
 (defn- run-child!
   [mode database-path store-id output-path]
@@ -97,7 +83,7 @@
      {:tx-data (#'loop/session-image-tx @connection stored ordinal)})))
 
 (deftest session-macro-without-a-program-row-fails-closed
-  (with-file-database
+  (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-macro
            _ (d/transact connection
@@ -123,7 +109,7 @@
        (is (not (contains? row :seon.sci.eval/unproven-called-vars)))))))
 
 (deftest executed-unsafe-built-ins-are-never-source-replayed
-  (with-file-database
+  (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-built-ins
            _ (d/transact connection
@@ -180,7 +166,7 @@
              "a faithful random value restores as data, never by re-execution"))))))
 
 (deftest failed-evaluation-delta-restores-values-but-never-replays-source
-  (with-file-database
+  (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.failed-session
            _ (d/transact connection
@@ -237,7 +223,7 @@
     (is (= 7 @(sci/resolve ctx 'my.agents.cut-session/before-cut)))))
 
 (deftest fresh-context-restores-the-forms-session-image
-  (with-file-database
+  (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-image
            _ (d/transact connection
@@ -364,7 +350,7 @@
        (is (= 199 @(sci/resolve ctx 'my.agents.session-cost/n199)))))))
 
 (deftest equal-large-values-share-the-content-addressed-blob
-  (with-file-database
+  (with-memory-database
    (fn [connection]
      (d/transact connection
                  [{:seon.config.eval.result/blob-threshold 16}])
