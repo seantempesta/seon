@@ -21,7 +21,8 @@ edges are closed: the work launcher uses Flow's stock priority control
 protocol; active provider-call teardown has a loud provider-derived backstop;
 agent fault fan-out parks on virtual `:io` tasks; and every cluster owns its
 launcher graph while sharing only the process-root executors. Commits:
-`b22b58d33`, `d62561f24`, `53ca533cd`, `b50050968`, and `d3e97d2ea`.
+`b22b58d33`, `d62561f24`, `655b2b004`, `53ca533cd`, `b50050968`, and
+`d3e97d2ea`.
 Measured 1,000-source fan-out changed from +1,017 platform threads to zero;
 the integrated two-cluster boot gate passed 28 tests / 133 assertions. The
 agent/turn combined rerun is presently unverified at the independent schema

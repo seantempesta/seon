@@ -108,12 +108,12 @@ operator root and live default cluster were never addressed.
 
 The readiness permit repairs observable proc-start and parked-state races, but
 an active turn can still be inside a remote provider call whose completion is
-not observable by Flow. Commit `d62561f24` keeps teardown event-driven until a
+not observable by Flow. Commits `d62561f24` and `655b2b004` keep teardown event-driven until a
 durable prompt-capture fact proves that a provider call may have crossed the
 external boundary. Only then does it arm a loud last-resort backstop derived
-from that turn's effective primary/backup provider timeout and finite retry
-budget. Firing offers the existing Flow fault value, prints a core-fault line,
-throws, and leaves the route armed so stop is retryable.
+from the captured turn basis's effective primary/backup provider timeout and
+finite retry budget. Firing offers the existing Flow fault value, prints a
+core-fault line, throws, and leaves the route armed so stop is retryable.
 
 The local never-answering socket regression configured a 100 ms provider
 timeout with zero retries and observed the 100 ms derived backstop plus the
