@@ -1,0 +1,5 @@
+#:seon.config.effect{:long-call-ms
+                     [:int
+                      {:min 1,
+                       :description
+                       "Foreground capability duration that triggers background-work guidance."}]}

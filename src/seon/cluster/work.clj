@@ -547,6 +547,21 @@
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))
 
+(defn- unanswered-background-result?
+  [db agent-id]
+  (boolean
+   (db/q
+    '[:find ?receipt .
+      :in $ ?agent-id
+      :where
+      [?agent :seon.cluster.agent/id ?agent-id]
+      [?receipt :seon.effect/to ?agent]
+      (or-join [?receipt]
+               [?receipt :seon.effect/result-edn]
+               [?receipt :seon.effect/interrupted-at])
+      (not [_ :seon.cluster.run/background-results ?receipt])]
+    db agent-id)))
+
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
   Pure — the per-agent derivation every turn proc runs (F1 §5.2). The
@@ -583,13 +598,16 @@
       (some? run) nil
 
       :else
-      (when-let [trigger-id
-                 (or (refusal-continuation-trigger db agent-id)
-                     (:seon.cluster.message/id
-                      (openable-trigger db agent-id)))]
-        {:seon.cluster.work/situation :open
-         :seon.cluster.agent/id agent-id
-         :seon.cluster.message/id trigger-id}))))
+      (let [trigger-id
+            (or (refusal-continuation-trigger db agent-id)
+                (:seon.cluster.message/id
+                 (openable-trigger db agent-id)))]
+        (when (or trigger-id (unanswered-background-result? db agent-id))
+          (cond->
+           {:seon.cluster.work/situation :open
+            :seon.cluster.agent/id agent-id}
+            trigger-id
+            (assoc :seon.cluster.message/id trigger-id)))))))
 
 (defn more-agent-work?
   "True when another pass would find work for this agent.

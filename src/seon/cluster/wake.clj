@@ -90,7 +90,7 @@
   wake always fires."
   {:malli/schema [:=> [:cat] :seon.cluster.wake/attributes]}
   []
-  #{:seon.cluster.message/to :seon.cluster.agent/id})
+  #{:seon.cluster.message/to :seon.effect/to :seon.cluster.agent/id})
 
 (defn delivery
   "`offer!`'s answers plus the route owner's derived fence, named.
@@ -216,6 +216,13 @@
            (async/offer! armer-channel ::wake)
 
            :seon.cluster.message/to
+           (if-let [channel (get (channels) (nth datom 2))]
+             (let [agent-eid (nth datom 2)]
+               (deliver! fault-channel key ::mailbox channel
+                         #(fenced? agent-eid channel)))
+             (async/offer! armer-channel ::wake))
+
+           :seon.effect/to
            (if-let [channel (get (channels) (nth datom 2))]
              (let [agent-eid (nth datom 2)]
                (deliver! fault-channel key ::mailbox channel

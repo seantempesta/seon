@@ -39,6 +39,7 @@
   (:require [clojure.string :as str]
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
+            [seon.effect :as effect]
             [seon.render :as render]
             [seon.schema.edn :as schema.edn]))
 
@@ -566,7 +567,7 @@
      [:maybe :string]]]}
   ([db rendered-units]
    (prose db rendered-units {}))
-  ([_db rendered-units {requested-branch :seon.render.walk/branch}]
+  ([db rendered-units {requested-branch :seon.render.walk/branch}]
    (letfn [(provenance [unit]
             (or (get-in unit [:seon.error/value :seon.error/kind])
                 (:seon.render.walk/lookup unit)))
@@ -612,6 +613,9 @@
            elisions (filter elision-unit? ordered)
            visible (remove elision-unit? ordered)
            rendered-visible (map unit-lines visible)
+           agent-id
+           (when (= :seon.cluster.agent/id (first root))
+             (second root))
            elision-summary
            (when (seq elisions)
              (let [former-noise (str/join "\n" (keep :seon.render/output
@@ -632,6 +636,8 @@
                          (some-> elision-summary
                                  :seon.render.walk/metadata
                                  vector)
+                         (when agent-id
+                           [(effect/context-suffix db agent-id)])
                          (keep :seon.render.walk/branch-metadata
                                rendered-visible))
            text (str/join "\n" lines)]

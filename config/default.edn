@@ -22,6 +22,10 @@
  :seon.config.flow.io/concurrency 64
  :seon.config.flow.io/queue-depth 64
 
+ ; Unit: foreground capability milliseconds before the volatile context tail
+ ; recommends explicit background execution on a later call.
+ :seon.config.effect/long-call-ms 2000
+
  ; Unit: milliseconds allowed for one Flow ping response. Provenance: F1
  ; measured parked mailbox and turn replies in microseconds; 20 ms leaves
  ; orders of magnitude of scheduling room. A missing reply is reported as

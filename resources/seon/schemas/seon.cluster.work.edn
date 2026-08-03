@@ -54,6 +54,7 @@
                        [:seon.cluster.work/situation [:= :open]]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
                        [:seon.cluster.message/id
+                        {:optional true}
                         :seon.cluster.message/id]]]
                      [:close
                       [:map

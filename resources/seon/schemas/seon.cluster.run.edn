@@ -1,4 +1,5 @@
 #:seon.cluster.run{:agent :seon.db/ref,
+                   :background-results [:set :seon.db/ref],
                    :closed-at :inst,
                    :error [:string {:min 1}],
                    :forms
@@ -19,6 +20,9 @@
                     [:seon.cluster.run/trigger
                      {:optional true}
                      :seon.cluster.run/trigger]
+                    [:seon.cluster.run/background-results
+                     {:optional true}
+                     :seon.cluster.run/background-results]
                     [:seon.cluster.run/opened-at
                      :seon.cluster.run/opened-at]
                     [:seon.cluster.run/closed-at

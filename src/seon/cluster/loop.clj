@@ -1069,17 +1069,21 @@
     run-id :seon.cluster.run/id
     form-ordinal :seon.cluster.run.form/ordinal}]
   (merge form
-         {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
-          :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-          :seon.sci.eval/ctx ctx
-          :seon.cluster.agent/id agent-id
-          :seon.cluster.run/id run-id
-          :seon.cluster.run.form/ordinal form-ordinal
-          :seon.boot/cluster-name (:seon.cluster/name cluster)
-          :seon.sci.eval/time-limit-ms
-          (:seon.config.eval/time-limit-ms cluster)
-          :seon.config/on-core-error
-          (:seon.config/on-core-error cluster)}))
+         (cond->
+          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
+           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+           :seon.sci.eval/ctx ctx
+           :seon.cluster.agent/id agent-id
+           :seon.cluster.run/id run-id
+           :seon.cluster.run.form/ordinal form-ordinal
+           :seon.boot/cluster-name (:seon.cluster/name cluster)
+           :seon.sci.eval/time-limit-ms
+           (:seon.config.eval/time-limit-ms cluster)
+           :seon.config/on-core-error
+           (:seon.config/on-core-error cluster)}
+           (:seon.flow/work-launcher cluster)
+           (assoc :seon.flow/work-launcher
+                  (:seon.flow/work-launcher cluster)))))
 
 (defn settle-interruption!
   "Bury one orphaned run so its agent stops being busy.
@@ -1138,13 +1142,17 @@
           outcome (db/transact!
                    connection
                    {:tx-data
-                    (into (run/open-tx {:seon.cluster.run/id id
-                                        :seon.cluster.run/agent
-                                        [:seon.cluster.agent/id agent-id]
-                                        :seon.cluster.run/trigger
-                                        [:seon.cluster.message/id
-                                         (:seon.cluster.message/id work)]
-                                        :seon.cluster.run/opened-at now})
+                    (into (run/open-tx
+                           (cond->
+                            {:seon.cluster.run/id id
+                             :seon.cluster.run/agent
+                             [:seon.cluster.agent/id agent-id]
+                             :seon.cluster.run/opened-at now}
+                             (:seon.cluster.message/id work)
+                             (assoc
+                              :seon.cluster.run/trigger
+                              [:seon.cluster.message/id
+                               (:seon.cluster.message/id work)])))
                           (run/claim-tx {:seon.cluster.run/id id
                                          :seon.cluster.run/process process
                                          :seon.cluster.run/live-processes

@@ -438,13 +438,17 @@
                              :seon.effect/result-size
                              :seon.effect/interrupted-at]}]}]
                  [:seon.cluster.agent/id agent-id])
+        basis-instant
+        (:db/txInstant
+         (db/pull database [:db/txInstant] (long (:max-tx database))))
         pending
         (->> (db/q
-              '[:find ?id ?owner
+              '[:find ?id ?owner ?opened
                 :in $ ?agent
                 :where
                 [?receipt :seon.effect/notify ?agent]
                 [?receipt :seon.effect/id ?id]
+                [?receipt :seon.effect/opened-at ?opened]
                 [?receipt :seon.effect/owner ?owner-eid]
                 [?owner-eid :seon.fn/sym ?owner]]
               database (:db/id agent-row))
@@ -459,28 +463,44 @@
            :where
            [_ :seon.config.effect/long-call-ms ?threshold]]
          database)
+        previous-capture-basis
+        (or
+         (db/q
+          '[:find (max ?basis) .
+            :in $ ?agent
+            :where
+            [?run :seon.cluster.run/agent ?agent]
+            [?capture :seon.context.capture/run ?run]
+            [?capture :seon.context.capture/basis-t ?basis]]
+          database (:db/id agent-row))
+         0)
         durations
         (when threshold
           (->> (db/q
-                '[:find ?id ?duration ?owner
-                  :in $ ?agent ?threshold
+                '[:find ?id ?duration ?owner ?tx
+                  :in $ ?agent ?threshold ?previous-capture
                   :where
                   [?run :seon.cluster.run/agent ?agent]
                   [?receipt :seon.effect/run ?run]
                   [?receipt :seon.effect/id ?id]
-                  [?receipt :seon.effect/duration-ms ?duration]
+                  [?receipt :seon.effect/duration-ms ?duration ?tx]
+                  [(> ?tx ?previous-capture)]
                   [(>= ?duration ?threshold)]
                   [?receipt :seon.effect/owner ?owner-eid]
                   [?owner-eid :seon.fn/sym ?owner]
                   (not [?receipt :seon.effect/to])]
-                database (:db/id agent-row) threshold)
+                database (:db/id agent-row) threshold
+                previous-capture-basis)
                (sort-by first)))]
     (str/join
      "\n"
      (concat
       [";; Background work: use (my.background/await result-ref note) as the last form to wait, or retain the ref and keep working."]
-      (map (fn [[id owner]]
-             (str ";; background pending " id " · " owner))
+      (map (fn [[id owner opened]]
+             (str ";; background pending " id " · " owner " · "
+                  (max 0 (- (.getTime ^Date basis-instant)
+                            (.getTime ^Date opened)))
+                  "ms elapsed · " (pr-str [:seon.effect/id id])))
            pending)
       (map (fn [result]
              (str ";; background result " (:seon.effect/id result) " · "
@@ -488,7 +508,7 @@
                       (str "interrupted at "
                            (:seon.effect/interrupted-at result)))))
            results)
-      (map (fn [[id duration owner]]
+      (map (fn [[id duration owner _tx]]
              (str ";; foreground effect " owner " took " duration
                   "ms · consider my.background/background next time · " id))
            durations)))))

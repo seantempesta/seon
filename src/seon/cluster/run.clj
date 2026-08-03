@@ -229,6 +229,22 @@
          open-call receipt-start-call receipt-settle-call
          receipt-refusal-call recover-call)
 
+(defn- unanswered-background-results
+  [db agent-eid]
+  (->> (db/q
+        '[:find ?receipt ?effect-id ?tx
+          :in $ ?agent
+          :where
+          [?receipt :seon.effect/to ?agent ?tx]
+          [?receipt :seon.effect/id ?effect-id]
+          (or-join [?receipt]
+                   [?receipt :seon.effect/result-edn]
+                   [?receipt :seon.effect/interrupted-at])
+          (not [_ :seon.cluster.run/background-results ?receipt])]
+        db agent-eid)
+       (sort-by (fn [[_ effect-id tx]] [tx effect-id]))
+       (mapv first)))
+
 (defn open-call
   "Open one run for an agent, inside the transaction.
   Refuses when the run id already exists, or when the agent's
@@ -246,7 +262,8 @@
   [db request]
   (let [{::keys [id agent trigger opened-at]} request
         agent-eid (:db/id (db/pull db [:db/id] agent))
-        run-tempid (str "seon.cluster.run/" id)]
+        run-tempid (str "seon.cluster.run/" id)
+        background-results (unanswered-background-results db agent-eid)]
     (cond
       (nil? agent-eid) (refuse! `open-call ::no-such-agent request)
       (some? (current-run db id)) (refuse! `open-call ::run-exists request)
@@ -261,7 +278,9 @@
                       ::id id
                       ::agent agent-eid
                       ::opened-at opened-at}
-               trigger (assoc ::trigger trigger))
+               trigger (assoc ::trigger trigger)
+               (seq background-results)
+               (assoc ::background-results background-results))
              {:db/id agent-eid :seon.cluster.agent/run run-tempid}])))
 
 (defn claim-tx
@@ -989,6 +1008,13 @@
                  (catch Throwable _
                    nil)))))
 
+(defn- background-result-ref?
+  [value]
+  (and (vector? value)
+       (= 2 (count value))
+       (= :seon.effect/id (first value))
+       (string? (second value))))
+
 (defn- unfinished-warning
   "The first form recovery closed before it started, and the missing count."
   [forms receipts]
@@ -1137,6 +1163,7 @@
   [unit]
   (let [ordinal (get unit :seon.cluster.eval/ordinal)
         result (get unit :seon.cluster.eval/result-edn)
+        value (when result (receipt-value unit))
         output (get unit :seon.cluster.eval/output)]
     (when ordinal
       (str
@@ -1150,7 +1177,11 @@
 
          result (str "Form " ordinal " returned " result)
          :else (str "Form " ordinal " is still running."))
-       (when output (str " It printed: " output))))))
+       (when output (str " It printed: " output))
+       (when (background-result-ref? value)
+         (str " Keep working, or use (my.background/await "
+              (pr-str value)
+              " note) as the last form to close this run until it lands."))))))
 
 (defn render-receipt-html
   "`:seon.render/html` — one receipt, with the same facts as its AI twin."

@@ -10,6 +10,7 @@
   (:require [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
             [seon.context :as context]
+            [seon.db :as db]
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -74,9 +75,12 @@
   [db request]
   (validate-request! request)
   (let [run-id (:seon.cluster.run/id request)
+        run (db/pull db [:seon.cluster.run/background-results]
+                     [:seon.cluster.run/id run-id])
         _ (or (message/trigger db run-id)
+              (seq (:seon.cluster.run/background-results run))
               (refuse! ::no-trigger
-                       "Prompt request's held run has no recorded trigger."))
+                       "Prompt request's held run has no trigger or background result."))
         acquired (render/acquire-context!
                   (:seon.render/context-channel request)
                   (assoc request
