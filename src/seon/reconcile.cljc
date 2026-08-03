@@ -114,24 +114,26 @@
 
 (defn- first-assertion-transactions
   [db identity-attrs]
-  (let [history (d/history db)]
-    (reduce
-     (fn [first-by-identity attr]
-       (reduce
-        (fn [result [eid value tx]]
-          (update result
-                  [eid [attr value]]
-                  #(if (or (nil? %) (< tx %)) tx %)))
-        first-by-identity
-        (d/q
-         '[:find ?entity ?value ?tx
-           :in $ ?identity-attr
-           :where
-           [?entity ?identity-attr ?value ?tx true]]
-         history
-         attr)))
-     {}
-     identity-attrs)))
+  (if-not (true? (get-in db [:config :keep-history?]))
+    {}
+    (let [history (d/history db)]
+      (reduce
+       (fn [first-by-identity attr]
+         (reduce
+          (fn [result [eid value tx]]
+            (update result
+                    [eid [attr value]]
+                    #(if (or (nil? %) (< tx %)) tx %)))
+          first-by-identity
+          (d/q
+           '[:find ?entity ?value ?tx
+             :in $ ?identity-attr
+             :where
+             [?entity ?identity-attr ?value ?tx true]]
+           history
+           attr)))
+       {}
+       identity-attrs))))
 
 (defn- process-by-transaction
   [db]

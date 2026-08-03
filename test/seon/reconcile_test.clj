@@ -6,6 +6,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.cluster :as cluster]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -46,6 +47,27 @@
                    [{:seon.db.process/id unmanaged-process}])
        (body connection)))))
 
+(defn- with-non-temporal-database
+  [body]
+  (let [configuration
+        {:store {:backend :memory :id (random-uuid)}
+         :keep-history? false
+         :schema-flexibility :write}]
+    (d/create-database configuration)
+    (let [connection (d/connect configuration)]
+      (try
+        (cluster/populate-source!
+         {:seon.store/branch-connection connection})
+        (d/transact connection
+                    {:tx-data
+                     [{:seon.source/digest (apply str (repeat 64 "0"))}]})
+        (d/transact connection
+                    [{:seon.db.process/id unmanaged-process}])
+        (body connection)
+        (finally
+          (d/release connection)
+          (d/delete-database configuration))))))
+
 (defn- transaction-meta
   [process]
   {:seon.db/process [:seon.db.process/id process]})
@@ -60,6 +82,10 @@
   [desired]
   {::reconcile/desired desired
    ::reconcile/process managing-process})
+
+(defn- adopting-request
+  [desired identities]
+  (assoc (request desired) ::reconcile/adopt-identities identities))
 
 (defn- config-row
   [cluster queue-depth]
@@ -103,6 +129,36 @@
                second-result))
         (is (= after-first after-second)
             "converged means no transaction entity and unchanged :max-tx")))))
+
+(deftest reconciliation-uses-current-provenance-without-history
+  (with-non-temporal-database
+    (fn [connection]
+      (is (thrown? clojure.lang.ExceptionInfo (d/history @connection))
+          "the fixture genuinely has no temporal indices")
+      (let [desired [(config-row "non-temporal" 10)]
+            adopted #{[:seon.config/cluster "non-temporal"]}
+            first-result
+            (reconcile/reconcile!
+             connection
+             (adopting-request desired adopted))
+            after-first (:max-tx @connection)
+            second-result
+            (reconcile/reconcile!
+             connection
+             (adopting-request desired adopted))]
+        (is (= {::reconcile/converged? false
+                ::reconcile/operations 1}
+               first-result))
+        (is (= {::reconcile/converged? true
+                ::reconcile/operations 0}
+               second-result))
+        (is (= after-first (:max-tx @connection))
+            "re-applying the managed identity commits nothing")
+        (is (= "non-temporal"
+               (:seon.config/cluster
+                (d/pull @connection
+                        '[:seon.config/cluster]
+                        [:seon.config/cluster "non-temporal"]))))))))
 
 (deftest a-hand-edit-is-repaired-by-the-next-apply
   (with-model-database

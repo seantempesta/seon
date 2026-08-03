@@ -251,7 +251,10 @@
     (reconcile/reconcile!
      (:seon.config/connection request)
      {::reconcile/desired [(:seon.config/desired-row compiled)]
-      ::reconcile/process managing-process-identity})))
+      ::reconcile/process managing-process-identity
+      ::reconcile/adopt-identities
+      #{[:seon.config/cluster
+         (:seon.config/cluster (:seon.config/desired-row compiled))]}})))
 
 (defn effective
   "Read the effective config for one cluster; absent cluster means `default`."

@@ -137,27 +137,31 @@
   diff buffer, retained history by the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
-  stored values."
-  {:malli/schema [:=> [:cat :seon.store/dir] [:map]]}
-  [store-dir]
-  (let [path (canonical-path store-dir)]
-    {:store {:backend :file
-             :path path
-             ; Konserve requires a UUID store id, and Datahike keys its
-             ; connection registry, schema caches, and GC guard on it.
-             ; The id must therefore be a pure function of the canonical
-             ; path, or a reopen — or another spelling of the same
-             ; directory — would present itself as a different store.
-             :id (java.util.UUID/nameUUIDFromBytes
-                  (.getBytes ^String path "UTF-8"))}
-     :writer {:backend :self}
-     ; Rulings #23/#40: ordinary stores retain history. Scratch/eval stores
-     ; may be non-temporal only after their separate creation + reader
-     ; mechanism is proven; do not inherit this decision from Datahike.
-     :keep-history? true
-     :fuse-index-roots? true
-     :index-config {:diff-buf-size 256}
-     :schema-flexibility :write}))
+  stored values. `keep-history?` is also creation-fixed, but Datahike does
+  not auto-adopt it on reconnect, so the store owner reads the persisted
+  branch setting before connecting."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.store/dir] [:map]]
+    [:=> [:cat :seon.store/dir :boolean] [:map]]]}
+  ([store-dir]
+   (datahike-configuration store-dir true))
+  ([store-dir keep-history?]
+   (let [path (canonical-path store-dir)]
+     {:store {:backend :file
+              :path path
+              ; Konserve requires a UUID store id, and Datahike keys its
+              ; connection registry, schema caches, and GC guard on it.
+              ; The id must therefore be a pure function of the canonical
+              ; path, or a reopen — or another spelling of the same
+              ; directory — would present itself as a different store.
+              :id (java.util.UUID/nameUUIDFromBytes
+                   (.getBytes ^String path "UTF-8"))}
+      :writer {:backend :self}
+      :keep-history? keep-history?
+      :fuse-index-roots? true
+      :index-config {:diff-buf-size 256}
+      :schema-flexibility :write})))
 
 (defn- open-configuration
   "A configuration that adopts the store's creation-time settings."
@@ -244,6 +248,13 @@
   (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})]
     (some? (k/get konserve :branches nil {:sync? true}))))
 
+(defn- stored-main-keep-history?
+  "The creation-fixed history setting persisted in the main branch record."
+  [store-dir]
+  (let [konserve (filestore/connect-fs-store store-dir :opts {:sync? true})
+        stored-db (k/get konserve :db nil {:sync? true})]
+    (get-in stored-db [:config :keep-history?])))
+
 (defn- create-store!
   "Create a fresh store at `store-dir`, verifying genesis completed."
   [store-dir configuration]
@@ -271,9 +282,12 @@
   value; the flock descriptor stays held inside it until
   `release-store!`."
   {:malli/schema [:=> [:cat [:map {:closed true}
-                             [:seon.store/dir :seon.store/dir]]]
+                             [:seon.store/dir :seon.store/dir]
+                             [:seon.config.db/keep-history?
+                              {:optional true}
+                              :boolean]]]
                   :seon.store/store]}
-  [{store-dir :seon.store/dir}]
+  [{store-dir :seon.store/dir :as request}]
   ; one physical spelling for the whole lifecycle: the fence, the store
   ; id, the genesis probe, and the returned value all name one directory
   (let [dir (canonical-path store-dir)
@@ -284,16 +298,36 @@
                                " is held by a live process")
                           {::dir dir ::lock-file lock-path}))]
     (try
-      (let [creation-configuration (datahike-configuration dir)
+      (let [probe-configuration (datahike-configuration dir)
+            exists? (d/database-exists? probe-configuration)
+            complete? (and exists? (genesis-complete? dir))
+            requested? (contains? request :seon.config.db/keep-history?)
+            requested (:seon.config.db/keep-history? request)
+            stored (when complete? (stored-main-keep-history? dir))
+            _ (when (and complete? requested? (not= requested stored))
+                (refuse!
+                 ::keep-history-mismatch
+                 (str "the store at " dir
+                      " was created with :keep-history? " stored
+                      " and cannot reopen with " requested)
+                 {::dir dir
+                  ::requested-keep-history? requested
+                  ::stored-keep-history? stored}))
+            keep-history? (if complete?
+                            stored
+                            (if requested? requested true))
+            creation-configuration
+            (datahike-configuration dir keep-history?)
             created? (cond
-                       (not (d/database-exists? creation-configuration))
+                       (not exists?)
                        (do (create-store! dir creation-configuration) true)
 
-                       (genesis-complete? dir)
+                       complete?
                        false
 
                        ; :db without :branches — killed mid-genesis, so
-                       ; nothing durable ever existed. Recreate.
+                       ; nothing durable ever existed. Recreate with the
+                       ; requested setting (or the settled default).
                        :else
                        (do (create-store! dir creation-configuration) true))
             connection (d/connect (if created?
@@ -352,7 +386,9 @@
     (let [main-connection (:seon.store/connection store)
           configuration (assoc (open-configuration
                                 (datahike-configuration
-                                 (:seon.store/dir store)))
+                                 (:seon.store/dir store)
+                                 (get-in @main-connection
+                                         [:config :keep-history?])))
                                :branch branch)
           connection-id (datahike.store/connection-id configuration)]
       (when-not (contains? (d/branches main-connection) branch)

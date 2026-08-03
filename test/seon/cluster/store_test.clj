@@ -71,7 +71,8 @@
         (str "lock-file derivation failed: " (pr-str check)))))
 
 (deftest configuration-is-the-one-shape
-  (let [configuration (store/datahike-configuration "tmp/x/store")]
+  (let [configuration (store/datahike-configuration "tmp/x/store")
+        non-temporal (store/datahike-configuration "tmp/x/store" false)]
     (is (= :file (get-in configuration [:store :backend])))
     (is (= (.getCanonicalPath (io/file "tmp/x/store"))
            (get-in configuration [:store :path]))
@@ -81,7 +82,11 @@
     (is (true? (:fuse-index-roots? configuration)))
     (is (= {:diff-buf-size 256} (:index-config configuration)))
     (is (= {:backend :self} (:writer configuration)))
-    (is (= :write (:schema-flexibility configuration)))))
+    (is (= :write (:schema-flexibility configuration)))
+    (is (true? (:keep-history? configuration))
+        "ordinary stores retain history by default")
+    (is (false? (:keep-history? non-temporal))
+        "the creation seam accepts an explicit non-temporal policy")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle — live against the :file backend
@@ -182,6 +187,87 @@
               (store/release-store! opened))))
         (finally
           (test-support/delete-recursively! (str (io/file dir) "/..")))))))
+
+(deftest history-policy-is-creation-fixed-and-reopens-from-the-branch-record
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened
+            (store/open-store!
+             {:seon.store/dir dir
+              :seon.config.db/keep-history? false})]
+        (is (true? (:seon.store/created? opened)))
+        (is (false? (get-in @(:seon.store/connection opened)
+                            [:config :keep-history?])))
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (d/history @(:seon.store/connection opened))))
+        (store/release-store! opened))
+      (testing "an omitted request adopts the persisted policy"
+        (let [reopened (store/open-store! {:seon.store/dir dir})]
+          (try
+            (is (false? (:seon.store/created? reopened)))
+            (is (false? (get-in @(:seon.store/connection reopened)
+                                [:config :keep-history?])))
+            (finally
+              (store/release-store! reopened)))))
+      (testing "an explicit conflicting request refuses before connect"
+        (let [refusal
+              (test-support/refusal-data
+               #(store/open-store!
+                 {:seon.store/dir dir
+                  :seon.config.db/keep-history? true}))]
+          (is (= ::store/keep-history-mismatch (::store/rule refusal)))
+          (is (= false (::store/stored-keep-history? refusal)))
+          (is (= true (::store/requested-keep-history? refusal)))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest temporal-stores-answer-all-three-database-views
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            connection (:seon.store/connection opened)]
+        (try
+          (d/transact connection probe-schema)
+          (let [basis (:max-tx @connection)]
+            (d/transact connection
+                        [{:seon.store.test/marker "after-basis"}])
+            (is (store/database-value? (d/history @connection)))
+            (is (store/database-value? (d/as-of @connection basis)))
+            (is (store/database-value? (d/since @connection basis))))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
+(deftest branch-connections-inherit-the-root-history-representation
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened
+            (store/open-store!
+             {:seon.store/dir dir
+              :seon.config.db/keep-history? false})
+            main (:seon.store/connection opened)
+            branch :non-temporal-test]
+        (try
+          (d/transact main probe-schema)
+          (d/branch! main :db branch)
+          (let [connection (store/open-branch! opened branch)]
+            (try
+              (is (false? (get-in @connection [:config :keep-history?])))
+              (d/transact connection
+                          [{:seon.store.test/marker "current-reads-work"}])
+              (is (= #{["current-reads-work"]}
+                     (d/q '[:find ?marker
+                            :where [_ :seon.store.test/marker ?marker]]
+                          @connection)))
+              (is (thrown? clojure.lang.ExceptionInfo
+                           (d/history @connection)))
+              (finally
+                (d/release connection))))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
 (deftest transact-normalizes-only-jdk-integers
   (let [dir (fresh-dir)]
