@@ -402,6 +402,51 @@
         (.countDown release)
         (stop-test-work-launcher!)))))
 
+(deftest background-io-submission-is-nonblocking-bounded-and-joined
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        virtual? (atom [])
+        configuration
+        {:seon.config.flow.compute/queue-depth 1
+         :seon.config.flow.compute/concurrency 1
+         :seon.config.flow.io/queue-depth 1
+         :seon.config.flow.io/concurrency 1}
+        launcher
+        (sut/start-work-launcher! {::sut/configuration configuration})
+        terminals (mapv (fn [_] (promise)) (range 3))
+        submission
+        (fn [ordinal]
+          {::sut/submission-id (keyword (str "background-" ordinal))
+           ::sut/workload :io
+           ::sut/work-fn
+           (fn [_]
+             (swap! virtual? conj (.isVirtual (Thread/currentThread)))
+             (.countDown entered)
+             (test-support/await-event! release ::release-background-io)
+             ordinal)
+           ::sut/complete!
+           #(deliver (nth terminals ordinal) %)})]
+    (try
+      (is (true? (sut/submit! launcher (submission 0))))
+      (test-support/await-event! entered ::background-io-entered)
+      (is (true? (sut/submit! launcher (submission 1))))
+      (is (true? (sut/submit! launcher (submission 2)))
+          "submission returns after injection rather than after work")
+      (let [refused
+            (test-support/await-event!
+             (nth terminals 2)
+             ::background-io-refused)]
+        (is (= ::sut/submission-capacity
+               (get-in refused [::sut/value :seon.error/kind]))))
+      (sut/stop-work-launcher! launcher)
+      (is (every? realized? (take 2 terminals))
+          "stop joins terminal callbacks for every accepted submission")
+      (is (every? true? @virtual?))
+      (finally
+        (.countDown release)
+        (when-not (every? realized? (take 2 terminals))
+          (sut/stop-work-launcher! launcher))))))
+
 (deftest submission-time-limit-covers-the-pre-start-wait
   (testing "paused before start"
     (let [launcher
