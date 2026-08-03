@@ -1,8 +1,19 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, mcp, sci, runtime]
 ---
+
+RESOLVED 2026-08-03 by `a54b8bddb` (Bound MCP door value projections):
+recursive collection windowing, nested string clipping with the print
+grammar's elision markers, and shipped `:seon.print/length 32` /
+`:seon.print/level 8` defaults. Live proof, independently re-verified
+by the orchestrator on the reforked default: door `(vec (range 50000))`
+envelope 304,265 → ~4,332 bytes with `windowed? true`, digest, and
+`retrievable? true`; `get_value` pages the admitted artifact correctly
+(offset 8000 → `[8000..8007]`; past the admitted 8,192 length returns
+empty honestly). One mechanism, no MCP-only budget; the MCP server
+script was untouched, so no client restart was needed.
 
 # MCP door eval envelope leaks nested bulk through the top-level window
 
