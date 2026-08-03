@@ -178,6 +178,24 @@
                    {:selector schema-pattern
                     :eids [schema-ref missing-schema-ref schema-ref]})))))))))
 
+(deftest return-map-queries-preserve-ordering-and-limit
+  (test-support/with-database
+   {:seon.test-support/extra-schema
+    (schema.datahike/malli->datahike-schema [::row-id])}
+   (fn [connection]
+     (db/transact! connection
+                   [{::row-id "charlie"}
+                    {::row-id "alpha"}
+                    {::row-id "bravo"}])
+     (is (= [{:id "alpha"}
+             {:id "bravo"}]
+            (db/q {:query '[:find ?id
+                            :keys id
+                            :where [_ ::row-id ?id]]
+                   :args [@connection]
+                   :order-by '?id
+                   :limit 2}))))))
+
 (deftest database-identities-support-explicit-and-current-custody
   (test-support/with-database
    (fn [connection]

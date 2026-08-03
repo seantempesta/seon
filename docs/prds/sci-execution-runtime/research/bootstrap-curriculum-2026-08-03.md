@@ -99,7 +99,8 @@ pushed into the query rather than done in Clojure afterwards.
 applies, in this fixed order:
 
 ```
-:with truncation → aggregate → pull → -post-process → return-maps → order-by → offset/limit
+:with truncation → aggregate → pull → -post-process → order-by (+ offset/limit)
+→ return-maps → non-ordered offset/limit
 ```
 
 Three consequences that decide every recipe below:
@@ -113,15 +114,17 @@ Three consequences that decide every recipe below:
 2. **`:keys` is a post-hoc `zipmap`** (`convert-to-return-maps`,
    `query.cljc:3121-3128`) — literally `(mapv #(zipmap mkeys %) resultset)`.
    It costs a map allocation per row and buys naming. Useful, but it is not an
-   index optimization, and it has a real interaction bug (below).
+   index optimization. Ordered queries sort and apply offset/limit to positional
+   tuples before naming the retained rows.
 3. **`:order-by`/`:limit`/`:offset` are engine-side** (accepted as query-map
    keys at `query.cljc:112`, applied at `:4197-4200`). When they work, they
    truncate before returning.
 
-### Confirmed bug: `:keys` and `:order-by` cannot be combined
+### Resolved fork defect: `:keys` and `:order-by` now compose
 
-Because `convert-to-return-maps` runs at `:4196` and `apply-order-by` at
-`:4197`, ordering receives **maps** and tries to index into them positionally:
+Upstream commit `ebbd623a` (PR #795) placed `convert-to-return-maps` before
+`apply-order-by`, so ordering received **maps** and tried to index into them
+positionally:
 
 ```clojure
 (seon.db/q {:query '[:find ?sym ?doc
@@ -133,6 +136,12 @@ Because `convert-to-return-maps` runs at `:4196` and `apply-order-by` at
 ;;                 :message "nth not supported on this type: PersistentArrayMap"}
 ```
 
+The maintained fork repairs the stage order in commit `574c5f0f`: ordering
+resolves each find variable to its tuple position, sorts those tuples, applies
+offset/limit, and only then applies the declared `:keys` names. The fork's
+`datahike.test.query-test` regression also proves that the adjacent non-ordered
+offset/limit branch still returns correctly named maps.
+
 Naming the `:keys` alias instead fails earlier, with a genuinely good message:
 
 ```clojure
@@ -140,9 +149,12 @@ Naming the `:keys` alias instead fails earlier, with a genuinely good message:
 ;; => ":order-by variable seon.fn/sym not found in :find [?sym ?doc]"
 ```
 
-**Recommendation: do not teach `:keys` + `:order-by`.** Use pull-in-`:find`
-for naming and Clojure's `sort-by` for ordering — which is also the
-composition style this curriculum wants.
+The same query was re-run through the live `default` cluster's door after
+hot-reloading the repaired Var and returned the first three capability rows as
+an ordered table of `:seon.fn/sym` and `:seon.fn/doc` maps. The combination is
+now safe to teach when engine-side ordering and truncation are the point;
+pull-in-`:find` plus ordinary Clojure composition remains the preferred style
+for nested naming and shaping.
 
 ### Index-direct access
 
@@ -539,11 +551,11 @@ That error value is then **accepted by `seon.db/q` as its `db` argument**, and
 database value is required must return an error value, never `nil`. Silent,
 and therefore the worst failure mode available.
 
-### Gap 2 — `:keys` + `:order-by` is broken in the engine
+### Gap 2 — resolved: `:keys` + `:order-by`
 
-Root-caused above to pipeline order at `query.cljc:4196-4197`. Upstream defect
-in our pinned Datahike; worth an issue and a candidate upstream fix (order-by
-before return-maps, or index-by-name when rows are maps).
+Root-caused above to pipeline order introduced by upstream `ebbd623a` and
+repaired in the maintained fork at `574c5f0f`. The repair and its fork-native
+regressions should be offered upstream.
 
 ### Gap 3 — no test-for-capability coverage is visible as a fact
 
@@ -627,7 +639,11 @@ information (which clause, which attribute, what was expected) is absent.
 
 - **`:order-by` refusals are excellent**: ":order-by variable seon.fn/sym not
   found in :find [?sym ?doc]" names the value, the expectation, and the
-  context. This is the standard the others should meet.
+  context. This is the standard the others should meet. The former valid-query
+  failure, "nth not supported on this type: PersistentArrayMap", did not meet
+  that standard: it exposed an implementation type and named neither the
+  option nor the incompatible stage. The fork repair eliminates that internal
+  mismatch rather than adding a refusal for a valid query.
 - **`(doc …)` renders in the agent's own comment grammar**, so its output can
   be pasted straight back into a reply:
 

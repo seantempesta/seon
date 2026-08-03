@@ -16,6 +16,17 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, DATAHIKE RETURN-MAP ORDERING REPAIRED.** Upstream
+commit `ebbd623a` (PR #795) placed return-map conversion before `:order-by`,
+causing valid `:keys` + `:order-by` queries to hand maps to a positional
+comparator and fail at `nth`. Maintained-fork commit `574c5f0f` orders and
+applies ordered offset/limit to positional tuples before applying return-map
+names; the adjacent non-ordered offset/limit behavior remains covered. The
+fork gate passed 84 tests / 444 assertions, the Seon `seon.db-test` boundary
+passed 17 / 78, and the curriculum's capability query returned three ordered
+named maps through the live `default` cluster's door after Var reload. The
+repair should be offered upstream.
+
 **ADDENDUM — 2026-08-03, TEST FEEDBACK TIERS OWNER-RULED.** Bare `bin/test`
 is the fast recurring gate and derives its exclusions only from non-blank
 `:seon.test/long` reasons declared on process/boot-bound test vars or
