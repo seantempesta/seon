@@ -353,3 +353,7 @@
 [submodule "reference-code/ds4"]
 	path = reference-code/ds4
 	url = https://github.com/antirez/ds4
+[submodule "reference-code/langchain4clj"]
+	path = reference-code/langchain4clj
+	url = https://github.com/nandoolle/langchain4clj.git
+	ignore = dirty
