@@ -18,17 +18,20 @@ dated blocks stay as the record of what was believed when.]
 
 **ADDENDUM — 2026-08-03, UGLY OUTPUT COLLAPSES BY CONTENT SIGNATURE.** Core
 faults now retain and print one bounded face per `:seon.error/signature`, even
-when the database writer is dead (`7f09f6569`). The test runner renders one
-bounded face for repeated signed failures while preserving every error in its
-result counts (`f564dc1ff`). MCP exception results now carry one admitted
-class/message/frame summary, create no blob below the declared inline ceiling,
-and retain genuinely oversized summaries through the existing blob owner
-(`e780f8b48`). The integrated focused checkpoint passed 36 tests / 272
-assertions with zero failures or errors. Loaded-Var proof reduced the small MCP
-contract-failure response from 2,173 bytes, two message copies, and a forced
-22,488-byte blob to 1,246 bytes, one message, and no blob; a 5,000-character
-exception remained retrievable as one blob-backed value. The three resolved
-issues are archived under `docs/seon/issues/archive/`.
+when the database writer is dead (`7f09f6569`); a fresh committer proc also
+suppresses a signature found through the durable query (`89c62e119`), while a
+distinct successful commit remains visible exactly once (`9b1b0c766`). The
+test runner renders one bounded face for repeated signed failures while
+preserving every error in its result counts (`f564dc1ff`). MCP exception
+results now carry one admitted class/message/frame summary, create no blob
+below the declared inline ceiling, and retain genuinely oversized summaries
+through the existing blob owner (`e780f8b48`). The integrated focused
+checkpoint passed 36 tests / 282 assertions with zero failures or errors.
+Loaded-Var proof reduced the small MCP contract-failure response from 2,173
+bytes, two message copies, and a forced 22,488-byte blob to 1,246 bytes, one
+message, and no blob; a 5,000-character exception remained retrievable as one
+blob-backed value. The three resolved issues are archived under
+`docs/seon/issues/archive/`.
 
 **ADDENDUM — 2026-08-03, CLUSTER STOP RETRY IS RESUMABLE.** Commit
 `387c3d05a` makes each stop derive the remaining teardown from observable
