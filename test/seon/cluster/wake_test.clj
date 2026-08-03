@@ -66,10 +66,12 @@
   ([connection mailbox fenced?]
    (let [armer (async/chan (async/sliding-buffer 1))
          render (async/chan (async/sliding-buffer 1))
+         search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
      {:mailbox mailbox
       :armer armer
       :render render
+      :search search
       :faults faults
       :key (wake/route! {:seon.cluster.wake/connection connection
                          :seon.cluster.wake/channels
@@ -77,6 +79,7 @@
                          :seon.cluster.wake/fenced? fenced?
                          :seon.cluster.wake/armer-channel armer
                          :seon.cluster.wake/render-channel render
+                         :seon.cluster.wake/search-channel search
                          :seon.cluster.wake/fault-channel faults
                          :seon.cluster.wake/key ::probe})})))
 
@@ -88,11 +91,16 @@
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
-            {:keys [render key]} (route-probe! connection mailbox)]
+            {:keys [render search key]} (route-probe! connection mailbox)]
         (try
           (db/transact! connection (message-tx "m-1"))
           (is (some? (test-support/await-event! mailbox "mailbox wake"))
               "a message to this agent reaches ITS mailbox")
+          (let [report (test-support/await-event! search
+                                                  "search transaction report")]
+            (is (= (:max-tx (:db-after report))
+                   (:max-tx @connection))
+                "the same listener forwards the exact committed basis"))
           (testing "a commit of attributes only a TURN writes wakes no
                     mailbox — the trap that would spin an idle cluster"
             (db/transact! connection (run-tx "run-1"))

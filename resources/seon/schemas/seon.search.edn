@@ -1,0 +1,47 @@
+#:seon.search{:family [:enum :function :schema :test],
+              :path :string,
+              :index :string,
+              :channel :seon.flow/channel,
+              :completion :seon.flow/channel,
+              :families [:set {:min 1} :seon.search/family],
+              :match [:enum :token :substring],
+              :limit [:int {:min 1, :max 100}],
+              :query [:string {:min 1}],
+              :namespace-prefix :symbol,
+              :basis-t [:int {:min 0}],
+              :field [:enum :symbol :docstring :key],
+              :identity [:or [:string {:min 1}] :qualified-keyword],
+              :text [:string {:min 1}],
+              :score :double,
+              :result
+              [:map
+               [:seon.search/family :seon.search/family]
+               [:seon.search/namespace-prefix :seon.search/namespace-prefix]
+               [:seon.search/field :seon.search/field]
+               [:seon.search/identity :seon.search/identity]
+               [:seon.search/text :seon.search/text]
+               [:seon.search/score :seon.search/score]],
+              :results
+              [:map
+               [:seon.search/basis-t :seon.search/basis-t]
+               [:seon.search/results [:vector :seon.search/result]]],
+              :request
+              [:map
+               [:seon.search/query :seon.search/query]
+               [:seon.search/families :seon.search/families]
+               [:seon.search/namespace-prefix
+                {:optional true}
+                :seon.search/namespace-prefix]
+               [:seon.search/match :seon.search/match]
+               [:seon.search/limit :seon.search/limit]],
+              :unavailable [:= true]
+              :unavailable-error
+              [:map
+               {:seon.error/class true
+                :seon.render/ai seon.error/render-ai
+                :seon.render/html seon.error/render-html
+                :error/message "must explain why the cluster search index is unavailable"}
+               [:seon.search/unavailable :seon.search/unavailable]
+               [:seon.error/message :seon.error/message]],
+              :response
+              [:or :seon.search/results :seon.search/unavailable-error]}

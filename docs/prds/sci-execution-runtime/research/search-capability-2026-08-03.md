@@ -6,6 +6,84 @@ tags: [research, database, datahike, sci]
 
 # Search capability without embeddings
 
+## Owner-ruling addendum — Apache Lucene adopted (2026-08-03 night)
+
+**OWNER RULING: the measured “no Lucene; predicate scans suffice” verdict
+below is superseded. Seon adopts Apache Lucene full-text search as the one
+set-up-once substrate for agent search, schema-reuse teaching, and future
+consumers.** The old analysis remains below as the measured baseline and the
+record of the recommendation the owner replaced; it no longer sequences
+implementation.
+
+Lucene is a derived index, never truth. Each cluster owns exactly one index at
+`data/clusters/<name>/derived/lucene`, built from its database value and tagged
+with the basis transaction it reflects. The existing Datahike `listen!`
+transaction chain offers the complete transaction report to the search proc;
+the proc advances only from an exact `db-before` basis. Because its input is a
+sliding-one channel, a coalesced report is expected: a basis gap rebuilds from
+`db-after` rather than attempting partial recovery. A missing directory or an
+index commit whose recorded basis differs from the current database value also
+rebuilds. No fact, recovery input, or source population is read from Lucene.
+
+The exact selected coordinates in `deps.edn` are:
+
+- `org.apache.lucene/lucene-core` `10.5.0`;
+- `org.apache.lucene/lucene-analysis-common` `10.5.0`; and
+- `org.apache.lucene/lucene-queryparser` `10.5.0`.
+
+The corresponding Apache source is tag `releases/lucene/10.5.0`, peeled commit
+`f6eaee8148b7569e83c433feacc4f624608188fd`, in the
+[official Lucene repository](https://github.com/apache/lucene/tree/releases/lucene/10.5.0).
+Vendoring the complete Lucene repository is impractical here: it is a large
+multi-module build while this owner uses three published modules. Exact Maven
+coordinates plus the exact source tag/commit give the reproducible pin without
+pretending that an unused full checkout is maintained reference code.
+
+Both existing Datahike/Lucene examples were read end to end before this design:
+
+- Scriptum at
+  `reference-code/datahike/src-secondary/datahike/index/secondary/scriptum.clj`
+  (Scriptum `0.1.27`, Lucene `10.3.2`) demonstrates transaction-coupled datom
+  additions/retractions and deterministic document deletion; and
+- JobTech Taxonomy API commit
+  `19a5868d096e9ad174240c32ed50707b9c86d2eb`, especially
+  `src/jobtech_taxonomy_api/db/search.clj` and `database_connection.clj`
+  (Lucene `10.4.0`), demonstrates keeping search objects process-local and
+  keying derived search state to database identity.
+
+Seon adopted the ideas, not either bridge's code. Its document id is
+`<fact-family>|<entity-id>|<field>`, so any relevant datom change deletes every
+old document for that entity and reconstructs its current function symbol and
+docstring, schema key, or test symbol from `db-after`. Namespace-name changes
+rebuild because they affect documents reached through refs. Lucene objects do
+not cross `seon.search`; the ordinary public `search` contract returns bounded
+data or a flat error and scopes every query by declared fact family plus an
+optional namespace prefix argument.
+
+### Measurements
+
+The reproducible measurement is
+`docs/prds/sci-execution-runtime/research/scripts/search-lucene-measure-2026-08-03.clj`,
+run on the full published test fixture with OpenJDK `26.0.1` and Lucene
+`10.5.0`. Three wiped-index builds and 100 warmed queries per query shape
+measured:
+
+- full published-graph build: 243.87 ms minimum, 277.12 ms median, 627.55 ms
+  p95/maximum;
+- exact one-function incremental update, including commit + reader refresh but
+  excluding the already-completed database transaction: 24.69 ms;
+- scoped token query: 0.50 ms median, 1.04 ms p95, 2.00 ms maximum; and
+- scoped substring query: 1.49 ms median, 2.02 ms p95, 2.73 ms maximum.
+
+The database predicate-scan baseline below was 0.32 ms p50 / 0.43 ms p95 for
+all docstrings and 2.31 ms p50 / 2.65 ms p95 for all source, with the wider
+0.32–6 ms observed range across measured scans. Lucene therefore does not win
+every small-corpus query; it is adopted because it supplies the owner-directed
+full-text substrate and stable relevance/scoping contract while remaining in
+the same latency band. The first `10.3.2` probe emitted an unsupported-Java-26
+Vector API warning. Selecting current `10.5.0` removed it and reported the Java
+vector incubator API active at 128 preferred bits.
+
 ## Verdict
 
 Seon can offer useful, real search now without embeddings and without a second

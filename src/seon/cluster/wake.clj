@@ -199,6 +199,7 @@
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
            :seon.cluster.wake/fenced?
            :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
+           :seon.cluster.wake/search-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
   (d/listen
    connection
@@ -210,6 +211,16 @@
        ;; putting it ahead of the routing keeps it unconditional by
        ;; construction rather than by a reviewer checking every arm
        (deliver! fault-channel key ::render render-channel (constantly false))
+       ;; Search needs the report's exact db-before/db-after bases. The
+       ;; sliding-1 channel may coalesce reports; its proc detects that gap
+       ;; and rebuilds from the newest database value instead of guessing.
+       (when search-channel
+         (when-not (true? (async/offer! search-channel report))
+           (async/offer!
+            fault-channel
+            (ex-info "The derived search index refused a transaction report."
+                     {:seon.cluster.wake/key key
+                      :seon.cluster.wake/route ::search}))))
        (doseq [datom (:tx-data report)]
          (case (nth datom 1)
            :seon.cluster.agent/id

@@ -20,6 +20,9 @@
                       :seon.flow/channel]
                      [:seon.cluster.wake/render-channel
                       :seon.flow/channel]
+                     [:seon.cluster.wake/search-channel
+                      {:optional true}
+                      :seon.flow/channel]
                      [:seon.cluster.wake/fault-channel
                       :seon.flow/channel]
                      [:seon.cluster.wake/key :seon.cluster.wake/key]],

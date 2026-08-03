@@ -7,10 +7,10 @@
   Publication remains owned by `seon.schema.edn`."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.tools.reader.edn :as reader.edn]
             [clojure.tools.reader.reader-types :as reader-types]
+            [seon.search :as search]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -267,27 +267,19 @@
                  nodes))))
            (sort-by key declarations)))))
 
-(defn- token-parts
-  [text]
-  (let [flush-token
-        (fn [{:keys [tokens token]}]
-          {:tokens (cond-> tokens (seq token) (conj token))
-           :token ""})]
-    (:tokens
-     (flush-token
-      (reduce
-       (fn [{:keys [token] :as state} character]
-         (if (contains? #{\. \-} character)
-           (flush-token state)
-           (assoc state :token (str token character))))
-       {:tokens [] :token ""}
-       (str/lower-case (or text "")))))))
-
-(defn- name-tokens
-  [schema-key]
-  (into #{}
-        (concat (token-parts (namespace schema-key))
-                (token-parts (name schema-key)))))
+(defn- collision-findings
+  [file declarations registry]
+  (into []
+        (keep
+         (fn [declaration-key]
+           (when (contains? registry declaration-key)
+             (finding
+              file :error :schema-key-collision
+              (str "Schema key " declaration-key
+                   " is already registered; exact-key redefinition is refused.")
+              {:seon.schema.admission/declaration declaration-key
+               :seon.schema.admission/similar-key declaration-key}))))
+        (sort (keys declarations))))
 
 (defn- exact-reuse-findings
   [file declarations registry]
@@ -299,7 +291,10 @@
                             (= definition existing-definition))]
              (finding
               file :warning :schema-exact-reuse
-              (str "Schema " declaration-key " duplicates a declaration; same shape exists as " existing-key ".")
+              (str "Schema " declaration-key " has the same shape as existing "
+                   existing-key ". If this duplicates " existing-key
+                   ", delete " declaration-key " and reuse " existing-key
+                   ". Create a parallel schema only when the user explicitly chooses a separate system.")
               {:seon.schema.admission/declaration declaration-key
                :seon.schema.admission/similar-key existing-key})))
          (sort-by key declarations))))
@@ -309,30 +304,23 @@
   (into []
         (mapcat
          (fn [[declaration-key _]]
-           (let [tokens (name-tokens declaration-key)]
-             (->> registry
-                  (keep
-                   (fn [[existing-key _]]
-                     (when (and (qualified-keyword? declaration-key)
-                                (qualified-keyword? existing-key)
-                                (not= declaration-key existing-key))
-                       (let [shared (count
-                                     (set/intersection
-                                      tokens (name-tokens existing-key)))]
-                         (when (pos? shared)
-                           {:key existing-key :shared shared})))))
-                  (sort-by (juxt (comp - :shared) (comp str :key)))
-                  (take 3)
-                  (mapv
-                   (fn [{similar-key :key :keys [shared]}]
+           (->> (search/similar-identities
+                 declaration-key
+                 (remove #{declaration-key} (keys registry))
+                 3)
+                (mapv
+                   (fn [{similar-key :seon.schema.admission/similar-key
+                         shared :seon.schema.admission/shared-tokens}]
                      (finding
                       file :warning :schema-name-overlap
                       (str "Schema " declaration-key " shares " shared
                            " name token" (when (not= 1 shared) "s")
-                           " with " similar-key ". Check the registry before declaring a new key.")
+                           " with existing " similar-key ". If this duplicates "
+                           similar-key ", delete " declaration-key " and reuse "
+                           similar-key ". Create a parallel schema only when the user explicitly chooses a separate system.")
                       {:seon.schema.admission/declaration declaration-key
                        :seon.schema.admission/similar-key similar-key
-                       :seon.schema.admission/shared-tokens shared}))))))
+                       :seon.schema.admission/shared-tokens shared})))))
          (sort-by key declarations))))
 
 (defn- compilation-finding
@@ -396,19 +384,25 @@
                  (fn [{::keys [file declarations]}]
                    (house-findings file declarations)))
                 valid-units)
-          reuse-registry (merge registry candidate-declarations)
+          collisions
+          (into []
+                (mapcat
+                 (fn [{::keys [file declarations]}]
+                   (collision-findings file declarations registry)))
+                valid-units)
           similarity
           (into []
                 (mapcat
                  (fn [{::keys [file declarations]}]
                    (concat
-                    (exact-reuse-findings file declarations reuse-registry)
-                    (name-overlap-findings file declarations reuse-registry))))
+                    (exact-reuse-findings file declarations registry)
+                    (name-overlap-findings file declarations registry))))
                 valid-units)
           compilation
           (when (seq candidate-declarations)
             (compilation-finding files-by-key complete-forms))]
-      (vec (concat read-findings house (when compilation [compilation]) similarity)))
+      (vec (concat read-findings house collisions
+                   (when compilation [compilation]) similarity)))
     (catch Throwable error
       (if-let [findings (:seon.schema.admission/findings (ex-data error))]
         (vec findings)

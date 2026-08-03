@@ -103,7 +103,18 @@
            (:seon.schema.admission/similar-key (first exact))))
     (is (str/includes?
          (:message (first exact))
-         "same shape exists as :existing.fixture/value"))))
+         "delete :candidate.fixture/value and reuse :existing.fixture/value"))))
+
+(deftest exact-key-collision-is-the-only-reuse-refusal
+  (let [findings
+        (admission/admit
+         {::admission/declarations {:existing.fixture/value :int}
+          ::admission/registry {:existing.fixture/value :string}})
+        collision (findings-of-type :schema-key-collision findings)]
+    (is (= 1 (count collision)))
+    (is (= :error (:level (first collision))))
+    (is (str/includes? (:message (first collision))
+                       "exact-key redefinition is refused"))))
 
 (deftest name-token-overlap-is-ranked-and-capped-at-three
   (let [findings

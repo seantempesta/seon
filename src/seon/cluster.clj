@@ -51,7 +51,8 @@
             [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.search :as search])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files StandardCopyOption]))
 
@@ -459,13 +460,15 @@
                   [:map {:closed true}
                    [:seon.boot/cluster-dir :string]
                    [:seon.boot/advertisement-file :string]
-                   [:seon.boot/log-dir :string]]]}
+                   [:seon.boot/log-dir :string]
+                   [:seon.search/path :string]]]}
   [root cluster-name]
   (let [cluster-dir (io/file root cluster-name)]
     {:seon.boot/cluster-dir (str cluster-dir)
      :seon.boot/advertisement-file
      (str (io/file cluster-dir "prepl.edn"))
-     :seon.boot/log-dir (str (io/file cluster-dir "logs"))}))
+     :seon.boot/log-dir (str (io/file cluster-dir "logs"))
+     :seon.search/path (str (io/file cluster-dir "derived" "lucene"))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The instance lifecycle
@@ -1439,8 +1442,8 @@
              (:seon.config.error/escalate-to dials)))))
 
 (defn- cluster-graph-definition
-  "The cluster's OWN small graph (F1 R7, F2 §1): the armer proc and the
-  render proc — a schedule proc later. One cluster graph per cluster,
+  "The cluster's OWN small graph (F1 R7, F2 §1): armer, render, and the
+  derived search-index proc — a schedule proc later. One graph per cluster,
   so the components that arm agents and derive pages have exactly the
   ping/error/pause uniformity every other proc has. The render proc's
   channels are external ports (created by `arm-agents!`, carried on the
@@ -1454,7 +1457,15 @@
            {:proc (flow/var-process #'web/render-step :io
                                     (assoc view
                                            :seon.cluster.loop/cluster
-                                           handle))}}
+                                           handle))}
+           :seon.search/index
+           {:proc (flow/var-process #'search/index-step :io
+                                    {:seon.search/index
+                                     (:seon.search/index view)
+                                     :seon.search/channel
+                                     (:seon.search/channel view)
+                                     :seon.search/completion
+                                     (:seon.search/completion view)})}}
    :conns []})
 
 (defn- arm-agents!
@@ -1494,6 +1505,7 @@
         ;; registration the feed writes, and the proc's own orderly-stop
         ;; completion — all process-local, all free to lose
         render-channel (async/chan (async/sliding-buffer 1))
+        search-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
         view {:seon.render.web/render-channel render-channel
@@ -1503,6 +1515,9 @@
               :seon.render.web/latest-packages latest-packages
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
+              :seon.search/index (:seon.search/index instance)
+              :seon.search/channel search-channel
+              :seon.search/completion (async/promise-chan)
               :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms handle)
@@ -1575,6 +1590,7 @@
                     (cluster.agent/fenced-route? routing agent-eid channel))
                   :seon.cluster.wake/armer-channel armer-channel
                   :seon.cluster.wake/render-channel render-channel
+                  :seon.cluster.wake/search-channel search-channel
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.cluster.agent/route})
@@ -1601,6 +1617,7 @@
             :seon.render.web/pages-mult (async/mult pages-channel)
             :seon.render.web/fault-channel
             (:seon.flow/fault-channel fanout))
+     :seon.search/completion (:seon.search/completion view)
      :seon.error/drops drops}))
 
 (defn- disarm-agents!
@@ -1663,7 +1680,13 @@
                 (:seon.cluster.loop/cluster instance)))
     (some-> (get-in instance [:seon.render.web/view
                               :seon.render.web/completion])
-            async/<!!))
+            async/<!!)
+    (some-> (:seon.search/completion instance) async/<!!))
+  ;; A degraded boot can open the index before the graph stands. Then no proc
+  ;; owns its close transition yet, so this layer releases it directly.
+  (when (and (:seon.search/index instance)
+             (nil? (:seon.flow/graph instance)))
+    (search/close! (:seon.search/index instance)))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
@@ -1730,6 +1753,11 @@
         ;; escalation dial names, and BEFORE the loop is armed, because
         ;; an armed loop may need to address it on its first pass
         _ (seed-root-agent! connection cluster-name process)
+        search-path (:seon.search/path
+                     (cluster-paths (:seon.boot/root config) cluster-name))
+        instance (publish!
+                  (assoc instance :seon.search/index
+                         (search/open! connection search-path)))
         ;; The cluster's one live SCI program graph is derived from facts once
         ;; after schema accretion and before any agent graph can run. It has no
         ;; close operation; dropping the instance drops the derived context.
