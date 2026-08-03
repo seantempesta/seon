@@ -257,6 +257,28 @@
         _ (.putAll (.environment builder) (child-environment root))]
     (.start builder)))
 
+(defn- ensure-dependency-cache!
+  []
+  (println "● boot dependency cache: checking inputs")
+  (flush)
+  (let [process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["clojure" "-T:dev-cache" "ensure-cache"])
+          (.directory (repository-root))
+          (.redirectErrorStream true)))]
+    (with-open [reader (io/reader (.getInputStream process))]
+      (doseq [line (line-seq reader)]
+        (println line)
+        (flush)))
+    (let [exit (.waitFor process)]
+      (when-not (zero? exit)
+        (fail! "The dependency class cache could not be prepared."
+               {:seon.fresh-operator/exit exit}))))
+  nil)
+
 (defn- valid-name!
   [name]
   (when-not (and (string? name)
@@ -1318,6 +1340,8 @@
   ([advertisement form]
    (prepl-eval! advertisement form prepl-eval-ms))
   ([advertisement form timeout-ms]
+   (prepl-eval! advertisement form timeout-ms (constantly nil)))
+  ([advertisement form timeout-ms observe!]
    (with-open [socket (Socket.)]
      (.connect socket
                (InetSocketAddress.
@@ -1337,6 +1361,7 @@
        (.flush writer)
        (loop [events []]
          (let [event (edn/read {:eof ::eof} reader)]
+           (observe! event)
            (cond
              (= ::eof event)
              (fail! "The cluster closed its prepl before returning."
@@ -1402,23 +1427,32 @@
   (let [instance (gensym "instance")]
     (pr-str
      `(do
-        (require 'seon.cluster 'seon.config 'seon.instrument)
-        (let [~instance
-              (seon.cluster/start!
-               {:seon.boot/root ~(str (cluster-root root))
-                :seon.boot/cluster-name ~name
-                :seon.config/manifest ~manifest})
-              applied# ~(instrument-form instance name)]
-          (println "seon" ~name "ready — instrumented"
-                   (:seon.instrument/instrumented applied#) "vars")
-          (flush)
-          (with-open [socket# (java.net.Socket. "127.0.0.1" ~ready-port)
-                      writer# (java.io.OutputStreamWriter.
-                               (.getOutputStream socket#)
-                               java.nio.charset.StandardCharsets/UTF_8)]
-            (.write writer# "ready\n")
-            (.flush writer#))
-          @(promise))))))
+        (with-open [socket# (java.net.Socket. "127.0.0.1" ~ready-port)
+                    writer# (java.io.OutputStreamWriter.
+                             (.getOutputStream socket#)
+                             java.nio.charset.StandardCharsets/UTF_8)]
+          (let [progress!#
+                (fn [phase#]
+                  (.write writer# (str (clojure.core/name phase#) "\n"))
+                  (.flush writer#))]
+            (progress!# :seon.boot.phase/namespaces)
+            (require 'seon.cluster 'seon.config 'seon.instrument)
+            (let [progress-var#
+                  (ns-resolve 'seon.cluster (symbol "*boot-progress!*"))
+                  ~instance
+                  (with-bindings
+                    {progress-var# progress!#}
+                    (seon.cluster/start!
+                     {:seon.boot/root ~(str (cluster-root root))
+                      :seon.boot/cluster-name ~name
+                      :seon.config/manifest ~manifest}))
+                  applied# ~(instrument-form instance name)]
+              (println "seon" ~name "ready — instrumented"
+                       (:seon.instrument/instrumented applied#) "vars")
+              (flush)
+              (.write writer# "ready\n")
+              (.flush writer#))))
+        @(promise)))))
 
 (defn- add-form
   [root name manifest]
@@ -1434,11 +1468,20 @@
         ;; enters that process-global wrapper. The selected new cluster
         ;; still reapplies its own dial after its config facts commit.
         ~(refresh-instrument-form)
-        (let [~instance
-              (seon.cluster/start!
-               {:seon.boot/root ~(str (cluster-root root))
-                :seon.boot/cluster-name ~name
-                :seon.config/manifest ~manifest})
+        (let [progress-var#
+              (ns-resolve 'seon.cluster (symbol "*boot-progress!*"))
+              progress!#
+              (fn [phase#]
+                (println (str "● " ~name " boot: "
+                              (clojure.core/name phase#)))
+                (flush))
+              ~instance
+              (with-bindings
+                {progress-var# progress!#}
+                (seon.cluster/start!
+                 {:seon.boot/root ~(str (cluster-root root))
+                  :seon.boot/cluster-name ~name
+                  :seon.config/manifest ~manifest}))
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "added — instrumented"
                    (:seon.instrument/instrumented applied#) "vars")
@@ -1576,8 +1619,21 @@
                                  (java.io.InputStreamReader.
                                   (.getInputStream socket)
                                   java.nio.charset.StandardCharsets/UTF_8))]
-               {:seon.fresh-operator/event :ready
-                :seon.fresh-operator/value (.readLine reader)}))))
+               (loop []
+                 (let [value (.readLine reader)]
+                   (cond
+                     (nil? value)
+                     {:seon.fresh-operator/event :closed}
+
+                     (= "ready" value)
+                     {:seon.fresh-operator/event :ready
+                      :seon.fresh-operator/value value}
+
+                     :else
+                     (do
+                       (println (str "● " name " boot: " value))
+                       (flush)
+                       (recur)))))))))
         exited
         (.thenApply
          (.onExit handle)
@@ -1601,7 +1657,8 @@
       (fail! "The cluster JVM exited before readiness."
              {:seon.fresh-operator/name name
               :seon.boot/pid pid}))
-    (when-not (= "ready" (:seon.fresh-operator/value winner))
+    (when-not (and (= :ready (:seon.fresh-operator/event winner))
+                   (= "ready" (:seon.fresh-operator/value winner)))
       (fail! "The cluster JVM sent malformed readiness."
              {:seon.fresh-operator/name name
               :seon.boot/pid pid})))
@@ -1655,7 +1712,14 @@
             (:seon.fresh-operator/transport-advertisement anchor)
             _
             (try
-              (prepl-eval! anchor-ad (add-form root name manifest))
+              (prepl-eval!
+               anchor-ad
+               (add-form root name manifest)
+               prepl-eval-ms
+               (fn [event]
+                 (when (= :out (:tag event))
+                   (print (:val event))
+                   (flush))))
               (catch Throwable error
                 ;; A start can fail above the REPL after registering the
                 ;; partial instance. Reconcile before returning the failure,
@@ -1681,7 +1745,9 @@
                    (:seon.fresh-operator/name anchor)
                    "; that process owns its original stdout/stderr.\n"))
         (print-started! root name value))
-      (with-open [ready-server
+      (do
+        (ensure-dependency-cache!)
+        (with-open [ready-server
                   (ServerSocket.
                    0 1 (java.net.InetAddress/getLoopbackAddress))]
         (let [launch-result
@@ -1714,7 +1780,7 @@
                    {:seon.dev.process/generation
                     (:seon.dev.process/generation record)
                     :seon.fresh-operator/advertisement value}))
-          (print-started! root name value))))))
+          (print-started! root name value)))))))
 
 (defn- config-apply-form
   [name manifest]

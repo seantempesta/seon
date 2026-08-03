@@ -85,6 +85,23 @@
 
 (declare readiness)
 
+(def ^:dynamic ^:private *boot-progress!*
+  (constantly nil))
+
+(defn- boot-phase
+  [instance]
+  (cond
+    (:seon.boot/ready-ms instance) :seon.boot.phase/ready
+    (:seon.render.web/served instance) :seon.boot.phase/web
+    (:seon.flow/graph instance) :seon.boot.phase/agents
+    (:seon.flow/work-launcher instance) :seon.boot.phase/work-launcher
+    (:seon.sci.eval/ctx instance) :seon.boot.phase/program
+    (:seon.boot/config-result instance) :seon.boot.phase/config
+    (contains? instance :seon.boot/recovered-runs) :seon.boot.phase/recovery
+    (:seon.boot/cluster-connection instance) :seon.boot.phase/branch
+    (:seon.store/store instance) :seon.boot.phase/store
+    (:seon.boot/prepl-server instance) :seon.boot.phase/repl))
+
 ;;; ---------------------------------------------------------------------------
 ;;; MCP result projection — installed at the cluster io-prepl boundary.
 ;;; ---------------------------------------------------------------------------
@@ -1715,6 +1732,8 @@
           ;; stop! of the carried value and a stop! of the registered
           ;; one release the same resources
           published (volatile! instance)
+          progressed (volatile! (boot-phase instance))
+          _ (*boot-progress!* @progressed)
           publish! (fn [value]
                      (vreset! published value)
                      (swap! running-instances
@@ -1722,6 +1741,10 @@
                               (if (contains? instances cluster-name)
                                 (assoc instances cluster-name value)
                                 instances)))
+                     (let [phase (boot-phase value)]
+                       (when (not= phase @progressed)
+                         (vreset! progressed phase)
+                         (*boot-progress!* phase)))
                      value)]
       (try
         ;; the elapsed measure belongs to boot, not to whoever prints

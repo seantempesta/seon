@@ -351,6 +351,21 @@ CLJS boundary. This applies O13 (the pod dies unconditionally) to the
 development loop today instead of waiting for the group-5 cut: nothing
 may reintroduce a shadow build into the dev feedback path.
 
+### Ruling 2026-08-03 (owner) — cached boots with visible progress
+
+The flat ten-second first-start bound above is superseded. A slow first boot is
+acceptable when it prepares a reusable dependency class cache and visibly
+reports work instead of presenting a silent JVM hang. The active acceptance
+boundary is:
+
+- second and later boots reuse the cache and are fast;
+- every boot phase is printed to the watching operator; and
+- the standalone jar packages the same dependency classes, so reopening an
+  existing production root avoids recompiling the vendored closure too.
+
+First-party Seon namespaces stay source-loaded for live redefinition. The cache
+contains only the derived dependency closure; whole-tree AOT remains rejected.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh

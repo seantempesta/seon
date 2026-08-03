@@ -262,6 +262,9 @@
                    (swap! calls# conj :offline-roster)
                    (throw
                     (ex-info "cold start read the offline roster" {})))
+                 (operator-var# (symbol "ensure-dependency-cache!"))
+                 (fn []
+                   (swap! calls# conj :dependency-cache))
                  (operator-var# (symbol "launch!"))
                  (fn [_root# name# _manifest# _ready-port#]
                    (swap! calls# conj [:launch name#])
@@ -654,9 +657,21 @@
            (get [_]
              (with-open [ready-socket (.accept ready-server)
                          ready-reader (io/reader ready-socket)]
-               {:seon.dev.fresh-operator-test/event :ready
-                :seon.dev.fresh-operator-test/value
-                (.readLine ^java.io.BufferedReader ready-reader)}))))
+               (loop [phases []]
+                 (let [value
+                       (.readLine ^java.io.BufferedReader ready-reader)]
+                   (cond
+                     (nil? value)
+                     {:seon.dev.fresh-operator-test/event :closed
+                      :seon.dev.fresh-operator-test/phases phases}
+
+                     (= "ready" value)
+                     {:seon.dev.fresh-operator-test/event :ready
+                      :seon.dev.fresh-operator-test/value value
+                      :seon.dev.fresh-operator-test/phases phases}
+
+                     :else
+                     (recur (conj phases value)))))))))
         exited
         (.thenApply
          (.onExit (.toHandle child))
@@ -687,7 +702,7 @@
     (when-not (= "ready" (:seon.dev.fresh-operator-test/value winner))
       (throw (ex-info "The anchor returned malformed readiness."
                       {:seon.dev.fresh-operator-test/value winner})))
-    true))
+    winner))
 
 (defn- prepl-eval
   [advertisement form]
@@ -772,8 +787,9 @@
              (.redirectErrorStream true)))
           child-output (process-output child)]
       (try
-        (await-child-readiness! ready-server child child-output)
-        (let [anchor-advertisement
+        (let [readiness
+              (await-child-readiness! ready-server child child-output)
+              anchor-advertisement
               (edn/read-string
                (slurp (io/file root "data" "clusters"
                                "anchor" "prepl.edn")))
@@ -786,6 +802,8 @@
                  (slurp (io/file root "data" "clusters"
                                  "scratch" "prepl.edn"))))]
           {::anchor-ready? true
+           ::anchor-phases
+           (:seon.dev.fresh-operator-test/phases readiness)
            ::add-completed? (::completed? added)
            ::add-exit (::exit added)
            ::add-output (::output added)
@@ -859,9 +877,11 @@
 (deftest cold-start-defers-roster-read-to-the-launched-jvm
   (let [root (fresh-root)]
     (try
-      (is (= [[:launch "cold-start"] [:started "cold-start"]]
+      (is (= [:dependency-cache
+              [:launch "cold-start"]
+              [:started "cold-start"]]
              (cold-start-calls root))
-          "cold start launched one JVM without an offline roster JVM")
+          "cold start prepared its cache and launched without an offline roster JVM")
       (finally
         (delete-recursively! root)))))
 
@@ -1269,11 +1289,16 @@
     (try
       (let [initialized (run-operator root "init")]
         (is (= 0 (::exit initialized)) (::output initialized))
-        (let [{::keys [anchor-ready? add-completed? add-exit add-output
-                       scratch-ready?]}
+        (let [{::keys [anchor-ready? anchor-phases add-completed? add-exit
+                       add-output scratch-ready?]}
               (fresh-process-operator-paths root)]
           (is anchor-ready?
               "the generated launch form instrumented before publishing ready")
+          (is (= ["namespaces" "repl" "store" "branch" "recovery"
+                  "config" "program" "work-launcher" "agents" "web"
+                  "ready"]
+                 anchor-phases)
+              "the readiness socket reports every published tower boundary")
           (is add-completed? "the generated add form completed")
           (is (= 0 add-exit) add-output)
           (is scratch-ready?
