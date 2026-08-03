@@ -357,3 +357,6 @@
 	path = reference-code/langchain4clj
 	url = https://github.com/nandoolle/langchain4clj.git
 	ignore = dirty
+[submodule "reference-code/integrant-repl"]
+	path = reference-code/integrant-repl
+	url = https://github.com/weavejester/integrant-repl
