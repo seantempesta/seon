@@ -820,7 +820,24 @@ code-block comment above a form, and `;;;` is runtime-structure demarcation.
 - Classification rules are COMPUTED, never name-based. A namespace-prefix or
   literal-list trust/privacy/placement rule is a hand list; derive the fact
   from provenance, the corpus, or the artifact inventory instead (R34
-  precedent).
+  precedent). NAMING CONVENTIONS ARE THE SAME DEFECT: deriving a symbol by
+  string-building a name (`render-<kind>` from a namespace) is a hand rule in
+  disguise. Declare the thing EXPLICITLY — for schemas that means Malli
+  properties, which carry arbitrary namespaced keys read with `m/properties`
+  (`reference-code/malli/src/malli/core.cljc:39`, and the README's own
+  `:json-schema/example` / `:math/multiplier` examples at `README.md:284-292`)
+  — owner ruling #47.
+- **A REGEX REQUIRES THE OWNER'S PERMISSION. STOP AND ASK** (owner ruling
+  2026-08-02: "if you ever want to use a regex in this project you are to stop
+  and ask me permission. It's almost always wrong.") A regular expression over
+  code, model output, names, or structured data is nearly always a symptom of
+  reaching for text where a PARSED REPRESENTATION already exists: the program
+  graph answers questions about code, Malli schemas and their properties
+  answer questions about shape, the reader answers questions about forms, and
+  Datalog answers questions about facts. Regex-rewriting model output is
+  separately banned as a symptom patch. This applies to production code; using
+  `rg` to SEARCH the tree while working is ordinary tooling and needs no
+  permission.
 - Instrumentation is derived from the database program graph and reapplied on
   hot reload. Wrong schemas/calls are fixed at the source. The kill-switch is
   only emergency recovery.
