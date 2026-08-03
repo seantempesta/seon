@@ -365,6 +365,10 @@ boundary is:
 
 First-party Seon namespaces stay source-loaded for live redefinition. The cache
 contains only the derived dependency closure; whole-tree AOT remains rejected.
+Every admitted dependency cache is an immutable content-addressed directory.
+A JVM records and retains the exact digest directory on its classpath; refresh
+publishes another directory, and cleanup may delete only directories not
+referenced by a recorded live process identity.
 
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 

@@ -51,10 +51,23 @@ live-namespace mutation. `core.async` needs its own decision: AOT
 compiles go blocks to IOC on our pin (the `vthreads=target` property
 is inert there), so caching it changes the runtime profile we tuned.
 
+A second live hazard ruled out mutable admission entirely. Replacing
+`target/dev-dependency-classes` while a recorded JVM used that path caused a
+`NoClassDefFoundError` chain through `malli.generator`, test.check generators,
+and `rose_tree`; restoring the JVM required dependency-ordered source reloads.
+Each admitted closure is now an immutable content-addressed directory, and a
+process record carries the exact directory used by that JVM. Refresh publishes
+a new directory. Reaping derives live references from pid plus start instant
+and never deletes a referenced path; no TTL or literal process roster decides.
+
+The incident, implementation, measurements, and live-refresh falsifier are in
+[[load-time-2026-08-03]].
+
 ## Acceptance
 
-Cold `(require 'seon.artifact)` under 5 s measured 3x; `bin/test`
-green and unaffected; hot reload proven intact (edit a first-party
-file, re-require, new behavior); `bin/seon start` on an existing root
-inside the ten-second law end to end; and the stale 2.23 s claim
-corrected wherever it is written.
+Refreshed `(require 'seon.artifact)` measured 3x with a 3.2-second median;
+source-only was 10.3 seconds and the stale cache 5.4 seconds. A recurring test
+must preserve an exact cache directory while its recorded JVM remains live and
+prove a lazy class load after refresh. The remaining closure is artifact cold
+and reopen measurement, the complete focused operator/boot gate, and hot reload
+proof with no first-party loader class.
