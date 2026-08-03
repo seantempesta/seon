@@ -15,7 +15,9 @@
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.block :as block]
-            [seon.render.hiccup :as hiccup])
+            [seon.render.hiccup :as hiccup]
+            [seon.render.value :as value]
+            [seon.render.walk :as walk])
   (:import [java.io PushbackReader StringReader]))
 
 (def ^:private recent-entry-count
@@ -329,17 +331,7 @@
 
 (defn- floor-text
   [unit value]
-  (let [caps (:seon.sci.admit/caps unit)
-        rendered
-        (render/render
-         {:seon.render/unit
-          {:seon.render/value value
-           :seon.cluster.agent/id (:seon.cluster.agent/id unit)
-           :seon.sci.admit/caps caps
-           :seon.print/options (:seon.print/options unit)}
-          :seon.render/kind :seon.render/ai})]
-    (or (:seon.render/output rendered)
-        (pr-str rendered))))
+  (value/render-ai (assoc unit :seon.render/value value)))
 
 (defn- floor-value
   [unit value]
@@ -355,23 +347,16 @@
 
 (defn- rendered-family
   [unit family-unit distance]
-  (let [declaration
-        ((requiring-resolve 'seon.render.walk/projection)
-         family-unit
-         {:seon.render/kind :seon.render/ai
-          :seon.render/overrides {}
-          :seon.render/floor 'seon.render.block/data-prose})
-        rendered
-        (render/render
-         {:seon.render/unit
-          (assoc family-unit
-                 :seon.render/ai declaration
-                 :seon.db/db (:seon.db/db unit)
-                 :seon.render/distance distance
-                 :seon.sci.admit/caps (:seon.sci.admit/caps unit))
-          :seon.render/kind :seon.render/ai})
-        output (or (:seon.render/output rendered)
-                   (floor-text unit rendered))]
+  (let [db (:seon.db/db unit)
+        owner (walk/owning-namespace db family-unit)
+        rendered (render/render-ai
+                  (cond-> (assoc unit
+                                 :seon.render/value family-unit
+                                 :seon.render/distance distance)
+                    owner (assoc :seon.render/namespace owner)))
+        output (if (:seon.error/kind rendered)
+                 (floor-text unit rendered)
+                 rendered)]
     (bounded-scalar unit output)))
 
 (defn- message-extra

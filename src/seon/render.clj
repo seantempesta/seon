@@ -10,14 +10,11 @@
   Every selected qualified symbol resolves to the live SCI Var in the cluster
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
-  re-derives the same symbol from its database program row.
-
-  The generic router below remains only while its already-scheduled callers are
-  converted to the two typed outputs. No new caller may use it; the final debris
-  wave deletes it together with the obsolete generic-kind schemas and tests."
+  re-derives the same symbol from its database program row."
   (:require [seon.config :as config]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
+            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as sci.kernel]))
@@ -104,7 +101,7 @@
   [projection value output]
   (when (map? value)
     (let [producers
-          (->> (schema/matching-shapes-in projection value)
+          (->> (schema/matching-shapes-in projection (value/transacted value))
                (keep #(get % output))
                distinct
                (sort-by str)
@@ -159,7 +156,7 @@
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.error/value]]}
   [request]
-  (let [rendered (invoke-producer request :seon.render/ai :string)]
+  (let [rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
     (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
       rendered
       {:seon.error/kind ::invalid-ai-output
@@ -172,7 +169,7 @@
                   [:or :nil :seon.render/hiccup :seon.error/value]]}
   [request]
   (let [rendered (invoke-producer request :seon.render/html
-                                  :seon.render/hiccup)]
+                                  :seon.render/html)]
     (if (or (nil? rendered)
             (:seon.error/kind rendered)
             (hiccup/hiccup? rendered))
@@ -251,10 +248,17 @@
    [:=>
     [:catn
      [:seon.render.walk/context
-      [:map {:closed true}
+      [:map
        [:seon.cluster.agent/id :seon.cluster.agent/id]
        [:seon.db/db {:optional true} :seon.db/database-value]
        [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+       [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
+       [:seon.sci.eval/time-limit-ms
+        {:optional true}
+        :seon.sci.eval/time-limit-ms]
+       [:seon.config/on-core-error
+        {:optional true}
+        :seon.config/on-core-error]
        [:seon.store/branch-connection
         {:optional true}
         :seon.store/branch-connection]]]
@@ -317,7 +321,7 @@
     [:=> [:cat] :string]
     [:=>
      [:cat
-      [:map {:closed true}
+      [:map
        [:root {:optional true} :seon.render.walk/lookup]
        [:depth {:optional true} [:int {:min 0}]]
        [:branch
@@ -358,22 +362,29 @@
                              [:seon.cluster.agent/id agent-id])
                    depth (long (get options :depth 2))
                    branch (:branch options)
-                   neighborhood
+                   units
                    ((requiring-resolve 'seon.render.walk/neighborhood)
                     {:seon.db/db db
+                     :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
                      :seon.render.walk/lookup root
-                     :seon.render/kind :seon.render/ai
-                     :seon.render/floor 'seon.render.block/data-prose
-                     :seon.render/overrides {}
+                     :seon.render/output :seon.render/ai
                      :seon.render/distance depth
-                     :seon.sci.admit/caps caps})
-                   selected (when (contains? options :branch)
-                              (get-in neighborhood branch))]
-               (if (and (contains? options :branch) (not (map? selected)))
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/time-limit-ms
+                     (:seon.sci.eval/time-limit-ms *walk-context*)
+                     :seon.config/on-core-error
+                     (:seon.config/on-core-error *walk-context*)})
+                   selected? (or (not (contains? options :branch))
+                                 (some (fn [unit]
+                                         (let [path (:seon.render.walk/path unit)]
+                                           (and (<= (count branch) (count path))
+                                                (= branch (subvec path 0 (count branch))))))
+                                       units))]
+               (if-not selected?
                  (walk-error (str "No walk branch exists at "
                                   (pr-str branch) "."))
                  (str ((requiring-resolve 'seon.render.walk/prose)
-                       db neighborhood
+                       db units
                        (cond-> {}
                          (contains? options :branch)
                          (assoc :seon.render.walk/branch branch)))
@@ -382,159 +393,3 @@
        (walk-error (str "Walk failed: "
                         (or (ex-message failure)
                             (.getName (class failure)))))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Contract
-;;; ---------------------------------------------------------------------------
-
-(defn declaration?
-  "True when `value` is a projection declaration rather than data.
-
-  THREE SHAPES, and the narrowness is the mechanism rather than a
-  restriction: a qualified SYMBOL to resolve and apply, a STRING that is
-  its own output, or a VECTOR that is its own output. Anything else on a
-  `seon.render`-namespaced key is presentation data —
-  `:seon.render/priority 3` is the standing example, and admitting
-  numbers would silently turn it into a kind."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [value]
-  (or (qualified-symbol? value)
-      (string? value)
-      (vector? value)))
-
-(defn kinds
-  "The output kinds `unit` declares.
-  Every key in the `seon.render` namespace whose value is a
-  `declaration?`. COMPUTED from the unit, so a producer that adds a kind
-  is discoverable without an edit here and without a registry. The
-  router's own request keys (`:seon.render/unit`, `:seon.render/kind`)
-  can never be mistaken for declarations — a map and a keyword are
-  neither symbol, string nor vector — which is why the rule needs no
-  exclusion list.
-  Returns the empty set for a map that declares nothing; a unit with no
-  projections is an ordinary value, not an error."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:set :seon.render/kind]]}
-  [unit]
-  (let [value (get unit :seon.render/value unit)]
-    (into #{}
-          (keep (fn [[render-key declaration]]
-                  (when (and (qualified-keyword? render-key)
-                             (= "seon.render" (namespace render-key))
-                             (declaration? declaration))
-                    render-key)))
-          (concat
-           (when (map? value) value)
-           (when (and (map? unit) (not (identical? unit value))) unit)))))
-
-(defn- value-declaration
-  [unit kind]
-  (let [value (get unit :seon.render/value unit)]
-    (or (when (map? value)
-          (let [declaration (get value kind)]
-            (when (declaration? declaration)
-              declaration)))
-        (let [declaration (get unit kind)]
-          (when (declaration? declaration)
-            declaration)))))
-
-(defn- namespace-declaration
-  [unit kind]
-  (when-let [namespace-name (:seon.render/namespace unit)]
-    (let [candidate
-          (symbol (str namespace-name)
-                  (str "render-" (name kind)))]
-      (when
-       (try
-         (some? (requiring-resolve candidate))
-         (catch Throwable _ false))
-        candidate))))
-
-(defn- schema-declaration
-  [unit kind]
-  (let [value (get unit :seon.render/value unit)]
-    (when (map? value)
-      (try
-        (some
-         (fn [row]
-           (let [declaration (get row kind)]
-             (when (declaration? declaration)
-               declaration)))
-         (schema/matching-shapes value))
-        (catch Throwable _ nil)))))
-
-(defn- floor-declaration
-  [kind]
-  (if (= :seon.render/html kind)
-    'seon.render.block/data-panel
-    'seon.render.block/data-prose))
-
-(defn resolve-unit
-  "Resolve one unit and derive whether only the floor can render it.
-
-  The boolean records WHICH resolution branch won. It is deliberately not a
-  symbol comparison: a value may explicitly name the generic floor, and that
-  explicit choice did not fall through to it. The selected declaration is
-  associated under `kind`, so every caller hands the same resolved unit to the
-  projection and W4 can filter HTML without reimplementing precedence."
-  {:malli/schema [:=> [:cat :seon.render/request] :seon.render/unit]}
-  [{:seon.render/keys [unit kind]}]
-  (let [specific (or (value-declaration unit kind)
-                     (namespace-declaration unit kind)
-                     (schema-declaration unit kind))
-        floor? (nil? specific)]
-    (assoc unit
-           kind (or specific (floor-declaration kind))
-           :seon.render/would-fall-to-floor? floor?)))
-
-(defn render
-  "Project `:seon.render/unit` into `:seon.render/kind`.
-  Resolves the unit's declared symbol with `requiring-resolve` — loading
-  the owning namespace if needed — and INVOKES THE VAR with the unit,
-  so a re-evaluated projection takes effect immediately. On success:
-  `{:seon.render/kind <kind> :seon.render/output <the projection>}`.
-
-  Flat `:seon.error` values, never throws — this router runs on the
-  error path and may not fault into it:
-  - `::unresolvable` — the declared symbol does not resolve, naming the
-    symbol. This is the same failure `:seon.source/populate` refuses
-    on, and it is a bug in the producer, not in the caller;
-  - `::projection-failed` — the projection itself threw, naming the
-    symbol and the throwable's class. The projection is named because
-    the projection is what is broken."
-  {:malli/schema [:=> [:cat :seon.render/request]
-                  [:or :seon.render/rendered :seon.error/value]]}
-  [{:seon.render/keys [unit kind]}]
-  (let [resolved-unit (resolve-unit {:seon.render/unit unit
-                                     :seon.render/kind kind})
-        declaration (get resolved-unit kind)]
-    (cond
-      ;; A LITERAL IS ITS OWN OUTPUT. No resolution, nothing to invoke,
-      ;; and therefore nothing that can throw — a fixed string or a
-      ;; fixed hiccup vector is the answer, and a block that just says a
-      ;; fixed thing should not have to define a function to say it.
-      (not (qualified-symbol? declaration))
-      {:seon.render/kind kind
-       :seon.render/output declaration}
-
-      :else
-      ;; the VAR, never a fn value taken once: re-evaluating the
-      ;; projection's defn must change the next render
-      (if-let [projection (try
-                            (requiring-resolve declaration)
-                            (catch Throwable _ nil))]
-        (try
-          {:seon.render/kind kind
-           :seon.render/output (projection resolved-unit)}
-          (catch Throwable failure
-            {:seon.error/kind ::projection-failed
-             :seon.error/message (str "The " declaration " projection threw: "
-                                      (or (ex-message failure)
-                                          (.getName (class failure))))
-             :seon.error/data {:seon.render/kind kind
-                               :seon.render/projection declaration
-                               :seon.error/class (.getName (class failure))}}))
-        {:seon.error/kind ::unresolvable
-         :seon.error/message (str "The projection " declaration
-                                  " does not resolve.")
-         :seon.error/data {:seon.render/kind kind
-                           :seon.render/projection declaration}}))))

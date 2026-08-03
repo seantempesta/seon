@@ -52,23 +52,6 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The core projections — each present exactly while its facts are
-;;; ---------------------------------------------------------------------------
-
-(defn execution-ai
-  "The reply grammar: how this agent's answer is evaluated, and the
-  dispositions available to it. Always present — an agent that is never
-  told the grammar cannot end a run on purpose."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [_unit]
-  (str "Reply with Clojure forms to run, in order. "
-       "Finish with (my.run/complete \"your reply\") when you are "
-       "done, or (my.run/wait \"why\") to pause this run — pause "
-       "when you are waiting on another agent, and put everything "
-       "you will need to finish into the note, because your next "
-       "run starts fresh and that note is what it reads."))
-
-;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture
 ;;; ---------------------------------------------------------------------------
 
@@ -96,9 +79,8 @@
      [:pre {:class "seon-context-capture-prompt"} prompt]]))
 
 (defn- contribution-row
-  "One durable contribution row: evidence, not content. No stored kind
-  (constant `:seon.render/ai` on a prompt capture — a stored
-  derivation), no stored text (hash + position + the prompt blob
+  "One durable contribution row: evidence, not content. No stored output tag
+  (a prompt capture is necessarily AI), no stored text (hash + position + the prompt blob
   reconstruct it). A FAILED contribution is presence of the error keys."
   [capture-id record]
   (let [position (:seon.context.contribution/position record)
@@ -110,8 +92,6 @@
              (:seon.context.contribution/hash record)
              :seon.context.contribution/tokens
              (:seon.context.contribution/tokens record)}
-      (:seon.render/projection record)
-      (assoc :seon.render/projection (:seon.render/projection record))
       failure
       (assoc :seon.error/kind (:seon.error/kind failure)
              :seon.context.contribution/error (:seon.error/message failure)))))
@@ -144,13 +124,11 @@
        live (assoc :seon.cluster.run/live-processes live))]))
 
 ;;; ---------------------------------------------------------------------------
-;;; The one estimator seam, re-exported nowhere — contributions call it
+;;; The one digest seam
 ;;; ---------------------------------------------------------------------------
 
-;; `seon.cluster.prompt` builds the in-memory records (it owns position
-;; and reduction); the hash and token derivations it uses are
-;; `seon.schema/sha-256` and `seon.ai.tokens/estimate` — named here so
-;; the capture row's two evidence fields have exactly one owner each.
+;; `seon.cluster.prompt` builds the in-memory records and owns token
+;; estimation. The capture owner derives only the durable digest evidence.
 
 (defn contribution-hash
   "SHA-256 hex of the contribution's exact UTF-8 text — the one digest
@@ -158,10 +136,3 @@
   {:malli/schema [:=> [:cat :string] :seon.context.contribution/hash]}
   [text]
   (schema/sha-256 [(.getBytes ^String text "UTF-8")]))
-
-(defn contribution-tokens
-  "ESTIMATED tokens of one contribution's text (house rule:
-  human-visible sizes are estimated tokens, never raw characters)."
-  {:malli/schema [:=> [:cat :string] :seon.context.contribution/tokens]}
-  [text]
-  (tokens/estimate text))

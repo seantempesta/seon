@@ -32,12 +32,10 @@
 (defn- walk-contribution
   [text]
   {:seon.render.block/name :walk
-   :seon.render/kind :seon.render/ai
    :seon.context.contribution/position 0
    :seon.context.contribution/text text
    :seon.context.contribution/hash (context/contribution-hash text)
-   :seon.context.contribution/tokens (tokens/estimate text)
-   :seon.render/projection 'seon.render/walk})
+   :seon.context.contribution/tokens (tokens/estimate text)})
 
 (defn prompt
   "Derive one fresh walk for the agent holding the request's run.
@@ -59,7 +57,12 @@
         (render/call-with-walk-context
          {:seon.db/db db
           :seon.cluster.agent/id agent-id
-          :seon.sci.admit/caps caps}
+          :seon.sci.admit/caps caps
+          :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+          :seon.sci.eval/time-limit-ms
+          (:seon.sci.eval/time-limit-ms request)
+          :seon.config/on-core-error
+          (:seon.config/on-core-error request)}
          #(render/walk {:depth depth}))]
     {:seon.cluster.prompt/text text
      :seon.context/contributions [(walk-contribution text)]

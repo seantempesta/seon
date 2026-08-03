@@ -57,7 +57,6 @@
             [seon.db :as db]
             [seon.cluster.work :as work]
             [seon.error :as error]
-            [seon.render :as render]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -269,10 +268,6 @@
 
   An empty family is ABSENT rather than an empty vector, so a healthy
   cluster derives `{}` and `(seq (problems …))` is the whole question.
-  When anything IS wrong the value also carries `:seon.render/log`, so
-  it routes through the one projection router like any other unit; a
-  `{}` declares no projection, because there is nothing to say.
-
   Ordering is deterministic and meaningful, not incidental: error
   signatures come worst-recurring first, and every other family sorts
   by its own identity so two derivations of one database value are the
@@ -295,10 +290,7 @@
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
                 (seq unowned)
                 (assoc :seon.problems/unowned-namespaces unowned))]
-    (cond-> found
-      (seq found) (assoc :seon.render/log `log-report)
-      (seq found) (assoc :seon.render/html `html-report)
-      (or (seq errored) (seq deferred)) (assoc :seon.render/ai `ai-prose))))
+    found))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE
@@ -446,9 +438,9 @@
        (str/join "\n")))
 
 (defn log-report
-  "`:seon.render/log` — the whole value as lines, newest concern first.
+  "The whole value as log lines, newest concern first.
   COMPOSES rather than reformats: an error signature's line is
-  the latest fact's notice through `seon.render/render`, so the line a
+  the latest fact's ordinary `seon.error/log-line`, so the line a
   digger sees in `problems` is byte-identical to the one the fault path
   emitted. The other three families have no per-fact owner, so their
   lines are built here, in the same `key=value` grammar.
@@ -460,13 +452,10 @@
   [found]
   (->> (concat
         (for [entry (:seon.problems/error-signatures found)]
-          (:seon.render/output
-           (render/render
-            {:seon.render/unit
-             (error/notice {:seon.error/fact (:seon.error/fact entry)
-                            :seon.error/occurrences
-                            (:seon.problems/occurrences entry)})
-             :seon.render/kind :seon.render/log})))
+          (error/log-line
+           (error/notice {:seon.error/fact (:seon.error/fact entry)
+                          :seon.error/occurrences
+                          (:seon.problems/occurrences entry)})))
         (for [entry (:seon.problems/wedged-runs found)]
           (str "seon.problems wedged-run run=" (:seon.cluster.run/id entry)
                " agent=" (:seon.cluster.agent/id entry)

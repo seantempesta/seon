@@ -44,7 +44,7 @@
   because nil is also a legitimate value to have navigated to and the
   two must not look the same."
   {:malli/schema [:=> [:cat :any :seon.render.data/cursor]
-                  [:or [:map {:closed true} [:seon.render.data/value :any]]
+                  [:or [:map [:seon.render.data/value :any]]
                    :seon.error/value]]}
   [value {:keys [:seon.render.data/path]}]
   (reduce (fn [found step]

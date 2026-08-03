@@ -947,8 +947,8 @@
 ;;; Declared on the registered entity maps in `resources/seon/schema.edn`
 ;;; (`:seon.render/ai` properties), which is `seon.schema`'s own idiom
 ;;; for `:seon.fn`, `:seon.ns` and `:seon.schema` — so a family declares
-;;; its lens where it declares everything else about itself, and
-;;; `seon.render.walk/projection` finds it with no table.
+;;; its default where it declares everything else about itself, and
+;;; `seon.render` finds it with no table.
 ;;;
 ;;; Each is a PLAIN FUNCTION: one unit map in, prose out. It reads the
 ;;; pulled entity it was handed and the database value riding beside it,

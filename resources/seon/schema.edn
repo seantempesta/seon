@@ -328,7 +328,39 @@
  ; pure functions of the durable evidence (`seon.ai/disposition`,
  ; `status-class`, the error fact's data-edn), derived at read rather
  ; than frozen beside the facts they restate.
- :seon.ai/attempt [:map {:seon.db/entity true} [:seon.ai.attempt/id :seon.ai.attempt/id] [:seon.ai.attempt/run :seon.ai.attempt/run] [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal] [:seon.ai.attempt/at :seon.ai.attempt/at] [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn] [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn] [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning] [:seon.ai.attempt/reasoning-blob {:optional true} :seon.ai.attempt/reasoning-blob] [:seon.ai.attempt/reasoning-size {:optional true} :seon.ai.attempt/reasoning-size] [:seon.ai.attempt/finish-reason {:optional true} :seon.ai.attempt/finish-reason] [:seon.ai/http-status {:optional true} :seon.ai/http-status] [:seon.ai/request-transmitted? {:optional true} :seon.ai/request-transmitted?] [:seon.ai/response-started? {:optional true} :seon.ai/response-started?] [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?] [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error] [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/failover-from] [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
+ :seon.ai/attempt
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.ai/attempt-ai
+        :seon.render/html seon.ai/attempt-html}
+  [:seon.ai.attempt/id :seon.ai.attempt/id]
+  [:seon.ai.attempt/run :seon.ai.attempt/run]
+  [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+  [:seon.ai.attempt/at :seon.ai.attempt/at]
+  [:seon.ai/endpoint :seon.ai/endpoint]
+  [:seon.ai/model :seon.ai/model]
+  [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn]
+  [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn]
+  [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning]
+  [:seon.ai.attempt/reasoning-blob
+   {:optional true}
+   :seon.ai.attempt/reasoning-blob]
+  [:seon.ai.attempt/reasoning-size
+   {:optional true}
+   :seon.ai.attempt/reasoning-size]
+  [:seon.ai.attempt/finish-reason
+   {:optional true}
+   :seon.ai.attempt/finish-reason]
+  [:seon.ai/http-status {:optional true} :seon.ai/http-status]
+  [:seon.ai/request-transmitted?
+   {:optional true}
+   :seon.ai/request-transmitted?]
+  [:seon.ai/response-started? {:optional true} :seon.ai/response-started?]
+  [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?]
+  [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error]
+  [:seon.ai.attempt/failover-from
+   {:optional true}
+   :seon.ai.attempt/failover-from]
+  [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
 
  ; ---------------------------------------------------------------------
  ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
@@ -365,27 +397,10 @@
  ; nothing here declares or stores an agent-owned block set.
  :seon.render.block/name :keyword
 
- ; Temporary dependency of the in-flight context-contribution schema. The
- ; context lane removes both together; no render code reads this attribute.
- :seon.render.block/band [:enum :anchor :program :authored :continuity :dynamic]
-
- ; An in-memory named render declaration accepted by the retained direct
- ; `unit`/`surface` helpers. It is not a database entity family.
- :seon.render.block/block
- [:map
-  [:seon.render.block/name :seon.render.block/name]
-  [:seon.render/ai {:optional true} :seon.render/ai]
-  [:seon.render/html {:optional true} :seon.render/html]]
-
- ; ---------------------------------------------------------------------------
- ; THE HTML KIND
- ; ---------------------------------------------------------------------------
-
- ; One more kind on the open set. Its consumer is a surface in the
- ; browser, and its output grammar is hiccup — stated by the consumer,
- ; per the router's rule that a kind's grammar belongs to the kind's
- ; consumer and never to the router.
- :seon.render/html :seon.render/projection
+ ; One of exactly two typed render outputs. A durable declaration stores the
+ ; producer symbol; a renderer function returns the Hiccup arm. Explicit
+ ; producer fields below narrow this union back to `:qualified-symbol`.
+ :seon.render/html [:or :qualified-symbol :seon.render/hiccup]
 
  ; HICCUP IS A NAMED PREDICATE, and that is a limitation being paid for
  ; honestly rather than a preference. Hiccup is a tree, and a
@@ -408,28 +423,6 @@
  ; and the patch can never drift apart. `surface-` prefixed because the
  ; id shares a document with ids nobody here owns.
  :seon.render/surface-id [:string {:min 9}]
-
- ; ONE RENDERED BLOCK. Success carries the output; failure carries the
- ; flat error value INSTEAD. The surface always carries its name and id, so a
- ; failed block still has a place to put its error card and its
- ; neighbours are unaffected: per-block isolation is structural here, not
- ; a try/catch somebody remembered.
- ;
- ; The two required result attributes describe the current producer invariant:
- ; success carries `:seon.render/output`, failure carries `:seon.error/value`.
- ; Maps remain open for accretion; closedness is not the discriminator.
- :seon.render/surface
- [:or
-  [:map
-   [:seon.render.block/name :seon.render.block/name]
-   [:seon.render/surface-id :seon.render/surface-id]
-   [:seon.render/kind :seon.render/kind]
-   [:seon.render/output :seon.render/output]]
-  [:map
-   [:seon.render.block/name :seon.render.block/name]
-   [:seon.render/surface-id :seon.render/surface-id]
-   [:seon.render/kind :seon.render/kind]
-   [:seon.error/value :seon.error/value]]]
 
  ; ---------------------------------------------------------------------------
  ; DISTANCE — how many hops of the neighborhood one render reaches
@@ -454,17 +447,6 @@
  ; caps — the depth and node dials remain the absolute bound, and
  ; distance SELECTS WITHIN them.
  :seon.render/distance [:int {:min 0}]
-
- ; The retained direct unit builder's input.
- :seon.render/unit-request
- [:map
-  [:seon.db/db :seon.db/database-value]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.ai/partial {:optional true} :seon.ai/partial]
-  [:seon.cluster.run/live-processes {:optional true}
-   :seon.cluster.run/live-processes]]
 
  ; The shell's ordered hiccup fragment.
  :seon.render/page [:vector :seon.render/hiccup]
@@ -867,11 +849,9 @@
  ; ONE CONTRIBUTION ROW — evidence, not content.
  ;
  ; The prompt blob is the byte ground truth; rows explain how it was
- ; built: name, hash, tokens, position, projection. NO stored
- ; :seon.render/kind — the 2026-07-28 presence ruling exempts kind as
- ; "a request argument, never stored", and on a prompt capture it is the
- ; constant :seon.render/ai anyway (derivable, so storing it would be a
- ; stored derivation). NO stored text — hash + position + the blob
+ ; built: name, hash, tokens, and position. NO stored output tag: a prompt
+ ; capture is necessarily the AI output, so that would be a stored
+ ; derivation. NO stored text — hash + position + the blob
  ; reconstruct it. A FAILED contribution is presence of the error keys.
  ; An OMITTED block writes no row: its omission is re-derivable from the
  ; captured basis and membership (derive, don't store).
@@ -899,7 +879,6 @@
   [:seon.render.block/name :seon.render.block/name]
   [:seon.context.contribution/hash :seon.context.contribution/hash]
   [:seon.context.contribution/tokens :seon.context.contribution/tokens]
-  [:seon.render/projection {:optional true} :seon.render/projection]
   [:seon.error/kind {:optional true} :seon.error/kind]
   [:seon.context.contribution/error {:optional true}
    :seon.context.contribution/error]]
@@ -911,17 +890,14 @@
  ; One in-memory contribution record. Text is ALWAYS present — a failed
  ; block contributes a bounded, block-named error statement rather than
  ; silence (silent omission is confabulation fuel). :seon.error/value
- ; presence IS "failed"; :seon.render/kind rides here (request-argument
- ; territory) even though the durable row drops it.
+ ; presence IS "failed".
  :seon.context/contribution
  [:map
   [:seon.render.block/name :seon.render.block/name]
-  [:seon.render/kind :seon.render/kind]
   [:seon.context.contribution/position :seon.context.contribution/position]
   [:seon.context.contribution/text [:string {:min 1}]]
   [:seon.context.contribution/hash :seon.context.contribution/hash]
   [:seon.context.contribution/tokens :seon.context.contribution/tokens]
-  [:seon.render/projection {:optional true} :seon.render/projection]
   [:seon.error/value {:optional true} :seon.error/value]]
 
  :seon.context/contributions [:vector :seon.context/contribution]
@@ -1132,7 +1108,6 @@
  ; evidence owner; the notice carries its lookup ref, the derived kind,
  ; every route it declares, and the selected human presentation.
  :seon.error/evidence [:tuple [:enum :seon.error/id] :seon.error/id]
- :seon.error/presentation :seon.render/projection
  :seon.error/notice-request [:map  [:seon.error/fact :seon.error/fact] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
  ; The notice is DERIVED and never stored: a fact plus the projection
  ; declarations, which is what makes it routable through the one generic
@@ -1140,7 +1115,7 @@
  ; than on the entity because a stored symbol identical on every row is
  ; stored-derived data, and because the ai projection needs the reason
  ; the entity cannot carry.
- :seon.error/notice [:map  [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.error/presentation :seon.error/presentation] [:seon.render/kinds :seon.render/kinds] [:seon.render/ai :seon.render/projection] [:seon.render/log :seon.render/projection] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.error/notice [:map  [:seon.error/fact :seon.error/fact] [:seon.error/kind :seon.error/kind] [:seon.error/evidence :seon.error/evidence] [:seon.render/ai :qualified-symbol] [:seon.error/reason {:optional true} :seon.error/reason] [:seon.error/occurrence {:optional true} :seon.error/occurrence] [:seon.error/occurrences {:optional true} :seon.error/occurrences] [:seon.error/notification-limit {:optional true} :seon.error/notification-limit] [:seon.error/notification {:optional true} :seon.error/notification] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
 
  ; How many faults the fan-out's bounded buffer had to DROP in this
  ; process. Process-local by nature — it counts what never became a
@@ -1921,7 +1896,7 @@
  ; builder carry (§9 of the context-blocks contract package).
  :seon.problems/request [:map  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
 
- :seon.problems/problems [:map  [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]] [:seon.render/ai {:optional true} :seon.render/projection] [:seon.render/log {:optional true} :seon.render/projection] [:seon.render/html {:optional true} :seon.render/html]]
+ :seon.problems/problems [:map {:seon.render/ai seon.problems/ai-prose :seon.render/html seon.problems/html-report} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]]]
 
 ;; ===========================================================================
 ;; PROCESS
@@ -2165,6 +2140,9 @@
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
   ; HOW MANY HOPS of its own neighbourhood the agent sees (owner ruling
   ; 2026-07-28 post-midnight). The same optional parameter the surfaces,
   ; page and expansion requests already carry — the landed accretion
@@ -2260,70 +2238,9 @@
 ;; ===========================================================================
 ;; RENDER
 ;; ===========================================================================
-; ---------------------------------------------------------------------------
- ; THE PROJECTION CONTRACT, generic (owner direction, 2026-07-27 night).
- ; A unit is any map that declares, per OUTPUT KIND, the fully qualified
- ; symbol of the function that projects it into that kind. One router
- ; resolves and applies. The render contract's `:seon.render/ai` +
- ; `:seon.render/html` pair (docs/seon/architecture/ui.md, "The block and
- ; its two renders") is the SPECIAL CASE of this, not a separate
- ; mechanism; new kinds — log, sms, metrics — are accretion: add a key,
- ; write the fn, no router change and no registration table.
- ; ---------------------------------------------------------------------------
-
- ; A kind IS its key: `:seon.render/ai` is both the declaration key on a
- ; unit and the kind a caller asks for. Nothing maps short names to keys,
- ; because a second naming is a second place to drift.
- :seon.render/kind :qualified-keyword
- :seon.render/kinds [:set :seon.render/kind]
- ; The viewer namespace whose `render-<kind>` defn may override a matching
- ; schema's default. Explicit request data, never ambient `*ns*`.
+; The typed render call carries a value, its explicitly derived owning
+; namespace when one exists, and the shared SCI invocation custody.
  :seon.render/namespace :symbol
- ; The declaration. USUALLY a fully qualified symbol naming the
- ; projection fn, resolved LATE on every render so a re-`defn` takes
- ; effect with no re-registration — the proven `:seon.source/populate`
- ; / `:seon.cluster.loop/evaluate` / predicate-owner idiom.
- ;
- ; A SYMBOL, and only a symbol — because this schema is what the two
- ; kind attributes are declared as, and a kind attribute is STORED. One
- ; Datahike value type stores natively (`:db.type/symbol`) where a union
- ; needs a pr-str codec on every read and write, which is the codec the
- ; quarry had and this design deleted.
- ;
- ; Proven the hard way rather than reasoned about: widening this to
- ; `[:or :qualified-symbol :string [:vector :any]]` made the bridge
- ; derive `:db.type/string` from the union's first branch and every
- ; block transaction refused. The durable/runtime split is not a
- ; preference — the schema IS the durable side.
- :seon.render/projection :qualified-symbol
-
- ; The RUNTIME affordance, which is deliberately not an attribute: a
- ; unit built in memory may declare a literal that is its own output —
- ; a verbatim string for a prose kind, a vector for a hiccup kind
- ; (docs/seon/architecture/ui.md, "The block and its two renders"). This
- ; is the accretion `seon.render`'s docstring scoped and deferred out of
- ; step 1: a block that just says a fixed thing should not have to
- ; define a function to say it.
- ;
- ; `seon.render/declaration?` is the code-level contract that admits
- ; both, and the admissible SHAPES are narrow on purpose: `kinds`
- ; derives what a unit can become from the unit itself, so every shape
- ; admitted becomes a shape that turns an ordinary
- ; `seon.render`-namespaced key into a KIND. `:seon.render/priority 3`
- ; is presentation data and must stay data, so a number, keyword, map
- ; or set declares nothing.
- :seon.render/literal [:or :string [:vector :any]]
-
- ; `:any` twice, at this router's one genuinely polymorphic boundary and
- ; for the same reason value admission gives: IN, a unit is any map any
- ; owner declares (naming a shape here would defeat the mechanism — the
- ; whole point is that a family the router has never heard of routes);
- ; OUT, the projection's grammar belongs to the KIND'S CONSUMER — prose
- ; for `ai`, a line for `log`, hiccup for `html` — and restating it here
- ; would be a second contract that drifts from the consumer's.
- ; The keys are `:qualified-keyword` rather than `:any`, because fully
- ; namespaced map keys are the house rule and this is where it is
- ; enforceable for free.
  :seon.render/unit [:map-of :qualified-keyword :any]
  :seon.render/output :any
  :seon.render/output-schema :qualified-keyword
@@ -2345,8 +2262,8 @@
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
   [:seon.config/on-core-error :seon.config/on-core-error]
-  [:seon.render/ai {:optional true} :seon.render/projection]
- [:seon.render/html {:optional true} :seon.render/projection]]
+  [:seon.render/ai {:optional true} :qualified-symbol]
+  [:seon.render/html {:optional true} :qualified-symbol]]
 
  :seon.db/tx-data :seon.store/transaction-data
  :seon.render/failure-request
@@ -2360,23 +2277,9 @@
   [:seon.render/html :seon.render/hiccup]
   [:seon.db/tx-data :seon.db/tx-data]]
 
- :seon.render/request
- [:map
-  [:seon.render/unit :seon.render/unit]
-  [:seon.render/kind :seon.render/kind]]
- ; The output is WRAPPED, and that is deliberate: an unwrapped return
- ; would be indistinguishable from a flat `:seon.error/value` for any
- ; projection whose own output is a map. With the wrap, "did this
- ; render?" is `:seon.error/kind` presence, by construction.
- :seon.render/rendered [:map  [:seon.render/kind :seon.render/kind] [:seon.render/output :seon.render/output]]
-
- ; The two kinds the error family declares today. Registered here, in the
- ; router's own file, because a kind is a contract between the router and
- ; a consumer rather than a property of any one producer — and because
- ; the loader is global, an owner declaring a new kind adds one line to
- ; whichever file owns that consumer.
- :seon.render/ai :seon.render/projection
- :seon.render/log :seon.render/projection
+ ; The AI twin of `:seon.render/html`: durable declarations are symbols and
+ ; renderer functions return strings.
+ :seon.render/ai [:or :qualified-symbol :string]
 
 ;; ===========================================================================
 ;; RENDER_VALUE
@@ -2444,9 +2347,9 @@
  ; path would have failed at run-open, one step past the trigger. Same
  ; class, same commit. `/run` is optional because an idle agent has no
  ; current run, and absence IS idle (there is no status to read).
- ; The family lens is declared WHERE THE FAMILY IS (the `:seon.fn` /
+ ; The schema default is declared WHERE THE FAMILY IS (the `:seon.fn` /
  ; `:seon.ns` / `:seon.schema` idiom in seon.schema.clj):
- ; `seon.render.walk/projection` reads it off the matched entity map, so
+ ; `seon.render` reads it off the matched entity map, so
  ; a family gains a default render by adding one line here and writing
  ; one plain function. No registry, no table, no dispatch.
  :seon.cluster.agent/agent
@@ -2877,93 +2780,35 @@
   [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
   [:seon.error/value {:optional true} :seon.error/value]]
 
- ; ---------------------------------------------------------------------------
- ; THE RESOLUTION CHAIN (owner ruling 2026-07-28 post-midnight #3),
- ; most specific first. Each step is DATA the caller already holds, so
- ; "why did it render that way?" is answered by reading one map.
- ; ---------------------------------------------------------------------------
-
- ; step 1 — the VIEWER's local override for a data type, keyed by the
- ; registered schema key the value matches. It rides the REQUEST rather
- ; than the unit precisely because the viewer is constant through the
- ; whole walk: every hop renders through the original agent's overrides, and
- ; perspective never silently shifts to an intermediate namespace.
- :seon.render/overrides [:map-of :qualified-keyword :seon.render/projection]
-
- ; step 3 — the kind's floor. Required, because a kind whose floor could
- ; be absent would make some value unrenderable, and the floor exists
- ; precisely so none is: "code is a good fallback as it's the truth of
- ; the system."
- :seon.render/floor :seon.render/projection
-
- :seon.render.walk/resolution
- [:map
-  [:seon.render/kind :seon.render/kind]
-  [:seon.render/floor :seon.render/floor]
-  [:seon.render/overrides {:optional true} :seon.render/overrides]]
-
- ; ---------------------------------------------------------------------------
- ; THE WALK
- ; ---------------------------------------------------------------------------
-
- ; DISTANCE is optional for the same reason it is optional on every
- ; other render request: implied 1, never required, written in one place
- ; (`seon.render.block/distance`). Caps are REQUIRED — a walk over a
- ; graph that fans out and genuinely cycles needs the node budget, and
- ; the reverse-neighbour width is the same collection dial rather than a
- ; second one to drift from it.
+ ; One typed traversal request; every renderer uses the shared SCI context.
  :seon.render.walk/request
  [:map
   [:seon.db/db :seon.db/database-value]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
   [:seon.render.walk/lookup :seon.render.walk/lookup]
-  [:seon.render/kind :seon.render/kind]
-  [:seon.render/floor :seon.render/floor]
-  [:seon.render/namespace {:optional true} :seon.render/namespace]
+  [:seon.render/output [:enum :seon.render/ai :seon.render/html]]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.render/overrides {:optional true} :seon.render/overrides]]
+  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.render/distance {:optional true} :seon.render/distance]]
 
- ; One rendered node. `:seon.render/output` and `:seon.error/value` are
- ; SIBLINGS, never a key beside each other: a node either rendered or
- ; said why it could not, and both are values — nothing here throws,
- ; because the prompt path is an error path.
- ;
- ; `:seon.render.walk/neighbours` is `[:vector :map]` rather than a
- ; self-reference: the population admits no recursive form today, and a
- ; consumer walks the tree with `get`, so a nominally recursive
- ; declaration would buy nothing the reader does not already have.
- :seon.render.walk/neighbours [:vector :map]
-
- :seon.render.walk/node
- [:map
-  [:seon.render.walk/lookup :seon.render.walk/lookup]
-  [:seon.render/distance :seon.render/distance]
-  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
-  [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
-  [:seon.render.walk/back-reference? {:optional true}
-   :seon.render.walk/back-reference?]
-  [:seon.render/would-fall-to-floor? {:optional true}
-   :seon.render/would-fall-to-floor?]
-  [:seon.render/projection {:optional true} :seon.render/projection]
-  [:seon.render/output {:optional true} :seon.render/output]
-  [:seon.error/value {:optional true} :seon.error/value]
-  [:seon.render.walk/neighbours {:optional true}
-   :seon.render.walk/neighbours]]
-
- ; A projection-neutral flattened walk unit. `output` remains the raw render
- ; value; consumers decide whether to serialize it as prose or HTML.
+ ; The traversal returns only flat render-call units.
  :seon.render.walk/path [:vector [:or :keyword :int]]
  :seon.render.walk/found-depth [:int {:min 0}]
  :seon.render.walk/branch :seon.render.walk/path
  :seon.render.walk/unit
  [:map
-  [:seon.render.walk/node :seon.render.walk/node]
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/distance :seon.render/distance]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
   [:seon.render.walk/path :seon.render.walk/path]
   [:seon.render.walk/found-depth :seon.render.walk/found-depth]
+  [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
   [:seon.render.walk/branch {:optional true} :seon.render.walk/branch]
-  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
-  [:seon.render/output {:optional true} :seon.render/output]]
+  [:seon.render/output {:optional true} :seon.render/output]
+  [:seon.error/value {:optional true} :seon.error/value]
+  [:seon.db/tx-data {:optional true} :seon.db/tx-data]]
  :seon.render.walk/units [:vector :seon.render.walk/unit]
 
 ;; ===========================================================================
@@ -2984,7 +2829,7 @@
 
  :seon.render.web/port [:int {:min 0 :max 65535}]
 
- ; The fan-out the complete page snapshots ride: the render proc's
+ ; The fan-out the complete revisioned package maps ride: the render proc's
  ; `::pages` out-port, multed, tapped per tab with a sliding-1.
  :seon.render.web/pages-mult [:fn {:gen/gen seon.render.web/mult-generator} seon.render.web/mult?]
 
@@ -3066,6 +2911,9 @@
   [:seon.store/connection :seon.store/connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.config.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
   [:seon.cluster.run/process :seon.cluster.run/process]
  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
  [:seon.render.web/registration :seon.render.web/registration]
@@ -3117,17 +2965,11 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.config.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
   [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]
   [:seon.ai/partial {:optional true} :seon.ai/partial]]
-
- ; One repaint: what to send, and what the connection has now seen.
- ; Keyed by surface id and holding the BYTES, because bytes are what the
- ; socket costs and what suppression must compare — two values that
- ; serialize identically are the same page.
- :seon.render.web/repaint
- [:map
-  [:seon.render.web/patches [:vector [:tuple :seon.render/surface-id :string]]]
-  [:seon.render.web/delivered [:map-of :seon.render/surface-id :string]]]
 
 ;; ===========================================================================
 ;; WORK

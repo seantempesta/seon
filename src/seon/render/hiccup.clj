@@ -45,11 +45,14 @@
      serialization, and `->string` has no throw left to make.
 
   Lazy sequences are safe here BY CONSTRUCTION rather than by care:
-  every agent-authored value crosses `seon.sci.admit/admit`, which
+  every agent-authored value crosses `seon.sci.admit/admit-value`, which
   deeply realizes inside the armed boundary, so no unrealized seq can
   reach this namespace from an agent. System-authored hiccup may still
   use `for` freely — that seq realizes on this thread, which is exactly
-  where a runaway would be visible.
+  where a runaway would be visible. `raw` is callable like every other
+  program function, but SCI admission projects its record into ordinary
+  data and strips the trusted-byte marker; if that data is valid Hiccup,
+  the serializer treats it as ordinary escaped content or attributes.
 
   Crash walk: pure, allocates one buffer, holds nothing. A kill during a
   render loses a string nobody had sent."
@@ -69,9 +72,10 @@
   "Wrap `string` so the serializer emits it unescaped.
   For content the caller has already serialized: an inline `<style>`
   body, a `<script>` body, a third-party HTML fragment. Wrapping is an
-  assertion — \"I have escaped this myself\" — so anything an agent
-  supplied that reaches here is an injection surface, which is why
-  nothing agent-authored may construct one."
+  assertion — \"I have escaped this myself\". Agent code may call this
+  function, but the guarded invocation kernel projects the record to
+  ordinary data and strips this trusted-byte marker. Only system-authored
+  Hiccup that has not crossed SCI admission can preserve it."
   {:malli/schema [:=> [:cat :string] :any]}
   [string]
   (->Raw (str string)))
@@ -266,7 +270,7 @@
   about the same value: exactly the behaviour the quarry's `parse-tag`
   had and this rewrite drops."
   {:malli/schema [:=> [:cat :any]
-                  [:or [:map {:closed true}
+                  [:or [:map
                         [:seon.render.hiccup/tag :string]
                         [:seon.render.hiccup/id {:optional true} :string]
                         [:seon.render.hiccup/classes [:vector :string]]]

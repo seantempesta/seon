@@ -243,12 +243,16 @@
 
       :else nil)))
 
-(defn- full-transcript [db agent-id cluster-name]
+(defn- full-transcript [db agent-id instance settings]
   (transcript/render-ai
    {:seon.db/db db
+    :seon.store/branch-connection (:seon.boot/cluster-connection instance)
+    :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.cluster.agent/id agent-id
-    :seon.sci.admit/caps
-    (config/result-caps (config/effective db cluster-name))
+    :seon.sci.admit/caps (config/result-caps settings)
+    :seon.config.eval/time-limit-ms
+    (:seon.config.eval/time-limit-ms settings)
+    :seon.config/on-core-error (:seon.config/on-core-error settings)
     ::transcript/token-budget 1000000000}))
 
 (defn- grading-branch! [store ending-commit episode-id]
@@ -317,7 +321,7 @@
        :seon.eval.drive/receipts receipts
        :seon.eval.drive/completed-result (completed-result receipts)
        :seon.eval.drive/transcript
-       (full-transcript ending-db agent-id cluster-name)
+       (full-transcript ending-db agent-id instance settings)
        :seon.eval.drive/model (:seon.config.ai/model settings)
        :seon.eval.drive/thinking (:seon.config.ai/thinking settings)})))
 

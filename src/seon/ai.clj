@@ -61,6 +61,7 @@
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
@@ -89,6 +90,27 @@
 (schema/register-core-predicate! 'seon.ai/sink? sink?)
 
 (schema.edn/load! {})
+
+(defn- attempt-without-reasoning
+  [unit]
+  (let [attempt (into (sorted-map-by #(compare (str %1) (str %2)))
+                      (dissoc (:seon.render/value unit unit)
+                              :seon.ai.attempt/reasoning
+                              :seon.ai.attempt/reasoning-blob
+                              :seon.ai.attempt/reasoning-size))]
+    (assoc unit :seon.render/value attempt)))
+
+(defn attempt-ai
+  "Render an attempt without exposing provider reasoning to agent context."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (render.value/render-ai (attempt-without-reasoning unit)))
+
+(defn attempt-html
+  "Render an attempt's ordinary facts; reasoning has its own disclosure."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (render.value/render-html (attempt-without-reasoning unit)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts

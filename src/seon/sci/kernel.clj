@@ -98,6 +98,15 @@
           {:functions functions :namespaces namespaces})
   nil)
 
+(defn cache-function!
+  "Publish one committed function row into the live program snapshot."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :map]
+                  :qualified-symbol]}
+  [ctx function-symbol row]
+  (swap! (::program-snapshot ctx) assoc-in
+         [:functions function-symbol] row)
+  function-symbol)
+
 (defn program-function
   "Return one cached function row from the acquired program snapshot."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol]

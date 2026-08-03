@@ -1135,7 +1135,10 @@
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
                                      :seon.render.web/fault-channel
-                                     :seon.cluster.run/process])))]
+                                     :seon.cluster.run/process
+                                     :seon.sci.eval/ctx
+                                     :seon.config.eval/time-limit-ms
+                                     :seon.config/on-core-error])))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
       (log/warn (str "seon " cluster-name " view: port " unavailable
                      " was taken, serving on "
@@ -1308,6 +1311,11 @@
               :seon.render.web/latest-packages latest-packages
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
+              :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+              :seon.config.eval/time-limit-ms
+              (:seon.config.eval/time-limit-ms handle)
+              :seon.config/on-core-error
+              (:seon.config/on-core-error handle)
               ;; THE ONE THING THE DATABASE CANNOT ANSWER, carried to
               ;; the page boundary rather than defaulted at it. On this
               ;; branch the live set is a singleton by construction —

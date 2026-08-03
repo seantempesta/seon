@@ -717,6 +717,7 @@
 
       :seon.fn/sym
       (let [namespace-name (second (:seon.fn/ns row))
+            function-symbol (symbol (:seon.fn/sym committed))
             event (when-not (::evaluated? row)
                     (one-event (:seon.fn/source committed)
                                namespace-name ctx))
@@ -725,7 +726,13 @@
         (when event
           (sci/binding [sci/ns (sci/create-ns namespace-name)]
             (sci/eval-form ctx (:seon.sci.reader/form event))))
-        (kernel/mark-installed! ctx (symbol (:seon.fn/sym committed)))
+        (kernel/cache-function!
+         ctx function-symbol
+         {::function-source (:seon.fn/source committed)
+          ::function-namespace namespace-name
+          ::function-private? (:seon.fn/private? committed)
+          ::agent-authored? true})
+        (kernel/mark-installed! ctx function-symbol)
         (when-not (::skip-contract-install? row)
           (install-function-contract! ctx committed next-projection db))
         {:seon.schema/projection next-projection

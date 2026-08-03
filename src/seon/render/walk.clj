@@ -1,39 +1,14 @@
 (ns seon.render.walk
-  "The neighbourhood traversal — one entity, its neighbours, rendered.
+  "The one bounded neighbourhood traversal.
 
-  THE GUARDRAIL NAMED THIS FILE (owner, 2026-07-28 close): \"ALL
-  machinery lives in dedicated namespaces: the traversal in
-  seon.render.walk.\" So every renderer in this system stays a normal
-  Clojure function — one unit map in, data out — and everything that
-  makes a WALK a walk (which neighbour is next, what it costs, when to
-  stop, whose lens renders it) lives here and only here. A renderer that
-  wants a neighbour calls one function; it never learns a protocol, an
-  argument convention or an annotation.
+  It follows explicit forward and reverse refs from one immutable database
+  value and emits flat render-call units. Renderer selection belongs only to
+  `seon.render`: an explicit producer, a unique contract fit in an explicitly
+  owning namespace, a schema property, then the structural floor. This
+  namespace derives ownership only from real data or traversal refs; it never
+  reads keyword text or the viewing agent's namespace.
 
-  WHAT AN AGENT'S CONTEXT IS (owner ruling, 2026-07-28 post-midnight #2):
-  `render(its namespace, distance N)`. This namespace is the `render(_,
-  N)` half — it takes one entity and one hop budget and produces the
-  rendered neighbourhood as a VALUE. Assembly into prose and page fragments
-  consumes the same flat render-call units. There is one traversal discipline
-  and no Hiccup-marker walker beside it.
-
-  THE RESOLUTION CHAIN IS THE DESIGN (owner ruling, 2026-07-28
-  post-midnight #3), most specific first, in `projection`:
-
-  1. the VIEWER's local override for the data type — and the viewer is
-     CONSTANT through the whole walk. Every hop renders through the original
-     agent's overrides; perspective never silently shifts to whichever
-     namespace happens to own the intermediate node. That constancy is
-     why `overrides` rides the request rather than the unit;
-  2. the OWNING NAMESPACE's default — the entity's own stored
-     declaration if it carries one, then its FAMILY's, declared as a
-     `:seon.render/ai`/`:seon.render/html` property on the registered
-     entity map (`seon.schema`'s own idiom: `:seon.fn`, `:seon.ns` and
-     `:seon.schema` already declare theirs that way, and `shape-rows`
-     lifts them). Declaring a family default is therefore a schema EDN
-     line plus a plain function — no registry, no table here;
-  3. the FLOOR: the code/data panels, \"a good fallback as it's the truth
-     of the system.\" Nothing is ever unrenderable.
+  There is no public recursive node envelope and no Hiccup marker walker.
 
   DISTANCE IS SPENT ON CONNECTIONS, one hop each: the root is rendered at
   the requested distance, a neighbour
@@ -55,11 +30,9 @@
   door and the generic panel already use; a second width dial here would
   be a magic number and would drift from the first.
 
-  TOTAL, because the prompt path is an error path. Every failure is a
-  value: an unresolvable lookup, a family with no default, a projection
-  that throws — each becomes a node carrying a flat `:seon.error/value`,
-  never an exception into the loop. The one guard that is not a value is
-  the node budget, which elides.
+  TOTAL, because the prompt path is an error path. Every selected renderer
+  failure is a flat value and an undeclared value reaches the floor. Node and
+  distance budgets elide explicitly.
 
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
@@ -67,7 +40,6 @@
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.render :as render]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -75,107 +47,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
-
-;;; ---------------------------------------------------------------------------
-;;; Identifying the family
-;;; ---------------------------------------------------------------------------
-
-(defn transacted
-  "A pulled entity in the shape it was TRANSACTED in.
-
-  `db/pull` is the canonical read and it wraps every ref as `{:db/id N}`,
-  while the registered attribute schema describes the value a caller
-  TRANSACTS — an eid, a tempid or a lookup ref. So a pulled entity does
-  not validate against its own registered entity map, and family
-  identification would find nothing at all. This unwraps pull's syntax
-  back to the eid the ref actually is (and a cardinality-many ref back to
-  the SET its schema declares, the same restoration
-  `seon.render.block/blocks` already performs on `:seon.context/inputs`).
-
-  It is used for IDENTIFICATION ONLY. Renderers receive the pulled
-  entity, because pull's shape is what a renderer wants to read."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [entity]
-  (into {}
-        (map (fn [[attribute value]]
-               [attribute
-                (cond
-                  ;; `contains?` and not a key-set equality: `db/pull`
-                  ;; expands COMPONENT refs into their full child maps,
-                  ;; so an equality check would leave a run's forms as
-                  ;; maps in a ref position and the entity would match
-                  ;; no family at all. The eid is what identification
-                  ;; wants either way.
-                  (and (map? value) (contains? value :db/id))
-                  (:db/id value)
-
-                  (and (sequential? value)
-                       (seq value)
-                       (every? (fn [element]
-                                 (and (map? element)
-                                      (contains? element :db/id)))
-                               value))
-                  (into #{} (map :db/id) value)
-
-                  ;; every other cardinality-many value pulls as a
-                  ;; vector where the schema declares a set — the same
-                  ;; boundary restoration, one place
-                  (sequential? value) (set value)
-
-                  :else value)]))
-        (dissoc entity :db/id)))
-
-(defn family
-  "The registered entity shapes `entity` belongs to, most specific first.
-
-  ONE derivation, and it is the schema's own: `matching-shapes` returns
-  every registered map schema the value validates against, already
-  ranked. A family default renderer is therefore declared where the
-  family is declared — as a `:seon.render/ai` or `:seon.render/html`
-  property on the entity map — and discovered here with no table.
-
-  Total: an unactivated projection, or a value that matches nothing,
-  yields `[]`. A traversal must never fail because a family has not been
-  described yet; that is exactly when the floor earns its keep."
-  {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [entity]
-  (try
-    (schema/matching-shapes (transacted entity))
-    (catch Throwable _ [])))
-
-;;; ---------------------------------------------------------------------------
-;;; The resolution chain
-;;; ---------------------------------------------------------------------------
-
-(defn- specific-projection
-  [unit kind overrides]
-  (or (some (fn [{shape-key :seon.schema/key}] (get overrides shape-key))
-            (family unit))
-      (let [declared (get unit kind)]
-        (when (qualified-symbol? declared) declared))
-      (some (fn [row] (get row kind)) (family unit))))
-
-(defn projection
-  "The projection symbol for `unit` in `kind`. THE RESOLUTION CHAIN.
-
-  Most specific first — viewer override, the entity's own declaration,
-  its family's default, the kind's floor — and each step is data the caller
-  already has, so \"why did it render that way?\" is answered by reading one
-  map rather than by tracing a dispatch.
-
-  `overrides` is the VIEWER's, keyed by registered schema key, and it is
-  passed unchanged to every hop: the viewer is constant through the whole
-  walk. `floor` is the kind's own last resort and is required, because a
-  kind with no floor would make some value unrenderable and the whole
-  point of the floor is that none is.
-
-  Returns a declaration, never nil: `seon.render/declaration?` holds for
-  everything this can produce."
-  {:malli/schema [:=> [:cat :seon.render/unit :seon.render.walk/resolution]
-                  :seon.render/projection]}
-  [unit {:seon.render/keys [kind overrides floor]}]
-  (or (specific-projection unit kind overrides)
-      floor))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The connections
@@ -223,8 +94,8 @@
   Newest first, then bounded, then re-ordered oldest-first for reading:
   the newest `max-collection` neighbours per attribute are the ones a
   reader wants, and reading them in the order they happened is how a
-  history reads. Entity id ascending IS commit order for facts committed
-  in sequence, which `seon.render.root/messages-html` already relies on.
+  history reads. Entity id ascending is commit order for facts committed
+  in sequence.
 
   The bound is the caps' own collection dial. A dedicated neighbourhood
   width would be a second size dial to keep in step with the first, and
@@ -385,12 +256,15 @@
       [:seon.ns/name namespace-name]
       eid)))
 
-(defn- owning-namespace
+(defn owning-namespace
   "The one namespace explicitly named by the value or one of its direct refs.
 
   This deliberately does not inspect keyword text. An entity with no explicit
   namespace edge has no owning namespace at this boundary and therefore falls
   through to its matching schema property and the structural floor."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :map]
+    [:or :seon.render/namespace :nil]]}
   [db entity]
   (let [names (cond-> (into #{}
                             (keep (fn [[_attribute target]]
@@ -400,17 +274,15 @@
     (when (= 1 (count names))
       (first names))))
 
-(declare units)
+(declare ^:private units)
 
 (defn neighborhood
-  "One entity and its neighbours, rendered, as a VALUE.
+  "One entity and its neighbours as flat rendered units.
 
-  THE PILOT'S WHOLE MECHANISM. A node is
-  `{lookup, projection, output, distance, neighbours}` and a neighbour
-  entry adds the `attribute` it was reached through, so a consumer can
-  say \"through :seon.cluster.run/agent\" without re-querying. It is a
-  value rather than text or hiccup because the two assemblies want
-  different shapes from the same walk; `prose` is the ai one.
+  Each unit records its lookup, path, distance, selected output, and the
+  explicit owning namespace derived from the data or traversal edge. AI prose
+  and the HTML page consume this same sequence; no public recursive node
+  envelope sits between traversal and those consumers.
 
   DISTANCE IS SPENT PER CONNECTION: the root renders at the requested
   distance, each neighbour one hop cheaper,
@@ -427,12 +299,11 @@
   node. A per-walk rendered set stops cycles and fan-in from rendering the
   same entity again; it never silently changes a renderer's input.
 
-  Every failure is a node carrying a flat `:seon.error/value`. Nothing
+  Every failure is a unit carrying a flat `:seon.error/value`. Nothing
   throws."
-  {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/node]}
+  {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
   [{:keys [:seon.db/db :seon.sci.admit/caps]
-    :seon.render/keys [kind overrides floor]
-    viewer-namespace :seon.render/namespace
+    output :seon.render/output
     :seon.render.walk/keys [lookup]
     :as request}]
   (let [remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
@@ -446,15 +317,13 @@
                 (cond-> {:seon.render.walk/lookup lookup
                          :seon.render/distance hops
                          :seon.render.walk/changed-at 0
-                         :seon.render/projection 'seon.render.walk/elision
                          :seon.render/output
-                         (if (= kind :seon.render/html)
+                         (if (= output :seon.render/html)
                            [:span {:class "seon-walk-elision"
                                    :data-walk-elided "true"}
                             "… " message]
-                           message)}
-                  (:seon.render/output request)
-                  (assoc :seon.error/value failure)
+                           message)
+                         :seon.error/value failure}
 
                   attribute (assoc :seon.render.walk/attribute attribute))))
             (marker [lookup attribute hops failure]
@@ -470,9 +339,7 @@
                      failure :seon.error/value} connection]
                 (cond
                   failure (marker (or lookup attribute) attribute hops failure)
-                  target (node (if (:seon.render/output request)
-                                 (entity-lookup db target)
-                                 target)
+                  target (node (entity-lookup db target)
                                target attribute hops)
                   lookup (node lookup (eid-of db lookup) attribute hops)
                   :else
@@ -522,54 +389,19 @@
                             render-base (assoc base
                                                :seon.render/distance
                                                render-distance)
-                            typed-output (:seon.render/output request)
                             owner (owning-namespace db pulled)
-                            legacy-resolution
-                            (when-not typed-output
-                              (let [unit
-                                    (cond-> (assoc pulled
-                                                   :seon.db/db db
-                                                   :seon.sci.admit/caps caps
-                                                   :seon.render/distance
-                                                   render-distance)
-                                      viewer-namespace
-                                      (assoc :seon.render/namespace
-                                             viewer-namespace))
-                                    specific
-                                    (specific-projection unit kind overrides)
-                                    resolved
-                                    (render/resolve-unit
-                                     {:seon.render/unit
-                                      (cond-> unit specific
-                                        (assoc kind specific))
-                                      :seon.render/kind kind})
-                                    floor?
-                                    (:seon.render/would-fall-to-floor? resolved)]
-                                {:seon.render/unit
-                                 (cond-> resolved floor? (assoc kind floor))
-                                 :seon.render/projection (get resolved kind)
-                                 :seon.render/would-fall-to-floor? floor?}))
                             render-request
-                            (when typed-output
-                              (cond-> (assoc request
-                                             :seon.render/value pulled
-                                             :seon.render/distance
-                                             render-distance)
-                                owner
-                                (assoc :seon.render/namespace owner)))
+                            (cond-> (assoc request
+                                           :seon.render/value pulled
+                                           :seon.render/distance
+                                           render-distance)
+                              owner (assoc :seon.render/namespace owner))
                             rendered
-                            (if typed-output
-                              ((if (= typed-output :seon.render/html)
-                                 render/render-html
-                                 render/render-ai)
-                               render-request)
-                              (render/render
-                               {:seon.render/unit
-                                (:seon.render/unit legacy-resolution)
-                                :seon.render/kind kind}))
-                            rendered-output
-                            (if typed-output rendered
-                                (:seon.render/output rendered))
+                            ((if (= output :seon.render/html)
+                               render/render-html
+                               render/render-ai)
+                             render-request)
+                            rendered-output rendered
                             render-failure
                             (when (:seon.error/kind rendered) rendered)
                             failure-outcome
@@ -580,9 +412,8 @@
                                 :seon.error/value render-failure}))
                             failure-output
                             (when render-failure
-                              (or (get failure-outcome (or typed-output kind))
-                                  (if (= (or typed-output kind)
-                                         :seon.render/html)
+                              (or (get failure-outcome output)
+                                  (if (= output :seon.render/html)
                                     [:div {:class "seon-render-unavailable"}
                                      "renderer unavailable"]
                                     "Renderer unavailable.")))
@@ -600,12 +431,6 @@
                                             (.getMessage failure))}}])))
                             with-render
                             (cond-> render-base
-                              legacy-resolution
-                              (assoc :seon.render/projection
-                                     (:seon.render/projection legacy-resolution)
-                                     :seon.render/would-fall-to-floor?
-                                     (:seon.render/would-fall-to-floor?
-                                      legacy-resolution))
                               render-failure
                               (assoc :seon.error/value render-failure
                                      :seon.render/output failure-output)
@@ -641,15 +466,13 @@
                 :seon.error/message
                 (str "Nothing in the database answers to "
                      (pr-str lookup) ".")}})]
-        (if (:seon.render/output request)
-          (units tree)
-          tree)))))
+        (units tree)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Assembly — the ai kind
 ;;; ---------------------------------------------------------------------------
 
-(defn units
+(defn- units
   "Flatten a rendered neighbourhood into one deterministically ordered vector.
 
   Each result is the direct renderer-call unit: address, path, distance,
@@ -658,7 +481,7 @@
   last-changed order. Repeated logical lookups and back-references contribute
   no second unit."
   {:malli/schema
-   [:=> [:cat :seon.render.walk/node] :seon.render.walk/units]}
+   [:=> [:cat :map] :seon.render.walk/units]}
   [node]
   (letfn [(flatten-units [node path depth branch]
             (let [failure (:seon.error/value node)
@@ -696,8 +519,8 @@
                  (:seon.render.walk/branch unit)
                  path]))
             (logical-key [unit]
-              (when-not (= 'seon.render.walk/elision
-                           (:seon.render/projection unit))
+              (when-not (= ::elided
+                           (get-in unit [:seon.error/value :seon.error/kind]))
                 [:seon.render.walk/lookup
                  (:seon.render.walk/lookup unit)]))]
       (->> (flatten-units node [] 0 nil)
@@ -718,7 +541,7 @@
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
 
-  Each unit gets one compact comment carrying its depth and projection. A
+  Each unit gets one compact comment carrying its depth and output. A
   branch root also retains the literal `:branch` path accepted by
   `seon.render/walk`, so shortening presentation never removes the drill
   handle. A node that rendered nothing contributes nothing — omission is
@@ -731,32 +554,31 @@
   failed block."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.db/database-value :seon.render.walk/node]
+    [:=> [:cat :seon.db/database-value :seon.render.walk/units]
      [:maybe :string]]
     [:=>
      [:cat
       :seon.db/database-value
-      :seon.render.walk/node
-      [:map {:closed true}
+      :seon.render.walk/units
+      [:map
        [:seon.render.walk/branch
         {:optional true}
         [:vector [:or :keyword :int]]]]]
      [:maybe :string]]]}
-  ([db node]
-   (prose db node {}))
-  ([db node {requested-branch :seon.render.walk/branch}]
-   (letfn [(provenance [node]
-            (or (:seon.render/projection node)
-                (get-in node [:seon.error/value :seon.error/kind])
-                :seon.render.walk/unknown))
+  ([db rendered-units]
+   (prose db rendered-units {}))
+  ([db rendered-units {requested-branch :seon.render.walk/branch}]
+   (letfn [(provenance [unit]
+            (or (get-in unit [:seon.error/value :seon.error/kind])
+                (:seon.render.walk/lookup unit)))
           (within-branch? [path]
             (or (nil? requested-branch)
                 (and (<= (count requested-branch) (count path))
                      (= requested-branch
                         (subvec path 0 (count requested-branch))))))
           (elision-unit? [unit]
-            (= 'seon.render.walk/elision
-               (:seon.render/projection unit)))
+            (= ::elided
+               (get-in unit [:seon.error/value :seon.error/kind])))
           (unit-lines [unit]
             (let [path (:seon.render.walk/path unit)
                   depth (:seon.render.walk/found-depth unit)
@@ -770,8 +592,10 @@
                     (when (= path (:seon.render.walk/branch unit))
                       (str " · :branch " (pr-str path))))
                text]))]
-     (let [root (:seon.render.walk/lookup node)
-           requested-depth (:seon.render/distance node)
+     (let [root-unit (first (sort-by #(count (:seon.render.walk/path %))
+                                     rendered-units))
+           root (:seon.render.walk/lookup root-unit)
+           requested-depth (:seon.render/distance root-unit)
            basis (long (:max-tx db))
            options (cond-> {:root root :depth requested-depth}
                      (some? requested-branch)
@@ -782,7 +606,7 @@
                        " depth=" requested-depth
                        (when (some? requested-branch)
                          (str " branch=" (pr-str requested-branch))))
-           ordered (->> (units node)
+           ordered (->> rendered-units
                         (filter (comp within-branch?
                                       :seon.render.walk/path)))
            elisions (filter elision-unit? ordered)

@@ -1273,7 +1273,13 @@
                                     {:seon.cluster.run/id run-id
                                      :seon.cluster.agent/id agent-id
                                      :seon.sci.admit/caps
-                                     (:seon.sci.admit/caps cluster)})
+                                     (:seon.sci.admit/caps cluster)
+                                     :seon.sci.eval/ctx
+                                     (:seon.sci.eval/ctx cluster)
+                                     :seon.sci.eval/time-limit-ms
+                                     (:seon.config.eval/time-limit-ms cluster)
+                                     :seon.config/on-core-error
+                                     (:seon.config/on-core-error cluster)})
                      (catch Exception failure
                        ;; the kind fallback keeps this total: an
                        ;; exception carrying no flat error data still
@@ -1373,12 +1379,17 @@
                      ;; durable — never a notice written at this call
                      ;; site. The backup reads exactly what the agent,
                      ;; the escalation owner and the log read.
-                     (:seon.render/output
-                      (render/render
-                       {:seon.render/unit
-                        (error/notice {:seon.error/fact fact
-                                       :seon.error/reason :failover})
-                        :seon.render/kind :seon.render/ai})))
+                     (render/render-ai
+                      {:seon.db/db @connection
+                       :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                       :seon.render/value
+                       (error/notice {:seon.error/fact fact
+                                      :seon.error/reason :failover})
+                       :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                       :seon.sci.eval/time-limit-ms
+                       (:seon.config.eval/time-limit-ms cluster)
+                       :seon.config/on-core-error
+                       (:seon.config/on-core-error cluster)}))
 
               (and (= :backoff disposition) (seq waits))
               (do
@@ -1416,15 +1427,22 @@
     ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
     (let [compiled-evaluate
           (requiring-resolve (:seon.cluster.loop/evaluate cluster))
-          ;; Walk context supplies the agent and render caps only. `evaluate`
-          ;; owns database custody from its request on the actual compute
-          ;; worker, so compiled host calls and admitted lazy values see this
-          ;; cluster without relying on executor thread propagation.
+          ;; The public walk and every renderer share this evaluation's exact
+          ;; cluster context. Bind it on the actual compute worker so nested
+          ;; agent calls use the same database value, live SCI ctx, time limit,
+          ;; and core-error disposition as the form that called them.
           evaluate
           (fn [request]
             (render/call-with-walk-context
-             {:seon.cluster.agent/id agent-id
-              :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+             {:seon.db/db @connection
+              :seon.store/branch-connection connection
+              :seon.cluster.agent/id agent-id
+              :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+              :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+              :seon.sci.eval/time-limit-ms
+              (:seon.config.eval/time-limit-ms cluster)
+              :seon.config/on-core-error
+              (:seon.config/on-core-error cluster)}
              #(compiled-evaluate request)))
           ;; the message this run is answering, read ONCE per turn: it
           ;; is the head of the conversation chain every message this

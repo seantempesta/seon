@@ -6,28 +6,24 @@
   `mult` → per-tab sliding-1 taps. The RENDER PROC (a proc of the
   cluster's own graph, pinned `:io`, built through
   `seon.flow/var-process`) runs one pass per wake over ONE database
-  value, derives every WATCHED agent's page, suppresses at the proc
-  against the last value PRODUCED, and puts one COMPLETE
-  `{agent-id → {surface-id → html}}` snapshot on the mult. Complete
-  snapshots, never incremental patches — a sliding-1 tap holds exactly
-  one pending value, so a patch displaced by a patch would be a
-  PERMANENTLY lost morph; the newest-only buffer row demands a complete
-  value (F2 R7).
+  value, derives every WATCHED agent's page, retains each fragment's
+  evidence and bytes, and puts one revisioned package per changed page
+  on the mult. Every package carries both its delta and a complete
+  keyframe assembled from those retained bytes, so a revision gap can
+  always recover from the newest package.
 
-  ONE MORPH PER BLOCK is preserved AT THE SOCKET: each tab's writer
-  diffs the snapshot against what IT last delivered and sends only the
-  changed blocks — the same 287-bytes-not-82,893 wire economy this
-  namespace proved, now computed per tab from one shared derivation
-  instead of derived per tab. DELETED with F2: the per-connection
-  `d/listen` registration, the hand-rolled latest-wins mailbox, and the
-  per-tab full re-derivation.
+  ONE MORPH PER BLOCK is preserved AT THE PROC: a contiguous revision
+  sends the retained delta bytes and a gap sends the retained keyframe
+  bytes. A tab remembers only its delivered revision. DELETED: per-tab
+  page maps, per-connection rendering and serialization, the old
+  `d/listen` registration, and the hand-rolled latest-wins mailbox.
 
   THE WAKE SOURCE is `wake/route!` — the cluster's ONE listener — which
   offers one payload-free render wake per transaction report; a freshly
   opened tab offers its own. The COALESCE FLOOR
   (`:seon.config.render/coalesce-ms`, a config fact) is honored at the
   proc: a burst of commits costs one derivation for the whole cluster,
-  and the per-tab writer just writes. It remains a coalescing floor
+  and the per-tab writer only selects retained package bytes. It remains a coalescing floor
   over an observed event (the commit), never a poll.
 
   THE FEED OPENER IS A SIBLING OF THE MORPH TARGETS, never a child. A
@@ -38,8 +34,8 @@
   the surfaces rather than on the container.
 
   Crash walk. Everything here is channel contents or process-local
-  disposable state — the produced-memory, the delivered-memory, the
-  watched registration, pending snapshots on taps — all free to lose by
+  disposable state — retained fragments/packages, delivered revisions, the
+  watched registration, pending packages on taps — all free to lose by
   the transport law: every tab reconnects and repaints from current
   facts (reconnect = repaint), the registration re-fills from
   `on-open`, and the next commit re-offers the wake."
@@ -84,8 +80,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn server?
-  "True for an http-kit server object. The gate resolves and runs this,
-  so it is real code rather than a contract stub."
+  "True for an http-kit server object.
+
+  The gate resolves and runs this, so it is real code rather than a contract
+  stub."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [x]
   (instance? org.httpkit.server.HttpServer x))
@@ -106,7 +104,7 @@
 (schema/register-core-predicate! 'seon.render.web/server? server?)
 
 (defn mult?
-  "True for a core.async mult — the fan-out the page snapshots ride."
+  "True for a core.async mult — the fan-out the render packages ride."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [value]
   (satisfies? clojure.core.async/Mult value))
@@ -145,9 +143,8 @@
 
   Every transient value lives in a Datastar signal: typed text,
   request progress, and refusal prose. The render depends only on the
-  agent id, so unrelated facts serialize to identical bytes and the
-  per-tab equality check never morphs this surface or disturbs its
-  caret."
+  agent id, so unrelated facts retain identical bytes and the render proc
+  never includes this surface in the delta or disturbs its caret."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [agent-id (:seon.cluster.agent/id unit)]
@@ -259,16 +256,12 @@
   (let [failure (:seon.error/value unit)
         output (:seon.render/output unit)
         id (unit-id agent-id unit)
-        floor? (:seon.render/would-fall-to-floor? unit)
-        attributes
-        (cond-> {:id id
-                 :class ["seon-walk-unit" (rank-class rank)]
-                 :style (str "order:" rank)
-                 :data-rank rank
-                 :data-unit-id id
-                 :data-walk-path (pr-str (:seon.render.walk/path unit))}
-          floor?
-          (assoc :data-floor "true" :data-show "$showEverything"))]
+        attributes {:id id
+                    :class ["seon-walk-unit" (rank-class rank)]
+                    :style (str "order:" rank)
+                    :data-rank rank
+                    :data-unit-id id
+                    :data-walk-path (pr-str (:seon.render.walk/path unit))}]
     (hiccup/->string
      [:article attributes
       (if failure
@@ -313,11 +306,11 @@
 (defn- page-result
   "One namespace page and the durable owner messages its failures require.
 
-  Derives the agent's html surfaces at `db` and serializes each through
-  `surface-html`. The render proc and the initial paint both call THIS,
-  so the bytes the proc suppresses against and the bytes a tab diffs
-  against are the same bytes by construction — colocation is what makes
-  the byte contract structural (F2 R2).
+  Derives the agent's flat HTML units at `db` and serializes each through
+  `surface-html`. Root fleet oversight enters the same unit sequence before
+  ranking; it has no private fragment path. Only the render proc calls this
+  function. It retains equal fragment bytes, builds the package keyframe from
+  them, and gives initial paint and later joins those exact bytes.
 
   THE LIVE SET RIDES IN, it is not defaulted here. `:seon.cluster.run/
   live-processes` is the one input no database value can answer, and
@@ -331,11 +324,42 @@
            :seon.store/branch-connection] caps :seon.sci.admit/caps
     live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial
-    retained :seon.render.web/retained-fragments}]
-  (let [node (render.walk/neighborhood (walk-request db caps id
-                                                     :seon.render/html
-                                                     branch-connection))
-        units (render.walk/units node)
+    retained :seon.render.web/retained-fragments
+    :as request}]
+  (let [walked-units (render.walk/neighborhood
+                      (walk-request db caps id :seon.render/html
+                                    branch-connection request))
+        fleet-call
+        (when (= id root-agent-id)
+          (oversight/unit
+           {:seon.db/db db
+            :seon.cluster.agent/id root-agent-id
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+            :seon.sci.eval/time-limit-ms
+            (:seon.config.eval/time-limit-ms request)
+            :seon.config/on-core-error
+            (:seon.config/on-core-error request)
+            :seon.store/branch-connection branch-connection
+            :seon.cluster.run/live-processes live-processes}))
+        fleet-output (some-> fleet-call render/render-html)
+        fleet-unit
+        (when fleet-call
+          (cond-> {:seon.render.walk/lookup
+                   [:seon.cluster.agent/id root-agent-id]
+                   :seon.render.walk/path [::fleet-oversight]
+                   :seon.render.walk/found-depth 0
+                   :seon.render/distance 0
+                   :seon.render.walk/changed-at 0}
+            (:seon.error/kind fleet-output)
+            (assoc :seon.error/value fleet-output
+                   :seon.render/output
+                   [:div {:class "seon-render-unavailable"}
+                    "renderer unavailable"])
+
+            (not (:seon.error/kind fleet-output))
+            (assoc :seon.render/output fleet-output)))
+        units (cond-> walked-units fleet-unit (conj fleet-unit))
         ranks (into {}
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))
@@ -353,28 +377,6 @@
                           (:seon.render.web/html previous)
                           (surface-html id unit rank))}))
                    units)
-        fleet-row
-        (when (= id root-agent-id)
-          (let [request {:seon.db/db db
-                         :seon.cluster.agent/id root-agent-id
-                         :seon.sci.admit/caps caps
-                         :seon.cluster.run/live-processes live-processes}
-                output (oversight/block-html request)
-                evidence [output]
-                previous (get retained (block/surface-id :fleet-oversight))]
-            {:seon.render.web/element-id
-             (block/surface-id :fleet-oversight)
-             :seon.render.walk/path [::fleet-oversight]
-             :seon.render.fragment/evidence evidence
-             :seon.render.web/html
-             (if (= evidence (:seon.render.fragment/evidence previous))
-               (:seon.render.web/html previous)
-               (hiccup/->string
-                (if (:seon.error/kind output)
-                  [:article {:id (block/surface-id :fleet-oversight)}
-                   [:div {:class "seon-render-unavailable"}
-                    "renderer unavailable"]]
-                  output)))}))
         stream-evidence [stream-partial]
         previous-stream (get retained stream-strip-id)
         stream-row
@@ -386,7 +388,7 @@
                 (:seon.render.fragment/evidence previous-stream))
            (:seon.render.web/html previous-stream)
            (stream-strip-html stream-partial))}
-        rows (cond-> rows fleet-row (conj fleet-row) true (conj stream-row))
+        rows (conj rows stream-row)
         paths (into {stream-strip-id [::stream-strip]}
                     (map (juxt :seon.render.web/element-id
                                :seon.render.walk/path))
@@ -408,13 +410,6 @@
      :seon.render.web/fragments fragments
      :seon.db/tx-data
      (into [] (mapcat :seon.db/tx-data) units)}))
-
-(defn page-of
-  "One namespace page as `{element-id → serialized fragment}`."
-  {:malli/schema [:=> [:cat :seon.render.web/paint-request]
-                  [:map-of :seon.render/surface-id :string]]}
-  [request]
-  (:seon.render.web/page (page-result request)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The per-agent debug value
@@ -492,48 +487,28 @@
 
 (declare ai-walk)
 
-(defn- debug-page-of
-  [db connection agent-id root-agent-id caps]
-  (let [page (dissoc
-              (page-of {:seon.db/db db
-                        :seon.cluster.agent/id agent-id
-                        :seon.render.web/root-agent-id root-agent-id
-                        :seon.sci.admit/caps caps
-                        :seon.store/branch-connection connection
-                        :seon.cluster.run/live-processes #{}})
-              stream-strip-id)
+(defn- debug-page-result
+  [db connection agent-id root-agent-id caps handle]
+  (let [result (page-result
+                {:seon.db/db db
+                 :seon.cluster.agent/id agent-id
+                 :seon.render.web/root-agent-id root-agent-id
+                 :seon.sci.admit/caps caps
+                 :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                 :seon.config.eval/time-limit-ms
+                 (:seon.config.eval/time-limit-ms handle)
+                 :seon.config/on-core-error
+                 (:seon.config/on-core-error handle)
+                 :seon.store/branch-connection connection
+                 :seon.cluster.run/live-processes #{}})
+        page (dissoc (:seon.render.web/page result) stream-strip-id)
         ai-id (str "debug-ai-" agent-id)]
-    (assoc page ai-id
-           (hiccup/->string
-            [:section {:id ai-id
-                       :class "seon-debug-body seon-debug-body-ai"}
-             [:pre (ai-walk db caps agent-id)]]))))
-
-(defn changed
-  "The patches whose bytes differ between `delivered` and `page`.
-
-  EQUALITY SUPPRESSION, and it compares the BYTES rather than the
-  values, deliberately: bytes are what the socket costs and what the
-  browser diffs, and two values that serialize identically are the same
-  page whatever their internal representation. Determinism makes this
-  sound — the serializer sorts attributes, so one value is always one
-  byte string. The comparison is UNCHANGED in kind since the first web
-  slice, relocated in owner (F2 §1.5): the proc suppresses against the
-  last value PRODUCED, each tab diffs against the last value IT
-  delivered.
-
-  Returns `{:seon.render.web/patches [[id html] …]
-            :seon.render.web/delivered {id → html}}`, patches sorted by
-  id so one input always yields one output."
-  {:malli/schema [:=> [:cat [:map-of :string :string]
-                       [:map-of :string :string]]
-                  :seon.render.web/repaint]}
-  [delivered page]
-  {:seon.render.web/patches
-   (into []
-         (filter (fn [[id html]] (not= html (get delivered id))))
-         (sort-by key page))
-   :seon.render.web/delivered page})
+    (assoc result :seon.render.web/page
+           (assoc page ai-id
+                  (hiccup/->string
+                   [:section {:id ai-id
+                              :class "seon-debug-body seon-debug-body-ai"}
+                    [:pre (ai-walk db caps agent-id handle)]])))))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -673,17 +648,22 @@
                                       registration-key)]
                        [registration-key
                         (if debug?
-                          {:seon.render.web/page
-                           (debug-page-of db connection agent-id
-                                          (:seon.render.web/root-agent-id state)
-                                          caps)
-                           :seon.render.web/fragments {}}
+                          (debug-page-result
+                            db connection agent-id
+                            (:seon.render.web/root-agent-id state)
+                            caps handle)
                           (page-result
                            (cond-> {:seon.db/db db
                                     :seon.cluster.agent/id agent-id
                                     :seon.render.web/root-agent-id
                                     (:seon.render.web/root-agent-id state)
                                     :seon.sci.admit/caps caps
+                                    :seon.sci.eval/ctx
+                                    (:seon.sci.eval/ctx handle)
+                                    :seon.config.eval/time-limit-ms
+                                    (:seon.config.eval/time-limit-ms handle)
+                                    :seon.config/on-core-error
+                                    (:seon.config/on-core-error handle)
                                     :seon.store/branch-connection connection
                                     :seon.cluster.run/live-processes
                                     #{(:seon.cluster.run/process handle)}
@@ -764,13 +744,8 @@
                   [:=> [:cat :map :keyword :any]
                    ;; `[state out]`, where `out` is nil when suppression
                    ;; found nothing to say and otherwise ONE complete
-                   ;; page snapshot on `::pages`
-                   [:tuple :map
-                    [:or :nil
-                     [:map-of :keyword
-                      [:vector [:map-of :seon.cluster.agent/id
-                                [:map-of :seon.render/surface-id
-                                 :string]]]]]]]]}
+                   ;; package map on `::pages`
+                   [:tuple :map [:or :nil :map]]]]}
   ([]
    {:ins {}
     :outs {}
@@ -929,25 +904,24 @@
         (deregister-tab! registration registration-key)))))
 
 (defn feed
-  "The SSE response for one tab: a tap and a virtual thread — never a
-  graph, never a listener.
+  "Return the SSE response for one tab.
+
+  It owns a tap and a virtual thread — never a graph or a listener.
 
   `on-open` registers interest for the agent, taps the mult with a
-  `(sliding-buffer 1)`, paints once from the CURRENT database value
-  (the initial full paint — every block, at its own id), offers one
-  render wake so a freshly watched agent is derived without waiting for
-  the next commit, then loops on the tap: take the newest complete
-  snapshot, select this agent's entry, diff against this connection's
-  own last-delivered map, and patch only the changed blocks.
+  `(sliding-buffer 1)`, reuses the latest proc-owned keyframe when its
+  basis is current, or requests one proc pass when absent. It then loops
+  on packages, sending delta bytes for a contiguous revision and keyframe
+  bytes for a gap. The tab owns only its delivered revision.
 
   Backpressure walk: after at most one Datastar event enters http-kit's
   pending queue, this connection's `:io` writer parks on its exact
   drain-or-close completion. The tap's sliding-1 keeps only the newest
-  complete page while the render proc continues; after drain the writer
-  takes that newest page instead of submitting every displaced value.
+  complete package while the render proc continues; after drain the writer
+  takes that newest package instead of submitting every displaced value.
 
   `on-close` untaps and deregisters. The connection owns exactly one
-  virtual thread and one map; nothing outlives the socket."
+  virtual thread and one revision number; nothing outlives the socket."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
   [request {:keys [:seon.cluster.agent/id]
             connection :seon.store/connection
@@ -968,8 +942,8 @@
      {datastar.http-kit/on-open
       (fn [generator]
         ;; interest FIRST, so the pass a wake triggers derives this
-        ;; agent; the tap BEFORE the paint, so a snapshot racing the
-        ;; paint is diffed rather than missed
+        ;; agent; the tap BEFORE the paint, so a package racing the
+        ;; proc-owned keyframe is observed rather than missed
         (register-tab! registration registration-key)
         (async/tap pages-mult tap)
         (.start
@@ -1221,28 +1195,31 @@
   {:depth 2})
 
 (defn- walk-request
-  [db caps agent-id kind connection]
-  (let [viewer-namespace (agent-namespace db agent-id)]
-    (cond-> {:seon.db/db db
+  [db caps agent-id output connection render-context]
+  (cond-> {:seon.db/db db
              :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-             :seon.render/kind kind
-             :seon.render/floor (if (= :seon.render/html kind)
-                                  'seon.render.block/data-panel
-                                  'seon.render.block/data-prose)
-             :seon.render/overrides {}
+             :seon.render/output output
              :seon.render/distance (:depth namespace-walk-options)
-             :seon.sci.admit/caps caps}
-      viewer-namespace
-      (assoc :seon.render/namespace viewer-namespace)
+             :seon.sci.admit/caps caps
+             :seon.sci.eval/ctx (:seon.sci.eval/ctx render-context)
+             :seon.sci.eval/time-limit-ms
+             (:seon.config.eval/time-limit-ms render-context)
+             :seon.config/on-core-error
+             (:seon.config/on-core-error render-context)}
       connection
-      (assoc :seon.store/branch-connection connection))))
+      (assoc :seon.store/branch-connection connection)))
 
 (defn- ai-walk
-  [db caps agent-id]
+  [db caps agent-id render-context]
   (render/call-with-walk-context
    {:seon.db/db db
     :seon.cluster.agent/id agent-id
-    :seon.sci.admit/caps caps}
+    :seon.sci.admit/caps caps
+    :seon.sci.eval/ctx (:seon.sci.eval/ctx render-context)
+    :seon.sci.eval/time-limit-ms
+    (:seon.config.eval/time-limit-ms render-context)
+    :seon.config/on-core-error
+    (:seon.config/on-core-error render-context)}
    #(render/walk namespace-walk-options)))
 
 (defn- page-response
@@ -1419,7 +1396,7 @@
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.cluster.agent/id id
-                   :seon.render/page [(block/data-panel unit)]
+                   :seon.render/page [(value/render-html unit)]
                    :seon.render.web/feed-url
                    (route/path ::route/feed {:id id})})}))
 
@@ -1590,9 +1567,10 @@
       fell-back? (assoc :seon.render.web/wanted-port wanted))))
 
 (defn stop!
-  "Close the server. Every connection's `on-close` untaps its own tap
-  and drops its registration, so nothing survives this that could keep
-  painting."
+  "Close the server.
+
+  Every connection's `on-close` untaps its own tap and drops its registration,
+  so nothing survives this that could keep painting."
   {:malli/schema [:=> [:cat :seon.render.web/server] :nil]}
   [{:keys [:seon.render.web/server]}]
   (http/server-stop! server)

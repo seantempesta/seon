@@ -9,6 +9,33 @@
 
 (schema.edn/load! {})
 
+(defn transacted
+  "Restore a pulled entity to the value shape its schema validates.
+
+  Pull expands refs to maps and cardinality-many values to vectors. Renderer
+  selection validates the transaction shape, while renderer functions still
+  receive the original pulled value."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [entity]
+  (into {}
+        (map (fn [[attribute value]]
+               [attribute
+                (cond
+                  (and (map? value) (contains? value :db/id))
+                  (:db/id value)
+
+                  (and (sequential? value)
+                       (seq value)
+                       (every? (fn [element]
+                                 (and (map? element)
+                                      (contains? element :db/id)))
+                               value))
+                  (into #{} (map :db/id) value)
+
+                  (sequential? value) (set value)
+                  :else value)]))
+        (dissoc entity :db/id)))
+
 (def ^:private print-option-keys
   #{:seon.print/length
     :seon.print/level

@@ -114,9 +114,8 @@
   absent produces no ref rather than a nil one.
 
   PROJECTIONS, ONE PER CONSUMER (owner direction, 2026-07-27 night).
-  A fact is not prose. `notice` derives the routing unit — the fact plus
-  the two projection declarations — and the ONE generic router
-  (`seon.render`) resolves and applies them:
+  A fact is not prose. `notice` derives the agent-facing unit and its explicit
+  AI producer; log consumers call the ordinary log function directly:
 
   - `ai-prose` is the generic `:seon.render/ai` implementation: what
     happened, why the reader is being told, and what it can do. A fact
@@ -126,7 +125,7 @@
     content, and that is not a stored-derived slip: a message is a
     historical fact about what an agent WAS TOLD, and it must not
     silently change when the error's context does.
-  - `log-line` (`:seon.render/log`) is a structured single line, DERIVED
+  - `log-line` is a structured single line, DERIVED
     and never stored. Nothing durable depends on it, so it may change
     shape freely. `seon.problems` COMPOSES it rather than reformatting
     an error its own way, so there is one place that decides what an
@@ -144,8 +143,7 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
-            [seon.render :as render]
-            [seon.render.walk :as walk]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -359,11 +357,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn notice
-  "The routing unit for one fact: the fact plus its projection keys.
-  Declares the generic `:seon.render/log` implementation and selects the
-  `:seon.render/ai` implementation from the fact's own attributes, so
-  the unit routes through the one generic router (`seon.render/render`)
-  and no consumer dispatches on the error family by name.
+  "The agent-facing unit for one fact and its explicit AI producer.
 
   `:seon.error/reason` is the per-RECIPIENT why-clause and is optional
   because a log has no recipient: one fact is `:your-run` to the
@@ -381,12 +375,8 @@
     (cond-> {:seon.error/fact fact
              :seon.error/kind (:seon.error/kind fact)
              :seon.error/evidence [:seon.error/id (:seon.error/id fact)]
-             :seon.error/presentation presentation
-             :seon.render/kinds #{:seon.render/ai :seon.render/log}
-             ;; The fact's own kind selects the specialist. Consumers never
-             ;; classify errors or name projection functions.
-             :seon.render/ai presentation
-           :seon.render/log `log-line}
+             ;; The typed selector invokes this explicit producer through SCI.
+             :seon.render/ai presentation}
       reason (assoc :seon.error/reason reason)
       occurrence (assoc :seon.error/occurrence occurrence)
       occurrences (assoc :seon.error/occurrences occurrences)
@@ -448,13 +438,6 @@
            ". The call was stopped before the function ran. "
            ". The function returned an invalid value. ")
          (evidence-prose fact))))
-
-(defn- render-output
-  [unit kind]
-  (let [rendered (render/render {:seon.render/unit unit
-                                 :seon.render/kind kind})]
-    (or (:seon.render/output rendered)
-        (:seon.error/message rendered))))
 
 (defn ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
@@ -544,7 +527,7 @@
               " Signature: " signature ".")])))))
 
 (defn log-line
-  "`:seon.render/log` — one structured line for a human reading stderr.
+  "One structured line for a human reading stderr.
   DERIVED, never stored: nothing durable may depend on this shape, so it
   stays free to change. Single line by construction — a log line that
   wraps is two log lines to every tool that reads them.
@@ -682,12 +665,11 @@
   {:seon.cluster.message/id (str (:seon.error/id fact) "-" (name reason))
    :seon.cluster.message/to [:seon.cluster.agent/id recipient]
    :seon.cluster.message/content
-   (render-output
+   (ai-prose
     (notice (merge {:seon.error/fact fact
                     :seon.error/reason reason
                     :seon.cluster.agent/id recipient}
-                   notification))
-    :seon.render/ai)
+                   notification)))
    :seon.cluster.message/at (:seon.error/at fact)
    :seon.cluster.message/about (fact-tempid (:seon.error/id fact))})
 
@@ -837,7 +819,7 @@
   router exists to prevent.
 
   `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
-  which the fact schema admits — `seon.render.walk/transacted` is the
+  which the fact schema admits — `seon.render.value/transacted` is the
   one place that unwrapping is written.
 
   Nil for a unit that is not an error fact: presence of the kind is the
@@ -845,10 +827,10 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when (and (:seon.error/kind unit) (:seon.error/id unit))
-    (let [fact (dissoc (walk/transacted unit)
+    (let [fact (dissoc (render.value/transacted unit)
                        :seon.db/db :seon.sci.admit/caps :seon.render/distance)]
       (try
-        (render-output (notice {:seon.error/fact fact}) :seon.render/ai)
+        (ai-prose (notice {:seon.error/fact fact}))
         (catch Throwable _
           ;; TOTAL, because this runs on the error path: a fact the
           ;; notice builder cannot accept still says what it is, rather

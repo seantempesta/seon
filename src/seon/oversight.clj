@@ -29,7 +29,6 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.render :as render]
             [seon.render.block :as block]))
 
 ;;; Flow's ping contract is explicitly timeout-bounded because an active
@@ -57,11 +56,9 @@
 (defn- running-instances
   "The cluster entry's process-local instances, if that owner is loaded."
   []
-  ;; `seon.cluster` requires `seon.render.root`, which requires this
-  ;; namespace. Requiring it here would make that real dependency cyclic.
-  ;; The cluster registry is therefore resolved late, like a render
-  ;; declaration. It is read only and matched by connection identity; no
-  ;; caller can accidentally select "the" cluster.
+  ;; This namespace is loaded by `seon.cluster`; requiring that owner here
+  ;; would make the dependency cyclic. Resolve the read-only registry late and
+  ;; match by connection identity, never by assuming "the" cluster.
   (some-> (ns-resolve 'seon.cluster 'running-instances) var-get deref))
 
 (defn- owning-instance
@@ -302,35 +299,3 @@
                     (or (:seon.oversight/passes proc)
                         "mid-pass")))
              plumbing))]]]))
-
-(defn- projection
-  "Build and route one live fleet projection, preserving omission."
-  [source kind]
-  (when-let [built (unit source)]
-    (let [rendered (render/render {:seon.render/unit built
-                                   :seon.render/kind kind})]
-      (if (:seon.error/kind rendered)
-        rendered
-        (:seon.render/output rendered)))))
-
-(defn block-ai
-  "Build and route root's live fleet prose, or omit it."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe [:or :string :seon.error/value]]]}
-  [source]
-  (projection source :seon.render/ai))
-
-(defn block-html
-  "Build and route root's live fleet table, or omit it."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe [:or :seon.render/hiccup :seon.error/value]]]}
-  [source]
-  (projection source :seon.render/html))
-
-(def block
-  "Root's live fleet block declaration."
-  {:seon.render.block/name :fleet-oversight
-   :seon.render.block/priority 15
-   :seon.render.block/band :dynamic
-   :seon.render/ai `block-ai
-   :seon.render/html `block-html})
