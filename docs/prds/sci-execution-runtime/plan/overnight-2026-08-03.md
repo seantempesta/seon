@@ -6,6 +6,35 @@ tags: [prd, orchestrator, runtime]
 
 # Overnight plan — 2026-08-03
 
+## REVISED ORDER — owner-ruled 2026-08-03 night (rulings #49-#50)
+
+The owner ruled live at session open; this section supersedes the tier
+sequencing below where they differ. Lane cap: 3 implementation + 1
+research. No Fable subagents — opus and sol lanes only.
+
+1. IN FLIGHT: `suite-speed` (tier 0, a FIX is expected, not a
+   diagnosis — ruling #49), `union-codec` (1A, decode EVERYWHERE
+   pre-authorized, blast-radius table for morning review),
+   `history-integration` (3C's six parts, authorized, live proof both
+   ways), `render-simplification` (research: ruling #50's audit).
+2. QUEUE for freed implementation slots, in order: the alter-meta!
+   immutability SCI fork change (authorized); the blob threshold
+   derivation (derived comparison, never a tuned constant); then THE
+   QUIET WINDOW — pause all lanes, one lane runs the seon.db call-site
+   sweep (3A) alone, full-suite gate, release.
+3. AFTER the sweep: MCP value chain (3B). Its admit seam is drafted by
+   the uncommitted renderer-kernel prototype
+   (`tmp/renderer-kernel-prototype-2026-08-02.patch`); the 3B lane
+   adopts the `admit-value` half explicitly; `eval.clj`'s
+   invocation-arm half stays parked for render.
+4. RENDER IMPLEMENTATION DOES NOT START TONIGHT (ruling #50). The
+   audit's verdict table and minimal-rules model are the morning's
+   owner decision. Tier 2 below is therefore deferred wholesale.
+5. Hygiene now standing (ruling #49): dead test-run roots reaped (3.9
+   GB → 384 MB), default root reset and rebuilt from current source,
+   dead experiment clusters destroyed. bin/test gains bounded reaping
+   via the suite-speed lane.
+
 Written 2026-08-02 night, after a session that landed 100+ commits. This
 is the ordered work for an overnight run where lanes can go SLOWER and
 take their time: deeper reading, more falsification, no rushing to a
