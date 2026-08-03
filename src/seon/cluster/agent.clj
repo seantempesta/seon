@@ -570,8 +570,9 @@
   routing entry (the created-and-messaged-in-one-commit belt).
   Coalescing on its sliding-1 in-port is safe by the standard argument.
   L8 holds by construction: arming writes nothing, and the prime is an
-  `offer!`. The stop transition publishes the cluster graph's
-  completion."
+  `offer!`. A quiescence request acknowledges that every earlier arm wake
+  has settled before cluster teardown disarms agent graphs. The stop
+  transition publishes the cluster graph's completion."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
@@ -598,16 +599,26 @@
                   (:seon.cluster.loop/cluster state))
                  ::stopped))
    state)
-  ([state _input _message]
-   (let [handle (:seon.cluster.loop/cluster state)
-         routing (:seon.cluster.agent/routing state)
-         db @(:seon.store/branch-connection handle)
-         agents (db/q '[:find [?id ...]
-                       :where [_ :seon.cluster.agent/id ?id]]
-                     db)
-         unarmed (remove #(contains? (::armed @routing) %) agents)]
-     (doseq [agent-id (sort unarmed)]
-       (arm! {:seon.cluster.loop/cluster handle
-              :seon.cluster.agent/id agent-id
-              :seon.cluster.agent/routing routing}))
-     [(update state ::passes inc) nil])))
+  ([state _input message]
+   (cond
+     (nil? message)
+     [state nil]
+
+     (::quiesce message)
+     (do
+       (async/put! (::quiesce message) ::quiesced)
+       [state nil])
+
+     :else
+     (let [handle (:seon.cluster.loop/cluster state)
+           routing (:seon.cluster.agent/routing state)
+           db @(:seon.store/branch-connection handle)
+           agents (db/q '[:find [?id ...]
+                         :where [_ :seon.cluster.agent/id ?id]]
+                       db)
+           unarmed (remove #(contains? (::armed @routing) %) agents)]
+       (doseq [agent-id (sort unarmed)]
+         (arm! {:seon.cluster.loop/cluster handle
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.agent/routing routing}))
+       [(update state ::passes inc) nil]))))

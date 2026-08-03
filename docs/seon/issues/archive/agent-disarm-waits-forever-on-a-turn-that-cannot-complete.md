@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, runtime, testing]
 ---
@@ -41,18 +41,19 @@ the fault is committed the turn can never reach completion and `with-cluster`'s
 its agent tagging, its signature, and root's message are all committed before
 the wedge, so the fault path is healthy — only teardown is not.
 
-## Not caused by the guarded-kernel merge
+## Root cause
 
-Checked while landing that merge (`04fe5f247`, `db0d78368`): the injected throw
-replaces `work/next-agent-work`, which runs BEFORE any guarded evaluation, and
-no `seon.sci.*` frame appears anywhere in the wedged dump. The kernel merge
-changed only how the two guarded entrances arm and classify failures.
+The completion channel was not missing. A virtual-thread-aware dump from the
+recurring failure at `bd4494239` showed the agent turn still active in
+`seon.render/acquire-context!`, while the main thread waited in
+`await-turn-completion!`. Cluster teardown had stopped the combined armer and
+render graph before disarming agent graphs. The fault-generated follow-up turn
+therefore requested context after the only render proc had stopped, so that
+turn could never finish and publish completion.
 
-The likelier neighbour is the same day's work-launcher change
-(`79700db1c`, "Add bounded background IO launcher arm", +249 lines in
-`src/seon/flow.clj`), which owns exactly the control alts ruling #51 names as
-this edge's other half. That is a lead, not a finding — it was not bisected,
-because a shared checkout cannot be checked out to an older commit safely.
+The earlier platform-thread-only attribution omitted the active virtual turn
+and was incorrect. Neither the guarded-kernel merge nor the work launcher
+caused this failure.
 
 ## Acceptance
 
@@ -64,7 +65,22 @@ because a shared checkout cannot be checked out to an older commit safely.
 - `seon.cluster.armed-test` runs to completion in the recurring gate, and one
   regression covers stopping a cluster whose turn is guaranteed not to settle.
 
+## Resolution
+
+Cluster teardown now unregisters database wakes, sends one quiescence request
+through the armer's existing input, closes that input, and waits for the
+observable acknowledgement. That establishes that every earlier arm wake has
+settled while the render proc remains live. Agent graphs then disarm and join
+their active turns; only afterward does the combined cluster graph stop.
+
+The original focused command first reproduced the failure and exited 124 at
+the suite's 300-second liveness backstop. After the repair, the same
+`bin/test seon.cluster.armed-test` command completed 6 tests and 53 assertions
+with 0 failures and 0 errors. The formerly wedged
+`an-escaped-throwable-becomes-a-fact-and-a-message` case completed in about 28
+seconds and the namespace continued through all later recovery cases.
+
 ## Provenance
 
 Found by the guarded-kernel-merge lane while widening its gate to the
-consumers of the evaluation error face.
+consumers of the evaluation error face; resolved by the wave-close gate.

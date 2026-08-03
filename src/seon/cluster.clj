@@ -1556,12 +1556,13 @@
 (defn- disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.
   The routing LISTENER goes first so nothing new is routed while the
-  graphs unwind; the ARMER next, so no new agent graph can appear
-  mid-teardown (which is also what makes arm/disarm races
-  unrepresentable rather than locked around); then each agent graph,
-  each joined at its own turn proc's completion; then the fan-out
-  detaches its taps. Each layer is released only if it stands — a
-  degraded instance disarms the same way.
+  graphs unwind. An explicit armer quiescence event then proves every
+  earlier arm wake has settled and closes that input, while the render
+  proc remains available to active agent turns. Each agent graph is
+  then joined at its own turn proc's completion; only after those turns
+  finish does the cluster graph stop and the fan-out detach its taps.
+  Each layer is released only if it stands — a degraded instance
+  disarms the same way.
 
   ORDERLY STOP WAITS FOR THE ACTIVE PASS. `flow/stop` only queues
   `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
@@ -1583,6 +1584,25 @@
     (wake/unlisten! {:seon.cluster.wake/connection
                      (:seon.store/branch-connection handle)
                      :seon.cluster.wake/key :seon.cluster.agent/route}))
+  (when-let [handle (:seon.cluster.loop/cluster instance)]
+    (let [armer-channel (:seon.cluster.wake/channel handle)
+          quiesced (async/promise-chan)]
+      (when-not (async/>!! armer-channel
+                           {::cluster.agent/quiesce quiesced})
+        (throw
+         (ex-info "The cluster armer input closed before quiescence."
+                  {:seon.error/kind
+                   :seon.cluster.agent/armer-quiescence-undeliverable})))
+      (async/close! armer-channel)
+      (when-not (= ::cluster.agent/quiesced (async/<!! quiesced))
+        (throw
+         (ex-info "The cluster armer did not publish quiescence."
+                  {:seon.error/kind
+                   :seon.cluster.agent/armer-quiescence-undeliverable})))))
+  (when-let [routing (:seon.cluster.agent/routing instance)]
+    (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
+      (cluster.agent/disarm! {:seon.cluster.agent/id agent-id
+                              :seon.cluster.agent/routing routing})))
   (when-let [graph (:seon.flow/graph instance)]
     (flow.core/stop graph)
     ;; BOTH cluster-graph procs are joined at their own completions —
@@ -1594,14 +1614,9 @@
     (some-> (get-in instance [:seon.render.web/view
                               :seon.render.web/completion])
             async/<!!))
-  (when-let [routing (:seon.cluster.agent/routing instance)]
-    (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
-      (cluster.agent/disarm! {:seon.cluster.agent/id agent-id
-                              :seon.cluster.agent/routing routing})))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
-    (async/close! (:seon.cluster.wake/channel handle))
     (some-> (:seon.cluster.loop/stream-channel handle) async/close!)
     (some-> (:seon.render/context-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has
