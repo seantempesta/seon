@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -114,6 +115,20 @@
                         [:seon.error/data
                          :seon.db/dependency-data
                          ::schema.datahike/rule]))))))))
+
+(deftest instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster.agent/id "wildcard-agent"}])
+     (instrument/apply! {:seon.config/on-core-error :panic
+                         :seon.sci.admit/caps nil})
+     (try
+       (is (= "wildcard-agent"
+              (:seon.cluster.agent/id
+               (db/pull @connection '[*]
+                        [:seon.cluster.agent/id "wildcard-agent"]))))
+       (finally
+         (instrument/remove!))))))
 
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database

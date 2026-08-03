@@ -358,7 +358,8 @@
                   subpattern
                   (decode-pull-child subpattern value)
 
-                  (and (= display-key attribute)
+                  (and (keyword? attribute)
+                       (= display-key attribute)
                        (schema.datahike/edn-encoded-attr? attribute))
                   (decode-attribute-value attribute value)
 

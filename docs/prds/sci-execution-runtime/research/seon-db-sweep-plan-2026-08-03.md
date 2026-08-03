@@ -87,6 +87,14 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   invalid encoded values below its logical-value transaction boundary. Those
   exact `d/q` and `d/transact` sites remain dependency probes; the surrounding
   logical writes and application reads use `seon.db`.
+- The SCI instrumentation gate exposed a pre-existing decoder contract defect
+  once transaction functions began using `seon.db`: wildcard pull output has
+  no parsed attribute metadata for fields such as `:db/id`, and
+  `decode-pull-entity` called the keyword-only `edn-encoded-attr?` predicate
+  with that absent metadata. Uninstrumented execution hid the call; Malli
+  instrumentation turned the pull into `:seon.db/invalid-read`. The database
+  owner now requires a keyword before that predicate call, with an
+  instrumented wildcard-pull regression.
 
 ## Current source census
 
