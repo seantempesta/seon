@@ -431,9 +431,6 @@
    [:seon.render/kind :seon.render/kind]
    [:seon.error/value :seon.error/value]]]
 
- ; Rendered values supplied to the retained bounded slot expander.
- :seon.render/surfaces [:vector :seon.render/surface]
-
  ; ---------------------------------------------------------------------------
  ; DISTANCE — how many hops of the neighborhood one render reaches
  ; (owner ruling, 2026-07-28 post-midnight; seal revision to the request
@@ -448,19 +445,9 @@
  ; argument TO the renderer, never a property OF it. The renderer is
  ; CALLED with the distance (present on the unit; IMPLIED 1 when absent,
  ; and never required — a projection that ignores it is correct).
- ; Reaching past its own unit is the renderer'S OWN COMPOSITIONAL ACT: it
- ; includes a neighbor by DELEGATING to that neighbor's renderer —
- ; mechanically, by emitting the ref hole `seon.render.block/entity-slot`
- ; already produces — and the expansion DECREMENTS distance per hop, so
- ; the neighbor is rendered at distance-1 and distance 0 is identity
- ; only: no expansion at all.
- ;
- ; REDIRECTION AT THE SLOT: a ref hole may carry an explicit projection
- ; symbol, and the neighbor is then rendered through that projection
- ; instead of its own declaration — the "override at any point" half of
- ; the ruling, routed through the ONE router like every other
- ; declaration, and recorded where every projection choice is recorded:
- ; in the emitting renderer's own output.
+ ; Reaching past one unit is the walk's compositional act: following a real
+ ; database ref spends one hop and delegates the reached value to its owner.
+ ; Distance 0 follows no connections.
  ;
  ; ACCRETION, strictly. Absent means exactly today's behaviour: the
  ; admission caps alone bound the walk. Distance never overrides those
@@ -479,67 +466,8 @@
   [:seon.cluster.run/live-processes {:optional true}
    :seon.cluster.run/live-processes]]
 
- ; What one bounded expansion needs. The database value is OPTIONAL
- ; because block-slot expansion needs none; an entity ref without one is
- ; refused in place, naming what it needed, rather than silently
- ; rendering an empty hole.
- ;
- ; DISTANCE is optional: absent means the caps alone bound the expansion;
- ; present means each ref hop spends one.
- :seon.render/expansion
- [:map
-  [:seon.render/surfaces :seon.render/surfaces]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.render/distance {:optional true} :seon.render/distance]
-  [:seon.db/db {:optional true} :seon.db/database-value]]
-
  ; The shell's ordered hiccup fragment.
  :seon.render/page [:vector :seon.render/hiccup]
-
- ; ---------------------------------------------------------------------------
- ; GENERIC DEFAULT + SPECIALIST — the reusable selection shape
- ; (owner architectural ruling, 2026-07-27 night)
- ;
- ; Every output kind has a GENERIC default renderer that can project any
- ; value of the family. A producer that knows more about a particular
- ; value points that value's key at a SPECIALIST instead — and the
- ; choice is made WHERE THE UNIT IS BUILT, computed from the value's own
- ; attributes.
- ;
- ; The two halves of the ruling are one design. Because the key on the
- ; unit is the whole answer, a CONSUMER never branches: it hands the
- ; unit to the one router and receives whatever the producer decided.
- ; That is what makes "consumers reach an error's renderings only
- ; through the router" enforceable rather than a convention — there is
- ; no second call site to reach for, because the specialist's name never
- ; leaves the producer.
- ;
- ; It also keeps hot reload: the specialist is a SYMBOL resolved late by
- ; the router on every render, so re-evaluating it changes the next
- ; render, exactly as the generic default does.
- ; ---------------------------------------------------------------------------
-
- ; ONE RULE: a pure predicate over the value's own attributes, and the
- ; projection to use when it accepts. Both are qualified symbols
- ; resolved late — a rule is as hot-reloadable as the renderer it picks.
- :seon.render/specialist [:tuple :qualified-symbol :seon.render/projection]
-
- ; What a producer asks for. `specialists` is ORDERED and first match
- ; wins, because "more specific" is a judgement its owner makes and not
- ; something a scoring function should guess. An empty vector is the
- ; ordinary case and yields the default, so a family with no specialists
- ; writes no special code.
- ;
- ; This is NOT a registry: the vector belongs to the ONE producer that
- ; owns the family, is built from that family's own attributes, and is
- ; never consulted by anybody rendering. A second family's rules are
- ; invisible here, which is the difference between a producer's rules
- ; and a dispatch table.
- :seon.render/selection
- [:map
-  [:seon.render/kind :seon.render/kind]
-  [:seon.render/default :seon.render/projection]
-  [:seon.render/specialists [:vector :seon.render/specialist]]]
 
 ;; ===========================================================================
 ;; BOOT
@@ -2918,8 +2846,7 @@
  ; like `[:seon.cluster.run/id "run-7f21"]`. `:any` at a genuinely
  ; polymorphic dependency boundary — the admissible forms are Datahike's
  ; and restating them here would be a second contract to drift from the
- ; database's own (`seon.render.block/entity-slot` takes the same value
- ; under the same rule).
+ ; database's own.
  :seon.render.walk/lookup :any
  :seon.render.walk/target :int
  :seon.render.walk/back-reference? :boolean

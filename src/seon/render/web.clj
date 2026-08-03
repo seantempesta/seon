@@ -349,18 +349,19 @@
                          :seon.cluster.agent/id root-agent-id
                          :seon.sci.admit/caps caps
                          :seon.cluster.run/live-processes live-processes}
-                surface (block/surface request oversight/block
-                                       :seon.render/html)]
+                output (oversight/block-html request)]
             {:seon.render.web/element-id
-             (:seon.render/surface-id surface)
+             (block/surface-id :fleet-oversight)
              :seon.render.walk/path [::fleet-oversight]
              :seon.render.web/html
              (hiccup/->string
-              (block/expand
-               (block/slot :fleet-oversight)
-               {:seon.render/surfaces [surface]
-                :seon.db/db db
-                :seon.sci.admit/caps caps}))}))
+              (if (:seon.error/kind output)
+                [:article {:id (block/surface-id :fleet-oversight)}
+                 [:div {:class "seon-error-card"
+                        :data-error-kind (str (:seon.error/kind output))}
+                  [:span {:class "seon-error-card-message"}
+                   (:seon.error/message output)]]]
+                output))}))
         rows (cond-> rows fleet-row (conj fleet-row))
         paths (into {stream-strip-id [::stream-strip]}
                     (map (juxt :seon.render.web/element-id

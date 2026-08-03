@@ -13,11 +13,9 @@
   WHAT AN AGENT'S CONTEXT IS (owner ruling, 2026-07-28 post-midnight #2):
   `render(its namespace, distance N)`. This namespace is the `render(_,
   N)` half — it takes one entity and one hop budget and produces the
-  rendered neighbourhood as a VALUE. Assembly into prose is `prose`
-  below; assembly into a page is `seon.render.block/expand`, which spends
-  distance the same way over hiccup holes. Two assemblers, one traversal
-  discipline, and neither is a second router: every node here is rendered
-  by `seon.render/render` exactly like a block.
+  rendered neighbourhood as a VALUE. Assembly into prose and page fragments
+  consumes the same flat render-call units. There is one traversal discipline
+  and no Hiccup-marker walker beside it.
 
   THE RESOLUTION CHAIN IS THE DESIGN (owner ruling, 2026-07-28
   post-midnight #3), most specific first, in `projection`:
@@ -37,8 +35,8 @@
   3. the FLOOR: the code/data panels, \"a good fallback as it's the truth
      of the system.\" Nothing is ever unrenderable.
 
-  DISTANCE IS SPENT ON CONNECTIONS, one hop each, exactly as `expand`
-  spends it: the root is rendered at the requested distance, a neighbour
+  DISTANCE IS SPENT ON CONNECTIONS, one hop each: the root is rendered at
+  the requested distance, a neighbour
   at distance-1, and a walk with no hops left follows nothing. Distance
   is an ARGUMENT to the renderer and never a property of it — this
   namespace puts it on the unit under `:seon.render/distance` and the
@@ -414,8 +412,8 @@
   value rather than text or hiccup because the two assemblies want
   different shapes from the same walk; `prose` is the ai one.
 
-  DISTANCE IS SPENT PER CONNECTION, exactly as `expand` spends it: the
-  root renders at the requested distance, each neighbour one hop cheaper,
+  DISTANCE IS SPENT PER CONNECTION: the root renders at the requested
+  distance, each neighbour one hop cheaper,
   and a node with no hops left follows nothing. Namespace rendering is
   root-relative: the root agent's assigned namespace receives distance 1,
   while every other namespace receives distance 2. Namespace renderers
@@ -424,8 +422,7 @@
 
   Three bounds, none of them a clock: the hop budget (what was asked
   for), the caps' node budget (the absolute one — a graph that fans out
-  needs a node budget and not merely a loop guard, the lesson
-  `seon.render.block/expand` already paid for), and the caps' collection
+  needs a node budget and not merely a loop guard), and the caps' collection
   budget on each reverse attribute. Every active bound emits a quiet elision
   node. A per-walk rendered set stops cycles and fan-in from rendering the
   same entity again; it never silently changes a renderer's input.
