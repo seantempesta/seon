@@ -6,7 +6,8 @@
             [clojure.test :as test]
             [datahike.api :as d]
             [seon.cluster :as cluster]
-            [seon.fs :as fs])
+            [seon.fs :as fs]
+            [seon.fn :as seon.fn])
   (:import [java.util.concurrent CountDownLatch Future TimeUnit
             TimeoutException]))
 
@@ -23,6 +24,14 @@
 (def unknown-refusal
   "Returned when a thrown boundary carries no classifiable ex-data."
   ::unknown-refusal)
+
+(def ^:private source-manifest
+  ;; The runner loads every selected test namespace before it invokes a test,
+  ;; so the first fixture derives this immutable value from that invocation's
+  ;; frozen source tree. Every database still installs the complete population
+  ;; through its own transactions; only repeated static analysis is shared.
+  (delay
+    (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})))
 
 (defn await-event!
   "Await one channel, latch, or future event with a loud backstop."
@@ -159,7 +168,8 @@
          connection (d/connect configuration)]
      (try
        (cluster/populate-source!
-        {:seon.store/branch-connection connection})
+        {:seon.store/branch-connection connection
+         :seon.fn/manifest @source-manifest})
        ;; `populate-source!` is the contents step used by production
        ;; `source/publish!`; production seals that completed population in
        ;; the following transaction. Keep this canonical fixture on the same

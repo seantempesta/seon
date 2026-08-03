@@ -231,7 +231,10 @@
                   (str/join ", " (map :parity/row pending-rows))))))
 
 (use-fixtures :once report-fixture)
-(use-fixtures :each database-fixture)
+;; Parity cases receive only the immutable database value and create a fresh
+;; SCI ctx per session; none receives the connection or transacts. One
+;; namespace-scoped population therefore preserves case isolation.
+(use-fixtures :once database-fixture)
 
 ;;; Family B — collection faces and elision
 ;; Ported from Clojure's printer tables at
