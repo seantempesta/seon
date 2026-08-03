@@ -3,8 +3,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.config :as config]
             [seon.db :as db]
-            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
@@ -15,24 +15,39 @@
 (def ^:private git-sha (apply str (repeat 40 "a")))
 (def ^:private run-id "test-run-1")
 
+(defn- captured-run-with-output []
+  (let [writer (java.io.StringWriter.)
+        result
+        (binding [clojure.test/*test-out* writer]
+          (runner/run!
+           {:seon.test.runner/namespaces
+            ['seon.test-runner-failure-fixture]
+            :seon.test.run/id run-id
+            :seon.test.run/at at
+            :seon.test.run/git-sha git-sha}))]
+    {::result result
+     ::output (str writer)}))
+
 (defn- captured-run []
-  (binding [clojure.test/*test-out* (java.io.StringWriter.)]
-    (runner/run!
-     {:seon.test.runner/namespaces
-      ['seon.test-runner-failure-fixture]
-      :seon.test.run/id run-id
-      :seon.test.run/at at
-      :seon.test.run/git-sha git-sha})))
+  (::result (captured-run-with-output)))
+
+(defn- occurrences
+  [text fragment]
+  (loop [from 0
+         found 0]
+    (if-let [match-at (str/index-of text fragment from)]
+      (recur (+ match-at (count fragment)) (inc found))
+      found)))
 
 (deftest captures-one-pass-or-fail-value-per-test
   (let [result (captured-run)
         by-symbol (into {}
                         (map (juxt :seon.test/sym identity))
                         (:seon.test.runner/results result))]
-    (is (= #:seon.test.runner{:test-count 2
+    (is (= #:seon.test.runner{:test-count 4
                               :pass-count 1
                               :fail-count 1
-                              :error-count 0}
+                              :error-count 8}
            (:seon.test.runner/summary result)))
     (is (= :pass
            (:seon.test.result/outcome
@@ -47,6 +62,37 @@
           (by-symbol
            "seon.test-runner-failure-fixture/failing-example"))
          "deliberate broken-test evidence"))))
+
+(deftest repeated-identical-errors-have-one-bounded-face
+  (let [{::keys [result output]} (captured-run-with-output)
+        by-symbol (into {}
+                        (map (juxt :seon.test/sym identity))
+                        (:seon.test.runner/results result))
+        repeated-message
+        (:seon.test.failure/message
+         (by-symbol
+          "seon.test-runner-failure-fixture/repeated-identical-error"))
+        repeated-signature (apply str (repeat 64 "a"))
+        distinct-signature (apply str (repeat 64 "b"))
+        signature-at (str/index-of output repeated-signature)
+        repeated-start (inc (str/last-index-of output "\nERROR in"
+                                                signature-at))
+        summary-start (str/index-of output "\nRan" repeated-start)
+        repeated-face (subs output repeated-start summary-start)]
+    (testing "all events remain counted while only distinct causes render"
+      (is (= 8
+             (get-in result [:seon.test.runner/summary
+                             :seon.test.runner/error-count])))
+      (is (= 2 (occurrences output "ERROR in")))
+      (is (= 2 (occurrences output "  signature:")))
+      (is (str/includes? output "one repeated refusal"))
+      (is (str/includes? output distinct-signature)))
+    (testing "one face and the captured fact are bounded and deduplicated"
+      (is (<= (count repeated-face)
+              (:seon.config.eval.result/blob-threshold
+               (config/defaults))))
+      (is (= 1 (occurrences repeated-message
+                            "the same refusal reached the reporter again"))))))
 
 (deftest result-facts-join-through-test-namespace-to-its-owner
   (test-support/with-database
@@ -68,10 +114,12 @@
                 git-sha]}
             (db/q
              '[:find ?test-symbol ?agent-id ?message ?at ?git-sha
+               :in $ ?selected-test
                :where
                [?result :seon.test.result/outcome :fail]
                [?result :seon.test.result/test ?test]
                [?test :seon.test/sym ?test-symbol]
+               [(= ?test-symbol ?selected-test)]
                [?test :seon.test/ns ?namespace]
                [?agent :seon.cluster.agent/namespace ?namespace]
                [?agent :seon.cluster.agent/id ?agent-id]
@@ -80,7 +128,8 @@
                [?result :seon.test.result/run ?run]
                [?run :seon.test.run/at ?at]
                [?run :seon.test.run/git-sha ?git-sha]]
-             @connection)))))))
+             @connection
+             "seon.test-runner-failure-fixture/failing-example")))))))
 
 (deftest the-effectful-sink-refuses-the-default-cluster
   (let [refusal

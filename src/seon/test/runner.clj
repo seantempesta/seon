@@ -4,6 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test]
+            [seon.config :as config]
             [seon.db :as db])
   (:import (java.lang ProcessHandle Runtime Thread)
            (java.lang.management ManagementFactory ThreadInfo)
@@ -22,23 +23,63 @@
   [event]
   (var-symbol (or (:var event) (first test/*testing-vars*))))
 
+(defn- bounded-text
+  [options text]
+  (let [text (str text)
+        max-chars (:seon.config.eval.result/blob-threshold options)
+        suffix "\n... additional failure output elided by bin/test"]
+    (if (<= (count text) max-chars)
+      text
+      (if (<= max-chars (count suffix))
+        (subs suffix 0 max-chars)
+        (str (subs text 0 (- max-chars (count suffix))) suffix)))))
+
 (defn- printable
-  [value]
-  (if (instance? Throwable value)
-    (str (.getName (class value)) ": " (or (ex-message value) ""))
-    (pr-str value)))
+  [options value]
+  (bounded-text
+   options
+   (if (instance? Throwable value)
+     (str (.getName (class value)) ": " (or (ex-message value) ""))
+     (binding [*print-length* (:seon.print/length options)
+               *print-level* (:seon.print/level options)]
+       (pr-str value)))))
+
+(defn- throwable-signature
+  [^Throwable failure]
+  (loop [current failure]
+    (when current
+      (or (:seon.error/signature (ex-data current))
+          (recur (ex-cause current))))))
+
+(defn- event-signature
+  [event]
+  (or (:seon.error/signature event)
+      (when (instance? Throwable (:actual event))
+        (throwable-signature (:actual event)))))
+
+(defn- throwable-face
+  [options ^Throwable failure signature]
+  (with-out-str
+    (println (str (.getName (class failure)) ": "
+                  (or (ex-message failure) "")))
+    (doseq [frame (take (:seon.print/length options)
+                        (.getStackTrace failure))]
+      (println "    at" frame))
+    (when signature
+      (println "  signature:" signature))))
 
 (defn- failure-message
-  [event]
+  [options event]
   (->> [(when (seq test/*testing-contexts*)
           (test/testing-contexts-str))
         (:message event)
         (when (contains? event :expected)
-          (str "expected: " (printable (:expected event))))
+          (str "expected: " (printable options (:expected event))))
         (when (contains? event :actual)
-          (str "actual: " (printable (:actual event))))]
+          (str "actual: " (printable options (:actual event))))]
        (remove str/blank?)
-       (str/join "\n")))
+       (str/join "\n")
+       (bounded-text options)))
 
 (defn- ensure-result
   [capture test-symbol]
@@ -50,24 +91,64 @@
                   {:seon.test/sym (str test-symbol)
                    :seon.ns/name (symbol (namespace test-symbol))
                    :seon.test.result/outcome :pass
-                   ::failure-messages []}))))
+                   ::failure-messages []
+                   ::failure-signatures #{}}))))
 
 (defn- capture-event!
-  [capture selected-namespaces event]
+  [options capture selected-namespaces event]
   (when-let [test-symbol (event-symbol event)]
     (when (contains? selected-namespaces (symbol (namespace test-symbol)))
       (swap! capture
              (fn [current]
-               (let [current (ensure-result current test-symbol)]
+               (let [current (ensure-result current test-symbol)
+                     signature (event-signature event)
+                     seen? (and signature
+                                (contains?
+                                 (get-in current [::results test-symbol
+                                                  ::failure-signatures])
+                                 signature))]
                  (if (contains? #{:fail :error} (:type event))
-                   (-> current
-                       (assoc-in [::results test-symbol
-                                  :seon.test.result/outcome]
-                                 :fail)
-                       (update-in [::results test-symbol ::failure-messages]
-                                  conj
-                                  (failure-message event)))
+                   (cond-> (assoc-in current
+                                     [::results test-symbol
+                                      :seon.test.result/outcome]
+                                     :fail)
+                     (and signature (not seen?))
+                     (update-in [::results test-symbol ::failure-signatures]
+                                conj signature)
+                     (not seen?)
+                     (update-in [::results test-symbol ::failure-messages]
+                                conj (failure-message options event)))
                    current)))))))
+
+(defn- report-error!
+  [options event signature]
+  (test/with-test-out
+    (test/inc-report-counter :error)
+    (print
+     (bounded-text
+      options
+      (with-out-str
+        (println "\nERROR in" (test/testing-vars-str event))
+        (when (seq test/*testing-contexts*)
+          (println (test/testing-contexts-str)))
+        (when-let [message (:message event)]
+          (println message))
+        (println "expected:" (printable options (:expected event)))
+        (print "  actual: ")
+        (println (throwable-face options (:actual event) signature)))))))
+
+(defn- report-event!
+  [options default-report reported-signatures event]
+  (if (and (= :error (:type event))
+           (instance? Throwable (:actual event)))
+    (let [signature (event-signature event)]
+      (if (and signature (contains? @reported-signatures signature))
+        (test/inc-report-counter :error)
+        (do
+          (when signature
+            (swap! reported-signatures conj signature))
+          (report-error! options event signature))))
+    (default-report event)))
 
 (defn- announce!
   [progress description]
@@ -273,7 +354,7 @@
    (fn [test-symbol]
      (let [result (get results test-symbol)
            messages (::failure-messages result)]
-       (cond-> (dissoc result ::failure-messages)
+       (cond-> (dissoc result ::failure-messages ::failure-signatures)
          (seq messages)
          (assoc :seon.test.failure/message (str/join "\n\n" messages)))))
    order))
@@ -348,15 +429,22 @@
 (defn- run-request!
   [request progress selected-vars]
   (let [selected-namespaces (set (:seon.test.runner/namespaces request))
+        options (select-keys
+                 (config/defaults)
+                 [:seon.config.eval.result/blob-threshold
+                  :seon.print/length
+                  :seon.print/level])
         capture (atom {::order [] ::results {}})
+        reported-signatures (atom #{})
         default-report test/report
         raw-summary
         (binding [test/report
                   (fn [event]
-                    (capture-event! capture selected-namespaces event)
+                    (capture-event! options capture selected-namespaces event)
                     (when progress
                       (progress-event! progress event))
-                    (default-report event))]
+                    (report-event! options default-report
+                                   reported-signatures event))]
           (if selected-vars
             (run-selected-tests (:seon.test.runner/namespaces request)
                                 selected-vars)
@@ -375,8 +463,8 @@
 (defn run!
   "Run namespaces through `clojure.test` and return per-test values.
 
-  The default reporter still receives every event and therefore keeps the
-  gate's ordinary output and counters. Capture is invocation-local data."
+  Ordinary events use the default reporter. Throwable errors have one bounded
+  face per existing error signature while every event remains counted."
   {:malli/schema [:=> [:cat :seon.test.runner/run-request]
                   :seon.test.runner/run-result]}
   [{namespaces :seon.test.runner/namespaces
