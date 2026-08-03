@@ -1,54 +1,73 @@
-{
-; WHAT THE LOOP SHOULD DO NEXT, as one derived value. The four
- ; situations below are total and mutually exclusive over any database
- ; value; `nil` is idle, and nothing else is representable.
- :seon.cluster.work/situation [:enum :resume :call :open :close]
- ; :resume — an open run THIS process already holds, with a plan: fold
- ;           on at the first ordinal lacking a terminal receipt. An
- ;           unheld plan never resumes; recovery closes interrupted work.
- ; :call   — an open run this process holds, no plan: derive the prompt,
- ;           call the model, freeze the plan (the ONE paid call, never
- ;           retried)
- ; :open   — an unanswered trigger and an idle agent: open + claim first,
- ;           model second (the claim-early fence)
- ; :close  — an open run whose every form has a terminal receipt: the
- ;           fold is done. Its own situation rather than a :resume with
- ;           a missing ordinal, because fold-vs-close is a different
- ;           instruction and must be visible in the VALUE, never inferred
- ;           from an absent key (seal revision, 2026-07-27)
- :seon.cluster.work/next [:multi {:dispatch :seon.cluster.work/situation}
-                          [:resume [:map  [:seon.cluster.work/situation [:= :resume]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]]]
-                          [:call [:map  [:seon.cluster.work/situation [:= :call]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]
-                          [:open [:map  [:seon.cluster.work/situation [:= :open]] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.message/id :seon.cluster.message/id]]]
-                          [:close [:map  [:seon.cluster.work/situation [:= :close]] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id]]]]
- ; THE PER-AGENT DERIVATION'S REQUEST (F1): the same request narrowed
- ; to one agent. The episode dial is deliberately NOT here — it is a
- ; config fact the derivation reads from the database value itself, so
- ; a live dial change applies at the next pass with no handle rebuild.
- :seon.cluster.work/agent-request [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.work/now :inst]]
- ; Runs since (and including) the one answering the last OUTSIDE
- ; trigger — the episode, derived purely from committed facts.
- :seon.cluster.work/episode-runs [:int {:min 0}]
- :seon.cluster.work/now :inst
-
- ; THE SEVEN STATES OF ONE FROZEN FORM. These are derived values, never
- ; stored status attributes. Run closure is intentionally absent.
- :seon.cluster.work/form-state
- [:enum :unevaluated :running :succeeded :routed :unrouted-red
-  :owner-fixed :owner-declared-cant]
- :seon.cluster.work/settled? :boolean
- :seon.cluster.work/form-settlement
- [:map
-  [:seon.cluster.run.form/id :seon.cluster.run.form/id]
-  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
-  [:seon.problems/id {:optional true} :seon.problems/id]
-  [:seon.cluster.work/form-state :seon.cluster.work/form-state]
-  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
- :seon.cluster.work/plan-settlement
- [:map
-  [:seon.cluster.run/id :seon.cluster.run/id]
-  [:seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]]
-  [:seon.cluster.work/settled? :seon.cluster.work/settled?]]
- :seon.cluster.work/forms [:vector :seon.cluster.work/form-settlement]}
+#:seon.cluster.work{:agent-request
+                    [:map
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.cluster.run/process
+                      :seon.cluster.run/process]
+                     [:seon.cluster.work/now :inst]],
+                    :episode-runs [:int {:min 0}],
+                    :form-settlement
+                    [:map
+                     [:seon.cluster.run.form/id
+                      :seon.cluster.run.form/id]
+                     [:seon.cluster.run.form/ordinal
+                      :seon.cluster.run.form/ordinal]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.cluster.eval/id
+                      {:optional true}
+                      :seon.cluster.eval/id]
+                     [:seon.problems/id
+                      {:optional true}
+                      :seon.problems/id]
+                     [:seon.cluster.work/form-state
+                      :seon.cluster.work/form-state]
+                     [:seon.cluster.work/settled?
+                      :seon.cluster.work/settled?]],
+                    :form-state
+                    [:enum
+                     :unevaluated
+                     :running
+                     :succeeded
+                     :routed
+                     :unrouted-red
+                     :owner-fixed
+                     :owner-declared-cant],
+                    :forms
+                    [:vector :seon.cluster.work/form-settlement],
+                    :next
+                    [:multi
+                     {:dispatch :seon.cluster.work/situation}
+                     [:resume
+                      [:map
+                       [:seon.cluster.work/situation [:= :resume]]
+                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.cluster.agent/id :seon.cluster.agent/id]
+                       [:seon.cluster.run.form/ordinal
+                        :seon.cluster.run.form/ordinal]]]
+                     [:call
+                      [:map
+                       [:seon.cluster.work/situation [:= :call]]
+                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.cluster.agent/id
+                        :seon.cluster.agent/id]]]
+                     [:open
+                      [:map
+                       [:seon.cluster.work/situation [:= :open]]
+                       [:seon.cluster.agent/id :seon.cluster.agent/id]
+                       [:seon.cluster.message/id
+                        :seon.cluster.message/id]]]
+                     [:close
+                      [:map
+                       [:seon.cluster.work/situation [:= :close]]
+                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.cluster.agent/id
+                        :seon.cluster.agent/id]]]],
+                    :now :inst,
+                    :plan-settlement
+                    [:map
+                     [:seon.cluster.run/id :seon.cluster.run/id]
+                     [:seon.cluster.work/forms
+                      [:vector :seon.cluster.work/form-settlement]]
+                     [:seon.cluster.work/settled?
+                      :seon.cluster.work/settled?]],
+                    :settled? :boolean,
+                    :situation [:enum :resume :call :open :close]}

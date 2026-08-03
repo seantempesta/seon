@@ -1,0 +1,33 @@
+#:seon.fn.arity{:arity :string,
+                :guard :seon.db/ref,
+                :guard-refs [:set :seon.db/ref],
+                :input :seon.db/ref,
+                :input-refs [:set :seon.db/ref],
+                :max :int,
+                :min :int,
+                :order :int,
+                :output :seon.db/ref,
+                :output-refs [:set :seon.db/ref],
+                :row
+                [:map
+                 #:seon.db{:attributes true}
+                 [:seon.fn.arity/order :seon.fn.arity/order]
+                 [:seon.fn.arity/arity :seon.fn.arity/arity]
+                 [:seon.fn.arity/min :seon.fn.arity/min]
+                 [:seon.fn.arity/max
+                  {:optional true}
+                  :seon.fn.arity/max]
+                 [:seon.fn.arity/input :seon.fn.arity/input]
+                 [:seon.fn.arity/output :seon.fn.arity/output]
+                 [:seon.fn.arity/guard
+                  {:optional true}
+                  :seon.fn.arity/guard]
+                 [:seon.fn.arity/input-refs
+                  {:optional true}
+                  :seon.fn.arity/input-refs]
+                 [:seon.fn.arity/output-refs
+                  {:optional true}
+                  :seon.fn.arity/output-refs]
+                 [:seon.fn.arity/guard-refs
+                  {:optional true}
+                  :seon.fn.arity/guard-refs]]}

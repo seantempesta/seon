@@ -1,0 +1,10 @@
+#:seon.config.flow.compute{:concurrency
+                           [:int
+                            {:min 1,
+                             :description
+                             "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}],
+                           :queue-depth
+                           [:int
+                            {:min 1,
+                             :description
+                             "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}]}

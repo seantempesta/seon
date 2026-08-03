@@ -1,0 +1,17 @@
+#:seon.test.result{:failure
+                   [:and #:seon.db{:component true} :seon.db/ref],
+                   :id [:string {:min 1, :seon.db/identity true}],
+                   :outcome [:enum :pass :fail],
+                   :result
+                   [:map
+                    #:seon.db{:entity true}
+                    [:seon.test.result/id :seon.test.result/id]
+                    [:seon.test.result/test :seon.test.result/test]
+                    [:seon.test.result/run :seon.test.result/run]
+                    [:seon.test.result/outcome
+                     :seon.test.result/outcome]
+                    [:seon.test.result/failure
+                     {:optional true}
+                     :seon.test.result/failure]],
+                   :run :seon.db/ref,
+                   :test :seon.db/ref}

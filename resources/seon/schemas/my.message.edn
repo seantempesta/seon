@@ -1,0 +1,21 @@
+#:my.message{:about [:string {:min 1}],
+             :content [:string {:min 1}],
+             :declination
+             [:map
+              [:my.message/to :my.message/to]
+              [:my.message/about :my.message/about]
+              [:my.message/reason :my.message/reason]],
+             :message
+             [:map
+              [:my.message/to :my.message/to]
+              [:my.message/content :my.message/content]
+              [:my.message/about {:optional true} :my.message/about]],
+             :reason [:string {:min 1}],
+             :to [:string {:min 1}],
+             :value
+             [:or
+              :my.message/message
+              :my.message/declination
+              [:vector
+               {:min 1}
+               [:or :my.message/message :my.message/declination]]]}

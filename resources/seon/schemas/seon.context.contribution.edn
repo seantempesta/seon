@@ -1,0 +1,25 @@
+#:seon.context.contribution{:contribution
+                            [:map
+                             #:seon.db{:entity true}
+                             [:seon.context.contribution/id
+                              :seon.context.contribution/id]
+                             [:seon.context.contribution/position
+                              :seon.context.contribution/position]
+                             [:seon.render.block/name
+                              :seon.render.block/name]
+                             [:seon.context.contribution/hash
+                              :seon.context.contribution/hash]
+                             [:seon.context.contribution/tokens
+                              :seon.context.contribution/tokens]
+                             [:seon.error/kind
+                              {:optional true}
+                              :seon.error/kind]
+                             [:seon.context.contribution/error
+                              {:optional true}
+                              :seon.context.contribution/error]],
+                            :error [:string {:min 1}],
+                            :hash [:string {:min 1}],
+                            :id
+                            [:string {:min 1, :seon.db/identity true}],
+                            :position [:int {:min 0}],
+                            :tokens [:int {:min 0}]}

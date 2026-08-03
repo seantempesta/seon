@@ -2,85 +2,33 @@
   "Mechanically split and verify Seon's schema declaration resources."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.pprint :as pprint]
             [clojure.string :as str]))
 
-(def ^:private separator
-  ";; ===========================================================================")
+(defn- filesystem-safe-namespace?
+  [schema-namespace]
+  (and (seq schema-namespace)
+       (not (#{"." ".."} schema-namespace))
+       (every? #(or (Character/isLetterOrDigit ^char %)
+                    (#{\. \- \_} %))
+               schema-namespace)))
 
-(def ^:private section-resources
-  {"ADMIT" "seon.sci.admit.edn"
-   "AGENT" "seon.cluster.agent.edn"
-   "AI" "seon.ai.edn"
-   "BLOCK" "seon.render.block.edn"
-   "BOOT" "seon.boot.edn"
-   "CONFIG" "seon.config.edn"
-   "CONTEXT" "seon.context.edn"
-   "DATA" "seon.render.data.edn"
-   "DISPOSITIONS" "my.run.edn"
-   "ERROR" "seon.error.edn"
-   "EVAL" "seon.sci.eval.edn"
-   "EFFECT" "seon.effect.edn"
-   "EXPORT" "seon.export.edn"
-   "FLOW" "seon.flow.edn"
-   "INSTRUCTION" "seon.cluster.instruction.edn"
-   "INSTRUMENT" "seon.instrument.edn"
-   "LOOP" "seon.cluster.loop.edn"
-   "MESSAGE" "seon.cluster.message.edn"
-   "PRINT" "seon.print.edn"
-   "PROBLEMS" "seon.problems.edn"
-   "PROCESS" "seon.cluster.process.edn"
-   "PROGRAM" "seon.fn.edn"
-   "PROMPT" "seon.cluster.prompt.edn"
-   "PROVENANCE" "seon.db.edn"
-   "RECONCILE" "seon.reconcile.edn"
-   "REGISTRY" "seon.cluster.registry.edn"
-   "RENDER" "seon.render.edn"
-   "RENDER_VALUE" "seon.render.value.edn"
-   "REPLY" "seon.cluster.reply.edn"
-   "RUN" "seon.cluster.run.edn"
-   "SOURCE" "seon.source.edn"
-   "STORE" "seon.store.edn"
-   "TEST" "seon.test.edn"
-   "WAKE" "seon.cluster.wake.edn"
-   "WALK" "seon.render.walk.edn"
-   "WEB" "seon.render.web.edn"
-   "WORK" "seon.cluster.work.edn"})
+(defn- require-safe-namespace!
+  [schema-namespace registry-key]
+  (when-not (filesystem-safe-namespace? schema-namespace)
+    (throw
+     (ex-info
+      (str "Schema key namespace is not safe as a verbatim filename: "
+           registry-key)
+      {:key registry-key
+       :namespace schema-namespace}))))
 
-(defn- section-start?
-  [lines index]
-  (and (= separator (get lines index))
-       (some? (get lines (+ index 1)))
-       (= separator (get lines (+ index 2)))
-       (str/starts-with? (get lines (+ index 1)) ";; ")))
-
-(defn- section-name
-  [lines index]
-  (subs (get lines (+ index 1)) 3))
-
-(defn- section-starts
-  [lines]
-  (into []
-        (keep (fn [index]
-                (when (section-start? lines index)
-                  [index (section-name lines index)])))
-        (range (count lines))))
-
-(defn- section-texts
-  [text]
-  (let [lines (vec (str/split-lines text))
-        starts (section-starts lines)]
-    (when (empty? starts)
-      (throw (ex-info "Schema monolith has no named sections." {})))
-    (into {}
-          (map-indexed
-           (fn [section-index [start section]]
-             (let [next-start (or (first (get starts (inc section-index)))
-                                  (count lines))
-                   body (subvec lines (+ start 3) next-start)
-                   body (if (= "}" (peek body)) (pop body) body)]
-               [section (str "{" (when (seq body) "\n")
-                          (str/join "\n" body) "}\n")]))
-           starts))))
+(defn- key-namespace!
+  [registry-key]
+  (let [schema-namespace (when (qualified-keyword? registry-key)
+                           (namespace registry-key))]
+    (require-safe-namespace! schema-namespace registry-key)
+    schema-namespace))
 
 (defn- read-map
   [file]
@@ -101,37 +49,57 @@
   [files]
   (reduce
    (fn [{:keys [forms files-by-key]} file]
-     (reduce-kv
-      (fn [state registry-key form]
-        (when-let [first-file (get files-by-key registry-key)]
-          (throw
-           (ex-info (str "Duplicate schema declaration " registry-key " in "
-                         first-file " and " file ".")
-                    {:key registry-key
-                     :files [(str first-file) (str file)]})))
-        {:forms (assoc (:forms state) registry-key form)
-         :files-by-key (assoc (:files-by-key state) registry-key (str file))})
-      {:forms forms :files-by-key files-by-key}
-      (read-map file)))
+     (let [filename (.getName file)
+           file-namespace (subs filename 0 (- (count filename) 4))]
+       (require-safe-namespace! file-namespace filename)
+       (reduce-kv
+        (fn [state registry-key form]
+          (let [schema-namespace (key-namespace! registry-key)]
+            (when-not (= file-namespace schema-namespace)
+              (throw
+               (ex-info (str "Schema declaration " registry-key " is in "
+                             filename " but belongs in " schema-namespace
+                             ".edn.")
+                        {:key registry-key
+                         :file (str file)
+                         :expected-file (str schema-namespace ".edn")})))
+            (when-let [first-file (get files-by-key registry-key)]
+              (throw
+               (ex-info (str "Duplicate schema declaration " registry-key " in "
+                             first-file " and " file ".")
+                        {:key registry-key
+                         :files [(str first-file) (str file)]})))
+            {:forms (assoc (:forms state) registry-key form)
+             :files-by-key (assoc (:files-by-key state) registry-key (str file))}))
+        {:forms forms :files-by-key files-by-key}
+        (read-map file))))
    {:forms {} :files-by-key {}}
    files))
 
 (defn- write-split!
   [text directory]
-  (let [sections (section-texts text)
-        unknown (sort (remove section-resources (keys sections)))
-        missing (sort (remove sections (keys section-resources)))]
-    (when (seq unknown)
-      (throw (ex-info "Schema monolith has unmapped sections."
-                      {:sections unknown})))
-    (when (seq missing)
-      (println "Absent optional sections:" (str/join ", " missing)))
-    (.mkdirs (io/file directory))
-    (doseq [[section resource] section-resources
-            :let [text (get sections section)]
-            :when text]
-      (spit (io/file directory resource) text))
-    (println "Wrote" (count sections) "schema domain resources.")))
+  (let [monolith (edn/read-string text)
+        directory-file (io/file directory)]
+    (when-not (map? monolith)
+      (throw (ex-info "Schema monolith must contain one map." {})))
+    (.mkdirs directory-file)
+    (doseq [file (split-files directory-file)]
+      (when-not (.delete file)
+        (throw (ex-info "Could not remove superseded schema resource."
+                        {:file (str file)}))))
+    (let [by-namespace
+          (group-by (comp key-namespace! key) monolith)]
+      (doseq [[schema-namespace entries] (sort-by key by-namespace)]
+        (let [file (io/file directory-file (str schema-namespace ".edn"))
+              forms (into (sorted-map) entries)]
+          (with-open [writer (io/writer file)]
+            (binding [*out* writer]
+              (pprint/pprint forms)))
+          (when-not (= forms (read-map file))
+            (throw (ex-info "Generated schema resource did not re-read exactly."
+                            {:file (str file)})))))
+      (println "Wrote and re-read" (count by-namespace)
+               "verbatim namespace schema resources."))))
 
 (defn- check-forms!
   [monolith directory]

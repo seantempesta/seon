@@ -1,0 +1,2 @@
+#:seon.config.run{:max-episode-runs
+                  [:int {:min 1, :seon.config/optional true}]}

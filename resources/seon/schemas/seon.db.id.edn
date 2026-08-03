@@ -1,0 +1,4 @@
+#:seon.db.id{:generator
+             [:enum
+              :seon.db.id.generator/human-readable
+              :seon.db.id.generator/compact]}

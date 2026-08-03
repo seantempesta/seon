@@ -1,0 +1,6 @@
+#:seon.config.eval.result{:blob-threshold
+                          [:int {:min 1, :seon.config/dial true}],
+                          :max-collection [:int {:min 1}],
+                          :max-depth [:int {:min 1}],
+                          :max-nodes [:int {:min 1}],
+                          :max-string [:int {:min 1}]}

@@ -1,0 +1,23 @@
+#:seon.ns{:aliases [:set #:seon.db{:component true} :seon.db/ref],
+          :doc :string,
+          :imports [:set #:seon.db{:component true} :seon.db/ref],
+          :name [:symbol #:seon.db{:identity true}],
+          :name-designation [:enum :agent :user],
+          :ns
+          [:map
+           {:seon.db/entity true,
+            :seon.render/ai seon.render.ns/render-ai,
+            :seon.render/html seon.render.ns/render-html}
+           [:seon.ns/name :seon.ns/name]
+           [:seon.schema.admission/source
+            {:optional true}
+            :seon.schema.admission/source]
+           [:seon.ns/source {:optional true} :seon.ns/source]
+           [:seon.ns/doc {:optional true} :seon.ns/doc]
+           [:seon.ns/requires {:optional true} :seon.ns/requires]
+           [:seon.ns/aliases {:optional true} :seon.ns/aliases]
+           [:seon.ns/imports {:optional true} :seon.ns/imports]
+           [:seon.ns/refers {:optional true} :seon.ns/refers]],
+          :refers [:set #:seon.db{:component true} :seon.db/ref],
+          :requires [:set :seon.db/ref],
+          :source [:string {:min 1}]}

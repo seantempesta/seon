@@ -1,17 +1,54 @@
-{
-; Verdict: State A stored both transaction-metadata values as refs.
- ; Keep that shape: provenance resolves to durable user/process entities,
- ; never denormalized strings on the transaction entity. The :seon.db/index
- ; facet admits both into canonical-database-attributes by the computed
- ; persistence-facet rule (a bare :seon.db/ref carries no facet and would
- ; never install).
- ; the :and wrap is the one idiom for facet properties on a referenced
- ; form — properties attach to Malli TYPES, and :seon.db/ref is a
- ; registered alias, not a type
- :seon.db/user [:and {:seon.db/index true} :seon.db/ref]
- :seon.db/process [:and {:seon.db/index true} :seon.db/ref]
- ; the process entity provenance refs resolve to; identities are the
- ; owner-ruled literal core set (:seon.db.process/{boot,config,core})
- ; seeded as GENESIS DATA in the ancestor, where bootstrap content lives
- :seon.db.process/id [:string {:min 1 :seon.db/identity true}]
-}
+#:seon.db{:connection
+          [:fn
+           #:gen{:gen seon.db/connection-generator}
+           seon.db/connection?],
+          :database-value
+          [:fn
+           #:gen{:gen seon.db/database-value-generator}
+           seon.db/database-value?],
+          :datom
+          [:map
+           [:e :seon.schema/value]
+           [:a :seon.schema/value]
+           [:v :seon.schema/value]
+           [:tx :int]
+           [:added :boolean]],
+          :datoms [:vector :seon.db/datom],
+          :entity-id
+          [:or :int [:sequential :seon.schema/value] :keyword],
+          :index-lookup
+          [:map
+           [:index [:enum :eavt :aevt :avet]]
+           [:components
+            {:optional true}
+            [:or :nil [:sequential :seon.schema/value]]]],
+          :process [:and #:seon.db{:index true} :seon.db/ref],
+          :pull-many-options
+          [:map
+           [:selector :seon.db/pull-selector]
+           [:eids [:sequential :seon.db/entity-id]]
+           [:max-work {:optional true} [:int {:min 1}]]
+           [:max-results {:optional true} [:int {:min 1}]]
+           [:max-result-weight {:optional true} [:int {:min 1}]]],
+          :pull-options
+          [:map
+           [:selector :seon.db/pull-selector]
+           [:eid :seon.db/entity-id]
+           [:max-work {:optional true} [:int {:min 1}]]
+           [:max-results {:optional true} [:int {:min 1}]]
+           [:max-result-weight {:optional true} [:int {:min 1}]]],
+          :pull-selector [:vector :seon.schema/value],
+          :query [:or [:vector :seon.schema/value] :map :string],
+          :query-args
+          [:map
+           [:query :seon.db/query]
+           [:args {:optional true} [:sequential :seon.schema/value]]
+           [:request-id {:optional true} :string]
+           [:limit {:optional true} :int]
+           [:offset {:optional true} :int]
+           [:max-work {:optional true} [:int {:min 1}]]
+           [:max-results {:optional true} [:int {:min 1}]]
+           [:max-result-weight {:optional true} [:int {:min 1}]]],
+          :time-point [:or :inst :int],
+          :tx-data :seon.store/transaction-data,
+          :user [:and #:seon.db{:index true} :seon.db/ref]}

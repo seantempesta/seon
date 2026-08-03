@@ -1,33 +1,41 @@
-{
-; The one positive `/data` and oversized-receipt page-size dial. Its shipped
- ; decision lives only in config/default.edn; admission caps remain the outer
- ; safety bound and print presentation has its own :seon.print family.
- :seon.render.value/max-collection
- [:int {:min 1 :seon.config/dial true}]
-
- ; A render unit may combine the page-size dial with explicit print options,
- ; but every print key is declared exactly once in the PRINT section.
- :seon.render.value/options
- [:map
-  [:seon.render.value/max-collection {:optional true}
-   :seon.render.value/max-collection]
-  [:seon.print/length {:optional true} [:maybe :seon.print/length]]
-  [:seon.print/level {:optional true} [:maybe :seon.print/level]]
-  [:seon.print/width {:optional true} :seon.print/width]
-  [:seon.print/namespace-maps? {:optional true}
-   :seon.print/namespace-maps?]
-  [:seon.print/table? {:optional true} :seon.print/table?]]
-
- :seon.render/value :any
- :seon.render.value/tree :seon.print/node
- :seon.render.value/truncated? :boolean
- :seon.render.value/text :string
- :seon.render.value/html :seon.render/hiccup
- :seon.render.value/projection
- [:map
-  [:seon.render.value/tree :seon.render.value/tree]
-  [:seon.render.value/truncated? :seon.render.value/truncated?]
-  [:seon.render.value/text :seon.render.value/text]
-  [:seon.render.value/html :seon.render.value/html]
-  [:seon.render.value/options :seon.print/options]]
-}
+#:seon.render.value{:artifact
+                    [:map
+                     [:seon.sci.admit/print-node :seon.print/node]
+                     [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+                     [:seon.sci.admit/record
+                      {:optional true}
+                      :seon.sci.admit/record]],
+                    :html :seon.render/hiccup,
+                    :max-collection
+                    [:int {:min 1, :seon.config/dial true}],
+                    :options
+                    [:map
+                     [:seon.render.value/max-collection
+                      {:optional true}
+                      :seon.render.value/max-collection]
+                     [:seon.print/length
+                      {:optional true}
+                      [:maybe :seon.print/length]]
+                     [:seon.print/level
+                      {:optional true}
+                      [:maybe :seon.print/level]]
+                     [:seon.print/width
+                      {:optional true}
+                      :seon.print/width]
+                     [:seon.print/namespace-maps?
+                      {:optional true}
+                      :seon.print/namespace-maps?]
+                     [:seon.print/table?
+                      {:optional true}
+                      :seon.print/table?]],
+                    :projection
+                    [:map
+                     [:seon.render.value/tree :seon.render.value/tree]
+                     [:seon.render.value/truncated?
+                      :seon.render.value/truncated?]
+                     [:seon.render.value/text :seon.render.value/text]
+                     [:seon.render.value/html :seon.render.value/html]
+                     [:seon.render.value/options :seon.print/options]],
+                    :text :string,
+                    :tree :seon.print/node,
+                    :truncated? :boolean}

@@ -1,0 +1,13 @@
+#:seon.ai.attempt{:at :inst,
+                  :delay-ms [:int {:min 0}],
+                  :error :seon.db/ref,
+                  :failover-from :seon.db/ref,
+                  :finish-reason :seon.ai/finish-reason,
+                  :id [:string {:min 1, :seon.db/identity true}],
+                  :ordinal [:int {:min 0}],
+                  :reasoning :string,
+                  :reasoning-blob :seon.blob/digest,
+                  :reasoning-size [:int {:min 1}],
+                  :run [:and #:seon.db{:index true} :seon.db/ref],
+                  :settings-edn [:string #:seon.db{:no-history? true}],
+                  :usage-edn [:string #:seon.db{:no-history? true}]}

@@ -1,0 +1,25 @@
+#:seon.context.capture{:basis-t [:int {:min 0}],
+                       :capture
+                       [:map
+                        {:seon.db/entity true,
+                         :seon.render/ai seon.context/capture-ai,
+                         :seon.render/html seon.context/capture-html}
+                        [:seon.context.capture/id
+                         :seon.context.capture/id]
+                        [:seon.context.capture/run
+                         :seon.context.capture/run]
+                        [:seon.context.capture/basis-t
+                         :seon.context.capture/basis-t]
+                        [:seon.context.capture/prompt
+                         :seon.context.capture/prompt]
+                        [:seon.context.capture/contributions
+                         :seon.context.capture/contributions]
+                        [:seon.cluster.run/live-processes
+                         {:optional true}
+                         :seon.cluster.run/live-processes]],
+                       :contributions
+                       [:set #:seon.db{:component true} :seon.db/ref],
+                       :id [:string {:min 1, :seon.db/identity true}],
+                       :prompt
+                       [:string {:min 1, :seon.db/no-history? true}],
+                       :run :seon.db/ref}

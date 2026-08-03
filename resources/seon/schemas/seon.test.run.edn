@@ -1,0 +1,9 @@
+#:seon.test.run{:at :inst,
+                :git-sha [:re "^[0-9a-f]{40}$"],
+                :id [:string {:min 1, :seon.db/identity true}],
+                :run
+                [:map
+                 #:seon.db{:entity true}
+                 [:seon.test.run/id :seon.test.run/id]
+                 [:seon.test.run/at :seon.test.run/at]
+                 [:seon.test.run/git-sha :seon.test.run/git-sha]]}

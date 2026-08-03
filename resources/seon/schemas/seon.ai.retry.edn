@@ -1,0 +1,20 @@
+#:seon.ai.retry{:base-delay-ms [:int {:min 1}],
+                :delays [:vector [:int {:min 0}]],
+                :jitter-fraction [:double {:min 0.0, :max 1.0}],
+                :maximum-delay-ms [:int {:min 1}],
+                :maximum-retries [:int {:min 0}],
+                :maximum-total-delay-ms [:int {:min 0}],
+                :multiplier [:double {:min 1.0}],
+                :strategy
+                [:map
+                 [:seon.ai.retry/base-delay-ms
+                  :seon.ai.retry/base-delay-ms]
+                 [:seon.ai.retry/multiplier :seon.ai.retry/multiplier]
+                 [:seon.ai.retry/jitter-fraction
+                  :seon.ai.retry/jitter-fraction]
+                 [:seon.ai.retry/maximum-delay-ms
+                  :seon.ai.retry/maximum-delay-ms]
+                 [:seon.ai.retry/maximum-retries
+                  :seon.ai.retry/maximum-retries]
+                 [:seon.ai.retry/maximum-total-delay-ms
+                  :seon.ai.retry/maximum-total-delay-ms]]}

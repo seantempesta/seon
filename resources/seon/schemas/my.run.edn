@@ -1,14 +1,12 @@
-{
-; The agent-facing disposition VALUES. Exactly two (owner ruling,
- ; 2026-07-27 night): no start!, no pause/resume/terminate until an
- ; agent-lifecycle entity exists. These are values the driver
- ; interprets — the first of the three agent-facing shapes — and they
- ; are pure: `my.run` commits nothing and reads nothing.
- :my.run/disposition [:enum :wait :completed]
- :my.run/note [:string {:min 1}]
- :my.run/result [:string {:min 1}]
- :my.run/wait [:map  [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note]]
- :my.run/completed [:map  [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
- ; what an agent's last form may evaluate to and the loop will act on
- :my.run/value [:or :my.run/wait :my.run/completed]
-}
+#:my.run{:completed
+         [:map
+          [:my.run/disposition [:= :completed]]
+          [:my.run/result :my.run/result]],
+         :disposition [:enum :wait :completed],
+         :note [:string {:min 1}],
+         :result [:string {:min 1}],
+         :value [:or :my.run/wait :my.run/completed],
+         :wait
+         [:map
+          [:my.run/disposition [:= :wait]]
+          [:my.run/note :my.run/note]]}

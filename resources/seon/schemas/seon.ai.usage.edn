@@ -1,0 +1,4 @@
+#:seon.ai.usage{:cached-tokens :seon.ai/tokens,
+                :completion-tokens :seon.ai/tokens,
+                :prompt-tokens :seon.ai/tokens,
+                :total-tokens :seon.ai/tokens}

@@ -1,0 +1,42 @@
+#:seon.fn.ast{:child [:and #:seon.db{:component true} :seon.db/ref],
+              :children
+              [:vector #:seon.db{:component true} :seon.db/ref],
+              :guard [:and #:seon.db{:component true} :seon.db/ref],
+              :input [:and #:seon.db{:component true} :seon.db/ref],
+              :key [:and #:seon.db{:component true} :seon.db/ref],
+              :keys [:vector #:seon.db{:component true} :seon.db/ref],
+              :node
+              [:map
+               #:seon.db{:attributes true}
+               [:seon.fn.ast/type :seon.fn.ast/type]
+               [:seon.fn.ast/value {:optional true} :seon.fn.ast/value]
+               [:seon.fn.ast/input {:optional true} :seon.fn.ast/input]
+               [:seon.fn.ast/output
+                {:optional true}
+                :seon.fn.ast/output]
+               [:seon.fn.ast/guard {:optional true} :seon.fn.ast/guard]
+               [:seon.fn.ast/child {:optional true} :seon.fn.ast/child]
+               [:seon.fn.ast/key {:optional true} :seon.fn.ast/key]
+               [:seon.fn.ast/ref {:optional true} :seon.fn.ast/ref]
+               [:seon.fn.ast/properties
+                {:optional true}
+                :seon.fn.ast/properties]
+               [:seon.fn.ast/children
+                {:optional true}
+                :seon.fn.ast/children]
+               [:seon.fn.ast/keys {:optional true} :seon.fn.ast/keys]
+               [:seon.fn.ast/registry
+                {:optional true}
+                :seon.fn.ast/registry]
+               [:seon.fn.ast/values
+                {:optional true}
+                :seon.fn.ast/values]],
+              :output [:and #:seon.db{:component true} :seon.db/ref],
+              :properties
+              [:vector #:seon.db{:component true} :seon.db/ref],
+              :ref :seon.db/ref,
+              :registry
+              [:vector #:seon.db{:component true} :seon.db/ref],
+              :type :string,
+              :value [:and #:seon.db{:component true} :seon.db/ref],
+              :values [:vector #:seon.db{:component true} :seon.db/ref]}

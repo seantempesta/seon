@@ -1,0 +1,3 @@
+#:seon.config.web{:port
+                  [:int
+                   {:min 0, :max 65535, :seon.config/optional true}]}

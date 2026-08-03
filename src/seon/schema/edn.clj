@@ -157,6 +157,22 @@
      ::file resource
      :seon.error/kind :user-input})))
 
+(defn- filesystem-safe-namespace?
+  [schema-namespace]
+  (and (seq schema-namespace)
+       (not (#{"." ".."} schema-namespace))
+       (every? #(or (Character/isLetterOrDigit ^char %)
+                    (#{\. \- \_} %))
+               schema-namespace)))
+
+(defn- directory-resource?
+  [resource]
+  (let [url (or (io/resource resource) (unreadable-file! resource))]
+    (or (and (= "file" (.getProtocol url))
+             (.isDirectory (io/file url)))
+        (and (= "jar" (.getProtocol url))
+             (not (str/ends-with? resource ".edn"))))))
+
 (defn- directory-resource-paths
   [resource directory-url]
   (let [paths
@@ -250,7 +266,50 @@
         {::error ::not-a-map
          ::file file
          :seon.error/kind :user-input})))
-    {::file file ::forms value}))
+    {::file file ::resource resource ::forms value}))
+
+(defn- resource-filename
+  [resource]
+  (let [separator (.lastIndexOf ^String resource "/")]
+    (subs resource (inc separator))))
+
+(defn- validate-resource-placement!
+  [loaded]
+  (doseq [{file ::file resource ::resource forms ::forms} loaded
+          :let [filename (resource-filename resource)
+                file-namespace (subs filename 0 (- (count filename) 4))]]
+    (when-not (filesystem-safe-namespace? file-namespace)
+      (throw
+       (ex-info
+        (str "Schema resource filename is not a safe verbatim namespace: "
+             filename)
+        {::error ::unsafe-namespace
+         ::file file
+         ::namespace file-namespace
+         :seon.error/kind :user-input})))
+    (doseq [registry-key (keys forms)
+            :let [schema-namespace (when (qualified-keyword? registry-key)
+                                     (namespace registry-key))]]
+      (when-not (filesystem-safe-namespace? schema-namespace)
+        (throw
+         (ex-info
+          (str "Schema key namespace is not safe as a verbatim filename: "
+               registry-key)
+          {::error ::unsafe-namespace
+           ::attribute registry-key
+           ::file file
+           ::namespace schema-namespace
+           :seon.error/kind :user-input})))
+      (when-not (= file-namespace schema-namespace)
+        (throw
+         (ex-info
+          (str "Schema attribute " registry-key " is declared in " file
+               " but belongs in " schema-namespace ".edn.")
+          {::error ::misplaced-attribute
+           ::attribute registry-key
+           ::file file
+           ::expected-file (str schema-namespace ".edn")
+           :seon.error/kind :user-input}))))))
 
 (defn- merge-schema-resources
   [loaded]
@@ -280,6 +339,8 @@
         loaded (mapv read-schema-resource paths)
         {declared ::forms files-by-key ::files-by-key}
         (merge-schema-resources loaded)]
+    (when (directory-resource? resource)
+      (validate-resource-placement! loaded))
     {::file (if (= 1 (count loaded)) (::file (first loaded)) resource)
      ::declared-forms declared
      ::forms (derive-config-forms declared)

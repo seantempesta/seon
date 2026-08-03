@@ -1,0 +1,1 @@
+#:seon.config.render{:coalesce-ms [:int {:min 0, :max 1000}]}

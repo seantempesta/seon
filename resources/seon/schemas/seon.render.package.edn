@@ -1,0 +1,12 @@
+#:seon.render.package{:base-revision [:int {:min 0}],
+                      :basis-transaction [:int {:min 0}],
+                      :delta [:map-of :seon.render/surface-id :string],
+                      :frame
+                      [:fn
+                       #:gen{:gen seon.render.web/byte-array-generator}
+                       seon.schema/byte-array?],
+                      :keyframe
+                      [:map-of :seon.render/surface-id :string],
+                      :revision [:int {:min 1}],
+                      :size [:int {:min 0}],
+                      :streaming? :boolean}

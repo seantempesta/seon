@@ -1,0 +1,54 @@
+#:seon.test.runner{:error-count [:int {:min 0}],
+                   :fail-count [:int {:min 0}],
+                   :namespaces [:vector :symbol],
+                   :pass-count [:int {:min 0}],
+                   :record-request
+                   [:map
+                    [:seon.test.runner/run-result
+                     :seon.test.runner/run-result]
+                    [:seon.boot/cluster-name :seon.boot/cluster-name]
+                    [:seon.boot/root :seon.boot/root]],
+                   :record-tx [:vector :map],
+                   :recorded
+                   [:map
+                    [:seon.boot/cluster-name :seon.boot/cluster-name]
+                    [:seon.test.run/id :seon.test.run/id]
+                    [:seon.test.runner/recorded-count
+                     [:int {:min 0}]]],
+                   :result
+                   [:map
+                    [:seon.test/sym :seon.test/sym]
+                    [:seon.ns/name :seon.ns/name]
+                    [:seon.test.result/outcome
+                     :seon.test.result/outcome]
+                    [:seon.test.failure/message
+                     {:optional true}
+                     :seon.test.failure/message]],
+                   :results [:vector :seon.test.runner/result],
+                   :run-request
+                   [:map
+                    [:seon.test.runner/namespaces
+                     :seon.test.runner/namespaces]
+                    [:seon.test.run/id :seon.test.run/id]
+                    [:seon.test.run/at :seon.test.run/at]
+                    [:seon.test.run/git-sha :seon.test.run/git-sha]],
+                   :run-result
+                   [:map
+                    [:seon.test.run/id :seon.test.run/id]
+                    [:seon.test.run/at :seon.test.run/at]
+                    [:seon.test.run/git-sha :seon.test.run/git-sha]
+                    [:seon.test.runner/summary
+                     :seon.test.runner/summary]
+                    [:seon.test.runner/results
+                     :seon.test.runner/results]],
+                   :summary
+                   [:map
+                    [:seon.test.runner/test-count
+                     :seon.test.runner/test-count]
+                    [:seon.test.runner/pass-count
+                     :seon.test.runner/pass-count]
+                    [:seon.test.runner/fail-count
+                     :seon.test.runner/fail-count]
+                    [:seon.test.runner/error-count
+                     :seon.test.runner/error-count]],
+                   :test-count [:int {:min 0}]}

@@ -1,0 +1,51 @@
+#:seon.cluster.eval{:at :inst,
+                    :error :string,
+                    :id [:string {:min 1, :seon.db/identity true}],
+                    :interrupted-at :inst,
+                    :ns :seon.db/ref,
+                    :ordinal [:int {:min 0}],
+                    :output
+                    [:string {:min 1, :seon.db/no-history? true}],
+                    :receipt
+                    [:map
+                     {:seon.db/entity true,
+                      :seon.render/ai
+                      seon.cluster.run/render-receipt-ai,
+                      :seon.render/html
+                      seon.cluster.run/render-receipt-html}
+                     [:seon.cluster.eval/id :seon.cluster.eval/id]
+                     [:seon.cluster.eval/run :seon.cluster.eval/run]
+                     [:seon.cluster.eval/ordinal
+                      :seon.cluster.eval/ordinal]
+                     [:seon.cluster.eval/at :seon.cluster.eval/at]
+                     [:seon.cluster.eval/ns
+                      {:optional true}
+                      :seon.cluster.eval/ns]
+                     [:seon.cluster.eval/result-edn
+                      {:optional true}
+                      :seon.cluster.eval/result-edn]
+                     [:seon.cluster.eval/result-blob
+                      {:optional true}
+                      :seon.cluster.eval/result-blob]
+                     [:seon.cluster.eval/result-size
+                      {:optional true}
+                      :seon.cluster.eval/result-size]
+                     [:seon.cluster.eval/error
+                      {:optional true}
+                      :seon.cluster.eval/error]
+                     [:seon.cluster.eval/interrupted-at
+                      {:optional true}
+                      :seon.cluster.eval/interrupted-at]
+                     [:seon.problems/id
+                      {:optional true}
+                      :seon.problems/id]
+                     [:seon.error/kind
+                      {:optional true}
+                      :seon.error/kind]
+                     [:seon.cluster.eval/output
+                      {:optional true}
+                      :seon.cluster.eval/output]],
+                    :result-blob [:re "^[0-9a-f]{64}$"],
+                    :result-edn [:string #:seon.db{:no-history? true}],
+                    :result-size [:int {:min 0}],
+                    :run :seon.db/ref}

@@ -1,0 +1,1 @@
+#:seon.config.db{:keep-history? [:boolean #:seon.config{:dial true}]}

@@ -1,170 +1,78 @@
-{
-; THE TRIGGER. The run loop needs exactly one thing to wake on that it
- ; does not itself commit (L8 disjointness); the smallest honest one is
- ; an inbound message. No delivery/ack/read semantics —
- ; the messaging rung owns that shape when it exists (n3-plan §11.8).
- :seon.cluster.message/at :inst
- :seon.cluster.message/content
- [:string {:min 1 :seon.db/no-history? true}]
- :seon.cluster.message/id [:string {:min 1 :seon.db/identity true}]
- ; the WAKE attribute: a new datom on this ref is the one thing that
- ; wakes the loop. It is a ref so "who was triggered" is a follow, and
- ; because an idempotently re-asserted value emits no datom and would
- ; therefore emit no wake (probe B Q10).
- :seon.cluster.message/to :seon.db/ref
-
- ; WHO SENT IT, and its ABSENCE is the other half of the contract: a
- ; message with no `from` came from outside the agent population — the
- ; human, or the system's own error recorder. That absence is what
- ; makes a human nudge structurally distinguishable from an agent's
- ; reply without a flag, an origin enum, or a `:from :human` stamp
- ; (the quarry stored an origin keyword AND a hops integer for want of
- ; this: src-old/seon/agent/message.cljc:48-64).
- ;
- ; Indexed for the same reason `:seon.cluster.message/about` is: a bare
- ; ref carries no persistence facet and would never install, and
- ; "what did bob send me" is a query BY the ref.
- :seon.cluster.message/from [:and {:seon.db/index true} :seon.db/ref]
- ; The message whose answering produced this outbound message. Absent
- ; on messages from outside the agent population. The delivery records
- ; this ref from the run's trigger; conversation causality never
- ; consults a transaction entity and survives a non-temporal database.
- :seon.cluster.message/caused-by [:and {:seon.db/index true} :seon.db/ref]
-
- ; THE ENTITY MAP, and it is not decoration: `canonical-database-
- ; attributes` installs entity-map entries BY CONSTRUCTION and
- ; standalone forms only when they carry a persistence facet. Without
- ; this map only `/id` installed (it has an identity facet) and the
- ; live boot path could not transact a message at all — the fixtures
- ; never saw it because they install explicit attribute lists, which is
- ; exactly the fixture-vs-live-boot class. Declaring the entity makes
- ; `to`, `content` and `at` installable, and `to` installs WITH its ref
- ; type through the bridge.
- :seon.cluster.message/message
- [:map {:seon.db/entity true
-        :seon.render/ai seon.cluster.message/render-ai
-        :seon.render/html seon.cluster.message/render-html}
-  [:seon.cluster.message/id :seon.cluster.message/id]
-  [:seon.cluster.message/to :seon.cluster.message/to]
-  [:seon.cluster.message/content :seon.cluster.message/content]
-  [:seon.cluster.message/at :seon.cluster.message/at]
-  [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]
-  [:seon.cluster.message/caused-by
-   {:optional true}
-   :seon.cluster.message/caused-by]
-  ; The referenced fact this message assigns to the recipient. The
-  ; attribute is declared with its persistence facet in the ERROR section,
-  ; where the error recorder first established the same relation.
-  [:seon.cluster.message/about
-   {:optional true}
-   :seon.cluster.message/about]
-  ; A declination rides the ordinary message row. The reason's presence
-  ; is the reply shape settlement joins; content mirrors it so the
-  ; existing render path gives readers the explanation without parsing.
-  [:my.message/reason {:optional true} :my.message/reason]]
-
- ; --------------------------------------------------------------------
- ; THE AGENT-FACING VALUES — `my.message/send` and `/decline` return
- ; these and nothing happens. They are the FIRST of the three
- ; agent-facing shapes (pure code returning a value the driver
- ; interprets), exactly like `my.run`'s two dispositions, and they are
- ; deliberately NOT the second shape: a message is a durable FACT the
- ; driver commits, not a capability request that needs a guarded door.
- ; Building `seon.effect` for verbs whose whole effect is a transaction
- ; the loop already makes would be a door around the inside of the house.
- ;
- ; The recipient is an AGENT ID string, not a ref: agent code holds
- ; names, never entity ids, and resolving the name is the driver's job
- ; — which is also where "no such agent" becomes an error fact instead
- ; of a lookup ref that would fail the whole terminal transaction.
- :my.message/to [:string {:min 1}]
- :my.message/content [:string {:min 1}]
- :my.message/about [:string {:min 1}]
- :my.message/reason [:string {:min 1}]
- :my.message/message
- [:map
-  [:my.message/to :my.message/to]
-  [:my.message/content :my.message/content]
-  ; Optional identity of the fact this message concerns. Agent code
-  ; carries the string; the driver resolves the ref and derives the
-  ; assignment's unique `(about, recipient)` message id.
-  [:my.message/about {:optional true} :my.message/about]]
-
- ; A can't-fix is a STRUCTURED REPLY, not a run disposition. `about`
- ; is mandatory because an unjoinable declination cannot settle the
- ; routed form; `reason` is reader-facing and is never parsed.
- :my.message/declination
- [:map
-  [:my.message/to :my.message/to]
-  [:my.message/about :my.message/about]
-  [:my.message/reason :my.message/reason]]
-
- ; What a FORM may evaluate to and the loop will deliver: one message
- ; or declination, or several of either. The vector arm is not a
- ; convenience — a form's value is the only channel, so a mixed vector
- ; is the ONLY way to answer and message several recipients in one form.
- :my.message/value
- [:or :my.message/message
-  :my.message/declination
-  [:vector {:min 1}
-   [:or :my.message/message :my.message/declination]]]
-
- ; --------------------------------------------------------------------
- ; THE DRIVER SIDE — what `seon.cluster.message/delivery` is asked and
- ; what it answers. Rows are ordinary tx-data the loop rides in its own
- ; terminal transaction; refusals are flat error VALUES the loop hands
- ; to the error recorder, so a refused delivery is a durable fact and
- ; never a silent drop.
- :seon.cluster.message/delivery-request
- [:map
-  [:my.message/value :my.message/value]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.cluster.run/id :seon.cluster.run/id]
-  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
-  [:seon.cluster.message/at :seon.cluster.message/at]
-  [:seon.config.message/max-chain :seon.config.message/max-chain]
-  ; the message this run is answering, when there is one: the chain the
-  ; new message extends. ABSENT means depth zero — a run whose trigger
-  ; cannot be found starts a fresh chain, which is the conservative
-  ; direction (it can only make the guard fire later, never never).
-  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
-
- ; What a completed run owes the agent that asked for it. The result is
- ; the disposition's own text, and the trigger is optional because a
- ; run answering a human has nobody to reply TO — absence is the state,
- ; and it is what makes "reply to the asker" a derivation rather than
- ; a rule with an exception.
- :seon.cluster.message/reply-request
- [:map
-  [:my.run/result :my.run/result]
-  ; WHO IS COMPLETING, needed to ask the second question the chain
-  ; answers: is this trigger an ANSWER to something I sent? A reply is
-  ; not a question, and completing back at it is how a delegation
-  ; becomes a bounce.
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.cluster.message/trigger {:optional true} :seon.cluster.message/id]]
-
- :seon.cluster.message/delivery
- [:map
-  [:seon.cluster.message/rows [:vector :map]]
-  [:seon.error/values [:vector :seon.error/value]]]
-
- ; --------------------------------------------------------------------
- ; THE BROWSER BOUNDARY. The request content deliberately admits the
- ; empty string so `inbound-tx` can return the blank-content refusal as
- ; a VALUE; the durable `/content` attribute remains non-empty.
- :seon.cluster.message/inbound-content :string
- :seon.cluster.message/inbound-request
- [:map
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.cluster.message/inbound-content
-   :seon.cluster.message/inbound-content]
-  [:seon.cluster.message/at :seon.cluster.message/at]
-  [:seon.config.eval.result/max-string
-   :seon.config.eval.result/max-string]]
-
- ; One admitted request becomes one ordinary tx-data row. A refusal is
- ; the shared flat error value, never a thrown agent-facing result.
- :seon.cluster.message/inbound
- [:or [:vector {:min 1 :max 1} :map] :seon.error/value]
-}
+#:seon.cluster.message{:about
+                       [:and #:seon.db{:index true} :seon.db/ref],
+                       :at :inst,
+                       :caused-by
+                       [:and #:seon.db{:index true} :seon.db/ref],
+                       :content
+                       [:string {:min 1, :seon.db/no-history? true}],
+                       :delivery
+                       [:map
+                        [:seon.cluster.message/rows [:vector :map]]
+                        [:seon.error/values
+                         [:vector :seon.error/value]]],
+                       :delivery-request
+                       [:map
+                        [:my.message/value :my.message/value]
+                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.cluster.run/id :seon.cluster.run/id]
+                        [:seon.cluster.run.form/ordinal
+                         :seon.cluster.run.form/ordinal]
+                        [:seon.cluster.message/at
+                         :seon.cluster.message/at]
+                        [:seon.config.message/max-chain
+                         :seon.config.message/max-chain]
+                        [:seon.cluster.message/trigger
+                         {:optional true}
+                         :seon.cluster.message/id]],
+                       :from
+                       [:and #:seon.db{:index true} :seon.db/ref],
+                       :id [:string {:min 1, :seon.db/identity true}],
+                       :inbound
+                       [:or
+                        [:vector {:min 1, :max 1} :map]
+                        :seon.error/value],
+                       :inbound-content :string,
+                       :inbound-request
+                       [:map
+                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.cluster.message/inbound-content
+                         :seon.cluster.message/inbound-content]
+                        [:seon.cluster.message/at
+                         :seon.cluster.message/at]
+                        [:seon.config.eval.result/max-string
+                         :seon.config.eval.result/max-string]],
+                       :message
+                       [:map
+                        {:seon.db/entity true,
+                         :seon.render/ai
+                         seon.cluster.message/render-ai,
+                         :seon.render/html
+                         seon.cluster.message/render-html}
+                        [:seon.cluster.message/id
+                         :seon.cluster.message/id]
+                        [:seon.cluster.message/to
+                         :seon.cluster.message/to]
+                        [:seon.cluster.message/content
+                         :seon.cluster.message/content]
+                        [:seon.cluster.message/at
+                         :seon.cluster.message/at]
+                        [:seon.cluster.message/from
+                         {:optional true}
+                         :seon.cluster.message/from]
+                        [:seon.cluster.message/caused-by
+                         {:optional true}
+                         :seon.cluster.message/caused-by]
+                        [:seon.cluster.message/about
+                         {:optional true}
+                         :seon.cluster.message/about]
+                        [:my.message/reason
+                         {:optional true}
+                         :my.message/reason]],
+                       :reply-request
+                       [:map
+                        [:my.run/result :my.run/result]
+                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.cluster.message/trigger
+                         {:optional true}
+                         :seon.cluster.message/id]],
+                       :to :seon.db/ref}

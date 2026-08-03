@@ -1,57 +1,64 @@
-{
-; An agent's current namespace is a connection to the canonical
- ; `:seon.ns` entity. Cardinality one means an agent has at most one;
- ; unique-value means a namespace has at most one agent. Reassignment
- ; is an ordinary cardinality-one transact, never a second identity.
- :seon.cluster.agent/namespace
- [:and {:seon.db/unique true} :seon.db/ref]
-
- ; Every agent is its own entity and points to its branch's cluster entity.
- ; Cluster-global facts never move onto the agent; per-agent instructions are
- ; an additive connection whose ordinary empty state is absence.
- :seon.cluster.agent/cluster :seon.db/ref
-
- :seon.cluster.agent/context-links
- [:map {:seon.db/entity true}
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.cluster.agent/cluster :seon.cluster.agent/cluster]
-  [:seon.cluster.agent/instructions
-   {:optional true}
-   :seon.cluster.agent/instructions]]
-
- ; The one formal creation shape. It creates the namespace row and the
- ; agent row in one transaction so a newly created agent is never
- ; ownerless at any committed basis.
- :seon.cluster.agent/creation-request
- [:map
- [:seon.cluster.agent/id :seon.cluster.agent/id]
- [:seon.ns/name :seon.ns/name]
-  [:seon.cluster/name :seon.cluster/name]]
-
- ; Pure transaction data is heterogeneous Datahike input by definition.
- :seon.cluster.agent/creation-tx [:vector :map]
-
- ; THE ONE BLUEPRINT'S REQUEST: a pure function of (agent-id, handle).
- ; Two agents differ only in the agent-id their procs carry and the
- ; mailbox channel routed to them — there is no per-agent variation.
- :seon.cluster.agent/blueprint-request [:map  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id]]
-
- ; THE ROUTING ENTRY: process-local map atom held on the cluster
- ; instance beside the connection — the sanctioned kind of process
- ; state (a disposable artifact, rebuilt by arming at boot). It is not
- ; a fact: it names live channels. ::armed is keyed by agent id;
- ; ::channels by the recipient's ENTITY id, because that is what a
- ; committed `:seon.cluster.message/to` datom carries, so the wake
- ; handler's delivery is one map lookup — no query, no park.
- :seon.cluster.agent/routing [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
-
- :seon.cluster.agent/arm-request [:map  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
-
- :seon.cluster.agent/disarm-request [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/routing :seon.cluster.agent/routing]]
-
- ; One armed agent's process-local entry: its graph, its mailbox, the
- ; orderly-stop completion, and the entity id its routing rides on.
- :seon.cluster.agent/armed [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.agent/eid :int] [:seon.flow/graph :seon.flow/graph] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel]]
-
- :seon.cluster.agent/eid :int
-}
+#:seon.cluster.agent{:agent
+                     [:map
+                      {:seon.db/entity true,
+                       :seon.render/ai seon.render.agent/agent-ai,
+                       :seon.render/html seon.render.agent/agent-html}
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/namespace
+                       {:optional true}
+                       :seon.cluster.agent/namespace]
+                      [:seon.cluster.agent/run
+                       {:optional true}
+                       :seon.cluster.agent/run]],
+                     :arm-request
+                     [:map
+                      [:seon.cluster.loop/cluster
+                       :seon.cluster.loop/cluster]
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/routing
+                       :seon.cluster.agent/routing]],
+                     :armed
+                     [:map
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/eid :int]
+                      [:seon.flow/graph :seon.flow/graph]
+                      [:seon.cluster.wake/channel :seon.flow/channel]
+                      [:seon.cluster.loop/completion
+                       :seon.flow/channel]],
+                     :blueprint-request
+                     [:map
+                      [:seon.cluster.loop/cluster
+                       :seon.cluster.loop/cluster]
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]],
+                     :cluster :seon.db/ref,
+                     :context-links
+                     [:map
+                      #:seon.db{:entity true}
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/cluster
+                       :seon.cluster.agent/cluster]
+                      [:seon.cluster.agent/instructions
+                       {:optional true}
+                       :seon.cluster.agent/instructions]],
+                     :count [:int {:min 0}],
+                     :creation-request
+                     [:map
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.ns/name :seon.ns/name]
+                      [:seon.cluster/name :seon.cluster/name]],
+                     :creation-tx [:vector :map],
+                     :disarm-request
+                     [:map
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/routing
+                       :seon.cluster.agent/routing]],
+                     :eid :int,
+                     :id [:string {:min 1, :seon.db/identity true}],
+                     :instructions [:set :seon.db/ref],
+                     :namespace
+                     [:and #:seon.db{:unique true} :seon.db/ref],
+                     :routing
+                     [:fn
+                      #:gen{:gen seon.flow/atom-reference-generator}
+                      seon.flow/atom-reference?],
+                     :run :seon.db/ref}

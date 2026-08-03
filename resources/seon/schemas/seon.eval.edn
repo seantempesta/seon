@@ -1,0 +1,5 @@
+#:seon.eval{:allocated-bytes :int,
+            :duration-ms :int,
+            :fn-entries :int,
+            :host-interop-count [:int {:min 0}],
+            :outcome [:enum :ok :time :error]}

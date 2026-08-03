@@ -7,7 +7,7 @@
   through the one gate) ONLY — schemas and tests are byte-sealed.
   Fixture EDN lives under test/seon/schema_edn_fixtures/ (on the :test
   classpath), one resource per scenario, so the production
-  `seon/schema.edn` resource is never touched by a test."
+  `seon/schemas` resource directory is never touched by a test."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -25,10 +25,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest production-schema-edn-is-a-resource-not-source
-  (let [loaded (schema.edn/load! {})
+  (let [paths ((deref #'schema.edn/schema-resource-paths)
+               schema.edn/default-resource)
+        loaded (schema.edn/load! {})
         file (:seon.schema.edn/file loaded)]
     (is (= "seon/schemas" file)
-        "production schema EDN is the one named resource directory")))
+        "production schema EDN is the one named resource directory")
+    (is (= (count paths)
+           (count (into #{}
+                        (map (comp namespace key))
+                        (::schema.edn/declared-forms
+                         ((deref #'schema.edn/resource-population)
+                          schema.edn/default-resource)))))
+        "the flat directory has exactly one file per key namespace")))
 
 (deftest one-resource-is-one-population
   (let [resource "seon/schema_edn_fixtures/valid.edn"
@@ -110,6 +119,35 @@
         (is (str/includes? (ex-message failure) "contains no EDN files")))
       (finally
         (.delete directory)))))
+
+(deftest a-misplaced-declaration-refuses-with-its-required-filename
+  (let [failure
+        (try
+          (schema.edn/load!
+           {::schema.edn/resource
+            "seon/schema_edn_fixtures/misplaced"})
+          nil
+          (catch clojure.lang.ExceptionInfo error
+            error))]
+    (is (= ::schema.edn/misplaced-attribute
+           (::schema.edn/error (ex-data failure))))
+    (is (= "actual.namespace.edn"
+           (::schema.edn/expected-file (ex-data failure))))
+    (is (str/includes? (ex-message failure) "wrong.namespace.edn"))))
+
+(deftest an-unsafe-key-namespace-refuses-before-placement
+  (let [failure
+        (try
+          (schema.edn/load!
+           {::schema.edn/resource
+            "seon/schema_edn_fixtures/unsafe_namespace"})
+          nil
+          (catch clojure.lang.ExceptionInfo error
+            error))]
+    (is (= ::schema.edn/unsafe-namespace
+           (::schema.edn/error (ex-data failure))))
+    (is (= :bad?/key (::schema.edn/attribute (ex-data failure))))
+    (is (str/includes? (ex-message failure) "verbatim filename"))))
 
 (deftest unreadable-files-refuse-by-name
   (let [data (test-support/refusal-data

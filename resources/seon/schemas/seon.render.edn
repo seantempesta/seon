@@ -1,44 +1,78 @@
-{
-; The typed render call carries a value, its explicitly derived owning
-; namespace when one exists, and the shared SCI invocation custody.
- :seon.render/namespace :symbol
- :seon.render/unit [:map-of :qualified-keyword :any]
- :seon.render/output :any
- :seon.render/output-schema :qualified-keyword
- :seon.render/candidates [:vector :seon.fn/sym]
- :seon.render/candidate-request
- [:map
-  [:seon.db/db :seon.db/database-value]
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.render/namespace {:optional true} :seon.render/namespace]
-  [:seon.render/value :any]
-  [:seon.render/output-schema :seon.render/output-schema]]
- :seon.render/call-request
- [:map {:seon.render/ai seon.render.value/render-ai
-        :seon.render/html seon.render.value/render-html}
-  [:seon.db/db :seon.db/database-value]
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.render/namespace {:optional true} :seon.render/namespace]
-  [:seon.render/value :any]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
-  [:seon.config/on-core-error :seon.config/on-core-error]
-  [:seon.render/ai {:optional true} :qualified-symbol]
-  [:seon.render/html {:optional true} :qualified-symbol]]
-
- :seon.db/tx-data :seon.store/transaction-data
- :seon.render/failure-request
- [:map
-  [:seon.db/db :seon.db/database-value]
-  [:seon.render/namespace :seon.render/namespace]
-  [:seon.error/value :seon.error/value]]
- :seon.render/failure
- [:map
-  [:seon.render/ai :string]
-  [:seon.render/html :seon.render/hiccup]
-  [:seon.db/tx-data :seon.db/tx-data]]
-
- ; The AI twin of `:seon.render/html`: durable declarations are symbols and
- ; renderer functions return strings.
- :seon.render/ai [:or :qualified-symbol :string]
-}
+#:seon.render{:acquired-context
+              [:map
+               [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+               [:seon.db/db :seon.db/database-value]],
+              :ai [:or :qualified-symbol :string],
+              :call-request
+              [:map
+               #:seon.render{:ai seon.render.value/render-ai,
+                             :html seon.render.value/render-html}
+               [:seon.db/db :seon.db/database-value]
+               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+               [:seon.render/namespace
+                {:optional true}
+                :seon.render/namespace]
+               [:seon.render/value :any]
+               [:seon.sci.admit/caps :seon.sci.admit/caps]
+               [:seon.sci.eval/time-limit-ms
+                :seon.sci.eval/time-limit-ms]
+               [:seon.config/on-core-error :seon.config/on-core-error]
+               [:seon.render/ai {:optional true} :qualified-symbol]
+               [:seon.render/html {:optional true} :qualified-symbol]],
+              :candidate-request
+              [:map
+               [:seon.db/db :seon.db/database-value]
+               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+               [:seon.render/namespace
+                {:optional true}
+                :seon.render/namespace]
+               [:seon.render/value :any]
+               [:seon.render/output-schema
+                :seon.render/output-schema]],
+              :candidates [:vector :seon.fn/sym],
+              :distance [:int {:min 0}],
+              :failure
+              [:map
+               [:seon.render/ai :string]
+               [:seon.render/html :seon.render/hiccup]
+               [:seon.db/tx-data :seon.db/tx-data]],
+              :failure-request
+              [:map
+               [:seon.db/db :seon.db/database-value]
+               [:seon.render/namespace :seon.render/namespace]
+               [:seon.error/value :seon.error/value]],
+              :hiccup
+              [:fn
+               #:gen{:gen seon.render.hiccup/hiccup-generator}
+               seon.render.hiccup/hiccup?],
+              :html [:or :qualified-symbol :seon.render/hiccup],
+              :namespace :symbol,
+              :output :any,
+              :output-schema :qualified-keyword,
+              :package
+              [:map
+               [:seon.render.package/revision
+                :seon.render.package/revision]
+               [:seon.render.package/base-revision
+                {:optional true}
+                :seon.render.package/base-revision]
+               [:seon.render.package/basis-transaction
+                :seon.render.package/basis-transaction]
+               [:seon.render.package/streaming?
+                :seon.render.package/streaming?]
+               [:seon.render.package/keyframe
+                :seon.render.package/keyframe]
+               [:seon.render.package/keyframe-bytes
+                :seon.render.package/frame]
+               [:seon.render.package/keyframe-size
+                :seon.render.package/size]
+               [:seon.render.package/delta :seon.render.package/delta]
+               [:seon.render.package/delta-bytes
+                :seon.render.package/frame]
+               [:seon.render.package/delta-size
+                :seon.render.package/size]],
+              :page [:vector :seon.render/hiccup],
+              :surface-id [:string {:min 9}],
+              :unit [:map-of :qualified-keyword :any],
+              :value :any,
+              :would-fall-to-floor? :boolean}

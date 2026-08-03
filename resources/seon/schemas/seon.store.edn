@@ -1,92 +1,34 @@
-{
-; WHAT ONE TRANSACTION IS, in Datahike's own vocabulary: a vector of
- ; operations, or its argument map carrying `:tx-data` and optional
- ; `:tx-meta`. Those two keys are unqualified because they are THEIRS
- ; (`reference-code/datahike/src/datahike/spec.cljc:66-67`), and
- ; renaming a dependency's keys to look like ours is the drift the
- ; grounding rule forbids.
- ; This form exists because the map arm was already on the live
- ; critical path while `transact!`'s contract said `[:vector :any]`,
- ; and Datahike's own spec admitted the map by accident — every map
- ; entry is a `coll?`. Declared, the mismatch is unrepresentable.
- ; Datahike database values are opaque runtime objects, but not anonymous:
- ; its maintained `datahike.db.utils/db?` predicate covers current, as-of,
- ; since, and history values. The generator constructs all four variants.
- :seon.db/database-value
- [:fn {:gen/gen seon.db/database-value-generator}
-  seon.db/database-value?]
- :seon.db/connection
- [:fn {:gen/gen seon.db/connection-generator} seon.db/connection?]
- ; Datahike's own read arguments, named once for every public contract.
- ; The unqualified option keys belong to the dependency
- ; (`reference-code/datahike/src/datahike/api/types.cljc:102-130,175-179`).
- :seon.db/query
- [:or [:vector :seon.schema/value] :map :string]
- :seon.db/query-args
- [:map
-  [:query :seon.db/query]
-  [:args {:optional true} [:sequential :seon.schema/value]]
-  [:request-id {:optional true} :string]
-  [:limit {:optional true} :int]
-  [:offset {:optional true} :int]
-  [:max-work {:optional true} [:int {:min 1}]]
-  [:max-results {:optional true} [:int {:min 1}]]
-  [:max-result-weight {:optional true} [:int {:min 1}]]]
- :seon.db/entity-id
- [:or :int [:sequential :seon.schema/value] :keyword]
- :seon.db/pull-selector [:vector :seon.schema/value]
- :seon.db/pull-options
- [:map
-  [:selector :seon.db/pull-selector]
-  [:eid :seon.db/entity-id]
-  [:max-work {:optional true} [:int {:min 1}]]
-  [:max-results {:optional true} [:int {:min 1}]]
-  [:max-result-weight {:optional true} [:int {:min 1}]]]
- :seon.db/pull-many-options
- [:map
-  [:selector :seon.db/pull-selector]
-  [:eids [:sequential :seon.db/entity-id]]
-  [:max-work {:optional true} [:int {:min 1}]]
-  [:max-results {:optional true} [:int {:min 1}]]
-  [:max-result-weight {:optional true} [:int {:min 1}]]]
- :seon.db/index-lookup
- [:map
-  [:index [:enum :eavt :aevt :avet]]
-  [:components {:optional true}
-   [:or :nil [:sequential :seon.schema/value]]]]
- ; An eager ordinary projection of Datahike's Datom lookup keys.
- :seon.db/datom
- [:map
-  [:e :seon.schema/value]
-  [:a :seon.schema/value]
-  [:v :seon.schema/value]
-  [:tx :int]
-  [:added :boolean]]
- :seon.db/datoms [:vector :seon.db/datom]
- :seon.db/time-point [:or :inst :int]
- ; Transaction operations are dependency-owned open data: entity maps or
- ; Datahike operation vectors. Their values are genuinely polymorphic at this
- ; boundary, so the one named `:seon.schema/value` exception is referenced
- ; instead of repeating anonymous `:any` slots throughout public contracts.
- :seon.store/transaction-operation
- [:or :map [:vector :seon.schema/value]]
- :seon.store/transaction-data
- [:vector :seon.store/transaction-operation]
- :seon.store/transaction
- [:or
-  :seon.store/transaction-data
-  [:map
-   [:tx-data :seon.store/transaction-data]
-   [:tx-meta {:optional true} :map]]]
- :seon.store/branch :keyword
- :seon.store/branch-connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]
- ; A connection OBJECT, live or released. The distinction is not
- ; pedantry: a started instance holds a connection that outlives its own
- ; liveness, and `stop!` is idempotent, so its second call necessarily
- ; receives a released one. Requiring liveness on the instance made the
- ; contract forbid the case stop! exists to handle.
- :seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection-object?]
- :seon.store/dir [:string {:min 1}]
- :seon.store/lock-file [:string {:min 1}]
- :seon.store/store [:map  [:seon.store/dir :seon.store/dir] [:seon.store/lock-file :seon.store/lock-file] [:seon.store/connection [:fn {:gen/gen seon.cluster.store/connection-generator} seon.cluster.store/connection?]] [:seon.store/lock [:fn {:gen/gen seon.cluster.store/file-lock-generator} seon.cluster.store/file-lock?]] [:seon.store/created? :boolean]]
-}
+#:seon.store{:branch :keyword,
+             :branch-connection
+             [:fn
+              #:gen{:gen seon.cluster.store/connection-generator}
+              seon.cluster.store/connection?],
+             :connection
+             [:fn
+              #:gen{:gen seon.cluster.store/connection-generator}
+              seon.cluster.store/connection-object?],
+             :dir [:string {:min 1}],
+             :lock-file [:string {:min 1}],
+             :store
+             [:map
+              [:seon.store/dir :seon.store/dir]
+              [:seon.store/lock-file :seon.store/lock-file]
+              [:seon.store/connection
+               [:fn
+                #:gen{:gen seon.cluster.store/connection-generator}
+                seon.cluster.store/connection?]]
+              [:seon.store/lock
+               [:fn
+                #:gen{:gen seon.cluster.store/file-lock-generator}
+                seon.cluster.store/file-lock?]]
+              [:seon.store/created? :boolean]],
+             :transaction
+             [:or
+              :seon.store/transaction-data
+              [:map
+               [:tx-data :seon.store/transaction-data]
+               [:tx-meta {:optional true} :map]]],
+             :transaction-data
+             [:vector :seon.store/transaction-operation],
+             :transaction-operation
+             [:or :map [:vector :seon.schema/value]]}

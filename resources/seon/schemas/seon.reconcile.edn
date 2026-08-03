@@ -1,35 +1,20 @@
-{
-; the managing process identity that scopes the managed population;
- ; opaque here — config supplies the one core identity
- :seon.reconcile/process
- [:string {:min 1}]
-
- :seon.reconcile/desired
- [:vector [:map]]
-
- ; identities the caller explicitly adopts into the managed scope even
- ; though their first assertion predates management
- :seon.reconcile/adopt-identities
- [:set [:vector :any]]
-
- :seon.reconcile/converged?
- :boolean
-
- :seon.reconcile/operations
- [:int {:min 0}]
-
- :seon.reconcile/request
- [:map
-  [:seon.reconcile/desired :seon.reconcile/desired]
-  [:seon.reconcile/process :seon.reconcile/process]
-  [:seon.reconcile/adopt-identities
-   {:optional true}
-   :seon.reconcile/adopt-identities]]
-
- :seon.reconcile/result
- [:or
-  [:map
-   [:seon.reconcile/converged? :seon.reconcile/converged?]
-   [:seon.reconcile/operations :seon.reconcile/operations]]
-  :seon.error/value]
-}
+#:seon.reconcile{:adopt-identities [:set [:vector :any]],
+                 :converged? :boolean,
+                 :desired [:vector [:map]],
+                 :operations [:int {:min 0}],
+                 :process [:string {:min 1}],
+                 :request
+                 [:map
+                  [:seon.reconcile/desired :seon.reconcile/desired]
+                  [:seon.reconcile/process :seon.reconcile/process]
+                  [:seon.reconcile/adopt-identities
+                   {:optional true}
+                   :seon.reconcile/adopt-identities]],
+                 :result
+                 [:or
+                  [:map
+                   [:seon.reconcile/converged?
+                    :seon.reconcile/converged?]
+                   [:seon.reconcile/operations
+                    :seon.reconcile/operations]]
+                  :seon.error/value]}

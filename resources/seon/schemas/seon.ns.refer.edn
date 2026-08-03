@@ -1,0 +1,10 @@
+#:seon.ns.refer{:binding
+                [:map
+                 #:seon.db{:entity true}
+                 [:seon.ns.refer/local :seon.ns.refer/local]
+                 [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
+                 [:seon.ns.refer/target-name
+                  :seon.ns.refer/target-name]],
+                :local :symbol,
+                :target-name :symbol,
+                :target-ns :symbol}

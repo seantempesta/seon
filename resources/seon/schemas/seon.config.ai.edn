@@ -1,0 +1,80 @@
+#:seon.config.ai{:api-key-variable
+                 [:string {:min 1, :seon.config/per-agent true}],
+                 :endpoint
+                 [:string {:min 1, :seon.config/per-agent true}],
+                 :extra-body-edn
+                 [:string
+                  {:min 1,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/extra-body true}],
+                 :frequency-penalty
+                 [:double
+                  {:min -2.0,
+                   :max 2.0,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["frequency_penalty" clojure.core/identity]]}],
+                 :max-tokens
+                 [:and
+                  {:seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["max_tokens" clojure.core/identity]]}
+                  :seon.ai/max-tokens],
+                 :model
+                 [:string {:min 1, :seon.config/per-agent true}],
+                 :no-auth
+                 [:=
+                  #:seon.config{:optional true, :per-agent true}
+                  true],
+                 :presence-penalty
+                 [:double
+                  {:min -2.0,
+                   :max 2.0,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["presence_penalty" clojure.core/identity]]}],
+                 :response-format
+                 [:enum
+                  {:seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["response_format"
+                     seon.ai/response-format-wire-value]]}
+                  :json-object],
+                 :stop
+                 [:vector
+                  {:min 1,
+                   :max 4,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire [["stop" clojure.core/identity]]}
+                  [:string {:min 1}]],
+                 :temperature
+                 [:double
+                  {:min 0.0,
+                   :max 2.0,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["temperature" clojure.core/identity]]}],
+                 :thinking
+                 [:and
+                  {:seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire
+                   [["thinking" seon.ai/thinking-wire-value]
+                    ["reasoning_effort"
+                     seon.ai/reasoning-effort-wire-value]]}
+                  :seon.ai/thinking],
+                 :timeout-ms
+                 [:int {:min 1, :seon.config/per-agent true}],
+                 :top-p
+                 [:double
+                  {:min 0.0,
+                   :max 1.0,
+                   :seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :seon.ai/wire [["top_p" clojure.core/identity]]}]}

@@ -1,0 +1,11 @@
+#:seon.schema{:arguments [:vector :any],
+              :schema
+              [:map
+               #:seon.db{:entity true}
+               [:seon.schema/key :seon.schema/key]
+               [:seon.schema.admission/source
+                :seon.schema.admission/source]
+               [:seon.schema/form :seon.schema/form]
+               [:seon.db.id/generator
+                {:optional true}
+                :seon.db.id/generator]]}

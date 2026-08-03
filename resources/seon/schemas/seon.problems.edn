@@ -1,88 +1,84 @@
-{
-; EVERYTHING WRONG NOW, derived. The PULL side of exactly the facts the
- ; error path PUSHES — same facts, no second store, no acknowledgement
- ; flag, no "seen" attribute, nothing stamped when something is fixed. A
- ; problem stops being a problem when the FACTS stop saying so.
- ;
- ; The value is a MAP KEYED BY FAMILY with every empty family ABSENT, so
- ; a healthy cluster derives `{}`. That shape is deliberate twice over:
- ; it needs no `:type` discriminator on the entries (the key a family
- ; arrives under is the family), and it makes "is anything wrong?"
- ; `(seq problems)` rather than a status anybody has to maintain.
-
- ; One SIGNATURE, however many times it happened. Grouping is the point:
- ; a hundred errors of one signature is one problem that recurred a
- ; hundred times, and reporting it a hundred times would bury the other
- ; two. `fact` is the latest occurrence in full, so the log projection
- ; composes the ordinary per-fact line and a digger has the id, the
- ; kind, the refs and the projected data without a second lookup.
- :seon.problems/occurrences [:int {:min 1}]
- ; Agent-held identity for one red receipt's derived problem. This is an
- ; identity on the receipt, not stored problem state: redness, routing and
- ; settlement remain pure derivations over current facts.
- :seon.problems/id [:string {:min 1 :seon.db/identity true}]
- :seon.problems/error-signature [:map  [:seon.error/signature :seon.error/signature] [:seon.error/kind :seon.error/kind] [:seon.problems/occurrences :seon.problems/occurrences] [:seon.error/fact :seon.error/fact]]
-
- ; A run held by a process that is NOT in the live set. Not "old" and
- ; not "expired" — no clock is consulted, because liveness is an
- ; observable fact about processes and a deadline standing in for it
- ; would be exactly the tuned constant the ruling bans.
- :seon.problems/wedged-run [:map  [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/process :seon.cluster.run/process]]
-
- ; A run that closed carrying WHY it closed. The agent reads this in its
- ; next prompt; a human reading `problems` sees the same fact from the
- ; other side.
- :seon.problems/failed-run [:map  [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.run/error :seon.cluster.run/error]]
-
- ; One form of one plan that errored. An agent's own mistake is not a
- ; core fault and never becomes an error fact — but a plan that keeps
- ; erroring is something a human wants to see, so it is a problem
- ; without being a fault, and the distinction survives into this value.
- :seon.problems/errored-receipt [:map  [:seon.cluster.eval/id :seon.cluster.eval/id] [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.error/kind :seon.error/kind] [:seon.cluster.eval/error :seon.cluster.eval/error]]
-
- ; One red evaluation that may be assigned. The namespace owner is derived
- ; from the form's parse-time `/ns`; author is the total fallback.
- :seon.problems/form-problem
- [:map
-  [:seon.problems/id :seon.problems/id]
-  [:seon.cluster.eval/id :seon.cluster.eval/id]
-  [:seon.cluster.run/id :seon.cluster.run/id]
-  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
-  [:seon.cluster.run.form/source :seon.cluster.run.form/source]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
-  [:seon.problems/author :seon.cluster.agent/id]
-  [:seon.error/kind :seon.error/kind]
-  [:seon.cluster.eval/error :seon.cluster.eval/error]]
-
- :seon.problems/form-problem-request
- [:map
-  [:seon.cluster.run/id :seon.cluster.run/id]
-  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
-  [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]
-
- :seon.problems/author :seon.cluster.agent/id
-
- ; An agent the episode cap is deferring (F1 §7). PRESENCE, derived:
- ; the count is `work/episode-runs`, the deferrals are the unanswered
- ; agent-sent triggers the gate skips, and the whole row vanishes when
- ; the next outside trigger's run resets the derivation — no counter,
- ; no flag, no refusal message row anywhere.
- :seon.problems/deferred-agent [:map  [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster.work/episode-runs :seon.cluster.work/episode-runs] [:seon.problems/deferred-count [:int {:min 1}]]]
-
- ; A program namespace carrying source but no reverse namespace assignment.
- ; Presence is the problem; it vanishes when an agent gains the ref.
- :seon.problems/unowned-namespace
- [:map  [:seon.ns/name :seon.ns/name]]
-
- ; The request. `live-processes` is the same set `run/recover-tx` takes,
- ; by the same name, because it is the same question: which holders are
- ; real right now. Absent set = nothing is known to be live, which
- ; honestly makes every held run wedged — the caller that cannot answer
- ; must not get a quieter answer than the truth.
- ; `live-processes` references the ONE global registration (CONTEXT section)
- ; — the same set, by the same name, as the capture and every request
- ; builder carry (§9 of the context-blocks contract package).
- :seon.problems/request [:map  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]]
-
- :seon.problems/problems [:map {:seon.render/ai seon.problems/ai-prose :seon.render/html seon.problems/html-report} [:seon.problems/error-signatures {:optional true} [:vector :seon.problems/error-signature]] [:seon.problems/wedged-runs {:optional true} [:vector :seon.problems/wedged-run]] [:seon.problems/failed-runs {:optional true} [:vector :seon.problems/failed-run]] [:seon.problems/errored-receipts {:optional true} [:vector :seon.problems/errored-receipt]] [:seon.problems/deferred-agents {:optional true} [:vector :seon.problems/deferred-agent]] [:seon.problems/unowned-namespaces {:optional true} [:vector :seon.problems/unowned-namespace]]]
-}
+#:seon.problems{:author :seon.cluster.agent/id,
+                :deferred-agent
+                [:map
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.cluster.work/episode-runs
+                  :seon.cluster.work/episode-runs]
+                 [:seon.problems/deferred-count [:int {:min 1}]]],
+                :error-signature
+                [:map
+                 [:seon.error/signature :seon.error/signature]
+                 [:seon.error/kind :seon.error/kind]
+                 [:seon.problems/occurrences
+                  :seon.problems/occurrences]
+                 [:seon.error/fact :seon.error/fact]],
+                :errored-receipt
+                [:map
+                 [:seon.cluster.eval/id :seon.cluster.eval/id]
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.eval/ordinal
+                  :seon.cluster.eval/ordinal]
+                 [:seon.cluster.run.form/source
+                  :seon.cluster.run.form/source]
+                 [:seon.error/kind :seon.error/kind]
+                 [:seon.cluster.eval/error :seon.cluster.eval/error]],
+                :failed-run
+                [:map
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.cluster.run/error :seon.cluster.run/error]],
+                :form-problem
+                [:map
+                 [:seon.problems/id :seon.problems/id]
+                 [:seon.cluster.eval/id :seon.cluster.eval/id]
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.run.form/ordinal
+                  :seon.cluster.run.form/ordinal]
+                 [:seon.cluster.run.form/source
+                  :seon.cluster.run.form/source]
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.problems/author :seon.cluster.agent/id]
+                 [:seon.error/kind :seon.error/kind]
+                 [:seon.cluster.eval/error :seon.cluster.eval/error]],
+                :form-problem-request
+                [:map
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.run.form/ordinal
+                  :seon.cluster.run.form/ordinal]
+                 [:seon.sci.eval/evaluation
+                  :seon.sci.eval/evaluation]],
+                :id [:string {:min 1, :seon.db/identity true}],
+                :occurrences [:int {:min 1}],
+                :problems
+                [:map
+                 #:seon.render{:ai seon.problems/ai-prose,
+                               :html seon.problems/html-report}
+                 [:seon.problems/error-signatures
+                  {:optional true}
+                  [:vector :seon.problems/error-signature]]
+                 [:seon.problems/wedged-runs
+                  {:optional true}
+                  [:vector :seon.problems/wedged-run]]
+                 [:seon.problems/failed-runs
+                  {:optional true}
+                  [:vector :seon.problems/failed-run]]
+                 [:seon.problems/errored-receipts
+                  {:optional true}
+                  [:vector :seon.problems/errored-receipt]]
+                 [:seon.problems/deferred-agents
+                  {:optional true}
+                  [:vector :seon.problems/deferred-agent]]
+                 [:seon.problems/unowned-namespaces
+                  {:optional true}
+                  [:vector :seon.problems/unowned-namespace]]],
+                :request
+                [:map
+                 [:seon.cluster.run/live-processes
+                  :seon.cluster.run/live-processes]],
+                :unowned-namespace
+                [:map [:seon.ns/name :seon.ns/name]],
+                :wedged-run
+                [:map
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.cluster.run/process :seon.cluster.run/process]]}

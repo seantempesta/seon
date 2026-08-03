@@ -1,0 +1,24 @@
+#:seon.config.ai.retry{:base-delay-ms
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/base-delay-ms],
+                       :jitter-fraction
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/jitter-fraction],
+                       :maximum-delay-ms
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/maximum-delay-ms],
+                       :maximum-retries
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/maximum-retries],
+                       :maximum-total-delay-ms
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/maximum-total-delay-ms],
+                       :multiplier
+                       [:and
+                        #:seon.config{:per-agent true}
+                        :seon.ai.retry/multiplier]}

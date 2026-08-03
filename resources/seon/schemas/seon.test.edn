@@ -1,97 +1,11 @@
-{
-; The indexed test row. The result sink can assert the identity + namespace
- ; floor before the corpus indexer enriches the same entity with source.
- :seon.test/sym [:string {:min 1 :seon.db/identity true}]
- :seon.test/ns :seon.db/ref
- :seon.test/source :string
- :seon.test/test
- [:map {:seon.db/entity true}
-  [:seon.test/sym :seon.test/sym]
-  [:seon.schema.admission/source :seon.schema.admission/source]
-  [:seon.test/ns {:optional true} :seon.test/ns]
-  [:seon.test/source {:optional true} :seon.test/source]]
-
- ; One invocation of bin/test. The run is the batch identity delegation can
- ; carry; its instant and git SHA apply to every referenced result.
- :seon.test.run/id [:string {:min 1 :seon.db/identity true}]
- :seon.test.run/at :inst
- :seon.test.run/git-sha [:re "^[0-9a-f]{40}$"]
- :seon.test.run/run
- [:map {:seon.db/entity true}
-  [:seon.test.run/id :seon.test.run/id]
-  [:seon.test.run/at :seon.test.run/at]
-  [:seon.test.run/git-sha :seon.test.run/git-sha]]
-
- ; Failure text is its own referenced fact. A result never inlines it, so a
- ; future blob-backed message can replace this leaf without changing joins.
- :seon.test.failure/id [:string {:min 1 :seon.db/identity true}]
- :seon.test.failure/message [:string {:min 1}]
- :seon.test.failure/failure
- [:map {:seon.db/entity true}
-  [:seon.test.failure/id :seon.test.failure/id]
-  [:seon.test.failure/message :seon.test.failure/message]]
-
- ; One test in one run. `:error` is folded into the failing outcome because
- ; delegation asks whether the test passed; the referenced message preserves
- ; the exact failure class and detail.
- :seon.test.result/id [:string {:min 1 :seon.db/identity true}]
- :seon.test.result/test :seon.db/ref
- :seon.test.result/run :seon.db/ref
- :seon.test.result/outcome [:enum :pass :fail]
- :seon.test.result/failure
- [:and {:seon.db/component true} :seon.db/ref]
- :seon.test.result/result
- [:map {:seon.db/entity true}
-  [:seon.test.result/id :seon.test.result/id]
-  [:seon.test.result/test :seon.test.result/test]
-  [:seon.test.result/run :seon.test.result/run]
-  [:seon.test.result/outcome :seon.test.result/outcome]
-  [:seon.test.result/failure {:optional true} :seon.test.result/failure]]
-
- ; The capture boundary's ordinary values.
- :seon.test.runner/namespaces [:vector :symbol]
- :seon.test.runner/result
- [:map
-  [:seon.test/sym :seon.test/sym]
-  [:seon.ns/name :seon.ns/name]
-  [:seon.test.result/outcome :seon.test.result/outcome]
-  [:seon.test.failure/message
-   {:optional true}
-   :seon.test.failure/message]]
- :seon.test.runner/results [:vector :seon.test.runner/result]
- :seon.test.runner/test-count [:int {:min 0}]
- :seon.test.runner/pass-count [:int {:min 0}]
- :seon.test.runner/fail-count [:int {:min 0}]
- :seon.test.runner/error-count [:int {:min 0}]
- :seon.test.runner/summary
- [:map
-  [:seon.test.runner/test-count :seon.test.runner/test-count]
-  [:seon.test.runner/pass-count :seon.test.runner/pass-count]
-  [:seon.test.runner/fail-count :seon.test.runner/fail-count]
-  [:seon.test.runner/error-count :seon.test.runner/error-count]]
- :seon.test.runner/run-request
- [:map
-  [:seon.test.runner/namespaces :seon.test.runner/namespaces]
-  [:seon.test.run/id :seon.test.run/id]
-  [:seon.test.run/at :seon.test.run/at]
-  [:seon.test.run/git-sha :seon.test.run/git-sha]]
- :seon.test.runner/run-result
- [:map
-  [:seon.test.run/id :seon.test.run/id]
-  [:seon.test.run/at :seon.test.run/at]
-  [:seon.test.run/git-sha :seon.test.run/git-sha]
-  [:seon.test.runner/summary :seon.test.runner/summary]
-  [:seon.test.runner/results :seon.test.runner/results]]
-
- :seon.test.runner/record-request
- [:map
-  [:seon.test.runner/run-result :seon.test.runner/run-result]
-  [:seon.boot/cluster-name :seon.boot/cluster-name]
-  [:seon.boot/root :seon.boot/root]]
- :seon.test.runner/record-tx [:vector :map]
- :seon.test.runner/recorded
- [:map
-  [:seon.boot/cluster-name :seon.boot/cluster-name]
-  [:seon.test.run/id :seon.test.run/id]
-  [:seon.test.runner/recorded-count [:int {:min 0}]]]
-}
+#:seon.test{:ns :seon.db/ref,
+            :source :string,
+            :sym [:string {:min 1, :seon.db/identity true}],
+            :test
+            [:map
+             #:seon.db{:entity true}
+             [:seon.test/sym :seon.test/sym]
+             [:seon.schema.admission/source
+              :seon.schema.admission/source]
+             [:seon.test/ns {:optional true} :seon.test/ns]
+             [:seon.test/source {:optional true} :seon.test/source]]}

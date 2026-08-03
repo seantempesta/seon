@@ -1,0 +1,25 @@
+#:seon.fn.ast.entry{:key :string,
+                    :order :int,
+                    :properties
+                    [:vector #:seon.db{:component true} :seon.db/ref],
+                    :row
+                    [:map
+                     #:seon.db{:attributes true}
+                     [:seon.fn.ast.entry/order
+                      {:optional true}
+                      :seon.fn.ast.entry/order]
+                     [:seon.fn.ast.entry/key
+                      {:optional true}
+                      :seon.fn.ast.entry/key]
+                     [:seon.fn.ast.entry/value
+                      {:optional true}
+                      :seon.fn.ast.entry/value]
+                     [:seon.fn.ast.entry/value-edn
+                      {:optional true}
+                      :seon.fn.ast.entry/value-edn]
+                     [:seon.fn.ast.entry/properties
+                      {:optional true}
+                      :seon.fn.ast.entry/properties]],
+                    :value
+                    [:and #:seon.db{:component true} :seon.db/ref],
+                    :value-edn :string}

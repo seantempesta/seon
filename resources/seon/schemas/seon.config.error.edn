@@ -1,0 +1,3 @@
+#:seon.config.error{:escalate-to
+                    [:string {:min 1, :seon.config/optional true}],
+                    :recurrence-limit [:int {:min 1}]}

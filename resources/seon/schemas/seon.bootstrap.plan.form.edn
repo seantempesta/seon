@@ -1,0 +1,13 @@
+#:seon.bootstrap.plan.form{:context [:string {:min 1}],
+                           :form
+                           [:map
+                            #:seon.db{:entity true}
+                            [:seon.cluster.run.form/ordinal
+                             :seon.cluster.run.form/ordinal]
+                            [:seon.cluster.run.form/source
+                             :seon.cluster.run.form/source]
+                            [:seon.ns/name-designation
+                             :seon.ns/name-designation]
+                            [:seon.bootstrap.plan.form/context
+                             {:optional true}
+                             :seon.bootstrap.plan.form/context]]}

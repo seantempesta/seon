@@ -1,0 +1,10 @@
+#:seon.bootstrap{:default-form
+                 [:map
+                  [:seon.cluster.run.form/source
+                   :seon.cluster.run.form/source]
+                  [:seon.ns/name-designation :seon.ns/name-designation]
+                  [:seon.bootstrap.plan.form/context
+                   {:optional true}
+                   :seon.bootstrap.plan.form/context]],
+                 :default-forms
+                 [:vector {:min 1} :seon.bootstrap/default-form]}

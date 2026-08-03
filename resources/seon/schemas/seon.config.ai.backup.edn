@@ -1,0 +1,20 @@
+#:seon.config.ai.backup{:api-key-variable
+                        [:string
+                         {:min 1,
+                          :seon.config/optional true,
+                          :seon.config/per-agent true}],
+                        :endpoint
+                        [:string
+                         {:min 1,
+                          :seon.config/optional true,
+                          :seon.config/per-agent true}],
+                        :model
+                        [:string
+                         {:min 1,
+                          :seon.config/optional true,
+                          :seon.config/per-agent true}],
+                        :timeout-ms
+                        [:int
+                         {:min 1,
+                          :seon.config/optional true,
+                          :seon.config/per-agent true}]}

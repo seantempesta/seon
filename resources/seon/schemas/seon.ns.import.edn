@@ -1,0 +1,9 @@
+#:seon.ns.import{:binding
+                 [:map
+                  #:seon.db{:entity true}
+                  [:seon.ns.import/local :seon.ns.import/local]
+                  [:seon.ns.import/target-class
+                   {:optional true}
+                   :seon.ns.import/target-class]],
+                 :local :symbol,
+                 :target-class :symbol}

@@ -1,272 +1,267 @@
-{
-; ONE PROVIDER, ONE ATTEMPT, ONE DEADLINE. Authentication is exactly
- ; one of two explicit shapes: the NAME of the environment variable
- ; holding the credential, or the literal no-auth fact. The credential
- ; itself is read at the leaf and never becomes a datom.
- :seon.ai/api-key-variable [:string {:min 1}]
- ; Literal true rather than boolean: false would be a second spelling
- ; for the authenticated shape. The target/request unions below make
- ; both and neither unrepresentable.
- :seon.config.ai/no-auth
- [:= {:seon.config/optional true :seon.config/per-agent true} true]
- :seon.ai/endpoint [:string {:min 1}]
- :seon.ai/model [:string {:min 1}]
- ; One value makes contradictory toggle/effort pairs unrepresentable.
- ; Absence leaves the provider default untouched; :disabled sends an
- ; explicit off switch; every other value sends enabled + that effort.
- :seon.ai/thinking [:enum :disabled :low :high :max]
- :seon.ai/temperature :seon.config.ai/temperature
- :seon.ai/top-p :seon.config.ai/top-p
- :seon.ai/frequency-penalty :seon.config.ai/frequency-penalty
- :seon.ai/presence-penalty :seon.config.ai/presence-penalty
- :seon.ai/stop :seon.config.ai/stop
- :seon.ai/response-format :seon.config.ai/response-format
- :seon.ai/extra-body-edn :seon.config.ai/extra-body-edn
- ; The provider's output budget. This bounds reasoning and visible
- ; completion together on the OpenAI-compatible wire; keeping thinking
- ; enabled is safe only when the request carries this positive cap.
- :seon.ai/max-tokens [:int {:min 1}]
- :seon.ai/prompt [:string {:min 1}]
- :seon.ai/system [:string {:min 1}]
- ; The one legitimate deadline in the rung: a remote HTTP call is
- ; genuinely unobservable external state. Its firing is an ordinary
- ; error value, never a bug report.
- :seon.ai/timeout-ms [:int {:min 1}]
- :seon.ai/text [:string {:min 1}]
- ; Provider reasoning is a separate projection from visible reply text.
- ; The settled value is persisted on the attempt; the partial exists only
- ; while the same lossy stream snapshot is in flight.
- :seon.ai/reasoning-content [:string {:min 1}]
- :seon.ai/reasoning-partial :string
- ; STREAMING is a transport choice and nothing more
- ; (docs/seon/reference/llm-adapters.md:545-563: wire transport and reply
- ; evaluation are independent). Its one invariant, quoted from that
- ; authority because it is the thing a partial-display feature always
- ; breaks: "Partial display is presentation-only and cannot affect
- ; transport, parsing, usage, or evaluation." A streamed call and a
- ; one-shot call return the SAME completion value.
- :seon.ai/stream? :boolean
-
- ; Where partials GO, injected by the caller rather than known here.
- ; `seon.ai` owns the wire and the fold; it does not own the database,
- ; so it cannot be the thing that decides a partial becomes a datom.
- ; The sink is called with a snapshot and its return value is ignored —
- ; presentation may lag or drop, and it may never slow the call.
- :seon.ai/sink [:fn {:gen/gen seon.ai/sink-generator} seon.ai/sink?]
-
- ; The provider's own usage map, retained as the NEWEST seen. Kept
- ; independently of choices because Gemini attaches cumulative usage to
- ; content chunks while OpenAI-compatible providers emit one final
- ; choices-empty chunk — the portable fold must not assume either.
- :seon.ai/json-value
- [:schema
-  {:registry
-   {:seon.ai.json/value
-    [:or
-     :nil
-     :boolean
-     [:or :int :double]
-     :string
-     [:vector [:ref :seon.ai.json/value]]
-     [:map-of :string [:ref :seon.ai.json/value]]]}}
-  [:ref :seon.ai.json/value]]
- :seon.ai/usage [:map-of :string :seon.ai/json-value]
- :seon.ai/tokens [:int {:min 0}]
- :seon.ai/finish-reason [:string {:min 1}]
-
- ; Request settings are canonical Clojure data until this one projection
- ; applies the registration's [wire-key coercion] pairs.
- :seon.ai/sent [:map-of :string :seon.ai/json-value]
- :seon.ai/inert [:set :qualified-keyword]
- :seon.ai/wire-settings
- [:map
-  [:seon.ai/sent :seon.ai/sent]
-  [:seon.ai/inert :seon.ai/inert]]
- :seon.ai/request-body [:or :seon.ai/sent :seon.error/value]
- :seon.ai/settings :seon.config/effective
-
- ; Open provider usage stays open on the attempt; these comparable counts are
- ; derived at read and never stored beside their source document.
- :seon.ai.usage/prompt-tokens :seon.ai/tokens
- :seon.ai.usage/completion-tokens :seon.ai/tokens
- :seon.ai.usage/total-tokens :seon.ai/tokens
- :seon.ai.usage/cached-tokens :seon.ai/tokens
- :seon.ai/normalized-usage
- [:map
-  [:seon.ai.usage/prompt-tokens {:optional true} :seon.ai.usage/prompt-tokens]
-  [:seon.ai.usage/completion-tokens {:optional true} :seon.ai.usage/completion-tokens]
-  [:seon.ai.usage/total-tokens {:optional true} :seon.ai.usage/total-tokens]
-  [:seon.ai.usage/cached-tokens {:optional true} :seon.ai.usage/cached-tokens]]
-
- ; One snapshot handed to the sink: everything so far, plus the live
- ; token count derived from the SAME fold rather than counted twice.
- :seon.ai/partial
- [:map
-  [:seon.ai/text :string]
-  [:seon.ai/reasoning-partial {:optional true} :seon.ai/reasoning-partial]
-  [:seon.ai/tokens :seon.ai/tokens]
-  [:seon.ai/usage {:optional true} :seon.ai/usage]
-  [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]]
-
- :seon.ai/request
- [:or
-  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]
-  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/system {:optional true} :seon.ai/system] [:seon.ai/prompt :seon.ai/prompt] [:seon.ai/timeout-ms :seon.ai/timeout-ms] [:seon.ai/stream? {:optional true} :seon.ai/stream?] [:seon.ai/sink {:optional true} :seon.ai/sink]]]
- :seon.ai/completion [:or [:map  [:seon.ai/text :seon.ai/text] [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content] [:seon.ai/usage {:optional true} :seon.ai/usage] [:seon.ai/tokens {:optional true} :seon.ai/tokens] [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]] :seon.error/value]
-
- ; ---------------------------------------------------------------------
- ; THE DESCRIPTOR ROW. A target is one callable model: the four wire
- ; facts and nothing else. A `:seon.ai/request` IS a target plus what to
- ; say, which is why `complete` takes `(assoc target :seon.ai/prompt …)`
- ; and no adapter sits between them.
- ; The two ROLES are registered in their own right so every key in
- ; `:seon.ai/targets` resolves through the registry like every other
- ; key here. Neither carries a persistence facet, so neither becomes a
- ; database attribute — the roles are a shape, not a row.
- :seon.ai/primary :seon.ai/target
- :seon.ai/backup :seon.ai/target
- :seon.ai/target
- [:or
-  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.ai/api-key-variable :seon.ai/api-key-variable] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
-  [:map  [:seon.ai/endpoint :seon.ai/endpoint] [:seon.ai/model :seon.ai/model] [:seon.ai/max-tokens :seon.ai/max-tokens] [:seon.config.ai/no-auth :seon.config.ai/no-auth] [:seon.ai/thinking {:optional true} :seon.ai/thinking] [:seon.ai/temperature {:optional true} :seon.ai/temperature] [:seon.ai/top-p {:optional true} :seon.ai/top-p] [:seon.ai/frequency-penalty {:optional true} :seon.ai/frequency-penalty] [:seon.ai/presence-penalty {:optional true} :seon.ai/presence-penalty] [:seon.ai/stop {:optional true} :seon.ai/stop] [:seon.ai/response-format {:optional true} :seon.ai/response-format] [:seon.ai/extra-body-edn {:optional true} :seon.ai/extra-body-edn] [:seon.ai/timeout-ms :seon.ai/timeout-ms]]]
- ; TWO ROLES, and the backup is ABSENT rather than nil when there is
- ; none — absence is the state, and `:seon.ai/backup?` downstream is
- ; literally `(contains? targets :seon.ai/backup)`.
- :seon.ai/targets [:map  [:seon.ai/primary :seon.ai/target] [:seon.ai/backup {:optional true} :seon.ai/target]]
-
- ; ---------------------------------------------------------------------
- ; THE BACKOFF STRATEGY, as data. Composed the way `again` composes it
- ; (multiplicative → randomize → clamp → max-retries → max-duration),
- ; but DERIVED rather than executed: `seon.ai/delays` turns these six
- ; facts plus injected randomness into a finite vector of waits, so the
- ; whole schedule is one value a seeded property can pin.
- :seon.ai.retry/base-delay-ms [:int {:min 1}]
- :seon.ai.retry/multiplier [:double {:min 1.0}]
- :seon.ai.retry/jitter-fraction [:double {:min 0.0 :max 1.0}]
- :seon.ai.retry/maximum-delay-ms [:int {:min 1}]
- ; zero retries is a legitimate configuration: it turns `:backoff` into
- ; `:fail` by data rather than by a code branch.
- :seon.ai.retry/maximum-retries [:int {:min 0}]
- :seon.ai.retry/maximum-total-delay-ms [:int {:min 0}]
- :seon.ai.retry/strategy [:map  [:seon.ai.retry/base-delay-ms :seon.ai.retry/base-delay-ms] [:seon.ai.retry/multiplier :seon.ai.retry/multiplier] [:seon.ai.retry/jitter-fraction :seon.ai.retry/jitter-fraction] [:seon.ai.retry/maximum-delay-ms :seon.ai.retry/maximum-delay-ms] [:seon.ai.retry/maximum-retries :seon.ai.retry/maximum-retries] [:seon.ai.retry/maximum-total-delay-ms :seon.ai.retry/maximum-total-delay-ms]]
- :seon.ai.retry/delays [:vector [:int {:min 0}]]
-
- ; ---------------------------------------------------------------------
- ; THE ATTEMPT FACT — one durable row per model call, and the reason the
- ; whole failover story is a query rather than a log grep. Without it,
- ; a successful backup ERASES the primary's failure and "nothing retried
- ; a paid call" is unprovable after the fact.
- ;
- ; It is warranted despite the crash model's aversion to replay ledgers,
- ; and the distinction is exact: a remote call's OCCURRENCE and its
- ; payment-safety evidence are not derivable from anything else we hold.
- ; The row authorizes no replay — nothing reads it to decide what to do
- ; next, only to say what happened.
- ;
- ; ONE ROW PER ATTEMPT, WRITTEN AFTER THE CALL, deliberately. A
- ; before-the-call `:running` row would be a second interruption
- ; mechanism for a fact nothing reads: a process that dies mid-call
- ; already leaves a claimed run that `work/interruption` finds and the
- ; loop settles, and nothing re-calls either way. The honest cost is
- ; named: a crash mid-call leaves NO attempt row, so the chain says
- ; "the call was never recorded", not "the call never happened".
- :seon.ai.attempt/id [:string {:min 1 :seon.db/identity true}]
- ; DERIVED as <run-id>-attempt-<ordinal>, so a re-entered `:call` pass
- ; appends rather than overwriting, and the chain reads in order.
- :seon.ai.attempt/run [:and {:seon.db/index true} :seon.db/ref]
- :seon.ai.attempt/ordinal [:int {:min 0}]
- :seon.ai.attempt/at :inst
- ; The provider's open usage document after JSON decoding. Persisted as
- ; EDN because its string-keyed, provider-owned shape is deliberately
- ; open; cached-token normalization remains a read-time derivation.
- :seon.ai.attempt/usage-edn [:string {:seon.db/no-history? true}]
- ; The SAME inline/blob split as eval results, using the same configured
- ; threshold. Digest shape is direct so schema-derived history GC reaches it.
- :seon.ai.attempt/reasoning :string
- :seon.ai.attempt/reasoning-blob :seon.blob/digest
- :seon.ai.attempt/reasoning-size [:int {:min 1}]
- ; The complete resolved config map used for this attempt. It is an
- ; observation of the call, not a provider usage field or derived warning.
- :seon.ai.attempt/settings-edn [:string {:seon.db/no-history? true}]
- :seon.ai.attempt/finish-reason :seon.ai/finish-reason
- ; The error FACT this attempt produced — the whole normalized record
- ; with its signature, prose projection and evidence, never a copy of
- ; its message. ITS PRESENCE IS THE OUTCOME (owner ruling 2026-07-28):
- ; an attempt failed exactly when it points at an error fact, and there
- ; is no stored :success/:error label restating that.
- :seon.ai.attempt/error :seon.db/ref
- ; ROLE BY CONNECTION, never a `:primary`/`:backup` stamp: an attempt is
- ; the backup exactly when it points at the attempt it replaced. That
- ; ref is also the proof of WHICH failure supplied its context.
- :seon.ai.attempt/failover-from :seon.db/ref
- ; The wait that preceded this attempt, present only on a backoff retry.
- :seon.ai.attempt/delay-ms [:int {:min 0}]
- ; The descriptor fields and the transport evidence keep the names the
- ; PRODUCERS already use — `seon.ai/target`'s own endpoint/model and the
- ; leaf's own `:seon.error/data` evidence keys — so reading a row back
- ; needs no translation table. The row stores OBSERVATIONS only (owner
- ; ruling 2026-07-28): the disposition acted on and the error class are
- ; pure functions of the durable evidence (`seon.ai/disposition`,
- ; `status-class`, the error fact's data-edn), derived at read rather
- ; than frozen beside the facts they restate.
- :seon.ai/attempt
- [:map {:seon.db/entity true
-        :seon.render/ai seon.ai/attempt-ai
-        :seon.render/html seon.ai/attempt-html}
-  [:seon.ai.attempt/id :seon.ai.attempt/id]
-  [:seon.ai.attempt/run :seon.ai.attempt/run]
-  [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
-  [:seon.ai.attempt/at :seon.ai.attempt/at]
-  [:seon.ai/endpoint :seon.ai/endpoint]
-  [:seon.ai/model :seon.ai/model]
-  [:seon.ai.attempt/settings-edn :seon.ai.attempt/settings-edn]
-  [:seon.ai.attempt/usage-edn {:optional true} :seon.ai.attempt/usage-edn]
-  [:seon.ai.attempt/reasoning {:optional true} :seon.ai.attempt/reasoning]
-  [:seon.ai.attempt/reasoning-blob
-   {:optional true}
-   :seon.ai.attempt/reasoning-blob]
-  [:seon.ai.attempt/reasoning-size
-   {:optional true}
-   :seon.ai.attempt/reasoning-size]
-  [:seon.ai.attempt/finish-reason
-   {:optional true}
-   :seon.ai.attempt/finish-reason]
-  [:seon.ai/http-status {:optional true} :seon.ai/http-status]
-  [:seon.ai/request-transmitted?
-   {:optional true}
-   :seon.ai/request-transmitted?]
-  [:seon.ai/response-started? {:optional true} :seon.ai/response-started?]
-  [:seon.ai/output-observed? {:optional true} :seon.ai/output-observed?]
-  [:seon.ai.attempt/error {:optional true} :seon.ai.attempt/error]
-  [:seon.ai.attempt/failover-from
-   {:optional true}
-   :seon.ai.attempt/failover-from]
-  [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]]
-
- ; ---------------------------------------------------------------------
- ; THE EVIDENCE A FAILOVER DECISION NEEDS, and the reason it lives here:
- ; only the leaf knows what actually happened on the wire. The five flat
- ; kinds are unchanged and stay the agent-facing shape; these are
- ; namespaced fields inside `:seon.error/data`, never a nested envelope.
- ;
- ; `error-class` is NORMALIZED — derived from the JDK's own exception
- ; taxonomy and the HTTP status, which is the dependency's vocabulary
- ; rather than a list we invented. The three phase booleans are what
- ; make "did this cost anything?" answerable instead of guessed, and
- ; that question is the whole no-retry ruling.
- :seon.ai/error-class [:enum :credential :transport-before-send :transport-unknown :timeout :rate-limit :server :authentication :authorization :model :request :response]
- :seon.ai/http-status [:int {:min 100 :max 599}]
- ; TRANSMITTED means the request left this machine, so the provider may
- ; have done paid work. UNKNOWN counts as transmitted: the ruling is
- ; strict, and "we cannot prove it was free" is not "it was free".
- :seon.ai/request-transmitted? :boolean
- :seon.ai/response-started? :boolean
- :seon.ai/output-observed? :boolean
-
- ; ONE DISPOSITION, computed. Three ordinary values, and the reducer
- ; that produces them is pure over the evidence above plus whether a
- ; backup exists.
- :seon.ai/disposition [:enum :failover-now :backoff :fail]
- :seon.ai/backup? :boolean
- :seon.ai/disposition-request [:map  [:seon.error/value :seon.error/value] [:seon.ai/backup? :seon.ai/backup?]]
-}
+#:seon.ai{:api-key-variable [:string {:min 1}],
+          :attempt
+          [:map
+           {:seon.db/entity true,
+            :seon.render/ai seon.ai/attempt-ai,
+            :seon.render/html seon.ai/attempt-html}
+           [:seon.ai.attempt/id :seon.ai.attempt/id]
+           [:seon.ai.attempt/run :seon.ai.attempt/run]
+           [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+           [:seon.ai.attempt/at :seon.ai.attempt/at]
+           [:seon.ai/endpoint :seon.ai/endpoint]
+           [:seon.ai/model :seon.ai/model]
+           [:seon.ai.attempt/settings-edn
+            :seon.ai.attempt/settings-edn]
+           [:seon.ai.attempt/usage-edn
+            {:optional true}
+            :seon.ai.attempt/usage-edn]
+           [:seon.ai.attempt/reasoning
+            {:optional true}
+            :seon.ai.attempt/reasoning]
+           [:seon.ai.attempt/reasoning-blob
+            {:optional true}
+            :seon.ai.attempt/reasoning-blob]
+           [:seon.ai.attempt/reasoning-size
+            {:optional true}
+            :seon.ai.attempt/reasoning-size]
+           [:seon.ai.attempt/finish-reason
+            {:optional true}
+            :seon.ai.attempt/finish-reason]
+           [:seon.ai/http-status {:optional true} :seon.ai/http-status]
+           [:seon.ai/request-transmitted?
+            {:optional true}
+            :seon.ai/request-transmitted?]
+           [:seon.ai/response-started?
+            {:optional true}
+            :seon.ai/response-started?]
+           [:seon.ai/output-observed?
+            {:optional true}
+            :seon.ai/output-observed?]
+           [:seon.ai.attempt/error
+            {:optional true}
+            :seon.ai.attempt/error]
+           [:seon.ai.attempt/failover-from
+            {:optional true}
+            :seon.ai.attempt/failover-from]
+           [:seon.ai.attempt/delay-ms
+            {:optional true}
+            :seon.ai.attempt/delay-ms]],
+          :backup :seon.ai/target,
+          :backup? :boolean,
+          :completion
+          [:or
+           [:map
+            [:seon.ai/text :seon.ai/text]
+            [:seon.ai/reasoning-content
+             {:optional true}
+             :seon.ai/reasoning-content]
+            [:seon.ai/usage {:optional true} :seon.ai/usage]
+            [:seon.ai/tokens {:optional true} :seon.ai/tokens]
+            [:seon.ai/finish-reason
+             {:optional true}
+             :seon.ai/finish-reason]]
+           :seon.error/value],
+          :disposition [:enum :failover-now :backoff :fail],
+          :disposition-request
+          [:map
+           [:seon.error/value :seon.error/value]
+           [:seon.ai/backup? :seon.ai/backup?]],
+          :endpoint [:string {:min 1}],
+          :error-class
+          [:enum
+           :credential
+           :transport-before-send
+           :transport-unknown
+           :timeout
+           :rate-limit
+           :server
+           :authentication
+           :authorization
+           :model
+           :request
+           :response],
+          :extra-body-edn :seon.config.ai/extra-body-edn,
+          :finish-reason [:string {:min 1}],
+          :frequency-penalty :seon.config.ai/frequency-penalty,
+          :http-status [:int {:min 100, :max 599}],
+          :inert [:set :qualified-keyword],
+          :json-value
+          [:schema
+           {:registry
+            #:seon.ai.json{:value
+                           [:or
+                            :nil
+                            :boolean
+                            [:or :int :double]
+                            :string
+                            [:vector [:ref :seon.ai.json/value]]
+                            [:map-of
+                             :string
+                             [:ref :seon.ai.json/value]]]}}
+           [:ref :seon.ai.json/value]],
+          :max-tokens [:int {:min 1}],
+          :model [:string {:min 1}],
+          :normalized-usage
+          [:map
+           [:seon.ai.usage/prompt-tokens
+            {:optional true}
+            :seon.ai.usage/prompt-tokens]
+           [:seon.ai.usage/completion-tokens
+            {:optional true}
+            :seon.ai.usage/completion-tokens]
+           [:seon.ai.usage/total-tokens
+            {:optional true}
+            :seon.ai.usage/total-tokens]
+           [:seon.ai.usage/cached-tokens
+            {:optional true}
+            :seon.ai.usage/cached-tokens]],
+          :output-observed? :boolean,
+          :partial
+          [:map
+           [:seon.ai/text :string]
+           [:seon.ai/reasoning-partial
+            {:optional true}
+            :seon.ai/reasoning-partial]
+           [:seon.ai/tokens :seon.ai/tokens]
+           [:seon.ai/usage {:optional true} :seon.ai/usage]
+           [:seon.ai/finish-reason
+            {:optional true}
+            :seon.ai/finish-reason]],
+          :presence-penalty :seon.config.ai/presence-penalty,
+          :primary :seon.ai/target,
+          :prompt [:string {:min 1}],
+          :reasoning-content [:string {:min 1}],
+          :reasoning-partial :string,
+          :request
+          [:or
+           [:map
+            [:seon.ai/endpoint :seon.ai/endpoint]
+            [:seon.ai/model :seon.ai/model]
+            [:seon.ai/max-tokens :seon.ai/max-tokens]
+            [:seon.ai/api-key-variable :seon.ai/api-key-variable]
+            [:seon.ai/thinking {:optional true} :seon.ai/thinking]
+            [:seon.ai/temperature
+             {:optional true}
+             :seon.ai/temperature]
+            [:seon.ai/top-p {:optional true} :seon.ai/top-p]
+            [:seon.ai/frequency-penalty
+             {:optional true}
+             :seon.ai/frequency-penalty]
+            [:seon.ai/presence-penalty
+             {:optional true}
+             :seon.ai/presence-penalty]
+            [:seon.ai/stop {:optional true} :seon.ai/stop]
+            [:seon.ai/response-format
+             {:optional true}
+             :seon.ai/response-format]
+            [:seon.ai/extra-body-edn
+             {:optional true}
+             :seon.ai/extra-body-edn]
+            [:seon.ai/system {:optional true} :seon.ai/system]
+            [:seon.ai/prompt :seon.ai/prompt]
+            [:seon.ai/timeout-ms :seon.ai/timeout-ms]
+            [:seon.ai/stream? {:optional true} :seon.ai/stream?]
+            [:seon.ai/sink {:optional true} :seon.ai/sink]]
+           [:map
+            [:seon.ai/endpoint :seon.ai/endpoint]
+            [:seon.ai/model :seon.ai/model]
+            [:seon.ai/max-tokens :seon.ai/max-tokens]
+            [:seon.config.ai/no-auth :seon.config.ai/no-auth]
+            [:seon.ai/thinking {:optional true} :seon.ai/thinking]
+            [:seon.ai/temperature
+             {:optional true}
+             :seon.ai/temperature]
+            [:seon.ai/top-p {:optional true} :seon.ai/top-p]
+            [:seon.ai/frequency-penalty
+             {:optional true}
+             :seon.ai/frequency-penalty]
+            [:seon.ai/presence-penalty
+             {:optional true}
+             :seon.ai/presence-penalty]
+            [:seon.ai/stop {:optional true} :seon.ai/stop]
+            [:seon.ai/response-format
+             {:optional true}
+             :seon.ai/response-format]
+            [:seon.ai/extra-body-edn
+             {:optional true}
+             :seon.ai/extra-body-edn]
+            [:seon.ai/system {:optional true} :seon.ai/system]
+            [:seon.ai/prompt :seon.ai/prompt]
+            [:seon.ai/timeout-ms :seon.ai/timeout-ms]
+            [:seon.ai/stream? {:optional true} :seon.ai/stream?]
+            [:seon.ai/sink {:optional true} :seon.ai/sink]]],
+          :request-body [:or :seon.ai/sent :seon.error/value],
+          :request-transmitted? :boolean,
+          :response-format :seon.config.ai/response-format,
+          :response-started? :boolean,
+          :sent [:map-of :string :seon.ai/json-value],
+          :settings :seon.config/effective,
+          :sink [:fn #:gen{:gen seon.ai/sink-generator} seon.ai/sink?],
+          :stop :seon.config.ai/stop,
+          :stream? :boolean,
+          :system [:string {:min 1}],
+          :target
+          [:or
+           [:map
+            [:seon.ai/endpoint :seon.ai/endpoint]
+            [:seon.ai/model :seon.ai/model]
+            [:seon.ai/max-tokens :seon.ai/max-tokens]
+            [:seon.ai/api-key-variable :seon.ai/api-key-variable]
+            [:seon.ai/thinking {:optional true} :seon.ai/thinking]
+            [:seon.ai/temperature
+             {:optional true}
+             :seon.ai/temperature]
+            [:seon.ai/top-p {:optional true} :seon.ai/top-p]
+            [:seon.ai/frequency-penalty
+             {:optional true}
+             :seon.ai/frequency-penalty]
+            [:seon.ai/presence-penalty
+             {:optional true}
+             :seon.ai/presence-penalty]
+            [:seon.ai/stop {:optional true} :seon.ai/stop]
+            [:seon.ai/response-format
+             {:optional true}
+             :seon.ai/response-format]
+            [:seon.ai/extra-body-edn
+             {:optional true}
+             :seon.ai/extra-body-edn]
+            [:seon.ai/timeout-ms :seon.ai/timeout-ms]]
+           [:map
+            [:seon.ai/endpoint :seon.ai/endpoint]
+            [:seon.ai/model :seon.ai/model]
+            [:seon.ai/max-tokens :seon.ai/max-tokens]
+            [:seon.config.ai/no-auth :seon.config.ai/no-auth]
+            [:seon.ai/thinking {:optional true} :seon.ai/thinking]
+            [:seon.ai/temperature
+             {:optional true}
+             :seon.ai/temperature]
+            [:seon.ai/top-p {:optional true} :seon.ai/top-p]
+            [:seon.ai/frequency-penalty
+             {:optional true}
+             :seon.ai/frequency-penalty]
+            [:seon.ai/presence-penalty
+             {:optional true}
+             :seon.ai/presence-penalty]
+            [:seon.ai/stop {:optional true} :seon.ai/stop]
+            [:seon.ai/response-format
+             {:optional true}
+             :seon.ai/response-format]
+            [:seon.ai/extra-body-edn
+             {:optional true}
+             :seon.ai/extra-body-edn]
+            [:seon.ai/timeout-ms :seon.ai/timeout-ms]]],
+          :targets
+          [:map
+           [:seon.ai/primary :seon.ai/target]
+           [:seon.ai/backup {:optional true} :seon.ai/target]],
+          :temperature :seon.config.ai/temperature,
+          :text [:string {:min 1}],
+          :thinking [:enum :disabled :low :high :max],
+          :timeout-ms [:int {:min 1}],
+          :tokens [:int {:min 0}],
+          :top-p :seon.config.ai/top-p,
+          :usage [:map-of :string :seon.ai/json-value],
+          :wire-settings
+          [:map
+           [:seon.ai/sent :seon.ai/sent]
+           [:seon.ai/inert :seon.ai/inert]]}

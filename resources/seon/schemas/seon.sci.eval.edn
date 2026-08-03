@@ -1,79 +1,119 @@
-{
-; THE ONE LIMIT. Time, and nothing else: sci counts no steps and has no
- ; step concept, so a wall-clock deadline read at every interpreted fn
- ; body entrance is the whole mechanism (reference-code/sci/doc/
- ; interrupt.md:23-35). :seon.eval/fn-entries is RECORDED beside it and
- ; is never a limit — 271M entries in 500ms reads as a spin, 12 reads as
- ; blocked in a host call.
- :seon.sci.eval/time-limit-ms [:int {:min 1}]
- ; sci's own word for an interpreter context; one live context belongs to
- ; each cluster, so every agent in that cluster shares definitions while
- ; another cluster remains isolated.
- :seon.sci.eval/ctx [:fn {:gen/gen seon.sci.eval/ctx-generator} seon.sci.eval/ctx?]
- :seon.sci.eval/args [:vector :any]
- :seon.sci.eval/invocation-request
- [:map
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.db/db :seon.db/database-value]
-  [:seon.fn/sym :seon.fn/sym]
-  [:seon.sci.eval/args :seon.sci.eval/args]
-  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
-  [:seon.sci.admit/caps :seon.sci.admit/caps]
-  [:seon.db/capture-context {:optional true}
-   [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]]
-  [:seon.config/on-core-error :seon.config/on-core-error]]
- :seon.sci.eval/invocation-result
- [:map
-  [:seon.sci.admit/print-node :seon.print/node]
-  [:seon.sci.admit/value :any]
-  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
-  [:seon.sci.admit/record :seon.sci.admit/record]]
- :seon.schema/arguments [:vector :any]
- :seon.sci.eval/program-row :map
- :seon.sci.eval/referenced-vars [:set :symbol]
- :seon.sci.eval/unproven-called-vars [:set :symbol]
- :seon.sci.eval/nondeterministic-calls [:set :symbol]
- :seon.sci.eval/impure-calls [:set :symbol]
- :seon.sci.eval/session-def
- [:map
-  [:seon.code.def/id :seon.code.def/id]
-  [:seon.code.def/ns :seon.code.def/ns]
-  [:seon.code.def/name :seon.code.def/name]
-  [:seon.code.def/source :seon.code.def/source]
-  [:seon.sci.eval/value :any]
-  [:seon.sci.eval/referenced-vars :seon.sci.eval/referenced-vars]
-  [:seon.sci.eval/unproven-called-vars
-   :seon.sci.eval/unproven-called-vars]
-  [:seon.sci.eval/nondeterministic-calls
-   :seon.sci.eval/nondeterministic-calls]
-  [:seon.sci.eval/impure-calls :seon.sci.eval/impure-calls]]
- :seon.sci.eval/session-defs [:vector :seon.sci.eval/session-def]
- :seon.sci.eval/install-request
- [:map
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.db/db :seon.db/database-value]
-  [:seon.sci.eval/program-row :seon.sci.eval/program-row]]
- :seon.sci.eval/acquire-request
- [:map
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.db/db :seon.db/database-value]]
- :seon.sci.eval/session-install-request
- [:map
-  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-  [:seon.db/db :seon.db/database-value]
-  [:seon.store/branch-connection {:optional true}
-   :seon.store/branch-connection]]
- ; The error disposition is REQUIRED and is passed straight to
- ; admission: R41 decides what a projection failure does, and a caller
- ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.run.form/ordinal {:optional true} :seon.cluster.run.form/ordinal] [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
- ; What one evaluation leaves behind: the terminal facts the receipt
- ; stores (result-edn always; error when it failed; interrupted-at when
- ; the time limit fired), the admitted value the loop reads a
- ; disposition out of, the printed projection, and the diagnostics.
- ; Nothing here is optional-by-nil — an absent key means the evaluation
- ; had no such thing, and PRESENCE IS THE STATE: there is no status
- ; label restating which keys exist (owner ruling 2026-07-28).
- :seon.sci.eval/ending-ns :symbol
- :seon.sci.eval/evaluation [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options :seon.print/options] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
-}
+#:seon.sci.eval{:acquire-request
+                [:map
+                 [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.db/db :seon.db/database-value]],
+                :args [:vector :any],
+                :ctx
+                [:fn
+                 #:gen{:gen seon.sci.eval/ctx-generator}
+                 seon.sci.eval/ctx?],
+                :ending-ns :symbol,
+                :evaluation
+                [:map
+                 [:seon.sci.admit/value :any]
+                 [:seon.cluster.eval/result-edn
+                  :seon.cluster.eval/result-edn]
+                 [:seon.cluster.eval/error
+                  {:optional true}
+                  :seon.cluster.eval/error]
+                 [:seon.cluster.eval/interrupted-at
+                  {:optional true}
+                  :seon.cluster.eval/interrupted-at]
+                 [:seon.cluster.eval/output
+                  {:optional true}
+                  :seon.cluster.eval/output]
+                 [:seon.cluster.eval/ns :seon.cluster.eval/ns]
+                 [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns]
+                 [:seon.sci.eval/program-row
+                  {:optional true}
+                  :seon.sci.eval/program-row]
+                 [:seon.sci.eval/session-defs
+                  {:optional true}
+                  :seon.sci.eval/session-defs]
+                 [:seon.print/options :seon.print/options]
+                 [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+                 [:seon.sci.admit/record :seon.sci.admit/record]],
+                :impure-calls [:set :symbol],
+                :install-request
+                [:map
+                 [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.db/db :seon.db/database-value]
+                 [:seon.sci.eval/program-row
+                  :seon.sci.eval/program-row]],
+                :invocation-request
+                [:map
+                 [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.db/db :seon.db/database-value]
+                 [:seon.fn/sym :seon.fn/sym]
+                 [:seon.sci.eval/args :seon.sci.eval/args]
+                 [:seon.sci.eval/time-limit-ms
+                  :seon.sci.eval/time-limit-ms]
+                 [:seon.sci.admit/caps :seon.sci.admit/caps]
+                 [:seon.db/capture-context
+                  {:optional true}
+                  [:fn
+                   #:gen{:gen seon.flow/atom-reference-generator}
+                   seon.flow/atom-reference?]]
+                 [:seon.config/on-core-error
+                  :seon.config/on-core-error]],
+                :invocation-result
+                [:map
+                 [:seon.sci.admit/print-node :seon.print/node]
+                 [:seon.sci.admit/value :any]
+                 [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+                 [:seon.sci.admit/record :seon.sci.admit/record]],
+                :nondeterministic-calls [:set :symbol],
+                :program-row :map,
+                :referenced-vars [:set :symbol],
+                :request
+                [:map
+                 [:seon.cluster.run.form/source
+                  :seon.cluster.run.form/source]
+                 [:seon.cluster.run.form/ns
+                  {:optional true}
+                  :seon.cluster.run.form/ns]
+                 [:seon.sci.admit/caps :seon.sci.admit/caps]
+                 [:seon.sci.eval/time-limit-ms
+                  :seon.sci.eval/time-limit-ms]
+                 [:seon.config/on-core-error
+                  :seon.config/on-core-error]
+                 [:seon.sci.eval/ctx
+                  {:optional true}
+                  :seon.sci.eval/ctx]
+                 [:seon.cluster.agent/id
+                  {:optional true}
+                  :seon.cluster.agent/id]
+                 [:seon.cluster.run/id
+                  {:optional true}
+                  :seon.cluster.run/id]
+                 [:seon.cluster.run.form/ordinal
+                  {:optional true}
+                  :seon.cluster.run.form/ordinal]
+                 [:seon.boot/cluster-name
+                  {:optional true}
+                  :seon.boot/cluster-name]],
+                :session-def
+                [:map
+                 [:seon.code.def/id :seon.code.def/id]
+                 [:seon.code.def/ns :seon.code.def/ns]
+                 [:seon.code.def/name :seon.code.def/name]
+                 [:seon.code.def/source :seon.code.def/source]
+                 [:seon.sci.eval/value :any]
+                 [:seon.sci.eval/referenced-vars
+                  :seon.sci.eval/referenced-vars]
+                 [:seon.sci.eval/unproven-called-vars
+                  :seon.sci.eval/unproven-called-vars]
+                 [:seon.sci.eval/nondeterministic-calls
+                  :seon.sci.eval/nondeterministic-calls]
+                 [:seon.sci.eval/impure-calls
+                  :seon.sci.eval/impure-calls]],
+                :session-defs [:vector :seon.sci.eval/session-def],
+                :session-install-request
+                [:map
+                 [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.db/db :seon.db/database-value]
+                 [:seon.store/branch-connection
+                  {:optional true}
+                  :seon.store/branch-connection]],
+                :time-limit-ms [:int {:min 1}],
+                :unproven-called-vars [:set :symbol]}
