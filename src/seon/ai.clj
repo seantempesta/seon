@@ -60,7 +60,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
@@ -116,7 +116,7 @@
   [db agent-id]
   (let [attributes (map-attributes :seon.config/agent-overlay)]
     (select-keys
-     (or (d/pull db (vec attributes) [:seon.cluster.agent/id agent-id]) {})
+     (or (db/pull db (vec attributes) [:seon.cluster.agent/id agent-id]) {})
      attributes)))
 
 (defn- config-ai-ident->request-ident

@@ -142,7 +142,7 @@
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.error.refusal :as error.refusal]
             [seon.render :as render]
             [seon.render.walk :as walk]
@@ -638,7 +638,7 @@
   the record because the recipient was a typo is precisely the failure
   mode the fault path may not have."
   [db agent-id]
-  (some? (d/q '[:find ?agent .
+  (some? (db/q '[:find ?agent .
                 :in $ ?id
                 :where [?agent :seon.cluster.agent/id ?id]]
               db agent-id)))
@@ -650,7 +650,7 @@
   recipient would. The recorder may not be destroyed by the pointer it
   was handed: a run that vanished costs the REF, never the record."
   [db attribute value]
-  (some? (d/q '[:find ?entity .
+  (some? (db/q '[:find ?entity .
                 :in $ ?attribute ?value
                 :where [?entity ?attribute ?value]]
               db attribute value)))
@@ -662,7 +662,7 @@
   exactly the \"since this process started\" window the escalation rule
   wants, with no clock in it."
   [db signature process]
-  (count (d/q '[:find ?error
+  (count (db/q '[:find ?error
                 :in $ ?signature ?process
                 :where
                 [?error :seon.error/signature ?signature]

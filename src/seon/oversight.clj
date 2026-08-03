@@ -25,10 +25,10 @@
   (:require [clojure.core.async.flow :as flow]
             [clojure.datafy :as datafy]
             [clojure.string :as str]
-            [datahike.api :as d]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.render :as render]
             [seon.render.block :as block]))
 
@@ -38,7 +38,7 @@
 
 (defn- cluster-name
   [db]
-  (d/q '[:find ?name .
+  (db/q '[:find ?name .
          :where [_ :seon.cluster/name ?name]]
        db))
 
@@ -50,7 +50,7 @@
 (defn- connection-identity
   "The stable connection + generation portion of a committed db value."
   [db]
-  (some-> (d/committed-value-identity db)
+  (some-> (db/committed-value-identity db)
           (select-keys [:datahike.value/connection-id
                         :datahike.value/generation])))
 
@@ -78,7 +78,7 @@
 (defn- current-run-id
   "The run the agent currently points at, or nil."
   [db agent-id]
-  (d/q '[:find ?run-id .
+  (db/q '[:find ?run-id .
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]

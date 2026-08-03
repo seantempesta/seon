@@ -3,8 +3,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [datahike.api :as d]
             [seon.cluster.run :as run]
+            [seon.db :as db]
             [seon.schema :as schema]))
 
 (def plan-id
@@ -78,7 +78,7 @@
   [db]
   (let [forms (packaged-forms)
         digest (digest-value forms)
-        current (d/pull db
+        current (db/pull db
                         [:seon.bootstrap.plan/id
                          :seon.bootstrap.plan/digest]
                         [:seon.bootstrap.plan/id plan-id])]
@@ -108,7 +108,7 @@
 (defn- ordered-plan-rows
   [db cluster-name]
   (let [rows
-        (d/q
+        (db/q
          {:query
           '[:find ?ordinal ?source ?designation
             :in $ ?cluster-name
@@ -161,7 +161,7 @@
                   :seon.cluster.reply/sources]}
   [db agent-id]
   (let [[cluster-name namespace-name]
-        (d/q '[:find [?cluster-name ?namespace-name]
+        (db/q '[:find [?cluster-name ?namespace-name]
                :in $ ?agent-id
                :where
                [?agent :seon.cluster.agent/id ?agent-id]

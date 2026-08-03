@@ -64,6 +64,12 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   execution start. Its one planned core-read row is deferred so no prototype
   hunk enters this lane's commits; the final census must report that exact
   non-exempt remainder.
+- The leaf wave confirmed that `seon.db` statically requires `seon.schema` for
+  predicate registration and transaction encoding. A static reverse require
+  made `seon.schema` unloadable, so its four classified `q` sites now resolve
+  the explicit `seon.db/q` Var late. This is still the one database
+  implementation and preserves explicit custody; it is the cycle-breaking
+  equivalent of the existing late owner resolution in `seon.oversight`.
 
 ## Current source census
 

@@ -1,7 +1,7 @@
 (ns seon.cluster.instruction
   "Cluster-owned instruction facts and their verbatim family renders."
   (:require [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.schema.edn :as schema.edn]))
 
 (schema.edn/load! {})
@@ -45,7 +45,7 @@
    [:=> [:cat :seon.db/database-value]
     :seon.cluster/toolkit-namespaces]}
   [db]
-  (->> (d/q '[:find ?namespace-name ?private
+  (->> (db/q '[:find ?namespace-name ?private
               :where
               [?namespace :seon.ns/name ?namespace-name]
               [?function :seon.fn/ns ?namespace]

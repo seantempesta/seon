@@ -21,7 +21,6 @@
             [malli.registry :as mr]
             [clojure.set :as set]
             [clojure.walk :as walk]
-            [datahike.api :as d]
             [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
@@ -480,13 +479,17 @@
   (let [sources
         (when (contains? (dbi/-schema db) :seon.schema.admission/source)
           (set
-           (d/q '[:find [?source ...]
-                  :in $ ?tx
-                  :where
-                  [?declaration _ _ ?tx]
-                  [?declaration :seon.schema.admission/source ?source]]
-                db
-                asserting-tx-eid)))
+           ;; `seon.db` requires this namespace for predicate registration and
+           ;; transaction encoding. Resolve the one database Var late instead
+           ;; of recreating that load cycle.
+           ((requiring-resolve 'seon.db/q)
+            '[:find [?source ...]
+              :in $ ?tx
+              :where
+              [?declaration _ _ ?tx]
+              [?declaration :seon.schema.admission/source ?source]]
+            db
+            asserting-tx-eid)))
         recorded (when (= 1 (count sources)) (first sources))
         recognized? (contains? #{:core :agent} recorded)
         source (if recognized? recorded :agent)]
@@ -1746,23 +1749,26 @@
    (projection-from-rows
     {:seon.schema/database-value db
      :seon.schema/schema-rows
-     (d/q '[:find ?key ?form ?tx
-            :where
-            [?schema :seon.schema/key ?key ?tx]
-            [?schema :seon.schema/form ?form]]
-          db)
+     ((requiring-resolve 'seon.db/q)
+      '[:find ?key ?form ?tx
+        :where
+        [?schema :seon.schema/key ?key ?tx]
+        [?schema :seon.schema/form ?form]]
+      db)
      :seon.schema/function-contract-rows
-     (d/q '[:find ?sym ?spec ?tx
-            :where
-            [?function :seon.fn/sym ?sym]
-            [?function :seon.fn/spec ?spec ?tx]]
-          db)
+     ((requiring-resolve 'seon.db/q)
+      '[:find ?sym ?spec ?tx
+        :where
+        [?function :seon.fn/sym ?sym]
+        [?function :seon.fn/spec ?spec ?tx]]
+      db)
      :seon.schema/function-source-rows
-     (d/q '[:find ?sym ?source ?tx
-            :where
-            [?function :seon.fn/sym ?sym]
-            [?function :seon.fn/source ?source ?tx]]
-          db)
+     ((requiring-resolve 'seon.db/q)
+      '[:find ?sym ?source ?tx
+        :where
+        [?function :seon.fn/sym ?sym]
+        [?function :seon.fn/source ?source ?tx]]
+      db)
      :seon.schema/artifact-exports #{}
      :seon.schema/pure-predicate-symbols #{}}
     reusable-projection)))

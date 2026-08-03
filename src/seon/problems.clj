@@ -54,7 +54,7 @@
   Crash walk: pure, reads only. A kill loses a value nobody had
   committed; the next caller re-derives it from the same facts."
   (:require [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.work :as work]
             [seon.error :as error]
             [seon.render :as render]
@@ -73,7 +73,7 @@
 (defn- error-signatures
   "Every committed error, grouped by signature, worst-recurring first."
   [db]
-  (->> (d/q '[:find [(pull ?error [*]) ...]
+  (->> (db/q '[:find [(pull ?error [*]) ...]
               :where [?error :seon.error/signature _]]
             db)
        (group-by :seon.error/signature)
@@ -93,7 +93,7 @@
   "Runs held by a process that is not alive. Open runs only: a closed
   run held by a dead process is finished work, not stuck work."
   [db live-processes]
-  (->> (d/q '[:find ?id ?agent-id ?process
+  (->> (db/q '[:find ?id ?agent-id ?process
               :where
               [?run :seon.cluster.run/id ?id]
               [?run :seon.cluster.run/process ?process]
@@ -110,7 +110,7 @@
 
 (defn- failed-runs
   [db]
-  (->> (d/q '[:find ?id ?agent-id ?error
+  (->> (db/q '[:find ?id ?agent-id ?error
               :where
               [?run :seon.cluster.run/id ?id]
               [?run :seon.cluster.run/error ?error]
@@ -125,7 +125,7 @@
 
 (defn- errored-receipts
   [db]
-  (->> (d/q '[:find ?id ?run-id ?ordinal ?source ?kind ?error
+  (->> (db/q '[:find ?id ?run-id ?ordinal ?source ?kind ?error
               :where
               ;; PRESENCE IS THE STATE: an errored receipt is one that
               ;; carries an error — there is no status label to filter
@@ -159,7 +159,7 @@
   [db {:keys [:seon.cluster.run/id :seon.cluster.run.form/ordinal
               :seon.sci.eval/evaluation]}]
   (let [form
-        (d/q '[:find (pull ?form [*]) .
+        (db/q '[:find (pull ?form [*]) .
                :in $ ?run-id ?ordinal
                :where
                [?run :seon.cluster.run/id ?run-id]
@@ -177,7 +177,7 @@
     (when (and scoped? red? (not artifact?))
       (let [owner-id (work/form-owner db form)
             author-id
-            (d/q '[:find ?author-id .
+            (db/q '[:find ?author-id .
                    :in $ ?form
                    :where
                    [?form :seon.cluster.run.form/run ?run]
@@ -228,7 +228,7 @@
   outside trigger's run resets the count. Nothing here reads a counter
   or a flag, because none exists."
   [db]
-  (->> (d/q '[:find [?agent-id ...]
+  (->> (db/q '[:find [?agent-id ...]
               :where [_ :seon.cluster.agent/id ?agent-id]]
             db)
        sort
@@ -244,7 +244,7 @@
 (defn- unowned-namespaces
   "Source-bearing program namespaces with no assigned agent."
   [db]
-  (->> (d/q '[:find [?name ...]
+  (->> (db/q '[:find [?name ...]
               :where
               [?namespace :seon.ns/name ?name]
               [?namespace :seon.ns/source _]

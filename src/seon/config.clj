@@ -14,7 +14,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form])
@@ -278,7 +278,7 @@
    (select-keys
     (dissoc
      (or
-      (d/pull
+      (db/pull
        db
        '[*]
        [:seon.config/cluster (or cluster-name "default")])
