@@ -297,22 +297,28 @@
                 (admitted-projection parsed (:seon.sci.admit/caps unit))))]
     (admit/print-node-edn (print-node-window node (page-size unit)))))
 
+(defn- render-prepared
+  [unit output]
+  (if-let [projection (prepare unit)]
+    (if (= output :seon.render/html)
+      (render-html-data projection)
+      (render-ai-data projection))
+    (if (= output :seon.render/html)
+      [:div {:class "seon-error-card"}
+       [:span {:class "seon-error-card-message"}
+        (str "This panel needs :seon.sci.admit/caps on the unit; without "
+             "them nothing bounds what it would print.")]]
+      (str "This projection needs :seon.sci.admit/caps on the unit; without "
+           "them nothing bounds what it would say."))))
+
 (defn render-ai
   "Render any floor unit through the admitted text sink."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (if-let [projection (prepare unit)]
-    (render-ai-data projection)
-    (str "This projection needs :seon.sci.admit/caps on the unit; without "
-         "them nothing bounds what it would say.")))
+  (render-prepared unit :seon.render/ai))
 
 (defn render-html
   "Render any floor unit through the admitted hiccup sink."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-let [projection (prepare unit)]
-    (render-html-data projection)
-    [:div {:class "seon-error-card"}
-     [:span {:class "seon-error-card-message"}
-      (str "This panel needs :seon.sci.admit/caps on the unit; without "
-           "them nothing bounds what it would print.")]]))
+  (render-prepared unit :seon.render/html))

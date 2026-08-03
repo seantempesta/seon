@@ -640,19 +640,20 @@
                             render-base (assoc base
                                                :seon.render/distance
                                                render-distance)
-                            unit (cond-> (assoc pulled
-                                               :seon.db/db db
-                                               :seon.sci.admit/caps caps
-                                               :seon.render/distance
-                                               render-distance)
-                                   viewer-namespace
-                                   (assoc :seon.render/namespace
-                                          viewer-namespace))
                             typed-output (:seon.render/output request)
                             owner (owning-namespace db pulled)
                             legacy-resolution
                             (when-not typed-output
-                              (let [specific
+                              (let [unit
+                                    (cond-> (assoc pulled
+                                                   :seon.db/db db
+                                                   :seon.sci.admit/caps caps
+                                                   :seon.render/distance
+                                                   render-distance)
+                                      viewer-namespace
+                                      (assoc :seon.render/namespace
+                                             viewer-namespace))
+                                    specific
                                     (specific-projection unit kind overrides)
                                     resolved
                                     (render/resolve-unit
@@ -666,17 +667,20 @@
                                  (cond-> resolved floor? (assoc kind floor))
                                  :seon.render/projection (get resolved kind)
                                  :seon.render/would-fall-to-floor? floor?}))
+                            render-request
+                            (when typed-output
+                              (cond-> (assoc request
+                                             :seon.render/value pulled
+                                             :seon.render/distance
+                                             render-distance)
+                                owner
+                                (assoc :seon.render/namespace owner)))
                             rendered
                             (if typed-output
                               ((if (= typed-output :seon.render/html)
                                  render/render-html
                                  render/render-ai)
-                               (cond-> (assoc request
-                                              :seon.render/value pulled
-                                              :seon.render/distance
-                                              render-distance)
-                                 owner
-                                 (assoc :seon.render/namespace owner)))
+                               render-request)
                               (render/render
                                {:seon.render/unit
                                 (:seon.render/unit legacy-resolution)

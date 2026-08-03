@@ -74,6 +74,21 @@
        (is (= (str "B:" fixture-b) (render-ai request)))
        (is (= (str "A:" fixture-b)
               (render-ai (assoc request :seon.render/namespace fixture-a))))
+       (let [walked (walk/neighborhood
+                     {:seon.db/db database
+                      :seon.sci.eval/ctx ctx
+                      :seon.render.walk/lookup [:seon.ns/name fixture-b]
+                      :seon.render/output :seon.render/ai
+                      :seon.sci.admit/caps caps
+                      :seon.sci.eval/time-limit-ms 2000
+                      :seon.config/on-core-error :panic
+                      :seon.render/distance 0})]
+         (is (= (str "B:" fixture-b) (:seon.render/output walked)))
+         (is (not-any? #(contains? walked %)
+                       [:seon.render/unit
+                        :seon.render/kind
+                        :seon.render/projection
+                        :seon.render/would-fall-to-floor?])))
        (db/transact! connection
                      [[:db.fn/retractEntity
                        [:seon.fn/sym
