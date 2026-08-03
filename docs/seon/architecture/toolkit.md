@@ -129,23 +129,18 @@ request identity, or direct leaf binding. The flat `my.*` function supplies
 ordinary request data; `effect/request!` carries the one identity through
 admission, execution, receipt, and result.
 
-The four effect classes describe replay behavior at the entry boundary:
-
-- `:pure` is referentially transparent for its arguments, including a read at
-  an explicit immutable database value.
-- `:read` observes mutable external state without changing it and is safe to
-  run again without a receipt.
-- `:idempotent` mutates through a durable receipt. The effect owner assigns
-  one request identity; explicitly reusing it addresses the same recorded
-  request.
-- `:external` mutates without a durable receipt, so recovery never assumes that
-  replay is safe.
+Nothing re-executes. There are no replay classes: every capability request
+opens one durable receipt before dispatch and settles it exactly once, and a
+receipt left open by an interrupted process is marked `:interrupted` on
+recovery — the handler never runs again under the old identity. A new request
+from a new form is a new effect identity; requesting a cheap read again is
+ordinary new work, not replay. Effectfulness itself is a declared program
+fact (`:seon.effect/capability` on the owner's function row) reached by
+Datalog reachability, never a per-family class enum.
 
 The effect request identity is the only request identity across admission,
 leaf execution, transport, receipt, and result; families do not mint another
-operation ID. The exact durable request and replay schemas remain target work
-owned by the effect boundary; architecture does not invent attribute names
-before that schema is admitted.
+operation ID.
 
 ### Database and program graph
 

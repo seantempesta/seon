@@ -724,14 +724,17 @@ still event-driven through process exit; the clock is only the external-state
 backstop. `termination-grace-ms` bounds the genuinely foreign interval between
 polite tree termination and forced tree termination.
 
-The manifest's schema declarations carry the environment-name relationship as
-data. The handler queries effective config attributes whose schema has a
-`:seon.shell/environment` property and projects exactly those names into the
-child. Adding a later variable is another declared config attribute with that
-property; it does not require editing a variable list in shell code. The child
-does not inherit the JVM environment, where provider credentials live. The
-initial request has no environment override; this avoids defining secret and
-variable-name policy in the file/shell slice.
+The child process INHERITS THE COMPLETE PARENT ENVIRONMENT (owner ruling
+2026-08-03, applying the no-hobbling ruling: agents are trusted
+collaborators, we cannot know which value is a credential, and nothing is
+blocked or filtered on that basis). The config attributes above are OPTIONAL
+OVERRIDES layered on that inheritance, not a projection allowlist: a declared
+`:seon.shell/environment` property names the variable an override sets, and
+adding a later override is another declared config attribute — never a
+variable list in shell code. This section previously specified a sanitized
+child environment and was REWRITTEN under the ruling; no environment
+sanitization, credential filtering, or undeclared-variable blocking exists
+anywhere in `my.shell`.
 
 ### Request and result schemas
 
@@ -852,15 +855,18 @@ Errors: `:my.shell/cwd-refused`, `:my.shell/stdin-limit`,
   recorded survivor must be reconciled.
 - Produce output just below and just above the inline threshold. The logical
   digest and bytes must be identical across inline and blob representations.
-- Place provider credentials in the parent JVM environment and run an env dump;
-  no undeclared variable may reach the child.
+- Run an env dump and prove the child received the complete parent
+  environment plus any declared overrides, with each override's declared
+  value winning over the inherited one.
 
 ### What not to build in `my.shell`
 
 - no shell string, tokenizer, implicit pipeline, redirection syntax, glob
   expansion, or `bash -c` convenience;
 - no command allowlist masquerading as callability and no per-agent grant;
-- no inherited process environment or credential forwarding;
+- no environment sanitization, credential filter, or variable allowlist —
+  the child inherits the complete parent environment (owner ruling
+  2026-08-03);
 - no `ByteArrayOutputStream` proportional to child output and no discarded
   suffix after a cap;
 - no background run, job atom, list/status/output polling API, or process-local
