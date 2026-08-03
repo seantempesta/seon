@@ -12,6 +12,19 @@ The owner ruled live at session open; this section supersedes the tier
 sequencing below where they differ. Lane cap: 3 implementation + 1
 research. No Fable subagents — opus and sol lanes only.
 
+EVERY LANE SPEC NAMES ITS SKILLS AND ITS REFERENCE SOURCES
+(owner-directed 2026-08-03): the launch prompt lists the
+`.agents/skills/` skills the lane must invoke before specialized work
+(flow work → `seon-flow-architecture`; any Clojure →
+`data-oriented-clojure`; schema/query → `data-modeling` + `datahike`;
+tests → `clojure-testing`; eval/reader → `repl`), AND the exact
+`reference-code/` trees that own the seams it is writing against
+(core.async flow.clj/impl.clj/spi.clj for procs and buffers; datahike
+writer/writing/versioning for store semantics; sci core/interrupt for
+the eval boundary; malli for schema properties; http-kit for the SSE
+write path). A lane writing at a seam it has not read the dependency's
+own source for is the known integration-bug generator.
+
 1. IN FLIGHT: `suite-speed` (tier 0, a FIX is expected, not a
    diagnosis — ruling #49), `union-codec` (1A, decode EVERYWHERE
    pre-authorized, blast-radius table for morning review),

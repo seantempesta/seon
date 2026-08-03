@@ -1869,6 +1869,34 @@ may reintroduce a shadow build into the dev feedback path.
   never from names (ruling #47 stands). The audit resolves the open
   edge: two qualifying functions in ONE namespace for one shape —
   most-specific-input wins, or loud, but proposed with evidence.
+  **Ruling 2026-08-03 #51 (owner, night): MINIMIZE THE SURFACE SHARED
+  AMONG CLUSTERS, AND AGENTS CANNOT CRASH THE SYSTEM.** Owner verbatim:
+  "minimize the surface that is shared among the clusters and I'm sure
+  it's going to bite us in the ass so be very careful at those points.
+  We do not crash ever. We make it so agents cannot crash the system.
+  They are all running on separate flows so one agent going nuts
+  doesn't impact the others." The shared-surface census at ruling time,
+  each point a standing care point: (1) the JVM image's COMPILED VARS —
+  every cluster runs the image's code regardless of its published
+  commit, and one re-evaled defn changes all clusters at once; the
+  run-from-SCI migration (ruling #50 third amendment) shrinks exactly
+  this, and each migration wave must state what it removed from the
+  shared surface and what it deliberately left shared and why. (2) The
+  root :compute executor — fixed pool ≈ cores shared by all clusters;
+  a compute storm in one starves siblings; per-cluster fairness has no
+  mechanism today (census item, not yet a design). (3) The physical
+  store — branches are per-cluster but konserve fsyncs share one disk
+  path. (4) The :io virtual default — cheap, lowest risk. (5) SCI stock
+  Vars — read-only in our fork; the alter-meta! closure (this batch)
+  finishes the metadata hole. The crash model is structural and stands:
+  errors two classes, agent mistakes are flat values that never throw
+  into a loop, faults are committed facts, one dev/prod dial. Its open
+  edges are filed, not hidden: work-launcher control alts lacks
+  :priority, agent graph stop can wait forever on turn completion,
+  armed agents hold a platform thread in error fan-out, and compiled
+  host calls remain the uninterruptible ceiling the SCI migration
+  progressively lowers. The standing adversarial pass carries the
+  shared-surface census forward as a named deliverable.
   THIRD AMENDMENT same night (owner, resolving the producer
   representation): "store everything that you can in the database and
   try and make it all run from SCI. We are making this super efficient
