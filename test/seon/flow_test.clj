@@ -1138,23 +1138,35 @@
                       {:seon.config.eval.result/blob-threshold inline-ceiling}
                       %)})
                   stderr-writer (java.io.StringWriter.)
-                  [final-state _]
+                  [after-duplicate _]
                   (binding [*err* stderr-writer]
                     (committer-step initial-state ::sut/core-fault
                                     repeated-fault))
+                  duplicate-stderr (str stderr-writer)
+                  [final-state _]
+                  (binding [*err* stderr-writer]
+                    (committer-step after-duplicate ::sut/core-fault
+                                    distinct-fault))
                   signatures
                   (db/q '[:find ?signature
                           :where [_ :seon.error/signature ?signature]]
-                        @connection)]
+                        @connection)
+                  signature-set (set (map first signatures))
+                  lines (str/split-lines (str stderr-writer))]
               (is (= ::sut/committed durable-outcome))
-              (is (= #{(:seon.error/signature durable-fact)}
-                     (set (map first signatures))))
-              (is (= #{(:seon.error/signature durable-fact)}
-                     (::sut/seen-signatures final-state)))
-              (is (zero? (::sut/committed final-state)))
-              (is (zero? (::sut/panicked final-state)))
-              (is (empty? (str stderr-writer))
-                  "the durable signature suppresses output after rebuild"))))))
+              (is (empty? duplicate-stderr)
+                  "the durable signature suppresses output after rebuild")
+              (is (contains? signature-set
+                             (:seon.error/signature durable-fact)))
+              (is (= 2 (count signature-set)))
+              (is (= signature-set (::sut/seen-signatures final-state)))
+              (is (= 1 (::sut/committed final-state)))
+              (is (= 1 (::sut/panicked final-state)))
+              (is (= 1 (count lines))
+                  "one genuinely new signature remains visible")
+              (is (str/includes? (first lines) "a distinct cause"))
+              (is (<= (count (first lines)) (+ (* 2 inline-ceiling) 192))
+                  "the new signature's face remains bounded"))))))
 
     (testing "a dead writer still emits each signature only once"
       (test-support/with-database
