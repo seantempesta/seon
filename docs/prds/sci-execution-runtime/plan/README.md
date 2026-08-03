@@ -1869,6 +1869,24 @@ may reintroduce a shadow build into the dev feedback path.
   never from names (ruling #47 stands). The audit resolves the open
   edge: two qualifying functions in ONE namespace for one shape —
   most-specific-input wins, or loud, but proposed with evidence.
+  THIRD AMENDMENT same night (owner, resolving the producer
+  representation): "store everything that you can in the database and
+  try and make it all run from SCI. We are making this super efficient
+  with the shared context so the overhead isn't that high and the
+  separation and guarantees not to crash or run forever are awesome.
+  The previous agent kept trying to turn everything into a runtime var
+  and I didn't want that." SO: renderers are DATABASE FACTS (source in
+  the program graph, referenced by qualified symbol), EXECUTED THROUGH
+  SCI in the cluster's shared context via ruling #46's guarded kernel —
+  never compiled JVM runtime Vars, never `requiring-resolve`, and the
+  earlier "why have them even hit the main runtime as vars?" was an
+  objection to COMPILED vars, not a request for in-process function
+  objects. The render-model doc's open decision 2 is thereby RULED:
+  durable symbol producers resolved to the live SCI Var, one
+  representation, no fn-object declaration arm. Also ruled: the suite
+  floor is 2-3 minutes when the excess is GENUINE boot-tower subjects
+  (real flocks/processes) — everything else reaches seconds; and the
+  orchestrator pushes the shared branch at every verified wave landing.
   AMENDED AGAIN same night (owner): RENDER IMPLEMENTATION IS AUTHORIZED
   TONIGHT once the simplification audit lands and the queued non-render
   work completes — "if the report comes back and you finish the other
