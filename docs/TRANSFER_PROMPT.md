@@ -279,11 +279,23 @@ unbuilt is largely built and live-proven:
   What the run actually holds: history is 47.25% of it, the commit
   record averages 969 B per transaction, and **blob content is exactly
   0 B** — the blob tier is not being exercised at eval scale at all.
-  The blob threshold was lowered to 4,096 characters on the DISPROVEN
-  reading, so whether that value is right is now an open question, not
-  a settled one. The older "~1.5 MB per transaction regardless of
-  payload" claim is also false. Three wrong numbers in one area is the
-  lesson: measure before repeating, and model before tuning.
+  The blob threshold was RE-JUSTIFIED at 4,096 on fresh evidence
+  (production replay 1,277,558 B versus 1,572,238 B at 65,536, an 18.7%
+  saving); the 0-byte finding was explained — the archived run predated
+  the change. The older "~1.5 MB per transaction regardless of payload"
+  claim is also false.
+  **ATTRIBUTION IS NOT A COUNTERFACTUAL**, and this bit us the same day
+  we measured it. The per-attribute census attributed 187,360,394 B to
+  `:seon.schema/created-at` and projected ~8.3 MB per sample from
+  deleting it. Actually deleting it saved **9,661,654 B** — a
+  nineteenth of the attributed figure — because bytes attributed to an
+  attribute are not the bytes its removal frees when the underlying
+  persistent-set nodes are shared. A census tells you where bytes ARE;
+  only a measured before/after tells you what a change SAVES. Never
+  quote an attribution as a saving. Four figures in this one area have
+  now been disproven, the last by our own fresh measurement: measure
+  before repeating, model before tuning, and prove the counterfactual
+  before promising the win.
 - **The agent write surface** — the hole is ergonomics and gating, not
   capability. Agents CAN transact any declared attribute (ruling #20
   makes `store/transact!` callable; `:schema-flexibility :write`
