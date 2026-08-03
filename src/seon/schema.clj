@@ -1284,12 +1284,24 @@
                         required-attrs
                         (when map-shape?
                           (set (internal/map-required-attrs form)))
+                        declared-attrs
+                        (when map-shape?
+                          (into #{}
+                                (keep (fn [entry]
+                                        (let [attr (when (vector? entry)
+                                                     (first entry))]
+                                          (when (and (keyword? attr)
+                                                     (not= attr
+                                                           :malli.core/default))
+                                            attr))))
+                                (form/map-entries form)))
                         id-attr (:seon.entity/id-attr props)]
                     (when (seq required-attrs)
                       [k (cond->
                            (merge
                             {:seon.schema/key k
                              :seon.schema/required-attrs required-attrs
+                             :seon.schema/declared-attrs declared-attrs
                              :seon.schema/entity?
                              (boolean (:seon.db/entity props))}
                             (into {}
@@ -2391,11 +2403,8 @@
   (let [projection (shape-projection)]
     (candidate-shapes-in projection value)))
 
-(defn matching-shapes-in
-  "All schemas in explicit `projection` that validate `value`."
-  {:malli/schema [:=> [:catn [::projection ::projection] [::value ::value]]
-                  [:vector :map]]}
-  [projection value]
+(defn- matching-shapes-with-in
+  [projection value value-for-row]
   (if-let [attrs (seq (complete-present-attrs value))]
     (let [index (:seon.schema.projection/shape-index projection)
           rows (:seon.schema.projection/shape-rows projection)
@@ -2410,9 +2419,16 @@
                      ((cached-compiler-in!
                         projection :seon.schema.shape/validators
                         projection-validator key)
-                      value)))
+                      (value-for-row value (get rows key)))))
            vec))
     []))
+
+(defn matching-shapes-in
+  "All schemas in explicit `projection` that validate `value`."
+  {:malli/schema [:=> [:catn [::projection ::projection] [::value ::value]]
+                  [:vector :map]]}
+  [projection value]
+  (matching-shapes-with-in projection value (fn [value _row] value)))
 
 (defn matching-shapes
   "All schemas that validate `value` in the activated projection.
@@ -2423,6 +2439,32 @@
   [value]
   (let [projection (shape-projection)]
     (matching-shapes-in projection value)))
+
+(defn render-matching-shapes-in
+  "Schemas identifying `value` for render resolution in `projection`.
+
+   Render units are open EAV values: additional top-level attributes do not
+   change what the declared attributes identify. Each closed map therefore
+   validates only its declared top-level entries here. General schema
+   validation remains closed, and invalid values of declared entries still
+   refuse the match."
+  {:malli/schema [:=> [:catn [::projection ::projection] [::value ::value]]
+                  [:vector :map]]}
+  [projection value]
+  (matching-shapes-with-in
+   projection value
+   (fn [value row]
+     (select-keys value (:seon.schema/declared-attrs row)))))
+
+(defn render-matching-shapes
+  "Schemas identifying `value` for render resolution.
+
+   This structural fallback is for values whose producing function has no
+   declared output schema. Known producers resolve through their output schema
+   without structural matching."
+  {:malli/schema [:=> [:catn [::value ::value]] [:vector :map]]}
+  [value]
+  (render-matching-shapes-in (shape-projection) value))
 
 (defn explain-shape-in
   "Explain `value` against `schema-key` in explicit `projection`."
