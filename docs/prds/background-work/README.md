@@ -571,3 +571,46 @@ architecture describes the no-replay effect boundary. Scheduling, arbitrary
 background evaluation, recurring work, subprocess tool design, and provider-
 specific concurrency remain separate PRDs; none is a reason to widen this
 slice (`docs/seon/architecture/toolkit.md:126-148`; `AGENTS.md:248-297`).
+
+## Owner approval and added requirements — 2026-08-03
+
+APPROVED as specified (explicit `background` only, one declared
+capability call per slice). The owner accepted the no-auto-background
+recommendation as a first try, revisable on evidence. Four additions,
+all orchestrator design calls the owner delegated:
+
+**1. Teach at the point of return, not in a wall of instructions.**
+Every `background` call's return renders concise guidance with the
+ref: that the agent may `await` it (the run closes and reopens when it
+lands) or simply keep working, in which case the result arrives in
+whatever turn follows its settlement. The guidance is part of the
+result's declared `:seon.render/ai`, so it exists once, in the schema,
+never duplicated per tool.
+
+**2. Duration feedback replaces auto-backgrounding.** A foreground
+capability result carries `:seon.effect/duration-ms` (already measured
+at settlement — no new machinery). When it exceeds a config dial
+(`:seon.config.effect/long-call-ms`, default to be measured; start
+~2000 ms), its render appends a short note: this took N seconds in the
+foreground, the user was waiting; consider `(my.background/background
+…)` for calls like this. DERIVED from the receipt, never a hand list
+of "slow functions", and it teaches exactly when the lesson is
+relevant. If agents keep stalling despite it, THAT is the evidence for
+a per-capability `:seon.effect/prefer-background` default — not a
+guess now.
+
+**3. The bootstrap tail is the live background pane.** The bootstrap
+form series ends with one form, deliberately AFTER the cache boundary
+(it changes every turn, so it must not sit inside the stable prefix
+that providers cache — see
+`docs/prds/sci-execution-runtime/research/llm-provider-research-2026-08-03.md`),
+that renders: the agent's currently pending background receipts with
+their capability, elapsed time and ref; any results that landed and
+are unanswered; and one line of standing guidance about awaiting
+versus continuing. One place, always current, derived by query from
+`:seon.effect/notify` and unanswered `/to` facts. No per-tool
+duplication and no stored instruction text.
+
+**4. Nothing above changes a key's meaning.** `duration-ms` and the
+bootstrap pane are additive; the foreground call's result value and
+the `:wait` disposition keep their exact contracts.
