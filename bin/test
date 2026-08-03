@@ -118,6 +118,64 @@ git_sha=$(git rev-parse HEAD)
 run_parent=${SEON_TEST_RUN_PARENT:-$source_root/tmp/test-runs}
 mkdir -p "$run_parent"
 run_parent=$(cd "$run_parent" && pwd -P)
+
+# Retain every live invocation plus the three newest inactive roots younger
+# than 24 hours. Reap anything older, and bound recent failed/interrupted
+# evidence to three roots. seon.fs owns the no-follow deletion walk: a symlink
+# inside a run root is deleted as a leaf and its referent is never traversed.
+bb --config "$source_root/bb.edn" -e '
+  (require (quote [clojure.java.io :as io])
+           (quote [babashka.process :as process])
+           (quote [seon.fs :as fs]))
+  (import (quote [java.nio.file Files LinkOption])
+          (quote [java.time Duration Instant]))
+  (let [run-parent (first *command-line-args*)
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
+        pid-of (fn [root]
+                 (let [record (io/file root "test-run.txt")]
+                   (when (.isFile record)
+                     (with-open [reader (io/reader record)]
+                       (let [tokens (java.util.StringTokenizer.
+                                     (or (.readLine reader) ""))]
+                         (loop []
+                           (when (.hasMoreTokens tokens)
+                             (let [token (.nextToken tokens)]
+                               (if (.startsWith token "pid=")
+                                 (try
+                                   (Long/parseLong (.substring token 4))
+                                   (catch NumberFormatException _ nil))
+                                 (recur))))))))))
+        active? (fn [root]
+                  (when-let [pid (pid-of root)]
+                    (zero?
+                     (:exit
+                      (process/shell
+                       {:continue true :out :string :err :string}
+                       "/bin/kill" "-0" (str pid))))))
+        modified-at (fn [root]
+                      (.toInstant
+                       (Files/getLastModifiedTime (.toPath root) no-follow)))
+        cutoff (.minus (Instant/now) (Duration/ofHours 24))
+        candidates (->> (.listFiles (io/file run-parent))
+                        (filter (fn [entry]
+                                  (let [path (.toPath entry)]
+                                    (and (.startsWith (.getName entry) "run.")
+                                         (Files/isDirectory path no-follow)))))
+                        (map (fn [root]
+                               {:root root
+                                :modified-at (modified-at root)
+                                :active? (boolean (active? root))})))
+        inactive (sort-by :modified-at #(compare %2 %1)
+                          (remove :active? candidates))]
+    (doseq [[rank {:keys [root modified-at]}] (map-indexed vector inactive)
+            :when (or (not (.isAfter modified-at cutoff))
+                      (>= rank 3))]
+      (fs/delete-recursively! run-parent (.getPath root))
+      (binding [*out* *err*]
+        (println "bin/test: reaped retained isolated operator root"
+                 (.getPath root)))))
+  nil' "$run_parent"
+
 run_root=$(mktemp -d "$run_parent/run.XXXXXX")
 mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
 
@@ -181,7 +239,10 @@ cd "$source_root"
 if [ "$status" -eq 0 ]; then
   case "$run_root" in
     "$run_parent"/run.*)
-      rm -rf -- "$run_root"
+      bb --config "$source_root/bb.edn" -e \
+        '(require (quote [seon.fs :as fs]))
+         (apply fs/delete-recursively! *command-line-args*)' \
+        "$run_parent" "$run_root"
       echo "bin/test: removed successful isolated operator root $run_root"
       ;;
     *)
