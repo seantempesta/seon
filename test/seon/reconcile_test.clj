@@ -43,7 +43,8 @@
     (let [connection (d/connect configuration)]
       (try
         (cluster/populate-source!
-         {:seon.store/branch-connection connection})
+         {:seon.store/branch-connection connection
+          :seon.fn/manifest @test-support/source-manifest})
         (db/transact! connection
                     {:tx-data
                      [{:seon.source/digest (apply str (repeat 64 "0"))}]})

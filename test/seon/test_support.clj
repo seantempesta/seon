@@ -26,7 +26,7 @@
   "Returned when a thrown boundary carries no classifiable ex-data."
   ::unknown-refusal)
 
-(def ^:private source-manifest
+(def source-manifest
   ;; The runner loads every selected test namespace before it invokes a test,
   ;; so the first fixture derives this immutable value from that invocation's
   ;; frozen source tree. Every database still installs the complete population
