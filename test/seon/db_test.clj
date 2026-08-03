@@ -2,7 +2,15 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
+
+(schema/register! ::ai-declaration
+                  [:and {:seon.db/index true}
+                   [:or :string :qualified-symbol]])
+(schema/register! ::html-declaration [:or [:vector :any] :qualified-symbol])
+(schema/register! ::row-id [:string {:seon.db/identity true}])
 
 (def ^:private exam-query
   '[:find (count ?key) .
@@ -27,6 +35,85 @@
 
 (def ^:private missing-schema-ref
   [:seon.schema/key :seon.db-test/missing])
+
+(deftest edn-backed-reads-return-distinguishable-logical-values
+  (test-support/with-database
+   {:seon.test-support/extra-schema
+    (schema.datahike/malli->datahike-schema
+     [::ai-declaration ::html-declaration ::row-id])}
+   (fn [connection]
+     (let [producer 'example.render/ai
+           literal-text "example.render/ai"
+           literal-html [:p "Hello"]]
+       (is (contains?
+            (db/transact!
+             connection
+             [{::row-id "producer"
+               ::ai-declaration producer
+               ::html-declaration producer}
+              {::row-id "literal"
+               ::ai-declaration literal-text
+               ::html-declaration literal-html}])
+            :db-after))
+       (testing "a qualified-symbol producer survives a query read"
+         (is (= producer
+                (db/q '[:find ?declaration .
+                        :where
+                        [?entity ::row-id "producer"]
+                        [?entity ::ai-declaration ?declaration]]
+                      @connection))))
+       (testing "both literal arms survive pull and entity reads"
+         (is (= {::ai-declaration literal-text
+                 ::html-declaration literal-html}
+                (db/pull @connection
+                         [::ai-declaration ::html-declaration]
+                         [::row-id "literal"])))
+         (is (= literal-text
+                (::ai-declaration
+                 (db/entity @connection [::row-id "literal"])))))
+       (testing "one mixed population keeps text and symbol distinguishable"
+         (is (= #{literal-text producer}
+                (set
+                 (db/q '[:find [?declaration ...]
+                         :where [_ ::ai-declaration ?declaration]]
+                       @connection))))
+         (is (= #{literal-text producer}
+                (set
+                 (db/q '[:find [?declaration ...]
+                         :in $ ?attribute
+                         :where [_ ?attribute ?declaration]]
+                       @connection
+                       ::ai-declaration))))
+         (is (= #{literal-html producer}
+                (set
+                 (db/q '[:find [?declaration ...]
+                         :where [_ ::html-declaration ?declaration]]
+                       @connection)))))
+       (testing "datom projections decode from their explicit attribute"
+         (is (= #{literal-text producer}
+                (into #{}
+                      (map :v)
+                      (db/datoms @connection :avet ::ai-declaration)))))))))
+
+(deftest invalid-edn-backed-storage-is-a-flat-read-error
+  (doseq [[stored rule]
+          [["[" ::schema.datahike/malformed-edn]
+           ["true" ::schema.datahike/schema-invalid]]]
+    (test-support/with-database
+     {:seon.test-support/extra-schema
+      [(schema.datahike/malli->datahike-attr ::ai-declaration)]}
+     (fn [connection]
+       (d/transact connection [{::ai-declaration stored}])
+       (let [result
+             (db/q '[:find ?declaration .
+                     :where [_ ::ai-declaration ?declaration]]
+                   @connection)]
+         (is (= :seon.db/invalid-read (:seon.error/kind result)))
+         (is (= rule
+                (get-in result
+                        [:seon.error/data
+                         :seon.db/dependency-data
+                         ::schema.datahike/rule]))))))))
 
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database

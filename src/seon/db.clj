@@ -9,10 +9,14 @@
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
             [datahike.store :as datahike.store]
+            [datalog.parser.impl.proto :as parser]
+            [datalog.parser.pull :as pull.parser]
             [clojure.test.check.generators :as gen]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike])
+  (:import [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
+            FindTuple Pattern Variable]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
@@ -170,6 +174,209 @@
    database
    (:datahike.read/dependency-plan response)))
 
+(defn- decode-attribute-value
+  [attribute value]
+  (schema.datahike/decode-attribute-value attribute value))
+
+(defn- decode-attribute-maps
+  [value]
+  (cond
+    (map? value)
+    (reduce-kv
+     (fn [decoded attribute child]
+       (assoc decoded attribute
+              (if (and (keyword? attribute)
+                       (schema.datahike/edn-encoded-attr? attribute))
+                (decode-attribute-value attribute child)
+                (decode-attribute-maps child))))
+     (empty value)
+     value)
+
+    (vector? value)
+    (mapv decode-attribute-maps value)
+
+    (set? value)
+    (into #{} (map decode-attribute-maps) value)
+
+    (sequential? value)
+    (doall (map decode-attribute-maps value))
+
+    :else value))
+
+(defn- parsed-nodes
+  [root]
+  (tree-seq #(or (map? %) (coll? %))
+            #(cond
+               (map? %) (vals %)
+               (coll? %) %
+               :else nil)
+            root))
+
+(defn- query-input-bindings
+  [parsed-query arguments]
+  (into {}
+        (keep (fn [[input-binding value]]
+                (let [variable (:variable input-binding)]
+                  (when (and (instance? BindScalar input-binding)
+                             (instance? Variable variable))
+                    [(:symbol variable) value]))))
+        (map vector (:qin parsed-query) arguments)))
+
+(defn- query-variable-attributes
+  [parsed-query arguments]
+  (let [input-bindings (query-input-bindings parsed-query arguments)]
+    (reduce
+     (fn [attributes pattern]
+       (let [attribute-node (nth (:pattern pattern) 1 nil)
+             value-node (nth (:pattern pattern) 2 nil)
+             attribute (if (instance? Constant attribute-node)
+                         (:value attribute-node)
+                         (get input-bindings (:symbol attribute-node)))
+             variable (:symbol value-node)]
+         (if (and (keyword? attribute)
+                  (instance? Variable value-node))
+           (update attributes variable (fnil conj #{}) attribute)
+           attributes)))
+     {}
+     (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))))
+
+(defn- query-find-attributes
+  [parsed-query arguments]
+  (let [variable-attributes
+        (query-variable-attributes parsed-query arguments)]
+    (mapv
+     (fn [element]
+       (when (instance? Variable element)
+         (let [attributes (get variable-attributes (:symbol element))]
+           (when (= 1 (count attributes))
+             (let [attribute (first attributes)]
+               (when (schema.datahike/edn-encoded-attr? attribute)
+                 attribute))))))
+     (parser/find-elements (:qfind parsed-query)))))
+
+(defn- decode-query-field
+  [attribute value]
+  (if (and attribute (some? value))
+    (decode-attribute-value attribute value)
+    (decode-attribute-maps value)))
+
+(defn- decode-query-tuple
+  [attributes tuple]
+  (mapv decode-query-field attributes tuple))
+
+(defn- query-return-map-keys
+  [return-maps]
+  (let [mapping-keys (map :mapping-key (:mapping-keys return-maps))]
+    (case (:mapping-type return-maps)
+      :keys (mapv keyword mapping-keys)
+      :strs (mapv str mapping-keys)
+      :syms (mapv symbol mapping-keys)
+      [])))
+
+(defn- decode-query-return-maps
+  [return-maps attributes result]
+  (let [mapping-keys (query-return-map-keys return-maps)
+        attributes-by-key (zipmap mapping-keys attributes)]
+    (mapv
+     (fn [row]
+       (reduce-kv
+        (fn [decoded mapping-key value]
+          (assoc decoded mapping-key
+                 (decode-query-field
+                  (get attributes-by-key mapping-key) value)))
+        (empty row)
+        row))
+     result)))
+
+(defn- decode-query-result
+  [normalized result]
+  (let [parsed-query (query/memoized-parse-query (:query normalized))
+        attributes (query-find-attributes parsed-query (:args normalized))
+        find-clause (:qfind parsed-query)
+        return-maps (:qreturnmaps parsed-query)
+        decode-result
+        (fn [value]
+          (cond
+            return-maps
+            (decode-query-return-maps return-maps attributes value)
+
+            (instance? FindRel find-clause)
+            (into (empty value) (map #(decode-query-tuple attributes %)) value)
+
+            (instance? FindColl find-clause)
+            (mapv #(decode-query-field (first attributes) %) value)
+
+            (instance? FindScalar find-clause)
+            (decode-query-field (first attributes) value)
+
+            (instance? FindTuple find-clause)
+            (some->> value (decode-query-tuple attributes))
+
+            :else
+            (decode-attribute-maps value)))]
+    (if (and (map? result) (contains? result :ret))
+      (update result :ret decode-result)
+      (decode-result result))))
+
+(defn- pull-selector
+  [arguments]
+  (let [selector-or-options (first arguments)]
+    (if (map? selector-or-options)
+      (:selector selector-or-options)
+      selector-or-options)))
+
+(defn- pull-output-options
+  [spec]
+  (into {}
+        (map (fn [[display-key options]]
+               [(or (:as options) display-key)
+                [display-key options]]))
+        (:attrs spec)))
+
+(declare decode-pull-entity)
+
+(defn- decode-pull-child
+  [spec value]
+  (cond
+    (map? value) (decode-pull-entity spec value)
+    (vector? value) (mapv #(decode-pull-child spec %) value)
+    (set? value) (into #{} (map #(decode-pull-child spec %)) value)
+    (sequential? value) (doall (map #(decode-pull-child spec %) value))
+    :else value))
+
+(defn- decode-pull-entity
+  [spec entity]
+  (let [options-by-output (pull-output-options spec)]
+    (reduce-kv
+     (fn [decoded output-key value]
+       (let [[display-key options] (get options-by-output output-key)
+             attribute (:attr options)
+             subpattern (:subpattern options)]
+         (assoc decoded output-key
+                (cond
+                  subpattern
+                  (decode-pull-child subpattern value)
+
+                  (and (= display-key attribute)
+                       (schema.datahike/edn-encoded-attr? attribute))
+                  (decode-attribute-value attribute value)
+
+                  (and (keyword? output-key)
+                       (schema.datahike/edn-encoded-attr? output-key))
+                  (decode-attribute-value output-key value)
+
+                  :else
+                  (decode-attribute-maps value)))))
+     (empty entity)
+     entity)))
+
+(defn- decode-pull-result
+  [selector result-key result]
+  (let [spec (pull.parser/parse-pull selector)]
+    (if (= :datahike.pull-many/result result-key)
+      (mapv #(when % (decode-pull-entity spec %)) result)
+      (when result (decode-pull-entity spec result)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Reads over immutable database values
 ;;; ---------------------------------------------------------------------------
@@ -252,7 +459,8 @@
           (let [request (assoc normalized :args aligned)
                 response (d/q-with-evidence request)]
             (append-query-evidence! aligned response)
-            (:datahike.query/result response))
+            (decode-query-result request
+                                 (:datahike.query/result response)))
 
           :else
           (error-value
@@ -270,9 +478,10 @@
   (if (error-value? database)
     database
     (try
-      (let [response (apply operation database arguments)]
+      (let [response (apply operation database arguments)
+            selector (pull-selector arguments)]
         (append-pull-evidence! database response)
-        (get response result-key))
+        (decode-pull-result selector result-key (get response result-key)))
       (catch Throwable cause
         (append-database-evidence! database :all)
         (dependency-error result-key cause)))))
@@ -374,12 +583,18 @@
    (entity-call database entity-id)))
 
 (defn- datom->data
-  [datom]
-  {:e (:e datom)
-   :a (:a datom)
-   :v (:v datom)
-   :tx (:tx datom)
-   :added (:added datom)})
+  [database datom]
+  (let [stored-attribute (:a datom)
+        attribute (:ident (db.utils/attr-info database stored-attribute))
+        value (:v datom)]
+    {:e (:e datom)
+     :a stored-attribute
+     :v (if (and (keyword? attribute)
+                 (schema.datahike/edn-encoded-attr? attribute))
+          (decode-attribute-value attribute value)
+          (decode-attribute-maps value))
+     :tx (:tx datom)
+     :added (:added datom)}))
 
 (defn- datoms-call
   [database arguments]
@@ -388,7 +603,8 @@
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (let [result (mapv datom->data (apply d/datoms database arguments))]
+      (let [result (mapv #(datom->data database %)
+                         (apply d/datoms database arguments))]
         (append-database-evidence! database :all)
         result)
       (catch Throwable cause

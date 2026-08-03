@@ -271,7 +271,7 @@
   [projection attr]
   (boolean
    (when (contains? (:seon.schema.projection/forms projection) attr)
-     (let [form (resolve-malli-form-in
+     (let [form (resolve-datahike-form-in
                  projection
                  (get (:seon.schema.projection/forms projection) attr))
            explicit
