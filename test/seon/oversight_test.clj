@@ -17,6 +17,11 @@
 
 (set! *warn-on-reflection* true)
 
+(deftest a-dead-procs-missing-ping-is-unknown-never-healthy
+  (is (= {:seon.oversight/proc :dead
+          :seon.oversight/ping :unknown}
+         (oversight/proc-ping :dead nil))))
+
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
   [connection probe]

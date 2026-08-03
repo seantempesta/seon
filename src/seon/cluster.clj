@@ -18,6 +18,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
+            [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.instruction :as instruction]
             [seon.cluster.process :as cluster.process]
@@ -39,7 +40,11 @@
             [seon.fn :as seon.fn]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
+            [seon.oversight :as oversight]
             [seon.problems :as problems]
+            [seon.render.data :as render.data]
+            [seon.render.value :as render.value]
+            [seon.sci.admit :as admit]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
@@ -76,6 +81,140 @@
 
 (schema.edn/load! {})
 (schema/activate! (schema/snapshot))
+
+(declare readiness)
+
+;;; ---------------------------------------------------------------------------
+;;; MCP result projection — installed at the cluster io-prepl boundary.
+;;; ---------------------------------------------------------------------------
+
+(defonce ^:private mcp-projection
+  (ThreadLocal.))
+
+(defn project-next-prepl-value!
+  "Mark this io-prepl connection's next returned value for MCP projection."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (.set mcp-projection true)
+  nil)
+
+(defn- consume-mcp-projection!
+  []
+  (let [project? (true? (.get mcp-projection))]
+    (.remove mcp-projection)
+    project?))
+
+(defn- mcp-instance
+  [cluster-name]
+  (get @running-instances cluster-name))
+
+(defn- mcp-effective
+  [cluster-name bootstrap-effective]
+  (if-let [connection (:seon.boot/cluster-connection
+                       (mcp-instance cluster-name))]
+    (config/effective @connection cluster-name)
+    bootstrap-effective))
+
+(defn- mcp-project
+  [cluster-name bootstrap-effective value]
+  (let [instance (mcp-instance cluster-name)
+        connection (:seon.boot/cluster-connection instance)
+        effective (mcp-effective cluster-name bootstrap-effective)
+        admitted (admit/admit-value
+                  {:seon.sci.admit/value value
+                   :seon.sci.admit/interrupt-fn (fn [])
+                   :seon.sci.admit/caps (config/result-caps effective)
+                   :seon.config/on-core-error
+                   (:seon.config/on-core-error effective)})
+        artifact (render.value/artifact admitted)
+        content (render.value/artifact-edn artifact)
+        content-digest (blob/digest content)
+        threshold (:seon.config.eval.result/blob-threshold effective)
+        oversized? (> (count content) threshold)
+        page-size (:seon.render.value/max-collection effective)
+        print-node (:seon.sci.admit/print-node artifact)
+        projected-node (if oversized?
+                         (render.value/print-node-window print-node page-size)
+                         print-node)
+        stored-digest (when (and oversized? connection)
+                        (blob/put! connection content))]
+    (cond-> {:seon.dev.mcp/value
+             (admit/semantic-value projected-node)
+             :seon.sci.admit/capped?
+             (:seon.sci.admit/capped? artifact)
+             :seon.dev.mcp/windowed? oversized?}
+      oversized?
+      (assoc :seon.blob/digest content-digest
+             :seon.blob/size (count content)
+             :seon.dev.mcp/retrievable? (boolean stored-digest))
+
+      (and oversized? (nil? stored-digest))
+      (assoc :seon.dev.mcp/remainder
+             "The cluster has no database connection; the remainder is not retrievable."))))
+
+(defn mcp-valf
+  "Project marked MCP returns; preserve ordinary io-prepl returns unchanged."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name
+                       :seon.config/effective :any]
+                  :string]}
+  [cluster-name bootstrap-effective value]
+  (admit/canonical-edn
+   (if (consume-mcp-projection!)
+     (mcp-project cluster-name bootstrap-effective value)
+     value)))
+
+(defn mcp-io-prepl
+  "Serve one cluster io-prepl with the cluster-side MCP value projector."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name
+                       :seon.config/effective]
+                  :nil]}
+  [cluster-name bootstrap-effective]
+  (clojure.core.server/io-prepl
+   :valf (partial mcp-valf cluster-name bootstrap-effective)))
+
+(defn mcp-get-value
+  "Read and drill one stored MCP value artifact without mutating REPL state."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest
+                       :seon.render.data/path :int]
+                  :any]}
+  [cluster-name content-digest path offset]
+  (if-let [connection (:seon.boot/cluster-connection
+                       (mcp-instance cluster-name))]
+    (if-let [content (blob/get connection content-digest)]
+      (let [stored (render.value/read-artifact content)
+            found (render.data/at
+                   (render.value/artifact-value stored)
+                   {:seon.render.data/path path
+                    :seon.render.data/offset offset})]
+        (if (contains? found :seon.render.data/value)
+          (:seon.render.value/window
+           (render.value/window
+            (:seon.render.data/value found) offset
+            (:seon.render.value/max-collection
+             (config/effective @connection cluster-name))))
+          found))
+      {:seon.error/kind :seon.dev.mcp/value-not-found
+       :seon.error/message "No stored MCP value has this digest."
+       :seon.blob/digest content-digest})
+    {:seon.error/kind :seon.dev.mcp/remainder-not-retrievable
+     :seon.error/message
+     "The cluster has no database connection; the remainder is not retrievable."
+     :seon.blob/digest content-digest}))
+
+(defn mcp-runtime-observation
+  "Derive health and Flow observations for one root-discovered cluster."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
+  [cluster-name]
+  (let [instance (mcp-instance cluster-name)
+        connection (:seon.boot/cluster-connection instance)]
+    (cond-> {:seon.dev.mcp/cluster cluster-name
+             :seon.dev.mcp/health
+             (if connection :observed :unknown)
+             :seon.dev.mcp/flow
+             (if (and connection (:seon.flow/graph instance))
+               (oversight/cluster-flow-status @connection instance)
+               :unknown)}
+      instance (assoc :seon.dev.mcp/readiness (readiness instance)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure resolution — defaults are THE defaults document for this layer
@@ -1446,7 +1585,9 @@
           (try
             (let [prepl-server
                   (clojure.core.server/start-server
-                   {:accept 'clojure.core.server/io-prepl
+                   {:accept 'seon.cluster/mcp-io-prepl
+                    :args [cluster-name
+                           (:seon.config/effective compiled-config)]
                     :port (:seon.boot/prepl-port config)
                     :name server-symbol
                     :address (:seon.boot/prepl-host config)})

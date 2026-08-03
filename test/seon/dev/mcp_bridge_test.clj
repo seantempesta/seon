@@ -116,173 +116,13 @@
       (is (= 0 (when completed? (.exitValue process))) output)
       (is (str/includes? output ":bridge-loaded") output))))
 
-(deftest evaluation-exceptions-keep-only-model-legible-frames
-  (let [event {:tag :ret
-               :val (pr-str
-                     {:cause "The root cause."
-                      :phase :execution
-                      :via [{:type 'clojure.lang.ExceptionInfo
-                             :message "The wrapper."
-                             :data {:opaque (Object.)}
-                             :at ['clojure.lang.Compiler 'eval "Compiler.java" 1]}
-                            {:type 'java.lang.IllegalStateException
-                             :message "The root cause."}]
-                      :trace [['clojure.lang.Compiler 'eval "Compiler.java" 1]
-                              ['seon.dev.mcp_bridge_test$fail
-                               'invokeStatic "mcp_bridge_test.clj" 20]
-                              ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-                              ['seon.dev.mcp_bridge_test$outer
-                               'invokeStatic "mcp_bridge_test.clj" 44]
-                              ['seon.dev.mcp_bridge_test$fourth
-                               'invokeStatic "mcp_bridge_test.clj" 50]]})
-               :ns "user"
-               :ms 7
-               :form "(fail)"
-               :exception true}
-        projected ((bridge-var 'project-exception-event) event)
-        value (read-string (:val projected))]
-    (is (= (dissoc event :val) (dissoc projected :val))
-        "The prepl tag/namespace/timing/form/exception vocabulary survives.")
-    (is (= "The root cause." (:cause value)))
-    (is (= :execution (:phase value)))
-    (is (= [{:type 'clojure.lang.ExceptionInfo :message "The wrapper."}
-            {:type 'java.lang.IllegalStateException
-             :message "The root cause."}]
-           (:via value)))
-    (is (= [['seon.dev.mcp_bridge_test$fail
-             'invokeStatic "mcp_bridge_test.clj" 20]
-            ['user$eval123 'invokeStatic "NO_SOURCE_FILE" 3]
-            ['seon.dev.mcp_bridge_test$outer
-             'invokeStatic "mcp_bridge_test.clj" 44]]
-           (:trace value)))
-    (is (= 2 (:seon.dev.mcp/frames-omitted value)))
-    (is (not (str/includes? (:val projected) "java.lang.Object")))))
-
-(deftest compiled-agent-namespace-frames-derive-from-source-provenance
-  (let [fixture-root (io/file project-root "tmp"
-                              (str "mcp-frame-" (random-uuid)))
-        source-root (io/file fixture-root "src")
-        my-root (io/file source-root "my")
-        agents-root (io/file my-root "agents")
-        source (io/file agents-root "mcp_frame_fixture.clj")
-        known-paths [fixture-root source-root my-root agents-root source]
-        namespace-symbol 'my.agents.mcp-frame-fixture]
-    (try
-      (is (.mkdirs agents-root))
-      (spit source
-            (str "(ns my.agents.mcp-frame-fixture)\n"
-                 "(defn explode [] (throw (ex-info \"agent boom\" {})))\n"))
-      (load-file (.getPath source))
-      (let [throwable (try
-                        ((ns-resolve namespace-symbol 'explode))
-                        nil
-                        (catch Throwable error error))
-            event {:tag :ret
-                   :val (pr-str (Throwable->map throwable))
-                   :ns "user"
-                   :form "(my.agents.mcp-frame-fixture/explode)"
-                   :exception true}
-            projected
-            (with-redefs-fn {(bridge-var 'project-root)
-                             (.getCanonicalPath fixture-root)}
-              #((bridge-var 'project-exception-event) event))
-            trace (:trace (read-string (:val projected)))]
-        (is (some #(str/starts-with? (str (first %))
-                                     "my.agents.mcp_frame_fixture$")
-                  trace))
-        (is (every? #(or (str/starts-with? (str (first %))
-                                         "my.agents.mcp_frame_fixture$")
-                         (str/starts-with? (str (first %)) "user$"))
-                    trace)
-            (pr-str trace)))
-      (finally
-        (when (find-ns namespace-symbol) (remove-ns namespace-symbol))
-        (delete-known-files! known-paths)))))
-
-(deftest oversized-event-values-trim-in-place-largest-first
-  (let [payload {:seon.dev.mcp/runtime "clj"
-                 :seon.dev.mcp/cluster "default"
-                 :seon.dev.mcp/session-id "trim-test"
-                 :seon.dev.mcp/events
-                 [{:tag :out :val (apply str (repeat 700 "x"))}
-                  {:tag :ret :val (apply str (repeat 100 "y"))
-                   :ns "user" :ms 3 :form "(large-value)"}]}
-        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 128}
-                  ((bridge-var 'content-text) payload))
-        decoded (json/read-str encoded :key-fn keyword)
-        [large terminal] (:seon.dev.mcp/events decoded)]
-    (is (= "clj" (:seon.dev.mcp/runtime decoded)))
-    (is (= "default" (:seon.dev.mcp/cluster decoded)))
-    (is (= "trim-test" (:seon.dev.mcp/session-id decoded)))
-    (is (= {:tag "ret" :ns "user" :ms 3 :form "(large-value)"}
-           (select-keys terminal [:tag :ns :ms :form])))
-    (is (= (apply str (repeat 100 "y")) (:val terminal))
-        "The smaller member survives byte-for-byte.")
-    (is (true? (:seon.dev.mcp/truncated? large)))
-    (is (= 700 (:seon.dev.mcp/total-chars large)))
-    (is (= (count (:val large))
-           (:seon.dev.mcp/retained-chars large)))
-    (is (not (contains? decoded :seon.dev.mcp/preview)))
-    (is (<= (count encoded) (* 4 128)))))
-
-(deftest minimum-output-budget-preserves-the-envelope
-  (let [prefix "quoted=\" slash=\\ newline=\n "
-        payload {:seon.dev.mcp/runtime "clj"
-                 :seon.dev.mcp/cluster "default"
-                 :seon.dev.mcp/session-id "minimum-test"
-                 :seon.dev.mcp/events
-                 [{:tag :ret
-                   :val (str prefix (apply str (repeat 1000 "z")))
-                   :ns "user" :ms 9 :form "(large-value)"
-                   :exception true}]}
-        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 64}
-                  ((bridge-var 'content-text) payload))
-        decoded (json/read-str encoded :key-fn keyword)
-        event (first (:seon.dev.mcp/events decoded))]
-    (is (= "clj" (:seon.dev.mcp/runtime decoded)))
-    (is (= "default" (:seon.dev.mcp/cluster decoded)))
-    (is (= "minimum-test" (:seon.dev.mcp/session-id decoded)))
-    (is (= {:tag "ret" :ns "user" :ms 9 :form "(large-value)"
-            :exception true}
-           (select-keys event [:tag :ns :ms :form :exception])))
-    (is (string? (:val event)))
-    (is (true? (:seon.dev.mcp/truncated? event)))
-    (is (= (+ (count prefix) 1000)
-           (:seon.dev.mcp/total-chars event)))
-    (is (= (count (:val event))
-           (:seon.dev.mcp/retained-chars event)))
-    (is (not (contains? decoded :seon.dev.mcp/preview)))))
-
-(deftest oversized-terminal-fields-stay-inside-the-structured-budget
-  (let [huge-form (apply str (repeat 20000 "f"))
-        huge-error (apply str (repeat 20000 "e"))
-        payload {:seon.dev.mcp/runtime "clj"
-                 :seon.dev.mcp/cluster "default"
-                 :seon.dev.mcp/session-id "terminal-field-test"
-                 :seon.dev.mcp/error huge-error
-                 :seon.dev.mcp/events
-                 [{:tag :ret :val "refusal" :ns "user" :ms 4
-                   :form huge-form :exception true}]}
-        limit (* 4 128)
-        encoded (with-bindings {(bridge-var '*requested-output-tokens*) 128}
-                  ((bridge-var 'content-text) payload))
-        decoded (json/read-str encoded :key-fn keyword)
-        terminal (first (:seon.dev.mcp/events decoded))]
-    (is (<= (count encoded) limit) (str (count encoded) " > " limit))
-    (is (= {:tag "ret" :ns "user" :ms 4 :exception true}
-           (select-keys terminal [:tag :ns :ms :exception])))
-    (is (contains? terminal :form))
-    (is (= (count (:form terminal))
-           (first (get-in terminal
-                          [:seon.dev.mcp/truncated-fields :form]))))
-    (is (= (count huge-form)
-           (second (get-in terminal
-                           [:seon.dev.mcp/truncated-fields :form]))))
-    (is (contains? decoded :seon.dev.mcp/error))
-    (is (= (count huge-error)
-           (second (get-in decoded
-                           [:seon.dev.mcp/truncated-fields
-                            :seon.dev.mcp/error]))))))
+(deftest bridge-content-has-no-second-truncation-budget
+  (let [large (apply str (repeat 20000 "x"))
+        payload {:seon.dev.mcp/events [{:tag :ret :val large}]}
+        encoded ((bridge-var 'content-text) payload)
+        decoded (json/read-str encoded :key-fn keyword)]
+    (is (= large (get-in decoded [:seon.dev.mcp/events 0 :val])))
+    (is (not (str/includes? encoded "truncated by MCP bridge")))))
 
 (deftest multiple-form-refusals-name-the-second-form-position
   (let [code "(+ 1 2)\n(+ 3 4)"
@@ -418,7 +258,7 @@
         rows (:seon.dev.mcp/clusters data)
         by-cluster (into {} (map (juxt :seon.dev.mcp/cluster identity)) rows)]
     (is (= root (:seon.dev.mcp/root data)))
-    (is (= "inventory" (name (:seon.dev.mcp/view data))))
+        (is (= "inventory-health-flow" (name (:seon.dev.mcp/view data))))
     (is (= "alive" (name (get-in by-cluster ["alive" :seon.dev.mcp/state]))))
     (is (= "degraded"
            (name (get-in by-cluster ["degraded" :seon.dev.mcp/state]))))
@@ -610,9 +450,10 @@
         eval-tool (some #(when (= "eval_clj" (:name %)) %)
                         (get-in listed [:result :tools]))]
     (is (= "seon" (get-in initialized [:result :serverInfo :name])))
-    (is (= #{"eval_clj" "runtime_status"}
+    (is (= #{"eval_clj" "runtime_status" "get_value"}
            (into #{} (map :name) (get-in listed [:result :tools]))))
-    (is (str/includes? (:description eval-tool) "max_output_tokens"))
+    (is (not (contains? (get-in eval-tool [:inputSchema :properties])
+                        :max_output_tokens)))
     (is (str/includes? (:description eval-tool)
                        "MUTATES that shared per-cluster ctx"))
     (is (str/includes? (:description eval-tool)

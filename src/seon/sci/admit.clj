@@ -9,10 +9,12 @@
   configured depth, width, string, and node caps. Reference types and
   arrays are never entered.
 
-  The returned value and its `:seon.cluster.eval/result-edn` string are
-  projections of the same bounded data. Admission preserves supplied
-  evaluation diagnostics and reports whether anything was capped. SCI
-  interrupts propagate. Other projection failures panic or degrade to
+  `admit-value` returns the one bounded print node and its derived semantic
+  value without constructing a print sink. `admit` adds
+  `:seon.cluster.eval/result-edn` from that same node for receipt callers.
+  Admission preserves
+  supplied evaluation diagnostics and reports whether anything was capped.
+  SCI interrupts propagate. Other projection failures panic or degrade to
   markers according to `:seon.config/on-core-error`. Admission opens no
   resources and writes no durable state."
   (:require [clojure.test.check.generators :as gen]
@@ -382,9 +384,11 @@
     [(semantic-value (first entry))
      (semantic-value (second entry))]))
 
-(defn- semantic-value
-  "The bounded value consumed by runtime semantics, derived from the finite
-  print node without touching the dangerous source a second time."
+(defn semantic-value
+  "Derive the bounded runtime value from one finite print node.
+
+  This never touches the dangerous source a second time."
+  {:malli/schema [:=> [:cat :seon.print/node] :any]}
   [print-node]
   (case (::print/face print-node)
     (::print/nil ::print/boolean ::print/number ::print/keyword
@@ -417,6 +421,62 @@
                     ::projection-error (::print/message print-node)}
     ::print/throwable (semantic-value (::print/value print-node))
     (::print/elided ::print/pruned) ::elided))
+
+(defn canonical-edn
+  "Return canonical readable EDN independent of ambient print bindings."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [value]
+  (binding [*print-length* nil
+            *print-level* nil
+            *print-meta* false
+            *print-readably* true
+            *print-dup* false
+            *print-namespace-maps* true]
+    (pr-str value)))
+
+(defn print-node-edn
+  "Return canonical readable EDN for one admitted print node.
+
+  The result is independent of ambient REPL print bindings. The print node is
+  already finite, so no print cap is needed at this sink."
+  {:malli/schema [:=> [:cat :seon.print/node]
+                  :seon.cluster.eval/result-edn]}
+  [print-node]
+  (canonical-edn print-node))
+
+(defn- admit*
+  [{::keys [value interrupt-fn caps record]
+    on-core-error :seon.config/on-core-error}]
+  (let [state {:interrupt-fn interrupt-fn
+               :caps caps
+               :on-core-error on-core-error
+               ;; the root is a node like any other
+               :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
+                                             caps))))
+               :capped? (volatile! false)}
+        print-node (project value 0 state)]
+    (cond-> {::print-node print-node
+             ::value (semantic-value print-node)
+             ::capped? @(:capped? state)}
+      ;; absent in, absent out — never a stored nil
+      record (assoc ::record record))))
+
+(defn admit-value
+  "Realize and bound one value without constructing receipt EDN.
+
+  This is the shared admission operation for guarded invocations and literal
+  render declarations. It walks the source exactly once and returns the same
+  print node, semantic value, cap signal, and optional diagnostics as
+  `admit`."
+  {:malli/schema
+   [:=> [:cat :seon.sci.admit/request]
+    [:map
+     [:seon.sci.admit/print-node :seon.print/node]
+     [:seon.sci.admit/value :any]
+     [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+     [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]]}
+  [request]
+  (admit* request))
 
 (defn admit
   "Realize and bound one value leaving a sci evaluation. ONE pass.
@@ -451,21 +511,8 @@
   marker. The one throwable it deliberately does NOT catch is sci's
   uncatchable interrupt, which must reach `evaluate`."
   {:malli/schema [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted]}
-  [{::keys [value interrupt-fn caps record]
-    on-core-error :seon.config/on-core-error}]
-  (let [state {:interrupt-fn interrupt-fn
-               :caps caps
-               :on-core-error on-core-error
-               ;; the root is a node like any other
-               :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
-                                             caps))))
-               :capped? (volatile! false)}
-        print-node (project value 0 state)]
-    (cond-> {::value (semantic-value print-node)
-             ;; finite by construction: the projection is depth-bounded,
-             ;; width-bounded, deref-free and cycle-free, so this print
-             ;; cannot run away and cannot overflow the stack
-             :seon.cluster.eval/result-edn (pr-str print-node)
-             ::capped? @(:capped? state)}
-      ;; absent in, absent out — never a stored nil
-      record (assoc ::record record))))
+  [request]
+  (let [admitted (admit* request)]
+    (assoc admitted
+           :seon.cluster.eval/result-edn
+           (print-node-edn (::print-node admitted)))))

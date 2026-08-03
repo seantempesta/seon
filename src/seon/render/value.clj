@@ -79,7 +79,9 @@
   (when (counted? value)
     (try (count value) (catch Throwable _ nil))))
 
-(defn- opened-window
+(defn window
+  "Return one stable structural page from an ordinary bounded value."
+  {:malli/schema [:=> [:cat :any :int :int] :map]}
   [value offset size]
   (try
     (if-let [entries (stable-entries value)]
@@ -117,7 +119,7 @@
   [unit]
   (if (and (:seon.render.value/route-base unit)
            (:seon.render.data/cursor unit))
-    (opened-window
+    (window
      (:seon.render/value unit)
      (long (get-in unit [:seon.render.data/cursor
                          :seon.render.data/offset] 0))
@@ -174,19 +176,19 @@
                   [:or :nil :seon.render.value/projection]]}
   [unit]
   (when-let [caps (:seon.sci.admit/caps unit)]
-    (let [window (display-value unit)
+    (let [display (display-value unit)
           admitted (if-let [result-edn (:seon.cluster.eval/result-edn unit)]
                      {:seon.render.value/tree (edn/read-string result-edn)
                       :seon.render.value/truncated? false}
                      (admitted-projection
-                      (:seon.render.value/window window) caps))
+                      (:seon.render.value/window display) caps))
           tree (:seon.render.value/tree admitted)
           options (print-options unit)
           emitted (print/emit-both tree options)
           truncated? (boolean
                       (or (:seon.render.value/truncated? admitted)
-                          (:seon.render.value/more? window)
-                          (pos? (:seon.render.value/offset window))))
+                          (:seon.render.value/more? display)
+                          (pos? (:seon.render.value/offset display))))
           path (vec (get-in unit [:seon.render.data/cursor
                                   :seon.render.data/path] []))]
       {:seon.render.value/tree tree
@@ -196,7 +198,7 @@
        :seon.render.value/html
        [:div {:id (node-id unit path) :class "seon-data-panel"}
         (breadcrumbs unit path)
-        (pager unit path window)
+        (pager unit path display)
         (:seon.print/hiccup emitted)
         (when truncated?
           [:p {:class "seon-data-capped"}
@@ -217,7 +219,46 @@
   [projection]
   (:seon.render.value/html projection))
 
-(defn- window-node
+(defn artifact
+  "Select the one durable value artifact from an admission result.
+
+  The print node is the sole value source. Semantic data and printable EDN
+  are derived when read and are never stored beside it."
+  {:malli/schema [:=> [:cat :map] :seon.render.value/artifact]}
+  [admitted]
+  (select-keys admitted
+               [:seon.sci.admit/print-node
+                :seon.sci.admit/capped?
+                :seon.sci.admit/record]))
+
+(defn artifact-edn
+  "Serialize one value artifact with canonical print bindings."
+  {:malli/schema [:=> [:cat :seon.render.value/artifact] :string]}
+  [stored]
+  (admit/canonical-edn stored))
+
+(defn read-artifact
+  "Read one stored value artifact."
+  {:malli/schema [:=> [:cat :string] :seon.render.value/artifact]}
+  [content]
+  (edn/read-string content))
+
+(defn artifact-value
+  "Derive semantic drill data from an artifact's sole print node."
+  {:malli/schema [:=> [:cat :seon.render.value/artifact] :any]}
+  [stored]
+  (admit/semantic-value (:seon.sci.admit/print-node stored)))
+
+(defn artifact-result-edn
+  "Derive receipt EDN from an artifact's sole print node."
+  {:malli/schema [:=> [:cat :seon.render.value/artifact]
+                  :seon.cluster.eval/result-edn]}
+  [stored]
+  (admit/print-node-edn (:seon.sci.admit/print-node stored)))
+
+(defn print-node-window
+  "Return the first structural window of one admitted print node."
+  {:malli/schema [:=> [:cat :seon.print/node :int] :seon.print/node]}
   [node size]
   (let [face (:seon.print/face node)
         limit (max 0 (dec size))]
@@ -254,7 +295,7 @@
                parsed
                (:seon.render.value/tree
                 (admitted-projection parsed (:seon.sci.admit/caps unit))))]
-    (pr-str (window-node node (page-size unit)))))
+    (admit/print-node-edn (print-node-window node (page-size unit)))))
 
 (defn render-ai
   "Render any floor unit through the admitted text sink."

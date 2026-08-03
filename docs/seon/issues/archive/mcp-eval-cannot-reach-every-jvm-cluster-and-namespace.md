@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, sci]
 ---
@@ -149,6 +149,18 @@ Live acceptance used only the isolated operator root
 - Run/receipt counts were `[1 13]` immediately before a door-only debug `def`
   and `[1 13]` immediately after it. The definition appeared in the shared SCI
   context while no run or receipt was created.
+
+## Resolution — 2026-08-03
+
+Ruling #44's complete three-tool surface now preserves the root, cluster,
+namespace, mode, and stateful-session contracts this issue established. The
+cluster-side `valf` projects only bridge-marked returns after raw `*1` is set;
+the bridge remains below the application classpath and invokes cluster owners
+through the live io-prepl. A fresh direct server probe—not the orchestrator's
+already-bound MCP client—proved the stateful session by evaluating an
+oversized vector and then reading `(subvec *1 100 103)` as `[100 101 102]`.
+
+Focused bridge proof: 18 tests / 117 assertions / 0 failures / 0 errors.
 
 The current `seon.cluster/start!` writes its advertisement in REPL layer zero
 (`src/seon/cluster.clj:1443-1471`), so an ordinary post-REPL failure retains

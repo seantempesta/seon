@@ -24,8 +24,8 @@ MCP-only string budget.
 | SCI evaluation | Door mode uses the cluster's shared ctx, admission caps, print grammar, contracts, and time limit; it mutates that ctx and creates no run or receipts. | Door mode is unavailable above a live REPL when the cluster layer did not stand. | Preserve the flat error value and never fall back to JVM mode. |
 | Inventory | `runtime_status` uses the operator's root-scoped `source-observations` census and reports advertisement/process-record registrations as text. | It omits the operator's full cluster-truth/roster projection, stopped branches, and observation failures. A process record alone has no prepl endpoint, so missing-advertisement recovery still needs another live advertisement for that JVM. | One public, read-only operator observation value feeds both `bin/seon status` rendering and structured MCP inventory. |
 | Core health | A reachable JVM can expose the partial instance, and a ready instance has `seon.cluster/readiness` plus `seon.problems/problems`. | MCP does not compose them; prepl refusal can currently leave no layer signal and still print `alive`. | Report process, prepl, boot readiness, roster/database observation, and problem counts separately; never synthesize health from silence. |
-| Flow state | Flow supports `datafy`, `ping`, and per-proc ping; Seon retains the cluster graph, per-agent graphs, work launcher, fault fan-out, and bounded `:ping-map-fn` projections. | MCP exposes none of it; the existing fleet render pings every armed agent and is not a bounded MCP response. | Add opt-in cluster Flow summary and an optional one-agent drill using Flow's own maps and vocabulary. |
-| Output and drill | SCI door results already pass through `seon.sci.admit` and `seon.print`; eval receipts already move admitted results above `:seon.config.eval.result/blob-threshold` to `seon.blob`. | MCP still chops strings irretrievably; raw io-prepl serializes before MCP can admit the value; status bypasses the value system; `node-id` is an address hash rather than a blob lookup; `/data` cannot select a blob; unreferenced MCP blobs can be swept by explicit store collection. | Delete MCP token/character/event/frame cutoffs. Project eval and status through one value artifact, return its useful window plus caps evidence and `{root, cluster, digest, size, node-id}`, and expose `get_value` for `get-in` path/offset drill. Use only the selected cluster's effective admission caps, render window, and existing blob threshold; refuse a value result when those owners have not stood. |
+| Flow state | `runtime_status` reports the selected cluster graph through Flow ping data, pairs every expected proc with its reply, and reports a missing reply as `unknown`. The 20 ms window is a database-backed config fact. | Process work-launcher and fault-committer summaries plus explicit one-agent drill remain outside tier 3B. | Add those bounded observations without implicitly pinging the agent fleet. |
+| Output and drill | `eval_clj` installs the shared projector as the cluster io-prepl `valf`; one print-node artifact derives semantic drill data and result EDN, oversized results use the existing blob threshold, `get_value` drills by EDN path/offset, and `/data` selects the same digest. The MCP-only token/character/event/frame cutoffs are deleted. | Root-wide status is still bridge-composed rather than projected through a selected value host, and MCP artifacts have no durable reference fact before explicit store collection. | Complete the status value-host boundary and retention proof; do not add another value cache or budget. |
 
 ## Origin and scope
 
@@ -82,6 +82,39 @@ The next slices are blocked at owners outside the MCP lane, not at the bridge:
 Complete inventory, health, and Flow remain pending behind those owner seams;
 the independent session data has already moved into `runtime_status`, so no
 compatibility `list_sessions` path remains.
+
+## Tier 3B implementation — 2026-08-03
+
+The value-chain owner seams above are now implemented. `seon.sci.admit`
+retains and exposes the one print node, derives its semantic value publicly,
+and emits result EDN under canonical print bindings. `seon.render.value`
+stores only that node with cap and optional diagnostic facts. The cluster
+io-prepl installs the projector as `valf`, after Clojure has assigned the raw
+result to `*1`; the tooling bridge merely marks which returns need projection.
+Oversized results settle in the selected cluster's existing Konserve blob tier
+and return their digest, while a storeless JVM returns the same digest and an
+explicit non-retrievable remainder statement. `/data?value=…` and `get_value`
+load the same artifact.
+
+The bridge now advertises exactly `eval_clj`, `runtime_status`, and
+`get_value`; session rows live in status and `list_sessions` remains deleted.
+Its token, character, event-count, and exception-frame truncation owners and
+tests are deleted. Runtime status adds readiness/problem and selected cluster
+Flow observations. The Flow ping window is
+`:seon.config.flow/ping-timeout-ms`, default 20 ms with provenance; expected
+procs missing from the reply map are `unknown`.
+
+Live proof in isolated root `tmp/mcp-value-chain-live` produced a 102,984-byte
+artifact for `(vec (range 2000))`, returned digest
+`482e503f48849b53e9241c98c5d151e3b29cdc6a303eca8b179e091af13ea2f5`,
+drilled offset 7 as `[7 8 9 10 11 12 13 14]`, rendered the same digest at
+`/data` as `showing 8–15 of 2000`, and then read raw `*1` as
+`[100 101 102]`. The root was brought down after proof.
+
+Remaining surface work is outside tier 3B: extract the complete public
+operator inventory value, add work-launcher/fault-committer and explicit
+one-agent Flow detail, project root-wide status through its selected value
+host, and close the separately tracked parent-watchdog lifetime defect.
 
 ## Grounding ledger
 

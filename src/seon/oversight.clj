@@ -28,15 +28,24 @@
             [datahike.api :as d]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]))
 
 ;;; Flow's ping contract is explicitly timeout-bounded because an active
-;;; transform cannot answer until it returns. F1 measured the parked mailbox
-;;; and turn replies in microseconds; twenty milliseconds leaves orders of
-;;; magnitude of scheduling room while making "turn did not answer" useful
-;;; rather than adding a second to every live render.
-(def ^:private ping-timeout-ms 20)
+;;; transform cannot answer until it returns. The window is a config fact;
+;;; absence of a reply remains unknown rather than becoming a health claim.
+
+(defn- cluster-name
+  [db]
+  (d/q '[:find ?name .
+         :where [_ :seon.cluster/name ?name]]
+       db))
+
+(defn- ping-timeout-ms
+  [db]
+  (:seon.config.flow/ping-timeout-ms
+   (config/effective db (cluster-name db))))
 
 (defn- connection-identity
   "The stable connection + generation portion of a committed db value."
@@ -84,11 +93,31 @@
     {:seon.oversight/count (:count buffer)
      :seon.oversight/capacity (:capacity buffer)}))
 
+(defn proc-ping
+  "Project one expected Flow proc and its optional ping reply.
+
+  A missing reply is explicitly unknown; presence in the graph never implies
+  health."
+  {:malli/schema [:=> [:cat :any [:maybe :map]] :map]}
+  [proc-id reply]
+  (if reply
+    {:seon.oversight/proc proc-id
+     :seon.oversight/ping :reply
+     :seon.oversight/passes (::flow/count reply)
+     :seon.oversight/buffers
+     (into []
+           (keep (fn [[port channel]]
+                   (when-let [found (occupancy channel)]
+                     (assoc found :seon.oversight/port port))))
+           (::flow/ins reply))}
+    {:seon.oversight/proc proc-id
+     :seon.oversight/ping :unknown}))
+
 (defn- agent-story
   "One armed agent's current story."
-  [db agent-id entry]
+  [db timeout-ms agent-id entry]
   (let [ping (flow/ping (:seon.flow/graph entry)
-                        :timeout-ms ping-timeout-ms)
+                        :timeout-ms timeout-ms)
         mailbox (get ping ::agent/mailbox)
         turn (get ping ::agent/turn)
         run-id (current-run-id db agent-id)
@@ -121,39 +150,45 @@
 
 (defn- plumbing-story
   "Every proc in the cluster graph, including a proc busy rendering us."
-  [graph]
-  (let [ping (flow/ping graph :timeout-ms ping-timeout-ms)
+  [graph timeout-ms]
+  (let [ping (flow/ping graph :timeout-ms timeout-ms)
         pids (sort (keys (:procs (datafy/datafy graph))))]
     (mapv
      (fn [pid]
-       (if-let [reply (get ping pid)]
-         {:seon.oversight/proc pid
-          :seon.oversight/passes (::flow/count reply)
-          :seon.oversight/buffers
-          (into []
-                (keep (fn [[port channel]]
-                        (when-let [found (occupancy channel)]
-                          (assoc found :seon.oversight/port port))))
-                (::flow/ins reply))}
-         ;; The render proc observes itself in this state during a feed
-         ;; pass: it cannot answer until the projection returns. Presence
-         ;; of the proc in the graph definition plus absence of a pong is
-         ;; the story; no stored busy flag is needed.
-         {:seon.oversight/proc pid}))
+       ;; The render proc observes itself as unknown during a feed pass: it
+       ;; cannot answer until the projection returns. Presence in the graph
+       ;; plus absence of a pong never becomes a health claim.
+       (proc-ping pid (get ping pid)))
      pids)))
 
 (defn- fleet-value
   "The complete process-local fleet value at one database value."
   [db instance]
   (let [routing (:seon.cluster.agent/routing instance)
-        armed (or (some-> routing deref ::agent/armed) {})]
+        armed (or (some-> routing deref ::agent/armed) {})
+        timeout-ms (ping-timeout-ms db)]
     {:seon.oversight/agents
      (into []
            (map (fn [[agent-id entry]]
-                  (agent-story db agent-id entry)))
+                  (agent-story db timeout-ms agent-id entry)))
            (sort-by key armed))
      :seon.oversight/plumbing
-     (plumbing-story (:seon.flow/graph instance))}))
+     (plumbing-story (:seon.flow/graph instance) timeout-ms)}))
+
+(defn flow-status
+  "Return the current agent and plumbing Flow observations for one instance."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
+                  :map]}
+  [db instance]
+  (fleet-value db instance))
+
+(defn cluster-flow-status
+  "Return only the selected cluster graph's bounded Flow observations."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
+                  :map]}
+  [db instance]
+  {:seon.oversight/plumbing
+   (plumbing-story (:seon.flow/graph instance) (ping-timeout-ms db))})
 
 (defn unit
   "Build the live fleet render unit, or omit it without a cluster."

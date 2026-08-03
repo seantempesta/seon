@@ -6,8 +6,7 @@
             [clojure.string :as str])
   (:import [clojure.lang LineNumberingPushbackReader]
            [java.io BufferedReader PushbackReader]
-           [java.net InetSocketAddress Socket SocketTimeoutException]
-           [java.nio.file FileVisitOption Files LinkOption]))
+           [java.net InetSocketAddress Socket SocketTimeoutException]))
 
 ;; This process is deliberately below the application. It asks the fresh
 ;; operator for its root-scoped observations and speaks io-prepl; it never
@@ -25,188 +24,19 @@
 
 (def default-timeout-ms 30000)
 (def connect-timeout-ms 5000)
-(def default-output-tokens 4000)
-(def max-output-tokens 16000)
-(def min-output-tokens 64)
-(def max-transport-events 256)
-(def max-exception-frames 3)
 (def max-form-preview-chars 60)
-(def first-party-source-directories ["src" "test"])
 (def server-info {:name "seon" :version "0.4.0"})
-(def minimum-identity-prefix-chars (quot max-form-preview-chars 2))
-
-;; The output-token estimate cannot be smaller than the bridge's required
-;; terminal identity plus explicit truncation evidence. Derive that structural
-;; floor from the encoded shape instead of tuning a second character constant.
-(def minimum-structured-transport-chars
-  (count
-   (json/generate-string
-    {:seon.dev.mcp/runtime "clj"
-     :seon.dev.mcp/cluster
-     (apply str (repeat minimum-identity-prefix-chars "c"))
-     :seon.dev.mcp/session-id
-     (apply str (repeat minimum-identity-prefix-chars "s"))
-     :seon.dev.mcp/events
-     [{:tag :ret
-       :val ""
-       :ns (apply str (repeat minimum-identity-prefix-chars "n"))
-       :ms Long/MAX_VALUE
-       :form (apply str (repeat minimum-identity-prefix-chars "f"))
-       :exception true
-       :seon.dev.mcp/truncated? true
-       :seon.dev.mcp/retained-chars 0
-       :seon.dev.mcp/total-chars (* 4 max-output-tokens)}]})))
 
 ;; [root cluster session-id] -> one stateful io-prepl socket and its endpoint.
 (def clj-sessions (atom {}))
 (def stdout-lock (Object.))
-(def ^:dynamic *requested-output-tokens* default-output-tokens)
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
-
-(defn- output-token-limit
-  [requested]
-  (min max-output-tokens
-       (max min-output-tokens (or requested default-output-tokens))))
-
-(defn- transport-char-limit
-  []
-  (max minimum-structured-transport-chars
-       (* 4 (output-token-limit *requested-output-tokens*))))
-
-(defn- event-char-limit
-  []
-  (max 1 (quot (transport-char-limit) 2)))
-
-(defn- bounded-text
-  [value]
-  (let [value (str value)
-        limit (transport-char-limit)]
-    (if (<= (count value) limit)
-      value
-      (str (subs value 0 limit) "\n… output truncated by MCP bridge"))))
-
-(defn- safe-prefix
-  [value retained]
-  (let [retained (min (count value) (max 0 retained))
-        retained (if (and (pos? retained)
-                          (Character/isHighSurrogate
-                           (.charAt ^String value (dec retained))))
-                   (dec retained)
-                   retained)]
-    (subs value 0 retained)))
-
-(defn- trim-event-value
-  [value event-index retained]
-  (let [path [:seon.dev.mcp/events event-index]
-        event (get-in value path)
-        original (:val event)
-        total (or (:seon.dev.mcp/total-chars event) (count original))
-        kept (safe-prefix original retained)]
-    (-> value
-        (assoc-in (conj path :val) kept)
-        (assoc-in (conj path :seon.dev.mcp/truncated?) true)
-        (assoc-in (conj path :seon.dev.mcp/retained-chars) (count kept))
-        (assoc-in (conj path :seon.dev.mcp/total-chars) total))))
-
-(defn- string-leaves
-  ([value]
-   (string-leaves [] value))
-  ([path value]
-   (cond
-     (string? value)
-     [{:seon.dev.mcp/path path
-       :seon.dev.mcp/raw-chars (count value)
-       :seon.dev.mcp/encoded-chars
-       (count (json/generate-string value))}]
-
-     (map? value)
-     (into []
-           (mapcat (fn [[field-key child]]
-                     (string-leaves (conj path field-key) child)))
-           value)
-
-     (vector? value)
-     (into []
-           (mapcat (fn [[index child]]
-                     (string-leaves (conj path index) child)))
-           (map-indexed vector value))
-
-     :else
-     [])))
-
-(defn- largest-string-value
-  [value]
-  (->> (string-leaves value)
-       (filter (comp pos? :seon.dev.mcp/raw-chars))
-       (sort-by (juxt (comp - :seon.dev.mcp/encoded-chars)
-                      (comp pr-str :seon.dev.mcp/path)))
-       first))
-
-(defn- event-value-path?
-  [path]
-  (and (= 3 (count path))
-       (= :seon.dev.mcp/events (first path))
-       (integer? (second path))
-       (= :val (peek path))))
-
-(defn- trim-string-value
-  [value path retained]
-  (if (event-value-path? path)
-    (trim-event-value value (second path) retained)
-    (let [parent-path (pop path)
-          field (peek path)
-          original (get-in value path)
-          previous (get-in value
-                           (conj parent-path
-                                 :seon.dev.mcp/truncated-fields field))
-          total (or (second previous) (count original))
-          kept (safe-prefix original retained)
-          trimmed (assoc-in value path kept)]
-      (if (map? (get-in value parent-path))
-        (assoc-in trimmed
-                  (conj parent-path :seon.dev.mcp/truncated-fields field)
-                  [(count kept) total])
-        trimmed))))
-
-(defn- droppable-event-index
-  [value]
-  (first
-   (keep-indexed (fn [index event]
-                   (when (not= :ret (:tag event)) index))
-                 (:seon.dev.mcp/events value))))
-
-(defn- drop-event
-  [value index]
-  (-> value
-      (update :seon.dev.mcp/events
-              #(into (subvec % 0 index) (subvec % (inc index))))
-      (update :seon.dev.mcp/events-omitted (fnil inc 0))))
-
-(defn- encode-structured-content
-  [value]
-  (let [limit (transport-char-limit)]
-    (loop [value value]
-      (let [encoded (json/generate-string value)
-            overflow (- (count encoded) limit)]
-        (if-not (pos? overflow)
-          encoded
-          (if-let [{path :seon.dev.mcp/path
-                    raw-chars :seon.dev.mcp/raw-chars}
-                   (largest-string-value value)]
-            (recur (trim-string-value value path
-                                      (- raw-chars (max 1 overflow))))
-            (if-let [event-index (droppable-event-index value)]
-              (recur (drop-event value event-index))
-              ;; The bridge's fixed terminal envelope fits the advertised
-              ;; minimum. Reaching this arm means a future non-string shape
-              ;; grew without acquiring its own projection contract.
-              encoded)))))))
 
 (defn- content-text
   [value]
   (if (string? value)
-    (bounded-text value)
-    (encode-structured-content value)))
+    value
+    (json/generate-string value)))
 
 (defn- log-info
   [& arguments]
@@ -612,123 +442,15 @@
                        :seon.dev.mcp/reader-error (ex-message throwable)}
                       throwable)))))
 
-(defn- bounded-event
-  [event limit]
-  (if-let [value (when (string? (:val event)) (:val event))]
-    (let [kept (safe-prefix value (min limit (count value)))]
-      [(cond-> (assoc event :val kept)
-         (< (count kept) (count value))
-         (assoc :seon.dev.mcp/truncated? true
-                :seon.dev.mcp/retained-chars (count kept)
-                :seon.dev.mcp/total-chars (count value)))
-       (count kept)])
-    [event 0]))
-
-(defn- source-files
-  [directory-name]
-  (let [directory (io/file project-root directory-name)]
-    (if-not (.isDirectory directory)
-      []
-      (with-open [paths (Files/walk (.toPath directory)
-                                    (make-array FileVisitOption 0))]
-        (->> (iterator-seq (.iterator paths))
-             (filter #(Files/isRegularFile
-                       % (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
-             (filter #(let [path (str %)]
-                        (or (str/ends-with? path ".clj")
-                            (str/ends-with? path ".cljc"))))
-             (mapv #(.toFile %)))))))
-
-(defn- source-namespace
-  [file]
-  (try
-    (with-open [reader (PushbackReader. (io/reader file))]
-      (binding [*read-eval* false]
-        (let [eof (Object.)]
-          (loop []
-            (let [form (read {:eof eof :read-cond :allow} reader)]
-              (cond
-                (identical? eof form) nil
-                (and (seq? form)
-                     (= 'ns (first form))
-                     (symbol? (second form)))
-                (second form)
-                :else (recur)))))))
-    (catch Throwable _
-      nil)))
-
-(defn- first-party-class-prefixes
-  []
-  (into #{}
-        (comp (mapcat source-files)
-              (keep source-namespace)
-              (map #(munge (str %))))
-        first-party-source-directories))
-
-(defn- class-owned-by-prefix?
-  [prefixes class-name]
-  (some #(or (= % class-name)
-             (str/starts-with? class-name (str % "$")))
-        prefixes))
-
-(defn- first-party-frame?
-  [source-prefixes event-namespace frame]
-  (let [class-name (str (first frame))
-        event-prefix (when (and (string? event-namespace)
-                                (not (str/blank? event-namespace)))
-                       (munge event-namespace))]
-    (or (class-owned-by-prefix? source-prefixes class-name)
-        (and event-prefix
-             (class-owned-by-prefix? [event-prefix] class-name)))))
-
-(defn- project-exception-value
-  [value event-namespace]
-  (let [throwable-map
-        (try
-          (if (string? value)
-            (edn/read-string {:default (fn [tag tagged-value]
-                                         [tag tagged-value])}
-                             value)
-            value)
-          (catch Throwable _ nil))]
-    (if-not (map? throwable-map)
-      value
-      (let [trace (vec (:trace throwable-map))
-            source-prefixes (first-party-class-prefixes)
-            frames (into []
-                         (comp (filter #(first-party-frame?
-                                        source-prefixes event-namespace %))
-                               (take max-exception-frames))
-                         trace)]
-        (pr-str
-         (array-map
-          :cause (:cause throwable-map)
-          :phase (:phase throwable-map)
-          :via (mapv #(select-keys % [:type :message])
-                     (:via throwable-map))
-          :trace frames
-          :seon.dev.mcp/frames-omitted (- (count trace)
-                                          (count frames))))))))
-
-(defn- project-exception-event
-  [event]
-  (if (:exception event)
-    (update event :val project-exception-value (:ns event))
-    event))
-
 (defn- collect-prepl-response!
   [{:keys [socket reader]} timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop [events []
-           dropped 0]
+    (loop [events []]
       (let [remaining-ms (- deadline (System/currentTimeMillis))]
         (when-not (pos? remaining-ms)
           (throw (SocketTimeoutException. "io-prepl deadline exceeded")))
         (.setSoTimeout ^Socket socket (int remaining-ms))
-        (let [event (edn/read {:eof ::eof} reader)
-              event (if (map? event)
-                      (project-exception-event event)
-                      event)]
+        (let [event (edn/read {:eof ::eof} reader)]
           (cond
             (= ::eof event)
             (throw (ex-info "Cluster closed the io-prepl session."
@@ -739,19 +461,40 @@
                             {:seon.dev.mcp/failure :malformed-prepl
                              :seon.dev.mcp/value (pr-str event)}))
 
+            (= :ret (:tag event))
+            (conj events event)
+
             :else
-            (let [[event _] (bounded-event event (event-char-limit))
-                  terminal? (= :ret (:tag event))
-                  retain? (or terminal?
-                              (< (count events) (dec max-transport-events)))
-                  events (cond-> events retain? (conj event))
-                  dropped (if retain? dropped (inc dropped))]
-              (if terminal?
-                (cond-> events
-                  (pos? dropped)
-                  (conj {:tag :seon.dev.mcp/dropped-events
-                         :count dropped}))
-                (recur events dropped)))))))))
+            (recur (conj events event))))))))
+
+(defn- decoded-projection-event
+  [event]
+  (if (and (= :ret (:tag event)) (string? (:val event)))
+    (let [parsed (try
+                   (edn/read-string (:val event))
+                   (catch Throwable _ ::unreadable))]
+      (if (and (map? parsed) (contains? parsed :seon.dev.mcp/value))
+        (assoc event :val parsed)
+        event))
+    event))
+
+(defn- one-shot-events!
+  [root cluster remote-form timeout-ms]
+  (let [session-id (str "value-" (random-uuid))
+        key [root cluster session-id]
+        {:keys [writer] :as session}
+        (current-clj-session! root cluster session-id)]
+    (try
+      (.write ^java.io.Writer writer (str remote-form "\n"))
+      (.flush ^java.io.Writer writer)
+      (mapv decoded-projection-event
+            (collect-prepl-response! session timeout-ms))
+      (finally
+        (close-clj-session! key)))))
+
+(defn- terminal-projection
+  [events]
+  (some #(when (= :ret (:tag %)) (:val %)) events))
 
 (defn- namespace-symbol!
   [namespace-name]
@@ -782,6 +525,9 @@
   [form namespace-symbol]
   (pr-str
    (list 'do
+         (list (list 'requiring-resolve
+                     (list 'quote
+                           'seon.cluster/project-next-prepl-value!)))
          (list 'in-ns (list 'quote namespace-symbol))
          (list 'clojure.core/refer (list 'quote 'clojure.core))
          (list 'clojure.core/eval (list 'quote form)))))
@@ -789,7 +535,9 @@
 (defn- door-evaluation-form
   [source cluster namespace-symbol]
   (pr-str
-   `(let [instances# @@(ns-resolve 'seon.cluster
+   `(do
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!))
+      (let [instances# @@(ns-resolve 'seon.cluster
                                    (symbol "running-instances"))
           instance# (get instances# ~cluster)
           cluster# (:seon.cluster.loop/cluster instance#)]
@@ -810,7 +558,7 @@
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms cluster#)
           :seon.config/on-core-error
-          (:seon.config/on-core-error cluster#)})))))
+          (:seon.config/on-core-error cluster#)}))))))
 
 (defn- remote-evaluation-form
   [{:seon.dev.mcp/keys [form source]} mode cluster namespace-symbol]
@@ -854,7 +602,8 @@
               (current-clj-session! root cluster session-id)]
           (.write ^java.io.Writer writer (str remote-form "\n"))
           (.flush ^java.io.Writer writer)
-          (let [events (collect-prepl-response! session timeout-ms)
+          (let [events (mapv decoded-projection-event
+                             (collect-prepl-response! session timeout-ms))
                 terminal (some #(when (= :ret (:tag %)) %) events)
                 response {:seon.dev.mcp/runtime "clj"
                           :seon.dev.mcp/root root
@@ -905,19 +654,107 @@
             :seon.dev.mcp/session-id session-id})))
    (sort (keys @clj-sessions))))
 
+(defn- runtime-observation
+  [root cluster]
+  (try
+    (let [projected
+          (terminal-projection
+           (one-shot-events!
+            root cluster
+            (pr-str
+             `(do
+                ((requiring-resolve
+                  'seon.cluster/project-next-prepl-value!))
+                ((requiring-resolve
+                  'seon.cluster/mcp-runtime-observation)
+                 ~cluster)))
+            default-timeout-ms))]
+      (or (:seon.dev.mcp/value projected) projected))
+    (catch Throwable throwable
+      {:seon.dev.mcp/cluster cluster
+       :seon.dev.mcp/health :unknown
+       :seon.dev.mcp/flow :unknown
+       :seon.dev.mcp/error (ex-message throwable)})))
+
 (defn- execute-runtime-status
-  [{:keys [root]}]
+  [{:keys [root cluster]}]
   (let [root (canonical-root root)
-        rows (discovery-rows root)]
+        rows (discovery-rows root)
+        selected (or cluster own-cluster)]
     (mcp-success
      {:seon.dev.mcp/root root
-      :seon.dev.mcp/view :inventory
-      :seon.dev.mcp/clusters rows
+      :seon.dev.mcp/view :inventory-health-flow
+      :seon.dev.mcp/clusters
+      (mapv (fn [row]
+              (if (contains? #{:alive :degraded :unknown}
+                             (:seon.dev.mcp/state row))
+                (assoc row :seon.dev.mcp/runtime
+                       (runtime-observation
+                        root (:seon.dev.mcp/cluster row)))
+                (assoc row :seon.dev.mcp/runtime
+                       {:seon.dev.mcp/health :unknown
+                        :seon.dev.mcp/flow :unknown})))
+            rows)
+      :seon.dev.mcp/selected-cluster selected
       :seon.dev.mcp/sessions (session-rows root)})))
+
+(defn- hex-digit?
+  [character]
+  (or (<= (int \0) (int character) (int \9))
+      (<= (int \a) (int character) (int \f))
+      (<= (int \A) (int character) (int \F))))
+
+(defn- digest!
+  [content-digest]
+  (when-not (and (string? content-digest)
+                 (= 64 (count content-digest))
+                 (every? hex-digit? content-digest))
+    (throw (ex-info "Digest must be 64 hexadecimal characters."
+                    {:seon.dev.mcp/failure :invalid-digest})))
+  content-digest)
+
+(defn- path!
+  [path]
+  (let [parsed (try
+                 (edn/read-string (or path "[]"))
+                 (catch Throwable _ ::unreadable))]
+    (when-not (vector? parsed)
+      (throw (ex-info "Path must be one EDN vector."
+                      {:seon.dev.mcp/failure :invalid-path})))
+    parsed))
+
+(defn- execute-get-value
+  [{:keys [root cluster digest path offset timeout_ms]}]
+  (let [root (canonical-root root)
+        cluster (or cluster own-cluster)
+        content-digest (digest! digest)
+        path (path! path)
+        offset (max 0 (long (or offset 0)))
+        timeout-ms (min 120000 (max 1 (or timeout_ms default-timeout-ms)))
+        events
+        (one-shot-events!
+         root cluster
+         (pr-str
+          `(do
+             ((requiring-resolve 'seon.cluster/project-next-prepl-value!))
+             ((requiring-resolve 'seon.cluster/mcp-get-value)
+              ~cluster ~content-digest ~path ~offset)))
+         timeout-ms)
+        terminal (some #(when (= :ret (:tag %)) %) events)
+        response {:seon.dev.mcp/runtime "clj"
+                  :seon.dev.mcp/root root
+                  :seon.dev.mcp/cluster cluster
+                  :seon.dev.mcp/source-digest content-digest
+                  :seon.render.data/path path
+                  :seon.render.data/offset offset
+                  :seon.dev.mcp/events events}]
+    (if (:exception terminal)
+      (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
+      (mcp-success response))))
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains *1/*2. Door mode evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement. Narrow oversized results or raise max_output_tokens up to 16000."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. Door mode evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from the fresh operator's advertisements and degraded process-record census on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
@@ -925,15 +762,26 @@
                                :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
                                :mode {:type "string" :enum ["jvm" "door"] :description "jvm evaluates in the host io-prepl; door evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
-                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}
-                               :max_output_tokens {:type "integer" :minimum 64 :maximum 16000}}
+                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
                   :required ["code"]}}
 
    {:name "runtime_status"
-    :description "Report root-scoped JVM clusters and the active stateful io-prepl sessions under that root."
+    :description "Report root-scoped cluster inventory, health/readiness, Flow proc observations, and active stateful io-prepl sessions. A proc that does not answer within the configured ping window is unknown, never healthy."
     :inputSchema {:type "object"
-                  :properties {:root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}}
-                  :required []}}])
+                  :properties {:root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
+                               :cluster {:type "string" :description "Selected cluster. Defaults to this MCP server's cluster."}}
+                  :required []}}
+
+   {:name "get_value"
+    :description "Drill an oversized eval result previously stored in the selected cluster's blob tier. The path is a get-in path and offset pages the selected collection."
+    :inputSchema {:type "object"
+                  :properties {:digest {:type "string" :description "The SHA-256 digest returned by eval_clj."}
+                               :path {:type "string" :description "An EDN get-in path into the stored value. Defaults to []."}
+                               :offset {:type "integer" :minimum 0}
+                               :root {:type "string" :description "Operator root path. Defaults to the repository root."}
+                               :cluster {:type "string" :description "Cluster holding the blob. Defaults to this MCP server's cluster."}
+                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
+                  :required ["digest"]}}])
 
 (defn- execute-tool
   [name arguments]
@@ -941,13 +789,12 @@
                                (assoc result (keyword key) value))
                              {}
                              (or arguments {}))]
-    (binding [*requested-output-tokens*
-              (output-token-limit (:max_output_tokens arguments))]
-      (case name
-        "eval_clj" (execute-clj-eval arguments)
-        "runtime_status" (execute-runtime-status arguments)
-        (throw (ex-info (str "Unknown tool: " name)
-                        {:seon.dev.mcp/tool name}))))))
+    (case name
+      "eval_clj" (execute-clj-eval arguments)
+      "runtime_status" (execute-runtime-status arguments)
+      "get_value" (execute-get-value arguments)
+      (throw (ex-info (str "Unknown tool: " name)
+                      {:seon.dev.mcp/tool name})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; JSON-RPC

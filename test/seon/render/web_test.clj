@@ -33,12 +33,15 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [org.httpkit.server :as http]
+            [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.flow :as flow]
             [seon.render :as render]
+            [seon.render.value :as value]
             [seon.render.web :as web]
+            [seon.sci.admit :as admit]
             [seon.test-support :as support])
   (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -931,6 +934,23 @@
         (is (str/includes? body
                            "entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D")
             "every floor handle preserves the selected entity root")))))
+
+(deftest data-selects-a-stored-value-artifact-by-digest
+  (with-server
+    (fn [connection server _context]
+      (let [stored (-> (admit/admit-value
+                        {:seon.sci.admit/value {:alpha [1 2 3]}
+                         :seon.sci.admit/interrupt-fn (fn [])
+                         :seon.sci.admit/caps caps
+                         :seon.config/on-core-error :record})
+                       value/artifact
+                       value/artifact-edn)
+            digest (blob/put! connection stored)
+            response (fetch server (str "/data?value=" digest))
+            body (.body response)]
+        (is (= 200 (.statusCode response)))
+        (is (str/includes? body ":alpha"))
+        (is (str/includes? body (str "value=" digest)))))))
 
 (deftest data-caps-a-five-megabyte-attribute-through-the-shared-floor
   (with-server

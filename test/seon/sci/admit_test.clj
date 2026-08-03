@@ -120,6 +120,23 @@
                   (schema/current-projection))]
     (m/schema :seon.print/node {:registry registry})))
 
+(deftest one-print-node-owns-semantic-value-and-result-edn
+  (binding [*print-length* 0
+            *print-level* 0
+            *print-meta* true
+            *print-readably* false
+            *print-dup* true
+            *print-namespace-maps* false]
+    (let [admitted (admit/admit (request {:alpha [1 2 3]}))
+          print-node (:seon.sci.admit/print-node admitted)]
+      (is (= print-node
+             (edn/read-string (:seon.cluster.eval/result-edn admitted))))
+      (is (= (:seon.sci.admit/value admitted)
+             (admit/semantic-value print-node)))
+      (is (= print-node
+             (:seon.sci.admit/print-node
+              (admit/admit-value (request {:alpha [1 2 3]}))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Real sci values — one context, inert values, never mutated
 ;;; ---------------------------------------------------------------------------

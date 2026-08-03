@@ -38,8 +38,8 @@
                     :in $ ?message-id
                     :where
                     [?message :seon.cluster.message/id ?message-id]
-                    [?tx :seon.db/trigger ?message]
-                    [?run :seon.cluster.run/id ?run-id ?tx]
+                    [?run :seon.cluster.run/trigger ?message]
+                    [?run :seon.cluster.run/id ?run-id]
                     [?run :seon.cluster.run/closed-at _]]
                   db
                   message-id)]

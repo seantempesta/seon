@@ -77,6 +77,22 @@
              (print/emit-both (:seon.render.value/tree projection)
                               (:seon.render.value/options projection))))))))
 
+(deftest value-artifact-stores-only-the-print-node-source
+  (let [admitted (admit/admit
+                  {:seon.sci.admit/value {:alpha [1 2 3]}
+                   :seon.sci.admit/interrupt-fn (fn [])
+                   :seon.sci.admit/caps caps
+                   :seon.config/on-core-error :record})
+        artifact (value/artifact admitted)
+        stored (value/artifact-edn artifact)
+        restored (value/read-artifact stored)]
+    (is (= #{:seon.sci.admit/print-node :seon.sci.admit/capped?}
+           (set (keys artifact))))
+    (is (= (:seon.sci.admit/value admitted)
+           (value/artifact-value restored)))
+    (is (= (:seon.cluster.eval/result-edn admitted)
+           (value/artifact-result-edn restored)))))
+
 (deftest print-options-merge-over-declared-stock-defaults
   (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
   (is (= "(...)"
@@ -131,7 +147,7 @@
     (is (str/includes? html "seon-data-capped"))))
 
 (deftest a-window-of-one-shows-one-item-not-an-empty-claim-of-more
-  (let [window (#'value/opened-window [:a :b :c] 0 1)]
+  (let [window (value/window [:a :b :c] 0 1)]
     (is (= 1 (:seon.render.value/shown window)))
     (is (= [:a] (:seon.render.value/window window)))
     (is (true? (:seon.render.value/more? window)))))

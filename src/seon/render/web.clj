@@ -53,6 +53,7 @@
             [datahike.api :as d]
             [org.httpkit.server :as http]
             [reitit.ring :as ring]
+            [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
@@ -1173,15 +1174,32 @@
    request]
   (let [db @connection
         query (query-params request)
+        value? (contains? query "value")
+        value-digest (get query "value")
         entity? (contains? query "entity")
         entity (query-entity (get query "entity"))
-        root-value (if entity?
-                     (when-let [eid (some-> (when entity
-                                             (d/pull db [:db/id]
-                                                     entity))
-                                           :db/id)]
-                       (generic-entity db eid caps false))
-                     (schema/canonical-database-attributes))
+        root-value
+        (cond
+          value?
+          (try
+            (if-let [content (blob/get connection value-digest)]
+              (value/artifact-value (value/read-artifact content))
+              {:seon.error/kind :seon.render.web/value-not-found
+               :seon.error/message "No stored value has this digest."
+               :seon.blob/digest value-digest})
+            (catch Throwable failure
+              {:seon.error/kind :seon.render.web/value-unreadable
+               :seon.error/message (or (ex-message failure)
+                                       "The stored value is unreadable.")}))
+
+          entity?
+          (when-let [eid (some-> (when entity
+                                   (d/pull db [:db/id] entity))
+                                 :db/id)]
+            (generic-entity db eid caps false))
+
+          :else
+          (schema/canonical-database-attributes))
         options
         (select-keys
          (config/effective db (current-cluster-name db))
@@ -1194,12 +1212,15 @@
         route-base (route/path ::route/data
                                {}
                                (cond-> {}
+                                 value? (assoc :value value-digest)
                                  entity? (assoc :entity (get query "entity"))))
         unit {:seon.cluster.agent/id id
               :seon.render.value/root
-              (if entity?
+              (cond
+                value? [:seon.blob/digest value-digest]
+                entity?
                 (or entity [:seon.render.data/entity (get query "entity")])
-                :seon.render.data/schema)
+                :else :seon.render.data/schema)
               :seon.render.value/route-base route-base
               :seon.render.value/options options
               :seon.render.data/cursor cursor

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, mcp, render]
 ---
@@ -146,3 +146,25 @@ semantic value beside its derived print string. Its exact proposed schema is:
 On read, the semantic drill value derives through the existing
 `semantic-value` transformation and result EDN derives through the canonical
 print helper. No second stored projection is justified.
+
+## Resolution — 2026-08-03
+
+The MCP bridge's output-token, character, event-count, and exception-frame
+truncation paths are deleted. The cluster io-prepl now installs the shared
+projector as its `valf`, after Clojure has assigned the raw result to `*1`.
+Admission exposes one print node; value artifacts store that node plus cap and
+optional diagnostic facts, while semantic drill data and result EDN derive
+from it under canonical print bindings.
+
+An isolated-root live proof evaluated `(vec (range 2000))`. The returned
+window named digest
+`482e503f48849b53e9241c98c5d151e3b29cdc6a303eca8b179e091af13ea2f5`,
+size 102,984, and `retrievable? true`; `get_value` at offset 7 returned
+`[7 8 9 10 11 12 13 14]` with that same source digest. `/data?value=…`
+rendered `showing 8–15 of 2000`. A second eval in the same session read raw
+`*1` and returned `[100 101 102]`. The storeless regression produces the same
+digest with `retrievable? false` and the explicit remainder statement.
+
+Recurring focused proof: `seon.cluster.mcp-test` (1 test / 6 assertions),
+`seon.dev.mcp-bridge-test` (18 / 117), `seon.sci.admit-test` plus
+`seon.render.value-test` (16 / 57), all green.

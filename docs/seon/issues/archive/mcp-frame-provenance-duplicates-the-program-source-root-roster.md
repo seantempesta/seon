@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, mcp, repl]
 ---
@@ -43,3 +43,12 @@ MCP server.
   proves its compiled frame survives projection with no MCP-specific edit.
 - Dependency and JDK frames remain omitted, and source discovery continues to
   refuse symlink traversal.
+
+## Resolution — 2026-08-03
+
+The exception-frame projection and its source-root walk were deleted with the
+MCP-only truncation mechanism. Exceptions now pass through the same admitted
+print-node value chain as every other result, so there is no MCP frame roster
+to synchronize with the program graph. The obsolete frame-specific tests were
+deleted in the same change; the focused bridge suite is green at 18 tests and
+117 assertions.
