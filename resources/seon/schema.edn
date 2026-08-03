@@ -1922,6 +1922,7 @@
  :seon.fn/private? :boolean
  :seon.fn/spec :string
  :seon.fn/calls [:set :seon.db/ref]
+ :seon.effect/capability :qualified-symbol
  :seon.fn/arities
  [:vector {:seon.db/component true} :seon.db/ref]
  :seon.fn/ast
@@ -2024,7 +2025,8 @@
   [:seon.fn/calls {:optional true} :seon.fn/calls]
   [:seon.fn/arities {:optional true} :seon.fn/arities]
   [:seon.fn/ast {:optional true} :seon.fn/ast]
-  [:seon.fn/workload {:optional true} :seon.fn/workload]]
+  [:seon.fn/workload {:optional true} :seon.fn/workload]
+  [:seon.effect/capability {:optional true} :seon.effect/capability]]
 
  :seon.schema/schema
  [:map {:seon.db/entity true}
@@ -2158,6 +2160,14 @@
    :seon.cluster.run/live-processes]]
 
  :seon.cluster.prompt/text [:string {:min 1}]
+
+ ; The render proc's retained-byte response. Prompt assembly adds the
+ ; contribution record only after acquiring these exact bytes and their
+ ; database value.
+ :seon.render/acquired-context
+ [:map
+  [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+  [:seon.db/db :seon.db/database-value]]
 
  ; The rendered context: the exact text the loop sends, the ordered
  ; contribution records every other consumer (capture, debug, token

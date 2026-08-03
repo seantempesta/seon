@@ -1,5 +1,5 @@
 (ns seon.cluster.prompt-test
-  "Recurring acceptance for one fresh walk per prompt."
+  "Recurring acceptance for one retained walk per prompt."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
@@ -97,7 +97,7 @@
    :seon.config/on-core-error :panic
    :seon.render/context-channel context-channel})
 
-(deftest prompt-is-one-fresh-labeled-walk
+(deftest prompt-is-one-retained-labeled-walk
   (planted
    (fn [connection context-channel]
      (let [render-request (request connection context-channel)

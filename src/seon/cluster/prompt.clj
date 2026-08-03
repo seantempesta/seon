@@ -4,8 +4,9 @@
   The loop's call site is deliberately stable: it still asks `prompt` for
   `{text, contributions, db}` and captures those exact bytes before the
   provider call. Internally there is no block selection or composition. One
-  public `seon.render/walk` function returns the exact text, including the one
-  REPL-state line that marks the deliberately uncached boundary."
+  public `seon.render/walk` function returns the exact stable-prefix text and
+  the final REPL-state line carries volatile basis and time after the provider
+  cache boundary."
   (:require [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
             [seon.context :as context]
