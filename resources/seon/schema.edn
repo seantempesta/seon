@@ -1171,6 +1171,8 @@
   [:seon.sci.eval/args :seon.sci.eval/args]
   [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.db/capture-context {:optional true}
+   [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]]
   [:seon.config/on-core-error :seon.config/on-core-error]]
  :seon.sci.eval/invocation-result
  [:map
@@ -1426,7 +1428,7 @@
  ; which the `:call` arm's sink offers complete `:seon.ai/partial`
  ; snapshots. OPTIONAL because a suite or a REPL drives a turn without a
  ; render pipeline — absent means the call runs one-shot.
- :seon.cluster.loop/cluster [:map  [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
+ :seon.cluster.loop/cluster [:map  [:seon.store/branch-connection :seon.store/branch-connection] [:seon.cluster/name :seon.cluster/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.sci.eval/ctx :seon.sci.eval/ctx] [:seon.cluster.wake/channel :seon.flow/channel] [:seon.cluster.loop/stream-channel {:optional true} :seon.flow/channel] [:seon.render/context-channel :seon.flow/channel] [:seon.cluster.loop/completion :seon.flow/channel] [:seon.cluster.loop/evaluate :qualified-symbol] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config.eval/time-limit-ms :seon.config.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.config.error/recurrence-limit :seon.config.error/recurrence-limit] [:seon.config.message/max-chain :seon.config.message/max-chain] [:seon.config.error/escalate-to {:optional true} :seon.config.error/escalate-to] [:clojure.core.async.flow/pid {:optional true} :keyword]]
  ; `::flow/pid` is FLOW'S, added to the args map it hands the init
  ; arity (`flow/impl.clj:155`: `:args (assoc args ::flow/pid pid)`), so
  ; the handle a running proc holds genuinely has one and the closed
@@ -2143,6 +2145,7 @@
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
   [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.render/context-channel :seon.flow/channel]
   ; HOW MANY HOPS of its own neighbourhood the agent sees (owner ruling
   ; 2026-07-28 post-midnight). The same optional parameter the surfaces,
   ; page and expansion requests already carry — the landed accretion
@@ -2887,6 +2890,7 @@
  :seon.render.web/view
  [:map
   [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render/context-channel :seon.flow/channel]
   [:seon.render.web/pages-channel :seon.flow/channel]
   [:seon.render.web/registration :seon.render.web/registration]
   [:seon.render.web/latest-packages :seon.render.web/latest-packages]
@@ -2919,6 +2923,7 @@
  [:seon.render.web/registration :seon.render.web/registration]
  [:seon.render.web/latest-packages :seon.render.web/latest-packages]
  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render/context-channel :seon.flow/channel]
   [:seon.render.web/fault-channel :seon.flow/channel]
  [:seon.render.web/port {:optional true} :seon.render.web/port]]
 

@@ -302,6 +302,7 @@
     arguments :seon.sci.eval/args
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
+    capture-context :seon.db/capture-context
     on-core-error :seon.config/on-core-error}]
   (let [started-at (System/nanoTime)
         arm-state (volatile! nil)
@@ -314,7 +315,9 @@
         (binding [db/*conn*
                   (get-in ctx
                           [:seon.sci.eval/custody
-                           :seon.store/branch-connection])]
+                           :seon.store/branch-connection])
+                  db/*capture-context*
+                  (or capture-context db/*capture-context*)]
           (let [sci-var (sci/resolve ctx function-symbol)]
             (when-not (sci.utils/var? sci-var)
               (throw

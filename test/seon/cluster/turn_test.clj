@@ -84,6 +84,42 @@
   [agent-id]
   {:seon.cluster.agent/id agent-id})
 
+(defn- with-render-context-proc
+  [_connection cluster-handle body]
+  (let [context-channel (async/chan)
+        render-channel (async/chan (async/sliding-buffer 1))
+        pages-channel (async/chan (async/sliding-buffer 1))
+        stream-channel (async/chan (async/sliding-buffer 1))
+        completion (async/promise-chan)
+        cluster-handle (assoc cluster-handle
+                              :seon.render/context-channel context-channel
+                              :seon.cluster.loop/stream-channel stream-channel)
+        graph
+        (flow.core/create-flow
+         {:procs
+          {:seon.render.web/render
+           {:proc
+            (seon.flow/var-process
+             #'web/render-step :io
+             {:seon.render.web/render-channel render-channel
+              :seon.render/context-channel context-channel
+              :seon.render.web/pages-channel pages-channel
+              :seon.render.web/registration (atom {})
+              :seon.render.web/latest-packages (atom {})
+              :seon.render.web/completion completion
+              :seon.render.web/root-agent-id "agent-a"
+              :seon.cluster.loop/cluster cluster-handle})}}
+          :conns []})
+        {:keys [report-chan error-chan]} (flow.core/start graph)]
+    (async/go-loop [] (when (async/<! report-chan) (recur)))
+    (async/go-loop [] (when (async/<! error-chan) (recur)))
+    (try
+      (flow.core/resume graph)
+      (body cluster-handle)
+      (finally
+        (flow.core/stop graph)
+        (async/<!! completion)))))
+
 (defn- with-cluster [body]
   (test-support/with-database
    (fn [connection]
@@ -133,7 +169,9 @@
       (with-redefs
         [cluster.loop/lint-form
          (fn [{source :seon.cluster.loop/source}] source)]
-        (body {:seon.store/branch-connection connection
+        (with-render-context-proc
+         connection
+         {:seon.store/branch-connection connection
                :seon.cluster/name "turn-test"
                :seon.flow/work-launcher launcher
                :seon.cluster.run/process process
@@ -160,7 +198,8 @@
                {:seon.config.eval.result/max-depth 6
                 :seon.config.eval.result/max-collection 8
                 :seon.config.eval.result/max-string 4096
-                :seon.config.eval.result/max-nodes 256}}))
+                :seon.config.eval.result/max-nodes 256}}
+         body))
       (finally
         (seon.flow/stop-work-launcher! launcher)))))))
 
@@ -1767,7 +1806,9 @@
                                         :seon.sci.eval/time-limit-ms
                                         (:seon.config.eval/time-limit-ms cluster)
                                         :seon.config/on-core-error
-                                        (:seon.config/on-core-error cluster)})))))))))
+                                        (:seon.config/on-core-error cluster)
+                                        :seon.render/context-channel
+                                        (:seon.render/context-channel cluster)})))))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
@@ -2156,6 +2197,8 @@
             requests (atom [])
             usage {"prompt_tokens" 31
                    "completion_tokens" 7
+                   "prompt_cache_hit_tokens" 23
+                   "prompt_cache_miss_tokens" 8
                    "prompt_tokens_details" {"cached_tokens" 23}}]
         (with-redefs [ai/complete
                       (recording-completer
@@ -2173,6 +2216,11 @@
           (is (= usage
                  (edn/read-string (:seon.ai.attempt/usage-edn row)))
               "the provider-owned map survives the database round trip")
+          (is (= 23
+                 (:seon.ai.usage/cached-tokens
+                  (ai/normalize-usage
+                   (edn/read-string (:seon.ai.attempt/usage-edn row)))))
+              "DeepSeek's cache-hit tokens normalize from the stored document")
           (is (= "private reasoning"
                  (:seon.ai.attempt/reasoning row))
               "settled reasoning reaches the same durable attempt row")
@@ -2822,6 +2870,7 @@
                          #'web/render-step :io
                          {:seon.render.web/render-channel
                           render-channel
+                          :seon.render/context-channel (async/chan)
                           :seon.render.web/pages-channel
                           (async/chan (async/sliding-buffer 1))
                           :seon.render.web/registration (atom {})

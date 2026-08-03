@@ -1,5 +1,5 @@
 (ns seon.cluster.prompt
-  "The prompt is exactly one fresh entity walk at the turn's database value.
+  "The prompt acquires one retained entity walk from the cluster render proc.
 
   The loop's call site is deliberately stable: it still asks `prompt` for
   `{text, contributions, db}` and captures those exact bytes before the
@@ -38,7 +38,7 @@
    :seon.context.contribution/tokens (tokens/estimate text)})
 
 (defn prompt
-  "Derive one fresh walk for the agent holding the request's run.
+  "Acquire one retained walk for the agent holding the request's run.
 
   The held run must still have a recorded trigger; that custody invariant is
   independent of presentation. The returned contribution is forensic
@@ -48,22 +48,16 @@
                   :seon.cluster.prompt/rendered-context]}
   [db request]
   (let [run-id (:seon.cluster.run/id request)
-        agent-id (:seon.cluster.agent/id request)
-        caps (:seon.sci.admit/caps request)
-        depth (long (get request :seon.render/distance default-depth))
         _ (or (message/trigger db run-id)
               (refuse! ::no-trigger request))
-        text
-        (render/call-with-walk-context
-         {:seon.db/db db
-          :seon.cluster.agent/id agent-id
-          :seon.sci.admit/caps caps
-          :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-          :seon.sci.eval/time-limit-ms
-          (:seon.sci.eval/time-limit-ms request)
-          :seon.config/on-core-error
-          (:seon.config/on-core-error request)}
-         #(render/walk {:depth depth}))]
+        acquired (render/acquire-context!
+                  (:seon.render/context-channel request)
+                  (assoc request
+                         :seon.db/db db
+                         :seon.render/distance
+                         (long (get request :seon.render/distance
+                                    default-depth))))
+        text (:seon.cluster.prompt/text acquired)]
     {:seon.cluster.prompt/text text
      :seon.context/contributions [(walk-contribution text)]
-     :seon.db/db db}))
+     :seon.db/db (:seon.db/db acquired)}))

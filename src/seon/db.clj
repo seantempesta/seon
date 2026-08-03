@@ -148,10 +148,32 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan plan})))
 
+(defn- stable-read-result
+  [result]
+  (walk/postwalk (fn [value]
+                   (if (map? value)
+                     (dissoc value :seon.db/db)
+                     value))
+                 result))
+
 (defn- append-query-evidence!
-  [arguments response]
+  [request response result]
   (when *capture-context*
-    (let [plan (:datahike.read/dependency-plan response)
+    (let [arguments (:args request)
+          database-positions (into []
+                                   (keep-indexed
+                                    (fn [position argument]
+                                      (when (db.utils/db? argument) position)))
+                                   arguments)
+          replayable? (= 1 (count database-positions))
+          replay-request
+          (when replayable?
+            (update request :args
+                    (fn [values]
+                      (mapv (fn [value]
+                              (if (db.utils/db? value) ::database value))
+                            values))))
+          plan (:datahike.read/dependency-plan response)
           positions
           (if (= :all plan)
             (keep-indexed
@@ -166,14 +188,106 @@
         (append-read-evidence!
          {:seon.db/db database
           :seon.db/source-argument-position position
-          :datahike.read/dependency-plan plan}))))
+          :datahike.read/dependency-plan plan
+          :seon.db/read-request
+          (when replayable?
+            {:seon.db/read-operation :q
+             :seon.db/query-request replay-request})
+          :seon.db/read-result (stable-read-result result)}))))
   nil)
 
 (defn- append-pull-evidence!
-  [database response]
-  (append-database-evidence!
-   database
-   (:datahike.read/dependency-plan response)))
+  [database arguments operation-key response result]
+  (append-read-evidence!
+   {:seon.db/db database
+    :seon.db/source-argument-position 0
+    :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
+    :seon.db/read-request {:seon.db/read-operation operation-key
+                           :seon.db/pull-arguments arguments}
+    :seon.db/read-result (stable-read-result result)}))
+
+(defn- dependency-revision
+  [database plan source-position]
+  (let [context (:cache-context database)
+        attributes (d/dependency-plan-attributes plan source-position)
+        source-identity (select-keys context
+                                     [:datahike.cache/connection-id
+                                      :datahike.cache/generation])]
+    (if (= :all attributes)
+      (assoc source-identity
+             :datahike.read/attributes :all
+             :datahike.read/revision
+             (:datahike.cache/commit-id context))
+      (assoc source-identity
+             :datahike.read/attributes attributes
+             :datahike.cache/conservative-revision
+             (:datahike.cache/conservative-revision context)
+             :datahike.cache/attribute-revisions
+             (select-keys (:datahike.cache/attribute-revisions context)
+                          attributes)))))
+
+(defn read-evidence
+  "Retain dependency revisions without retaining database values."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [captured]
+  (mapv (fn [{database :seon.db/db
+              source-position :seon.db/source-argument-position
+              plan :datahike.read/dependency-plan
+              :as entry}]
+          (cond->
+           {:seon.db/source-argument-position source-position
+            :datahike.read/dependency-plan plan
+            :datahike.read/revision
+            (dependency-revision database plan source-position)}
+            (:seon.db/read-request entry)
+            (assoc :seon.db/read-request (:seon.db/read-request entry)
+                   :seon.db/read-result (:seon.db/read-result entry))))
+        captured))
+
+(declare decode-query-result decode-pull-result pull-selector)
+
+(defn- replay-read
+  [database request]
+  (case (:seon.db/read-operation request)
+    :q
+    (let [query-request
+          (update (:seon.db/query-request request) :args
+                  (fn [arguments]
+                    (mapv #(if (= ::database %) database %) arguments)))
+          response (d/q-with-evidence query-request)]
+      (decode-query-result query-request
+                           (:datahike.query/result response)))
+
+    :pull
+    (let [arguments (:seon.db/pull-arguments request)
+          response (apply d/pull-with-evidence database arguments)]
+      (decode-pull-result (pull-selector arguments)
+                          :datahike.pull/result
+                          (:datahike.pull/result response)))
+
+    :pull-many
+    (let [arguments (:seon.db/pull-arguments request)
+          response (apply d/pull-many-with-evidence database arguments)]
+      (decode-pull-result (pull-selector arguments)
+                          :datahike.pull-many/result
+                          (:datahike.pull-many/result response)))))
+
+(defn read-evidence-current?
+  "True when `database` still satisfies every retained dependency revision."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :boolean]}
+  [database retained]
+  (every?
+   (fn [{source-position :seon.db/source-argument-position
+         plan :datahike.read/dependency-plan
+         revision :datahike.read/revision
+         :as evidence}]
+     (or (= revision (dependency-revision database plan source-position))
+         (when-let [request (:seon.db/read-request evidence)]
+           (try
+             (= (:seon.db/read-result evidence)
+                (stable-read-result (replay-read database request)))
+             (catch Throwable _ false)))))
+   retained))
 
 (defn- decode-attribute-value
   [attribute value]
@@ -459,10 +573,11 @@
 
           aligned
           (let [request (assoc normalized :args aligned)
-                response (d/q-with-evidence request)]
-            (append-query-evidence! aligned response)
-            (decode-query-result request
-                                 (:datahike.query/result response)))
+                response (d/q-with-evidence request)
+                result (decode-query-result
+                        request (:datahike.query/result response))]
+            (append-query-evidence! request response result)
+            result)
 
           :else
           (error-value
@@ -476,14 +591,16 @@
         (dependency-error ::q cause)))))
 
 (defn- pull-call
-  [database arguments operation result-key]
+  [database arguments operation operation-key result-key]
   (if (error-value? database)
     database
     (try
       (let [response (apply operation database arguments)
-            selector (pull-selector arguments)]
-        (append-pull-evidence! database response)
-        (decode-pull-result selector result-key (get response result-key)))
+            selector (pull-selector arguments)
+            result (decode-pull-result selector result-key
+                                       (get response result-key))]
+        (append-pull-evidence! database arguments operation-key response result)
+        result)
       (catch Throwable cause
         (append-database-evidence! database :all)
         (dependency-error result-key cause)))))
@@ -507,21 +624,25 @@
    (pull-call (current-database-value)
               [options]
               d/pull-with-evidence
+              :pull
               :datahike.pull/result))
   ([database-or-selector options-or-eid]
    (if (db.utils/db? database-or-selector)
      (pull-call database-or-selector
                 [options-or-eid]
                 d/pull-with-evidence
+                :pull
                 :datahike.pull/result)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eid]
                 d/pull-with-evidence
+                :pull
                 :datahike.pull/result)))
   ([database selector entity-id]
    (pull-call database
               [selector entity-id]
               d/pull-with-evidence
+              :pull
               :datahike.pull/result)))
 
 (defn pull-many
@@ -545,21 +666,25 @@
    (pull-call (current-database-value)
               [options]
               d/pull-many-with-evidence
+              :pull-many
               :datahike.pull-many/result))
   ([database-or-selector options-or-eids]
    (if (db.utils/db? database-or-selector)
      (pull-call database-or-selector
                 [options-or-eids]
                 d/pull-many-with-evidence
+                :pull-many
                 :datahike.pull-many/result)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eids]
                 d/pull-many-with-evidence
+                :pull-many
                 :datahike.pull-many/result)))
   ([database selector entity-ids]
    (pull-call database
               [selector entity-ids]
               d/pull-many-with-evidence
+              :pull-many
               :datahike.pull-many/result)))
 
 (defn- entity-call
@@ -569,6 +694,7 @@
   (pull-call database
              [['*] entity-id]
              d/pull-with-evidence
+             :pull
              :datahike.pull/result))
 
 (defn entity

@@ -429,7 +429,17 @@
           {"prompt_tokens" 91
            "completion_tokens" 42
            "total_tokens" 133
-           "prompt_tokens_details" {"cached_tokens" 73}}))))
+           "prompt_tokens_details" {"cached_tokens" 73}})))
+  (is (= {:seon.ai.usage/prompt-tokens 91
+          :seon.ai.usage/completion-tokens 42
+          :seon.ai.usage/total-tokens 133
+          :seon.ai.usage/cached-tokens 73}
+         (ai/normalize-usage
+          {"prompt_tokens" 91
+           "completion_tokens" 42
+           "total_tokens" 133
+           "prompt_cache_hit_tokens" 73
+           "prompt_cache_miss_tokens" 18}))))
 
 (deftest a-foreign-document-either-yields-text-or-says-why
   (testing "the shape a provider actually returns"

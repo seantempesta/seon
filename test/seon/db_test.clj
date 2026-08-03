@@ -234,6 +234,24 @@
        (is (every? #(contains? % :datahike.read/dependency-plan)
                    @entries))))))
 
+(deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster/name "evidence-a"}])
+     (let [captured (atom [])]
+       (binding [db/*capture-context* captured]
+         (db/q '[:find [?name ...]
+                 :where [_ :seon.cluster/name ?name]]
+               @connection))
+       (let [evidence (db/read-evidence @captured)]
+         (db/transact! connection
+                       [{:seon.cluster.agent/id "unrelated-agent"}])
+         (is (db/read-evidence-current? @connection evidence)
+             "an unrelated attribute revision retains the renderer read")
+         (db/transact! connection [{:seon.cluster/name "evidence-b"}])
+         (is (not (db/read-evidence-current? @connection evidence))
+             "a depended attribute revision makes the retained read stale"))))))
+
 (deftest pull-many-preserves-input-alignment-with-one-shared-plan
   (test-support/with-database
    (fn [connection]

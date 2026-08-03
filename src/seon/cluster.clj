@@ -1218,7 +1218,7 @@
   per-agent overrides take effect on the next turn without rebuilding the
   graph."
   [connection cluster-name process ctx work-launcher
-   wake-channel stream-channel completion]
+   wake-channel stream-channel context-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> {:seon.store/branch-connection connection
               :seon.cluster/name cluster-name
@@ -1230,6 +1230,7 @@
               ;; the newest complete snapshot wins and the provider fold
               ;; is never parked by presentation
               :seon.cluster.loop/stream-channel stream-channel
+              :seon.render/context-channel context-channel
               :seon.cluster.loop/completion completion
               :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
               :seon.sci.admit/caps (config/result-caps dials)
@@ -1291,11 +1292,12 @@
   (let [process (process-identity (:seon.boot/advertisement instance))
         armer-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
+        context-channel (async/chan)
         completion (async/promise-chan)
         handle (loop-handle connection cluster-name process
                             (:seon.sci.eval/ctx instance)
                             (:seon.flow/work-launcher instance)
-                            armer-channel stream-channel completion)
+                            armer-channel stream-channel context-channel completion)
         routing (cluster.agent/routing)
         ;; the render pipeline's external ports (F2 §1): the wake
         ;; channel route! delivers into, the pages channel the proc's
@@ -1306,6 +1308,7 @@
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
         view {:seon.render.web/render-channel render-channel
+              :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
               :seon.render.web/latest-packages latest-packages

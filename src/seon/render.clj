@@ -11,7 +11,8 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [seon.config :as config]
+  (:require [clojure.core.async :as async]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
@@ -131,25 +132,46 @@
                       'seon.render.value/render-html
                       'seon.render.value/render-ai)))))))
 
-(defn- invoke-producer
+(defn- call-static-evidence
+  [request selected]
+  (let [argument (dissoc (render-argument request)
+                         :seon.db/db
+                         :seon.sci.eval/ctx
+                         :seon.store/branch-connection)
+        value (:seon.render/value argument)]
+    {:seon.render.call/producer selected
+     :seon.render.call/program-row
+     (sci.kernel/program-function (:seon.sci.eval/ctx request) selected)
+     :seon.render.call/argument
+     (cond-> argument
+       (map? value)
+       (assoc :seon.render/value (dissoc value :seon.db/db)))}))
+
+(defn- invoke-selected
   [{ctx :seon.sci.eval/ctx
     caps :seon.sci.admit/caps
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error
     :as request}
-   output output-schema]
-  (let [selected (producer request output output-schema)]
+   selected]
+  (:seon.sci.admit/value
+   (sci.kernel/invoke
+    {:seon.sci.eval/ctx ctx
+     :seon.db/db (:seon.db/db request)
+     :seon.fn/sym (str selected)
+     :seon.sci.eval/args [(render-argument request)]
+     :seon.sci.eval/time-limit-ms time-limit-ms
+     :seon.sci.admit/caps caps
+     :seon.db/capture-context (:seon.render.call/captured-reads request)
+     :seon.config/on-core-error on-core-error})))
+
+(defn- invoke-producer
+  [request output output-schema]
+  (let [selected (or (:seon.render.call/selected-producer request)
+                     (producer request output output-schema))]
     (if (:seon.error/kind selected)
       selected
-      (:seon.sci.admit/value
-       (sci.kernel/invoke
-        {:seon.sci.eval/ctx ctx
-         :seon.db/db (:seon.db/db request)
-         :seon.fn/sym (str selected)
-         :seon.sci.eval/args [(render-argument request)]
-         :seon.sci.eval/time-limit-ms time-limit-ms
-         :seon.sci.admit/caps caps
-         :seon.config/on-core-error on-core-error})))))
+      (invoke-selected request selected))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
@@ -177,6 +199,65 @@
       {:seon.error/kind ::invalid-html-output
        :seon.error/message "The selected HTML renderer did not return Hiccup."
        :seon.error/data {:seon.render/output rendered}})))
+
+(defn render-call
+  "Reuse one retained projection while its input, code, and reads are current."
+  {:malli/schema [:=> [:cat :seon.render/call-request]
+                  [:or :nil :string :seon.render/hiccup :seon.error/value]]}
+  [{database :seon.db/db
+    output :seon.render/output
+    call-id :seon.render.call/id
+    retained-calls :seon.render/retained-calls
+    captured-calls :seon.render/captured-calls
+    :as request}]
+  (let [output-schema (case output
+                        :seon.render/ai :seon.render/ai
+                        :seon.render/html :seon.render/html)
+        selected (producer request output output-schema)]
+    (if (:seon.error/kind selected)
+      selected
+      (let [static-evidence (call-static-evidence request selected)
+            previous (when (and call-id retained-calls)
+                       (get retained-calls call-id))
+            reusable? (and previous
+                           (= static-evidence
+                              (:seon.render.call/static-evidence previous))
+                           (db/read-evidence-current?
+                            database
+                            (:seon.render.call/read-evidence previous)))
+            captured (atom [])
+            rendered (if reusable?
+                       (:seon.render.call/output previous)
+                       (let [prepared-request
+                             (assoc request
+                                    :seon.render.call/selected-producer selected
+                                    :seon.render.call/captured-reads captured)
+                             rendered
+                             ((case output
+                                :seon.render/ai render-ai
+                                :seon.render/html render-html)
+                              prepared-request)]
+                         rendered))
+            entry (if reusable?
+                    previous
+                    {:seon.render.call/static-evidence static-evidence
+                     :seon.render.call/read-evidence
+                     (db/read-evidence @captured)
+                     :seon.render.call/output rendered})]
+        (when (and call-id captured-calls)
+          (swap! captured-calls assoc call-id entry))
+        rendered))))
+
+(defn acquire-context!
+  "Acquire an agent's exact AI bytes from the cluster render proc."
+  {:malli/schema [:=> [:cat :seon.flow/channel :seon.cluster.prompt/request]
+                  :seon.cluster.prompt/rendered-context]}
+  [context-channel request]
+  (let [reply (async/promise-chan)]
+    (async/>!! context-channel
+               {:seon.render.context/request request
+                :seon.render.context/reply reply})
+    (async/<!! reply)))
 
 (defn- failure-message-id
   [namespace-name failure]
@@ -366,6 +447,10 @@
                    ((requiring-resolve 'seon.render.walk/neighborhood)
                     {:seon.db/db db
                      :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
+                     :seon.render/retained-calls
+                     (:seon.render/retained-calls *walk-context*)
+                     :seon.render/captured-calls
+                     (:seon.render/captured-calls *walk-context*)
                      :seon.render.walk/lookup root
                      :seon.render/output :seon.render/ai
                      :seon.render/distance depth

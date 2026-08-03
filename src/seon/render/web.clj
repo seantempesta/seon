@@ -325,10 +325,14 @@
     live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
+    retained-calls :seon.render/retained-calls
     :as request}]
-  (let [walked-units (render.walk/neighborhood
-                      (walk-request db caps id :seon.render/html
-                                    branch-connection request))
+  (let [captured-calls (atom {})
+        render-request (assoc (walk-request db caps id :seon.render/html
+                                            branch-connection request)
+                              :seon.render/retained-calls retained-calls
+                              :seon.render/captured-calls captured-calls)
+        walked-units (render.walk/neighborhood render-request)
         fleet-call
         (when (= id root-agent-id)
           (oversight/unit
@@ -342,7 +346,14 @@
             (:seon.config/on-core-error request)
             :seon.store/branch-connection branch-connection
             :seon.cluster.run/live-processes live-processes}))
-        fleet-output (some-> fleet-call render/render-html)
+        fleet-output
+        (some-> fleet-call
+                (assoc :seon.render/output :seon.render/html
+                       :seon.render.call/id
+                       [:seon.render/html [::fleet-oversight]])
+                (assoc :seon.render/retained-calls retained-calls
+                       :seon.render/captured-calls captured-calls)
+                render/render-call)
         fleet-unit
         (when fleet-call
           (cond-> {:seon.render.walk/lookup
@@ -408,6 +419,7 @@
                         rows)]
     {:seon.render.web/page page
      :seon.render.web/fragments fragments
+     :seon.render/captured-calls @captured-calls
      :seon.db/tx-data
      (into [] (mapcat :seon.db/tx-data) units)}))
 
@@ -668,7 +680,9 @@
                                     :seon.cluster.run/live-processes
                                     #{(:seon.cluster.run/process handle)}
                                     :seon.render.web/retained-fragments
-                                    (get-in state [::fragments registration-key] {})}
+                                    (get-in state [::fragments registration-key] {})
+                                    :seon.render/retained-calls
+                                    (get-in state [::calls registration-key] {})}
                              (get-in streams [agent-id :seon.ai/partial])
                              (assoc :seon.ai/partial
                                     (get-in streams
@@ -705,19 +719,44 @@
                   (:seon.render.web/fragments result)))
          (::fragments state)
          results)
+        calls
+        (reduce-kv
+         (fn [retained registration-key result]
+           (assoc retained registration-key
+                  (:seon.render/captured-calls result)))
+         (::calls state)
+         results)
         _ (when (not= packages (::packages state))
             (reset! (:seon.render.web/latest-packages state) packages))
         state (-> state
                   (update ::passes inc)
                   (assoc ::watched (count watched)
                          ::streams streams))]
-    [(assoc state ::packages packages ::fragments fragments)
+    [(assoc state ::packages packages ::fragments fragments ::calls calls)
      (when changed? packages)]))
+
+(defn- context-pass
+  [state message]
+  (let [request (:seon.render.context/request message)
+        agent-id (:seon.cluster.agent/id request)
+        captured-calls (atom {})
+        text
+        (render/call-with-walk-context
+         (assoc request
+                :seon.render/retained-calls
+                (get-in state [::ai-calls agent-id] {})
+                :seon.render/captured-calls captured-calls)
+         #(render/walk {:depth (long (:seon.render/distance request 2))}))]
+    [(assoc-in state [::ai-calls agent-id] @captured-calls)
+     {:seon.cluster.prompt/text text
+      :seon.db/db (:seon.db/db request)}]))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
 
-  Two in-ports, both `(sliding-buffer 1)`: `::interest` — the render
+  Three in-ports: `::interest` and `::stream` use `(sliding-buffer 1)`;
+  `::context` is the reliable demand channel for exact agent context.
+  `::interest` — the render
   wake channel, a payload-free \"look\"; `::stream` — the cluster's one
   stream conn carrying `{agent-id + run-id + :seon.ai/partial snapshot}`
   entries. There is NO clear entry: the frozen-plan/error/close fact is
@@ -768,6 +807,7 @@
    (let [ports {::interest (:seon.render.web/render-channel args)
                 ::stream (:seon.cluster.loop/stream-channel
                           (:seon.cluster.loop/cluster args))
+                ::context (:seon.render/context-channel args)
                 ::pages (:seon.render.web/pages-channel args)
                 ::latest-packages (:seon.render.web/latest-packages args)}]
      (when-let [missing (seq (sort (keep (fn [[port channel]]
@@ -780,11 +820,14 @@
           ::flow/in-ports
           {::interest (:seon.render.web/render-channel args)
            ::stream (:seon.cluster.loop/stream-channel
-                     (:seon.cluster.loop/cluster args))}
+                     (:seon.cluster.loop/cluster args))
+           ::context (:seon.render/context-channel args)}
           ::flow/out-ports
           {::pages (:seon.render.web/pages-channel args)}
           ::packages {}
           ::fragments {}
+          ::calls {}
+          ::ai-calls {}
           ::streams {}
           ::passes 0
           ::watched 0
@@ -797,7 +840,11 @@
      (async/put! (:seon.render.web/completion state) ::stopped))
    state)
   ([state input message]
-   (let [settlement
+   (if (= ::context input)
+     (let [[state response] (context-pass state message)]
+       (async/put! (:seon.render.context/reply message) response)
+       [state nil])
+     (let [settlement
          (when (and (= ::interest input) (map? message))
            (::settlement message))
          join? (and (= ::interest input) (map? message) (::join message))
@@ -833,7 +880,7 @@
        (when settlement
          (async/put! settlement (::passes state)))
        [(assoc state ::last-pass-nanos (System/nanoTime))
-        (when (seq published) {::pages [published]})]))))
+        (when (seq published) {::pages [published]})])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The feed — per tab: a tap and a virtual thread (F2 §1.3)

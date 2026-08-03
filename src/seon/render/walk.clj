@@ -394,13 +394,12 @@
                             (cond-> (assoc request
                                            :seon.render/value pulled
                                            :seon.render/distance
-                                           render-distance)
+                                           render-distance
+                                           :seon.render.call/id
+                                           [output lookup render-distance])
                               owner (assoc :seon.render/namespace owner))
                             rendered
-                            ((if (= output :seon.render/html)
-                               render/render-html
-                               render/render-ai)
-                             render-request)
+                            (render/render-call render-request)
                             rendered-output rendered
                             render-failure
                             (when (:seon.error/kind rendered) rendered)
@@ -567,7 +566,7 @@
      [:maybe :string]]]}
   ([db rendered-units]
    (prose db rendered-units {}))
-  ([db rendered-units {requested-branch :seon.render.walk/branch}]
+  ([_db rendered-units {requested-branch :seon.render.walk/branch}]
    (letfn [(provenance [unit]
             (or (get-in unit [:seon.error/value :seon.error/kind])
                 (:seon.render.walk/lookup unit)))
@@ -596,13 +595,11 @@
                                      rendered-units))
            root (:seon.render.walk/lookup root-unit)
            requested-depth (:seon.render/distance root-unit)
-           basis (long (:max-tx db))
            options (cond-> {:root root :depth requested-depth}
                      (some? requested-branch)
                      (assoc :branch requested-branch))
            header (str ";; (seon.render/walk " (pr-str options) ")"
                        " => root=" (pr-str root)
-                       " basis=" basis
                        " depth=" requested-depth
                        (when (some? requested-branch)
                          (str " branch=" (pr-str requested-branch))))

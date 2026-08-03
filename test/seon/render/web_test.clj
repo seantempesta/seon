@@ -86,6 +86,7 @@
             ctx (sci.eval/cluster-ctx @connection connection)
             server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
+            context-channel (async/chan)
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
             latest-packages (atom {})
@@ -93,6 +94,7 @@
             fault-channel (async/chan (async/dropping-buffer 8))
             stream-channel (async/chan (async/sliding-buffer 1))
             view {:seon.render.web/render-channel render-channel
+                  :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
                   :seon.render.web/latest-packages latest-packages
@@ -495,11 +497,17 @@
         (try
           (read-complete-paint! stream connection)
           (let [serialize! hiccup/->string
+                render-html! render/render-html
                 serialized (atom 0)
+                rendered (atom [])
                 surface-count
                 (count (:seon.render.package/keyframe
                         (get @(:latest-packages context) agent-id)))]
-            (with-redefs [hiccup/->string
+            (with-redefs [render/render-html
+                          (fn [request]
+                            (swap! rendered conj (:seon.render.call/id request))
+                            (render-html! request))
+                          hiccup/->string
                           (fn [value]
                             (swap! serialized inc)
                             (serialize! value))]
@@ -510,6 +518,9 @@
               (let [repaint (read-until! stream "def changed true")]
                 (is (= 1 (patches repaint))
                     "one proc-framed delta event carries the changed unit")
+                (is (= 1 (count @rendered))
+                    (str "retained dependency evidence invokes only the changed renderer: "
+                         (pr-str @rendered)))
                 (is (< @serialized surface-count)
                     "equal retained units are not serialized again"))))
           (finally (.close stream)))))))

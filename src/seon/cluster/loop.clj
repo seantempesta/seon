@@ -1279,7 +1279,9 @@
                                      :seon.sci.eval/time-limit-ms
                                      (:seon.config.eval/time-limit-ms cluster)
                                      :seon.config/on-core-error
-                                     (:seon.config/on-core-error cluster)})
+                                     (:seon.config/on-core-error cluster)
+                                     :seon.render/context-channel
+                                     (:seon.render/context-channel cluster)})
                      (catch Exception failure
                        ;; the kind fallback keeps this total: an
                        ;; exception carrying no flat error data still
