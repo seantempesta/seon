@@ -264,10 +264,9 @@
     (hiccup/->string
      [:article attributes
       (if failure
-        [:div {:class "seon-error-card"
-               :data-error-kind (str (:seon.error/kind failure))}
-         [:span {:class "seon-error-card-message"}
-          (:seon.error/message failure)]]
+        (or output
+            [:div {:class "seon-render-unavailable"}
+             "renderer unavailable"])
         output)])))
 
 (def ^:private stream-strip-id
@@ -303,8 +302,8 @@
           (recur (inc index))
           step-order)))))
 
-(defn page-of
-  "One namespace page as `{element-id → html}`. THE one serialization.
+(defn- page-result
+  "One namespace page and the durable owner messages its failures require.
 
   Derives the agent's html surfaces at `db` and serializes each through
   `surface-html`. The render proc and the initial paint both call THIS,
@@ -319,8 +318,6 @@
   it because the web layer IS the running process: the service carries
   this process's run-holder identity, and on one branch that is the
   whole live set."
-  {:malli/schema [:=> [:cat :seon.render.web/paint-request]
-                  [:map-of :seon.render/surface-id :string]]}
   [{:keys [:seon.db/db :seon.cluster.agent/id
            :seon.render.web/root-agent-id
            :seon.store/branch-connection] caps :seon.sci.admit/caps
@@ -357,10 +354,8 @@
              (hiccup/->string
               (if (:seon.error/kind output)
                 [:article {:id (block/surface-id :fleet-oversight)}
-                 [:div {:class "seon-error-card"
-                        :data-error-kind (str (:seon.error/kind output))}
-                  [:span {:class "seon-error-card-message"}
-                   (:seon.error/message output)]]]
+                 [:div {:class "seon-render-unavailable"}
+                  "renderer unavailable"]]
                 output))}))
         rows (cond-> rows fleet-row (conj fleet-row))
         paths (into {stream-strip-id [::stream-strip]}
@@ -376,8 +371,18 @@
                           path-order))))
                    (map (juxt :seon.render.web/element-id
                               :seon.render.web/html))
-                   rows)]
-    (assoc page stream-strip-id (stream-strip-html stream-partial))))
+                   rows)
+        page (assoc page stream-strip-id (stream-strip-html stream-partial))]
+    {:seon.render.web/page page
+     :seon.db/tx-data
+     (into [] (mapcat :seon.db/tx-data) units)}))
+
+(defn page-of
+  "One namespace page as `{element-id → serialized fragment}`."
+  {:malli/schema [:=> [:cat :seon.render.web/paint-request]
+                  [:map-of :seon.render/surface-id :string]]}
+  [request]
+  (:seon.render.web/page (page-result request)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The per-agent debug value
@@ -557,24 +562,33 @@
                       (filter (fn [[_agent-id stream]]
                                 (unsettled-stream? db stream)))
                       (::streams state))
+        results
+        (into {}
+              (map (fn [agent-id]
+                     [agent-id
+                      (page-result
+                       (cond-> {:seon.db/db db
+                                :seon.cluster.agent/id agent-id
+                                :seon.render.web/root-agent-id
+                                (:seon.render.web/root-agent-id state)
+                                :seon.sci.admit/caps caps
+                                :seon.store/branch-connection connection
+                                :seon.cluster.run/live-processes
+                                #{(:seon.cluster.run/process handle)}}
+                         (get-in streams [agent-id :seon.ai/partial])
+                         (assoc :seon.ai/partial
+                                (get-in streams
+                                        [agent-id :seon.ai/partial]))))]))
+              watched)
         pages (into {}
-                    (map (fn [agent-id]
-                           [agent-id
-                            (page-of
-                             (cond-> {:seon.db/db db
-                                      :seon.cluster.agent/id agent-id
-                                      :seon.render.web/root-agent-id
-                                      (:seon.render.web/root-agent-id state)
-                                      :seon.sci.admit/caps caps
-                                      :seon.store/branch-connection connection
-                                      :seon.cluster.run/live-processes
-                                      #{(:seon.cluster.run/process handle)}}
-                               (get-in streams [agent-id :seon.ai/partial])
-                               (assoc :seon.ai/partial
-                                      (get-in streams
-                                              [agent-id
-                                               :seon.ai/partial]))))]))
-                    watched)
+                    (map (fn [[agent-id result]]
+                           [agent-id (:seon.render.web/page result)]))
+                    results)
+        tx-data (into []
+                      (mapcat (comp :seon.db/tx-data val))
+                      results)
+        _ (when (seq tx-data)
+            (db/transact! connection tx-data))
         state (-> state
                   (update ::passes inc)
                   (assoc ::watched (count watched)
@@ -779,7 +793,8 @@
             process :seon.cluster.run/process
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
-            render-channel :seon.render.web/render-channel}]
+            render-channel :seon.render.web/render-channel
+            fault-channel :seon.render.web/fault-channel}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
         registration-key (if debug? [::debug-tab id] id)
@@ -795,6 +810,7 @@
                             :seon.cluster.run/live-processes #{process}})))
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
+        tab-id (str (random-uuid))
         painting (volatile! true)]
     (datastar.http-kit/->sse-response
      request
@@ -828,7 +844,18 @@
                          ;; carries no entry for its agent; the wake this
                          ;; tab offered brings the next one
                          (recur delivered)))))))
-             (catch Throwable _ nil)
+             (catch Throwable failure
+               (async/offer!
+                fault-channel
+                {:clojure.core.async.flow/pid :seon.render.web/feed
+                 :seon.cluster.agent/id id
+                 :clojure.core.async.flow/ex
+                 (ex-info
+                  "The browser feed writer failed."
+                  {:seon.render.web/tab-id tab-id
+                   :seon.render.web/page registration-key
+                   :seon.render/output :seon.render/html}
+                  failure)}))
              (finally
                ;; A writer exception or channel shutdown must not leave
                ;; the socket and its tap alive. Idempotent after a real
@@ -1178,7 +1205,8 @@
                              :seon.cluster.run/process
                              :seon.render.web/pages-mult
                              :seon.render.web/registration
-                             :seon.render.web/render-channel]))))
+                             :seon.render.web/render-channel
+                             :seon.render.web/fault-channel]))))
 
 (defn- data-response
   [{:keys [:seon.store/connection :seon.cluster.agent/id]

@@ -2346,7 +2346,19 @@
   [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
   [:seon.config/on-core-error :seon.config/on-core-error]
   [:seon.render/ai {:optional true} :seon.render/projection]
-  [:seon.render/html {:optional true} :seon.render/projection]]
+ [:seon.render/html {:optional true} :seon.render/projection]]
+
+ :seon.db/tx-data :seon.store/transaction-data
+ :seon.render/failure-request
+ [:map
+  [:seon.db/db :seon.db/database-value]
+  [:seon.render/namespace :seon.render/namespace]
+  [:seon.error/value :seon.error/value]]
+ :seon.render/failure
+ [:map
+  [:seon.render/ai :string]
+  [:seon.render/html :seon.render/hiccup]
+  [:seon.db/tx-data :seon.db/tx-data]]
 
  :seon.render/request
  [:map
@@ -3033,10 +3045,11 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/process :seon.cluster.run/process]
-  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
-  [:seon.render.web/registration :seon.render.web/registration]
-  [:seon.render.web/render-channel :seon.flow/channel]
-  [:seon.render.web/port {:optional true} :seon.render.web/port]]
+ [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+ [:seon.render.web/registration :seon.render.web/registration]
+ [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/fault-channel :seon.flow/channel]
+ [:seon.render.web/port {:optional true} :seon.render.web/port]]
 
  :seon.render.web/feed-request
  [:map
@@ -3045,9 +3058,10 @@
   [:seon.store/connection :seon.store/connection]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/process :seon.cluster.run/process]
-  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
-  [:seon.render.web/registration :seon.render.web/registration]
-  [:seon.render.web/render-channel :seon.flow/channel]]
+ [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+ [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/fault-channel :seon.flow/channel]]
 
  :seon.render.web/page-request
  [:map

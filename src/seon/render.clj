@@ -181,6 +181,64 @@
        :seon.error/message "The selected HTML renderer did not return Hiccup."
        :seon.error/data {:seon.render/output rendered}})))
 
+(defn- failure-message-id
+  [namespace-name failure]
+  (str "render-failure-"
+       (schema/sha-256
+        [(.getBytes (pr-str [namespace-name failure]) "UTF-8")])))
+
+(defn- namespace-owner
+  [database namespace-name]
+  (db/q '[:find ?agent-id .
+          :in $ ?namespace-name
+          :where
+          [?namespace :seon.ns/name ?namespace-name]
+          [?agent :seon.cluster.agent/namespace ?namespace]
+          [?agent :seon.cluster.agent/id ?agent-id]]
+        database namespace-name))
+
+(defn renderer-failure
+  "Prepare the audience-safe render failure and its owner message.
+
+  The browser receives only an unavailable state. The namespace owner, when
+  one is explicitly assigned, receives one idempotent durable message carrying
+  the internal evidence. No loading state is inferred: without a recorded
+  repair-acceptance event, unavailable is the only honest state. An agentless
+  namespace has no queryable stakeholders yet, so its transaction data is
+  empty rather than guessed."
+  {:malli/schema [:=> [:cat :seon.render/failure-request]
+                  :seon.render/failure]}
+  [{database :seon.db/db
+    namespace-name :seon.render/namespace
+    failure :seon.error/value}]
+  (let [owner (namespace-owner database namespace-name)
+        message-id (failure-message-id namespace-name failure)
+        already-recorded?
+        (some? (db/q '[:find ?message .
+                       :in $ ?message-id
+                       :where
+                       [?message :seon.cluster.message/id ?message-id]]
+                     database message-id))
+        at (:db/txInstant
+            (db/pull database [:db/txInstant] (:max-tx database)))
+        message
+        (str "A renderer in " namespace-name " failed. "
+             (:seon.error/message failure)
+             " Inspect the render failure and repair its declared contract.")]
+    {:seon.render/ai "Renderer unavailable."
+     :seon.render/html
+     [:div {:class "seon-render-unavailable"} "renderer unavailable"]
+     :seon.db/tx-data
+     (cond-> []
+       (and owner (not already-recorded?))
+       (conj
+        (cond-> {:seon.cluster.message/id
+                 message-id
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id owner]
+                 :seon.cluster.message/content message}
+          at (assoc :seon.cluster.message/at at))))}))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient walk custody
 ;;; ---------------------------------------------------------------------------

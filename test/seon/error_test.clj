@@ -38,6 +38,7 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
@@ -488,6 +489,32 @@
                   [?message :seon.cluster.message/to ?agent]
                   [?agent :seon.cluster.agent/id ?to]]
                 db)))]))
+
+(deftest a-committed-fault-renders-its-evidence-without-renderer-failure-prose
+  (with-db
+    (fn [connection]
+      (db/transact!
+       connection
+       (error/commit-tx
+        @connection
+        (commit-request
+         (transform-error (ex-info "walk evidence" {}))
+         {:seon.cluster.agent/id "agent-3"})))
+      (let [db @connection
+            node (walk/neighborhood
+                  {:seon.db/db db
+                   :seon.render.walk/lookup
+                   [:seon.cluster.agent/id "agent-3"]
+                   :seon.render/kind :seon.render/ai
+                   :seon.render/floor 'seon.render.block/data-prose
+                   :seon.render/overrides {}
+                   :seon.render/distance 1
+                   :seon.sci.admit/caps caps})
+            text (walk/prose db node)]
+        (is (str/includes? text "The loop :step failed"))
+        (is (str/includes? text "Inspect error"))
+        (is (not (str/includes? text "projection threw")))
+        (is (not (str/includes? text "violated its contract")))))))
 
 (deftest a-missing-recurrence-limit-records-and-stays-silent
   ;; the recursion fence extended to OUR bugs: requiredness is a

@@ -1133,6 +1133,7 @@
                                     [:seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/render-channel
+                                     :seon.render.web/fault-channel
                                      :seon.cluster.run/process])))]
     (if-let [unavailable (:seon.render.web/wanted-port served)]
       (log/warn (str "seon " cluster-name " view: port " unavailable
@@ -1392,9 +1393,11 @@
      ;; the view half `serve!` hands to the web service: one mult over
      ;; the proc's pages out-port, the shared registration, and the
      ;; wake channel a freshly opened tab offers into
-     :seon.render.web/view (assoc view
-                                  :seon.render.web/pages-mult
-                                  (async/mult pages-channel))
+     :seon.render.web/view
+     (assoc view
+            :seon.render.web/pages-mult (async/mult pages-channel)
+            :seon.render.web/fault-channel
+            (:seon.flow/fault-channel fanout))
      :seon.error/drops drops}))
 
 (defn- disarm-agents!

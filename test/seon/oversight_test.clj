@@ -180,9 +180,9 @@
             (is (= :seon.render/unresolvable
                    (:seon.error/kind failure)))
             (is (= failure (:seon.error/value surface))))
-          (testing "the real page renders the report instead of faulting"
+          (testing "the real page stays public while the failure remains durable"
             (is (= 200 (.statusCode response)))
             (is (str/includes? body "id=\"surface-fleet-oversight\""))
-            (is (str/includes? body "seon-error-card"))
-            (is (str/includes? body
-                               "no.such.fleet/html does not resolve"))))))))
+            (is (str/includes? body "renderer unavailable"))
+            (is (not (str/includes? body "no.such.fleet/html")))
+            (is (not (str/includes? body "does not resolve")))))))))

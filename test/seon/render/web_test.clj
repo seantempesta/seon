@@ -42,7 +42,8 @@
             [seon.render.value :as value]
             [seon.render.web :as web]
             [seon.sci.admit :as admit]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [starfederation.datastar.clojure.api :as datastar])
   (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
@@ -131,12 +132,14 @@
                            :seon.cluster.run/process process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
-                           :seon.render.web/render-channel render-channel}))
+                           :seon.render.web/render-channel render-channel
+                           :seon.render.web/fault-channel fault-channel}))
           (body connection @server
                 {:graph graph
                  :pages-mult pages-mult
                  :render-channel render-channel
                  :stream-channel stream-channel
+                 :fault-channel fault-channel
                  :registration registration})
           (finally
             (when @server (web/stop! @server))
@@ -434,6 +437,26 @@
             (is (str/includes? initial "surface-stream")))
           (finally (.close stream)))))))
 
+(deftest a-feed-writer-failure-enters-the-cluster-fault-path
+  (with-server
+    (fn [_connection server context]
+      (with-redefs [datastar/patch-elements!
+                    (fn [& _]
+                      (throw (ex-info "injected writer failure" {})))]
+        (let [stream (open-feed server (str "/feed/" agent-id))]
+          (try
+            (let [fault (support/await-event!
+                         (:fault-channel context)
+                         [:feed-writer-fault])
+                  data (ex-data (:clojure.core.async.flow/ex fault))]
+              (is (= :seon.render.web/feed
+                     (:clojure.core.async.flow/pid fault)))
+              (is (= agent-id (:seon.cluster.agent/id fault)))
+              (is (string? (:seon.render.web/tab-id data)))
+              (is (= agent-id (:seon.render.web/page data)))
+              (is (= :seon.render/html (:seon.render/output data))))
+            (finally (.close stream))))))))
+
 (deftest only-the-walk-surface-that-changed-goes-on-the-wire
   (with-server
     (fn [connection server _context]
@@ -568,6 +591,7 @@
     (fn [connection]
       (let [pages-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
+            fault-channel (async/chan (async/dropping-buffer 1))
             failure
             (with-redefs
              [http/run-server
@@ -582,6 +606,7 @@
                   :seon.render.web/pages-mult (async/mult pages-channel)
                   :seon.render.web/registration (atom {})
                   :seon.render.web/render-channel render-channel
+                  :seon.render.web/fault-channel fault-channel
                   :seon.render.web/port 0})
                 nil
                 (catch Throwable thrown thrown)))]
@@ -592,7 +617,8 @@
           (is (not (instance? NullPointerException failure)))
           (finally
             (async/close! pages-channel)
-            (async/close! render-channel)))))))
+            (async/close! render-channel)
+            (async/close! fault-channel)))))))
 
 ;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
 
@@ -1193,6 +1219,8 @@
                             :seon.render.web/registration (atom {})
                             :seon.render.web/render-channel
                             (async/chan (async/sliding-buffer 1))
+                            :seon.render.web/fault-channel
+                            (async/chan (async/dropping-buffer 1))
                             :seon.render.web/port taken})]
         (try
           (is (not= taken (:seon.render.web/port second-server))

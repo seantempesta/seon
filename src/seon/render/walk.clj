@@ -572,6 +572,20 @@
                                 (:seon.render/output rendered))
                             render-failure
                             (when (:seon.error/kind rendered) rendered)
+                            failure-outcome
+                            (when (and render-failure owner)
+                              (render/renderer-failure
+                               {:seon.db/db db
+                                :seon.render/namespace owner
+                                :seon.error/value render-failure}))
+                            failure-output
+                            (when render-failure
+                              (or (get failure-outcome (or typed-output kind))
+                                  (if (= (or typed-output kind)
+                                         :seon.render/html)
+                                    [:div {:class "seon-render-unavailable"}
+                                     "renderer unavailable"]
+                                    "Renderer unavailable.")))
                             connections
                             (visible-connections
                              pulled
@@ -593,7 +607,12 @@
                                      (:seon.render/would-fall-to-floor?
                                       legacy-resolution))
                               render-failure
-                              (assoc :seon.error/value render-failure)
+                              (assoc :seon.error/value render-failure
+                                     :seon.render/output failure-output)
+
+                              (seq (:seon.db/tx-data failure-outcome))
+                              (assoc :seon.db/tx-data
+                                     (:seon.db/tx-data failure-outcome))
 
                               (not render-failure)
                               (assoc :seon.render/output rendered-output))]
@@ -744,9 +763,9 @@
                   failure (:seon.error/value unit)
                   output (:seon.render/output unit)
                   text (cond
-                         failure (:seon.error/message failure)
                          (string? output) output
-                         (some? output) (pr-str output))]
+                         (some? output) (pr-str output)
+                         failure (:seon.error/message failure))]
               [(str ";; d" depth " · " (pr-str (provenance unit))
                     (when (= path (:seon.render.walk/branch unit))
                       (str " · :branch " (pr-str path))))
