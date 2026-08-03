@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (8)
+## Blocker (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -28,6 +28,7 @@ See `README.md` for the convention.
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
+| [Bound internal contract violations before they retain the schema registry](internal-contract-violation-renders-whole-registry.md) | blocker | contract error-construction wave |
 
 ## Friction (68)
 

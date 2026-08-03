@@ -1,10 +1,16 @@
 ---
 type: issue
 status: open
+severity: blocker
 tags: [issue, render, error, sci]
 ---
 
 # An internal contract violation renders its whole candidate-forms registry as the error payload
+
+## Problem
+
+An internal contract violation retains and serializes its complete offending
+argument even when that value is the schema registry.
 
 ## Evidence
 
@@ -16,7 +22,16 @@ payload, allocating ~264 MB en route. Ugly-output standing order applies:
 the agent face of an error must be one to three honest lines with bounded
 evidence, never a registry dump.
 
-## Expected owner
+A direct 2026-08-03 probe after fixing the distinct first-touch bug invoked
+the instrumented candidate inspector with the registered schema population as
+its offending value. `seon.instrument/violation` constructed exception data
+containing 1,044,086 printed characters and allocated 150,063,304 bytes in
+47 ms. The message was only 134 characters and the problem projection only
+371 characters; the admitted `::args` value contributed 1,042,697 characters.
+This proves the payload has a different owner from the candidate-projection
+prevalidation fixed by `6329da95b`.
+
+## Owner
 
 The error construction site in the contract-violation path (instrument /
 install seam). The error-model wave's default renderer plus the
@@ -24,6 +39,15 @@ install seam). The error-model wave's default renderer plus the
 pair) is the target face; the payload must be bounded at CONSTRUCTION, not
 merely windowed at print time — a 264 MB allocation happens before any
 renderer runs.
+
+Concretely, `seon.instrument/violation` currently runs `m/explain` and
+`malli.error/humanize`, then admits the complete offending argument value into
+`::args`. `seon.config/result-caps` carries structural admission caps but not
+the 4,096-character blob threshold, so the registry is traversed and retained
+before any renderer or blob decision can help. The remaining fix must bound or
+summarize the offending argument at this construction seam while retaining the
+offending key/value, expected shape, problem count, and a capped context. It
+must not be implemented as print-time truncation.
 
 ## Acceptance
 
