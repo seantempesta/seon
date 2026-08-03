@@ -2,7 +2,7 @@
   "The surviving family-owned agent and transcript renders."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.error :as error]
@@ -27,14 +27,14 @@
 
 (defn- entity-id
   [db attribute value]
-  (d/q '[:find ?entity .
+  (db/q '[:find ?entity .
          :in $ ?attribute ?value
          :where [?entity ?attribute ?value]]
        db attribute value))
 
 (defn- transact-one!
   [connection row]
-  (d/transact connection {:tx-data [row]}))
+  (db/transact! connection {:tx-data [row]}))
 
 (defn- seed-history!
   [connection]
@@ -145,7 +145,7 @@
                         :seon.render/floor `block/data-panel}
             projection (fn [entity-id]
                          (walk/projection
-                          (assoc (d/pull db '[*] entity-id)
+                          (assoc (db/pull db '[*] entity-id)
                                  :seon.db/db db
                                  :seon.sci.admit/caps caps)
                           resolution))]

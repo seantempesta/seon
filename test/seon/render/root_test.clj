@@ -2,7 +2,7 @@
   "Regressions for root's ordinary block projections."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.root :as root]
             [seon.test-support :as test-support]))
@@ -10,7 +10,7 @@
 (deftest each-facts-link-names-its-own-agent-as-the-drill-root
   (test-support/with-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.agent/id "alice"}
                    {:seon.cluster.agent/id "bob"}])
       (let [html (hiccup/->string

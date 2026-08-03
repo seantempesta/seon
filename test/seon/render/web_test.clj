@@ -31,7 +31,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
             [org.httpkit.server :as http]
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
@@ -111,7 +110,7 @@
         (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
           (support/seed-cluster! connection "web-test")
-          (d/transact connection
+          (db/transact! connection
                       (cluster.agent/creation-tx
                        {:seon.cluster.agent/id agent-id
                         :seon.cluster/name "web-test"
@@ -200,7 +199,7 @@
 (defn- open-run!
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.run/id run-id
                 :seon.cluster.run/agent
                 [:seon.cluster.agent/id agent-id]
@@ -334,7 +333,7 @@
   ;; the design has regressed.
   (with-server
     (fn [connection server _context]
-      (d/transact connection
+      (db/transact! connection
                   (cluster.agent/creation-tx
                    {:seon.cluster.agent/id "agent-b"
                     :seon.cluster/name "web-test"
@@ -394,7 +393,7 @@
             "the canonical namespace page renders its owner's HTML walk")
         (is (= "seon.flow" owner))
         (is (= [process]
-               (d/q '[:find [?process-id ...]
+               (db/q '[:find [?process-id ...]
                       :in $ ?agent-id
                       :where
                       [?agent :seon.cluster.agent/id ?agent-id ?tx]
@@ -406,11 +405,11 @@
         (is (= basis-after-known (:max-tx @connection))
             "debug and repeat visits resume the existing owner untouched"))
       (doseq [path ["/ns/nonexistent.thing" "/ns/123bad"]]
-        (let [datoms-before (count (d/datoms @connection :eavt))
+        (let [datoms-before (count (db/datoms @connection :eavt))
               basis-before (:max-tx @connection)
               response (fetch server path)]
           (is (= 404 (.statusCode response)) path)
-          (is (= datoms-before (count (d/datoms @connection :eavt)))
+          (is (= datoms-before (count (db/datoms @connection :eavt)))
               (str path " wrote no datoms"))
           (is (= basis-before (:max-tx @connection))
               (str path " committed no transaction")))))))
@@ -441,7 +440,7 @@
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! stream connection)
-          (d/transact connection
+          (db/transact! connection
                       [{:seon.ns/name 'my.agents.root
                         :seon.ns/source "(ns my.agents.root)\n(def changed true)"}])
           (let [repaint (read-until! stream "def changed true")]
@@ -458,7 +457,7 @@
       (let [first-stream (open-feed server (str "/feed/" agent-id))]
         (read-complete-paint! first-stream connection)
         (.close first-stream))
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.ns/name 'my.agents.root
                     :seon.ns/source "(ns my.agents.root)\n(def current true)"}])
       (let [second-stream (open-feed server (str "/feed/" agent-id))]
@@ -498,7 +497,7 @@
         (try
           (doseq [tab tabs] (read-complete-paint! tab connection))
           (let [before (derivations context)]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.ns/name 'my.agents.root
                           :seon.ns/source "(ns my.agents.root)\n(def shared true)"}])
             (let [morphs (mapv #(read-until! % "def shared true") tabs)]
@@ -533,7 +532,7 @@
                 k 5]
             ;; nobody reads `slow` for the whole burst
             (doseq [n (range k)]
-              (d/transact connection
+              (db/transact! connection
                           [{:seon.ns/name 'my.agents.root
                             :seon.ns/source
                             (str "(ns my.agents.root)\n(def slow " n ")")}])
@@ -618,7 +617,7 @@
                      :seon.ai/partial {:seon.ai/text "half a re"
                                        :seon.ai/tokens 3}})
       (async/poll! (:stream-channel context))
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.ns/name 'my.agents.root
                     :seon.ns/source
                     "(ns my.agents.root)\n(def after-drop true)"}])
@@ -632,7 +631,7 @@
       (testing "and no partial text exists at ANY basis in the window"
         (let [db @connection
               stream-attributes
-              (d/q '[:find [?ident ...]
+              (db/q '[:find [?ident ...]
                      :where [_ :db/ident ?ident]
                      [(namespace ?ident) ?ns]
                      [(clojure.string/starts-with? ?ns "seon.ai.stream")]]
@@ -644,12 +643,12 @@
           ;; every REAL basis in the window — Datahike transaction ids
           ;; start above 536870912, so the walk asks the facts which
           ;; bases exist rather than counting from one
-          (doseq [t (sort (d/q '[:find [?tx ...]
+          (doseq [t (sort (db/q '[:find [?tx ...]
                                  :where [?tx :db/txInstant _]]
                                db))]
-            (is (empty? (d/q '[:find [?e ...]
+            (is (empty? (db/q '[:find [?e ...]
                                :where [?e :seon.ai.stream/text _]]
-                             (d/as-of db t)))
+                             (db/as-of db t)))
                 (str "no partial row at basis " t))))))))
 
 ;;; Seal revision, 2026-07-29 — terminal facts supersede partials
@@ -666,7 +665,7 @@
       (let [run-a "stream-run-a"
             run-b "stream-run-b"]
         (open-run! connection run-a)
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "agent-b"}
                      {:seon.cluster.run/id run-b
                       :seon.cluster.run/agent
@@ -703,7 +702,7 @@
 
           ;; The frozen plan is the settled provider reply fact. Its
           ;; normal database wake is the stream terminal.
-          (d/transact connection
+          (db/transact! connection
                       [[:db/add [:seon.cluster.run/id run-a]
                         :seon.cluster.run/plan-digest
                         (apply str (repeat 64 "a"))]])
@@ -767,7 +766,7 @@
               (is (< (.indexOf acting "seon-attempt-reasoning")
                      (.indexOf acting "; thinking"))))
 
-            (d/transact
+            (db/transact!
              connection
              [{:seon.ai.attempt/id "thinking-attempt"
                :seon.ai.attempt/run [:seon.cluster.run/id run-id]
@@ -844,7 +843,7 @@
   (with-server
     (fn [connection server context]
       ;; the dial as a fact, the way production ships it
-      (d/transact connection [{:seon.config/cluster "web-test"
+      (db/transact! connection [{:seon.config/cluster "web-test"
                                :seon.config.render/coalesce-ms 250}])
       (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
@@ -855,7 +854,7 @@
           (let [before (derivations context)
                 m 6]
             (doseq [n (range m)]
-              (d/transact connection
+              (db/transact! connection
                           [{:seon.ns/name 'my.agents.root
                             :seon.ns/source
                             (str "(ns my.agents.root)\n(def burst " n ")")}]))
@@ -918,7 +917,7 @@
 (deftest data-resolves-an-entity-root-and-preserves-it-in-floor-links
   (with-server
     (fn [connection server _context]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.agent/id "alice"}])
       (let [response
             (fetch server
@@ -961,7 +960,7 @@
             entity (URLEncoder/encode
                     (pr-str [:seon.ns/name namespace-name]) "UTF-8")
             path (URLEncoder/encode (pr-str [:seon.ns/source]) "UTF-8")]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.ns/name namespace-name :seon.ns/source huge}])
         (let [response (fetch server (str "/data?entity=" entity
                                           "&path=" path "&offset=0"))
@@ -982,7 +981,7 @@
 (deftest each-agent-has-an-isolated-debug-route
   (with-server
     (fn [connection server _context]
-      (d/transact connection
+      (db/transact! connection
                   (cluster.agent/creation-tx
                    {:seon.cluster.agent/id "alice"
                     :seon.cluster/name "web-test"
@@ -1000,7 +999,7 @@
 (deftest debug-drills-three-levels-and-includes-apparatus
   (with-server
     (fn [connection server _context]
-      (d/transact connection
+      (db/transact! connection
                   {:tx-data [{:seon.cluster.agent/id "debug-trigger"}]
                    :tx-meta {:seon.db/user
                              [:seon.cluster.agent/id agent-id]}})
@@ -1041,7 +1040,7 @@
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
   (with-server
     (fn [connection server _context]
-      (d/transact connection [{:seon.cluster.agent/id "bob"}])
+      (db/transact! connection [{:seon.cluster.agent/id "bob"}])
       (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
       (is (= 404 (.statusCode (post-form server "/agent/bob" "content=x"))))
       (is (= 404 (.statusCode
@@ -1074,7 +1073,7 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "web-write-refusal")
-      (d/transact connection
+      (db/transact! connection
                   (cluster.agent/creation-tx
                    {:seon.cluster.agent/id agent-id
                     :seon.cluster/name "web-write-refusal"
@@ -1124,7 +1123,7 @@
         (is (= 403 (.statusCode response)))
         (is (= basis-before (:max-tx @connection)))
         (is (empty?
-             (d/q '[:find [?message ...]
+             (db/q '[:find [?message ...]
                     :where
                     [?message :seon.cluster.message/content "forged"]]
                   @connection)))

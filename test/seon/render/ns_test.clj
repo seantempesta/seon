@@ -4,7 +4,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.render.block :as block]
@@ -18,7 +18,7 @@
 
 (defn- namespace-unit
   [db namespace-name distance token-budget]
-  (assoc (d/pull db [:db/id
+  (assoc (db/pull db [:db/id
                      :seon.ns/name
                      :seon.ns/source
                      :seon.ns/doc
@@ -57,13 +57,13 @@
 
 (defn- install-namespace!
   [connection namespace-name source schema-rows function-rows]
-  (d/transact connection
+  (db/transact! connection
               [(cond-> {:seon.ns/name namespace-name}
                  source (assoc :seon.ns/source source))])
   (when (seq schema-rows)
-    (d/transact connection schema-rows))
+    (db/transact! connection schema-rows))
   (when (seq function-rows)
-    (d/transact connection function-rows)))
+    (db/transact! connection function-rows)))
 
 (defn- function-row
   [namespace-name function-name source options]
@@ -159,7 +159,7 @@
 (deftest source-less-agent-namespace-routes-to-the-full-stub
   (support/with-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:db/id "fresh-namespace"
                     :seon.ns/name 'my.agents.fresh}
                    {:seon.cluster.agent/id "fresh"
@@ -375,7 +375,7 @@
       (let [db @connection
             namespace-names
             (vec (sort-by str
-                          (d/q '[:find [?name ...]
+                          (db/q '[:find [?name ...]
                                  :where [_ :seon.ns/name ?name]]
                                db)))
             check

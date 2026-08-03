@@ -6,7 +6,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
@@ -69,7 +69,7 @@
 (defn- seed-agents!
   [connection cluster-name agent-ids]
   (support/seed-cluster! connection cluster-name)
-  (d/transact
+  (db/transact!
    connection
    (into []
          (mapcat (fn [agent-id]
@@ -111,7 +111,7 @@
                                  (fn [index attribute]
                                    [attribute (str (name attribute) "-" index)]))
                                 attributes)
-                   _ (d/transact connection
+                   _ (db/transact! connection
                                  [(assoc values :audit/id "outside-family")])
                    db @connection
                    result
@@ -141,7 +141,7 @@
          (support/with-database
            {:seon.test-support/extra-schema audit-schema}
            (fn [connection]
-             (d/transact
+             (db/transact!
               connection
               (into [{:audit/target-id "target"}]
                     (map (fn [index]
@@ -151,12 +151,12 @@
                     (range source-count)))
              (let [db @connection
                    target-eid (:db/id
-                               (d/pull db [:db/id]
+                               (db/pull db [:db/id]
                                        [:audit/target-id "target"]))
                    expected (into #{}
                                   (map (fn [index]
                                          (:db/id
-                                          (d/pull db [:db/id]
+                                          (db/pull db [:db/id]
                                                   [:audit/id
                                                    (str "source-" index)]))))
                                   (range source-count))
@@ -203,7 +203,7 @@
                   (map (fn [instruction-id]
                          [instruction-id
                           (:db/id
-                           (d/pull db [:db/id]
+                           (db/pull db [:db/id]
                                    [:seon.cluster.instruction/id
                                     instruction-id]))]))
                   [:reply-grammar :messaging :declining :global])
@@ -289,7 +289,7 @@
       (seed-agents! connection "asked-cap" ["asker" "answerer"])
       (doseq [index (range 5)]
         (let [message-id (str "asked-message-" index)]
-          (d/transact connection
+          (db/transact! connection
                       [{:seon.cluster.message/id message-id
                         :seon.cluster.message/from
                         [:seon.cluster.agent/id "asker"]
@@ -298,7 +298,7 @@
                         :seon.cluster.message/content (str "request " index)
                         :seon.cluster.message/at
                         (java.util.Date. (long index))}])
-          (d/transact connection
+          (db/transact! connection
                       [{:seon.cluster.run/id (str "asked-run-" index)
                         :seon.cluster.run/agent
                         [:seon.cluster.agent/id "answerer"]
@@ -308,7 +308,7 @@
                         (java.util.Date. (long index))}])))
       (let [db @connection
             asker-eid (:db/id
-                        (d/pull db [:db/id]
+                        (db/pull db [:db/id]
                                 [:seon.cluster.agent/id "asker"]))
             matching
             (filter #(= :seon.render.walk/asked-for-run
@@ -349,7 +349,7 @@
             form-source "(identity \"UNIQUE-FORM-SOURCE\")"
             result-edn "\"UNIQUE-EVAL-RESULT\""
             instant (java.util.Date. 1)]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.cluster.message/id "one-message"
            :seon.cluster.message/from [:seon.cluster.agent/id "speaker"]
@@ -384,9 +384,9 @@
       (seed-agents! connection "longs" ["long-target"])
       (let [db-before @connection
             target (:db/id
-                    (d/pull db-before [:db/id]
+                    (db/pull db-before [:db/id]
                             [:seon.cluster.agent/id "long-target"]))]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.run/id "long-run"
                       :seon.cluster.run/agent
                       [:seon.cluster.agent/id "long-target"]
@@ -397,7 +397,7 @@
                       :seon.cluster.run.form/ordinal target
                       :seon.cluster.run.form/source "(+ 1 1)"}])
         (let [form-eid (:db/id
-                        (d/pull @connection [:db/id]
+                        (db/pull @connection [:db/id]
                                 [:seon.cluster.run.form/id "same-long"]))
               targets (into #{} (keep :seon.render.walk/target)
                             (walk/refs @connection target base-caps))]
@@ -503,12 +503,12 @@
   (support/with-database
     (fn [connection]
       (seed-agents! connection "derived" ["asker" "answerer"])
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.ns/name 'derived.target
                     :seon.schema.admission/source :agent}
                    {:seon.ns/name 'external.missing
                     :seon.schema.admission/source :agent}])
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.ns/name 'my.agents/asker
                     :seon.schema.admission/source :agent
                     :seon.ns/requires
@@ -521,7 +521,7 @@
                     [:seon.cluster.agent/id "asker"]
                     :seon.cluster.message/content "please answer"
                     :seon.cluster.message/at (java.util.Date.)}])
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.run/id "derived-run"
                     :seon.cluster.run/agent
                     [:seon.cluster.agent/id "answerer"]
@@ -533,26 +533,26 @@
                     [:seon.cluster.run/id "derived-run"]}])
       (let [db @connection
             asker (:db/id
-                   (d/pull db [:db/id] [:seon.cluster.agent/id "asker"]))
+                   (db/pull db [:db/id] [:seon.cluster.agent/id "asker"]))
             run-eid (:db/id
-                     (d/pull db [:db/id]
+                     (db/pull db [:db/id]
                              [:seon.cluster.run/id "derived-run"]))
             message-eid (:db/id
-                         (d/pull db [:db/id]
+                         (db/pull db [:db/id]
                                  [:seon.cluster.message/id
                                   "derived-message"]))
             target-ns (:db/id
-                       (d/pull db [:db/id]
+                       (db/pull db [:db/id]
                                [:seon.ns/name 'derived.target]))
             external-ns (:db/id
-                         (d/pull db [:db/id]
+                         (db/pull db [:db/id]
                                  [:seon.ns/name 'external.missing]))
             asker-refs (walk/refs db asker base-caps)
             run-refs (walk/refs db run-eid base-caps)
             namespace-refs
             (walk/refs db
                        (:db/id
-                        (d/pull db [:db/id]
+                        (db/pull db [:db/id]
                                 [:seon.ns/name 'my.agents/asker]))
                        base-caps)
             agent-walk (walk-agent db "asker" base-caps)]
@@ -581,7 +581,7 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "namespace-distance")
-      (d/transact
+      (db/transact!
        connection
        (agent/creation-tx
         {:seon.cluster.agent/id "seon-flow-owner"
@@ -589,14 +589,14 @@
          :seon.ns/name 'seon.flow}))
       (let [db @connection
             own-namespace-eid
-            (:db/id (d/pull db [:db/id] [:seon.ns/name 'seon.flow]))
+            (:db/id (db/pull db [:db/id] [:seon.ns/name 'seon.flow]))
             required-namespace-eids
-            (d/q '[:find [?required ...]
+            (db/q '[:find [?required ...]
                    :in $ ?namespace
                    :where [?namespace :seon.ns/requires ?required]]
                  db own-namespace-eid)
             toolkit-namespace-eids
-            (d/q '[:find [?toolkit ...]
+            (db/q '[:find [?toolkit ...]
                    :in $ ?cluster-name
                    :where
                    [?cluster :seon.cluster/name ?cluster-name]
@@ -605,14 +605,14 @@
             member-eids
             (into
              (set
-              (d/q '[:find [?function ...]
+              (db/q '[:find [?function ...]
                      :in $ ?namespace
                      :where [?function :seon.fn/ns ?namespace]]
                    db own-namespace-eid))
              (map :db/id)
              (mapcat val
                      (select-keys
-                      (d/pull db
+                      (db/pull db
                               [{:seon.ns/aliases [:db/id]}
                                {:seon.ns/imports [:db/id]}
                                {:seon.ns/refers [:db/id]}]

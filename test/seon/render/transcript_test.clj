@@ -5,7 +5,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
@@ -115,7 +115,7 @@
 
 (defn- seed-populated-history!
   [connection]
-  (d/transact
+  (db/transact!
    connection
    [{:seon.cluster.agent/id agent-id}
     {:seon.cluster.agent/id peer-id}
@@ -298,7 +298,7 @@
                  :seon.cluster.message/content (str "newest history " index)
                  :seon.cluster.message/at (at (+ 1000 index))})
               (range 6)))]
-    (d/transact
+    (db/transact!
      connection
      (into [{:seon.cluster.agent/id agent-id}
             {:seon.cluster.run/id bootstrap-run-id
@@ -345,7 +345,7 @@
 (deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
   (support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        [{:seon.cluster.agent/id agent-id}
         {:seon.cluster.agent/id peer-id}
@@ -389,7 +389,7 @@
             narrow-caps (assoc caps
                                :seon.config.eval.result/max-collection 3
                                :seon.config.eval.result/max-string 8)]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
           {:seon.cluster.run/id "run-capped"
@@ -416,7 +416,7 @@
     (fn [connection]
       (let [stored "[0 1 :seon.sci.admit/elided]"
             digest (apply str (repeat 64 "b"))]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
           {:seon.cluster.run/id "run-blobbed"
@@ -433,7 +433,7 @@
            :seon.cluster.eval/result-edn stored
            :seon.cluster.eval/result-blob digest
            :seon.cluster.eval/result-size 189000}])
-        (let [receipt (d/pull @connection '[*]
+        (let [receipt (db/pull @connection '[*]
                               [:seon.cluster.eval/id "eval-blobbed"])]
           (is (transcript/capped-result? receipt))
           (is (not (contains? receipt :seon.sci.admit/capped?)))
@@ -454,7 +454,7 @@
              :seon.ai/endpoint "https://provider.invalid"
              :seon.ai/model "fixture-thinking"
              :seon.ai.attempt/settings-edn "{}"}]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
           {:seon.cluster.run/id "run-reasoning"
@@ -464,7 +464,7 @@
                  :seon.ai.attempt/id "reasoning-inline"
                  :seon.ai.attempt/ordinal 0)])
         (let [before (full-agent-ai @connection)]
-          (d/transact
+          (db/transact!
            connection
            [[:db/add [:seon.ai.attempt/id "reasoning-inline"]
              :seon.ai.attempt/reasoning reasoning]])
@@ -474,7 +474,7 @@
                 "the complete agent projection is byte-identical when reasoning appears")
             (is (not (str/includes? after reasoning)))
             (is (not (str/includes? after digest)))))
-        (d/transact
+        (db/transact!
          connection
          [(assoc base-attempt
                  :seon.ai.attempt/id "reasoning-blob"
@@ -508,7 +508,7 @@
 (deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
   (support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        (into [{:seon.cluster.agent/id agent-id}]
              (map (fn [index]
@@ -521,8 +521,8 @@
       (let [db @connection
             floor (transcript/minimum-token-budget (unit db 0))
             pulled (atom [])
-            pull-many d/pull-many
-            ai (with-redefs [d/pull-many
+            pull-many db/pull-many
+            ai (with-redefs [db/pull-many
                              (fn [database selector entity-ids]
                                (swap! pulled conj (count entity-ids))
                                (pull-many database selector entity-ids))]
@@ -638,7 +638,7 @@
                                 {:seon.test/sym "generated-target"}]
                                (mapcat generated-rows)
                                events)]
-                (d/transact connection rows)
+                (db/transact! connection rows)
                 (let [db @connection
                       floor (transcript/minimum-token-budget (unit db 0))
                       budget (+ floor extra-budget)

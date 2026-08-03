@@ -6,6 +6,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -250,9 +251,9 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection
+      (db/transact! connection
                   (schema.datahike/malli->datahike-schema ref-attributes))
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.agent/id agent-id}
                    {:db/id -1
                     :seon.cluster.run/id "run-7f21"
@@ -288,10 +289,10 @@
   ;; connections instead of names.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.error/id "err-7f21" :seon.render/html `error-html}
                    {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
-      (let [db (d/db connection)
+      (let [db (db/db connection)
             unit (block/entity-unit db [:seon.error/id "err-7f21"])
             expanded (block/expand
                       (:seon.render/output
@@ -311,9 +312,9 @@
   ;; which can project anything.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.error/id "err-7f21" :seon.render/html `error-html}])
-      (let [db (d/db connection)
+      (let [db (db/db connection)
             unit (block/entity-unit db [:seon.error/id "err-7f21"])
             expanded (block/expand
                       (:seon.render/output
@@ -329,7 +330,7 @@
 (deftest a-dangling-ref-is-a-note-and-not-a-dead-page
   (with-ref-database
     (fn [connection]
-      (let [db (d/db connection)
+      (let [db (db/db connection)
             expanded (block/expand [:div (block/entity-slot 99999999)]
                                    (expansion db))]
         (is (hiccup/hiccup? expanded))
@@ -367,10 +368,10 @@
   ;; paid for. One hop reaches the run; two reach the run's forms.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.error/id "err-7f21" :seon.render/html `error-html}
                    {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
-      (let [db (d/db connection)
+      (let [db (db/db connection)
             at (fn [hops] (neighborhood db hops))]
         (testing "distance 0 renders the unit itself and follows nothing"
           (let [html (at 0)]
@@ -399,10 +400,10 @@
   ;; a distance-free expansion, which is what this function always did.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.error/id "err-7f21" :seon.render/html `error-html}
                    {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
-      (let [db (d/db connection)]
+      (let [db (db/db connection)]
         (is (= (neighborhood db nil) (neighborhood db 2))
             "the seeded chain is two hops, so an unbounded walk equals it")
         (is (str/includes? (neighborhood db nil) "my.run/complete")
@@ -413,10 +414,10 @@
   ;; many hops the request was willing to pay for.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.error/id "err-7f21" :seon.render/html `error-html}
                    {:seon.cluster.run/id "run-7f21" :seon.render/html `run-html}])
-      (let [db (d/db connection)
+      (let [db (db/db connection)
             shallow (assoc caps :seon.config.eval.result/max-depth 1)
             html (hiccup/->string
                   (block/expand
@@ -440,16 +441,16 @@
   ;; back at its run.
   (with-ref-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.run.form/id "form-0"
                     :seon.cluster.run.form/run [:seon.cluster.run/id "run-7f21"]}])
-      (let [db (d/db connection)
-            run-id (:db/id (d/pull db [:db/id] [:seon.cluster.run/id "run-7f21"]))
-            form-id (:db/id (d/pull db [:db/id] [:seon.cluster.run.form/id "form-0"]))]
-        (d/transact connection
+      (let [db (db/db connection)
+            run-id (:db/id (db/pull db [:db/id] [:seon.cluster.run/id "run-7f21"]))
+            form-id (:db/id (db/pull db [:db/id] [:seon.cluster.run.form/id "form-0"]))]
+        (db/transact! connection
                     [{:db/id run-id :seon.render/html `run-html}
                      {:db/id form-id :seon.render/html `form-html}])
-        (let [db (d/db connection)
+        (let [db (db/db connection)
               expanded (block/expand [:div (block/entity-slot run-id)]
                                      (expansion db))]
           (is (hiccup/hiccup? expanded))
