@@ -3186,3 +3186,51 @@ reconciles from outside and may observe a dead JVM; (seon.operator/status)
 derives from inside. No "reconcile" verb exists in code and none is added.
 (4) KIMI K3 CALIBRATION runs AFTER the prefix-cache work banks, so one paid
 matrix measures both providers on the same stable prefix.
+
+**GUARDED-KERNEL MERGE LANDED (2026-08-03, `04fe5f247` + `db0d78368`
++ `dd62545c3`):** ruling #46's kernel had already landed as
+`seon.sci.kernel` (`094127076`), but its SEMANTICS were still two
+copies. Falsified before the change: arming a context and calling
+`evaluate` on it threw `:seon.sci.kernel/already-armed` out of the
+boundary whose docstring says nothing throws, while `kernel/invoke` on
+the identical situation inherited the arm and returned a value; behind
+that sat two refusal readers and two failure classifiers.
+`kernel/arm` is now the ONE re-entrancy rule for both entrances
+(identical context inherits the governing arm and deadline, a different
+context is refused) and `kernel/failure-value` the ONE classifier, with
+the invoked symbol as the only difference between the faces. The throw
+had been hiding a real hole: a nested evaluation asking for 600,000 ms
+under an outer 50 ms arm is now cut at 54 ms. Deleted from
+`seon.sci.eval`: the arm re-keying wrapper, the `invoke` pass-through,
+its `failure-value` copy, its `interrupted?` pass-through.
+Live proof on the default cluster: a door-authored spinning renderer was
+deadline-stopped at 64 ms under a 60 ms limit through `render/render-ai`
+and `render-html` (1,185,678 fn-entries recorded as the spin diagnostic),
+and ordinary AI/HTML renders round-tripped on the same request.
+Gates: `seon.sci.eval-test seon.sci.admit-test
+seon.render-simplification-test` — 63/284/0. Consumers
+(`seon.sci.eval-instrumentation-test seon.sci.session-image-test
+seon.render.web-test seon.cluster.prompt-test seon.problems-test
+seon.error-test seon.repl-parity-test`) — 153/443, 1 failure, the
+initial-paint census above, now filed as
+`issues/initial-paint-census-is-a-hand-maintained-count.md` with its
+cause identified (six schema resources landed after the 17 bump; the
+equality-on-a-growing-derived-set is the defect, not any lane's change).
+`seon.cluster.armed-test` could NOT be gated: it wedges in `stop!` ->
+`disarm!` -> `await-turn-completion!`, ruling #51's named open edge,
+filed as `issues/agent-disarm-waits-forever-on-a-turn-that-cannot-
+complete.md` (blocker; not on the merged code path, no `seon.sci.*` frame
+in the dump; the same day's work-launcher change `79700db1c` is a lead,
+unbisected). Also filed:
+`issues/predicate-schema-violations-humanize-to-unknown-error.md` — 36
+`[:fn …]` registrations, 2 with `:error/message`, so a refused agent call
+reads "unknown error".
+Issue archived: `sci-evaluate-throws-when-a-guarded-context-is-re-armed`.
+RESIDUAL DIVERGENCE, deliberately left for the owner: the two entrances
+still emit DIFFERENT `:seon.error/kind` values for one class
+(`:seon.sci.eval/{time-limit,evaluation-failed}` vs
+`:seon.sci.kernel/{time-limit,invocation-failed}`). One classifier now
+produces both, so they cannot drift, but unifying the VALUES rewrites an
+agent-visible error kind already stored in receipts across live clusters —
+a values-drift with no validation failure, which is the accretion law's
+silent-breakage shape. It wants a ruling, not a lane's judgement.
