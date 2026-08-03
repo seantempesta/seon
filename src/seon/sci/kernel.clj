@@ -280,7 +280,14 @@
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
     (if (:seon.error/kind existing)
-      (update existing :seon.error/data merge evidence)
+      (cond-> (update existing :seon.error/data merge evidence)
+        ;; A refusal is raised as ex-info data that need not repeat the
+        ;; message, but an error VALUE must always say what happened —
+        ;; the run loop reads its presence as the failed state, and a
+        ;; refusal preserved without one stored a nil there.
+        (not (:seon.error/message existing))
+        (assoc :seon.error/message
+               (or (ex-message throwable) (.getName (class throwable)))))
       (cond-> {:seon.error/kind (if timed-out? time-limit-kind failure-kind)
                :seon.error/message
                (cond->> (if timed-out?

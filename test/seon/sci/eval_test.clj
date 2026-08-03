@@ -1219,13 +1219,20 @@
 (deftest an-inherited-arm-keeps-the-governing-deadline
   ;; The reason inheritance is the rule and not a convenience: nested work
   ;; must never restart the clock and outlive the limit that admitted it.
-  (let [ctx (eval/build-base-ctx)
-        {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 50)]
-    (try
-      (let [evaluation (deadlined-in ctx "(loop [i 0] (recur (inc i)))" 600000)]
-        (is (cut? evaluation)
-            "the outer 50ms arm stopped work that asked for ten minutes"))
-      (finally (stop!)))))
+  ;; Arm and evaluate on ONE thread, because inheritance is per-thread by
+  ;; construction. The future is only the suite's backstop: if the deadline
+  ;; ever stops governing nested work, this FAILS rather than hangs.
+  (let [task (future
+               (let [ctx (eval/build-base-ctx)
+                     {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 50)]
+                 (try
+                   (run-in ctx "(loop [i 0] (recur (inc i)))" 600000)
+                   (finally (stop!)))))
+        evaluation (deref task 15000 ::hung)]
+    (future-cancel task)
+    (is (not= ::hung evaluation))
+    (is (cut? evaluation)
+        "the outer 50ms arm stopped work that asked for ten minutes")))
 
 (deftest a-foreign-armed-context-is-refused-as-a-value
   (let [armed-ctx (eval/build-base-ctx)
@@ -1233,10 +1240,12 @@
         {stop! :seon.sci.kernel/stop!} (kernel/arm armed-ctx 30000)]
     (try
       (let [evaluation (run-in other-ctx "(+ 1 2)" 1000)]
-        (is (some? (:seon.cluster.eval/error evaluation))
-            "a refusal at an agent-facing operation is a value, never a throw")
         (is (= :seon.sci.kernel/already-armed
-               (:seon.error/kind (:seon.sci.admit/value evaluation)))))
+               (:seon.error/kind (:seon.sci.admit/value evaluation)))
+            "a refusal at an agent-facing operation is a value, never a throw")
+        (is (some? (:seon.cluster.eval/error evaluation))
+            "presence is the state, so a preserved refusal still carries the
+             message the loop reads — it must never store a nil there"))
       (finally (stop!)))))
 
 (deftest both-entrances-classify-one-failure-identically
