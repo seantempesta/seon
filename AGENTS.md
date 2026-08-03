@@ -1318,3 +1318,16 @@ markdown link (e.g. `[title](docs/prds/.../file.md)`), never a bare
 filename or an abbreviated path. The owner reads the details and
 iterates on designs from those links; an unlinkable mention forces a
 search. Lane summaries follow the same rule.
+
+## Read the whole spec — never grep it (standing, owner-ruled 2026-08-03)
+
+When a task names a document — a spec, ruling, research report, issue,
+or plan — READ IT END TO END before designing, deciding, implementing,
+or reporting on it, and state in your report that you did. Grepping a
+spec is how three wrong conclusions were reached in one evening
+(2026-08-02), each from a partial read of a document that was correct:
+verdict sections, "differences from current" sections, and numbered
+decision lists carry constraints a keyword search never surfaces. If a
+document is long, that is the reason to read it, not the excuse to
+search it. `rg` remains the right tool for FINDING things in the tree;
+it is never the way to CONSUME a named authority.
