@@ -91,10 +91,13 @@ auto-repair in this path. Unbalanced or malformed code returns
 `:seon.cluster.reply/no-forms` (`src/seon/cluster/reply.clj:310-355`).
 
 Practical rule: write code as ordinary balanced Clojure. Agent-written source
-may use comments for thinking preserved beside a form, but displayed REPL
-content is always the form followed by its actual computed value—never a
-comment-only pseudo-result, a `;; =>` annotation, or prose framed as comments.
-Do not expect parinfer or a repair pass to guess missing delimiters
+may use comments for thinking preserved beside a form. **[TARGET — owner
+decision 11]** Displayed REPL content is the form followed by its actual
+computed value—never a comment-only pseudo-result, a `;; =>` annotation, or
+prose framed as comments. Current comment-output owners are recorded under the
+strict REPL display wave in `docs/seon/issues/index.md`; do not mistake those
+known implementation defects for the display contract. Do not expect parinfer
+or a repair pass to guess missing delimiters
 (`src/seon/cluster/reply.clj:20-48,210-244,310-355`;
 `docs/prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md`,
 decision 11).
