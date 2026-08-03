@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The system test gate: every suite under test/, or an explicit selection.
 #
-#   bin/test                        # run everything under test/
+#   bin/test                        # run the default, non-long tier
+#   bin/test --full                 # run every test under test/
 #   bin/test seon.cluster.run-test  # run exactly these namespaces
 #   bin/test --result-cluster scratch [namespaces...]
 #
@@ -28,9 +29,11 @@ source bin/_java-home-resolver
 
 usage() {
   cat <<'USAGE'
-Usage: bin/test [--result-cluster NAME] [--result-root PATH] [namespaces...]
+Usage: bin/test [--full] [--result-cluster NAME] [--result-root PATH] [namespaces...]
 
-With no namespaces, runs every *_test.clj[c] under test/.
+With no namespaces, runs every non-long test under test/. Use --full or
+SEON_TEST_FULL=1 for the complete checkpoint suite. An explicit namespace
+selection always runs every test in those namespaces.
 USAGE
 }
 
@@ -52,13 +55,28 @@ fi
 
 result_cluster=${SEON_TEST_RESULT_CLUSTER:-}
 result_root=${SEON_TEST_RESULT_ROOT:-}
+full_requested=0
+explicit_selection=0
 namespaces=()
+
+case "${SEON_TEST_FULL:-0}" in
+  0) ;;
+  1) full_requested=1 ;;
+  *)
+    echo "bin/test: SEON_TEST_FULL must be 0 or 1" >&2
+    exit 64
+    ;;
+esac
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --help|-h)
       usage
       exit 0
+      ;;
+    --full)
+      full_requested=1
+      shift
       ;;
     --result-cluster)
       if [ $# -lt 2 ]; then
@@ -79,6 +97,9 @@ while [ $# -gt 0 ]; do
     --)
       shift
       namespaces+=("$@")
+      if [ $# -gt 0 ]; then
+        explicit_selection=1
+      fi
       break
       ;;
     --*)
@@ -88,12 +109,11 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       namespaces+=("$1")
+      explicit_selection=1
       shift
       ;;
   esac
 done
-
-selection="${namespaces[*]:-full suite}"
 
 if [ ${#namespaces[@]} -gt 0 ]; then
   :
@@ -106,6 +126,20 @@ else
     ns=${ns//_/-}
     namespaces+=("$ns")
   done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
+fi
+
+if [ "$full_requested" -eq 1 ] || [ "$explicit_selection" -eq 1 ]; then
+  selection_mode=full
+else
+  selection_mode=default
+fi
+
+if [ "$explicit_selection" -eq 1 ]; then
+  selection="${namespaces[*]}"
+elif [ "$selection_mode" = "full" ]; then
+  selection="full suite"
+else
+  selection="default tier"
 fi
 
 if [ ${#namespaces[@]} -eq 0 ]; then
@@ -242,7 +276,8 @@ clojure \
   "-J-Dseon.operator.root=$run_root" \
   "-J-Dseon.test.root=$run_root" \
   -M:test -m seon.test.runner \
-  "${result_cluster:--}" "$result_root" "$git_sha" "${namespaces[@]}"
+  "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
+  "${namespaces[@]}"
 status=$?
 set -e
 cd "$source_root"

@@ -13,7 +13,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -46,10 +46,19 @@
     (.mkdirs (io/file root))
     root))
 
-(defn- fresh-root []
-  (let [root (bare-root)]
-    (cluster/refresh-source! root)
-    root))
+(def ^:dynamic *published-root* nil)
+
+(defn- published-root
+  []
+  (when-not *published-root*
+    (throw (ex-info "The published-root fixture is not installed." {})))
+  (or @*published-root*
+      (locking *published-root*
+        (or @*published-root*
+            (let [root (bare-root)]
+              (cluster/refresh-source! root)
+              (reset! *published-root* root)
+              root)))))
 
 (defn- fresh-root-with-history-policy [keep-history?]
   (let [root (bare-root)
@@ -62,7 +71,21 @@
     root))
 
 (defn- delete-recursively! [path]
-  (test-support/delete-recursively! path))
+  (let [shared-root (some-> *published-root* deref io/file .getCanonicalPath)
+        target (.getCanonicalPath (io/file path))]
+    (when-not (= shared-root target)
+      (test-support/delete-recursively! path))))
+
+(defn- with-published-root
+  [body]
+  (binding [*published-root* (atom nil)]
+    (try
+      (body)
+      (finally
+        (when-let [root @*published-root*]
+          (test-support/delete-recursively! root))))))
+
+(use-fixtures :once with-published-root)
 
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
@@ -153,7 +176,8 @@
       (finally
         (store/release-store! opened)))))
 
-(deftest incompatible-sovereign-schema-refusal-steers-the-operator
+(deftest ^{:seon.test/long "Starts a degraded real cluster against an incompatible store."}
+  incompatible-sovereign-schema-refusal-steers-the-operator
   (let [root (bare-root)
         cluster-name "legacy"
         request {:seon.boot/cluster-name cluster-name
@@ -374,8 +398,9 @@
 ;;; The live lifecycle — real sockets, real files, this JVM
 ;;; ---------------------------------------------------------------------------
 
-(deftest repl-first-and-under-the-ten-second-bound
-  (let [root (fresh-root)]
+(deftest ^{:seon.test/long "Starts a real cluster and proves its live prepl boundary."}
+  repl-first-and-under-the-ten-second-bound
+  (let [root (published-root)]
     (try
       (let [started-at (System/nanoTime)
             instance (cluster/start! {:seon.boot/cluster-name "solo"
@@ -401,8 +426,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest two-instances-are-isolated
-  (let [root (fresh-root)]
+(deftest ^{:seon.test/long "Starts two real clusters to prove process-root isolation."}
+  two-instances-are-isolated
+  (let [root (published-root)]
     (try
       (let [a (cluster/start! {:seon.boot/cluster-name "a"
                                :seon.boot/root root})
@@ -434,8 +460,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest stale-advertisements-read-as-absent
-  (let [root (fresh-root)]
+(deftest ^{:seon.test/long "Starts and stops a real cluster before probing advertisements."}
+  stale-advertisements-read-as-absent
+  (let [root (published-root)]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name "stale"
                                       :seon.boot/root root})
@@ -467,10 +494,11 @@
                   #(java.util.Date. (dec (inst-ms %))))))
         "the pid still exists, but a different generation is dead")))
 
-(deftest a-delayed-stop-never-kills-a-replacement
+(deftest ^{:seon.test/long "Restarts a real cluster generation to falsify stale teardown."}
+  a-delayed-stop-never-kills-a-replacement
   ;; stops are instance-addressed: a stale stop! of an OLD instance
   ;; value must leave a same-named replacement fully alive
-  (let [root (fresh-root)]
+  (let [root (published-root)]
     (try
       (let [old-instance (cluster/start! {:seon.boot/cluster-name "swap"
                                           :seon.boot/root root})]
@@ -491,8 +519,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest same-jvm-same-name-restart-releases-the-registered-prepl
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Restarts a real prepl server under one registered name."}
+  same-jvm-same-name-restart-releases-the-registered-prepl
+  (let [root (published-root)
         cluster-name "registered-restart"
         server-name (str "seon.cluster/" cluster-name)]
     (try
@@ -519,8 +548,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest a-failed-stop-remains-addressable-and-retryable
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Injects failure into real cluster teardown and retries it."}
+  a-failed-stop-remains-addressable-and-retryable
+  (let [root (published-root)
         cluster-name "retry-stop"
         original-release-store! store/release-store!]
     (try
@@ -583,8 +613,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest orderly-stop-awaits-the-active-loop-pass
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Stops a real cluster while one flow pass remains active."}
+  orderly-stop-awaits-the-active-loop-pass
+  (let [root (published-root)
         pass-entered (CountDownLatch. 1)
         finish-pass (CountDownLatch. 1)
         stop-commanded (CountDownLatch. 1)
@@ -659,7 +690,8 @@
   [failure]
   (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
 
-(deftest operator-root-history-policy-is-creation-fixed
+(deftest ^{:seon.test/long "Starts real clusters against a creation-fixed store policy."}
+  operator-root-history-policy-is-creation-fixed
   (let [root (fresh-root-with-history-policy false)
         instance
         (cluster/start!
@@ -701,8 +733,9 @@
         (cluster/stop! instance)
         (delete-recursively! root)))))
 
-(deftest start-allows-an-older-complete-program-without-indexing
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Restarts a real sovereign cluster from its older program facts."}
+  start-allows-an-older-complete-program-without-indexing
+  (let [root (published-root)
         cluster-name "stale-program"
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
@@ -748,8 +781,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest partial-clusters-refuse-and-fresh-clusters-are-current
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Starts a real cluster before and after corrupting program facts."}
+  partial-clusters-refuse-and-fresh-clusters-are-current
+  (let [root (published-root)
         cluster-name "partial-program"
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
@@ -795,8 +829,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest incremental-source-refresh-publishes-without-touching-existing-clusters
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Keeps a real cluster live across source publication and a later fork."}
+  incremental-source-refresh-publishes-without-touching-existing-clusters
+  (let [root (published-root)
         current-digest
         (source/digest {:seon.source/roots cluster/source-roots})
         old-world
@@ -849,8 +884,7 @@
         (delete-recursively! root)))))
 
 (deftest packaged-source-does-not-capture-an-ambient-schema-registration
-  (let [root (fresh-root)
-        dial :seon.config.boot-test/reopen-dial
+  (let [dial :seon.config.boot-test/reopen-dial
         schema-state (schema/snapshot-state)]
     (try
       ;; Process-global registration is a REPL/runtime concern. It is not a
@@ -863,11 +897,11 @@
                      [:seon.schema.state/candidate-forms dial])))
       (is (not (contains? (schema.edn/packaged-forms) dial)))
       (finally
-        (schema/restore-state! schema-state)
-        (delete-recursively! root)))))
+        (schema/restore-state! schema-state)))))
 
-(deftest selected-config-repairs-locked-state-before-consumers-arm
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Restarts a real cluster to prove configuration applies before arming."}
+  selected-config-repairs-locked-state-before-consumers-arm
+  (let [root (published-root)
         cluster-name "config-unlock"
         observed (atom [])
         start-work-launcher! seon.flow/start-work-launcher!
@@ -1005,8 +1039,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest the-tower-stands-in-one-start
-  (let [root (fresh-root)]
+(deftest ^{:seon.test/long "Starts the complete real boot tower and a sibling cluster."}
+  the-tower-stands-in-one-start
+  (let [root (published-root)]
     (try
       (let [started-at (System/nanoTime)
             instance (cluster/start! {:seon.boot/cluster-name "tower"
@@ -1058,7 +1093,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest a-failed-tower-never-takes-the-repl
+(deftest ^{:seon.test/long "Starts a real prepl over deliberately corrupted boot storage."}
+  a-failed-tower-never-takes-the-repl
   ;; owner ruling: the REPL is always useful for debugging — a corrupt
   ;; store fails the boot LOUDLY while the socket stays up
   (let [root (bare-root)]
@@ -1091,8 +1127,9 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest explicit-refork-destroys-the-old-branch-and-forks-current-source
-  (let [root (fresh-root)
+(deftest ^{:seon.test/long "Starts and reforks a real cluster branch."}
+  explicit-refork-destroys-the-old-branch-and-forks-current-source
+  (let [root (published-root)
         cluster-name "refork-program"
         instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                   :seon.boot/root root})
@@ -1131,14 +1168,15 @@
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-dead-holders-run-is-unclaimed-by-the-time-start-returns
+(deftest ^{:seon.test/long "Restarts a real cluster over simulated process wreckage."}
+  a-dead-holders-run-is-unclaimed-by-the-time-start-returns
   ;; The live crash drill found this gap: `recover-tx` existed with no
   ;; caller, so a process that died holding a claimed run left the agent
   ;; wedged — `work/next-agent-work` sees a run held by someone else and
   ;; returns nothing, forever. Recovery is BY FACT: the drill measured
   ;; the dead holder's 60-second lease still in the future when the fix
   ;; fires, so nothing here waits a lease out.
-  (let [root (fresh-root)]
+  (let [root (published-root)]
     (try
       ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
       ;; an open run claimed by a process that will not exist afterwards,

@@ -162,7 +162,8 @@
     (is (= #{:creation-fixed :arm-time :live :mixed}
            (set (map (comp :mode val) application-ledger))))))
 
-(deftest applied-values-shape-the-running-system
+(deftest ^{:seon.test/long "Starts a real cluster to observe applied runtime configuration."}
+  applied-values-shape-the-running-system
   (let [root (fresh-root)
         name "application-proof"]
     (try
@@ -243,7 +244,8 @@
       (finally
         (test-support/delete-recursively! root)))))
 
-(deftest no-auth-is-consumed-as-the-credential-alternative
+(deftest ^{:seon.test/long "Starts a real cluster to exercise credential selection."}
+  no-auth-is-consumed-as-the-credential-alternative
   (let [root (fresh-root)]
     (try
       (let [instance

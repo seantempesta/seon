@@ -25,7 +25,8 @@
   (is (every? #(not-empty (:seon.bootstrap-drive/objective %))
               (vals drive/objectives))))
 
-(deftest one-fake-o1-drive-grades-on-its-ending-commit
+(deftest ^{:seon.test/long "Boots a real cluster graph and grades its ending commit."}
+  one-fake-o1-drive-grades-on-its-ending-commit
   (testing "the real graph executes bootstrap, objective, fork, and held-out call"
     (let [run-drives! (ns-resolve 'seon.bootstrap-drive 'run-drives!)
           reports

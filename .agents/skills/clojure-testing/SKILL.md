@@ -25,15 +25,19 @@ writer test command to satisfy an old instruction.
 ## Running
 
 ```bash
-bin/test                        # every *_test.clj / *_test.cljc under test/
-bin/test seon.cluster.run-test  # exactly these namespaces
+bin/test                        # default tier: every test not declared long
+bin/test --full                 # every *_test.clj / *_test.cljc under test/
+bin/test seon.cluster.run-test  # every test in exactly these namespaces
 ```
 
 Source classpath, no artifact and no operator: the exit code is the verdict.
-Use one explicit multi-namespace selection while iterating and the full run at
-the natural unit boundary. `bin/test` discovers files, converts paths to
-namespaces, requires the selected namespaces, and calls one `run-tests`
-invocation in one JVM (`bin/test:84-94,112-135`).
+Use one explicit multi-namespace selection while iterating and `bin/test
+--full` at the natural checkpoint boundary. Bare `bin/test` excludes only vars
+or namespaces carrying a non-blank `:seon.test/long` reason, then prints every
+omitted test and the full-suite command. `SEON_TEST_FULL=1 bin/test` is the CI
+equivalent. Explicit namespace selections are always complete, which preserves
+the changed-test selector (`bin/test:58-137`; `src/seon/test/runner.clj:241-308,
+457-531`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A

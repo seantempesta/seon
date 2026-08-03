@@ -1,4 +1,5 @@
-(ns seon.cluster.program-restart-test
+(ns ^{:seon.test/long "The namespace proves program acquisition across a real cluster restart."}
+  seon.cluster.program-restart-test
   "Live restart proof for database-backed SCI program acquisition."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]

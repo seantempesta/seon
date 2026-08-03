@@ -1,4 +1,5 @@
-(ns seon.sci.eval-instrumentation-test
+(ns ^{:seon.test/long "The regression completes a turn in a real instrumented cluster."}
+  seon.sci.eval-instrumentation-test
   "Armed-instrumentation regression for database program acquisition."
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]

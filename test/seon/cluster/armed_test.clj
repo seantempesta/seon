@@ -1,4 +1,5 @@
-(ns seon.cluster.armed-test
+(ns ^{:seon.test/long "Every test boots a real armed cluster to cover fixture-vs-live wiring."}
+  seon.cluster.armed-test
   "The armed layers of a booted cluster: root, the loop, the fault path.
 
   These are the falsifiers for the wiring whose ABSENCE was the highest

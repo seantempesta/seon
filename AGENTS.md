@@ -1142,7 +1142,9 @@ the class dead.
 There are two testing surfaces:
 
 1. code correctness through `bin/test` — the one gate for the fresh system
-   (a bare run is the full suite; pass namespaces to focus it);
+   (a bare run is the fast non-long tier; `bin/test --full` or
+   `SEON_TEST_FULL=1 bin/test` is the complete checkpoint suite; explicit
+   namespaces always run all their tests);
 2. agent/model evaluation through `src-inspect-ai/`.
 
 Do not restore the gym, add bespoke drive scripts, or create another runner.

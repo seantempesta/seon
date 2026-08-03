@@ -57,7 +57,8 @@
     :seon.sci.eval/time-limit-ms 30000
     :seon.config/on-core-error :panic}))
 
-(deftest two-fresh-jvms-round-trip-the-owner-session
+(deftest ^{:seon.test/long "Persists and restores one session through two fresh JVMs."}
+  two-fresh-jvms-round-trip-the-owner-session
   (let [root (str "tmp/session-fresh-jvm/" (random-uuid))
         database-path (str root "/database")
         store-id (random-uuid)

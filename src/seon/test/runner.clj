@@ -238,8 +238,75 @@
          (assoc :seon.test.failure/message (str/join "\n\n" messages)))))
    order))
 
+(defn- test-vars-in
+  [namespaces]
+  (into []
+        (mapcat
+         (fn [namespace-name]
+           (->> (ns-interns namespace-name)
+                vals
+                (filter (comp :test meta))
+                (sort-by var-symbol))))
+        namespaces))
+
+(defn- long-reason
+  [test-var]
+  (let [var-metadata (meta test-var)
+        namespace-metadata (meta (:ns var-metadata))
+        marker (if (contains? var-metadata :seon.test/long)
+                 (:seon.test/long var-metadata)
+                 (:seon.test/long namespace-metadata))]
+    (when (some? marker)
+      (when-not (and (string? marker) (not (str/blank? marker)))
+        (throw
+         (ex-info
+          ":seon.test/long must contain a non-blank reason."
+          {:seon.error/kind ::invalid-long-reason
+           :seon.test/sym (str (var-symbol test-var))
+           :seon.test/long marker})))
+      marker)))
+
+(defn- test-selection
+  [namespaces include-long?]
+  (reduce
+   (fn [selection test-var]
+     (let [reason (long-reason test-var)]
+       (if (and (not include-long?) reason)
+         (update selection ::skipped conj
+                 {::test-symbol (var-symbol test-var)
+                  ::reason reason})
+         (update selection ::selected conj test-var))))
+   {::selected [] ::skipped []}
+   (test-vars-in namespaces)))
+
+(defn- run-selected-tests
+  [namespaces selected-vars]
+  (let [selected-by-namespace (group-by (comp :ns meta) selected-vars)]
+    (binding [test/*report-counters* (ref test/*initial-report-counters*)]
+      (doseq [namespace-name namespaces
+              :let [namespace-object (the-ns namespace-name)
+                    namespace-vars (get selected-by-namespace namespace-object)]
+              :when (seq namespace-vars)]
+        (test/do-report {:type :begin-test-ns :ns namespace-object})
+        (if-let [hook (find-var
+                       (symbol (str namespace-name) "test-ns-hook"))]
+          (if (= (count namespace-vars)
+                 (count (filter (comp :test meta)
+                                (vals (ns-interns namespace-object)))))
+            ((var-get hook))
+            (throw
+             (ex-info
+              "A namespace test hook cannot select around long test vars."
+              {:seon.error/kind ::long-test-ns-hook
+               :seon.ns/name namespace-name})))
+          (test/test-vars namespace-vars))
+        (test/do-report {:type :end-test-ns :ns namespace-object}))
+      (let [summary (assoc @test/*report-counters* :type :summary)]
+        (test/do-report summary)
+        summary))))
+
 (defn- run-request!
-  [request progress]
+  [request progress selected-vars]
   (let [selected-namespaces (set (:seon.test.runner/namespaces request))
         capture (atom {::order [] ::results {}})
         default-report test/report
@@ -250,7 +317,10 @@
                     (when progress
                       (progress-event! progress event))
                     (default-report event))]
-          (apply test/run-tests (:seon.test.runner/namespaces request)))
+          (if selected-vars
+            (run-selected-tests (:seon.test.runner/namespaces request)
+                                selected-vars)
+            (apply test/run-tests (:seon.test.runner/namespaces request))))
         summary
         {::test-count (:test raw-summary)
          ::pass-count (:pass raw-summary)
@@ -277,6 +347,7 @@
                  :seon.test.run/id run-id
                  :seon.test.run/at at
                  :seon.test.run/git-sha git-sha}
+                nil
                 nil))
 
 (defn- namespace-tempid
@@ -386,15 +457,31 @@
       (finally
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
+(defn- print-skipped!
+  [skipped]
+  (when (seq skipped)
+    (println)
+    (println "bin/test: skipped" (count skipped) "long tests:")
+    (doseq [{::keys [test-symbol reason]} skipped]
+      (println " -" test-symbol "-" reason))
+    (println "bin/test: run skipped coverage with: bin/test --full")))
+
 (defn -main
   "Run selected tests with progress and a liveness backstop.
 
   Record results when the cluster argument names a non-default cluster, then
   exit zero exactly when no test failed or errored."
   {:malli/schema
-   [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string [:* :string]]
+   [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
+         [:* :string]]
     :nil]}
-  [cluster-name root git-sha & namespace-names]
+  [cluster-name root git-sha selection-mode & namespace-names]
+  (when-not (contains? #{"default" "full"} selection-mode)
+    (throw
+     (ex-info
+      "The test selection mode must be default or full."
+      {:seon.error/kind ::invalid-selection-mode
+       ::selection-mode selection-mode})))
   (let [namespaces (mapv symbol namespace-names)
         progress (atom {::description "JVM runner initialized"
                         ::at-nanos (System/nanoTime)
@@ -417,12 +504,15 @@
         (announce! progress
                    (str "LOADED " (inc index) "/" (count namespaces)
                         " " test-namespace)))
-      (let [run-result
+      (let [{::keys [selected skipped]}
+            (test-selection namespaces (= "full" selection-mode))
+            run-result
             (run-request! {:seon.test.runner/namespaces namespaces
                            :seon.test.run/id (str (random-uuid))
                            :seon.test.run/at (java.util.Date.)
                            :seon.test.run/git-sha git-sha}
-                          progress)
+                          progress
+                          (when (= "default" selection-mode) selected))
             _ (when-not (= "-" cluster-name)
                 (record! {:seon.test.runner/run-result run-result
                           :seon.boot/cluster-name cluster-name
@@ -436,6 +526,7 @@
           (println "\nFailing tests:")
           (doseq [test-symbol failures]
             (println " -" test-symbol)))
+        (print-skipped! skipped)
         (flush)
         (System/exit
          (if (zero? (+ (::fail-count summary) (::error-count summary))) 0 1)))

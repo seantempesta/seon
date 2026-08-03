@@ -525,7 +525,8 @@
             (.destroyForcibly child)
             (.get (.onExit child) 10 TimeUnit/SECONDS)))))))
 
-(deftest failed-launch-cleanup-escalates-after-bounded-term-grace
+(deftest ^{:seon.test/long "Spawns a TERM-resistant child and awaits the process cleanup backstop."}
+  failed-launch-cleanup-escalates-after-bounded-term-grace
   (let [process (start-sigterm-resistant-process!)]
     (try
       (is (nil?
@@ -961,7 +962,8 @@
           (.waitFor process 10 TimeUnit/SECONDS))
         (delete-recursively! root)))))
 
-(deftest init-owns-current-source-and-dormant-cluster-lifecycle
+(deftest ^{:seon.test/long "Runs complete source initialization through a fresh operator JVM."}
+  init-owns-current-source-and-dormant-cluster-lifecycle
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))
         name "init-command"
@@ -1007,7 +1009,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest live-init-reloads-a-moved-core-predicate-owner-before-admission
+(deftest ^{:seon.test/long "Runs live initialization and reload through a fresh operator JVM."}
+  live-init-reloads-a-moved-core-predicate-owner-before-admission
   (let [root (fresh-root)
         cluster-name "predicate-owner-reload"
         launched-identities (atom [])]
@@ -1059,7 +1062,8 @@
           (reap-process-identity! process-identity))
         (delete-recursively! root)))))
 
-(deftest source-less-root-reset-republishes-and-reforks-default
+(deftest ^{:seon.test/long "Destructively resets and republishes a source-less operator root."}
+  source-less-root-reset-republishes-and-reforks-default
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))]
     (try
@@ -1129,7 +1133,8 @@
               :populated)))]
     (edn/read-string (prepl-eval advertisement form))))
 
-(deftest populated-stopped-cluster-reopens-after-full-operator-restart
+(deftest ^{:seon.test/long "Restarts a populated cluster across two fresh operator JVMs."}
+  populated-stopped-cluster-reopens-after-full-operator-restart
   (let [root (fresh-root)
         name "restart-populated"
         marker "restart-populated-marker"
@@ -1258,7 +1263,8 @@
         (alter-meta! start-var (constantly start-meta))
         (reset! (var-get instances-var) instances-before)))))
 
-(deftest fresh-process-loads-schema-before-every-operator-instrumentation
+(deftest ^{:seon.test/long "Loads and instruments schemas in a genuinely fresh operator process."}
+  fresh-process-loads-schema-before-every-operator-instrumentation
   (let [root (fresh-root)]
     (try
       (let [initialized (run-operator root "init")]
