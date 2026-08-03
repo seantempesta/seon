@@ -2399,7 +2399,12 @@ may reintroduce a shadow build into the dev feedback path.
   attributes get per-attribute `:db/noHistory`, identified by
   MEASUREMENT (per-attribute datom-growth census in the storage/GC
   wave), never by guess; the existing `:seon.db/no-history?` usage is
-  the precedent. FORK PUBLICATION AUTHORIZED (owner, same
+  the precedent. **Completed 2026-08-02:** `e4bffb0d1` deletes the readerless
+  epoch-zero `:seon.schema/created-at` clock. Its committed paired 198-head /
+  13,204-commit physical cell measured 9,661,654 B removed (48,796 B/sample),
+  refuting the codec-weighted 187,360,394 B deletion projection and correcting
+  the combined counterfactual to 1,817,338,943 B / 9.178 MB per sample; see
+  `research/store-census-reductions-2026-08-02.md`. FORK PUBLICATION AUTHORIZED (owner, same
   conversation): create forks under the owner's GitHub account for
   maintained submodules lacking remotes and push the maintained
   branches — no force-pushes, nothing beyond our maintained branches.

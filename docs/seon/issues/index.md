@@ -104,7 +104,6 @@ See `README.md` for the convention.
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
-| [Delete schema-row creation clocks from retained snapshots](schema-created-at-multiplies-nonsemantic-provenance.md) | friction | eval-scale economics wave |
 | [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 
 ## Cleanup (12)

@@ -89,6 +89,11 @@ the fused roots of retained database records. The largest attributes are
 `:seon.context.capture/prompt` (53,797,232 B). Fully 1,793,869,909 B / 92.518%
 is snapshot-retained rather than reachable only from ending heads.
 
+The clock row was a codec-weighted allocation, not a causal deletion saving.
+After `e4bffb0d1` deleted it, the paired 198-head / 13,204-commit physical cell
+measured 9,661,654 B removed (48,796 B/sample), refuting the 187,360,394 B
+projection. See [[schema-created-at-multiplies-nonsemantic-provenance]].
+
 The zero-byte blob result is now explained. All 198 archived attempts used
 threshold 65,536 and disabled reasoning; no split-eligible result exceeded
 65,536 characters. Prompts never consult the result/reasoning splitter:
@@ -106,9 +111,9 @@ owner.
 
 Measured `:db/noHistory` candidates account for 111,931,217 temporal bytes:
 result EDN, prompt capture until its blob cutover, frozen form source, captured
-output, message content, attempt settings, and attempt usage. New owner notes
-track the two largest structural removals:
-[[schema-created-at-multiplies-nonsemantic-provenance]] and
+output, message content, attempt settings, and attempt usage. The clock
+deletion is resolved in [[schema-created-at-multiplies-nonsemantic-provenance]];
+the remaining largest structural removal is
 [[context-capture-prompts-bypass-the-blob-splitter]].
 
 Commit `041540fb8` applies all seven measured declarations. The exact selected

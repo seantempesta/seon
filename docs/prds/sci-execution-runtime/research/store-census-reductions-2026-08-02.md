@@ -16,12 +16,14 @@ sample**, down from 1,938,931,814 B / 9.793 MB per sample. That number is an
 exact subtraction from the validated physical-byte allocation, not a fresh
 198-sample replay.
 
-The largest remaining deletion is still `:seon.schema/created-at`:
-**187,360,394 B / 946,265 B per sample**. Its reader census found no semantic
-reader, but the complete deletion crosses `src/seon/schema.clj`,
-`src/seon/cluster.clj`, `src/seon/fn.clj`, and a test outside this lane's owned
-paths. Removing only the owned EDN field would leave live writers transacting
-an uninstalled attribute, so no partial deletion landed.
+The largest attributed row, `:seon.schema/created-at`, is now deleted by
+`e4bffb0d1`. The deletion was correct, but the **187,360,394 B / 946,265 B per
+sample attribution was not a causal saving**. A paired production-population
+cell with the archived 158/40 root split, 198 heads, and exactly 13,204
+post-base commits measured **9,661,654 B / 48,796 B per sample** removed. The
+codec-weighted census had assigned shared fused-node framing to the clock; the
+paired physical deletion is the stronger counterfactual and is only 5.157% of
+that allocation.
 
 Fork-parent bytes are not removable by changing the existing fork call.
 `branch!` copies one stored database record, but every later transaction
@@ -75,6 +77,12 @@ The committed instrument is
 Its final machine-readable output is
 `tmp/store-census-reductions-production-2026-08-02.edn`, SHA-256
 `0087483c9a71d72e77b1ae84376dcfab4d428b3c68c7477a653d9b81716dc970`.
+
+The clock-deletion instrument is
+`research/scripts/schema-created-at-saving-2026-08-02.clj`, SHA-256
+`b3578d1daf34b3e5c0529d594d2bdb9f8648d03b6d187c6eeefdacf437f837b7`.
+Its retained evidence root is
+`tmp/schema-created-at-saving-2acf0c0b-5592-4867-b18c-e0b35d20a29a`.
 
 ## Isolation and physical size evidence
 
@@ -153,7 +161,7 @@ Commit `041540fb8` applies the seven declarations in
 assertions / 0 failures / 0 errors** across schema derivation, schema EDN,
 blob settlement, context capture, the loop, and full turn behavior.
 
-## Created-at reader census and deletion boundary
+## Created-at reader census and measured deletion
 
 Fresh source has eight literal occurrences: four in `src/seon/schema.clj`,
 three in `src/seon/cluster.clj`, and one in `resources/seon/schema.edn`. There
@@ -172,17 +180,35 @@ original value.
 - Namespace rendering selects key and form only
   (`src/seon/render/ns.clj:36-81,348-351`).
 
-The verdict is delete, with no replacement clock. The coordinated source owner
-must remove the leaf declaration and timestamp arguments/field in
-`seon.schema`, remove reconciliation's pull/preservation/`now` argument, remove
-the epoch argument in `seon.fn`, remove the optional EDN entity field, and add
-a fresh-root absence proof. Existing branches retain old datoms, so only a
-freshly published/reforked private root proves deletion.
+The verdict was delete, with no replacement clock. Commit `e4bffb0d1` removed
+the leaf declaration and timestamp arguments/field in `seon.schema`, removed
+reconciliation's pull/preservation/`now` argument, removed the epoch argument
+in `seon.fn`, and removed the optional EDN entity field. The reconciliation
+comparison is now the direct semantic desired/current comparison; a focused
+regression proves a converged second pass leaves `:max-tx` unchanged.
 
-If that deletion lands, the selected 198 counterfactual after both reductions
-is **1,639,640,203 B / 8.281 MB per sample**, a combined
-**299,291,611 B / 15.436%** reduction. This is theory until the coordinated
-source deletion and a fresh replay land.
+The committed paired cell uses complete production source populations. Its
+baseline reconstructs the old declaration, old entity-map member, 691
+canonical rows, and 691 epoch-zero clocks locally inside the script. Its
+treatment uses the landed production population: 690 rows, no installed clock
+attribute, and no clock datoms. Both sides then create the archived two-root
+shape, 198 heads, and 13,204 commits with byte-identical deterministic marker
+transactions.
+
+| Root | Samples | Commits | Baseline B | Treatment B | Saving B |
+|---|---:|---:|---:|---:|---:|
+| `333214a0f358` | 158 | 10,542 | 1,284,399,105 | 1,276,655,102 | 7,744,003 |
+| `d0cd8fbc1fa3` | 40 | 2,662 | 339,134,164 | 337,216,513 | 1,917,651 |
+| **Total** | **198** | **13,204** | **1,623,533,269** | **1,613,871,615** | **9,661,654** |
+
+That is **48,796 B per sample / 0.595% of this paired baseline**. The
+post-base transactions reproduce the exact topology with deterministic marker
+rows; they are not an identical replay of the model's logical transaction
+stream. The earlier attribution therefore remains useful as a churn-ranking
+signal, but it is falsified as a removable-byte estimate. Applying the paired
+physical delta to the already landed no-history counterfactual corrects the
+combined result from the theoretical 1,639,640,203 B / 8.281 MB per sample to
+**1,817,338,943 B / 9.178 MB per sample**.
 
 ## Blob threshold
 
@@ -220,8 +246,10 @@ does not justify lowering below the highest same-split boundary.
   saved 294,680 B / 18.743% versus 65,536 in the controlled 67-commit cell.
   This changes the current default's justification, not the archived run's
   zero-blob result.
-- **Theory pending another owner:** 1,639,640,203 selected bytes / 8.281 MB per
-  sample after also deleting `:seon.schema/created-at`.
+- **Measured clock deletion:** 9,661,654 B / 48,796 B per sample in the paired
+  exact-topology physical cell. Combined with the landed no-history
+  counterfactual: 1,817,338,943 B / 9.178 MB per sample. The old
+  1,639,640,203 B / 8.281 MB projection is refuted.
 - **Not claimed:** any saving from fusion, a Datahike fork change, history-off,
   GC, transaction batching, or routing prompts through the blob owner.
 

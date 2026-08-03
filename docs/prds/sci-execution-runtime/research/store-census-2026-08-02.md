@@ -35,6 +35,13 @@ not remove changed-node retention, proves the production result splitter at
 4,096 against 65,536, and records the coordinated owner boundary for deleting
 `:seon.schema/created-at`.
 
+**Correction after physical deletion measurement:** the 187,360,394 B row is
+an exact codec-weighted allocation, not a causal removable-byte estimate. The
+landed deletion's paired 198-head / 13,204-commit exact-topology cell measured
+9,661,654 B removed. Shared fused-node framing made the allocation excellent
+for ranking churn but 19.4× too large as a deletion projection. The complete
+counterfactual and instrument are in the reduction follow-up.
+
 ## Scope and dependency ledger
 
 This census applies, rather than re-derives, the model validated in
