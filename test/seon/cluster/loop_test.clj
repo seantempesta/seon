@@ -15,7 +15,9 @@
      `kill -9` falsifier against a real child stays the orchestrator's
      integration proof, in the style of `store_child.clj`; it proves
      the process boundary, and this proves the derivation."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow.core]
+            [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
@@ -28,8 +30,10 @@
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
+            [seon.flow :as seon.flow]
             [seon.fn.analyzer :as fn.analyzer]
             [seon.problems :as problems]
+            [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
@@ -446,131 +450,177 @@
        (sort-by (juxt ::attempt-run-id ::attempt-ordinal))
        vec))
 
+(defn- with-render-context-proc
+  [cluster body]
+  (let [context-channel (async/chan)
+        render-channel (async/chan (async/sliding-buffer 1))
+        pages-channel (async/chan (async/sliding-buffer 1))
+        stream-channel (async/chan (async/sliding-buffer 1))
+        completion (async/promise-chan)
+        cluster (assoc cluster
+                       :seon.render/context-channel context-channel
+                       :seon.cluster.loop/stream-channel stream-channel)
+        graph
+        (flow.core/create-flow
+         {:procs
+          {:seon.render.web/render
+           {:proc
+            (seon.flow/var-process
+             #'web/render-step :io
+             {:seon.render.web/render-channel render-channel
+              :seon.render/context-channel context-channel
+              :seon.render.web/pages-channel pages-channel
+              :seon.render.web/registration (atom {})
+              :seon.render.web/latest-packages (atom {})
+              :seon.render.web/completion completion
+              :seon.render.web/root-agent-id "planner"
+              :seon.cluster.loop/cluster cluster})}}
+          :conns []})
+        {:keys [report-chan error-chan]} (flow.core/start graph)]
+    (async/go-loop [] (when (async/<! report-chan) (recur)))
+    (async/go-loop [] (when (async/<! error-chan) (recur)))
+    (try
+      (flow.core/resume graph)
+      (body cluster)
+      (finally
+        (flow.core/stop graph)
+        (async/<!! completion)))))
+
 (deftest call-resolves-once-records-settings-and-sees-next-turn-config
   (test-support/with-database
-    (fn [connection]
-      (let [cluster-name "live-settings"
-            agent-id "planner"
-            settings-fn ai/settings
-            overlay-fn ai/agent-overlay
-            resolutions (atom [])
-            overlays (atom [])
-            requests (atom [])
-            cluster {:seon.store/branch-connection connection
-                     :seon.cluster/name cluster-name
-                     :seon.cluster.run/process process
-                     :seon.sci.admit/caps
-                     {:seon.config.eval.result/max-depth 6
-                      :seon.config.eval.result/max-collection 8
-                      :seon.config.eval.result/max-string 4096
-                      :seon.config.eval.result/max-nodes 256}
-                     :seon.config.error/recurrence-limit 3
-                     :seon.config.message/max-chain 8}
-            unpaid {:seon.error/kind :seon.ai/transport-failure
-                    :seon.error/message "connection refused"
-                    :seon.error/data
-                    {:seon.ai/error-class :transport-before-send
-                     :seon.ai/request-transmitted? false
-                     :seon.ai/response-started? false
-                     :seon.ai/output-observed? false}}
-            completions (atom [unpaid
-                               {:seon.ai/text "(identity 1)"
-                                :seon.ai/usage
-                                {"completion_tokens_details"
-                                 {"reasoning_tokens" 7}}
-                                :seon.ai/finish-reason "stop"}
-                               {:seon.ai/text "(identity 2)"
-                                :seon.ai/finish-reason "stop"}])]
-        (config/apply!
-         {:seon.config/connection connection
-          :seon.boot/cluster-name cluster-name
-          :seon.config/manifest
-          {:seon.config.ai/model "before-apply"
-           :seon.config.ai.backup/model "backup-before-apply"}})
-        (test-support/seed-cluster! connection cluster-name)
-        (db/transact!
-         connection
-         (cluster.agent/creation-tx
-          {:seon.cluster.agent/id agent-id
-           :seon.ns/name 'my.agents.live-settings
-           :seon.cluster/name cluster-name}))
-        (db/transact! connection
-                    [{:seon.cluster.agent/id agent-id
-                      :seon.config.ai/thinking :high}])
-        (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
-        (with-redefs [ai/agent-overlay
-                      (fn [db id]
-                        (swap! overlays conj [db id])
-                        (overlay-fn db id))
-                      ai/settings
-                      (fn [cluster-settings agent-settings]
-                        (let [resolved
-                              (settings-fn cluster-settings agent-settings)]
-                          (swap! resolutions conj resolved)
-                          resolved))
-                      ai/complete
-                      (fn [request]
-                        (swap! requests conj request)
-                        (let [completion (first @completions)]
-                          (swap! completions subvec 1)
-                          completion))]
-          (cluster.loop/turn
-           {:seon.cluster.loop/cluster cluster
-            :seon.cluster.work/next
-            (call-work agent-id "settings-run-1")}
-           now)
-          (testing "failover reuses the turn's one resolution"
-            (is (= 1 (count @overlays)))
-            (is (= 1 (count @resolutions)))
-            (is (= ["before-apply" "backup-before-apply"]
-                   (mapv :seon.ai/model @requests)))
-            (is (= [:high :high]
-                   (mapv :seon.ai/thinking @requests))))
-          (let [first-settings (first @resolutions)
-                first-rows (settings-attempts @connection)]
-            (is (= 2 (count first-rows)))
-            (is (every? #(= first-settings
-                            (edn/read-string
-                             (:seon.ai.attempt/settings-edn %)))
-                        first-rows))
-            (is (= "stop" (:seon.ai.attempt/finish-reason
-                            (second first-rows))))
-            (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
-                   (edn/read-string
-                    (:seon.ai.attempt/usage-edn (second first-rows)))))
-            (is (not (contains?
-                      (edn/read-string
-                       (:seon.ai.attempt/usage-edn (second first-rows)))
-                      :seon.ai/settings))
-                "settings are beside usage, never inside it"))
+   (fn [connection]
+     (let [cluster-name "live-settings"
+           agent-id "planner"
+           settings-fn ai/settings
+           overlay-fn ai/agent-overlay
+           resolutions (atom [])
+           overlays (atom [])
+           requests (atom [])
+           cluster {:seon.store/branch-connection connection
+                    :seon.cluster/name cluster-name
+                    :seon.cluster.run/process process
+                    :seon.sci.eval/ctx
+                    (sci.eval/cluster-ctx @connection connection)
+                    :seon.config.eval/time-limit-ms 2000
+                    :seon.config/on-core-error :panic
+                    :seon.sci.admit/caps
+                    {:seon.config.eval.result/max-depth 6
+                     :seon.config.eval.result/max-collection 8
+                     :seon.config.eval.result/max-string 4096
+                     :seon.config.eval.result/max-nodes 256}
+                    :seon.config.error/recurrence-limit 3
+                    :seon.config.message/max-chain 8}
+           unpaid {:seon.error/kind :seon.ai/transport-failure
+                   :seon.error/message "connection refused"
+                   :seon.error/data
+                   {:seon.ai/error-class :transport-before-send
+                    :seon.ai/request-transmitted? false
+                    :seon.ai/response-started? false
+                    :seon.ai/output-observed? false}}
+           completions (atom [unpaid
+                              {:seon.ai/text "(identity 1)"
+                               :seon.ai/usage
+                               {"completion_tokens_details"
+                                {"reasoning_tokens" 7}}
+                               :seon.ai/finish-reason "stop"}
+                              {:seon.ai/text "(identity 2)"
+                               :seon.ai/finish-reason "stop"}])]
+       (config/apply!
+        {:seon.config/connection connection
+         :seon.boot/cluster-name cluster-name
+         :seon.config/manifest
+         {:seon.config.ai/model "before-apply"
+          :seon.config.ai.backup/model "backup-before-apply"}})
+       (test-support/seed-cluster! connection cluster-name)
+       (db/transact!
+        connection
+        (cluster.agent/creation-tx
+         {:seon.cluster.agent/id agent-id
+          :seon.ns/name 'my.agents.live-settings
+          :seon.cluster/name cluster-name}))
+       (db/transact!
+        connection
+        [{:seon.cluster.agent/id agent-id
+          :seon.config.ai/thinking :high}])
+       (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
+       (with-render-context-proc
+        cluster
+        (fn [cluster]
+          (with-redefs [ai/agent-overlay
+                        (fn [db id]
+                          (swap! overlays conj [db id])
+                          (overlay-fn db id))
+                        ai/settings
+                        (fn [cluster-settings agent-settings]
+                          (let [resolved
+                                (settings-fn cluster-settings agent-settings)]
+                            (swap! resolutions conj resolved)
+                            resolved))
+                        ai/complete
+                        (fn [request]
+                          (swap! requests conj request)
+                          (let [completion (first @completions)]
+                            (swap! completions subvec 1)
+                            completion))]
+            (cluster.loop/turn
+             {:seon.cluster.loop/cluster cluster
+              :seon.cluster.work/next
+              (call-work agent-id "settings-run-1")}
+             now)
+            (testing "failover reuses the turn's one resolution"
+              (is (= 1 (count @overlays)))
+              (is (= 1 (count @resolutions)))
+              (is (= ["before-apply" "backup-before-apply"]
+                     (mapv :seon.ai/model @requests)))
+              (is (= [:high :high]
+                     (mapv :seon.ai/thinking @requests))))
+            (let [first-settings (first @resolutions)
+                  first-rows (settings-attempts @connection)]
+              (is (= 2 (count first-rows)))
+              (is (every? #(= first-settings
+                              (edn/read-string
+                               (:seon.ai.attempt/settings-edn %)))
+                          first-rows))
+              (is (= "stop" (:seon.ai.attempt/finish-reason
+                              (second first-rows))))
+              (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
+                     (edn/read-string
+                      (:seon.ai.attempt/usage-edn (second first-rows)))))
+              (is (not (contains?
+                        (edn/read-string
+                         (:seon.ai.attempt/usage-edn (second first-rows)))
+                        :seon.ai/settings))
+                  "settings are beside usage, never inside it"))
 
-          (db/transact! connection
-                      (run/close-tx
-                       {:seon.cluster.run/id "settings-run-1"
-                        :seon.cluster.run/process process
-                        :seon.cluster.run/closed-at now}))
-          (config/apply!
-           {:seon.config/connection connection
-            :seon.boot/cluster-name cluster-name
-            :seon.config/manifest
-            {:seon.config.ai/model "after-apply"}})
-          (prepare-call! connection agent-id "settings-run-2" "settings-message-2")
-          (cluster.loop/turn
-           {:seon.cluster.loop/cluster cluster
-            :seon.cluster.work/next
-            (call-work agent-id "settings-run-2")}
-           now)
-          (testing "the same loop handle sees config apply on the next turn"
-            (is (= 2 (count @overlays)))
-            (is (= 2 (count @resolutions)))
-            (is (= "after-apply" (:seon.ai/model (last @requests))))
-            (is (= :high (:seon.ai/thinking (last @requests))))
-            (let [last-row (last (settings-attempts @connection))]
-              (is (= "after-apply" (:seon.ai/model last-row)))
-              (is (= "after-apply"
-                     (:seon.config.ai/model
-                      (edn/read-string
-                       (:seon.ai.attempt/settings-edn last-row))))))))))))
+            (db/transact!
+             connection
+             (run/close-tx
+              {:seon.cluster.run/id "settings-run-1"
+               :seon.cluster.run/process process
+               :seon.cluster.run/closed-at now}))
+            (config/apply!
+             {:seon.config/connection connection
+              :seon.boot/cluster-name cluster-name
+              :seon.config/manifest
+              {:seon.config.ai/model "after-apply"}})
+            (prepare-call!
+             connection agent-id "settings-run-2" "settings-message-2")
+            (cluster.loop/turn
+             {:seon.cluster.loop/cluster cluster
+              :seon.cluster.work/next
+              (call-work agent-id "settings-run-2")}
+             now)
+            (testing "the same loop handle sees config apply on the next turn"
+              (is (= 2 (count @overlays)))
+              (is (= 2 (count @resolutions)))
+              (is (= "after-apply" (:seon.ai/model (last @requests))))
+              (is (= :high (:seon.ai/thinking (last @requests))))
+              (let [last-row (last (settings-attempts @connection))]
+                (is (= "after-apply" (:seon.ai/model last-row)))
+                (is (= "after-apply"
+                       (:seon.config.ai/model
+                        (edn/read-string
+                         (:seon.ai.attempt/settings-edn last-row))))))))))))))
 
 (defn- lint-plan
   [sources]
