@@ -125,6 +125,19 @@ design decisions awaiting one PRD; the grounding audit is
    The curriculum agent was resumed against the restored default cluster
    to dramatically revise the report under this filter.
 
+11. **STRICT REPL FIDELITY IN DISPLAYED FORMS — no comments as output**
+   (owner, same night): comment-heavy lesson blocks adjacent to results
+   teach models the narrated-output pattern and they start hallucinating
+   written results after their own forms. Bootstrap/lesson forms render
+   exactly like a real REPL: the form, then the ACTUAL computed result —
+   no `;; =>` annotations, no decorative comment framing, no comment-only
+   pseudo-entries rendered as outputs. Explanatory prose lives in the
+   db-resident (help) text, never woven around forms. Agents WRITING
+   their own `;;` thinking before forms remains fine (input-side; the
+   parser preserves it) — the change is that WE stop modeling comments
+   as part of the output stream. This amends the earlier drafted-lesson
+   style (curriculum top-3 drafts must be restyled accordingly).
+
 ## Still open (dismissed question set — owner will rule when ready)
 
 - The seven work/identity recommendations (user entity shape, from
