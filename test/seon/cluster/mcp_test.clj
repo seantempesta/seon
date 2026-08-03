@@ -18,6 +18,18 @@
   [value]
   (alength (.getBytes ^String (pr-str value) "UTF-8")))
 
+(defn- door-evaluation
+  [effective value]
+  (let [admitted
+        (admit/admit
+         {:seon.sci.admit/value value
+          :seon.sci.admit/interrupt-fn (fn [])
+          :seon.sci.admit/caps (config/result-caps effective)
+          :seon.config/on-core-error :record})]
+    (assoc admitted
+           :seon.cluster.eval/ns [:seon.ns/name 'user]
+           :seon.sci.eval/ending-ns 'user)))
+
 (deftest nested-bulk-is-bounded-by-the-shared-value-window
   (let [cluster-name "mcp-nested-window-test"
         effective (config/defaults)
@@ -58,6 +70,21 @@
         "the node tree never rides the envelope; the text replaces it")
     (is (< (utf8-size result) 8192))))
 
+(deftest door-artifact-size-ignores-evaluation-envelope-bulk
+  (let [cluster-name "mcp-small-door-value-test"
+        effective (config/defaults)
+        evaluation
+        (assoc (door-evaluation effective 42)
+               :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
+        result (projected cluster-name effective evaluation)
+        face (:seon.dev.mcp/value result)]
+    (is (= "42" (:seon.dev.mcp/text face)))
+    (is (= (:seon.sci.admit/record evaluation)
+           (:seon.sci.admit/record face))
+        "evaluation diagnostics stay inline beside the text face")
+    (is (false? (:seon.dev.mcp/windowed? result)))
+    (is (not (contains? result :seon.blob/digest)))))
+
 (deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
   (let [cluster-name "mcp-value-test"
         value (vec (range 2000))
@@ -89,5 +116,39 @@
             (is (= 9000 (:seon.render.value/offset past-end)))
             (is (= 2000 (:seon.render.value/total past-end)))
             (is (true? (:seon.render.value/beyond-end? past-end))))
+          (finally
+            (swap! running-instances dissoc cluster-name)))))))
+
+(deftest door-value-artifacts-drill-from-the-result-root
+  (let [cluster-name "mcp-door-value-test"
+        effective (config/defaults)
+        door-result (door-evaluation effective (vec (range 2000)))
+        nested-result
+        (door-evaluation effective {:alpha (vec (range 2000)) :omega 42})]
+    (support/with-database
+      {:seon.test-support/fresh-store? true}
+      (fn [connection]
+        (config/apply! {:seon.config/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (support/seed-cluster! connection cluster-name)
+        (swap! running-instances assoc cluster-name
+               {:seon.boot/cluster-connection connection})
+        (try
+          (let [stored (projected cluster-name effective door-result)
+                content-digest (:seon.blob/digest stored)
+                nested-stored (projected cluster-name effective nested-result)
+                root (cluster/mcp-get-value
+                      cluster-name content-digest [] 0)
+                nested (cluster/mcp-get-value
+                        cluster-name (:seon.blob/digest nested-stored)
+                        [:alpha] 7)
+                projected-root (projected cluster-name effective root)]
+            (is (= [0 1 2 3 4 5 6 7]
+                   (:seon.render.value/window root)))
+            (is (= [7 8 9 10 11 12 13 14]
+                   (:seon.render.value/window nested)))
+            (is (false? (:seon.dev.mcp/windowed? projected-root))
+                "reading the result root must not mint another artifact")
+            (is (not (contains? projected-root :seon.blob/digest))))
           (finally
             (swap! running-instances dissoc cluster-name)))))))

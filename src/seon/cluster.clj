@@ -152,12 +152,18 @@
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
         effective (mcp-effective cluster-name bootstrap-effective)
-        admitted (admit/admit-value
-                  {:seon.sci.admit/value value
-                   :seon.sci.admit/interrupt-fn (fn [])
-                   :seon.sci.admit/caps (config/result-caps effective)
-                   :seon.config/on-core-error
-                   (:seon.config/on-core-error effective)})
+        evaluation-print-node (evaluation-node value)
+        admitted
+        (if evaluation-print-node
+          {:seon.sci.admit/print-node evaluation-print-node
+           :seon.sci.admit/capped?
+           (boolean (:seon.sci.admit/capped? value))}
+          (admit/admit-value
+           {:seon.sci.admit/value value
+            :seon.sci.admit/interrupt-fn (fn [])
+            :seon.sci.admit/caps (config/result-caps effective)
+            :seon.config/on-core-error
+            (:seon.config/on-core-error effective)}))
         artifact (render.value/artifact admitted)
         content (render.value/artifact-edn artifact)
         content-digest (blob/digest content)
@@ -174,8 +180,8 @@
         stored-digest (when (and oversized? connection)
                         (blob/put! connection content))]
     (cond-> {:seon.dev.mcp/value
-             (if-let [node (evaluation-node value)]
-               (evaluation-face value node effective)
+             (if evaluation-print-node
+               (evaluation-face value evaluation-print-node effective)
                (admit/semantic-value projected-node))
              :seon.sci.admit/capped?
              (:seon.sci.admit/capped? artifact)
