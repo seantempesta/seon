@@ -491,3 +491,65 @@ overstepping.
 **content** into a prompt instead of pointing here, put it here instead — two
 copies of the same guidance drift, and drifted guidance misleads everyone who
 reads it.*
+
+## Evergreen orchestration lessons (accumulated; add to this, never reset)
+
+These cost real time to learn. They are about HOW to run this program,
+not about any current wave.
+
+**Every inherited number is a hypothesis.** Five recorded figures were
+disproven in one evening (2026-08-02), four in storage alone, one by
+our own fresh measurement hours later: a census attributed 187 MB to an
+attribute whose deletion saved 9.66 MB, because ATTRIBUTION IS NOT A
+COUNTERFACTUAL. The next day a derived blob threshold of 343 characters
+was refuted by measuring the cost model it had omitted (a ~300x
+settlement slowdown). Reproduce before repeating; prove the
+counterfactual before promising a saving.
+
+**Read the whole spec; never grep it.** Promoted to a standing AGENTS.md
+rule. The evidence is stark: on the day partial reads were normal, three
+wrong conclusions came from documents that were correct; on the day
+every lane attested a whole read, zero such incidents across ~25 lane
+launches.
+
+**A quiet green proves nothing about a concurrency fix.** A lane once
+reported a control-priority fix "passing" with zero lines changed. Only
+load-based falsifiers (flood the channel, THEN send the command) catch
+that class. Write the falsifier so it fails first, always.
+
+**Lanes over-stop at other lanes' churn.** The most common lane failure
+is freezing because unrelated files are dirty. Name owned files
+explicitly in the spec and say that other lanes' churn is weather. The
+genuine boundary is a hunk YOU need inside a file someone else is
+editing — everything else proceeds.
+
+**Shared single files serialize the whole program.** One 690-entry
+schema resource deadlocked two lanes in one night and forced an
+orchestrator splice. When a file becomes every lane's contention point,
+that is a structural cost, not bad luck.
+
+**The fixture path is not the live path.** A fully green suite coexisted
+with a broken live boot: schema provenance was stamped on the fixture
+path only. Schema, acquisition, and process changes always need the
+reset-boundary live proof, and a live cluster should be kept up so every
+wave gets an end-to-end drive.
+
+**Independent verification finds what lane reports never do.** Socratic
+probes with checkable answers ("store X, read it back — what TYPE
+returns?", "kill the JVM mid-Y — what does recovery derive?") caught a
+process-global launcher that killed sibling clusters' work, a silent
+(first) over an ambiguous schema match, and a non-idempotent
+reconciliation. A verifier that can pass by agreeing is worthless.
+
+**Provider filters reject security-flavored wording.** A verification
+lane was refused launch for the words "attack" and "kill". Write specs
+in neutral engineering language; it is also the accurate description.
+
+**Stopping a lane is cheap.** Resume loses only the in-flight turn and
+keeps full context. Stop the moment new information invalidates a
+direction; never let a lane keep working on a dead premise.
+
+**Commit in slices, always.** A lane once had 63 files uncommitted in
+one step. Small path-limited commits are what make any of this
+reversible, and they are the only honest heartbeat — judge lanes by git
+log, never by the process table.
