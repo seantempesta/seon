@@ -73,6 +73,17 @@ design decisions awaiting one PRD; the grounding audit is
    (work-identity research Part 2). The user entity + explicit send is the
    fix; the scorer moves to message-reaching-user.
 
+7. **Message context is one bootstrap form with the replied column**
+   (owner, same night): the agent's conversation view = a single query
+   form in its bootstrap — last X messages (inbound AND its own outbound,
+   sorted, bounded previews) with derived `:replied?` — where X is a
+   LITERAL in the form source, so an agent tunes its own window by editing
+   its own starting form (self-modifying context, no config machinery).
+   Output is a seq of maps (honest REPL printing). Direction this implies:
+   the hand-built transcript renderer's message section becomes redundant —
+   message context migrates to form output the agent can see, re-run, and
+   modify; eval receipts stay renderer-owned as the REPL session itself.
+
 ## Still open (dismissed question set — owner will rule when ready)
 
 - The seven work/identity recommendations (user entity shape, from
