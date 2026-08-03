@@ -3338,12 +3338,25 @@ units — do NOT discard them:
   bridge-storable; non-storable declarations (`:gen/*`) stay
   compile-time properties. That correction is REQUIRED — the blanket
   lift broke tree-wide fixture population.
-- the keyword-edges opus agent (completed slice 2 into the tree):
-  `:seon.fn/keywords` indexing plus the config ledger conversion
-  (`test/seon/config_application_test.clj` — the hand-maintained
-  consumer map is GONE, replaced by a graph query; `:mode` stays
-  declared; dead dials now fail the test; family-grain assertion with
-  its tightening issue filed).
+- the keyword-edges opus agent: it went SILENT without committing and
+  without a final report, so its work sits UNCOMMITTED and UNVERIFIED
+  across exactly five files — `src/seon/fn.clj` (+86: `keyword-facts`
+  wired into BOTH the function and test arms),
+  `src/seon/fn/analyzer.clj` (+20), `src/seon/program.cljc` (+5:
+  `:seon.fn/keywords` in the projection), `test/seon/fn_test.clj`
+  (+70), and `test/seon/config_application_test.clj` (+263/-124: the
+  hand-maintained consumer map REPLACED by a `:seon.fn/keywords` graph
+  query, `:mode` kept as declared knowledge, dead dials now failing the
+  test, family-grain assertion with its tightening issue filed). The
+  attribute is declared in `resources/seon/schemas/seon.fn.edn` and
+  `seon.test.edn`. It LOOKS coherent and complete; NOTHING is proven.
+  The next session owes: focused gates (`seon.fn-test`,
+  `seon.config-application-test`), a republish, and the live edge
+  counts the spec asked for (rows with keywords, total edges, store
+  growth), then the commit. CAUTION: `src/seon/fn.clj` and
+  `resources/seon/schemas/seon.test.edn` may also carry
+  `error-schemas` hunks — attribute hunks before committing, and
+  commit the two units separately.
 
 FIRST ACTIONS: (1) `bin/codex-agent status` + `git log --oneline -30`;
 (2) resume `error-schemas` with the property-lift correction restated;
