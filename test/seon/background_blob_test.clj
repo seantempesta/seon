@@ -1,8 +1,12 @@
 (ns seon.background-blob-test
   (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as datahike-api]
             [datahike.core :as datahike]
             [seon.blob :as blob]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -10,6 +14,29 @@
             [seon.test-support :as support])
   (:import [java.io ByteArrayOutputStream]
            [java.util Arrays]))
+
+(defn- with-file-effect-store
+  [body]
+  (let [root (io/file "tmp/background-effect-binary-test")]
+    (when (.exists root)
+      (support/delete-recursively! root))
+    (let [opened (store/open-store!
+                  {:seon.store/dir (str root "/store")})]
+      (try
+        ((ns-resolve 'seon.test-support 'populate-database!)
+         (:seon.store/connection opened))
+        (registry/branch! {:seon.store/store opened
+                           :seon.cluster.registry/from :db
+                           :seon.store/branch :background-effect-binary-test})
+        (let [connection
+              (store/open-branch! opened :background-effect-binary-test)]
+          (try
+            (body connection)
+            (finally
+              (datahike-api/release connection))))
+        (finally
+          (store/release-store! opened)
+          (support/delete-recursively! root))))))
 
 (defn- invalid-utf8
   [size]
@@ -60,11 +87,12 @@
     (.toByteArray output)))
 
 (deftest background-binary-results-remain-exact-across-the-inline-threshold
-  (support/with-database
+  (with-file-effect-store
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config/cluster "default"}
+       [{:seon.config/cluster "default"
+         :seon.config.eval.result/blob-threshold 8}
         {:seon.cluster.agent/id "binary-agent"}
         {:seon.cluster.run/id "binary-run"
          :seon.cluster.run/agent
