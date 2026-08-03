@@ -22,6 +22,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -60,12 +61,12 @@
 (defn- markers
   "Every marker visible through one connection."
   [connection]
-  (set (d/q '[:find [?marker ...]
+  (set (db/q '[:find [?marker ...]
               :where [_ :seon.registry.test/marker ?marker]]
             @connection)))
 
 (defn- write-marker! [connection marker]
-  (d/transact connection {:tx-data [{:seon.registry.test/marker marker}]}))
+  (db/transact! connection {:tx-data [{:seon.registry.test/marker marker}]}))
 
 (defn- refusal
   "Run `thunk`, returning its refusal ex-data — or ::committed."
@@ -89,8 +90,8 @@
      (let [opened
            (store/open-store! (assoc store-request :seon.store/dir dir))]
        (try
-         (d/transact (:seon.store/connection opened) probe-schema)
-         (d/transact (:seon.store/connection opened)
+         (db/transact! (:seon.store/connection opened) probe-schema)
+         (db/transact! (:seon.store/connection opened)
                      [{:seon.schema/key :seon.cluster.eval/result-blob
                        :seon.schema/form ":seon.blob/digest"}
                       {:seon.schema/key :seon.code.def/blob
@@ -121,14 +122,14 @@
             digest (blob/put! connection content)]
         (try
           (let [report
-                (d/transact connection
+                (db/transact! connection
                             [{:seon.registry.test/marker "session def"
                               :seon.code.def/blob digest}])
                 entity-id
                 (:db/id
-                 (d/pull (:db-after report) [:db/id]
+                 (db/pull (:db-after report) [:db/id]
                          [:seon.registry.test/marker "session def"]))]
-            (d/transact connection
+            (db/transact! connection
                         [[:db/retract entity-id :seon.code.def/blob digest]]))
           (finally
             (d/release connection)))
@@ -151,7 +152,7 @@
             content "the current non-temporal result"
             digest (blob/put! connection content)]
         (try
-          (d/transact connection
+          (db/transact! connection
                       [{:seon.registry.test/marker "current blob"
                         :seon.cluster.eval/result-blob digest}])
           (finally
@@ -334,7 +335,7 @@
                           opened (registry/cluster-branch cluster-name))]
           (try
             (doseq [batch (partition-all 250 (range 1000))]
-              (d/transact connection
+              (db/transact! connection
                           {:tx-data (mapv (fn [n]
                                             {:seon.registry.test/marker
                                              (str prefix n " "

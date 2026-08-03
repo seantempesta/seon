@@ -85,7 +85,7 @@
   (await-fact
    connection
    (fn [db]
-     (d/q '[:find ?closed-at .
+     (db/q '[:find ?closed-at .
             :in $ ?run-id
             :where
             [?run :seon.cluster.run/id ?run-id]
@@ -142,8 +142,8 @@
               {:seon.schema.projection/forms forms}
               (schema/canonical-database-attributes forms)))]
         (try
-          (d/transact connection declarations)
-          (d/transact
+          (db/transact! connection declarations)
+          (db/transact!
            connection
            [{:seon.source/digest (apply str (repeat 64 "a"))}
             {:seon.ns/name 'legacy.core}
@@ -712,16 +712,16 @@
             (let [instance (cluster/start! request)
                   connection (:seon.boot/cluster-connection instance)
                   source-eid
-                  (d/q '[:find ?source .
+                  (db/q '[:find ?source .
                          :where [?source :seon.source/digest _]]
                        @connection)]
               (await-bootstrap! connection "root")
-              (d/transact
+              (db/transact!
                connection
                [[:db.fn/retractAttribute source-eid :seon.source/digest]
                 {:db/id source-eid :seon.source/digest stale-digest}])
               (let [program-transactions
-                    (d/q '[:find ?symbol ?tx
+                    (db/q '[:find ?symbol ?tx
                            :where
                            [?function :seon.fn/sym ?symbol]
                            [?function :seon.fn/source _ ?tx]]
@@ -733,12 +733,12 @@
           (testing "an older complete corpus is a sovereign cluster world"
             (is (some? (:seon.cluster.agent/routing restarted)))
             (is (= stale-digest
-                   (d/q '[:find ?digest .
+                   (db/q '[:find ?digest .
                           :where [_ :seon.source/digest ?digest]]
                         @(:seon.boot/cluster-connection restarted)))))
           (testing "reopen never indexes or advances the recorded digest"
             (is (= program-transactions-before
-                   (d/q '[:find ?symbol ?tx
+                   (db/q '[:find ?symbol ?tx
                           :where
                           [?function :seon.fn/sym ?symbol]
                           [?function :seon.fn/source _ ?tx]]
@@ -761,16 +761,16 @@
         (await-bootstrap! connection "root")
         (testing "a fresh fork is born at the current source digest"
           (is (= current-digest
-                 (d/q '[:find ?digest .
+                 (db/q '[:find ?digest .
                         :where [_ :seon.source/digest ?digest]]
                       @connection)))
-          (is (pos? (d/q '[:find (count ?function) .
+          (is (pos? (db/q '[:find (count ?function) .
                            :where [?function :seon.fn/sym]]
                          @connection))))
-        (d/transact
+        (db/transact!
          connection
          (mapv (fn [eid] [:db.fn/retractEntity eid])
-               (d/q '[:find [?function ...]
+               (db/q '[:find [?function ...]
                       :where [?function :seon.fn/sym]]
                     @connection)))
         (cluster/stop! instance))
@@ -782,11 +782,11 @@
             (is (str/includes? (ex-message failure) "partial"))
             (is (str/includes? (ex-message failure)
                                (str "bin/seon init " cluster-name " --force")))
-            (is (pos? (d/q '[:find (count ?namespace) .
+            (is (pos? (db/q '[:find (count ?namespace) .
                              :where [?namespace :seon.ns/name]]
                            @connection)))
             (is (zero? (or
-                        (d/q '[:find (count ?function) .
+                        (db/q '[:find (count ?function) .
                                :where [?function :seon.fn/sym]]
                              @connection)
                         0))))
@@ -830,7 +830,7 @@
         (testing "the existing cluster remains on its independent commit"
           (is (= old-basis (:max-tx @old-connection)))
           (is (= current-digest
-                 (d/q '[:find ?digest .
+                 (db/q '[:find ?digest .
                         :where [_ :seon.source/digest ?digest]]
                       @old-connection))))
         (testing "future clusters fork the published commit"
@@ -839,7 +839,7 @@
                          :seon.boot/root root})]
             (try
               (is (= current-digest
-                     (d/q '[:find ?digest .
+                     (db/q '[:find ?digest .
                             :where [_ :seon.source/digest ?digest]]
                           @(:seon.boot/cluster-connection future))))
               (finally
@@ -876,7 +876,7 @@
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
-        (d/transact
+        (db/transact!
          connection
          {:tx-data
           [{:seon.config/cluster cluster-name
@@ -987,14 +987,14 @@
               (let [db (d/branch-as-db (:seon.store/connection opened)
                                        source/current-branch)]
                 (is (str/includes?
-                     (d/q '[:find ?source .
+                     (db/q '[:find ?source .
                             :where
                             [?function :seon.fn/sym "sample.a/value"]
                             [?function :seon.fn/source ?source]]
                           db)
                      "[] 4"))
                 (is (str/includes?
-                     (d/q '[:find ?source .
+                     (db/q '[:find ?source .
                             :where
                             [?function :seon.fn/sym "sample.b/value"]
                             [?function :seon.fn/source ?source]]
@@ -1098,7 +1098,7 @@
                                   :seon.boot/root root})
         connection (:seon.boot/cluster-connection instance)]
     (try
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.message/id "history-refork-destroys"}])
       (let [result (cluster/refork! instance)
             replacement
@@ -1108,14 +1108,14 @@
           (testing "the old branch was replaced from current-src"
             (is (:seon.cluster/created? result))
             (is (nil?
-                 (d/q '[:find ?message .
+                 (db/q '[:find ?message .
                         :where
                         [?message :seon.cluster.message/id
                          "history-refork-destroys"]]
                       @(:seon.boot/cluster-connection replacement))))
             (is (pos?
                  (or
-                  (d/q '[:find (count ?function) .
+                  (db/q '[:find (count ?function) .
                          :where [?function :seon.fn/sym]]
                        @(:seon.boot/cluster-connection replacement))
                   0))))
@@ -1148,8 +1148,8 @@
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
         (await-bootstrap! connection "root")
-        (d/transact connection [{:seon.cluster.agent/id "alice"}])
-        (d/transact connection
+        (db/transact! connection [{:seon.cluster.agent/id "alice"}])
+        (db/transact! connection
                     [{:seon.cluster.run/id "run-crashed"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
                       :seon.cluster.run/opened-at now
@@ -1178,21 +1178,21 @@
         (try
           (testing "the dead holder's custody is gone — custody is
                     presence, and no run holds any"
-            (is (nil? (d/q (quote [:find ?p . :where
+            (is (nil? (db/q (quote [:find ?p . :where
                                    [_ :seon.cluster.run/process ?p]])
                            @connection))))
           (testing "its dangling receipt carries interrupted-at — the
                     one terminal fact recovery asserts"
             (is (= 1 (count
-                      (d/q (quote [:find [?at ...] :where
+                      (db/q (quote [:find [?at ...] :where
                                    [_ :seon.cluster.eval/interrupted-at ?at]])
                            @connection)))))
           (testing "and the run is CLOSED with its plan intact —
                     recovery ends custody and no plan form can execute"
-            (is (some? (d/q (quote [:find ?c . :where
+            (is (some? (db/q (quote [:find ?c . :where
                                     [_ :seon.cluster.run/closed-at ?c]])
                             @connection)))
-            (is (some? (d/q (quote [:find ?d . :where
+            (is (some? (db/q (quote [:find ?d . :where
                                     [_ :seon.cluster.run/plan-digest ?d]])
                             @connection))))
           (testing "the lease was still LIVE — nothing waited it out"

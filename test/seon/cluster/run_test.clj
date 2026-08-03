@@ -34,6 +34,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike]))
@@ -73,7 +74,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection
+      (db/transact! connection
                   (schema.datahike/malli->datahike-schema model-attributes))
       (body connection)
       (finally
@@ -99,17 +100,19 @@
   "Commit tx-data; a refusal returns its deepest ex-data as a value."
   [connection tx-data]
   (try
-    (d/transact connection tx-data)
-    ::committed
+    (let [result (db/transact! connection tx-data)]
+      (if (:seon.error/kind result)
+        result
+        ::committed))
     (catch Exception e
       (or (deepest-ex-data e)
           {::opaque (ex-message e)}))))
 
 (defn- run-entity [connection run-id]
-  (d/pull (d/db connection) '[*] [:seon.cluster.run/id run-id]))
+  (db/pull (db/db connection) '[*] [:seon.cluster.run/id run-id]))
 
 (defn- agent-pointer [connection agent-id]
-  (get-in (d/pull (d/db connection)
+  (get-in (db/pull (db/db connection)
                   [{:seon.cluster.agent/run [:seon.cluster.run/id]}]
                   [:seon.cluster.agent/id agent-id])
           [:seon.cluster.agent/run :seon.cluster.run/id]))
@@ -154,7 +157,7 @@
 (deftest one-run-lifecycle-teaches-the-call-shapes
   (with-model-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "teacher"}])
+      (db/transact! connection [{:seon.cluster.agent/id "teacher"}])
       (testing "open: run entity + agent pointer from ONE agent ref"
         (is (= ::committed
                (transact-or-refusal
@@ -193,14 +196,14 @@
                               [{:seon.cluster.run.form/source "(+ 1 1)"}
                                {:seon.cluster.run.form/source "(+ 2 2)"}]}))))
         (is (= ["(+ 1 1)" "(+ 2 2)"]
-               (->> (d/q '[:find ?ordinal ?source
+               (->> (db/q '[:find ?ordinal ?source
                            :in $ ?run-id
                            :where
                            [?run :seon.cluster.run/id ?run-id]
                            [?form :seon.cluster.run.form/run ?run]
                            [?form :seon.cluster.run.form/ordinal ?ordinal]
                            [?form :seon.cluster.run.form/source ?source]]
-                         (d/db connection) "lesson")
+                         (db/db connection) "lesson")
                     (sort-by first)
                     (mapv second)))))
       (testing "close settles the run and retracts the pointer it
@@ -239,13 +242,13 @@
                            [{:seon.cluster.run.form/source "(+ 1 1)"}]})]]]
     (with-model-database
       (fn [connection]
-        (d/transact connection [{:seon.cluster.agent/id "held-agent"}])
-        (d/transact connection
+        (db/transact! connection [{:seon.cluster.agent/id "held-agent"}])
+        (db/transact! connection
                     (run/open-tx {::run/id "held"
                                   ::run/agent
                                   [:seon.cluster.agent/id "held-agent"]
                                   ::run/opened-at (at -120000)}))
-        (d/transact connection
+        (db/transact! connection
                     (run/claim-tx {::run/id "held"
                                    ::run/process "p1"
                                    ::run/live-processes #{"p1"}
@@ -267,13 +270,13 @@
     (when (and start-tx settle-tx)
       (with-model-database
         (fn [connection]
-          (d/transact connection [{:seon.cluster.agent/id "receipt-agent"}])
-          (d/transact connection
+          (db/transact! connection [{:seon.cluster.agent/id "receipt-agent"}])
+          (db/transact! connection
                       (run/open-tx {::run/id "receipts"
                                     ::run/agent
                                     [:seon.cluster.agent/id "receipt-agent"]
                                     ::run/opened-at (at -120000)}))
-          (d/transact connection
+          (db/transact! connection
                       (run/claim-tx {::run/id "receipts"
                                      ::run/process "p1"
                                      ::run/live-processes #{"p1"}
@@ -309,7 +312,7 @@
                         (transact-or-refusal connection
                                              (settle-tx terminal)))
                   "a terminal receipt cannot settle again"))
-            (let [receipt (d/pull @connection
+            (let [receipt (db/pull @connection
                                   '[*]
                                   [:seon.cluster.eval/id
                                    (pr-str ["receipts" 0])])]
@@ -340,7 +343,7 @@
                 "a run held by a dead process is taken over")
             (is (= "p2" (::run/process (run-entity connection "receipts"))))
             (is (= t1 (:seon.cluster.eval/interrupted-at
-                       (d/pull @connection '[*]
+                       (db/pull @connection '[*]
                                [:seon.cluster.eval/id
                                 (pr-str ["receipts" 1])])))
                 "the takeover stamped the dead custody's running receipt
@@ -364,8 +367,8 @@
 (deftest receipt-refusal-settlement-is-idempotent-and-never-refuses
   (with-model-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "refusal-agent"}])
-      (d/transact
+      (db/transact! connection [{:seon.cluster.agent/id "refusal-agent"}])
+      (db/transact!
        connection
        (run/open-tx {::run/id "refusal-run"
                      ::run/agent
@@ -384,7 +387,7 @@
                 (run/receipt-refusal-tx
                  (assoc terminal :seon.cluster.eval/ordinal 99))))
             "a missing receipt is a no-op, not a recorder refusal")
-        (d/transact
+        (db/transact!
          connection
          (into
           (run/claim-tx {::run/id "refusal-run"
@@ -399,7 +402,7 @@
                 connection
                 (run/receipt-refusal-tx terminal)))
             "a running receipt accepts the minimal terminal error")
-        (let [settled (d/pull @connection
+        (let [settled (db/pull @connection
                               '[*]
                               [:seon.cluster.eval/id
                                (pr-str ["refusal-run" 0])])]
@@ -417,7 +420,7 @@
                           :seon.cluster.eval/error "changed"))))
               "an already-terminal receipt is a no-op, not a refusal")
           (is (= settled
-                 (d/pull @connection
+                 (db/pull @connection
                          '[*]
                          [:seon.cluster.eval/id
                           (pr-str ["refusal-run" 0])]))
@@ -681,9 +684,9 @@
         ;; present — the same derivation every reader now performs
         (into #{}
               (map (fn [eid]
-                     (let [receipt (d/pull @connection '[*] eid)
+                     (let [receipt (db/pull @connection '[*] eid)
                            run-id (:seon.cluster.run/id
-                                   (d/pull @connection
+                                   (db/pull @connection
                                            [:seon.cluster.run/id]
                                            (:db/id
                                             (:seon.cluster.eval/run
@@ -697,7 +700,7 @@
                          (assoc :settled :error)
                          (:seon.cluster.eval/interrupted-at receipt)
                          (assoc :settled :interrupted)))))
-              (d/q '[:find [?receipt ...]
+              (db/q '[:find [?receipt ...]
                      :where [?receipt :seon.cluster.eval/id _]]
                    @connection))]
     (and
@@ -734,7 +737,7 @@
          (prop/for-all [commands commands-gen]
            (with-model-database
              (fn [connection]
-               (d/transact connection
+               (db/transact! connection
                            (mapv (fn [id] {:seon.cluster.agent/id id})
                                  agent-ids))
                (loop [commands commands
@@ -785,13 +788,13 @@
   ;; ids derive from generated values only — replayable under the seed.
   (let [pull-receipts
         (fn [connection run-id]
-          (->> (d/q '[:find [?r ...]
+          (->> (db/q '[:find [?r ...]
                       :in $ ?run-id
                       :where
                       [?run :seon.cluster.run/id ?run-id]
                       [?r :seon.cluster.eval/run ?run]]
-                    (d/db connection) run-id)
-               (mapv #(d/pull (d/db connection) '[*] %))))
+                    (db/db connection) run-id)
+               (mapv #(db/pull (db/db connection) '[*] %))))
         pull-terminals
         (fn [connection run-id]
           (->> (pull-receipts connection run-id)
@@ -811,19 +814,19 @@
                                  "-" dead?)
                      agent-id (str "keeper-" run-id)
                      holder (if dead? "dead-process" "live-process")]
-                 (d/transact connection
+                 (db/transact! connection
                              [{:seon.cluster.agent/id agent-id}])
-                 (d/transact connection
+                 (db/transact! connection
                              (run/open-tx
                               {::run/id run-id
                                ::run/agent [:seon.cluster.agent/id agent-id]
                                ::run/opened-at t0}))
-                 (d/transact connection
+                 (db/transact! connection
                              (run/claim-tx {::run/id run-id
                                             ::run/process holder
                                             ::run/live-processes #{holder}
                                             ::run/now t1}))
-                 (d/transact
+                 (db/transact!
                   connection
                   (vec (map-indexed
                         (fn [ordinal state]
@@ -847,10 +850,10 @@
                         {::run/id run-id
                          ::run/live-processes #{"live-process"}
                          ::run/now t2})
-                       _ (d/transact connection recovery)
+                       _ (db/transact! connection recovery)
                        ;; recovery is IDEMPOTENT: running it again from
                        ;; current facts commits nothing new
-                       _ (d/transact connection recovery)
+                       _ (db/transact! connection recovery)
                        entity (run-entity connection run-id)]
                    (and
                     ;; settled receipts are IDENTICAL, whole entities
@@ -879,31 +882,31 @@
   ;; a settled receipt could be stamped `interrupted-at`.
   (with-model-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "orderer"}])
-      (d/transact connection
+      (db/transact! connection [{:seon.cluster.agent/id "orderer"}])
+      (db/transact! connection
                   (run/open-tx {::run/id "order-b"
                                 ::run/agent [:seon.cluster.agent/id "orderer"]
                                 ::run/opened-at t0}))
-      (d/transact connection
+      (db/transact! connection
                   (run/claim-tx {::run/id "order-b"
                                  ::run/process "dead-process"
                                  ::run/live-processes #{"dead-process"}
                                  ::run/now t0}))
-      (d/transact connection
+      (db/transact! connection
                   (run/receipt-start-tx {::run/id "order-b"
                                          :seon.cluster.eval/ordinal 0
                                          :seon.cluster.eval/at t0}))
       ;; the settle lands FIRST; recovery then runs against whatever
       ;; the transaction sees — which includes that settle
-      (d/transact connection
+      (db/transact! connection
                   (run/receipt-settle-tx {::run/id "order-b"
                                           :seon.cluster.eval/ordinal 0
                                           :seon.cluster.eval/result-edn "2"}))
-      (d/transact connection
+      (db/transact! connection
                   (run/recover-tx {::run/id "order-b"
                                    ::run/live-processes #{"live-process"}
                                    ::run/now t2}))
-      (let [receipt (d/pull @connection '[*]
+      (let [receipt (db/pull @connection '[*]
                             [:seon.cluster.eval/id (pr-str ["order-b" 0])])]
         (is (= "2" (:seon.cluster.eval/result-edn receipt)))
         (is (nil? (:seon.cluster.eval/interrupted-at receipt))
@@ -943,25 +946,26 @@
   ;; never by silently omitting the retraction
   (with-model-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "breaker"}])
-      (d/transact connection
+      (db/transact! connection [{:seon.cluster.agent/id "breaker"}])
+      (db/transact! connection
                   (run/open-tx {::run/id "broken"
                                 ::run/agent [:seon.cluster.agent/id "breaker"]
                                 ::run/opened-at t0}))
-      (d/transact connection
+      (db/transact! connection
                   (run/claim-tx {::run/id "broken"
                                  ::run/process "p1"
                                  ::run/live-processes #{"p1"}
                                  ::run/now t1}))
       ;; sever the relation out from under the run
-      (d/transact connection
+      (db/transact! connection
                   [[:db/retract [:seon.cluster.agent/id "breaker"]
                     :seon.cluster.agent/run [::run/id "broken"]]])
-      (is (thrown? Exception
-                   (d/transact connection
-                               (run/close-tx {::run/id "broken"
-                                              ::run/process "p1"
-                                              ::run/closed-at t2})))
+      (is (= ::run/agent-pointer-broken
+             (::run/rule
+              (db/transact! connection
+                            (run/close-tx {::run/id "broken"
+                                           ::run/process "p1"
+                                           ::run/closed-at t2}))))
           "close refuses ::agent-pointer-broken")
       (is (nil? (::run/closed-at (run-entity connection "broken")))
           "the refused close committed nothing"))))

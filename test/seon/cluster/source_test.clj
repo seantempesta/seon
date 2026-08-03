@@ -29,8 +29,8 @@
 
 (defn populate!
   [{:keys [:seon.store/branch-connection :seon.source/digest]}]
-  (d/transact branch-connection probe-schema)
-  (d/transact branch-connection
+  (db/transact! branch-connection probe-schema)
+  (db/transact! branch-connection
               [{:seon.source.test/marker digest}]))
 
 (defn populate-fails!
@@ -39,8 +39,8 @@
 
 (defn populate-from-data!
   [{:keys [:seon.store/branch-connection :seon.source.test/marker]}]
-  (d/transact branch-connection probe-schema)
-  (d/transact branch-connection [{:seon.source.test/marker marker}]))
+  (db/transact! branch-connection probe-schema)
+  (db/transact! branch-connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
   [request]
@@ -83,13 +83,13 @@
 
 (defn- markers
   [connection]
-  (set (d/q '[:find [?marker ...]
+  (set (db/q '[:find [?marker ...]
               :where [_ :seon.source.test/marker ?marker]]
             @connection)))
 
 (defn- source-digests
   [connection]
-  (set (d/q '[:find [?digest ...]
+  (set (db/q '[:find [?digest ...]
               :where [_ :seon.source/digest ?digest]]
             @connection)))
 
@@ -156,7 +156,7 @@
         (testing "a complete publication never trusts digest equality alone"
           (let [connection (store/open-branch! opened source/current-branch)]
             (try
-              (d/transact connection
+              (db/transact! connection
                           [[:db/retract
                             [:seon.source.test/marker digest-b]
                             :seon.source.test/marker
@@ -173,7 +173,7 @@
             (is (not= (:seon.source/commit-id b)
                       (:seon.source/commit-id again)))
             (is (= #{digest-b}
-                   (set (d/q '[:find [?marker ...]
+                   (set (db/q '[:find [?marker ...]
                                :where [_ :seon.source.test/marker ?marker]]
                              current-db)))
                 "complete population repairs stale rows under an equal digest")))))))
@@ -214,12 +214,12 @@
         (is (= (inc max-a) (:max-tx current-db))
             "rows and digest replacement commit in one transaction")
         (is (= #{digest-b}
-               (set (d/q '[:find [?digest ...]
+               (set (db/q '[:find [?digest ...]
                            :where [_ :seon.source/digest ?digest]]
                          current-db)))
             "exactly one source digest remains")
         (is (= #{digest-a "incremental"}
-               (set (d/q '[:find [?marker ...]
+               (set (db/q '[:find [?marker ...]
                            :where [_ :seon.source.test/marker ?marker]]
                          current-db))))
         (is (= #{commit-a} (d/parent-commit-ids current-db)))

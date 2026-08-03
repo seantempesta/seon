@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.tools.reader :as reader]
             [clojure.tools.reader.reader-types :as reader-types]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.instruction :as instruction]
             [seon.test-support :as test-support]))
@@ -45,7 +45,7 @@
 (defn- call-resolution
   [db call]
   (let [function-symbol (:seon.cluster.instruction/symbol call)
-        function (d/pull db
+        function (db/pull db
                          [{:seon.fn/arities
                            [:seon.fn.arity/order
                             :seon.fn.arity/min
@@ -66,7 +66,7 @@
 (defn- cluster-toolkit
   [db cluster-name]
   (set
-   (d/q '[:find [?namespace-name ...]
+   (db/q '[:find [?namespace-name ...]
           :in $ ?cluster-name
           :where
           [?cluster :seon.cluster/name ?cluster-name]
@@ -82,22 +82,22 @@
          (instruction/seed-rows)))
   (test-support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        [{:seon.cluster.instruction/id :getting-started
          :seon.cluster.instruction/text "Owner revision."}
         {:seon.cluster.instruction/id :reply-grammar
          :seon.cluster.instruction/text "Superseded."}])
-      (d/transact connection
+      (db/transact! connection
                   (#'cluster/instruction-row-changes
                    @connection (instruction/seed-rows)))
       (is (= #{:getting-started}
              (set
-              (d/q '[:find [?id ...]
+              (db/q '[:find [?id ...]
                      :where [_ :seon.cluster.instruction/id ?id]]
                    @connection))))
       (is (= "Owner revision."
-             (d/q '[:find ?text .
+             (db/q '[:find ?text .
                     :where
                     [?instruction :seon.cluster.instruction/id
                      :getting-started]
@@ -122,7 +122,7 @@
             removed (first (sort computed))]
         (is (seq computed) "The canonical corpus must expose a toolkit.")
         (is (= computed (cluster-toolkit @connection "toolkit")))
-        (d/transact
+        (db/transact!
          connection
          (cond-> [{:seon.ns/name 'my.stale.toolkit}
                   {:seon.cluster/name "toolkit"
@@ -136,7 +136,7 @@
         (is (not= computed (cluster-toolkit @connection "toolkit")))
         (cluster/ensure-cluster-entity!
          connection "toolkit" "instruction-test-process")
-        (is (some? (d/q '[:find ?process .
+        (is (some? (db/q '[:find ?process .
                           :where
                           [?process :seon.db.process/id
                            "instruction-test-process"]]
@@ -155,16 +155,16 @@
         (is (nil? (:seon.error/kind
                    (cluster/ensure-entity!
                     connection cluster/boot-process-identity first-request))))
-        (let [before (d/pull @connection '[*]
+        (let [before (db/pull @connection '[*]
                              [:seon.cluster.agent/id "alice"])]
           (is (nil? (:seon.error/kind
                      (cluster/ensure-entity!
                       connection cluster/boot-process-identity
                       resumed-request))))
           (is (= before
-                 (d/pull @connection '[*]
+                 (db/pull @connection '[*]
                          [:seon.cluster.agent/id "alice"])))
-          (is (nil? (d/q '[:find ?namespace .
+          (is (nil? (db/q '[:find ?namespace .
                            :in $ ?namespace-name
                            :where
                            [?namespace :seon.ns/name ?namespace-name]]

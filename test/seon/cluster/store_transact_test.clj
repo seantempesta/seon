@@ -69,7 +69,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
+      (db/transact! connection (schema.datahike/malli->datahike-schema attributes))
       (body connection)
       (finally
         (d/release connection)
@@ -132,7 +132,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact
+      (db/transact!
        connection
        [(schema.datahike/malli->datahike-attr ::mixed-value)])
       (body connection)
@@ -146,8 +146,8 @@
       (fn [connection]
         (let [outcome (db/transact! connection [{::mixed-value logical}])
               stored (d/q '[:find ?value .
-                            :where [_ ::mixed-value ?value]]
-                          @connection)]
+                             :where [_ ::mixed-value ?value]]
+                           @connection)]
           (is (contains? outcome :db-after))
           (is (= (pr-str logical) stored))
           (is (= logical
@@ -159,7 +159,7 @@
     (fn [connection]
       (let [outcome (db/transact! connection [{::mixed-value true}])]
         (is (= :user-input (:seon.error/kind outcome)))
-        (is (empty? (d/q '[:find ?value
+        (is (empty? (db/q '[:find ?value
                            :where [_ ::mixed-value ?value]]
                          @connection))))))
   (doseq [stored ["[" "true"]]

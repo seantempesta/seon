@@ -43,7 +43,7 @@
     :db/cardinality :db.cardinality/one}])
 
 (defn- markers [store]
-  (set (d/q '[:find [?marker ...]
+  (set (db/q '[:find [?marker ...]
               :where [_ :seon.store.test/marker ?marker]]
             @(:seon.store/connection store))))
 
@@ -137,8 +137,8 @@
       (let [opened (store/open-store! {:seon.store/dir dir})]
         (is (seon.schema/valid-candidate-value? :seon.store/store opened))
         (is (true? (:seon.store/created? opened)))
-        (d/transact (:seon.store/connection opened) probe-schema)
-        (d/transact (:seon.store/connection opened)
+        (db/transact! (:seon.store/connection opened) probe-schema)
+        (db/transact! (:seon.store/connection opened)
                     [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
         (is (nil? (store/release-store! opened)) "release is idempotent")
@@ -198,8 +198,9 @@
         (is (true? (:seon.store/created? opened)))
         (is (false? (get-in @(:seon.store/connection opened)
                             [:config :keep-history?])))
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (d/history @(:seon.store/connection opened))))
+        (is (= :seon.db/non-temporal-database
+               (:seon.error/kind
+                (db/history @(:seon.store/connection opened)))))
         (store/release-store! opened))
       (testing "an omitted request adopts the persisted policy"
         (let [reopened (store/open-store! {:seon.store/dir dir})]
@@ -227,13 +228,13 @@
       (let [opened (store/open-store! {:seon.store/dir dir})
             connection (:seon.store/connection opened)]
         (try
-          (d/transact connection probe-schema)
+          (db/transact! connection probe-schema)
           (let [basis (:max-tx @connection)]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.store.test/marker "after-basis"}])
-            (is (store/database-value? (d/history @connection)))
-            (is (store/database-value? (d/as-of @connection basis)))
-            (is (store/database-value? (d/since @connection basis))))
+            (is (store/database-value? (db/history @connection)))
+            (is (store/database-value? (db/as-of @connection basis)))
+            (is (store/database-value? (db/since @connection basis))))
           (finally
             (store/release-store! opened))))
       (finally
@@ -249,19 +250,19 @@
             main (:seon.store/connection opened)
             branch :non-temporal-test]
         (try
-          (d/transact main probe-schema)
+          (db/transact! main probe-schema)
           (d/branch! main :db branch)
           (let [connection (store/open-branch! opened branch)]
             (try
               (is (false? (get-in @connection [:config :keep-history?])))
-              (d/transact connection
+              (db/transact! connection
                           [{:seon.store.test/marker "current-reads-work"}])
               (is (= #{["current-reads-work"]}
-                     (d/q '[:find ?marker
+                     (db/q '[:find ?marker
                             :where [_ :seon.store.test/marker ?marker]]
                           @connection)))
-              (is (thrown? clojure.lang.ExceptionInfo
-                           (d/history @connection)))
+              (is (= :seon.db/non-temporal-database
+                     (:seon.error/kind (db/history @connection))))
               (finally
                 (d/release connection))))
           (finally
@@ -275,7 +276,7 @@
       (let [opened (store/open-store! {:seon.store/dir dir})
             connection (:seon.store/connection opened)]
         (try
-          (d/transact connection probe-schema)
+          (db/transact! connection probe-schema)
           (testing "Integer values commit from entity maps and datom vectors"
             (let [outcome
                   (db/transact!
@@ -288,7 +289,7 @@
                      :seon.store.test/measurement (Integer/valueOf 8)]])
                   stored
                   (into {}
-                        (d/q '[:find ?marker ?measurement
+                        (db/q '[:find ?marker ?measurement
                                :where
                                [?entity :seon.store.test/marker ?marker]
                                [?entity :seon.store.test/measurement
@@ -336,9 +337,9 @@
       (let [a (store/open-store! {:seon.store/dir dir-a})
             b (store/open-store! {:seon.store/dir dir-b})]
         (try
-          (d/transact (:seon.store/connection a) probe-schema)
-          (d/transact (:seon.store/connection b) probe-schema)
-          (d/transact (:seon.store/connection a)
+          (db/transact! (:seon.store/connection a) probe-schema)
+          (db/transact! (:seon.store/connection b) probe-schema)
+          (db/transact! (:seon.store/connection a)
                       [{:seon.store.test/marker "only-a"}])
           (is (= #{"only-a"} (markers a)))
           (is (= #{} (markers b)) "stores share nothing")
@@ -358,8 +359,8 @@
     (try
       ;; a complete store with one durable marker...
       (let [victim (store/open-store! {:seon.store/dir dir})]
-        (d/transact (:seon.store/connection victim) probe-schema)
-        (d/transact (:seon.store/connection victim)
+        (db/transact! (:seon.store/connection victim) probe-schema)
+        (db/transact! (:seon.store/connection victim)
                     [{:seon.store.test/marker "pre-window"}])
         (store/release-store! victim))
       ;; ...manufactured into the mid-genesis state Datahike can leave
@@ -372,7 +373,7 @@
         (try
           (is (true? (:seon.store/created? repaired))
               "mid-genesis means nothing durable existed — recreate")
-          (d/transact (:seon.store/connection repaired) probe-schema)
+          (db/transact! (:seon.store/connection repaired) probe-schema)
           (is (= #{} (markers repaired))
               "the recreated store is empty")
           (finally

@@ -81,6 +81,12 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   connection cannot answer the indexer's freshness query. The focused wave
   moved that exact double to `seon.db/q`; the test sweep still owns the file's
   ordinary database calls.
+- The cluster/store test gate corrected the generic `store-transact-test` row:
+  the heterogeneous-union assertion intentionally reads the encoded storage
+  value below `seon.db`, and the malformed-storage cases intentionally inject
+  invalid encoded values below its logical-value transaction boundary. Those
+  exact `d/q` and `d/transact` sites remain dependency probes; the surrounding
+  logical writes and application reads use `seon.db`.
 
 ## Current source census
 

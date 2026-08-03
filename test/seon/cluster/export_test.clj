@@ -24,6 +24,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.cluster.export :as export]
@@ -44,7 +45,7 @@
 (def ^:private other-branch :cluster-carried)
 
 (defn- markers [connection]
-  (set (d/q '[:find [?marker ...]
+  (set (db/q '[:find [?marker ...]
               :where [_ :seon.export.test/marker ?marker]]
             @connection)))
 
@@ -67,13 +68,13 @@
     (.mkdirs (.getParentFile (io/file dir)))
     (let [opened (store/open-store! {:seon.store/dir dir})]
       (try
-        (d/transact (:seon.store/connection opened) probe-schema)
-        (d/transact (:seon.store/connection opened)
+        (db/transact! (:seon.store/connection opened) probe-schema)
+        (db/transact! (:seon.store/connection opened)
                     {:tx-data [{:seon.export.test/marker "on-main"}]})
         (d/branch! (:seon.store/connection opened) :db other-branch)
         (let [connection (store/open-branch! opened other-branch)]
           (try
-            (d/transact connection
+            (db/transact! connection
                         {:tx-data [{:seon.export.test/marker "on-branch"}]})
             (finally
               (d/release connection))))
@@ -116,7 +117,7 @@
                   (finally
                     (d/release connection)))))
             (testing "the export is writable — a copy, not a read-only image"
-              (d/transact (:seon.store/connection exported)
+              (db/transact! (:seon.store/connection exported)
                           {:tx-data [{:seon.export.test/marker "post-export"}]})
               (is (= #{"on-main" "post-export"}
                      (markers (:seon.store/connection exported)))))
@@ -202,7 +203,7 @@
         (let [dir (str root "/half/store")]
           (.mkdirs (.getParentFile (io/file dir)))
           (let [opened (store/open-store! {:seon.store/dir dir})]
-            (d/transact (:seon.store/connection opened) probe-schema)
+            (db/transact! (:seon.store/connection opened) probe-schema)
             (store/release-store! opened))
           ;; the first-create kill window, manufactured exactly as B1's
           ;; own suite manufactures it
