@@ -16,7 +16,7 @@
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
-           [java.util.concurrent Executor Executors Future]
+           [java.util.concurrent Executor Executors Future FutureTask]
            [java.util.concurrent.atomic AtomicLong]))
 
 (set! *warn-on-reflection* true)
@@ -181,16 +181,18 @@
   (var-process #'capacity-observer-step :compute request))
 
 (defn- submission-capacity-error
-  [submission-id]
+  [submission-id workload]
   {:seon.error/kind ::submission-capacity
-   :seon.error/message "The bounded compute submission queue is full."
-   :seon.error/data {::submission-id submission-id}})
+   :seon.error/message "The bounded work submission queue is full."
+   :seon.error/data {::submission-id submission-id
+                     ::workload workload}})
 
-(defn- refuse-submission!
+(defn- refuse-compute-submission!
   [{::keys [submission-id result status]}]
   (when (compare-and-set! status ::queued ::refused)
     (deliver result {::started-at (System/nanoTime)
-                     ::value (submission-capacity-error submission-id)})))
+                     ::value (submission-capacity-error submission-id
+                                                        :compute)})))
 
 (defn- acquire-admission!
   [^AtomicLong admitted capacity]
@@ -234,12 +236,12 @@
      :capacity capacity}))
 
 (defn- refusing-buffer
-  [capacity]
+  [capacity refuse!]
   (RefusingBuffer.
    (LinkedList.)
    (long capacity)
    (AtomicLong.)
-   refuse-submission!))
+   refuse!))
 
 (defn- release-admission!
   [^RefusingBuffer buffer]
@@ -309,30 +311,107 @@
                     ::work
                     (dissoc work ::work-fn ::result ::status)))))))))
 
+(defn- io-terminal!
+  [completion active-work submissions
+   {::keys [submission-id complete! status active?] :as work}
+   terminal]
+  (when (or (compare-and-set! status ::queued ::completed)
+            (compare-and-set! status ::running ::completed))
+    (try
+      (complete! terminal)
+      (finally
+        (swap! active-work dissoc submission-id)
+        (swap! submissions dissoc submission-id)
+        (when @active?
+          (async/offer!
+           completion
+           (assoc terminal
+                  ::submission-id submission-id
+                  ::workload :io
+                  ::work
+                  (dissoc work ::work-fn ::complete! ::status
+                          ::active? ::task))))))))
+
+(defn- refuse-io-submission!
+  [submissions work]
+  (io-terminal!
+   nil
+   (atom {})
+   submissions
+   work
+   {::started-at (System/nanoTime)
+    ::value (submission-capacity-error (::submission-id work) :io)}))
+
+(defn- execute-io-work!
+  [task-executor completion active-work submissions
+   {::keys [submission-id work-fn status active? task] :as work}]
+  (when (compare-and-set! status ::queued ::running)
+    (reset! active? true)
+    (swap! active-work
+           assoc submission-id
+           {::workload :io
+            ::wedged? false
+            ::platform-thread? false})
+    (let [runnable
+          (fn []
+            (swap! active-work
+                   update submission-id
+                   assoc
+                   ::platform-thread?
+                   (not (.isVirtual (Thread/currentThread))))
+            (let [started-at (System/nanoTime)
+                  terminal
+                  (try
+                    {::started-at started-at
+                     ::value (work-fn {::started! (fn [])})}
+                    (catch Throwable throwable
+                      {::started-at started-at
+                       ::throwable throwable}))]
+              (io-terminal!
+               completion active-work submissions work terminal)))
+          future-task (FutureTask. ^Runnable runnable nil)]
+      (reset! task future-task)
+      (try
+        (.execute ^Executor task-executor future-task)
+        (catch Throwable throwable
+          (io-terminal!
+           completion active-work submissions work
+           {::started-at (System/nanoTime)
+            ::throwable throwable}))))
+    true))
+
 (defn- with-submission-filter
-  [{::keys [parallelism active-count] :as state}]
+  [{::keys [parallelism active-count io-parallelism io-active-count]
+    :as state}]
   (assoc
    state
    ::flow/input-filter
    (fn [input-id]
-     (or (not= ::compute-submission input-id)
-         (< active-count parallelism)))))
+     (case input-id
+       ::compute-submission (< active-count parallelism)
+       ::io-submission (< io-active-count io-parallelism)
+       true))))
 
 (defn- work-launcher-step
   ([]
    {:ins {::compute-submission
-          "One disposable compute submission backed by durable work."}
+          "One disposable compute submission backed by durable work."
+          ::io-submission
+          "One nonblocking IO submission backed by a durable receipt."}
     :workload :io
     :ping-map-fn
     (fn [{::keys [parallelism active-work]}]
       (capacity-facts parallelism active-work))})
-  ([{::keys [parallelism] :as args}]
+  ([{::keys [parallelism io-parallelism] :as args}]
    (with-submission-filter
      (assoc args
             ::active-count 0
+            ::io-active-count 0
             ::flow/in-ports
-            {::completion (async/chan parallelism)})))
-  ([state _transition]
+            {::completion (async/chan (+ parallelism io-parallelism))})))
+  ([{::keys [proc-stopped] :as state} transition]
+   (when (= ::flow/stop transition)
+     (deliver proc-stopped ::stopped))
    state)
   ([{::keys [active-count active-work admission-buffer task-executor]
      :as state}
@@ -350,16 +429,36 @@
           (assoc state ::active-count (inc active-count)))
         nil])
 
+     ::io-submission
+     (if (execute-io-work!
+          task-executor
+          (get-in state [::flow/in-ports ::completion])
+          active-work
+          (::io-submissions state)
+          message)
+       [(with-submission-filter
+          (update state ::io-active-count inc))
+        nil]
+       [state nil])
+
      ::completion
      (do
-       (release-admission! admission-buffer)
+       (let [io? (= :io (::workload message))
+             buffer (if io? (::io-admission-buffer state) admission-buffer)]
+         (release-admission! buffer))
        [(with-submission-filter
-          (assoc state ::active-count (dec active-count)))
+          (update state
+                  (if (= :io (::workload message))
+                    ::io-active-count
+                    ::active-count)
+                  dec))
         (if-let [throwable (::throwable message)]
           {::flow/error
            [#::flow{:pid (::flow/pid state)
                     :status :running
-                    :cid ::compute-submission
+                    :cid (if (= :io (::workload message))
+                           ::io-submission
+                           ::compute-submission)
                     :msg (::work message)
                     :op ::work
                     :ex throwable}]}
@@ -376,7 +475,9 @@
 (def flow-workload-attributes
   "Flat config-singleton attributes consumed by the work launcher."
   [:seon.config.flow.compute/queue-depth
-   :seon.config.flow.compute/concurrency])
+   :seon.config.flow.compute/concurrency
+   :seon.config.flow.io/queue-depth
+   :seon.config.flow.io/concurrency])
 
 (defn- required-launcher-configuration
   [configuration]
@@ -387,16 +488,22 @@
     (when (seq missing)
       (throw
        (ex-info
-        "The compute work launcher is not ready: required config facts are missing."
+        "The work launcher is not ready: required config facts are missing."
         {:seon.error/kind :configuration
          ::missing-config-facts (vec missing)})))
     selected))
 
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
-            task-executor]}]
+            task-executor io-parallelism io-queue-depth io-submissions
+            proc-stopped]}]
   (let [admission-buffer
-        (refusing-buffer (+ parallelism queue-depth))]
+        (refusing-buffer (+ parallelism queue-depth)
+                         refuse-compute-submission!)
+        io-admission-buffer
+        (refusing-buffer
+         (+ io-parallelism io-queue-depth)
+         (partial refuse-io-submission! io-submissions))]
     {:procs
      {::work-launcher
       {:proc
@@ -404,9 +511,14 @@
         {::parallelism parallelism
          ::active-work active-work
          ::admission-buffer admission-buffer
-         ::task-executor task-executor})
+         ::task-executor task-executor
+         ::io-parallelism io-parallelism
+         ::io-submissions io-submissions
+         ::io-admission-buffer io-admission-buffer
+         ::proc-stopped proc-stopped})
        :chan-opts
-       {::compute-submission {:buf-or-n admission-buffer}}}
+       {::compute-submission {:buf-or-n admission-buffer}
+        ::io-submission {:buf-or-n io-admission-buffer}}}
       ::capacity-observer
       {:proc
        (capacity-observer-proc
@@ -426,7 +538,22 @@
         (:seon.config.flow.compute/queue-depth configuration)
         parallelism
         (:seon.config.flow.compute/concurrency configuration)
+        io-queue-depth
+        (:seon.config.flow.io/queue-depth configuration)
+        io-parallelism
+        (:seon.config.flow.io/concurrency configuration)
         active-work (atom {})
+        io-submissions (atom {})
+        accepting? (atom true)
+        drained (promise)
+        proc-stopped (promise)
+        _
+        (add-watch
+         io-submissions
+         ::drained
+         (fn [_ _ _ next-submissions]
+           (when (and (not @accepting?) (empty? next-submissions))
+             (deliver drained ::drained))))
         root-executors
         ((requiring-resolve 'seon.operator.runtime/root-executors))
         task-executor (:io root-executors)
@@ -436,6 +563,10 @@
            {::parallelism parallelism
            ::active-work active-work
            ::queue-depth queue-depth
+           ::io-queue-depth io-queue-depth
+           ::io-parallelism io-parallelism
+           ::io-submissions io-submissions
+           ::proc-stopped proc-stopped
            ::compute-executor (:compute root-executors)
            ::task-executor task-executor}))
         started (flow/start graph)]
@@ -443,16 +574,80 @@
     {::graph graph
      ::started started
      ::active-work active-work
+     ::io-submissions io-submissions
+     ::accepting? accepting?
+     ::drained drained
+     ::proc-stopped proc-stopped
      ::compute-executor task-executor
      ::configuration configuration}))
 
 (defn stop-work-launcher!
-  "Stop one cluster-owned work launcher without touching root executors."
+  "Close IO admission, settle accepted work, then stop the Flow graph."
   {:malli/schema [:=> [:cat :seon.flow/work-launcher] :nil]}
-  [{::keys [graph]}]
+  [{::keys [graph accepting? io-submissions drained proc-stopped active-work]}]
   (when graph
-    (flow/stop graph))
+    (reset! accepting? false)
+    (doseq [[_ {::keys [task] :as work}] @io-submissions]
+      (when-let [^Future running @task]
+        (.cancel running true))
+      ;; The graph is stopping, so no proc counter needs a completion input.
+      (reset! (::active? work) false)
+      (io-terminal!
+       nil active-work io-submissions work
+       {::started-at (System/nanoTime)
+        ::value
+        {:seon.error/kind ::launcher-stopped
+         :seon.error/message
+         "The work launcher stopped before the background call completed."
+         :seon.error/data {::submission-id (::submission-id work)}}}))
+    (when (empty? @io-submissions)
+      (deliver drained ::drained))
+    @drained
+    (flow/stop graph)
+    @proc-stopped)
   nil)
+
+(defn submit!
+  "Submit bounded IO work without waiting for its terminal callback."
+  {:malli/schema
+   [:=> [:cat :seon.flow/work-launcher :seon.flow/io-submission]
+    :boolean]}
+  [work-launcher
+   {::keys [submission-id complete!] :as submission}]
+  (let [{::keys [graph accepting? io-submissions]} work-launcher
+        completion (bound-fn* complete!)
+        work
+        (assoc submission
+               ::complete! completion
+               ::status (atom ::queued)
+               ::active? (atom false)
+               ::task (atom nil))]
+    (if (and graph @accepting?)
+      (do
+        (swap! io-submissions assoc submission-id work)
+        (if @accepting?
+          (do
+            (flow/inject graph [::work-launcher ::io-submission] [work])
+            true)
+          (do
+            (io-terminal!
+             nil (atom {}) io-submissions work
+             {::started-at (System/nanoTime)
+              ::value
+              {:seon.error/kind ::launcher-stopped
+               :seon.error/message
+               "The work launcher is no longer accepting background calls."
+               :seon.error/data {::submission-id submission-id}}})
+            false)))
+      (do
+        (completion
+         {::started-at (System/nanoTime)
+          ::value
+          {:seon.error/kind ::launcher-stopped
+           :seon.error/message
+           "A background call requires a running work launcher."
+           :seon.error/data {::submission-id submission-id}}})
+        false))))
 
 (defn submit!!
   "Submit bounded compute work and await its terminal value.

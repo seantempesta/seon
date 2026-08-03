@@ -28,9 +28,16 @@
 
 (def ^:private test-work-launcher (atom nil))
 
+(def ^:private test-io-configuration
+  {:seon.config.flow.io/queue-depth 2
+   :seon.config.flow.io/concurrency 2})
+
 (defn- install-test-work-launcher!
   [request]
-  (let [launcher (sut/start-work-launcher! request)]
+  (let [launcher
+        (sut/start-work-launcher!
+         (update request ::sut/configuration
+                 #(merge test-io-configuration %)))]
     (reset! test-work-launcher launcher)
     launcher))
 
@@ -434,7 +441,7 @@
           "submission returns after injection rather than after work")
       (let [refused
             (test-support/await-event!
-             (nth terminals 2)
+             (future @(nth terminals 2))
              ::background-io-refused)]
         (is (= ::sut/submission-capacity
                (get-in refused [::sut/value :seon.error/kind]))))
@@ -659,8 +666,10 @@
 
 (deftest starting-a-sibling-launcher-does-not-interrupt-accepted-work
   (let [configuration
-        {:seon.config.flow.compute/queue-depth 2
-         :seon.config.flow.compute/concurrency 1}
+        (merge
+         test-io-configuration
+         {:seon.config.flow.compute/queue-depth 2
+          :seon.config.flow.compute/concurrency 1})
         entered-a (CountDownLatch. 1)
         release-a (CountDownLatch. 1)
         calls-a (atom 0)

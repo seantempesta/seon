@@ -1,0 +1,10 @@
+#:seon.config.flow.io{:concurrency
+                      [:int
+                       {:min 1,
+                        :description
+                        "Concurrent background IO submissions per cluster."}],
+                      :queue-depth
+                      [:int
+                       {:min 1,
+                        :description
+                        "Queued background IO submissions per cluster."}]}

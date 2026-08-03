@@ -16,6 +16,12 @@
  ; here; 22 concurrent evals queued 4 with 71 ms max wait.)
  :seon.config.flow.compute/concurrency :seon.config/available-processors
 
+ ; Unit: concurrent and queued background IO submissions per cluster.
+ ; Virtual threads make blocking cheap; these bounds instead limit remote
+ ; pressure and durable receipts awaiting settlement.
+ :seon.config.flow.io/concurrency 64
+ :seon.config.flow.io/queue-depth 64
+
  ; Unit: milliseconds allowed for one Flow ping response. Provenance: F1
  ; measured parked mailbox and turn replies in microseconds; 20 ms leaves
  ; orders of magnitude of scheduling room. A missing reply is reported as

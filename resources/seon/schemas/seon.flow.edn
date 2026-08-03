@@ -145,7 +145,11 @@
              [:seon.config.flow.compute/queue-depth
               :seon.config.flow.compute/queue-depth]
              [:seon.config.flow.compute/concurrency
-              :seon.config.flow.compute/concurrency]],
+              :seon.config.flow.compute/concurrency]
+             [:seon.config.flow.io/queue-depth
+              :seon.config.flow.io/queue-depth]
+             [:seon.config.flow.io/concurrency
+              :seon.config.flow.io/concurrency]],
             :lineage-status
             [:enum
              :seon.flow/iterating
@@ -193,6 +197,13 @@
             :started! [:=> [:cat] :nil],
             :submission-id [:or :uuid :keyword :string],
             :submission-wait-ms [:int {:min 0}],
+            :io-complete! [:=> [:cat :map] :seon.flow/callback-result],
+            :io-submission
+            [:map
+             [:seon.flow/submission-id :seon.flow/submission-id]
+             [:seon.flow/workload [:= :io]]
+             [:seon.flow/work-fn :seon.flow/work-fn]
+             [:seon.flow/complete! :seon.flow/io-complete!]],
             :successful-owners [:set :keyword],
             :turn-count [:int {:min 0}],
             :work-call
@@ -231,4 +242,4 @@
              [:seon.flow/workload :seon.flow/workload]
              [:seon.flow/work-fn :seon.flow/work-fn]
              [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]],
-            :workload [:enum :compute]}
+            :workload [:enum :compute :io]}
