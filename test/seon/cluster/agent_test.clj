@@ -28,11 +28,10 @@
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
-            [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
-  (:import [java.util Date]
+  (:import [java.net ServerSocket Socket]
+           [java.util Date]
            [java.util.concurrent CountDownLatch Executor]))
 
 (set! *warn-on-reflection* true)
@@ -73,36 +72,18 @@
       {:seon.cluster.eval/result-edn "1"
        :seon.sci.admit/value 1})))
 
-(defn- fresh-connection
-  []
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}]
-    (d/create-database configuration)
-    (let [connection (d/connect configuration)]
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (schema/canonical-database-attributes)))
-      connection)))
-
 (defn- with-connection
   [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}]
-    (d/create-database configuration)
-    (let [connection (d/connect configuration)]
+  (test-support/with-database
+    (fn [connection]
       (try
         (seon.flow/install-work-launcher!
          {::seon.flow/configuration
           {:seon.config.flow.compute/queue-depth 10
            :seon.config.flow.compute/concurrency 3}})
-        (d/transact connection
-                    (schema.datahike/malli->datahike-schema
-                     (schema/canonical-database-attributes)))
         (body connection (sci.eval/cluster-ctx @connection))
         (finally
-          (seon.flow/stop-installed-work-launcher!)
-          (d/release connection)
-          (d/delete-database configuration))))))
+          (seon.flow/stop-installed-work-launcher!))))))
 
 (defn- handle
   [connection ctx]
@@ -665,6 +646,85 @@
           (is (= 100 ready-count)
               (str "arming published parked completion in " ready-count
                    "/100 controlled stop interleavings")))))))
+
+(deftest disarm-has-a-provider-derived-loud-backstop
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            provider-timeout-ms 100
+            provider-entered (CountDownLatch. 1)
+            release-provider (CountDownLatch. 1)
+            server (ServerSocket. 0)
+            server-finished
+            (future
+              (with-open [_peer (.accept server)]
+                (test-support/await-event!
+                 release-provider
+                 ::release-never-answering-provider)))
+            agent-id "provider-backstop"]
+        (d/transact
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          (config-row
+           "provider-backstop"
+           {:seon.config.ai/timeout-ms provider-timeout-ms
+            :seon.config.ai.retry/maximum-retries 0
+            :seon.config.ai.retry/maximum-total-delay-ms 0
+            :seon.config.run/max-episode-runs 1})])
+        (try
+          (with-redefs
+            [ai/complete
+             (fn [_request]
+               (with-open [client (Socket. "127.0.0.1"
+                                           (.getLocalPort server))]
+                 (.countDown provider-entered)
+                 (.read (.getInputStream client))
+                 {:seon.error/kind ::provider-released
+                  :seon.error/message "The local provider released."}))]
+            (let [entry (arm-one! connection ctx routing agent-id)
+                  fault-channel
+                  (:seon.cluster.agent/fault-channel @routing)]
+              (outside-trigger! connection agent-id
+                                "provider-backstop-message" "block")
+              (async/offer! (:seon.cluster.wake/channel entry) ::wake)
+              (test-support/await-event!
+               provider-entered
+               ::never-answering-provider-entered)
+              (let [stopped
+                    (future
+                      (try
+                        (agent/disarm!
+                         {:seon.cluster.agent/id agent-id
+                          :seon.cluster.agent/routing routing})
+                        ::unexpected-orderly-stop
+                        (catch clojure.lang.ExceptionInfo failure
+                          failure)))
+                    failure
+                    (test-support/await-event!
+                     stopped
+                     ::provider-derived-stop-backstop)
+                    fault
+                    (test-support/await-event!
+                     fault-channel
+                     ::provider-stop-core-fault)]
+                (is (= ::agent/turn-completion-backstop
+                       (:seon.error/kind (ex-data failure))))
+                (is (= provider-timeout-ms
+                       (:seon.ai/timeout-ms (ex-data failure))))
+                (is (= failure (::flow/ex fault)))
+                (is (= agent-id (:seon.cluster.agent/id fault)))
+                (is (some? (agent/armed routing agent-id))
+                    "a fired backstop fails closed and leaves stop retryable"))
+              (.countDown release-provider)
+              (test-support/await-event!
+               server-finished
+               ::never-answering-provider-released)
+              (agent/disarm! {:seon.cluster.agent/id agent-id
+                              :seon.cluster.agent/routing routing})))
+          (finally
+            (.countDown release-provider)
+            (.close server)
+            (disarm-all! routing)))))))
 
 (deftest park-wake-test
   (with-connection
