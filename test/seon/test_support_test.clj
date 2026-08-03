@@ -77,13 +77,21 @@
         (is (= (set before) (set after)))))))
 
 (deftest explicit-synthetic-schema-rows-extend-only-that-database
-  (test-support/with-database
-    {::test-support/extra-schema
-     (test-support/file-store-probe-schema ::marker)}
-    (fn [connection]
-      (d/transact connection [{::marker "installed"}])
-      (is (= #{"installed"}
-             (test-support/file-store-markers connection ::marker))))))
+  (let [options
+        {::test-support/extra-schema
+         (test-support/file-store-probe-schema ::marker)}]
+    (is (= [#{"installed"} [false #{}]]
+           [(test-support/with-database
+              options
+              (fn [connection]
+                (d/transact connection [{::marker "installed"}])
+                (test-support/file-store-markers connection ::marker)))
+            (test-support/with-database
+              (fn [connection]
+                [(contains? (:schema @connection) ::marker)
+                 (test-support/file-store-markers connection ::marker)]))])
+        "a released lease is rebranched from the immutable base; neither its
+         child-only schema state nor its rows can leak into the next test")))
 
 (deftest shared-support-observes-events-refusals-and-cleanup
   (let [events (async/chan 1)

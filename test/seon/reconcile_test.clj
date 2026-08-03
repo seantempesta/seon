@@ -8,11 +8,8 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.reconcile :as reconcile]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support])
-  (:import [java.nio.charset StandardCharsets]
-           [java.util UUID]))
+            [seon.test-support :as test-support]))
 
 (set! *warn-on-reflection* true)
 
@@ -27,25 +24,13 @@
 (def ^:private digest
   (str/join (repeat 64 "a")))
 
-(defn- database-id
-  [trial]
-  (UUID/nameUUIDFromBytes
-   (.getBytes (pr-str trial) StandardCharsets/UTF_8)))
-
 (defn- with-model-database
-  ([body]
-   (test-support/with-database
-     (fn [connection]
-       (d/transact connection
-                   [{:seon.db.process/id unmanaged-process}])
-       (body connection))))
-  ([id body]
-   (test-support/with-database
-     {::test-support/database-id id}
-     (fn [connection]
-       (d/transact connection
-                   [{:seon.db.process/id unmanaged-process}])
-       (body connection)))))
+  [body]
+  (test-support/with-database
+    (fn [connection]
+      (d/transact connection
+                  [{:seon.db.process/id unmanaged-process}])
+      (body connection))))
 
 (defn- with-non-temporal-database
   [body]
@@ -259,7 +244,6 @@
          60
          (prop/for-all [desired desired-population-generator]
            (with-model-database
-             (database-id desired)
              (fn [connection]
                (reconcile/reconcile! connection (request desired))
                (let [before (:max-tx @connection)

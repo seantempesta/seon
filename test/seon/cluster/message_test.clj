@@ -289,13 +289,9 @@
                       (vals (::messages next-model)))))]))))
 
 (defn- generated-history-agrees-with-database?
-  [{::keys [population-size chain-limit commands] :as scenario}]
-  (let [population (subvec agent-ids 0 population-size)
-        database-id
-        (java.util.UUID/nameUUIDFromBytes
-         (.getBytes (pr-str scenario) java.nio.charset.StandardCharsets/UTF_8))]
+  [{::keys [population-size chain-limit commands]}]
+  (let [population (subvec agent-ids 0 population-size)]
     (test-support/with-database
-      {:seon.test-support/database-id database-id}
       (fn [connection]
         (d/transact connection
                     (mapv (fn [id] {:seon.cluster.agent/id id})

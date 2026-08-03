@@ -353,6 +353,7 @@
 
 (deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
   (support/with-database
+    {::support/fresh-store? true}
     (fn [connection]
       (d/transact connection
                   [{:seon.config.eval.result/blob-threshold 65536}

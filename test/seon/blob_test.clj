@@ -32,6 +32,7 @@
 
 (deftest utf8-content-round-trips-through-the-memory-backend
   (support/with-database
+    {::support/fresh-store? true}
     (fn [connection]
       (let [content "memory-backed naïve λ result"
             digest (blob/put! connection content)]
