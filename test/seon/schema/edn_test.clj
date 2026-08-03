@@ -5,9 +5,8 @@
   Orchestrator-authored (2026-07-27). The implementation lane makes
   these green by implementing seon.schema.edn (and wiring `register!`
   through the one gate) ONLY — schemas and tests are byte-sealed.
-  Fixture EDN lives under test/seon/schema_edn_fixtures/ (on the :test
-  classpath), one resource per scenario, so the production
-  `seon/schemas` resource directory is never touched by a test."
+  The valid fixture is a classpath resource. Negative EDN is written beneath
+  `tmp/` during each test so malformed inputs never enter publication."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -23,6 +22,35 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The loader
 ;;; ---------------------------------------------------------------------------
+
+(defn- with-temporary-resources
+  [files f]
+  (let [fixture-id (str (random-uuid))
+        resource-root (str "schema-edn-test/" fixture-id)
+        directory (io/file "tmp" "schema-edn-test" fixture-id)
+        resolve-resource io/resource]
+    (doseq [[relative-path content] files]
+      (let [file (io/file directory relative-path)]
+        (.mkdirs (.getParentFile file))
+        (spit file content)))
+    (with-redefs [io/resource
+                  (fn [resource]
+                    (if (or (= resource resource-root)
+                            (str/starts-with? resource
+                                              (str resource-root "/")))
+                      (let [relative-path
+                            (subs resource (count resource-root))
+                            relative-path
+                            (if (str/starts-with? relative-path "/")
+                              (subs relative-path 1)
+                              relative-path)
+                            file (if (seq relative-path)
+                                   (io/file directory relative-path)
+                                   directory)]
+                        (when (.exists file)
+                          (.toURL (.toURI file))))
+                      (resolve-resource resource)))]
+      (f resource-root))))
 
 (deftest production-schema-edn-is-a-resource-not-source
   (let [paths ((deref #'schema.edn/schema-resource-paths)
@@ -61,36 +89,43 @@
                 :seon.schema.edn.fixture/name ""))))))
 
 (deftest duplicates-across-sections-refuse
-  (let [data (test-support/refusal-data
-              #(schema.edn/load!
-                {:seon.schema.edn/resource
-                 "seon/schema_edn_fixtures/duplicate.edn"}))]
-    (is (map? data) "the duplicate refused")
-    (is (= :seon.schema.edn.fixture/twice
-           (:seon.schema.edn/attribute data))
-        "the refusal names the colliding key")
-    (is (str/ends-with? (:seon.schema.edn/file data) "/duplicate.edn")
-        "the refusal names the one resource")))
+  (with-temporary-resources
+    {"duplicate.edn"
+     (str "{:seon.schema.edn.fixture/twice [:string {:min 1}]\n"
+          " :seon.schema.edn.fixture/twice [:int {:min 0}]}\n")}
+    (fn [root]
+      (let [data (test-support/refusal-data
+                  #(schema.edn/load!
+                    {::schema.edn/resource (str root "/duplicate.edn")}))]
+        (is (map? data) "the duplicate refused")
+        (is (= :seon.schema.edn.fixture/twice
+               (::schema.edn/attribute data))
+            "the refusal names the colliding key")
+        (is (str/ends-with? (::schema.edn/file data) "/duplicate.edn")
+            "the refusal names the one resource")))))
 
 (deftest duplicates-across-files-refuse-with-both-file-names
-  (let [failure
-        (try
-          (schema.edn/load!
-           {:seon.schema.edn/resource
-            "seon/schema_edn_fixtures/duplicate_files"})
-          nil
-          (catch clojure.lang.ExceptionInfo error
-            error))
-        data (ex-data failure)
-        files (::schema.edn/files data)]
-    (is (= :seon.schema.edn.fixture/across-files
-           (::schema.edn/attribute data)))
-    (is (= 2 (count files)))
-    (is (some #(str/ends-with? % "/first.edn") files))
-    (is (some #(str/ends-with? % "/second.edn") files))
-    (is (every? #(str/includes? (ex-message failure) %)
-                files)
-        "the loud collision message names both files")))
+  (with-temporary-resources
+    {"duplicate_files/first.edn"
+     "{:seon.schema.edn.fixture/across-files :string}\n"
+     "duplicate_files/second.edn"
+     "{:seon.schema.edn.fixture/across-files [:string {:min 1}]}\n"}
+    (fn [root]
+      (let [failure
+            (try
+              (schema.edn/load!
+               {::schema.edn/resource (str root "/duplicate_files")})
+              nil
+              (catch clojure.lang.ExceptionInfo error error))
+            data (ex-data failure)
+            files (::schema.edn/files data)]
+        (is (= :seon.schema.edn.fixture/across-files
+               (::schema.edn/attribute data)))
+        (is (= 2 (count files)))
+        (is (some #(str/ends-with? % "/first.edn") files))
+        (is (some #(str/ends-with? % "/second.edn") files))
+        (is (every? #(str/includes? (ex-message failure) %) files)
+            "the loud collision message names both files")))))
 
 (deftest declaration-digest-is-independent-of-resource-order
   (let [resource-paths-var #'schema.edn/schema-resource-paths
@@ -121,42 +156,46 @@
         (.delete directory)))))
 
 (deftest a-misplaced-declaration-refuses-with-its-required-filename
-  (let [failure
-        (try
-          (schema.edn/load!
-           {::schema.edn/resource
-            "seon/schema_edn_fixtures/misplaced"})
-          nil
-          (catch clojure.lang.ExceptionInfo error
-            error))]
-    (is (= ::schema.edn/misplaced-attribute
-           (::schema.edn/error (ex-data failure))))
-    (is (= "actual.namespace.edn"
-           (::schema.edn/expected-file (ex-data failure))))
-    (is (str/includes? (ex-message failure) "wrong.namespace.edn"))))
+  (with-temporary-resources
+    {"misplaced/wrong.namespace.edn" "{:actual.namespace/key :string}\n"}
+    (fn [root]
+      (let [failure
+            (try
+              (schema.edn/load!
+               {::schema.edn/resource (str root "/misplaced")})
+              nil
+              (catch clojure.lang.ExceptionInfo error error))]
+        (is (= ::schema.edn/misplaced-attribute
+               (::schema.edn/error (ex-data failure))))
+        (is (= "actual.namespace.edn"
+               (::schema.edn/expected-file (ex-data failure))))
+        (is (str/includes? (ex-message failure) "wrong.namespace.edn"))))))
 
 (deftest an-unsafe-key-namespace-refuses-before-placement
-  (let [failure
-        (try
-          (schema.edn/load!
-           {::schema.edn/resource
-            "seon/schema_edn_fixtures/unsafe_namespace"})
-          nil
-          (catch clojure.lang.ExceptionInfo error
-            error))]
-    (is (= ::schema.edn/unsafe-namespace
-           (::schema.edn/error (ex-data failure))))
-    (is (= :bad?/key (::schema.edn/attribute (ex-data failure))))
-    (is (str/includes? (ex-message failure) "verbatim filename"))))
+  (with-temporary-resources
+    {"unsafe_namespace/bad.edn" "{:bad?/key :string}\n"}
+    (fn [root]
+      (let [failure
+            (try
+              (schema.edn/load!
+               {::schema.edn/resource (str root "/unsafe_namespace")})
+              nil
+              (catch clojure.lang.ExceptionInfo error error))]
+        (is (= ::schema.edn/unsafe-namespace
+               (::schema.edn/error (ex-data failure))))
+        (is (= :bad?/key (::schema.edn/attribute (ex-data failure))))
+        (is (str/includes? (ex-message failure) "verbatim filename"))))))
 
 (deftest unreadable-files-refuse-by-name
-  (let [data (test-support/refusal-data
-              #(schema.edn/load!
-                {:seon.schema.edn/resource
-                 "seon/schema_edn_fixtures/unreadable.edn"}))]
-    (is (map? data))
-    (is (string? (:seon.schema.edn/file data))
-        "the refusal names the unreadable file")))
+  (with-temporary-resources
+    {"unreadable.edn" "{:broken [unbalanced\n"}
+    (fn [root]
+      (let [data (test-support/refusal-data
+                  #(schema.edn/load!
+                    {::schema.edn/resource (str root "/unreadable.edn")}))]
+        (is (map? data))
+        (is (string? (::schema.edn/file data))
+            "the refusal names the unreadable file")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one gate
