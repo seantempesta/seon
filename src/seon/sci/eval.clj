@@ -111,6 +111,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.effect :as effect]
             [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.program :as program]
@@ -1455,6 +1456,9 @@
   [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    form-ordinal :seon.cluster.run.form/ordinal
+    cluster-name :seon.boot/cluster-name
     namespace-ref :seon.cluster.run.form/ns
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
@@ -1477,7 +1481,18 @@
         session-observation (volatile! nil)]
     (binding [db/*conn*
               (get-in evaluation-ctx
-                      [::custody :seon.store/branch-connection])]
+                      [::custody :seon.store/branch-connection])
+              effect/*context*
+              (when (and run-id (some? form-ordinal) cluster-name)
+                {:seon.store/branch-connection
+                 (get-in evaluation-ctx
+                         [::custody :seon.store/branch-connection])
+                 :seon.cluster.run/id run-id
+                 :seon.cluster.run.form/ordinal form-ordinal
+                 :seon.boot/cluster-name cluster-name
+                 :seon.sci.admit/caps caps
+                 :seon.config/on-core-error on-core-error
+                 :seon.effect/counter (atom -1)})]
       (try
         (let [before-reader-context
             (reader-context evaluation-ctx namespace-name)

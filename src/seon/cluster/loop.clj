@@ -1065,12 +1065,17 @@
     evaluation-namespace ::evaluation-namespace
     cluster ::cluster
     ctx :seon.sci.eval/ctx
-    agent-id :seon.cluster.agent/id}]
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    form-ordinal :seon.cluster.run.form/ordinal}]
   (merge form
          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
           :seon.sci.eval/ctx ctx
           :seon.cluster.agent/id agent-id
+          :seon.cluster.run/id run-id
+          :seon.cluster.run.form/ordinal form-ordinal
+          :seon.boot/cluster-name (:seon.cluster/name cluster)
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms cluster)
           :seon.config/on-core-error
@@ -1493,7 +1498,9 @@
                      ::evaluation-namespace evaluation-namespace
                      ::cluster cluster
                      :seon.sci.eval/ctx ctx
-                     :seon.cluster.agent/id agent-id}))
+                     :seon.cluster.agent/id agent-id
+                     :seon.cluster.run/id run-id
+                     :seon.cluster.run.form/ordinal ordinal}))
                   problem
                   (problems/form-problem
                    @connection

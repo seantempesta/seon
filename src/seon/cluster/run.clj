@@ -55,6 +55,7 @@
   (recovery asserts its `interrupted-at`)."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
+            [seon.effect :as effect]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -882,9 +883,10 @@
   "Settle and close one interrupted run during boot recovery.
   When the run's holder is NOT a live process — dead, or absent
   entirely — every running receipt (one carrying NO terminal fact) gets
-  `:seon.cluster.eval/interrupted-at` asserted at `::now`, dead custody
-  is released, the run is CLOSED at `::now`, and the owning agent's
-  run pointer is retracted. EVERY settled receipt is left byte-untouched:
+  `:seon.cluster.eval/interrupted-at` asserted at `::now`, every open effect
+  receipt gets `:seon.effect/interrupted-at`, dead custody is released, the
+  run is CLOSED at `::now`, and the owning agent's run pointer is retracted.
+  EVERY settled receipt is left byte-untouched:
   the receipt read and the stamp share this one transaction, so a
   stale-basis recovery stamping a settled receipt is unrepresentable
   (custody revision, Revision 4). A run held by a live process, a
@@ -928,8 +930,11 @@
       (let [agent-eid (:db/id (::agent run))
             pointer (when agent-eid
                       (:seon.cluster.agent/run
-                       (db/pull db [:seon.cluster.agent/run] agent-eid)))]
-        (cond-> (into (interrupt-stamps db (:db/id run) now)
+                       (db/pull db [:seon.cluster.agent/run] agent-eid)))
+            interrupted
+            (into (interrupt-stamps db (:db/id run) now)
+                  (effect/interruption-stamps db (:db/id run) now))]
+        (cond-> (into interrupted
                       (when (some? holder)
                         (retract-custody run)))
           true

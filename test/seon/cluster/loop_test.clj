@@ -222,6 +222,7 @@
               :seon.cluster.run.form/ns [:seon.ns/name 'old.namespace]}
         caps {:seon.config.eval.result/max-depth 4}
         cluster {:seon.sci.admit/caps caps
+                 :seon.cluster/name "default"
                  :seon.config.eval/time-limit-ms 500
                  :seon.config/on-core-error :panic}]
     (is (= {:seon.cluster.run.form/source "(inc 2)"
@@ -229,6 +230,9 @@
             :seon.sci.admit/caps caps
             :seon.sci.eval/ctx ctx
             :seon.cluster.agent/id "agent-1"
+            :seon.cluster.run/id "run-1"
+            :seon.cluster.run.form/ordinal 3
+            :seon.boot/cluster-name "default"
             :seon.sci.eval/time-limit-ms 500
             :seon.config/on-core-error :panic}
            ((private-loop-fn 'evaluation-request)
@@ -236,7 +240,9 @@
              :seon.cluster.loop/evaluation-namespace 'current.namespace
              :seon.cluster.loop/cluster cluster
              :seon.sci.eval/ctx ctx
-             :seon.cluster.agent/id "agent-1"})))))
+             :seon.cluster.agent/id "agent-1"
+             :seon.cluster.run/id "run-1"
+             :seon.cluster.run.form/ordinal 3})))))
 
 (deftest asked-value-preserves-explicit-reply-and-problem-precedence
   (let [db {:immutable :database-value}
