@@ -81,4 +81,8 @@
                 [:map
                  [:seon.cluster.run/id :seon.cluster.run/id]
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
-                 [:seon.cluster.run/process :seon.cluster.run/process]]}
+                 [:seon.cluster.run/process :seon.cluster.run/process]],
+                :unbound-var :qualified-symbol
+                :unbound-var-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unbound var referenced by a failed form"} [:seon.problems/unbound-var :seon.problems/unbound-var] [:seon.error/message :seon.error/message]]
+                :evaluation-failed [:= true]
+                :evaluation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a routed form whose evaluation failed"} [:seon.problems/evaluation-failed :seon.problems/evaluation-failed] [:seon.error/message :seon.error/message]]}

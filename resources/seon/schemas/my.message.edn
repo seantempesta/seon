@@ -18,4 +18,12 @@
               :my.message/declination
               [:vector
                {:min 1}
-               [:or :my.message/message :my.message/declination]]]}
+               [:or :my.message/message :my.message/declination]]],
+             :no-recipient [:= true]
+             :no-recipient-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
+             :no-content [:= true]
+             :no-content-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
+             :no-about [:= true]
+             :no-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no subject"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
+             :no-reason [:= true]
+             :no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]}

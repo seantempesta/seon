@@ -3,6 +3,11 @@
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
           :doc :string,
+          :keywords
+          [:set
+           {:description
+            "Qualified keywords written literally in this declaration's indexed source. clj-kondo resolves ::kw and ::alias/kw before reporting, so the set holds real namespaced keywords. It is honest membership only, never a read-versus-write claim: a keyword built at runtime is invisible, unqualified keywords are excluded as destructuring and option noise, and a keyword in a var's metadata (its :malli/schema) attributes to the namespace rather than to the var."}
+           :qualified-keyword],
           :fn
           [:map
            #:seon.db{:entity true}
@@ -16,6 +21,7 @@
            [:seon.fn/private? {:optional true} :seon.fn/private?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
+           [:seon.fn/keywords {:optional true} :seon.fn/keywords]
            [:seon.fn/arities {:optional true} :seon.fn/arities]
            [:seon.fn/ast {:optional true} :seon.fn/ast]
            [:seon.fn/workload {:optional true} :seon.fn/workload]
@@ -36,4 +42,24 @@
           :source [:string {:min 1}],
           :spec :string,
           :sym [:string {:min 1, :seon.db/identity true}],
-          :workload [:enum :io :compute]}
+          :workload [:enum :io :compute],
+          :index-transaction-refused :keyword
+          :index-transaction-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the indexing phase whose transaction was refused"} [:seon.fn/index-transaction-refused :seon.fn/index-transaction-refused] [:seon.error/message :seon.error/message]]
+          :source-checkout-absent :string
+          :source-checkout-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable source resource"} [:seon.fn/source-checkout-absent :seon.fn/source-checkout-absent] [:seon.error/message :seon.error/message]]
+          :source-span-absent [:= true]
+          :source-span-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declaration with no exact source span"} [:seon.fn/source-span-absent :seon.fn/source-span-absent] [:seon.error/message :seon.error/message]]
+          :capability-graph-invalid :seon.fn/sym
+          :capability-graph-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose capability declaration is invalid"} [:seon.fn/capability-graph-invalid :seon.fn/capability-graph-invalid] [:seon.error/message :seon.error/message]]
+          :analysis-blocked [:= true]
+          :analysis-blocked-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark static analysis with blocking findings"} [:seon.fn/analysis-blocked :seon.fn/analysis-blocked] [:seon.error/message :seon.error/message]]
+          :file-artifact-invalid :string
+          :file-artifact-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid or duplicate source file path"} [:seon.fn/file-artifact-invalid :seon.fn/file-artifact-invalid] [:seon.error/message :seon.error/message]]
+          :source-population-absent :keyword
+          :source-population-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent source population"} [:seon.fn/source-population-absent :seon.fn/source-population-absent] [:seon.error/message :seon.error/message]]
+          :duplicate-program-identity [:= true]
+          :duplicate-program-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark duplicate program identities"} [:seon.fn/duplicate-program-identity :seon.fn/duplicate-program-identity] [:seon.error/message :seon.error/message]]
+          :schema-declaration-invalid :seon.schema/key
+          :schema-declaration-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the declaration that is not a Malli schema"} [:seon.fn/schema-declaration-invalid :seon.fn/schema-declaration-invalid] [:seon.error/message :seon.error/message]]
+          :source-scratch-not-fresh [:= true]
+          :source-scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a source scratch branch that already contains program entities"} [:seon.fn/source-scratch-not-fresh :seon.fn/source-scratch-not-fresh] [:seon.error/message :seon.error/message]]}

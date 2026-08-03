@@ -16,4 +16,6 @@
                     :seon.config/on-core-error]
                    [:seon.sci.admit/caps
                     {:optional true}
-                    :seon.sci.admit/caps]]}
+                    :seon.sci.admit/caps]],
+                  :contract-violated :seon.instrument/fn
+                  :contract-violated-error [:map {:seon.error/class true :seon.render/ai seon.error/instrumentation-prose :seon.render/html seon.error/render-html :error/message "must identify the function whose declared contract was violated"} [:seon.instrument/contract-violated :seon.instrument/contract-violated] [:seon.error/message :seon.error/message]]}

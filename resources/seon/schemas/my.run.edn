@@ -12,4 +12,8 @@
           [:my.run/note :my.run/note]
           [:my.background/result
            {:optional true}
-           :my.background/result]]}
+           :my.background/result]],
+         :blank-note [:= true]
+         :blank-note-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run wait whose note is blank"} [:my.run/blank-note :my.run/blank-note] [:seon.error/message :seon.error/message]]
+         :blank-result [:= true]
+         :blank-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run completion whose result is blank"} [:my.run/blank-result :my.run/blank-result] [:seon.error/message :seon.error/message]]}

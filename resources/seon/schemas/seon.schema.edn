@@ -8,4 +8,48 @@
                [:seon.schema/form :seon.schema/form]
                [:seon.db.id/generator
                 {:optional true}
-                :seon.db.id/generator]]}
+                :seon.db.id/generator]],
+              :cyclic-reference :seon.schema/key
+              :cyclic-reference-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema participating in a cyclic reference"} [:seon.schema/cyclic-reference :seon.schema/cyclic-reference] [:seon.error/message :seon.error/message]]
+              :unresolved-predicate :qualified-symbol
+              :unresolved-predicate-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate with no admitted callable"} [:seon.schema/unresolved-predicate :seon.schema/unresolved-predicate] [:seon.error/message :seon.error/message]]
+              :noncanonical-definition :seon.schema/key
+              :noncanonical-definition-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a durable schema definition that is not canonical EDN"} [:seon.schema/noncanonical-definition :seon.schema/noncanonical-definition] [:seon.error/message :seon.error/message]]
+              :noncanonical-projection-data [:= true]
+              :noncanonical-projection-data-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark noncanonical data in a schema projection fingerprint"} [:seon.schema/noncanonical-projection-data :seon.schema/noncanonical-projection-data] [:seon.error/message :seon.error/message]]
+              :unproved-predicate-purity :qualified-symbol
+              :unproved-predicate-purity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate whose purity is not proved"} [:seon.schema/unproved-predicate-purity :seon.schema/unproved-predicate-purity] [:seon.error/message :seon.error/message]]
+              :unreadable-form :seon.schema/key
+              :unreadable-form-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema whose authored form is unreadable"} [:seon.schema/unreadable-form :seon.schema/unreadable-form] [:seon.error/message :seon.error/message]]
+              :non-round-tripping-form :seon.schema/key
+              :non-round-tripping-form-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema whose form does not round-trip as EDN"} [:seon.schema/non-round-tripping-form :seon.schema/non-round-tripping-form] [:seon.error/message :seon.error/message]]
+              :unregister-outside-delta :seon.schema/key
+              :unregister-outside-delta-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema unregistration requested outside an evaluation delta"} [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta] [:seon.error/message :seon.error/message]]
+              :malformed-projection-row [:= true]
+              :malformed-projection-row-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a committed projection row with an invalid shape"} [:seon.schema/malformed-projection-row :seon.schema/malformed-projection-row] [:seon.error/message :seon.error/message]]
+              :malformed-projection-form [:= true]
+              :malformed-projection-form-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an unreadable form in a committed projection row"} [:seon.schema/malformed-projection-form :seon.schema/malformed-projection-form] [:seon.error/message :seon.error/message]]
+              :duplicate-projection-row :seon.schema/key
+              :duplicate-projection-row-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the duplicated committed projection identity"} [:seon.schema/duplicate-projection-row :seon.schema/duplicate-projection-row] [:seon.error/message :seon.error/message]]
+              :malformed-projection-identity [:= true]
+              :malformed-projection-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a committed projection identity with an invalid shape"} [:seon.schema/malformed-projection-identity :seon.schema/malformed-projection-identity] [:seon.error/message :seon.error/message]]
+              :malformed-artifact-export [:= true]
+              :malformed-artifact-export-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a malformed export in a committed artifact"} [:seon.schema/malformed-artifact-export :seon.schema/malformed-artifact-export] [:seon.error/message :seon.error/message]]
+              :schema-in-use :seon.schema/key
+              :schema-in-use-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema still referenced by installed contracts"} [:seon.schema/schema-in-use :seon.schema/schema-in-use] [:seon.error/message :seon.error/message]]
+              :unknown-shape :seon.schema/key
+              :unknown-shape-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown projected map schema"} [:seon.schema/unknown-shape :seon.schema/unknown-shape] [:seon.error/message :seon.error/message]]
+              :undefined-contract :qualified-symbol
+              :undefined-contract-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose contract references an undefined schema"} [:seon.schema/undefined-contract :seon.schema/undefined-contract] [:seon.error/message :seon.error/message]]
+              :incomplete-predicate-contract :qualified-symbol
+              :incomplete-predicate-contract-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate contract missing a complete callable declaration"} [:seon.schema/incomplete-predicate-contract :seon.schema/incomplete-predicate-contract] [:seon.error/message :seon.error/message]]
+              :nilable-map-value :seon.schema/key
+              :nilable-map-value-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the map schema that permits a stored nil value"} [:seon.schema/nilable-map-value :seon.schema/nilable-map-value] [:seon.error/message :seon.error/message]]
+              :nilable-return :qualified-symbol
+              :nilable-return-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose durable return contract permits nil"} [:seon.schema/nilable-return :seon.schema/nilable-return] [:seon.error/message :seon.error/message]]
+              :invalid-schema :seon.schema/key
+              :invalid-schema-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the definition that is not a valid Malli schema"} [:seon.schema/invalid-schema :seon.schema/invalid-schema] [:seon.error/message :seon.error/message]]
+              :nilable-value-schema :seon.schema/key
+              :nilable-value-schema-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a durable value schema that permits nil"} [:seon.schema/nilable-value-schema :seon.schema/nilable-value-schema] [:seon.error/message :seon.error/message]]
+              :single-segment-namespace :symbol
+              :single-segment-namespace-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the single-segment namespace that cannot own durable data"} [:seon.schema/single-segment-namespace :seon.schema/single-segment-namespace] [:seon.error/message :seon.error/message]]}

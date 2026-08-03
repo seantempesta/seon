@@ -271,4 +271,40 @@
           :wire-settings
           [:map
            [:seon.ai/sent :seon.ai/sent]
-           [:seon.ai/inert :seon.ai/inert]]}
+           [:seon.ai/inert :seon.ai/inert]],
+          :unparseable-body [:= true]
+          :unparseable-body-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the status of an unparseable provider response"} [:seon.ai/unparseable-body :seon.ai/unparseable-body] [:seon.error/message :seon.error/message]]
+          :provider-error :seon.ai/http-status
+          :provider-error-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the status of a provider error response"} [:seon.ai/provider-error :seon.ai/provider-error] [:seon.error/message :seon.error/message]]
+          :timeout :seon.ai/timeout-ms
+          :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the elapsed provider request limit"} [:seon.ai/timeout :seon.ai/timeout] [:seon.error/message :seon.error/message]]
+          :transport-failure :seon.ai/endpoint
+          :transport-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint whose transport failed"} [:seon.ai/transport-failure :seon.ai/transport-failure] [:seon.error/message :seon.error/message]]
+          :no-credential [:= true]
+          :no-credential-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark an attempt with no provider credential"} [:seon.ai/no-credential :seon.ai/no-credential] [:seon.error/message :seon.error/message]]
+          :token-starvation [:= true]
+          :token-starvation-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark an attempt with no usable output-token budget"} [:seon.ai/token-starvation :seon.ai/token-starvation] [:seon.error/message :seon.error/message]]
+          :invalid-extra-body [:= true]
+          :invalid-extra-body-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark invalid provider-specific request data"} [:seon.ai/invalid-extra-body :seon.ai/invalid-extra-body] [:seon.error/message :seon.error/message]]
+          :extra-body-conflict [:= true]
+          :extra-body-conflict-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark provider-specific data that conflicts with governed fields"} [:seon.ai/extra-body-conflict :seon.ai/extra-body-conflict] [:seon.error/message :seon.error/message]]
+          :rate-limited :seon.ai/http-status
+          :rate-limited-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the rate-limit response status"} [:seon.ai/rate-limited :seon.ai/rate-limited] [:seon.error/message :seon.error/message]]
+          :provider-server-failure :seon.ai/http-status
+          :provider-server-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider server response status"} [:seon.ai/provider-server-failure :seon.ai/provider-server-failure] [:seon.error/message :seon.error/message]]
+          :credential-failure [:= true]
+          :credential-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider credential failure"} [:seon.ai/credential-failure :seon.ai/credential-failure] [:seon.error/message :seon.error/message]]
+          :authentication-failure :seon.ai/http-status
+          :authentication-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider authentication response status"} [:seon.ai/authentication-failure :seon.ai/authentication-failure] [:seon.error/message :seon.error/message]]
+          :authorization-failure :seon.ai/http-status
+          :authorization-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider authorization response status"} [:seon.ai/authorization-failure :seon.ai/authorization-failure] [:seon.error/message :seon.error/message]]
+          :model-failure :seon.ai/model
+          :model-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the unavailable or refused provider model"} [:seon.ai/model-failure :seon.ai/model-failure] [:seon.error/message :seon.error/message]]
+          :transport-before-send-failure :seon.ai/timeout-ms
+          :transport-before-send-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint whose transport failed before send"} [:seon.ai/transport-before-send-failure :seon.ai/transport-before-send-failure] [:seon.error/message :seon.error/message]]
+          :request-failure :seon.ai/http-status
+          :request-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint that refused the request"} [:seon.ai/request-failure :seon.ai/request-failure] [:seon.error/message :seon.error/message]]
+          :response-failure :seon.ai/http-status
+          :response-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the unusable provider response status"} [:seon.ai/response-failure :seon.ai/response-failure] [:seon.error/message :seon.error/message]]
+          :transport-outcome-unknown :seon.ai/endpoint
+          :transport-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint with an indeterminate transport outcome"} [:seon.ai/transport-outcome-unknown :seon.ai/transport-outcome-unknown] [:seon.error/message :seon.error/message]]}

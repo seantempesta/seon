@@ -1,0 +1,16 @@
+{:seon.schema.edn/unreadable-file :string
+ :seon.schema.edn/unreadable-file-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unreadable schema resource"} [:seon.schema.edn/unreadable-file :seon.schema.edn/unreadable-file] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/duplicate-attribute :qualified-keyword
+ :seon.schema.edn/duplicate-attribute-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the attribute declared by more than one resource"} [:seon.schema.edn/duplicate-attribute :seon.schema.edn/duplicate-attribute] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/not-a-map :string
+ :seon.schema.edn/not-a-map-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema resource whose root is not a map"} [:seon.schema.edn/not-a-map :seon.schema.edn/not-a-map] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/unsafe-namespace :qualified-keyword
+ :seon.schema.edn/unsafe-namespace-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify an attribute in an unsafe schema namespace"} [:seon.schema.edn/unsafe-namespace :seon.schema.edn/unsafe-namespace] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/misplaced-attribute :qualified-keyword
+ :seon.schema.edn/misplaced-attribute-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the attribute declared outside its flat namespace file"} [:seon.schema.edn/misplaced-attribute :seon.schema.edn/misplaced-attribute] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/dishonest-generator :qualified-keyword
+ :seon.schema.edn/dishonest-generator-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate schema with a dishonest generator"} [:seon.schema.edn/dishonest-generator :seon.schema.edn/dishonest-generator] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/unregistered-predicate :qualified-symbol
+ :seon.schema.edn/unregistered-predicate-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate that is not registered"} [:seon.schema.edn/unregistered-predicate :seon.schema.edn/unregistered-predicate] [:seon.error/message :seon.error/message]]
+ :seon.schema.edn/unresolved-reference :qualified-keyword
+ :seon.schema.edn/unresolved-reference-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema reference that cannot be resolved"} [:seon.schema.edn/unresolved-reference :seon.schema.edn/unresolved-reference] [:seon.error/message :seon.error/message]]}

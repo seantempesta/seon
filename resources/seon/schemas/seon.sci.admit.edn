@@ -46,4 +46,6 @@
                   [:seon.sci.admit/record
                    {:optional true}
                    :seon.sci.admit/record]],
-                 :value :any}
+                 :value :any,
+                 :projection-failed [:= true]
+                 :projection-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value that could not be projected into admitted data"} [:seon.sci.admit/projection-failed :seon.sci.admit/projection-failed] [:seon.error/message :seon.error/message]]}

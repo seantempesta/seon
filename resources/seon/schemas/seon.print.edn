@@ -208,4 +208,6 @@
               :derived
               true
               false],
-             :width [:int {:min 0, :seon.print/default 72}]}
+             :width [:int {:min 0, :seon.print/default 72}],
+             :unknown-face :keyword
+             :unknown-face-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested print face that is not declared"} [:seon.print/unknown-face :seon.print/unknown-face] [:seon.error/message :seon.error/message]]}

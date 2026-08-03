@@ -1,0 +1,8 @@
+{:seon.program/declaration-refused [:= true]
+ :seon.program/declaration-refused-error
+ [:map {:seon.error/class true
+        :seon.render/ai seon.error/render-ai
+        :seon.render/html seon.error/render-html
+        :error/message "must mark a program declaration refused by canonical admission"}
+  [:seon.program/declaration-refused :seon.program/declaration-refused]
+  [:seon.error/message :seon.error/message]]}

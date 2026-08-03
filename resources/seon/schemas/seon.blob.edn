@@ -18,4 +18,14 @@
             [:map
              [:seon.blob/digest :seon.blob/digest]
              [:seon.blob/size :seon.blob/size]
-             [:seon.blob/inline-prefix :seon.blob/inline-prefix]]}
+             [:seon.blob/inline-prefix :seon.blob/inline-prefix]],
+            :invalid-threshold :int
+            :invalid-threshold-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid blob-inline threshold"} [:seon.blob/invalid-threshold :seon.blob/invalid-threshold] [:seon.error/message :seon.error/message]]
+            :store-root-absent :string
+            :store-root-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the blob store with no process root"} [:seon.blob/store-root-absent :seon.blob/store-root-absent] [:seon.error/message :seon.error/message]]
+            :stored-content-mismatch :seon.blob/digest
+            :stored-content-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify stored blob content that mismatches its digest or size"} [:seon.blob/stored-content-mismatch :seon.blob/stored-content-mismatch] [:seon.error/message :seon.error/message]]
+            :input-stalled :seon.blob/size
+            :input-stalled-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a blob input stream that made no progress"} [:seon.blob/input-stalled :seon.blob/input-stalled] [:seon.error/message :seon.error/message]]
+            :content-digest-mismatch :seon.blob/digest
+            :content-digest-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify blob content that does not match its digest"} [:seon.blob/content-digest-mismatch :seon.blob/content-digest-mismatch] [:seon.error/message :seon.error/message]]}

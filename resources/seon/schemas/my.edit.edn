@@ -58,4 +58,16 @@
   [:my.edit/to-line :my.edit/to-line]
   [:my.edit/context :my.edit/context]
   [:my.edit/context-complete? :my.edit/context-complete?]
-  [:my.edit/replacements {:optional true} :my.edit/replacements]]}
+  [:my.edit/replacements {:optional true} :my.edit/replacements]],
+ :my.edit/no-match :my.edit/path
+ :my.edit/no-match-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path with no matching edit target"} [:my.edit/no-match :my.edit/no-match] [:seon.error/message :seon.error/message]]
+ :my.edit/ambiguous-match :my.edit/path
+ :my.edit/ambiguous-match-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path with ambiguous edit targets"} [:my.edit/ambiguous-match :my.edit/ambiguous-match] [:seon.error/message :seon.error/message]]
+ :my.edit/parse-refused [:= true]
+ :my.edit/parse-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source refused by the Clojure reader"} [:my.edit/parse-refused :my.edit/parse-refused] [:seon.error/message :seon.error/message]]
+ :my.edit/lossless-check-failed [:= true]
+ :my.edit/lossless-check-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source that failed the lossless check"} [:my.edit/lossless-check-failed :my.edit/lossless-check-failed] [:seon.error/message :seon.error/message]]
+ :my.edit/stale-source :my.edit/path
+ :my.edit/stale-source-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is stale"} [:my.edit/stale-source :my.edit/stale-source] [:seon.error/message :seon.error/message]]
+ :my.edit/not-utf8 :my.edit/path
+ :my.edit/not-utf8-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose source is not strict UTF-8"} [:my.edit/not-utf8 :my.edit/not-utf8] [:seon.error/message :seon.error/message]]}
