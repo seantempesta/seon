@@ -428,17 +428,17 @@
            (ai/retry-strategy settings)))]
     (+ provider-budget retry-budget)))
 
-(defn- provider-call-may-be-in-flight?
+(defn- provider-call-capture-basis
   [db agent-id]
-  (some?
-   (d/q '[:find ?capture .
-          :in $ ?agent-id
-          :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          [?agent :seon.cluster.agent/run ?run]
-          [?run :seon.cluster.run/process _]
-          [?capture :seon.context.capture/run ?run]]
-        db agent-id)))
+  (d/q '[:find ?basis-t .
+         :in $ ?agent-id
+         :where
+         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.cluster.agent/run ?run]
+         [?run :seon.cluster.run/process _]
+         [?capture :seon.context.capture/run ?run]
+         [?capture :seon.context.capture/basis-t ?basis-t]]
+       db agent-id))
 
 (defn- await-turn-completion!
   [routing entry]
@@ -458,8 +458,9 @@
               provider-db
               (loop []
                 (let [db @connection]
-                  (if (provider-call-may-be-in-flight? db agent-id)
-                    db
+                  (if-let [basis-t
+                           (provider-call-capture-basis db agent-id)]
+                    (d/as-of db basis-t)
                     (let [[value selected]
                           (async/alts!! [completion database-event]
                                         :priority true)]
