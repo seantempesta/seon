@@ -18,6 +18,7 @@
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [my.run :as my.run]
             [seon.ai :as ai]
             [seon.config :as config]
@@ -154,7 +155,7 @@
        (fn [actual-db run-id ordinal]
          (swap! calls conj [:form actual-db run-id ordinal])
          form)
-       #'d/pull
+       #'db/pull
        (fn [actual-db pattern lookup-ref]
          (swap! calls conj [:pull actual-db pattern lookup-ref])
          namespace-row)
@@ -343,7 +344,7 @@
         (config/apply! {:seon.config/connection connection
                         :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
-        (d/transact
+        (db/transact!
          connection
          (into (cluster.agent/creation-tx
                 {:seon.cluster.agent/id "planner"
@@ -353,7 +354,7 @@
                 {:seon.cluster.agent/id "worker"
                  :seon.ns/name 'my.agents.worker
                  :seon.cluster/name cluster-name})))
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "planner"
                       :seon.config.ai/thinking :high}])
         (let [db @connection
@@ -374,12 +375,12 @@
 
 (defn- prepare-call!
   [connection agent-id run-id message-id]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                 :seon.cluster.message/content "prove live settings"
                 :seon.cluster.message/at now}])
-  (d/transact
+  (db/transact!
    connection
    [{:seon.cluster.run/id run-id
      :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
@@ -397,14 +398,14 @@
 
 (defn- settings-attempts
   [db]
-  (->> (d/q '[:find ?run-id ?ordinal ?attempt
+  (->> (db/q '[:find ?run-id ?ordinal ?attempt
               :where
               [?attempt :seon.ai.attempt/run ?run]
               [?run :seon.cluster.run/id ?run-id]
               [?attempt :seon.ai.attempt/ordinal ?ordinal]]
             db)
        (map (fn [[run-id ordinal attempt]]
-              (assoc (d/pull db '[*] attempt)
+              (assoc (db/pull db '[*] attempt)
                      ::attempt-run-id run-id
                      ::attempt-ordinal ordinal)))
        (sort-by (juxt ::attempt-run-id ::attempt-ordinal))
@@ -452,13 +453,13 @@
           {:seon.config.ai/model "before-apply"
            :seon.config.ai.backup/model "backup-before-apply"}})
         (test-support/seed-cluster! connection cluster-name)
-        (d/transact
+        (db/transact!
          connection
          (cluster.agent/creation-tx
           {:seon.cluster.agent/id agent-id
            :seon.ns/name 'my.agents.live-settings
            :seon.cluster/name cluster-name}))
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id agent-id
                       :seon.config.ai/thinking :high}])
         (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
@@ -508,7 +509,7 @@
                       :seon.ai/settings))
                 "settings are beside usage, never inside it"))
 
-          (d/transact connection
+          (db/transact! connection
                       (run/close-tx
                        {:seon.cluster.run/id "settings-run-1"
                         :seon.cluster.run/process process
@@ -742,11 +743,11 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection
+      (db/transact! connection
                   (schema.datahike/malli->datahike-schema
                    (schema/canonical-database-attributes)))
       (testing "the trigger — the exact transact the live drive failed on"
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.cluster.agent/id "alice"}
                                {:seon.cluster.message/id "m-live"
                                 :seon.cluster.message/to
@@ -754,7 +755,7 @@
                                 :seon.cluster.message/content "count the widgets"
                                 :seon.cluster.message/at now}]))))
       (testing "the run, its agent pointer, and recorded trigger"
-        (is (map? (d/transact
+        (is (map? (db/transact!
                    connection
                    {:tx-data [{:seon.cluster.run/id "run-live"
                                :seon.cluster.run/agent
@@ -769,25 +770,25 @@
                                :seon.cluster.agent/run
                                [:seon.cluster.run/id "run-live"]}]}))))
       (testing "one frozen form"
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.cluster.run.form/id "f-0"
                                 :seon.cluster.run.form/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.run.form/ordinal 0
                                 :seon.cluster.run.form/source "(+ 1 1)"}]))))
       (testing "a running receipt (no terminal fact) and its settlement"
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.eval/ordinal 0
                                 :seon.cluster.eval/at now}])))
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/result-edn "2"}]))))
       (testing "the model-attempt chain: a failed primary carrying its
       transport evidence, and the backup that points back at it"
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.ai.attempt/id "run-live-attempt-0"
                                 :seon.ai.attempt/run
                                 [:seon.cluster.run/id "run-live"]
@@ -799,7 +800,7 @@
                                 :seon.ai/request-transmitted? false
                                 :seon.ai/response-started? false
                                 :seon.ai/output-observed? false}])))
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.ai.attempt/id "run-live-attempt-1"
                                 :seon.ai.attempt/run
                                 [:seon.cluster.run/id "run-live"]
@@ -811,7 +812,7 @@
                                 :seon.ai.attempt/failover-from
                                 [:seon.ai.attempt/id "run-live-attempt-0"]}]))))
       (testing "and an error receipt, whose result and error both land"
-        (is (map? (d/transact connection
+        (is (map? (db/transact! connection
                               [{:seon.cluster.eval/id "e-1"
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
@@ -821,7 +822,7 @@
                                 :seon.cluster.eval/result-edn "{:seon.error/kind :x}"}]))))
       (testing "the refs really are refs — a follow, not a string"
         (is (= "alice"
-               (d/q '[:find ?id .
+               (db/q '[:find ?id .
                       :where
                       [?m :seon.cluster.message/id "m-live"]
                       [?m :seon.cluster.message/to ?agent]
@@ -865,8 +866,8 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection (schema.datahike/malli->datahike-schema attributes))
-      (d/transact connection
+      (db/transact! connection (schema.datahike/malli->datahike-schema attributes))
+      (db/transact! connection
                   [{:seon.cluster.agent/id "agent-a"}
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
@@ -878,7 +879,7 @@
         (d/delete-database configuration)))))
 
 (defn- commit-run! [connection {:keys [held? planned? receipts closed?]}]
-  (d/transact
+  (db/transact!
    connection
    {:tx-data
     (cond-> [(cond-> {:seon.cluster.run/id "run-1"
@@ -941,6 +942,6 @@
     (with-database
       (fn [connection]
         (when state (commit-run! connection state))
-        (let [derived (work/next-agent-work (d/db connection) request)]
+        (let [derived (work/next-agent-work (db/db connection) request)]
           (testing (str "work derivation row " row)
             (is (= expected (:seon.cluster.work/situation derived)))))))))

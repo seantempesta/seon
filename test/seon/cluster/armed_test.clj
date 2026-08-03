@@ -72,7 +72,7 @@
         (await-fact
          (:seon.boot/cluster-connection instance)
          (fn [db]
-           (d/q '[:find ?closed-at .
+           (db/q '[:find ?closed-at .
                   :in $ ?run-id
                   :where
                   [?run :seon.cluster.run/id ?run-id]
@@ -84,13 +84,13 @@
 
 (defn- errors
   [db]
-  (d/q '[:find [(pull ?error [*]) ...]
+  (db/q '[:find [(pull ?error [*]) ...]
          :where [?error :seon.error/id _]]
        db))
 
 (defn- messages-to
   [db agent-id]
-  (d/q '[:find [(pull ?message [*]) ...]
+  (db/q '[:find [(pull ?message [*]) ...]
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -121,7 +121,7 @@
         (testing "the root agent exists, so the escalation dial names
         something real rather than something hoped for"
           (is (= "root"
-                 (d/q '[:find ?id . :in $ ?id
+                 (db/q '[:find ?id . :in $ ?id
                         :where [?agent :seon.cluster.agent/id ?id]]
                       @connection "root"))))
         (testing "the ARMER proc is running on the cluster's own graph"
@@ -183,7 +183,7 @@
           (await-fact
            (:seon.boot/cluster-connection instance)
            (fn [db]
-             (d/q '[:find ?closed-at .
+             (db/q '[:find ?closed-at .
                     :in $ ?run-id
                     :where
                     [?run :seon.cluster.run/id ?run-id]
@@ -244,7 +244,7 @@
                 next-agent-work work/next-agent-work
                 connection (:seon.boot/cluster-connection instance)
                 run-count (fn []
-                            (d/q '[:find (count ?run) .
+                            (db/q '[:find (count ?run) .
                                    :in $ ?agent-id
                                    :where
                                    [?agent :seon.cluster.agent/id ?agent-id]
@@ -287,7 +287,7 @@
            ;; completed, then a message commits before arm! returns.
            ;; Boot must already have registered the routing listener.
            (test-support/await-event! primed "boot arm prime")
-           (d/transact
+           (db/transact!
             (:seon.store/branch-connection
              (:seon.cluster.loop/cluster request))
             [{:seon.cluster.message/id "boot-window-message"
@@ -304,7 +304,7 @@
         (try
           (test-support/await-event! called "boot-window model call")
           (is (= "boot-window-message"
-                 (d/q '[:find ?message-id .
+                 (db/q '[:find ?message-id .
                         :where
                         [?run :seon.cluster.run/trigger ?message]
                         [?message :seon.cluster.message/id ?message-id]]
@@ -354,7 +354,7 @@
 
                  :else
                  (transact! target transaction)))]
-            (d/transact
+            (db/transact!
              connection
              [{:seon.cluster.message/id "terminal-refusal-trigger"
                :seon.cluster.message/to [:seon.cluster.agent/id "root"]
@@ -374,7 +374,7 @@
                             (:seon.error/kind %))
                         (errors db))))))
                   rid
-                  (d/q '[:find ?run-id .
+                  (db/q '[:find ?run-id .
                          :in $ ?error-id
                          :where
                          [?error :seon.error/id ?error-id]
@@ -396,14 +396,14 @@
                       :seon.flow/fault-committer))))
                   "the shipped :panic dial took R41's loud path")
               (let [receipt
-                    (d/q '[:find (pull ?receipt [*]) .
+                    (db/q '[:find (pull ?receipt [*]) .
                            :in $ ?run-id
                            :where
                            [?run :seon.cluster.run/id ?run-id]
                            [?receipt :seon.cluster.eval/run ?run]]
                          @connection rid)
                     run
-                    (d/pull @connection '[*]
+                    (db/pull @connection '[*]
                             [:seon.cluster.run/id rid])]
                 (is (false? (run/terminal? receipt))
                     "the function never reported a settlement that did not land")
@@ -452,13 +452,13 @@
                  connection
                  (fn [db]
                    (let [receipt
-                         (d/q '[:find (pull ?receipt [*]) .
+                         (db/q '[:find (pull ?receipt [*]) .
                                 :in $ ?run-id
                                 :where
                                 [?run :seon.cluster.run/id ?run-id]
                                 [?receipt :seon.cluster.eval/run ?run]]
                               db @run-id)
-                         run (d/pull db '[*]
+                         run (db/pull db '[*]
                                      [:seon.cluster.run/id @run-id])]
                      (when (:seon.cluster.eval/interrupted-at receipt)
                        {:receipt receipt :run run}))))]
@@ -497,7 +497,7 @@
               (is (= "clojure.lang.ExceptionInfo" (:seon.error/class fact)))
               (is (= :seon.cluster.agent/turn (:seon.error/proc fact)))
               (is (= "root"
-                     (d/q '[:find ?agent-id .
+                     (db/q '[:find ?agent-id .
                             :in $ ?error-id
                             :where
                             [?error :seon.error/id ?error-id]

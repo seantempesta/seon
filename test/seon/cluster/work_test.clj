@@ -23,6 +23,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.work :as work]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike])
@@ -81,9 +82,9 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection
+      (db/transact! connection
                   (schema.datahike/malli->datahike-schema attributes))
-      (d/transact connection [{:seon.cluster.agent/id agent-id}])
+      (db/transact! connection [{:seon.cluster.agent/id agent-id}])
       (body connection)
       (finally
         (d/release connection)
@@ -92,7 +93,7 @@
 (defn- add-trigger!
   "Commit one trigger message for the agent."
   [connection]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                 :seon.cluster.message/content "do the thing"
@@ -101,7 +102,7 @@
 (defn- open-run!
   "Open a run, optionally claimed by `holder`, optionally planned."
   [connection {:keys [holder planned? triggered?]}]
-  (d/transact
+  (db/transact!
    connection
    (cond-> {:tx-data
             (cond-> [(cond-> {:seon.cluster.run/id run-id
@@ -128,7 +129,7 @@
   ([connection ordinal]
    (terminal-receipt! connection ordinal "1"))
   ([connection ordinal result-edn]
-   (d/transact connection
+   (db/transact! connection
                [{:seon.cluster.eval/id (str run-id "-" ordinal)
                  :seon.cluster.eval/run [:seon.cluster.run/id run-id]
                  :seon.cluster.eval/ordinal ordinal
@@ -137,7 +138,7 @@
                  :seon.cluster.eval/result-edn result-edn}])))
 
 (defn- close-run! [connection]
-  (d/transact connection
+  (db/transact! connection
               [[:db/add [:seon.cluster.run/id run-id]
                 :seon.cluster.run/closed-at now]
                [:db/retract [:seon.cluster.agent/id agent-id]
@@ -145,13 +146,13 @@
 
 (defn- configure-cap!
   [connection limit]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.config/cluster "work-test"
                 :seon.config.run/max-episode-runs limit}]))
 
 (defn- add-outside-trigger!
   [connection id at]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                 :seon.cluster.message/content id
@@ -160,7 +161,7 @@
 (defn- closed-run!
   "Commit one complete turn, with each supplied value as a receipt result."
   [connection id trigger-id result-values at]
-  (d/transact
+  (db/transact!
    connection
    {:tx-data
     (into [{:seon.cluster.run/id id
@@ -179,7 +180,7 @@
               :seon.cluster.run.form/ordinal ordinal
               :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
            result-values))})
-  (d/transact
+  (db/transact!
    connection
    (map-indexed
     (fn [ordinal value]
@@ -189,7 +190,7 @@
        :seon.cluster.eval/at at
        :seon.cluster.eval/result-edn (pr-str value)})
     result-values))
-  (d/transact connection
+  (db/transact! connection
               [[:db/add [:seon.cluster.run/id id]
                 :seon.cluster.run/closed-at at]
                [:db/retract [:seon.cluster.agent/id agent-id]
@@ -290,7 +291,7 @@
               (open-run! connection {:holder process :planned? true
                                      :triggered? true})
               (close-run! connection)
-              (d/transact connection
+              (db/transact! connection
                           [{:seon.cluster.message/id "message-2"
                             :seon.cluster.message/to
                             [:seon.cluster.agent/id agent-id]
@@ -306,7 +307,7 @@
               (add-trigger! connection)
               (open-run! connection {:holder process :planned? true
                                      :triggered? true})
-              (d/transact connection
+              (db/transact! connection
                           [{:seon.cluster.message/id "message-2"
                             :seon.cluster.message/to
                             [:seon.cluster.agent/id agent-id]
@@ -322,7 +323,7 @@
     (with-database
       (fn [connection]
         (build connection)
-        (let [db (d/db connection)
+        (let [db (db/db connection)
               derived (work/next-agent-work db request)]
           (testing label
             (if (nil? expect)
@@ -457,7 +458,7 @@
                    (pr-str lint-refusal)
                    "1")))
               (when closed? (close-run! connection))
-              (let [db (d/db connection)
+              (let [db (db/db connection)
                     derived (work/next-agent-work db request)
                     situation (:seon.cluster.work/situation derived)
                     answered-closed? (and closed? triggered? trigger-first?)
@@ -494,7 +495,7 @@
     (fn [connection]
       (add-trigger! connection)
       (open-run! connection {:triggered? true})
-      (let [db (d/db connection)]
+      (let [db (db/db connection)]
         (is (nil? (work/next-agent-work db request))
             "it is not work — nothing re-calls a lost paid call")
         (is (= run-id (:seon.cluster.run/id (work/interruption db agent-id)))
@@ -505,7 +506,7 @@
     (fn [connection]
       (add-trigger! connection)
       (open-run! connection {:planned? true :triggered? true})
-      (let [db (d/db connection)]
+      (let [db (db/db connection)]
         (is (nil? (work/next-agent-work db request))
             "an unheld plan never cold resumes")
         (is (= run-id (:seon.cluster.run/id
@@ -519,15 +520,15 @@
       (testing "a trigger no run points at is unanswered"
         (is (= [message-id]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (d/db connection) agent-id)))))
+                     (work/unanswered-triggers (db/db connection) agent-id)))))
       (open-run! connection {:holder process :triggered? true})
       (testing "opening a run against it answers it — with no flag anywhere"
-        (is (empty? (work/unanswered-triggers (d/db connection) agent-id))))
+        (is (empty? (work/unanswered-triggers (db/db connection) agent-id))))
       (testing "and a run opened without a trigger ref answers nothing"
         (close-run! connection)
-        (is (empty? (work/unanswered-triggers (d/db connection) agent-id))
+        (is (empty? (work/unanswered-triggers (db/db connection) agent-id))
             "the first trigger stays answered")
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.message/id "message-3"
                       :seon.cluster.message/to
                       [:seon.cluster.agent/id agent-id]
@@ -535,19 +536,19 @@
                       :seon.cluster.message/at now}])
         (is (= ["message-3"]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (d/db connection) agent-id))))))))
+                     (work/unanswered-triggers (db/db connection) agent-id))))))))
 
 (deftest triggers-come-back-oldest-first
   (with-database
     (fn [connection]
       (doseq [[id at] [["m-2" (Date. 2000)] ["m-1" (Date. 1000)]
                        ["m-3" (Date. 3000)]]]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.message/id id
                       :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                       :seon.cluster.message/content id
                       :seon.cluster.message/at at}]))
       (is (= ["m-1" "m-2" "m-3"]
              (mapv :seon.cluster.message/id
-                   (work/unanswered-triggers (d/db connection) agent-id)))
+                   (work/unanswered-triggers (db/db connection) agent-id)))
           "commit order is not arrival order; the fact carries the time"))))

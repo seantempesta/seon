@@ -20,6 +20,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
@@ -44,14 +45,14 @@
 
 (defn- commit-inbound!
   [connection request]
-  (d/transact connection
+  (db/transact! connection
               [[:db.fn/call #'message/inbound-tx request]]))
 
 (defn- with-database
   [body]
   (test-support/with-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.agent/id "alice"}
                    {:seon.cluster.agent/id "bob"}])
       (body connection))))
@@ -60,7 +61,7 @@
   "Commit one message from OUTSIDE the agent population — a human's.
   No `from`, and no triggering transaction: the head of a chain."
   [connection id to content]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id id
                 :seon.cluster.message/to [:seon.cluster.agent/id to]
                 :seon.cluster.message/content content
@@ -82,7 +83,7 @@
                     trigger (assoc :seon.cluster.message/trigger trigger)))
         rows (:seon.cluster.message/rows delivery)]
     (when (seq rows)
-      (d/transact connection rows))
+      (db/transact! connection rows))
     delivery))
 
 (def ^:private agent-ids ["alice" "bob" "carol" "dana"])
@@ -213,7 +214,7 @@
          (fn [entity]
            (let [id (:seon.cluster.message/id entity)
                  parent
-                 (d/q '[:find ?parent-id .
+                 (db/q '[:find ?parent-id .
                         :in $ ?id
                         :where
                         [?message :seon.cluster.message/id ?id]
@@ -222,7 +223,7 @@
                       db id)]
              [id
               (cond-> {::id id
-                       ::to (d/q '[:find ?agent-id .
+                       ::to (db/q '[:find ?agent-id .
                                    :in $ ?to
                                    :where [?to :seon.cluster.agent/id
                                            ?agent-id]]
@@ -233,7 +234,7 @@
                 (:seon.cluster.message/from entity)
                 (assoc ::from (message/sender db id))
                 parent (assoc ::parent parent))]))
-         (d/q '[:find [(pull ?message [*]) ...]
+         (db/q '[:find [(pull ?message [*]) ...]
                 :where [?message :seon.cluster.message/id _]]
               db))))
 
@@ -262,7 +263,7 @@
             delivery (message/delivery @connection request)
             rows (:seon.cluster.message/rows delivery)]
         (when (seq rows)
-          (d/transact connection rows))
+          (db/transact! connection rows))
         [next-model
          (and
           (or (nil? chain-limit)
@@ -284,7 +285,7 @@
   (let [population (subvec agent-ids 0 population-size)]
     (test-support/with-database
       (fn [connection]
-        (d/transact connection
+        (db/transact! connection
                     (mapv (fn [id] {:seon.cluster.agent/id id})
                           population))
         (second
@@ -345,12 +346,12 @@
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
                             :value (my.message/send "bob" "how many?")})
-      (let [pulled (d/q '[:find (pull ?message [*]) .
+      (let [pulled (db/q '[:find (pull ?message [*]) .
                           :where
                           [?message :seon.cluster.message/content "how many?"]]
                         @connection)]
         (is (= "alice"
-               (d/q '[:find ?id .
+               (db/q '[:find ?id .
                       :in $ ?eid
                       :where [?eid :seon.cluster.agent/id ?id]]
                     @connection
@@ -371,7 +372,7 @@
   (with-database
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.run/id "r-1"
                     :seon.cluster.run/agent
                     [:seon.cluster.agent/id "alice"]
@@ -389,14 +390,14 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact
+      (db/transact!
        connection
        (schema.datahike/malli->datahike-schema
         (schema/canonical-database-attributes)))
-      (d/transact connection [{:seon.cluster.agent/id "alice"}])
+      (db/transact! connection [{:seon.cluster.agent/id "alice"}])
       (ask! connection "m-0" "alice" "hello")
       (let [report
-            (d/transact
+            (db/transact!
              connection
              (run/open-tx
               {:seon.cluster.run/id "r-1"
@@ -406,7 +407,7 @@
                [:seon.cluster.message/id "m-0"]
                :seon.cluster.run/opened-at now}))
             transaction (:max-tx (:db-after report))]
-        (is (nil? (d/pull @connection '[*] transaction))
+        (is (nil? (db/pull @connection '[*] transaction))
             "the HISTORY-OFF database has no transaction entity")
         (is (= "m-0" (message/trigger @connection "r-1"))
             "the run's ordinary trigger ref survives independently"))
@@ -560,13 +561,13 @@
   (with-database
     (fn [connection]
       (commit-inbound! connection (inbound-request "bob" "hello bob"))
-      (let [row (d/q '[:find (pull ?message [*]) .
+      (let [row (db/q '[:find (pull ?message [*]) .
                        :where
                        [?message :seon.cluster.message/content "hello bob"]]
                      @connection)]
         (is (string? (:seon.cluster.message/id row)))
         (is (= "bob"
-               (d/q '[:find ?agent-id .
+               (db/q '[:find ?agent-id .
                       :in $ ?message-id
                       :where
                       [?message :seon.cluster.message/id ?message-id]
@@ -586,7 +587,7 @@
         (commit-inbound!
          connection
          (inbound-request "bob" (str "burst-" index))))
-      (let [ids (d/q '[:find [?id ...]
+      (let [ids (db/q '[:find [?id ...]
                        :where [?message :seon.cluster.message/id ?id]]
                      @connection)
             inbound-ids (filter #(str/starts-with?
@@ -600,10 +601,10 @@
   ;; seed 2026072902 — no delivery step between commit and route!.
   (with-database
     (fn [connection]
-      (let [alice-eid (d/q '[:find ?agent .
+      (let [alice-eid (db/q '[:find ?agent .
                              :where [?agent :seon.cluster.agent/id "alice"]]
                            @connection)
-            bob-eid (d/q '[:find ?agent .
+            bob-eid (db/q '[:find ?agent .
                            :where [?agent :seon.cluster.agent/id "bob"]]
                          @connection)
             alice (async/chan (async/sliding-buffer 1))

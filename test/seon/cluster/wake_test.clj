@@ -23,7 +23,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.wake :as wake]
             [seon.schema]
@@ -33,14 +33,14 @@
 (defn- with-connection [body]
   (test-support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
       (body connection))))
 
 (defn- agent-eid
   "The recipient's ENTITY ID — what a `:seon.cluster.message/to` datom
   carries as its value, and therefore the key `route!` looks up."
   [connection]
-  (d/q '[:find ?e . :where [?e :seon.cluster.agent/id "agent-a"]]
+  (db/q '[:find ?e . :where [?e :seon.cluster.agent/id "agent-a"]]
        @connection))
 
 (defn- message-tx [id]
@@ -90,12 +90,12 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [render key]} (route-probe! connection mailbox)]
         (try
-          (d/transact connection (message-tx "m-1"))
+          (db/transact! connection (message-tx "m-1"))
           (is (some? (test-support/await-event! mailbox "mailbox wake"))
               "a message to this agent reaches ITS mailbox")
           (testing "a commit of attributes only a TURN writes wakes no
                     mailbox — the trap that would spin an idle cluster"
-            (d/transact connection (run-tx "run-1"))
+            (db/transact! connection (run-tx "run-1"))
             (is (nil? (async/poll! mailbox))))
           (testing "a transaction instant is in EVERY report and routes
                     nowhere by itself"
@@ -135,7 +135,7 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
-          (d/transact connection [{:seon.cluster.agent/id "agent-b"}])
+          (db/transact! connection [{:seon.cluster.agent/id "agent-b"}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
           (finally
@@ -156,7 +156,7 @@
           (let [committed
                 (future
                   (mapv (fn [n]
-                          (d/transact connection
+                          (db/transact! connection
                                       (message-tx (str "m-" n))))
                         (range 5)))]
             (is (= 5
@@ -219,7 +219,7 @@
                     (async.protocols/closed? channel))))]
         (try
           (async/close! mailbox)
-          (let [committed (future (d/transact connection (message-tx "m-9")))]
+          (let [committed (future (db/transact! connection (message-tx "m-9")))]
             (is (map? (test-support/await-event!
                        committed "fenced-mailbox transaction"))
                 "the committing caller returned — the handler swallowed
@@ -231,7 +231,7 @@
             (is (nil? (async/poll! faults))
                 "and the fence produced NO core fault about itself"))
           (is (= ["m-9"]
-                 (d/q '[:find [?id ...]
+                 (db/q '[:find [?id ...]
                         :where [_ :seon.cluster.message/id ?id]]
                       @connection))
               "the message stays a durable fact — the fresh mailbox
@@ -252,7 +252,7 @@
           ;; fixed-1, saturated and unread: the next offer! must park,
           ;; so it returns nil rather than false
           (async/offer! mailbox ::filler)
-          (let [committed (future (d/transact connection (message-tx "m-f")))]
+          (let [committed (future (db/transact! connection (message-tx "m-f")))]
             (is (map? (test-support/await-event!
                        committed "saturated-route transaction")))
             (let [fault (test-support/await-event! faults "route fault")]
@@ -276,7 +276,7 @@
             {:keys [render faults key]} (route-probe! connection mailbox)]
         (try
           (async/close! render)
-          (let [committed (future (d/transact connection (message-tx "m-r")))]
+          (let [committed (future (db/transact! connection (message-tx "m-r")))]
             (is (map? (test-support/await-event!
                        committed "closed-render transaction"))
                 "the writer still returned")
@@ -308,7 +308,7 @@
           [commits (gen/vector (gen/elements [:message :agent :run]) 1 8)]
           (test-support/with-database
             (fn [connection]
-              (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+              (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
               (let [mailbox (async/chan 64)
                     armer (async/chan 64)
                     ;; a COUNTING render channel: production slides,
@@ -329,12 +329,12 @@
                 (try
                   (doseq [[commit index] (map vector commits (range))]
                     (case commit
-                      :message (d/transact connection (message-tx
+                      :message (db/transact! connection (message-tx
                                                        (str "pm-" index)))
-                      :agent (d/transact connection
+                      :agent (db/transact! connection
                                          [{:seon.cluster.agent/id
                                            (str "pa-" index)}])
-                      :run (d/transact connection (run-tx
+                      :run (db/transact! connection (run-tx
                                                    (str "pr-" index)))))
                   (let [drain (fn [channel]
                                 (loop [n 0]
@@ -380,6 +380,6 @@
         (is (nil? (wake/unlisten! request)) "removing an absent listener
                                              is a no-op, because stop may
                                              arrive after a release")
-        (d/transact connection (message-tx "m-after"))
+        (db/transact! connection (message-tx "m-after"))
         (is (nil? (async/poll! mailbox))
             "nothing is delivered after unlisten")))))

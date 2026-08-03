@@ -1,7 +1,7 @@
 (ns seon.cluster.message-assignment-test
   "About-carrying sends resolve facts and upsert one assignment."
   (:require [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.message :as message]
             [seon.problems :as problems]
@@ -15,7 +15,7 @@
   [body]
   (test-support/with-database
    (fn [connection]
-     (d/transact connection
+     (db/transact! connection
                  [{:seon.cluster.agent/id "alice"}
                   {:seon.cluster.agent/id "bob"}
                   {:seon.error/id "failure-17"}
@@ -56,9 +56,9 @@
            rows (:seon.cluster.message/rows delivery)]
        (is (empty? (:seon.error/values delivery)))
        (is (= 1 (count rows)))
-       (d/transact connection rows)
+       (db/transact! connection rows)
        (is (= "failure-17"
-              (d/q '[:find ?failure-id .
+              (db/q '[:find ?failure-id .
                      :where
                      [?message :seon.cluster.message/content "repair this"]
                      [?message :seon.cluster.message/about ?failure]
@@ -88,7 +88,7 @@
             (assoc (request "assignment-run" "repair this")
                    :my.message/value
                    (my.message/send "bob" "repair this" "receipt-17")))
-           _ (d/transact connection
+           _ (db/transact! connection
                          (:seon.cluster.message/rows assignment))
            red-before
            (:seon.problems/errored-receipts
@@ -108,10 +108,10 @@
            rows (:seon.cluster.message/rows declination)]
        (is (empty? (:seon.error/values declination)))
        (is (= 1 (count rows)))
-       (d/transact connection rows)
+       (db/transact! connection rows)
        (testing "the reply shape joins the assigned owner back to the problem"
          (is (= 1
-                (d/q '[:find (count ?declination) .
+                (db/q '[:find (count ?declination) .
                        :where
                        [?problem :seon.cluster.eval/id "receipt-17"]
                        [?planner :seon.cluster.agent/id "alice"]
@@ -134,7 +134,7 @@
          (is (= ["receipt-17"]
                 (mapv :seon.cluster.eval/id red-before)))
          (is (= reason
-                (d/q '[:find ?reason .
+                (db/q '[:find ?reason .
                        :where
                        [?declination :my.message/reason ?reason]]
                      @connection))
@@ -154,7 +154,7 @@
                                         (request run-id content)))]
                  (.countDown ready)
                  (.await release)
-                 (d/transact connection rows))))
+                 (db/transact! connection rows))))
            transactions [(transact "run-1" "first assignment")
                          (transact "run-2" "second assignment")]]
        (try
@@ -167,7 +167,7 @@
                                     ::terminal-delivery-committed))
        (testing "the schema identity fences the race at commit"
          (is (= 1
-                (d/q '[:find (count ?message) .
+                (db/q '[:find (count ?message) .
                        :where
                        [?failure :seon.error/id "failure-17"]
                        [?recipient :seon.cluster.agent/id "bob"]

@@ -1,7 +1,7 @@
 (ns seon.cluster.resume-artifact-routing-test
   "X2 keeps interrupted process history out of namespace-owner routing."
   (:require [clojure.test :refer [deftest is]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
@@ -32,7 +32,7 @@
 (deftest resume-artifacts-stay-red-and-are-excluded-from-owner-routing
   (test-support/with-database
    (fn [connection]
-     (d/transact
+     (db/transact!
       connection
       [{:seon.ns/name 'my.gen.planner}
        {:seon.ns/name 'my.gen.alpha}
@@ -44,7 +44,7 @@
         :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
         :seon.cluster.run/opened-at now
         :seon.cluster.run/plan-digest "resume-artifact-digest"}])
-     (d/transact
+     (db/transact!
       connection
       [{:seon.cluster.run.form/id "resume-form-0"
         :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
@@ -74,7 +74,7 @@
             :seon.cluster.run.form/ordinal 1
             :seon.sci.eval/evaluation failed}))
          "one X2 clause prevents process-history breakage becoming owner blame")
-     (d/transact connection
+     (db/transact! connection
                  [[:db/add [:seon.cluster.eval/id "resume-receipt-1"]
                    :seon.cluster.eval/result-edn
                    (:seon.cluster.eval/result-edn failed)]
@@ -94,7 +94,7 @@
              :seon.cluster.run.form/ordinal 0
              :seon.cluster.message/at now
              :seon.config.message/max-chain 16})]
-       (d/transact connection (:seon.cluster.message/rows delivery)))
+       (db/transact! connection (:seon.cluster.message/rows delivery)))
      (is (= :unrouted-red
             (:seon.cluster.work/form-state
              (work/form-settlement @connection "resume-form-1")))

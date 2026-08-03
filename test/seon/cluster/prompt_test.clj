@@ -2,7 +2,7 @@
   "Recurring acceptance for one fresh walk per prompt."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
@@ -20,18 +20,18 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "prompt-walk")
-      (d/transact connection
+      (db/transact! connection
                   (agent/creation-tx
                    {:seon.cluster.agent/id "walker"
                     :seon.cluster/name "prompt-walk"
                     :seon.ns/name 'my.agents.walker}))
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.message/id "walk-message"
                     :seon.cluster.message/to
                     [:seon.cluster.agent/id "walker"]
                     :seon.cluster.message/content "inspect this walk"
                     :seon.cluster.message/at (Date. 1700000000000)}])
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.run/id "walk-run"
                     :seon.cluster.run/agent
                     [:seon.cluster.agent/id "walker"]
@@ -81,7 +81,7 @@
              #(render/walk {:depth 2 :branch []}))
             "branch=[]")
            "branch is the labeled get-in drill handle")
-       (is (empty? (d/q '[:find ?block
+       (is (empty? (db/q '[:find ?block
                           :where
                           [?agent :seon.cluster.agent/id "walker"]
                           [?agent :seon.cluster.agent/blocks ?block]]
@@ -93,7 +93,7 @@
    (fn [connection]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection request))]
-       (d/transact connection
+       (db/transact! connection
                    [{:seon.cluster.message/id "later"
                      :seon.cluster.message/to
                      [:seon.cluster.agent/id "walker"]
@@ -108,12 +108,12 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "no-trigger")
-      (d/transact connection
+      (db/transact! connection
                   (agent/creation-tx
                    {:seon.cluster.agent/id "walker"
                     :seon.cluster/name "no-trigger"
                     :seon.ns/name 'my.agents.walker}))
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.run/id "walk-run"
                     :seon.cluster.run/agent
                     [:seon.cluster.agent/id "walker"]

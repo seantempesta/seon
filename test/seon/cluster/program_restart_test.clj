@@ -3,7 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [datahike.core :as datahike]
             [sci.core :as sci]
             [seon.ai :as ai]
@@ -16,7 +16,7 @@
 
 (defn- transact-inbound!
   [connection agent-id content]
-  (d/transact
+  (db/transact!
    connection
    {:tx-data
     [[:db.fn/call
@@ -44,12 +44,12 @@
           (throw (ex-info "The scratch cluster did not commit the expected fact."
                           {:seon.error/kind ::commit-timeout
                            ::receipts
-                           (mapv #(d/pull @connection
+                           (mapv #(db/pull @connection
                                           [:seon.cluster.eval/ordinal
                                            :seon.cluster.eval/result-edn
                                            :seon.cluster.eval/error]
                                           %)
-                                 (d/q '[:find [?receipt ...]
+                                 (db/q '[:find [?receipt ...]
                                         :where
                                         [?receipt :seon.cluster.eval/ordinal _]]
                                       @connection))})))
@@ -60,17 +60,17 @@
 (defn- program-present?
   [db]
   (and
-   (some? (d/pull db [:seon.fn/sym]
+   (some? (db/pull db [:seon.fn/sym]
                   [:seon.fn/sym "my.agents.restart-a/persisted"]))
-   (some? (d/pull db [:seon.schema/key]
+   (some? (db/pull db [:seon.schema/key]
                   [:seon.schema/key :my.agents.restart-a/nonnegative]))
-   (some? (d/pull db [:seon.test/sym]
+   (some? (db/pull db [:seon.test/sym]
                   [:seon.test/sym
                    "my.agents.restart-a/persisted-test"]))))
 
 (defn- authored-receipt-count
   [db agent-id]
-  (d/q '[:find (count ?receipt) .
+  (db/q '[:find (count ?receipt) .
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -86,7 +86,7 @@
 
 (defn- authored-result
   [db agent-id ordinal]
-  (d/q '[:find ?result .
+  (db/q '[:find ?result .
          :in $ ?agent-id ?bootstrap-run-id ?ordinal
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -101,7 +101,7 @@
 (defn- active-agent-id
   "The agent whose durable run is currently open."
   [db]
-  (d/q '[:find ?agent-id .
+  (db/q '[:find ?agent-id .
          :where
          [?run :seon.cluster.run/agent ?agent]
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -111,7 +111,7 @@
 (defn- agent-open-run?
   [db agent-id]
   (boolean
-   (d/q '[:find ?run .
+   (db/q '[:find ?run .
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
@@ -121,7 +121,7 @@
 
 (defn- agent-authored-closed-run-count
   [db agent-id]
-  (d/q '[:find (count ?run) .
+  (db/q '[:find (count ?run) .
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -137,7 +137,7 @@
    connection
    (fn [db]
      (:seon.cluster.run/closed-at
-      (d/pull db [:seon.cluster.run/closed-at]
+      (db/pull db [:seon.cluster.run/closed-at]
               [:seon.cluster.run/id (bootstrap/run-id agent-id)])))
    (constantly nil)))
 
@@ -154,7 +154,7 @@
   (boolean
    (some #{"OK"}
          (map semantic-result
-              (d/q '[:find [?result ...]
+              (db/q '[:find [?result ...]
                      :where
                      [?agent :seon.cluster.agent/id "restart-b"]
                      [?run :seon.cluster.run/agent ?agent]
@@ -239,7 +239,7 @@
                  (semantic-result
                   (authored-result @connection "restart-a" 12)))
               "a private scratch def remains callable inside its namespace")
-          (is (nil? (d/pull @connection [:db/id]
+          (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym
                              "my.agents.restart-a/scratch"]))
               "an uncontracted scratch def remains outside the program graph")
@@ -252,12 +252,12 @@
                   (semantic-result
                    (authored-result @connection "restart-a" 15))))
               "the invalid ordinal is one flat value, not a plan-wide abort")
-          (is (nil? (d/pull @connection [:db/id]
+          (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym
                              "my.agents.restart-a/removed-before-restart"])))
           (is (pos? (authored-receipt-count @connection "restart-a")))
           (let [namespace-row
-                (d/pull @connection
+                (db/pull @connection
                         [{:seon.ns/requires [:seon.ns/name]}]
                         [:seon.ns/name 'my.agents.restart-a])
                 required-names
@@ -279,7 +279,7 @@
           (is (program-present? @connection)
               "the reopened database retains every current declaration")
           (is (not (contains?
-                    (d/pull @connection '[*]
+                    (db/pull @connection '[*]
                             [:seon.schema/key
                              :my.agents.restart-a/nonnegative])
                     :seon.schema/ns))

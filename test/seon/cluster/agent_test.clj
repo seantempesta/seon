@@ -18,6 +18,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [my.run :as my.run]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
@@ -93,7 +94,7 @@
   [connection ctx]
   {:seon.store/branch-connection connection
    :seon.cluster/name
-   (d/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
+   (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
         @connection)
    :seon.flow/work-launcher *work-launcher*
    :seon.sci.eval/ctx ctx
@@ -166,7 +167,7 @@
 
 (defn- outside-trigger!
   [connection agent-id message-id content]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                 :seon.cluster.message/content content
@@ -174,7 +175,7 @@
 
 (defn- agent-trigger!
   [connection from-id to-id message-id content]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id to-id]
                 :seon.cluster.message/from [:seon.cluster.agent/id from-id]
@@ -183,7 +184,7 @@
 
 (defn- open-runs
   [db]
-  (d/q '[:find [?id ...]
+  (db/q '[:find [?id ...]
          :where
          [?run :seon.cluster.run/id ?id]
          (not [?run :seon.cluster.run/closed-at _])]
@@ -193,7 +194,7 @@
   "Message id to the number of runs recording it as trigger."
   [db]
   (into {}
-        (d/q '[:find ?message-id (count ?run)
+        (db/q '[:find ?message-id (count ?run)
                :where
                [?run :seon.cluster.run/trigger ?message]
                [?message :seon.cluster.message/id ?message-id]]
@@ -237,7 +238,7 @@
    #(let [db (:db-after %)]
       (and (quiescent? db agent-ids)
            (= receipt-count
-              (or (d/q '[:find (count ?receipt) .
+              (or (db/q '[:find (count ?receipt) .
                          :where
                          [?receipt :seon.cluster.eval/id _]]
                        db)
@@ -245,7 +246,7 @@
 
 (defn- lint-refusal-results
   [db]
-  (->> (d/q '[:find [?serialized ...]
+  (->> (db/q '[:find [?serialized ...]
               :where
               [_ :seon.cluster.eval/result-edn ?serialized]]
             db)
@@ -273,7 +274,7 @@
                 ledger (atom [])
                 calls (async/chan 4)
                 events (database-events connection)]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.cluster.agent/id "all-refused"}
                          (config-row "r22-all-refused"
                                      {:seon.config.run/max-episode-runs 3})])
@@ -299,13 +300,13 @@
                     (is (and (string? second-prompt)
                              (str/includes? second-prompt "expects 2 or 3"))
                         "the next turn sees the exact arity finding")
-                    (is (= 1 (or (d/q '[:find (count ?message) .
+                    (is (= 1 (or (db/q '[:find (count ?message) .
                                          :where
                                          [?message :seon.cluster.message/id _]]
                                        @connection)
                                  0))
                         "no self-message or second external message continued it")
-                    (is (= 2 (count (d/q '[:find [?run ...]
+                    (is (= 2 (count (db/q '[:find [?run ...]
                                            :where
                                            [?run :seon.cluster.run/id _]]
                                          @connection)))
@@ -328,7 +329,7 @@
                 ledger (atom [])
                 calls (async/chan 4)
                 events (database-events connection)]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.cluster.agent/id "mixed-refusal"}
                          (config-row "r22-mixed-refusal"
                                      {:seon.config.run/max-episode-runs 3})])
@@ -354,7 +355,7 @@
                     (is (and (string? second-prompt)
                              (str/includes? second-prompt "expects 2 or 3"))
                         "the mixed turn's refusal finding reaches context")
-                    (is (= 3 (or (d/q '[:find (count ?receipt) .
+                    (is (= 3 (or (db/q '[:find (count ?receipt) .
                                          :where
                                          [?receipt :seon.cluster.eval/id _]]
                                        @connection)
@@ -381,7 +382,7 @@
                 request {:seon.cluster.agent/id "capped-refusal"
                          :seon.cluster.run/process process
                          :seon.cluster.work/now (Date.)}]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.cluster.agent/id "capped-refusal"}
                          (config-row "r22-capped-refusal"
                                      {:seon.config.run/max-episode-runs 1})])
@@ -428,7 +429,7 @@
             routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
             ledger (atom [])]
-        (d/transact connection
+        (db/transact! connection
                     (into [(config-row
                             "trial"
                             {:seon.config.run/max-episode-runs 100})]
@@ -461,12 +462,12 @@
                             #(quiescent? @connection agent-ids))
                   db @connection
                   answers (answers-by-trigger db)
-                  run-count (or (d/q '[:find (count ?run) . :where
+                  run-count (or (db/q '[:find (count ?run) . :where
                                        [?run :seon.cluster.run/id _]]
                                      db)
                                 0)
                   duplicate-receipts
-                  (->> (d/q '[:find ?run ?ordinal (count ?receipt)
+                  (->> (db/q '[:find ?run ?ordinal (count ?receipt)
                               :where
                               [?receipt :seon.cluster.eval/run ?run]
                               [?receipt :seon.cluster.eval/ordinal
@@ -479,7 +480,7 @@
                   per-agent-serial?
                   (every? (fn [[index agent-id]]
                             (= (nth triggers-per-agent index)
-                               (or (d/q '[:find (count ?run) .
+                               (or (db/q '[:find (count ?run) .
                                           :in $ ?agent-id
                                           :where
                                           [?agent :seon.cluster.agent/id
@@ -498,7 +499,7 @@
                :ledger-equals-runs? (= (count @ledger) run-count)
                :receipts-unique? (empty? duplicate-receipts)
                :fences-quiet?
-               (empty? (d/q '[:find ?error :where
+               (empty? (db/q '[:find ?error :where
                               [?error :seon.error/id _]]
                             db))
                :per-agent-serial? per-agent-serial?}))
@@ -528,7 +529,7 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)]
-        (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+        (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
         (try
           (is (false? (agent/fenced? routing "agent-a"))
               "an unarmed agent has no fence")
@@ -555,7 +556,7 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
-            _ (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+            _ (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
             entry (arm-one! connection ctx routing "agent-a")
             eid (:seon.cluster.agent/eid entry)
             channel (:seon.cluster.wake/channel entry)
@@ -633,7 +634,7 @@
       (let [routing (armory)
             agent-ids (mapv #(str "withheld-turn-" %) (range 100))
             original-definition agent/graph-definition]
-        (d/transact connection
+        (db/transact! connection
                     (mapv (fn [agent-id]
                             {:seon.cluster.agent/id agent-id})
                           agent-ids))
@@ -666,7 +667,7 @@
                  release-provider
                  ::release-never-answering-provider)))
             agent-id "provider-backstop"]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
           (config-row
@@ -735,7 +736,7 @@
     (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "parked"}
                      (config-row "park-2026072812"
                                  {:seon.config.run/max-episode-runs 100})])
@@ -750,7 +751,7 @@
                 (is (await-until #(pos? (::agent/passes
                                          (turn-ping entry)))))
                 (is (zero? (count @ledger)))
-                (is (empty? (d/q '[:find ?run :where
+                (is (empty? (db/q '[:find ?run :where
                                    [?run :seon.cluster.run/id _]]
                                  @connection))))
               (testing "one committed trigger → exactly one run, one
@@ -759,7 +760,7 @@
                                   "m-2026072812" "one unit of work")
                 (async/offer! (:seon.cluster.wake/channel entry) ::wake)
                 (is (await-until
-                     #(some? (d/q '[:find ?c . :where
+                     #(some? (db/q '[:find ?c . :where
                                     [_ :seon.cluster.run/closed-at ?c]]
                                   @connection))))
                 (is (= 1 (count @ledger)))
@@ -789,7 +790,7 @@
             release-provider (CountDownLatch. 1)
             provider-entered (CountDownLatch. 1)
             events (database-events connection)]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "pausable"}
                      (config-row "pause-2026072813"
                                  {:seon.config.run/max-episode-runs 100})])
@@ -821,7 +822,7 @@
                 (is (test-support/await-event!
                      (:seon.cluster.agent-test/events events)
                      ::plan-frozen
-                     #(some? (d/q '[:find ?digest . :where
+                     #(some? (db/q '[:find ?digest . :where
                                     [_ :seon.cluster.run/plan-digest ?digest]]
                                   (:db-after %))))
                     "the plan freeze landed")
@@ -864,7 +865,7 @@
 (defn- opened-run!
   "Open, claim, and close one run answering `message-id`."
   [connection agent-id run-id message-id at]
-  (d/transact connection
+  (db/transact! connection
               {:tx-data (into (run/open-tx {:seon.cluster.run/id run-id
                                             :seon.cluster.run/agent
                                             [:seon.cluster.agent/id agent-id]
@@ -876,7 +877,7 @@
                                              :seon.cluster.run/live-processes
                                              #{process}
                                              :seon.cluster.run/now at}))})
-  (d/transact connection
+  (db/transact! connection
               (run/close-tx {:seon.cluster.run/id run-id
                              :seon.cluster.run/process process
                              :seon.cluster.run/closed-at at})))
@@ -890,7 +891,7 @@
       (let [request {:seon.cluster.agent/id "alice"
                      :seon.cluster.run/process process
                      :seon.cluster.work/now (Date.)}]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "alice"}
                      {:seon.cluster.agent/id "bob"}
                      (config-row "cap-2026072814"
@@ -900,11 +901,11 @@
         (opened-run! connection "alice" "e1" "h1" now)
         (is (= 1 (work/episode-runs @connection "alice")))
         ;; R3: a recorder message (carries `about`) does NOT reset
-        (d/transact connection [{:seon.error/id "fault-2026072814"
+        (db/transact! connection [{:seon.error/id "fault-2026072814"
                                  :seon.error/at now
                                  :seon.error/signature
                                  (apply str (repeat 64 "c"))}])
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.message/id "r1"
                       :seon.cluster.message/to
                       [:seon.cluster.agent/id "alice"]
@@ -990,7 +991,7 @@
                      ([state input message]
                       (swap! v2-ran inc)
                       (step state input message))))]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "reloaded"}
                      (config-row "hot-2026072815"
                                  {:seon.config.run/max-episode-runs 100})])
@@ -1080,7 +1081,7 @@
             ledger (atom [])
             evaluation-sources (atom [])
             evaluate fake-evaluate]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "midfold"}
                      {:seon.cluster.agent/id "waiting"}
                      (config-row "restamp-2026072816"
@@ -1090,7 +1091,7 @@
         ;; and never settled, and a capability-shaped form 2 that had
         ;; never started — killed mid-fold
         (outside-trigger! connection "midfold" "m-dead" "count things")
-        (d/transact connection
+        (db/transact! connection
                     {:tx-data (into (run/open-tx
                                      {:seon.cluster.run/id "run-dead"
                                       :seon.cluster.run/agent
@@ -1104,7 +1105,7 @@
                                       :seon.cluster.run/live-processes
                                       #{dead}
                                       :seon.cluster.run/now now}))})
-        (d/transact connection
+        (db/transact! connection
                     (run/plan-tx {:seon.cluster.run/id "run-dead"
                                   :seon.cluster.run/process dead
                                   :seon.cluster.run/plan-digest
@@ -1115,16 +1116,16 @@
                                     "(+ 3 4)"}
                                    {:seon.cluster.run.form/source
                                     "(my.message/send \"waiting\" \"must not run\")"}]}))
-        (d/transact connection
+        (db/transact! connection
                     (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
                                            :seon.cluster.eval/ordinal 0
                                            :seon.cluster.eval/at now}))
-        (d/transact connection
+        (db/transact! connection
                     (run/receipt-settle-tx {:seon.cluster.run/id "run-dead"
                                             :seon.cluster.eval/ordinal 0
                                             :seon.cluster.eval/result-edn
                                             "3"}))
-        (d/transact connection
+        (db/transact! connection
                     (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
                                            :seon.cluster.eval/ordinal 1
                                            :seon.cluster.eval/at now}))
@@ -1144,7 +1145,7 @@
                                  (:seon.cluster.run.form/source request))
                           (evaluate request))]
             ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime
-            (d/transact connection
+            (db/transact! connection
                         (run/recover-tx
                          {:seon.cluster.run/id "run-dead"
                           :seon.cluster.run/live-processes #{process}
@@ -1156,13 +1157,13 @@
             (let [db @connection
                   answers (answers-by-trigger db)
                   run-receipts
-                  (d/q '[:find [?receipt ...]
+                  (db/q '[:find [?receipt ...]
                          :where
                          [?run :seon.cluster.run/id "run-dead"]
                          [?receipt :seon.cluster.eval/run ?run]]
                        db)]
               (testing "recovery ends the interrupted run atomically"
-                (is (some? (d/q '[:find ?at .
+                (is (some? (db/q '[:find ?at .
                                   :where
                                   [?run :seon.cluster.run/id "run-dead"]
                                   [?receipt :seon.cluster.eval/run ?run]
@@ -1170,30 +1171,30 @@
                                   [?receipt
                                    :seon.cluster.eval/interrupted-at ?at]]
                                 db)))
-                (is (nil? (d/q '[:find ?process .
+                (is (nil? (db/q '[:find ?process .
                                  :where
                                  [?run :seon.cluster.run/id "run-dead"]
                                  [?run :seon.cluster.run/process ?process]]
                                db)))
-                (is (some? (d/q '[:find ?at .
+                (is (some? (db/q '[:find ?at .
                                   :where
                                   [?run :seon.cluster.run/id "run-dead"]
                                   [?run :seon.cluster.run/closed-at ?at]]
                                 db)))
-                (is (nil? (d/q '[:find ?run .
+                (is (nil? (db/q '[:find ?run .
                                  :where
                                  [?agent :seon.cluster.agent/id "midfold"]
                                  [?agent :seon.cluster.agent/run ?run]]
                                db))))
               (testing "the interrupted plan never continues"
                 (is (every? (fn [[_ _ n]] (= 1 n))
-                            (d/q '[:find ?run ?ordinal (count ?receipt)
+                            (db/q '[:find ?run ?ordinal (count ?receipt)
                                    :where
                                    [?receipt :seon.cluster.eval/run ?run]
                                    [?receipt
                                     :seon.cluster.eval/ordinal ?ordinal]]
                                  db)))
-                (is (nil? (d/q '[:find ?result .
+                (is (nil? (db/q '[:find ?result .
                                  :where
                                  [?run :seon.cluster.run/id "run-dead"]
                                  [?receipt :seon.cluster.eval/run ?run]
@@ -1201,7 +1202,7 @@
                                  [?receipt
                                   :seon.cluster.eval/result-edn ?result]]
                                db)))
-                (is (nil? (d/q '[:find ?receipt .
+                (is (nil? (db/q '[:find ?receipt .
                                  :where
                                  [?run :seon.cluster.run/id "run-dead"]
                                  [?receipt :seon.cluster.eval/run ?run]
@@ -1227,7 +1228,7 @@
                       forms
                       (mapv (fn [ordinal]
                               {:seon.cluster.run.form/ordinal ordinal})
-                            (d/q '[:find [?ordinal ...]
+                            (db/q '[:find [?ordinal ...]
                                    :where
                                    [?run :seon.cluster.run/id "run-dead"]
                                    [?form
@@ -1235,7 +1236,7 @@
                                    [?form
                                     :seon.cluster.run.form/ordinal ?ordinal]]
                                  db))
-                      receipts (mapv #(d/pull db '[*] %) run-receipts)]
+                      receipts (mapv #(db/pull db '[*] %) run-receipts)]
                   (is (= 1 (count interrupt-prompts))
                       (str "only the interrupted agent sees recovery evidence: "
                            (pr-str (mapv :seon.ai/prompt @ledger))))
@@ -1263,12 +1264,12 @@
       (let [other "77777-1"
             routing (armory)
             ledger (atom [])]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "held"}
                      (config-row "p2-2026072818"
                                  {:seon.config.run/max-episode-runs 100})])
         (outside-trigger! connection "held" "m-held" "busy elsewhere")
-        (d/transact connection
+        (db/transact! connection
                     {:tx-data (into (run/open-tx
                                      {:seon.cluster.run/id "run-held"
                                       :seon.cluster.run/agent
@@ -1302,7 +1303,7 @@
                   "zero duplicate provider dispatches across the
                    interleaving")
               (is (zero? (::agent/turns (turn-ping entry))))
-              (is (= other (d/q '[:find ?p . :where
+              (is (= other (db/q '[:find ?p . :where
                                   [?run :seon.cluster.run/id "run-held"]
                                   [?run :seon.cluster.run/process ?p]]
                                 @connection))
@@ -1342,7 +1343,7 @@
             ledger (atom [])
             created (atom [])
             message-count (atom 0)]
-        (d/transact connection
+        (db/transact! connection
                     [(config-row "route-trial"
                                  {:seon.config.run/max-episode-runs 100})])
         (try
@@ -1365,14 +1366,14 @@
               (let [agent-id (str "ra-" (count @created))]
                 (case op
                   :create
-                  (do (d/transact connection
+                  (do (db/transact! connection
                                   [{:seon.cluster.agent/id agent-id}])
                       (swap! created conj agent-id))
 
                   :create-and-message
                   ;; the one-commit window the armer belt exists for:
                   ;; the recipient's graph cannot exist yet
-                  (do (d/transact
+                  (do (db/transact!
                        connection
                        [{:seon.cluster.agent/id agent-id}
                         {:seon.cluster.message/id
@@ -1447,7 +1448,7 @@
     (fn [connection ctx]
       (let [routing (armory)
             ledger (atom [])]
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.cluster.agent/id "waiter"}
                      (config-row "wait-2026072820"
                                  {:seon.config.run/max-episode-runs 100})])
@@ -1461,14 +1462,14 @@
               (async/offer! (:seon.cluster.wake/channel entry) ::wake))
             (is (await-until #(quiescent? @connection ["waiter"])))
             (let [db @connection
-                  run-id (d/q '[:find ?id . :where
+                  run-id (db/q '[:find ?id . :where
                                 [?run :seon.cluster.run/id ?id]]
                               db)
-                  settle-tx (d/q '[:find ?tx . :where
+                  settle-tx (db/q '[:find ?tx . :where
                                    [?receipt
                                     :seon.cluster.eval/result-edn _ ?tx]]
                                  db)
-                  close-tx (d/q '[:find ?tx . :where
+                  close-tx (db/q '[:find ?tx . :where
                                   [_ :seon.cluster.run/closed-at _ ?tx]]
                                 db)]
               (testing "settle and close share ONE transaction"
@@ -1476,13 +1477,13 @@
                 (is (= settle-tx close-tx)))
               (testing "no basis carries an unheld open planned run —
               the P1 feeder state is unrepresentable"
-                (let [txs (sort (d/q '[:find [?tx ...] :where
+                (let [txs (sort (db/q '[:find [?tx ...] :where
                                        [_ _ _ ?tx]]
                                      db))]
                   (is (not-any?
                        (fn [tx]
-                         (let [basis (d/as-of db tx)
-                               run (d/pull basis '[*]
+                         (let [basis (db/as-of db tx)
+                               run (db/pull basis '[*]
                                            [:seon.cluster.run/id run-id])]
                            (and (some? (:db/id run))
                                 (nil? (:seon.cluster.run/closed-at run))
@@ -1492,7 +1493,7 @@
                        txs))))
               (testing "the note survives in the receipt"
                 (is (str/includes?
-                     (d/q '[:find ?edn . :where
+                     (db/q '[:find ?edn . :where
                             [_ :seon.cluster.eval/result-edn ?edn]]
                           db)
                      "awaiting input")))
@@ -1502,7 +1503,7 @@
                   (async/offer! (:seon.cluster.wake/channel entry)
                                 ::wake))
                 (is (await-until #(quiescent? @connection ["waiter"])))
-                (is (= 2 (or (d/q '[:find (count ?run) . :where
+                (is (= 2 (or (db/q '[:find (count ?run) . :where
                                     [?run :seon.cluster.run/id _]]
                                   @connection)
                              0)))
