@@ -139,6 +139,21 @@ design decisions awaiting one PRD; the grounding audit is
    as part of the output stream. This amends the earlier drafted-lesson
    style (curriculum top-3 drafts must be restyled accordingly).
 
+12. **THE HARD CEILING IS UNIVERSAL — no single result may approach the
+   context window** (owner-confirmed, same night). Every agent-facing
+   rendering — eval result, ERROR value, fault fact, MCP envelope,
+   transcript entry, readline — is bounded by the admitted inline
+   ceiling with digest+blob for the remainder; horrible output is
+   logged/blobbed complete but NEVER rendered whole. Tonight proved the
+   value path held while the error path had bypasses (the 1MB
+   contract-violation ::args; the 304KB door window, fixed; the 21KB
+   envelope spill) — caps must bind at CONSTRUCTION for error values,
+   not only at print. STANDING FALSIFIER owed: a generative property
+   driving hostile values (huge/deep/binary/invalid-UTF-8) through
+   every face, asserting every rendering ≤ ceiling with blob-complete
+   remainder — one choke-point test class, claimed by a recurring
+   runner.
+
 ## Still open (dismissed question set — owner will rule when ready)
 
 - The seven work/identity recommendations (user entity shape, from
