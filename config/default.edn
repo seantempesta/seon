@@ -77,6 +77,30 @@
  ; backstop and the process boundary, never by this.
  :seon.config.eval/time-limit-ms 30000
 
+ ; THE FILESYSTEM CAPABILITY. These are policy facts shared by every agent,
+ ; never per-agent grants. Relative request paths resolve against the explicit
+ ; working root; the process working directory is not an undeclared fallback.
+ ; Provenance: the 2026-08-03 tracked-tree census found 2,793 first-party
+ ; src/test/resources/docs/config files, maximum depth 9, and a largest tracked
+ ; file of 2,327,591 bytes. The scan/write ceilings are ~7x that observed file;
+ ; the traversal ceiling is >23x the observed first-party entry count; depth is
+ ; >7x observed. The 8,192-byte inline window matches the standing admitted
+ ; collection ceiling so byte-vector reads cannot be clipped after dispatch.
+ :seon.config.fs/working-root "."
+ :seon.config.fs/roots ["."]
+ ; Unit: bytes streamed through one complete read/digest pass.
+ :seon.config.fs/max-read-bytes 16777216
+ ; Unit: bytes retained in one returned read window.
+ :seon.config.fs/max-inline-bytes 8192
+ ; Unit: bytes accepted for one conditional write.
+ :seon.config.fs/max-write-bytes 16777216
+ ; Unit: matched paths returned by one glob.
+ :seon.config.fs/max-glob-results 4096
+ ; Unit: directory entries examined by one glob.
+ :seon.config.fs/max-traversal-entries 65536
+ ; Unit: directory edges descended by one glob.
+ :seon.config.fs/max-depth 64
+
  ; Unit: count of same-signature faults since this process started.
  ; Provenance: the second escalation condition (the first is "no
  ; attributable agent"). Three says a fault that happened once was

@@ -1,0 +1,113 @@
+#:my.fs{:after-digest :my.fs/digest
+        :already-exists? :boolean
+        :before-digest :my.fs/digest
+        :byte [:int {:min 0, :max 255}]
+        :byte-count [:int {:min 0}]
+        :byte-offset [:int {:min 0}]
+        :byte-size :my.fs/byte-count
+        :bytes [:vector :my.fs/byte]
+        :bytes-read :my.fs/byte-count
+        :bytes-written :my.fs/byte-count
+        :changed? :boolean
+        :complete? :boolean
+        :content
+        [:and
+         [:map
+          [:my.fs/text {:optional true} :string]
+          [:my.fs/bytes {:optional true} :my.fs/bytes]
+          [:seon.blob/digest {:optional true} :seon.blob/digest]]
+         [:fn
+          {:gen/schema
+           [:or
+            [:map [:my.fs/text :string]]
+            [:map [:my.fs/bytes :my.fs/bytes]]
+            [:map [:seon.blob/digest :seon.blob/digest]]]}
+          my.fs/content?]]
+        :created? :boolean
+        :digest :seon.blob/digest
+        :directory? :boolean
+        :encoding [:enum :bytes :utf-8]
+        :eof? :boolean
+        :examined [:int {:min 0}]
+        :expected-absence? [:= true]
+        :expected-digest :my.fs/digest
+        :file-bytes :my.fs/byte-count
+        :glob-request
+        [:map
+         [:my.fs/root :my.fs/path]
+         [:my.fs/pattern :my.fs/pattern]
+         [:my.fs/max-depth {:optional true} [:int {:min 0}]]
+         [:my.fs/max-results {:optional true} [:int {:min 1}]]]
+        :glob-result
+        [:map
+         [:my.fs/root :my.fs/path]
+         [:my.fs/paths [:vector :my.fs/path]]
+         [:my.fs/returned [:int {:min 0}]]
+         [:my.fs/examined [:int {:min 0}]]
+         [:my.fs/complete? :boolean]]
+        :max-bytes [:int {:min 1}]
+        :max-depth [:int {:min 0}]
+        :max-results [:int {:min 1}]
+        :modified-at :inst
+        :path [:string {:min 1}]
+        :paths [:vector :my.fs/path]
+        :pattern [:string {:min 1}]
+        :precondition :my.fs/write-precondition
+        :read-request
+        [:map
+         [:my.fs/path :my.fs/path]
+         [:my.fs/byte-offset {:optional true} :my.fs/byte-offset]
+         [:my.fs/max-bytes {:optional true} :my.fs/max-bytes]
+         [:my.fs/encoding {:optional true} :my.fs/encoding]]
+        :read-result
+        [:map
+         [:my.fs/path :my.fs/path]
+         [:my.fs/digest :my.fs/digest]
+         [:my.fs/file-bytes :my.fs/file-bytes]
+         [:my.fs/byte-offset :my.fs/byte-offset]
+         [:my.fs/bytes-read :my.fs/bytes-read]
+         [:my.fs/eof? :boolean]
+         [:my.fs/bytes {:optional true} :my.fs/bytes]
+         [:my.fs/text {:optional true} :string]]
+        :regular-file? :boolean
+        :returned [:int {:min 0}]
+        :root :my.fs/path
+        :stat-request [:map [:my.fs/path :my.fs/path]]
+        :stat-result
+        [:map
+         [:my.fs/path :my.fs/path]
+         [:my.fs/regular-file? :boolean]
+         [:my.fs/directory? :boolean]
+         [:my.fs/symbolic-link? :boolean]
+         [:my.fs/byte-size {:optional true} :my.fs/byte-size]
+         [:my.fs/modified-at {:optional true} :my.fs/modified-at]]
+        :symbolic-link? :boolean
+        :text :string
+        :write-precondition
+        [:and
+         [:map
+          [:my.fs/expected-absence?
+           {:optional true}
+           :my.fs/expected-absence?]
+          [:my.fs/expected-digest
+           {:optional true}
+           :my.fs/expected-digest]]
+         [:fn
+          {:gen/schema
+           [:or
+            [:map [:my.fs/expected-absence? :my.fs/expected-absence?]]
+            [:map [:my.fs/expected-digest :my.fs/expected-digest]]]}
+          my.fs/write-precondition?]]
+        :write-request
+        [:map
+         [:my.fs/path :my.fs/path]
+         [:my.fs/content :my.fs/content]
+         [:my.fs/precondition :my.fs/write-precondition]]
+        :write-result
+        [:map
+         [:my.fs/path :my.fs/path]
+         [:my.fs/created? :boolean]
+         [:my.fs/changed? :boolean]
+         [:my.fs/before-digest {:optional true} :my.fs/before-digest]
+         [:my.fs/after-digest :my.fs/after-digest]
+         [:my.fs/bytes-written :my.fs/bytes-written]]}

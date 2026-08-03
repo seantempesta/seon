@@ -1,0 +1,16 @@
+#:seon.config.fs{:max-depth
+                 [:int {:min 0, :seon.config/dial true}],
+                 :max-glob-results
+                 [:int {:min 1, :seon.config/dial true}],
+                 :max-inline-bytes
+                 [:int {:min 1, :seon.config/dial true}],
+                 :max-read-bytes
+                 [:int {:min 1, :seon.config/dial true}],
+                 :max-traversal-entries
+                 [:int {:min 1, :seon.config/dial true}],
+                 :max-write-bytes
+                 [:int {:min 1, :seon.config/dial true}],
+                 :roots
+                 [:vector {:min 1, :seon.config/dial true} :my.fs/path],
+                 :working-root
+                 [:and {:seon.config/dial true} :my.fs/path]}
