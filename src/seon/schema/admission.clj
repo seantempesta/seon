@@ -402,5 +402,7 @@
 
 (defn -main
   "Read one admission request as EDN from stdin and print its findings."
+  {:malli/schema [:=> [:cat [:* :string]] :nil]}
   [& _]
-  (prn (admit (edn/read-string (slurp *in*)))))
+  (prn (admit (edn/read-string (slurp *in*))))
+  nil)
