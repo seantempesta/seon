@@ -527,6 +527,8 @@
         graph (::sut/graph launcher)
         step-var (ns-resolve 'seon.flow 'work-launcher-step)
         original-step @step-var
+        resume-transition (CountDownLatch. 1)
+        release-resume (CountDownLatch. 1)
         stop-transition (CountDownLatch. 1)
         queued
         (mapv
@@ -559,6 +561,11 @@
           ([args]
            (original-step args))
           ([state transition]
+           (when (= ::flow/resume transition)
+             (.countDown resume-transition)
+             (test-support/await-event!
+              release-resume
+              ::release-work-launcher-resume-transition))
            (let [next-state (original-step state transition)]
              (when (= ::flow/stop transition)
                (.countDown stop-transition))
@@ -566,7 +573,11 @@
           ([state input-id message]
            (original-step state input-id message)))))
       (flow/resume graph)
+      (test-support/await-event!
+       resume-transition
+       ::work-launcher-resume-transition)
       (flow/stop graph)
+      (.countDown release-resume)
       (test-support/await-event!
        stop-transition
        ::work-launcher-stop-transition)
@@ -575,6 +586,7 @@
       (is (every? #(false? (realized? (::sut/result %))) queued)
           "stop does not drain any flooded work")
       (finally
+        (.countDown release-resume)
         (alter-var-root step-var (constantly original-step))
         (sut/stop-installed-work-launcher!)))))
 
@@ -960,6 +972,91 @@
       (finally
         (.countDown finish-commit)
         (stop-testbed! testbed)))))
+
+(defn- async-mixed-platform-threads
+  []
+  (into #{}
+        (comp
+         (filter (fn [^Thread thread]
+                   (and (not (.isVirtual thread))
+                        (str/starts-with? (.getName thread)
+                                          "async-mixed-"))))
+         (map #(.getName ^Thread %)))
+        (keys (Thread/getAllStackTraces))))
+
+(defn- prime-agent-error-fanout!
+  [source-count]
+  (let [fault-channel (async/chan source-count)
+        sources (repeatedly source-count #(async/chan 1))
+        joins
+        (mapv
+         (fn [source]
+           (sut/join-error-fanout!
+            {::sut/started {:error-chan source}
+             ::sut/fault-channel fault-channel
+             ::sut/tag {}}))
+         sources)]
+    (doseq [source sources]
+      (async/>!! source {::flow/pid ::prime}))
+    (dotimes [_ source-count]
+      (test-support/await-event! fault-channel ::prime-agent-error-fanout))
+    (doseq [source sources]
+      (async/close! source))
+    (doseq [join joins]
+      (test-support/await-event!
+       (future (async/<!! join) ::prime-fanout-stopped)
+       ::prime-fanout-stopped))
+    (async/close! fault-channel)))
+
+(deftest agent-error-fanout-parks-without-platform-workers
+  (let [source-count 64
+        fault-channel (async/chan source-count)
+        _ (prime-agent-error-fanout! source-count)
+        baseline (async-mixed-platform-threads)
+        sources (repeatedly source-count #(async/chan 1))
+        joins
+        (mapv
+         (fn [ordinal source]
+           (sut/join-error-fanout!
+            {::sut/started {:error-chan source}
+             ::sut/fault-channel fault-channel
+             ::sut/tag {:seon.cluster.agent/id (str "agent-" ordinal)}}))
+         (range source-count)
+         sources)]
+    (try
+      (doseq [[ordinal source] (map-indexed vector sources)]
+        (async/>!! source {::flow/pid (keyword (str "proc-" ordinal))}))
+      (let [faults
+            (into #{}
+                  (map (fn [_]
+                         (test-support/await-event!
+                          fault-channel
+                          ::tagged-agent-fault)))
+                  (range source-count))]
+        (is (= (set (map #(str "agent-" %) (range source-count)))
+               (into #{} (map :seon.cluster.agent/id) faults))
+            "every source fault retains its agent provenance"))
+      (is (= baseline (async-mixed-platform-threads))
+          "parking one fan-out per agent adds no platform worker")
+      (doseq [source sources]
+        (async/close! source))
+      (doseq [join joins]
+        (is (= ::agent-error-fanout-stopped
+               (test-support/await-event!
+                (future
+                  (async/<!! join)
+                  ::agent-error-fanout-stopped)
+                ::agent-error-fanout-stopped))))
+      (is (true? (async/offer! fault-channel ::still-open))
+          "stopping every source leaves the committer inbox open")
+      (is (= ::still-open
+             (test-support/await-event!
+              fault-channel
+              ::fault-channel-remains-open)))
+      (finally
+        (doseq [source sources]
+          (async/close! source))
+        (async/close! fault-channel)))))
 
 (deftest fault-tap-retains-every-fault-under-capacity
   (testing "N admitted faults below the bounded tap capacity lose nothing"

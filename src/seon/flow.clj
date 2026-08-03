@@ -717,19 +717,29 @@
   "Feed one more started graph's errors into an existing fan-out.
   The N-source generalization (F1 §6): every agent graph's error
   channel joins the cluster's ONE counted-dropping fault channel,
-  tagged with structural provenance —
-  `(async/pipeline 1 fault-channel (map #(merge % tag)) error-chan
-  false)`. `close?` is false so one source graph's stop never closes
-  the committer's inbox; the pipeline itself ends when the source's
-  error channel closes (its graph stopped), so nothing needs an
-  explicit unjoin. Returns the pipeline's result channel."
+  tagged with structural provenance. One task on the process-root `:io`
+  executor blocks per source; these are virtual threads, so a parked agent
+  does not retain a platform thread. The task ends when the source graph
+  closes its error channel and never closes the committer's inbox, so nothing
+  needs an explicit unjoin. Returns the task's completion channel."
   {:malli/schema [:=> [:cat ::join-error-request] ::channel]}
   [{::keys [started fault-channel tag]}]
-  (async/pipeline 1
-                  fault-channel
-                  (map #(merge % tag))
-                  (:error-chan started)
-                  false))
+  (let [error-channel (:error-chan started)
+        completion (async/promise-chan)
+        io-executor
+        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+    (.execute
+     ^Executor io-executor
+     ^Runnable
+     (bound-fn []
+       (try
+         (loop []
+           (when-some [fault (async/<!! error-channel)]
+             (async/>!! fault-channel (merge fault tag))
+             (recur)))
+         (finally
+           (async/put! completion ::error-fanout-stopped)))))
+    completion))
 
 (defn stop-error-fanout!
   "Detach and stop one error fan-out without stopping its source graph."
