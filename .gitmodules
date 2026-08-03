@@ -360,3 +360,9 @@
 [submodule "reference-code/integrant-repl"]
 	path = reference-code/integrant-repl
 	url = https://github.com/weavejester/integrant-repl
+[submodule "reference-code/hato"]
+	path = reference-code/hato
+	url = https://github.com/gnarroway/hato.git
+[submodule "reference-code/jsoup"]
+	path = reference-code/jsoup
+	url = https://github.com/jhy/jsoup.git
