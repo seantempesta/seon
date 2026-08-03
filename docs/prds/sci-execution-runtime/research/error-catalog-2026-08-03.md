@@ -74,7 +74,7 @@ per-class override).
 
 | Family / classes | Sites | Data carries | Consumers | Face |
 |---|---|---|---|---|
-| `:my.fs/*` — `not-found`, `not-directory`, `not-regular-file`, `already-exists`, `path-refused`, `read-failed`, `write-failed`, `read-limit`, `write-limit`, `stale-digest`, `changed-during-read`, `invalid-utf8-window`, `atomic-write-unsupported`, `glob-failed`, `blob-unavailable` (15) | 18 | path, digest, expected-digest, limit bytes, blob digest | agent context via the flat value; `seon.edit.jvm/edit-error` translates two of them (§3.1) | D, O for `read-limit`/`write-limit` (show the limit and what to do) |
+| `:my.fs/*` — `not-found`, `not-directory`, `not-regular-file`, `already-exists`, `path-refused`, `read-failed`, `write-failed`, `read-limit`, `write-limit`, `stale-digest`, `changed-during-read`, `invalid-utf8-window`, `atomic-write-unsupported`, `glob-failed`, `blob-unavailable`, `invalid-glob` (16) | 19 | path, pattern, digest, expected-digest, limit bytes, blob digest | agent context via the flat value; `seon.edit.jvm/edit-error` translates two of them (§3.1) | D, O for `read-limit`/`write-limit` (show the limit and what to do) |
 | `:my.edit/*` — `no-match`, `ambiguous-match`, `parse-refused`, `lossless-check-failed`, `stale-source`, `not-utf8` (6) | 8 | `:seon.edit/candidates` + `candidates-complete?`, path, expected vs actual digest | agent context; `edit/jvm` dispatch | O for `no-match`/`ambiguous-match` (candidate list is the whole value) |
 | `:my.message/*` — `no-recipient`, `no-content`, `no-about`, `no-reason` (4) | 6 | nothing; message only (`src/my/message.clj:80-92, 142-152`) | agent context | D |
 | `:my.run/*` — `blank-note`, `blank-result` (2); `:my.background/*` — `invalid-call`, `invalid-result`, `missing-result` (3) | 5 | call/result value | agent context | D |
@@ -93,11 +93,11 @@ the kind at all, it reads the ATTRIBUTES. The kind is already vestigial here.
 
 | Classes | Sites | Data carries | Consumers | Face |
 |---|---|---|---|---|
-| `:seon.fn/index-refused` (see §0 — proposed 10-way split) | 13 | phase, resource, analysis entry, capability rule + sym, findings, file path, identity, missing population, schema key, existing entity | boot/init refusal; `bin/seon init` | O per split class |
+| `:seon.fn/index-refused` (see §0 — source-derived 11-way split) | 13 | phase, resource, analysis entry, capability rule + sym, findings, file path, identity, missing population, schema key, existing entity, or a subjectless missing manifest | boot/init refusal; `bin/seon init` | O per split class |
 | `:seon.instrument/contract-violated` | 3 (`src/seon/instrument.clj:148, 170`, doc `:44`) | `:seon.instrument/fn`, `/arm`, `/schema`, `/args` — already lifted to real fact attributes by `normalize` (`src/seon/error.clj:303-306, 330-337`) | **dispatch** in `error/normalize` and `error/notice` (§3.4) | O (the offending key/value pair) |
 | `:seon.schema/unresolved-predicate` | 1 (`src/seon/instrument.clj:238`) | predicate symbol | schema install | D |
 | `:seon.sci.eval/*` — `install-source-mismatch`, `install-delete-mismatch`, `missing-function-row`, `namespace-binding-cycle`, `reader-event-count`, `schema-refused` (2), `session-blob-unavailable`, plus selected `time-limit` / `evaluation-failed` | 10 | source digests, function row, cycle path, event count, schema key, blob digest | run loop receipts; agent context | O for `time-limit` (`:seon.eval/fn-entries` spin diagnostic) and `schema-refused` |
-| `:seon.sci.kernel/*` — `already-armed`, `missing-function-installer`, `missing-interrupt-guard`, `unresolved-invocation`, `failure-admission-failed` | 5 | `:seon.fn/sym`, `:seon.sci.admit/record`, throwable class (`src/seon/sci/kernel.clj:280-300`) | the guarded door's one classifier | O for `unresolved-invocation` |
+| `:seon.sci.kernel/*` — `already-armed`, `missing-function-installer`, `missing-interrupt-guard`, `unresolved-invocation`, `failure-admission-failed`, plus indirectly selected `time-limit` and `invocation-failed` | 7 | `:seon.fn/sym`, `:seon.sci.admit/record`, throwable class (`src/seon/sci/kernel.clj:280-300, 362-363`) | the guarded door's one classifier | O for `unresolved-invocation` |
 | `:seon.sci.admit/projection-failed`; `:seon.print/unknown-face` | 2 | face keyword, value marker | admission/print floor | D |
 | `:seon.program/declaration-refused` | 1 (`src/seon/program.cljc:80`) | declaration form | install gate | D |
 | `:seon.problems/unbound-var`, `/evaluation-failed` | derived (`src/seon/problems.clj:186-188`) | form source, ordinal, owner, author | problem routing → `my.message` assignment | O (the routed problem card) |
@@ -106,7 +106,7 @@ the kind at all, it reads the ATTRIBUTES. The kind is already vestigial here.
 
 | Classes | Sites | Data carries | Consumers | Face |
 |---|---|---|---|---|
-| `:seon.cluster.store/*` — `branch-absent`, `branch-already-open`, `held-elsewhere`, `initialization-incomplete`, `refused` | 6 | branch name, holder pid | operator; `bin/seon` | D |
+| `:seon.cluster.store/*` — `branch-absent`, `branch-already-open`, `held-elsewhere`, `initialization-incomplete`, `refused`, `file-lock-generator-failed` | 7 | branch name, holder pid, lock file | operator; `bin/seon` | D |
 | `:seon.cluster.source/*` — `root-absent`, `invalid-source-seal`, `populate-unresolvable`, `publish-readback-failed`, `stale-publication`, `unsafe-incremental-rows`, `refused` | 7 | commit id, path, row counts | `bin/seon init` | D |
 | `:seon.cluster.registry/*` — `cannot-retire-main`, `cluster-connected`, `source-absent`, `refused` | 5 | cluster name | operator | D |
 | `:seon.cluster.export/*` — `clone-unsupported`, `export-exists`, `genesis-incomplete`, `no-branch-head`, `refused` | 6 | export path, branch head | operator | D |
@@ -133,12 +133,15 @@ the kind at all, it reads the ATTRIBUTES. The kind is already vestigial here.
 | `:core-bug` (22), `:user-input` (31) — the blame taxonomy | 53 | varies per site; each site's real evidence is already beside the kind | nobody dispatches on them | replaced per site |
 | `:seon.error/unclassified` | 1 (`src/seon/error.clj:164`) | the whole source in `data-edn` | the fail-closed floor | O (it must say honestly that nothing recognized it) |
 
-**True class count: 160 kinds today.** After the §2 merges and the
-`index-refused` split, the proposed target is **≈118 classes** — 160 − 53 blame
-kinds − 11 near-duplicate merges + 10 `index-refused` splits + 12 replacement
-classes for the blame sites (the blame sites collapse to far fewer real classes
-than they have occurrences; the exact number is the implementation lane's
-per-site call and is the one number I cannot fix from the outside).
+**Corrected source-derived count: 224 target class schemas.** The earlier
+approximately-118 arithmetic incorrectly subtracted 53 blame *occurrences* as
+though they were 53 distinct kinds; they are only the two literals `:core-bug`
+and `:user-input`. A complete construction-site pass found 163 distinct current
+kinds, then applied the two ruled pair merges, the 11-way `index-refused`
+split, 10 additional unique AI replacement names (`timeout` overlaps), and 45
+real replacements for the blame sites: 39 schema classes, five blob classes,
+and one cluster-store class. The concurrent shell work adds five classes outside
+this catalog's scope and is not included in 224.
 
 ## 2. Per-class design — the replacement shape
 
@@ -240,7 +243,7 @@ loading/unavailable per ruling #50 and is untouched here.
 |---|---|
 | `:seon.render/invalid-ai-output` + `/invalid-html-output` → one class with `:seon.render/output` naming the projection (`src/seon/render.clj:184, 199` differ only in that word) | MERGE |
 | `:seon.sci.eval/install-source-mismatch` + `/install-delete-mismatch` → one `:seon.sci.eval/install-mismatch` carrying which side mismatched | MERGE |
-| the eleven `::refused` kinds in `config`, `reconcile`, `artifact`, `cluster.{store,source,registry,prompt,export,run}` | KEEP per namespace (each has a distinct repair) but reference ONE shared registered shape for the rule/transition attributes so they cannot drift |
+| the ten `::refused` kinds in `config`, `reconcile`, `artifact`, `boot`, `cluster.{store,source,registry,prompt,export,run}` | KEEP per namespace (each has a distinct repair) but reference ONE shared registered shape for the rule/transition attributes so they cannot drift |
 | `:seon.effect/already-recorded` + `/already-settled` | KEEP separate — a replayed request identity and a terminal receipt are different repairs, despite reading alike |
 | `:my.fs/read-limit` + `/write-limit` | KEEP separate, sharing one `:my.fs/limit-bytes` attribute |
 | `:seon.db/rejected` + `/unknown-failure` | KEEP — §3.3's HTTP status depends on the distinction — but rename to say what it means: "the database refused this transaction" vs "we do not know what happened" |
