@@ -202,6 +202,22 @@ never block. MCP DOOR ISSUE RESOLVED and archived with live proof
 (`a54b8bddb`, orchestrator-verified 304,265 → ~4,332 bytes,
 get_value paging proven).
 
+MCP RENDER CONVERGENCE (owner-directed, same afternoon): door
+evaluations now project the REPL TEXT FACE through the one seon.print
+text sink the transcript uses (`ca93bf40f`, live-proven: the
+50k-vector envelope is ~900 bytes; a three-entity `seon.db/pull`
+probe rendered shape-preserving elision with the full 32 KB artifact
+blob-backed). STANDING ACCEPTANCE RULE for the MCP surface, owner
+verbatim intent "ideally you would both use the same tools for
+everything including the blob result stuff": MCP tools are THIN
+ADAPTERS over exactly the functions agents call — one printer/floor
+for display, one seon.blob API for oversized results (converge
+mcp-get-value onto blob-binary's `read-chunk` when it lands), one
+path-drill mechanism — never a parallel MCP-only helper. Known
+nuance: the transcript merges SESSION print options while the MCP
+face reads the config dials — same printer, same floor, dial values
+may differ.
+
 **ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
 THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
 
