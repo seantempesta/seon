@@ -2037,6 +2037,35 @@ may reintroduce a shadow build into the dev feedback path.
   state, and NOTHING ROLLS BACK — a def an eval made stays live even
   when its terminal transaction is refused (ruling #30). There is no
   restart-from-before-the-crash; the agent adapts from what it is told.
+  **Ruling 2026-08-02 #47 (owner, night): NO NAMING CONVENTIONS —
+  RENDER DECLARATIONS ARE EXPLICIT MALLI PROPERTIES.** Owner verbatim:
+  "no naming conventions. explicit representations via malli metadata."
+  The `render-<kind>` symbol that `seon.render/namespace-declaration`
+  string-builds from a namespace name (`src/seon/render.clj:282-292`) is
+  DELETED, not justified — a name-derived rule is the hand-list shape
+  this repository bans, and it is a second resolution mechanism beside
+  the explicit one. GROUNDED IN THE DEPENDENCY: Malli schemas carry
+  arbitrary namespaced properties read with `m/properties`
+  (`reference-code/malli/src/malli/core.cljc:39`; the README's own
+  examples use custom keys such as `:json-schema/example` and
+  `:math/multiplier`, `reference-code/malli/README.md:284-292,1267-1275`).
+  So a schema's default render is declared ON THE SCHEMA as
+  `:seon.render/ai` / `:seon.render/html` properties — explicit, queryable,
+  and compatible with closed maps because properties live on the schema
+  rather than in the data. RESOLUTION ORDER becomes: the unit's own
+  explicit declaration, then the DECLARED OUTPUT TYPE of the producing
+  function (ruling #33's `:seon.fn.arity/output-refs` already makes "what
+  is this data" a query rather than a structural guess), then the
+  schema's own property, then the floor. RELATED HAZARD to fix in the
+  same wave: `matching-shapes-in` (`src/seon/schema.clj:2394-2416`)
+  selects schemas that VALIDATE the value, and Seon's convention is
+  `{:closed true}`, so a unit carrying EXTRA render attributes matches
+  nothing and silently falls to the generic floor. Owner: "something can
+  be named schema AND have additional render attributes and it's still
+  that thing. Extra attributes are always okay." Note Malli maps are OPEN
+  by default (`README.md:294`) — the hazard is self-inflicted by our
+  closed convention, so the fix belongs in render-resolution matching and
+  never in loosening the declarations, which are load-bearing elsewhere.
   **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
   THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
   (1) Owner verbatim: "we OWN sci now with our fork. Design with the
