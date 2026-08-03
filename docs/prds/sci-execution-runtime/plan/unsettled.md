@@ -16,6 +16,21 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, TEST FEEDBACK TIERS OWNER-RULED.** Bare `bin/test`
+is the fast recurring gate and derives its exclusions only from non-blank
+`:seon.test/long` reasons declared on process/boot-bound test vars or
+namespaces. It prints every skipped symbol and `bin/test --full`; explicit
+namespace selections, `bin/test --full`, and `SEON_TEST_FULL=1 bin/test` run
+their complete selection. The preceding 883-test / 4,405-assertion full gate
+took 697.50 seconds. The final tiered default measurement retained 813 tests /
+4,018 assertions with zero failures or errors in 174.94 seconds; the remaining
+gap to the one-to-two-minute aim is now dominated by default-tier generated
+invariants and source publication, not the removed process/boot giants. The
+new explicit full checkpoint is blocked at the concurrently edited render
+test census: loaded metadata currently contains 848 tests, not 883. Exact
+evidence and the design analysis live in
+`research/test-defect-analysis-2026-08-03.md`.
+
 **ADDENDUM — 2026-08-03, RULING #41 CALL-SITE SWEEP LANDED.** The ordered
 quiet-window sweep in `research/seon-db-sweep-plan-2026-08-03.md` is complete:
 all non-exempt production and test core reads/writes now use `seon.db`, and

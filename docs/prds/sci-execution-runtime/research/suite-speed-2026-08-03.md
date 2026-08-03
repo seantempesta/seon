@@ -294,3 +294,27 @@ The deliberately expensive canonical fixture test still rebuilds the manifest
 it is asserting, accounting for 6.77s of its 9.715s namespace wall. The full
 after wall and terminal count comparison remain unclaimed until the unrelated
 in-flight source snapshot reaches a coherent gate.
+
+## Owner-ruled recurring and full tiers
+
+The 2026-08-03 owner ruling supersedes bare-full semantics. Test metadata is
+now the single selection authority: a non-blank `:seon.test/long` reason on a
+var or namespace declares process/boot-bound coverage. Bare `bin/test` runs
+everything else and prints every skipped symbol plus `bin/test --full`.
+Explicit namespace selection, `bin/test --full`, and
+`SEON_TEST_FULL=1 bin/test` remain complete selections.
+
+The final default profile at
+`tmp/test-profiles/default-tier-final-2026-08-03` passed 813 tests / 4,018
+assertions with zero failures or errors in 174.935 seconds, skipping 35 named
+tests. That is 74.9% faster than the last 697.50-second full gate. Sharing one
+published operator root reduced the explicit 28-test / 133-assertion boot
+namespace from 171.541 seconds to about 71.7 seconds without removing an
+assertion.
+
+The explicit full rerun is blocked on a foreign render-lane census change:
+five former test namespaces are deleted and one replacement namespace is
+present, so the loaded metadata contains 848 tests rather than the required
+883. No full result is claimed for that snapshot. The defect analysis,
+ranking, remaining choke-point refactors, and exact boundary are recorded in
+`test-defect-analysis-2026-08-03.md`.
