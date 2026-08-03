@@ -31,10 +31,11 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (70)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make the opaque-reference test distinguish identity bytes from value bytes](opaque-reference-test-confuses-object-identity-with-value.md) | friction | render test-honesty wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
 | [Make the AI transport taxonomy test assert its premise](ai-transport-taxonomy-test-can-run-zero-assertions.md) | friction | AI provider-integrity wave |
 | [Give the SCI source-size cap a declared owner](sci-reader-hides-a-production-source-cap.md) | friction | SCI reader-limit wave |
