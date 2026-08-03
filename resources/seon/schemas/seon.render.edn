@@ -43,7 +43,9 @@
                [:seon.error/value :seon.error/value]],
               :hiccup
               [:fn
-               #:gen{:gen seon.render.hiccup/hiccup-generator}
+               {:error/message
+                "must be Hiccup accepted by Seon's HTML serializer"
+                :gen/gen seon.render.hiccup/hiccup-generator}
                seon.render.hiccup/hiccup?],
               :html [:or :qualified-symbol :seon.render/hiccup],
               :namespace :symbol,

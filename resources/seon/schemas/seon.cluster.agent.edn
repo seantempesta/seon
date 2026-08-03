@@ -61,6 +61,8 @@
                      [:and #:seon.db{:unique true} :seon.db/ref],
                      :routing
                      [:fn
-                      #:gen{:gen seon.flow/atom-reference-generator}
+                      {:error/message
+                       "must be a process-local atom containing agent routing state"
+                       :gen/gen seon.flow/atom-reference-generator}
                       seon.flow/atom-reference?],
                      :run :seon.db/ref}

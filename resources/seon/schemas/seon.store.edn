@@ -1,11 +1,15 @@
 #:seon.store{:branch :keyword,
              :branch-connection
              [:fn
-              #:gen{:gen seon.cluster.store/connection-generator}
+              {:error/message
+               "must be a live unreleased Datahike branch connection from the calling cluster"
+               :gen/gen seon.cluster.store/connection-generator}
               seon.cluster.store/connection?],
              :connection
              [:fn
-              #:gen{:gen seon.cluster.store/connection-generator}
+              {:error/message
+               "must be a Datahike connection object, live or released"
+               :gen/gen seon.cluster.store/connection-generator}
               seon.cluster.store/connection-object?],
              :dir [:string {:min 1}],
              :lock-file [:string {:min 1}],
@@ -15,11 +19,14 @@
               [:seon.store/lock-file :seon.store/lock-file]
               [:seon.store/connection
                [:fn
-                #:gen{:gen seon.cluster.store/connection-generator}
+                {:error/message
+                 "must be a live unreleased Datahike connection held by this process root"
+                 :gen/gen seon.cluster.store/connection-generator}
                 seon.cluster.store/connection?]]
               [:seon.store/lock
                [:fn
-                #:gen{:gen seon.cluster.store/file-lock-generator}
+                {:error/message "must be a held valid java.nio FileLock"
+                 :gen/gen seon.cluster.store/file-lock-generator}
                 seon.cluster.store/file-lock?]]
               [:seon.store/created? :boolean]],
              :transaction

@@ -196,7 +196,12 @@
           :response-started? :boolean,
           :sent [:map-of :string :seon.ai/json-value],
           :settings :seon.config/effective,
-          :sink [:fn #:gen{:gen seon.ai/sink-generator} seon.ai/sink?],
+          :sink
+          [:fn
+           {:error/message
+            "must be a callable sink that accepts one streamed AI partial"
+            :gen/gen seon.ai/sink-generator}
+           seon.ai/sink?],
           :stop :seon.config.ai/stop,
           :stream? :boolean,
           :system [:string {:min 1}],

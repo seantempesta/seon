@@ -198,7 +198,8 @@
               [:seon.print/hiccup :seon.render/hiccup]],
              :sink
              [:fn
-              #:gen{:gen seon.print/sink-generator}
+              {:error/message "must implement seon.print/Sink"
+               :gen/gen seon.print/sink-generator}
               seon.print/sink?],
              :table?
              [:enum

@@ -3,7 +3,9 @@
                       :delta [:map-of :seon.render/surface-id :string],
                       :frame
                       [:fn
-                       #:gen{:gen seon.render.web/byte-array-generator}
+                       {:error/message
+                        "must be a JVM byte array containing a serialized render package"
+                        :gen/gen seon.render.web/byte-array-generator}
                        seon.schema/byte-array?],
                       :keyframe
                       [:map-of :seon.render/surface-id :string],

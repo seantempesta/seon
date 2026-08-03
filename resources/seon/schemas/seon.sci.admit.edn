@@ -21,7 +21,9 @@
                    :seon.config.eval.result/max-nodes]],
                  :interrupt-fn
                  [:fn
-                  #:gen{:gen seon.sci.admit/interrupt-fn-generator}
+                  {:error/message
+                   "must be a callable value for SCI interruption checks"
+                   :gen/gen seon.sci.admit/interrupt-fn-generator}
                   seon.sci.admit/interrupt-fn?],
                  :print-node :seon.print/node,
                  :record

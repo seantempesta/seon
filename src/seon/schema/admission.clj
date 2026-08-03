@@ -234,6 +234,22 @@
                 (keep
                  (fn [node]
                    (when (and (vector? node)
+                              (= :fn (first node))
+                              (str/blank?
+                               (:error/message (form-properties node))))
+                     (finding
+                      file :warning
+                      :schema-predicate-missing-error-message
+                      (str "Predicate schema " declaration-key
+                           " must declare a nonblank `:error/message` "
+                           "saying what value "
+                           (pr-str (first (form-body node)))
+                           " accepts.")
+                      base-extra)))
+                 nodes)
+                (keep
+                 (fn [node]
+                   (when (and (vector? node)
                               (= :map (first node))
                               (true? (:closed (form-properties node))))
                      (finding file :error :schema-closed-map
@@ -348,8 +364,8 @@
 
   The open request accepts `::paths`/`::sources` for file admission or
   `::declarations` plus the complete `::registry` for declaration admission.
-  Error findings block; `:schema-exact-reuse` and `:schema-name-overlap` are
-  advisory warnings."
+  Error findings block; predicate-message, exact-reuse, and name-overlap
+  findings are advisory warnings."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{::keys [registry] :as request}]
   (try

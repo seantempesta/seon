@@ -17,7 +17,9 @@
           [:my.fs/bytes {:optional true} :my.fs/bytes]
           [:seon.blob/digest {:optional true} :seon.blob/digest]]
          [:fn
-          {:gen/schema
+          {:error/message
+           "must contain exactly one byte source: :my.fs/text, :my.fs/bytes, or :seon.blob/digest"
+           :gen/schema
            [:or
             [:map [:my.fs/text :string]]
             [:map [:my.fs/bytes :my.fs/bytes]]
@@ -93,7 +95,9 @@
            {:optional true}
            :my.fs/expected-digest]]
          [:fn
-          {:gen/schema
+          {:error/message
+           "must contain exactly one write fence: :my.fs/expected-absence? or :my.fs/expected-digest"
+           :gen/schema
            [:or
             [:map [:my.fs/expected-absence? :my.fs/expected-absence?]]
             [:map [:my.fs/expected-digest :my.fs/expected-digest]]]}

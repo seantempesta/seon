@@ -1,10 +1,14 @@
 #:seon.flow{:active-evals
             [:fn
-             #:gen{:gen seon.flow/atom-reference-generator}
+             {:error/message
+              "must be a process-local atom containing active evaluation state"
+              :gen/gen seon.flow/atom-reference-generator}
              seon.flow/atom-reference?],
             :active-work
             [:fn
-             #:gen{:gen seon.flow/atom-reference-generator}
+             {:error/message
+              "must be a process-local atom containing active Flow work state"
+              :gen/gen seon.flow/atom-reference-generator}
              seon.flow/atom-reference?],
             :admitted? :boolean,
             :attempt [:int {:min 0}],
@@ -37,7 +41,8 @@
             :changed-source :string,
             :channel
             [:fn
-             #:gen{:gen seon.flow/channel-generator}
+             {:error/message "must be a core.async channel"
+              :gen/gen seon.flow/channel-generator}
              seon.flow/channel?],
             :commit-drop!
             [:=>
@@ -98,7 +103,8 @@
               :seon.flow/compute-timeout-ms]],
             :executor
             [:fn
-             #:gen{:gen seon.flow/executor-generator}
+             {:error/message "must be a java.util.concurrent Executor"
+              :gen/gen seon.flow/executor-generator}
              seon.flow/executor?],
             :failure-count [:int {:min 0}],
             :fault-committer-proc-request
@@ -118,11 +124,13 @@
             :fix-step-fn [:=> [:cat :map] :seon.flow/fix-outcome],
             :future
             [:fn
-             #:gen{:gen seon.flow/java-future-generator}
+             {:error/message "must be a java.util.concurrent Future"
+              :gen/gen seon.flow/java-future-generator}
              seon.flow/java-future?],
             :graph
             [:fn
-             #:gen{:gen seon.flow/graph-generator}
+             {:error/message "must be a core.async Flow graph"
+              :gen/gen seon.flow/graph-generator}
              seon.flow/graph?],
             :indexer-proc-request
             [:map
@@ -138,7 +146,8 @@
              [:seon.flow/tag [:map-of :qualified-keyword :string]]],
             :launcher
             [:fn
-             #:gen{:gen seon.flow/proc-launcher-generator}
+             {:error/message "must implement core.async Flow ProcLauncher"
+              :gen/gen seon.flow/proc-launcher-generator}
              seon.flow/proc-launcher?],
             :launcher-configuration
             [:map

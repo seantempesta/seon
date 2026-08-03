@@ -123,6 +123,41 @@
             :invoice/item-total]
            (mapv :seon.schema.admission/similar-key overlaps)))))
 
+(deftest predicate-error-messages-are-advised-without-blocking-admission
+  (let [without-message
+        (admission/admit
+         {::admission/declarations
+          {:predicate.fixture/value
+           [:fn {:gen/schema :int} clojure.core/int?]}
+          ::admission/registry {}})
+        with-message
+        (admission/admit
+         {::admission/declarations
+          {:predicate.fixture/value
+           [:fn {:error/message "must be an integer"
+                 :gen/schema :int}
+            clojure.core/int?]}
+          ::admission/registry {}})
+        missing
+        (findings-of-type :schema-predicate-missing-error-message
+                          without-message)]
+    (is (= 1 (count missing)))
+    (is (= :warning (:level (first missing)))
+        "a missing explanation teaches at declaration time but never blocks")
+    (is (str/includes? (or (:message (first missing)) "")
+                       ":error/message"))
+    (is (empty?
+         (findings-of-type :schema-predicate-missing-error-message
+                           with-message)))))
+
+(deftest packaged-predicate-declarations-all-explain-their-values
+  (let [findings
+        (admission/admit
+         {::admission/path "resources/seon/schemas"})]
+    (is (empty?
+         (findings-of-type :schema-predicate-missing-error-message
+                           findings)))))
+
 (deftest a-clean-declaration-produces-no-findings
   (is (empty?
        (admission/admit

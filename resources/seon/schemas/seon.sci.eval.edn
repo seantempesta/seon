@@ -5,7 +5,8 @@
                 :args [:vector :any],
                 :ctx
                 [:fn
-                 #:gen{:gen seon.sci.eval/ctx-generator}
+                 {:error/message "must be an SCI evaluation context"
+                  :gen/gen seon.sci.eval/ctx-generator}
                  seon.sci.eval/ctx?],
                 :ending-ns :symbol,
                 :evaluation
@@ -52,7 +53,9 @@
                  [:seon.db/capture-context
                   {:optional true}
                   [:fn
-                   #:gen{:gen seon.flow/atom-reference-generator}
+                   {:error/message
+                    "must be a process-local atom collecting database read evidence"
+                    :gen/gen seon.flow/atom-reference-generator}
                    seon.flow/atom-reference?]]
                  [:seon.config/on-core-error
                   :seon.config/on-core-error]],

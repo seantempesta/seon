@@ -2,6 +2,8 @@
   "Regression proofs for the canonical schema registration boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [malli.error :as me]
+            [seon.db]
             [seon.schema :as schema]
             [seon.schema.edn]))
 
@@ -21,6 +23,15 @@
     (is (schema/malli-form? definition))
     (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
         "schema validation never loads an arbitrary predicate namespace")))
+
+(deftest named-predicate-violations-humanize-to-the-declared-requirement
+  (let [humanized
+        (me/humanize
+         (schema/explain-candidate-value
+          :seon.db/database-value "not a database value"))]
+    (is (str/includes? (pr-str humanized)
+                       "must be an immutable Datahike database value"))
+    (is (not (str/includes? (pr-str humanized) "unknown error")))))
 
 (deftest canonical-self-references-refuse-at-registration
   (let [state (schema/snapshot-state)

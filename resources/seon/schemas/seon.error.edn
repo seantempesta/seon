@@ -29,7 +29,9 @@
              :data-edn :string,
              :drops
              [:fn
-              #:gen{:gen seon.flow/atom-reference-generator}
+              {:error/message
+               "must be a process-local atom containing the dropped-error count"
+               :gen/gen seon.flow/atom-reference-generator}
               seon.flow/atom-reference?],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
              :fact

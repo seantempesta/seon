@@ -18,7 +18,8 @@
                     :seon.flow/channel]],
                   :http-server
                   [:fn
-                   #:gen{:gen seon.render.web/server-generator}
+                   {:error/message "must be an http-kit server"
+                    :gen/gen seon.render.web/server-generator}
                    seon.render.web/server?],
                   :inbound
                   [:map
@@ -28,7 +29,9 @@
                     :seon.cluster.message/inbound-content]],
                   :latest-packages
                   [:fn
-                   #:gen{:gen seon.flow/atom-reference-generator}
+                   {:error/message
+                    "must be a process-local atom containing each page's latest render package"
+                    :gen/gen seon.flow/atom-reference-generator}
                    seon.flow/atom-reference?],
                   :page-request
                   [:map
@@ -37,7 +40,9 @@
                    [:seon.render.web/feed-url [:string {:min 1}]]],
                   :pages-mult
                   [:fn
-                   #:gen{:gen seon.render.web/mult-generator}
+                   {:error/message
+                    "must be a core.async mult carrying render packages"
+                    :gen/gen seon.render.web/mult-generator}
                    seon.render.web/mult?],
                   :paint-request
                   [:map
@@ -62,7 +67,9 @@
                   :port [:int {:min 0, :max 65535}],
                   :registration
                   [:fn
-                   #:gen{:gen seon.flow/atom-reference-generator}
+                   {:error/message
+                    "must be a process-local atom containing registered namespace pages"
+                    :gen/gen seon.flow/atom-reference-generator}
                    seon.flow/atom-reference?],
                   :root-agent-id :seon.cluster.agent/id,
                   :server

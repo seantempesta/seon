@@ -3,12 +3,14 @@
             :inline-prefix :seon.blob/octet-array,
             :input-stream
             [:fn
-             #:gen{:gen seon.blob/input-stream-generator}
+             {:error/message "must be a JVM input stream"
+              :gen/gen seon.blob/input-stream-generator}
              seon.blob/input-stream?],
             :length [:int {:min 0}],
             :octet-array
             [:fn
-             #:gen{:gen seon.blob/octet-array-generator}
+             {:error/message "must be a JVM byte array"
+              :gen/gen seon.blob/octet-array-generator}
              seon.schema/byte-array?],
             :offset [:int {:min 0}],
             :size [:int {:min 0}],

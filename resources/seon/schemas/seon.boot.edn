@@ -24,11 +24,15 @@
             [:map
              [:compute
               [:fn
-               #:gen{:gen seon.flow/executor-generator}
+               {:error/message
+                "must be a java.util.concurrent Executor for compute work"
+                :gen/gen seon.flow/executor-generator}
                seon.flow/executor?]]
              [:io
               [:fn
-               #:gen{:gen seon.flow/executor-generator}
+               {:error/message
+                "must be a java.util.concurrent Executor for I/O work"
+                :gen/gen seon.flow/executor-generator}
                seon.flow/executor?]]],
             :instance
             [:map
@@ -36,7 +40,9 @@
              [:seon.boot/advertisement :seon.boot/advertisement]
              [:seon.boot/prepl-server
               [:fn
-               #:gen{:gen seon.cluster/socket-server-generator}
+               {:error/message
+                "must be a java.net.ServerSocket serving the cluster io-prepl"
+                :gen/gen seon.cluster/socket-server-generator}
                seon.cluster/socket-server?]]
              [:seon.boot/executors :seon.boot/executors]
              [:seon.store/store {:optional true} :seon.store/store]

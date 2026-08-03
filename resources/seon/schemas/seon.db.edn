@@ -1,10 +1,13 @@
 #:seon.db{:connection
           [:fn
-           #:gen{:gen seon.db/connection-generator}
+           {:error/message
+            "must be a live unreleased Datahike connection from the calling cluster"
+            :gen/gen seon.db/connection-generator}
            seon.db/connection?],
           :database-value
           [:fn
-           #:gen{:gen seon.db/database-value-generator}
+           {:error/message "must be an immutable Datahike database value"
+            :gen/gen seon.db/database-value-generator}
            seon.db/database-value?],
           :datom
           [:map
