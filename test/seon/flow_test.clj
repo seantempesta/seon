@@ -1118,6 +1118,44 @@
               (is (< (count (:seon.error/data-edn first-fact)) 10000)
                   "the normalizer caps the retained stack and ex-data"))))))
 
+    (testing "a rebuilt proc does not print a signature already durable"
+      (test-support/with-database
+        (fn [connection]
+          (with-redefs [config/effective effective]
+            (let [[durable-fact durable-outcome]
+                  (commit-core-fault! connection "fault-test" "process-3"
+                                      caps repeated-fault)
+                  initial-state
+                  (committer-step
+                   {::sut/fault-channel (async/chan 1)
+                    ::sut/completion (async/promise-chan)
+                    ::sut/read-core-error-mode (constantly :panic)
+                    ::sut/commit-fault!
+                    #(commit-core-fault! connection "fault-test" "process-3"
+                                         caps %)
+                    ::sut/panic!
+                    #(emit-core-fault!
+                      {:seon.config.eval.result/blob-threshold inline-ceiling}
+                      %)})
+                  stderr-writer (java.io.StringWriter.)
+                  [final-state _]
+                  (binding [*err* stderr-writer]
+                    (committer-step initial-state ::sut/core-fault
+                                    repeated-fault))
+                  signatures
+                  (db/q '[:find ?signature
+                          :where [_ :seon.error/signature ?signature]]
+                        @connection)]
+              (is (= ::sut/committed durable-outcome))
+              (is (= #{(:seon.error/signature durable-fact)}
+                     (set (map first signatures))))
+              (is (= #{(:seon.error/signature durable-fact)}
+                     (::sut/seen-signatures final-state)))
+              (is (zero? (::sut/committed final-state)))
+              (is (zero? (::sut/panicked final-state)))
+              (is (empty? (str stderr-writer))
+                  "the durable signature suppresses output after rebuild"))))))
+
     (testing "a dead writer still emits each signature only once"
       (test-support/with-database
         (fn [connection]

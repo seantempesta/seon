@@ -767,6 +767,9 @@
           (commit-fault! (assoc fault ::seen-signatures seen-signatures))
           signature (:seon.error/signature fact)
           repeated? (and signature (contains? seen-signatures signature))
+          already-reported?
+          (or repeated?
+              (contains? #{::already-committed ::already-reported} outcome))
           next-state (cond-> state
                        signature (update ::seen-signatures conj signature)
                        (= ::committed outcome) (update ::committed inc))
@@ -780,7 +783,7 @@
                             ::already-reported}
                           outcome))]
       (cond
-        repeated?
+        already-reported?
         [next-state nil]
 
         (= :record mode)
