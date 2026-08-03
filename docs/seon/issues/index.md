@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -31,8 +31,10 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
+| [Give each cluster durable work-launcher ownership](process-work-launcher-is-replaced-by-every-cluster-start.md) | blocker | shared-surface runtime repair |
+| [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 
-## Friction (73)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -107,8 +109,11 @@ See `README.md` for the convention.
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
 | [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
+| [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
+| [Refuse ambiguous render declarations from overlapping open schemas](render-resolution-silently-chooses-one-overlapping-schema.md) | friction | render implementation wave |
+| [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
 
-## Cleanup (12)
+## Cleanup (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -124,3 +129,4 @@ See `README.md` for the convention.
 | [Delete the konserve LRU our fork allocates and never reads](datahike-allocates-a-konserve-cache-it-never-reads.md) | cleanup | store/perf fix lane |
 | [Read the symbol SCI already puts in analysis ex-data](sci-analysis-ex-data-carries-a-symbol-nothing-reads.md) | cleanup | SCI eval-context owner design gate |
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
+| [Stop opaque contract generators from sharing live process objects](opaque-contract-generators-share-live-process-objects.md) | cleanup | contract-generator cleanup wave |

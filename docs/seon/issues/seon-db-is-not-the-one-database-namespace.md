@@ -123,3 +123,20 @@ Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
 
 Still open: acceptance item 3's 34-namespace direct-call sweep, its write-site
 classification, and the authority updates that graduate the complete issue.
+
+## Independent codec-window evidence — 2026-08-03
+
+An adversarial probe installed a synthetic `[:or :string :qualified-symbol]`
+attribute, transacted a qualified symbol through `seon.db/transact!`, and read
+it through both namespaces. `seon.db` returned `clojure.lang.Symbol` through
+`q`, `pull`, `entity`, and `datoms`; direct `datahike.api` returned
+`java.lang.String` through every equivalent path, including query tuple and
+pull-expression positions.
+
+The current production population census found 24 union declarations but zero
+installed fallback mixed-union attributes. Therefore no live production direct
+call site reads a union-capable installed attribute today; the migration-window
+risk is dormant, not hypothetical. The first such attribute exposed before the
+34-namespace sweep completes will be string-valued for every bypassing reader.
+Full probe output and source anchors are in
+[[adversarial-pass-2026-08-03]].

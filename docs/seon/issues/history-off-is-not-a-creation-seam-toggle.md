@@ -162,3 +162,18 @@ protected owner without weakening agent-authored contracts, then rerun the
 history-off READY → real DeepSeek turn → rendered context → flat temporal
 error proof and the paired history-on `history` / `as-of` / `since` proof.
 Until then the issue remains open and no live-proof acceptance is claimed.
+
+## Independent adversarial confirmation — 2026-08-03
+
+A separate low-level history-off probe confirmed that `seon.db/history`,
+`as-of`, and `since` each return flat
+`:seon.db/non-temporal-database` values, and that schema admission plus registry
+blob collection log zero Datahike temporal exceptions. Reopen without an
+explicit setting derived persisted `false`; conflicting explicit `true` was
+refused with zero connect calls.
+
+The full isolated tower independently stopped at the same remaining boundary:
+`:seon.ai/usage` was classified agent-authored when temporal first-assertion
+evidence was unavailable, then its `:any` was refused. The API migration is
+correct and quiet; history-off boot remains ungraduated. Exact results are in
+[[adversarial-pass-2026-08-03]].
