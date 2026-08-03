@@ -35,4 +35,17 @@
                [:seon.config/resolved-attributes
                 [:set :qualified-keyword]]],
               :on-core-error
-              [:enum #:seon.config{:dial true} :record :panic]}
+              [:enum #:seon.config{:dial true} :record :panic],
+              :rule :keyword,
+              :path [:string {:min 1}],
+              :key :qualified-keyword,
+              :refused :seon.config/rule
+              :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused configuration rule"} :seon.error/refusal-value [:map [:seon.config/refused :seon.config/refused]]]
+              :manifest-unreadable :seon.config/path
+              :manifest-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the configuration manifest that could not be read"} [:seon.config/manifest-unreadable :seon.config/manifest-unreadable] [:seon.error/message :seon.error/message]]
+              :reconcile-refused :seon.config/rule
+              :reconcile-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rule that refused configuration reconciliation"} [:seon.config/reconcile-refused :seon.config/reconcile-refused] [:seon.error/message :seon.error/message]]
+              :required-absent :seon.config/key
+              :required-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the required configuration key that is absent"} [:seon.config/required-absent :seon.config/required-absent] [:seon.error/message :seon.error/message]]
+              :unknown-key :seon.config/key
+              :unknown-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown configuration key"} [:seon.config/unknown-key :seon.config/unknown-key] [:seon.error/message :seon.error/message]]}

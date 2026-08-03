@@ -1,0 +1,11 @@
+{:seon.cluster.export/rule :keyword
+ :seon.cluster.export/clone-unsupported :seon.export/path
+ :seon.cluster.export/clone-unsupported-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the branch whose store cannot be cloned"} [:seon.cluster.export/clone-unsupported :seon.cluster.export/clone-unsupported] [:seon.error/message :seon.error/message]]
+ :seon.cluster.export/export-exists :string
+ :seon.cluster.export/export-exists-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the export path that already exists"} [:seon.cluster.export/export-exists :seon.cluster.export/export-exists] [:seon.error/message :seon.error/message]]
+ :seon.cluster.export/genesis-incomplete :seon.export/path
+ :seon.cluster.export/genesis-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the export with incomplete genesis data"} [:seon.cluster.export/genesis-incomplete :seon.cluster.export/genesis-incomplete] [:seon.error/message :seon.error/message]]
+ :seon.cluster.export/no-branch-head :seon.store/branch
+ :seon.cluster.export/no-branch-head-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the branch with no branch head"} [:seon.cluster.export/no-branch-head :seon.cluster.export/no-branch-head] [:seon.error/message :seon.error/message]]
+ :seon.cluster.export/refused :seon.cluster.export/rule
+ :seon.cluster.export/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a refused cluster-export transition"} :seon.error/refusal-value [:map [:seon.cluster.export/refused :seon.cluster.export/refused]]]}

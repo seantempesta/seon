@@ -251,4 +251,15 @@
              [:seon.flow/workload :seon.flow/workload]
              [:seon.flow/work-fn :seon.flow/work-fn]
              [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]],
-            :workload [:enum :compute :io]}
+            :workload [:enum :compute :io],
+            :proc-id :keyword,
+            :submission-capacity :seon.flow/proc-id
+            :submission-capacity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose submission capacity was exhausted"} [:seon.flow/submission-capacity :seon.flow/submission-capacity] [:seon.error/message :seon.error/message]]
+            :launcher-stopped :seon.flow/proc-id
+            :launcher-stopped-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose launcher has stopped"} [:seon.flow/launcher-stopped :seon.flow/launcher-stopped] [:seon.error/message :seon.error/message]]
+            :time-limit :seon.flow/proc-id
+            :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose compute time limit was reached"} [:seon.flow/time-limit :seon.flow/time-limit] [:seon.error/message :seon.error/message]]
+            :configuration [:= true]
+            :configuration-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid flow configuration"} [:seon.flow/configuration :seon.flow/configuration] [:seon.error/message :seon.error/message]]
+            :timeout :seon.flow/proc-id
+            :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose observable completion timed out"} [:seon.flow/timeout :seon.flow/timeout] [:seon.error/message :seon.error/message]]}

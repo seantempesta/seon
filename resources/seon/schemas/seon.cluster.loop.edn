@@ -112,4 +112,10 @@
                     [:map
                      [:seon.cluster.loop/cluster
                       :seon.cluster.loop/cluster]
-                     [:seon.cluster.work/next :seon.cluster.work/next]]}
+                     [:seon.cluster.work/next :seon.cluster.work/next]],
+                    :lint-rejected [:= true]
+                    :lint-rejected-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an evaluated form rejected by lint"} [:seon.cluster.loop/lint-rejected :seon.cluster.loop/lint-rejected] [:seon.error/message :seon.error/message]]
+                    :prompt-failed :seon.cluster.agent/id
+                    :prompt-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose prompt failed to render"} [:seon.cluster.loop/prompt-failed :seon.cluster.loop/prompt-failed] [:seon.error/message :seon.error/message]]
+                    :terminal-refusal-settlement-refused :seon.cluster.run/rule
+                    :terminal-refusal-settlement-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the run rule that refused terminal-refusal settlement"} [:seon.cluster.loop/terminal-refusal-settlement-refused :seon.cluster.loop/terminal-refusal-settlement-refused] [:seon.error/message :seon.error/message]]}

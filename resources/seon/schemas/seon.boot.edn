@@ -143,4 +143,6 @@
              [:seon.config/environment
               {:optional true}
               :seon.config/manifest]],
-            :store-dir [:string {:min 1}]}
+            :store-dir [:string {:min 1}],
+            :refused [:= true]
+            :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a refused boot transition"} :seon.error/refusal-value [:map [:seon.boot/refused :seon.boot/refused]]]}

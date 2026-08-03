@@ -65,4 +65,10 @@
                        "must be a process-local atom containing agent routing state"
                        :gen/gen seon.flow/atom-reference-generator}
                       seon.flow/atom-reference?],
-                     :run :seon.db/ref}
+                     :run :seon.db/ref,
+                     :no-such-agent :seon.cluster.agent/id
+                     :no-such-agent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested agent that does not exist"} [:seon.cluster.agent/no-such-agent :seon.cluster.agent/no-such-agent] [:seon.error/message :seon.error/message]]
+                     :turn-completion-backstop :seon.cluster.agent/id
+                     :turn-completion-backstop-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose turn-completion backstop fired"} [:seon.cluster.agent/turn-completion-backstop :seon.cluster.agent/turn-completion-backstop] [:seon.error/message :seon.error/message]]
+                     :turn-completion-undeliverable :seon.cluster.agent/id
+                     :turn-completion-undeliverable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose turn completion was undeliverable"} [:seon.cluster.agent/turn-completion-undeliverable :seon.cluster.agent/turn-completion-undeliverable] [:seon.error/message :seon.error/message]]}

@@ -17,4 +17,15 @@
                     :seon.reconcile/converged?]
                    [:seon.reconcile/operations
                     :seon.reconcile/operations]]
-                  :seon.error/value]}
+                  :seon.error/value],
+                 :rule :keyword,
+                 :refused :seon.reconcile/rule
+                 :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused reconciliation rule"} :seon.error/refusal-value [:map [:seon.reconcile/refused :seon.reconcile/refused]]]
+                 :no-identity [:= true]
+                 :no-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled row with no identity attribute"} [:seon.reconcile/no-identity :seon.reconcile/no-identity] [:seon.error/message :seon.error/message]]
+                 :two-identities [:= true]
+                 :two-identities-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled row with two identity attributes"} [:seon.reconcile/two-identities :seon.reconcile/two-identities] [:seon.error/message :seon.error/message]]
+                 :duplicate-identity [:= true]
+                 :duplicate-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark duplicate identities in a reconciled population"} [:seon.reconcile/duplicate-identity :seon.reconcile/duplicate-identity] [:seon.error/message :seon.error/message]]
+                 :identity-outside-scope [:= true]
+                 :identity-outside-scope-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled identity outside the declared scope"} [:seon.reconcile/identity-outside-scope :seon.reconcile/identity-outside-scope] [:seon.error/message :seon.error/message]]}

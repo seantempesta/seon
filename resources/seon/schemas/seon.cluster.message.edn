@@ -75,4 +75,20 @@
                         [:seon.cluster.message/trigger
                          {:optional true}
                          :seon.cluster.message/id]],
-                       :to :seon.db/ref}
+                       :to :seon.db/ref,
+                       :size [:int {:min 0}],
+                       :limit [:int {:min 0}],
+                       :unknown-recipient :seon.cluster.agent/id
+                       :unknown-recipient-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown message recipient"} [:seon.cluster.message/unknown-recipient :seon.cluster.message/unknown-recipient] [:seon.error/message :seon.error/message]]
+                       :unknown-about :seon.cluster.message/id
+                       :unknown-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown message named as context"} [:seon.cluster.message/unknown-about :seon.cluster.message/unknown-about] [:seon.error/message :seon.error/message]]
+                       :ambiguous-about :seon.cluster.message/id
+                       :ambiguous-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the ambiguous message context"} [:seon.cluster.message/ambiguous-about :seon.cluster.message/ambiguous-about] [:seon.error/message :seon.error/message]]
+                       :blank-content [:= true]
+                       :blank-content-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message whose content is blank"} [:seon.cluster.message/blank-content :seon.cluster.message/blank-content] [:seon.error/message :seon.error/message]]
+                       :content-too-large :seon.cluster.message/size
+                       :content-too-large-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the size of message content that exceeds its limit"} [:seon.cluster.message/content-too-large :seon.cluster.message/content-too-large] [:seon.error/message :seon.error/message]]
+                       :chain-limit :seon.cluster.message/limit
+                       :chain-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message-chain limit that was reached"} [:seon.cluster.message/chain-limit :seon.cluster.message/chain-limit] [:seon.error/message :seon.error/message]]
+                       :no-limit [:= true]
+                       :no-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message chain with no configured limit"} [:seon.cluster.message/no-limit :seon.cluster.message/no-limit] [:seon.error/message :seon.error/message]]}

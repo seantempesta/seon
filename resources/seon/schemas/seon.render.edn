@@ -77,4 +77,8 @@
               :surface-id [:string {:min 9}],
               :unit [:map-of :qualified-keyword :any],
               :value :any,
-              :would-fall-to-floor? :boolean}
+              :would-fall-to-floor? :boolean,
+              :ambiguous [:= true]
+              :ambiguous-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value matching more than one declared render producer"} [:seon.render/ambiguous :seon.render/ambiguous] [:seon.error/message :seon.error/message]]
+              :invalid-output :keyword
+              :invalid-output-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the render projection whose producer returned invalid output"} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]}

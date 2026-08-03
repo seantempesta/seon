@@ -1,0 +1,3 @@
+{:seon.render.hiccup/tag :string
+ :seon.render.hiccup/unparseable-tag :seon.render.hiccup/tag
+ :seon.render.hiccup/unparseable-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the Hiccup tag that could not be parsed"} [:seon.render.hiccup/unparseable-tag :seon.render.hiccup/unparseable-tag] [:seon.error/message :seon.error/message]]}

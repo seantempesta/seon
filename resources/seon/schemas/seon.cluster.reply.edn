@@ -4,4 +4,10 @@
                        :seon.cluster.run.form/source]
                       [:seon.ns/name {:optional true} :seon.ns/name]],
                      :sources [:vector :seon.cluster.reply/form],
-                     :text :string}
+                     :text :string,
+                     :refused-tag :seon.sci.reader/tag
+                     :refused-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the tagged literal refused by the reply reader"} [:seon.cluster.reply/refused-tag :seon.cluster.reply/refused-tag] [:seon.error/message :seon.error/message]]
+                     :unreadable :seon.cluster.reply/text
+                     :unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reply text that the reader could not parse"} [:seon.cluster.reply/unreadable :seon.cluster.reply/unreadable] [:seon.error/message :seon.error/message]]
+                     :no-forms [:= true]
+                     :no-forms-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an agent reply containing no forms"} [:seon.cluster.reply/no-forms :seon.cluster.reply/no-forms] [:seon.error/message :seon.error/message]]}

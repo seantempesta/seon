@@ -43,23 +43,30 @@
           :spec :string,
           :sym [:string {:min 1, :seon.db/identity true}],
           :workload [:enum :io :compute],
-          :index-transaction-refused :keyword
+          :index-phase :keyword,
+          :capability-rule :keyword,
+          :resource :string,
+          :missing-population :qualified-keyword,
+          :existing-program-entity :int,
+          :index-transaction-refused :seon.fn/index-phase
           :index-transaction-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the indexing phase whose transaction was refused"} [:seon.fn/index-transaction-refused :seon.fn/index-transaction-refused] [:seon.error/message :seon.error/message]]
-          :source-checkout-absent :string
-          :source-checkout-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable source resource"} [:seon.fn/source-checkout-absent :seon.fn/source-checkout-absent] [:seon.error/message :seon.error/message]]
+          :source-checkout-required :seon.fn/resource
+          :source-checkout-required-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the resource that requires a source checkout"} [:seon.fn/source-checkout-required :seon.fn/source-checkout-required] [:seon.error/message :seon.error/message]]
           :source-span-absent [:= true]
           :source-span-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declaration with no exact source span"} [:seon.fn/source-span-absent :seon.fn/source-span-absent] [:seon.error/message :seon.error/message]]
-          :capability-graph-invalid :seon.fn/sym
-          :capability-graph-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose capability declaration is invalid"} [:seon.fn/capability-graph-invalid :seon.fn/capability-graph-invalid] [:seon.error/message :seon.error/message]]
-          :analysis-blocked [:= true]
-          :analysis-blocked-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark static analysis with blocking findings"} [:seon.fn/analysis-blocked :seon.fn/analysis-blocked] [:seon.error/message :seon.error/message]]
-          :file-artifact-invalid :string
-          :file-artifact-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid or duplicate source file path"} [:seon.fn/file-artifact-invalid :seon.fn/file-artifact-invalid] [:seon.error/message :seon.error/message]]
-          :source-population-absent :keyword
-          :source-population-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent source population"} [:seon.fn/source-population-absent :seon.fn/source-population-absent] [:seon.error/message :seon.error/message]]
+          :capability-graph-malformed :seon.fn/capability-rule
+          :capability-graph-malformed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the malformed capability-graph rule"} [:seon.fn/capability-graph-malformed :seon.fn/capability-graph-malformed] [:seon.error/message :seon.error/message]]
+          :analysis-failed [:= true]
+          :analysis-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark static analysis with blocking findings"} [:seon.fn/analysis-failed :seon.fn/analysis-failed] [:seon.error/message :seon.error/message]]
+          :source-file-invalid :seon.fn.file/path
+          :source-file-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid or duplicate source file path"} [:seon.fn/source-file-invalid :seon.fn/source-file-invalid] [:seon.error/message :seon.error/message]]
+          :manifest-absent [:= true]
+          :manifest-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an indexing request with neither manifest nor source roots"} [:seon.fn/manifest-absent :seon.fn/manifest-absent] [:seon.error/message :seon.error/message]]
           :duplicate-program-identity [:= true]
           :duplicate-program-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark duplicate program identities"} [:seon.fn/duplicate-program-identity :seon.fn/duplicate-program-identity] [:seon.error/message :seon.error/message]]
+          :population-incomplete :seon.fn/missing-population
+          :population-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the program population with no rows"} [:seon.fn/population-incomplete :seon.fn/population-incomplete] [:seon.error/message :seon.error/message]]
           :schema-declaration-invalid :seon.schema/key
           :schema-declaration-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the declaration that is not a Malli schema"} [:seon.fn/schema-declaration-invalid :seon.fn/schema-declaration-invalid] [:seon.error/message :seon.error/message]]
-          :source-scratch-not-fresh [:= true]
-          :source-scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a source scratch branch that already contains program entities"} [:seon.fn/source-scratch-not-fresh :seon.fn/source-scratch-not-fresh] [:seon.error/message :seon.error/message]]}
+          :scratch-not-fresh :seon.fn/existing-program-entity
+          :scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the program entity already present on a source scratch branch"} [:seon.fn/scratch-not-fresh :seon.fn/scratch-not-fresh] [:seon.error/message :seon.error/message]]}

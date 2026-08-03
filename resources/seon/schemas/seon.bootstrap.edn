@@ -7,4 +7,17 @@
                    {:optional true}
                    :seon.bootstrap.plan.form/context]],
                  :default-forms
-                 [:vector {:min 1} :seon.bootstrap/default-form]}
+                 [:vector {:min 1} :seon.bootstrap/default-form],
+                :resource [:string {:min 1}],
+                :resource-absent :seon.bootstrap/resource
+                :resource-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent bootstrap resource"} [:seon.bootstrap/resource-absent :seon.bootstrap/resource-absent] [:seon.error/message :seon.error/message]]
+                :resource-invalid :seon.bootstrap/resource
+                :resource-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid bootstrap resource"} [:seon.bootstrap/resource-invalid :seon.bootstrap/resource-invalid] [:seon.error/message :seon.error/message]]
+                :population-conflict :seon.schema/identity
+                :population-conflict-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema identity that conflicts during bootstrap"} [:seon.bootstrap/population-conflict :seon.bootstrap/population-conflict] [:seon.error/message :seon.error/message]]
+                :plan-absent [:= true]
+                :plan-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a bootstrap population with no plan"} [:seon.bootstrap/plan-absent :seon.bootstrap/plan-absent] [:seon.error/message :seon.error/message]]
+                :invalid-ordinals [:= true]
+                :invalid-ordinals-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a bootstrap plan with invalid ordinals"} [:seon.bootstrap/invalid-ordinals :seon.bootstrap/invalid-ordinals] [:seon.error/message :seon.error/message]]
+                :agent-plan-absent :seon.cluster.agent/id
+                :agent-plan-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent with no bootstrap plan"} [:seon.bootstrap/agent-plan-absent :seon.bootstrap/agent-plan-absent] [:seon.error/message :seon.error/message]]}

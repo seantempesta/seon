@@ -26,4 +26,6 @@
                  :readiness :seon.boot/readiness,
                  :status
                  [:map
-                  [:seon.operator/clusters :seon.operator/clusters]]}
+                  [:seon.operator/clusters :seon.operator/clusters]],
+                 :failed [:= true]
+                 :failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an operator command that failed"} [:seon.operator/failed :seon.operator/failed] [:seon.error/message :seon.error/message]]}

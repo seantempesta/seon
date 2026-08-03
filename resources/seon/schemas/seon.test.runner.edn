@@ -51,4 +51,17 @@
                      :seon.test.runner/fail-count]
                     [:seon.test.runner/error-count
                      :seon.test.runner/error-count]],
-                   :test-count [:int {:min 0}]}
+                   :test-count [:int {:min 0}],
+                   :silence-seconds [:int {:min 0}],
+                   :long-reason :string,
+                   :selection-mode :keyword,
+                   :invalid-silence-seconds :seon.test.runner/silence-seconds
+                   :invalid-silence-seconds-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid test-runner silence bound"} [:seon.test.runner/invalid-silence-seconds :seon.test.runner/invalid-silence-seconds] [:seon.error/message :seon.error/message]]
+                   :invalid-long-reason :seon.test.runner/long-reason
+                   :invalid-long-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid long-test reason"} [:seon.test.runner/invalid-long-reason :seon.test.runner/invalid-long-reason] [:seon.error/message :seon.error/message]]
+                   :long-test-ns-hook :seon.ns/name
+                   :long-test-ns-hook-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the namespace whose long-test hook failed"} [:seon.test.runner/long-test-ns-hook :seon.test.runner/long-test-ns-hook] [:seon.error/message :seon.error/message]]
+                   :default-cluster-refused :seon.cluster/name
+                   :default-cluster-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the default cluster refused by the test runner"} [:seon.test.runner/default-cluster-refused :seon.test.runner/default-cluster-refused] [:seon.error/message :seon.error/message]]
+                   :invalid-selection-mode :seon.test.runner/selection-mode
+                   :invalid-selection-mode-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid test selection mode"} [:seon.test.runner/invalid-selection-mode :seon.test.runner/invalid-selection-mode] [:seon.error/message :seon.error/message]]}

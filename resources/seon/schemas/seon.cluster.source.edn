@@ -1,0 +1,15 @@
+{:seon.cluster.source/rule :keyword
+ :seon.cluster.source/root-absent :seon.source/path
+ :seon.cluster.source/root-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent source root"} [:seon.cluster.source/root-absent :seon.cluster.source/root-absent] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/invalid-source-seal :seon.source/digest
+ :seon.cluster.source/invalid-source-seal-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invalid source seal"} [:seon.cluster.source/invalid-source-seal :seon.cluster.source/invalid-source-seal] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/populate-unresolvable :seon.source/populate
+ :seon.cluster.source/populate-unresolvable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark source population whose dependencies cannot resolve"} [:seon.cluster.source/populate-unresolvable :seon.cluster.source/populate-unresolvable] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/publish-readback-failed :seon.source/digest
+ :seon.cluster.source/publish-readback-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the published commit that did not read back"} [:seon.cluster.source/publish-readback-failed :seon.cluster.source/publish-readback-failed] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/stale-publication :seon.source/digest
+ :seon.cluster.source/stale-publication-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the stale source publication commit"} [:seon.cluster.source/stale-publication :seon.cluster.source/stale-publication] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/unsafe-incremental-rows [:= true]
+ :seon.cluster.source/unsafe-incremental-rows-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unsafe incremental source-row count"} [:seon.cluster.source/unsafe-incremental-rows :seon.cluster.source/unsafe-incremental-rows] [:seon.error/message :seon.error/message]]
+ :seon.cluster.source/refused :seon.cluster.source/rule
+ :seon.cluster.source/refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a refused source-publication transition"} :seon.error/refusal-value [:map [:seon.cluster.source/refused :seon.cluster.source/refused]]]}

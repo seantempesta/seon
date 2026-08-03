@@ -12,6 +12,7 @@
               :expected-commit-id :uuid,
               :file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
+              :path [:string {:min 1}],
               :population
               [:map
                [:seon.store/branch-connection

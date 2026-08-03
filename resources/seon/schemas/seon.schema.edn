@@ -1,4 +1,6 @@
 #:seon.schema{:arguments [:vector :any],
+              :identity :qualified-keyword,
+              :predicate :qualified-symbol,
               :schema
               [:map
                #:seon.db{:entity true}

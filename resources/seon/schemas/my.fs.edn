@@ -125,13 +125,13 @@
  :already-exists-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path that already exists"} [:my.fs/already-exists :my.fs/already-exists] [:seon.error/message :seon.error/message]]
  :path-refused :my.fs/path
  :path-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused filesystem path"} [:my.fs/path-refused :my.fs/path-refused] [:seon.error/message :seon.error/message]]
- :read-failed :my.fs/path
+ :read-failed [:= true]
  :read-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose read failed"} [:my.fs/read-failed :my.fs/read-failed] [:seon.error/message :seon.error/message]]
- :write-failed :my.fs/path
+ :write-failed [:= true]
  :write-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose write failed"} [:my.fs/write-failed :my.fs/write-failed] [:seon.error/message :seon.error/message]]
- :read-limit :my.fs/path
+ :read-limit :seon.config.fs/max-read-bytes
  :read-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose read exceeded its limit"} [:my.fs/read-limit :my.fs/read-limit] [:seon.error/message :seon.error/message]]
- :write-limit :my.fs/path
+ :write-limit :seon.config.fs/max-write-bytes
  :write-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose write exceeded its limit"} [:my.fs/write-limit :my.fs/write-limit] [:seon.error/message :seon.error/message]]
  :stale-digest :my.fs/path
  :stale-digest-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose digest is stale"} [:my.fs/stale-digest :my.fs/stale-digest] [:seon.error/message :seon.error/message]]
@@ -139,11 +139,11 @@
  :changed-during-read-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path that changed during its read"} [:my.fs/changed-during-read :my.fs/changed-during-read] [:seon.error/message :seon.error/message]]
  :invalid-utf8-window :my.fs/path
  :invalid-utf8-window-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose requested window is not UTF-8"} [:my.fs/invalid-utf8-window :my.fs/invalid-utf8-window] [:seon.error/message :seon.error/message]]
- :atomic-write-unsupported :my.fs/path
+ :atomic-write-unsupported [:= true]
  :atomic-write-unsupported-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path where atomic replacement is unavailable"} [:my.fs/atomic-write-unsupported :my.fs/atomic-write-unsupported] [:seon.error/message :seon.error/message]]
  :glob-failed :my.fs/path
  :glob-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose glob expansion failed"} [:my.fs/glob-failed :my.fs/glob-failed] [:seon.error/message :seon.error/message]]
- :invalid-glob :my.fs/path
+ :invalid-glob :my.fs/pattern
  :invalid-glob-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose glob expression is invalid"} [:my.fs/invalid-glob :my.fs/invalid-glob] [:seon.error/message :seon.error/message]]
  :blob-unavailable :seon.blob/digest
  :blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable blob digest"} [:my.fs/blob-unavailable :my.fs/blob-unavailable] [:seon.error/message :seon.error/message]]}

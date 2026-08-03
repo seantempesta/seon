@@ -1,0 +1,3 @@
+{:seon.sci.reader/tag :symbol
+ :seon.sci.reader/keyword [:= true]
+ :seon.sci.reader/keyword-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid keyword read from agent source"} [:seon.sci.reader/keyword :seon.sci.reader/keyword] [:seon.error/message :seon.error/message]]}

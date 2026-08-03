@@ -122,4 +122,12 @@
                     :seon.cluster.run/process]
                    [:seon.render.web/pages-mult
                     :seon.render.web/pages-mult]],
-                  :wanted-port :seon.render.web/port}
+                  :wanted-port :seon.render.web/port,
+                  :missing-port :seon.config.web/port
+                  :missing-port-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the absent web-server port"} [:seon.render.web/missing-port :seon.render.web/missing-port] [:seon.error/message :seon.error/message]]
+                  :owner-not-ensured [:= true]
+                  :owner-not-ensured-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a namespace page whose owner was not ensured"} [:seon.render.web/owner-not-ensured :seon.render.web/owner-not-ensured] [:seon.error/message :seon.error/message]]
+                  :value-not-found :seon.blob/digest
+                  :value-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested rendered value that was not found"} [:seon.render.web/value-not-found :seon.render.web/value-not-found] [:seon.error/message :seon.error/message]]
+                  :value-unreadable :seon.blob/digest
+                  :value-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rendered value whose blob is unreadable"} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable] [:seon.error/message :seon.error/message]]}

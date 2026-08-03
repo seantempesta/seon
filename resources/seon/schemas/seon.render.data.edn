@@ -16,4 +16,6 @@
                      :seon.render.data/offset]
                     [:seon.render.data/previous-offset
                      {:optional true}
-                     :seon.render.data/offset]]}
+                     :seon.render.data/offset]],
+                   :no-such-path [:= true]
+                   :no-such-path-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a requested nested value path that does not exist"} [:seon.render.data/no-such-path :seon.render.data/no-such-path] [:seon.error/message :seon.error/message]]}

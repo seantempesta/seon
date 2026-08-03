@@ -1,0 +1,2 @@
+{:seon.eval.drive/absent [:= true]
+ :seon.eval.drive/absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an absent evaluation-drive result"} [:seon.eval.drive/absent :seon.eval.drive/absent] [:seon.error/message :seon.error/message]]}

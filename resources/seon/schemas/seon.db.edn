@@ -61,4 +61,8 @@
            [:max-result-weight {:optional true} [:int {:min 1}]]],
           :time-point [:or :inst :int],
           :tx-data :seon.store/transaction-data,
-          :user [:and #:seon.db{:index true} :seon.db/ref]}
+          :user [:and #:seon.db{:index true} :seon.db/ref],
+          :transaction-refused [:= true]
+          :transaction-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction that was refused"} [:seon.db/transaction-refused :seon.db/transaction-refused] [:seon.error/message :seon.error/message]]
+          :transaction-outcome-unknown [:= true]
+          :transaction-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]}

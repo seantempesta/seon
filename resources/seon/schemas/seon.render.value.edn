@@ -38,4 +38,6 @@
                      [:seon.render.value/options :seon.print/options]],
                     :text :string,
                     :tree :seon.print/node,
-                    :truncated? :boolean}
+                    :truncated? :boolean,
+                    :window-failed :seon.blob/digest
+                    :window-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the blob whose display window could not be read"} [:seon.render.value/window-failed :seon.render.value/window-failed] [:seon.error/message :seon.error/message]]}

@@ -2,4 +2,7 @@
                        [:map
                         [:seon.boot/pid :seon.boot/pid]
                         [:seon.boot/start-instant
-                         :seon.boot/start-instant]]}
+                         :seon.boot/start-instant]],
+                        :pid :seon.boot/pid,
+                        :start-instant-unavailable :seon.cluster.process/pid
+                        :start-instant-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the process whose start instant is unavailable"} [:seon.cluster.process/start-instant-unavailable :seon.cluster.process/start-instant-unavailable] [:seon.error/message :seon.error/message]]}

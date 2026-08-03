@@ -144,7 +144,21 @@
               :recurring
               :failover],
              :run [:and #:seon.db{:index true} :seon.db/ref],
-             :refusal :boolean,
+             :refusal [:= true],
+             :refusal-shape :qualified-keyword,
+             :refusal-value
+             [:map
+              [:seon.error/message :seon.error/message]
+              [:seon.cluster.run/rule {:optional true} :seon.cluster.run/rule]
+              [:seon.cluster.run/transition {:optional true} :seon.cluster.run/transition]],
+             :unclassified [:= true],
+             :unclassified-error
+             [:map {:seon.error/class true
+                    :seon.render/ai seon.error/render-ai
+                    :seon.render/html seon.error/render-html
+                    :error/message "must mark a failure that no registered error class recognized"}
+              [:seon.error/unclassified :seon.error/unclassified]
+              [:seon.error/message :seon.error/message]],
              :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
              :throwable-class [:string {:min 1}],
              :source :any,

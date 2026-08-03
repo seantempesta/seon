@@ -120,11 +120,11 @@
                   :seon.store/branch-connection]],
                 :time-limit-ms [:int {:min 1}],
                 :unproven-called-vars [:set :symbol],
-                :install-mismatch :qualified-symbol
+                :install-mismatch [:= true]
                 :install-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose installed source or deletion mismatched"} [:seon.sci.eval/install-mismatch :seon.sci.eval/install-mismatch] [:seon.error/message :seon.error/message]]
                 :missing-function-row :qualified-symbol
                 :missing-function-row-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function with no admitted program row"} [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row] [:seon.error/message :seon.error/message]]
-                :namespace-binding-cycle :qualified-symbol
+                :namespace-binding-cycle [:= true]
                 :namespace-binding-cycle-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a namespace participating in a binding cycle"} [:seon.sci.eval/namespace-binding-cycle :seon.sci.eval/namespace-binding-cycle] [:seon.error/message :seon.error/message]]
                 :reader-event-count :int
                 :reader-event-count-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the impossible reader-event count"} [:seon.sci.eval/reader-event-count :seon.sci.eval/reader-event-count] [:seon.error/message :seon.error/message]]
@@ -132,7 +132,7 @@
                 :schema-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema declaration refused during evaluation"} [:seon.sci.eval/schema-refused :seon.sci.eval/schema-refused] [:seon.error/message :seon.error/message]]
                 :session-blob-unavailable :seon.blob/digest
                 :session-blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable session-image blob"} [:seon.sci.eval/session-blob-unavailable :seon.sci.eval/session-blob-unavailable] [:seon.error/message :seon.error/message]]
-                :time-limit :seon.sci.eval/time-limit-ms
+                :time-limit :seon.eval/fn-entries
                 :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the evaluation time limit that was reached"} [:seon.sci.eval/time-limit :seon.sci.eval/time-limit] [:seon.error/message :seon.error/message]]
                 :evaluation-failed [:= true]
                 :evaluation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an evaluation that failed before producing a value"} [:seon.sci.eval/evaluation-failed :seon.sci.eval/evaluation-failed] [:seon.error/message :seon.error/message]]}

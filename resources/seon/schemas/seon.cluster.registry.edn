@@ -26,4 +26,13 @@
                          [:seon.store/store :seon.store/store]
                          [:seon.store/branch :seon.store/branch]],
                         :roster [:set :keyword],
-                        :swept [:int {:min 0}]}
+                        :swept [:int {:min 0}],
+                        :rule :keyword,
+                        :cannot-retire-main :seon.cluster/name
+                        :cannot-retire-main-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the main cluster that cannot be retired"} [:seon.cluster.registry/cannot-retire-main :seon.cluster.registry/cannot-retire-main] [:seon.error/message :seon.error/message]]
+                        :cluster-connected :seon.cluster/name
+                        :cluster-connected-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the connected cluster that cannot be changed"} [:seon.cluster.registry/cluster-connected :seon.cluster.registry/cluster-connected] [:seon.error/message :seon.error/message]]
+                        :source-absent :seon.cluster/name
+                        :source-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the cluster whose source branch is absent"} [:seon.cluster.registry/source-absent :seon.cluster.registry/source-absent] [:seon.error/message :seon.error/message]]
+                        :refused :seon.cluster.registry/rule
+                        :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused cluster-registry rule"} :seon.error/refusal-value [:map [:seon.cluster.registry/refused :seon.cluster.registry/refused]]]}

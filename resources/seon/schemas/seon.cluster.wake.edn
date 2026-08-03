@@ -27,4 +27,6 @@
                     [:map
                      [:seon.cluster.wake/connection
                       :seon.store/branch-connection]
-                     [:seon.cluster.wake/key :seon.cluster.wake/key]]}
+                     [:seon.cluster.wake/key :seon.cluster.wake/key]],
+                    :undeliverable-wake :seon.cluster.agent/id
+                    :undeliverable-wake-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose wake could not be delivered"} [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake] [:seon.error/message :seon.error/message]]}

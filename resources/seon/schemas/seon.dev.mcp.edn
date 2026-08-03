@@ -1,0 +1,6 @@
+{:seon.dev.mcp/cluster-degraded :seon.cluster/name
+ :seon.dev.mcp/cluster-degraded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the cluster whose MCP surface is degraded"} [:seon.dev.mcp/cluster-degraded :seon.dev.mcp/cluster-degraded] [:seon.error/message :seon.error/message]]
+ :seon.dev.mcp/value-not-found :seon.blob/digest
+ :seon.dev.mcp/value-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the value digest that MCP could not find"} [:seon.dev.mcp/value-not-found :seon.dev.mcp/value-not-found] [:seon.error/message :seon.error/message]]
+ :seon.dev.mcp/remainder-not-retrievable :seon.blob/digest
+ :seon.dev.mcp/remainder-not-retrievable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the value whose clipped remainder cannot be retrieved"} [:seon.dev.mcp/remainder-not-retrievable :seon.dev.mcp/remainder-not-retrievable] [:seon.error/message :seon.error/message]]}

@@ -5,11 +5,15 @@
                    [:seon.sci.kernel/failure-kind :qualified-keyword]],
                   :already-armed [:= true]
                   :already-armed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a different SCI context presented to an active arm"} [:seon.sci.kernel/already-armed :seon.sci.kernel/already-armed] [:seon.error/message :seon.error/message]]
-                  :missing-function-installer [:= true]
+                  :missing-function-installer :seon.fn/sym
                   :missing-function-installer-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an SCI context with no function installer"} [:seon.sci.kernel/missing-function-installer :seon.sci.kernel/missing-function-installer] [:seon.error/message :seon.error/message]]
                   :missing-interrupt-guard [:= true]
                   :missing-interrupt-guard-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an SCI context with no interrupt function"} [:seon.sci.kernel/missing-interrupt-guard :seon.sci.kernel/missing-interrupt-guard] [:seon.error/message :seon.error/message]]
                   :unresolved-invocation :seon.fn/sym
                   :unresolved-invocation-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function that could not be resolved for invocation"} [:seon.sci.kernel/unresolved-invocation :seon.sci.kernel/unresolved-invocation] [:seon.error/message :seon.error/message]]
                   :failure-admission-failed [:= true]
-                  :failure-admission-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a kernel failure that could not be admitted as data"} [:seon.sci.kernel/failure-admission-failed :seon.sci.kernel/failure-admission-failed] [:seon.error/message :seon.error/message]]}
+                  :failure-admission-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a kernel failure that could not be admitted as data"} [:seon.sci.kernel/failure-admission-failed :seon.sci.kernel/failure-admission-failed] [:seon.error/message :seon.error/message]]
+                  :time-limit :seon.fn/sym
+                  :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation cut by its time limit"} [:seon.sci.kernel/time-limit :seon.sci.kernel/time-limit] [:seon.error/message :seon.error/message]]
+                  :invocation-failed :seon.fn/sym
+                  :invocation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the invocation that failed before returning a value"} [:seon.sci.kernel/invocation-failed :seon.sci.kernel/invocation-failed] [:seon.error/message :seon.error/message]]}
