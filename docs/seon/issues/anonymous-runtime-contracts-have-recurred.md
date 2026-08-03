@@ -54,6 +54,36 @@ The current counts are:
 | `:malli/schema` metadata only | 54 | 22 |
 | Parsed source data outside function contracts | 4 | 1 |
 
+### Mechanical landing status — 2026-08-03
+
+The `any-some-fixes` lane handled only the explicitly mechanical rows and did
+not cross an active file owner. Counts below distinguish census rows from
+exact anonymous leaves so grouped multi-arity and transaction rows remain
+auditable.
+
+| Census instance | Anonymous leaves | Status | Evidence |
+|---|---:|---|---|
+| `seon.config/apply-compiled!` | `:any` ×1 | done | `6763616f4` references `:seon.store/branch-connection`; focused `seon.config-test` passed 11 tests / 48 assertions. |
+| `seon.config/effective` | `:any` ×2 | done | `6763616f4` references `:seon.db/database-value` in both arities; same focused gate. |
+| `:seon.config/apply-request` | `:any` ×1 | remaining—active shared-file owner | The mechanical replacement is still `:seon.store/branch-connection`, but `resources/seon/schema.edn` carried unrelated in-flight message/run schema edits during this lane and was not touched. |
+| `seon.instrument/instrumented` | `:any` ×1 | remaining—active shared-file owner | The body returns the Vars obtained from `ns-publics` (`src/seon/instrument.clj:109-117`); declaring the reusable Var predicate requires the concurrently edited schema population, so no partial source-only contract was landed. |
+| `seon.cluster.loop/terminal-tx` | `:some` ×1 | remaining—active shared-file owner | The existing replacement remains `:seon.store/transaction-data`; `src/seon/cluster/loop.clj` carried an unrelated in-flight work-launcher edit and was not touched. |
+| 18 `seon.cluster.run` transaction constructors/transitions | `:some` ×18 | remaining—protected by lane brief | `src/seon/cluster/run.clj` was explicitly excluded. |
+| `seon.flow/var-process` | `:any` ×2 | remaining—protected by lane brief | `src/seon/flow.clj` was explicitly excluded; both inputs should later reuse the Var predicate declared for instrumentation. |
+| `seon.render.walk/refs` | `:any` ×1 | remaining—render wave | Every `render/*` file was explicitly out of scope; the replacement remains `:seon.db/database-value`. |
+
+This lane therefore fixed **2 census instances / 3 anonymous leaves** and
+deliberately left **23 census instances / 24 anonymous leaves** at their named
+owners. The protected and active-owner rows above retain their original
+verdicts; none requires a new semantic ruling. The combined instrumentation /
+program / public-contract gate ran 26 tests / 141 assertions: instrumentation,
+program, and public-contract assertions passed, while
+`seon.schema.program-test/program-rows-have-one-canonical-persisted-shape`
+failed three assertions because its fixture rows omit the now-required
+`:seon.schema.admission/source` introduced by `d7ea68c58`
+(`resources/seon/schema.edn:2087,2102,2126`). That external gate breakage was
+not repaired in this lane.
+
 ### Divergences from the render-vocabulary summary
 
 - The schema count agrees exactly: 19 `:any` leaves across 18 schema keys and
