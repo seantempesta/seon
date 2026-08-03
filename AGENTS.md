@@ -697,6 +697,41 @@ agent routes are aliases; `POST /agent/{id}/message` submits a message; and
 `/feed/{id}`, `/data`, `/css/{*path}`, and `/js/{*path}` serve live transport,
 database inspection, and static assets.
 
+## Everything is declared, recorded, and queryable
+
+**EVERYTHING IN THE SYSTEM IS EXPLICITLY DECLARED AND RECORDED IN THE DATABASE.
+IT IS ALL QUERYABLE** (owner, 2026-08-02). This is the principle the rest of
+this document keeps restating. Every question about the system — what a
+function accepts, what it returns, whether it is private, which schema a value
+satisfies, which function renders a shape, what a namespace contains — is a
+DATALOG QUERY over facts we already store, never an inference, a convention, or
+a list somebody maintains.
+
+**If you cannot answer a question by query, the MISSING FACT is the defect.**
+Declare it. Do not work around it. The three banned shapes are all the same
+mistake wearing different clothes: a hand-maintained list, a naming convention
+(`render-<kind>` built from a namespace name), and a regex over text — each one
+is reaching for a substitute because the fact was never recorded.
+
+Worked examples, all measured on 2026-08-02:
+
+- "Which functions need cluster custody?" — 9 declare
+  `:seon.store/branch-connection` and 42 declare `:seon.db/database-value` in
+  some arity's `:seon.fn.arity/input-refs`. Nobody maintains that roster.
+- "Which public functions hand out a custody object?" — exactly 4, by querying
+  `:seon.fn.arity/output-refs`. Because it is a query and not a list, a fifth
+  such function appears in it automatically; that is the whole value.
+- "Which function renders this shape?" — the render functions declare their
+  output (`:seon.render/hiccup`) and what they accept, so the renderer is
+  found by querying both sides rather than by naming it `render-html`.
+- "Is this var part of the agent-facing surface?" — `:seon.fn/private?`, the
+  computed fact every agent-facing projection already honors.
+- COUNTEREXAMPLE, and the shape of the defect: "which tests exercise this
+  function?" is NOT answerable today, because `:seon.test` rows carry only
+  `sym`, `ns`, and `source` — no call edge. That missing edge, not a naming
+  convention between `foo` and `foo-test`, is what blocks definition-time
+  accretion testing.
+
 ## Data-oriented Clojure rules
 
 Use the `data-oriented-clojure` skill before writing or reviewing Seon Clojure.
