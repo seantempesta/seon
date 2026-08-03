@@ -16,7 +16,8 @@
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`.
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.dev.docstring :as docstring]
@@ -77,6 +78,10 @@
          [:cat :map]
          [:map {:closed true} [:seon.instrument-test/expected :int]]]}
   closed-map-output
+  [value]
+  value)
+
+(defn ^{:malli/schema [:=> [:cat :int] :int]} integer-inspector
   [value]
   value)
 
@@ -241,6 +246,50 @@
                 second literal limit")
             (is (= 200 (:seon.instrument/problem-count instrument-data))
                 "the problem count is the broken-system signal"))))
+      (finally
+        (instrument/remove!)))))
+
+(deftest registry-sized-contract-evidence-is-bounded-at-construction
+  (let [caps {:seon.config.eval.result/max-depth 64
+              :seon.config.eval.result/max-collection 8192
+              :seon.config.eval.result/max-string 262144
+              :seon.config.eval.result/max-nodes 65536}
+        inline-ceiling 4096
+        allocation-ceiling (* 16 1024 1024)
+        registry (schema/snapshot)
+        thread-bean
+        ^com.sun.management.ThreadMXBean
+        (java.lang.management.ManagementFactory/getThreadMXBean)
+        thread-id (.getId (Thread/currentThread))]
+    (is (> (count (pr-str registry)) inline-ceiling)
+        "the reproduction passes a genuinely oversized schema registry")
+    (when-not (.isThreadAllocatedMemoryEnabled thread-bean)
+      (.setThreadAllocatedMemoryEnabled thread-bean true))
+    (try
+      (instrument/apply! {:seon.config/on-core-error :panic
+                          :seon.sci.admit/caps caps})
+      (let [before (.getThreadAllocatedBytes thread-bean thread-id)
+            failure (try (integer-inspector registry)
+                         (catch Exception thrown thrown))
+            allocated (- (.getThreadAllocatedBytes thread-bean thread-id)
+                         before)
+            data (ex-data failure)
+            instrument-data (:seon.error/data data)
+            received (some-> (:seon.instrument/args instrument-data)
+                             edn/read-string
+                             first)
+            [offending-key offending-value] (first received)]
+        (is (< (count (pr-str data)) inline-ceiling)
+            "the constructed error value fits the admitted inline ceiling")
+        (is (< allocated allocation-ceiling)
+            (str "construction allocated " allocated
+                 " bytes; the issue baseline was 150,063,304"))
+        (is (= 1 (:seon.instrument/problem-count instrument-data)))
+        (is (= ":int" (:seon.instrument/schema instrument-data)))
+        (is (contains? registry offending-key)
+            "the bounded argument retains an exact offending registry key")
+        (is (some? offending-value)
+            "and retains that key's structurally admitted value context"))
       (finally
         (instrument/remove!)))))
 

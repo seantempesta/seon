@@ -130,6 +130,9 @@
           ;; the reporter may not panic on the way to reporting a panic
           :seon.config/on-core-error :record})]
     {:seon.instrument/edn (:seon.cluster.eval/result-edn admitted)
+     :seon.instrument/value (:seon.sci.admit/value admitted)
+     :seon.instrument/value-edn
+     (admit/canonical-edn (:seon.sci.admit/value admitted))
      :seon.instrument/text
      (print/emit-text
       (:seon.sci.admit/print-node admitted)
@@ -139,9 +142,45 @@
        :seon.print/width 0
        :seon.print/table? false})}))
 
-(defn- admitted-edn
+(def ^:private contract-evidence-caps
+  ;; The admitted inline ceiling is 4,096 characters. These structural caps
+  ;; leave room for the function, arm, expected shape, and problem count while
+  ;; retaining the exact offending key/value pair. They narrow the caller's
+  ;; caps only for contract evidence; the original value is never admitted or
+  ;; retained wholesale past this bounded construction.
+  {:seon.config.eval.result/max-depth 8
+   :seon.config.eval.result/max-collection 4
+   :seon.config.eval.result/max-string 256
+   :seon.config.eval.result/max-nodes 32})
+
+(defn- evidence-caps
+  [caps]
+  (merge-with min caps contract-evidence-caps))
+
+(defn- admitted-value
   [caps value]
-  (:seon.instrument/edn (admitted-face caps value)))
+  (:seon.instrument/value (admitted-face caps value)))
+
+(defn- offending-leaf
+  "One exact map key plus bounded value, or one bounded scalar value."
+  [caps path value]
+  (if (and (empty? path) (map? value))
+    (if-let [[entry-key entry-value] (first value)]
+      {(admitted-value caps entry-key) (admitted-value caps entry-value)}
+      {})
+    (admitted-value caps value)))
+
+(defn- offending-value
+  "The exact Malli-reported key/value pair, nested only along its path."
+  [caps kind problem]
+  (let [path (:in problem)
+        ;; Input explanations begin with the positional argument index. The
+        ;; surrounding args vector already represents that position.
+        path (if (= :malli.core/invalid-input kind) (next path) path)
+        value (reduce (fn [child key] {key child})
+                      (offending-leaf caps path (:value problem))
+                      (reverse path))]
+    (if (= :malli.core/invalid-input kind) [value] value)))
 
 (defn- violation
   "One malli report as a flat, bounded, agent-readable value.
@@ -174,23 +213,42 @@
                              [(:output data) (:value data)]
                              [(:input data) (:args data)])
           explanation (m/explain offended value)
-          problem-count (count (:errors explanation))
+          problems (:errors explanation)
+          problem-count (count problems)
+          bounded-caps (when caps (evidence-caps caps))
+          visible-explanation
+          (when bounded-caps
+            (assoc explanation
+                   :errors
+                   (into []
+                         (take (:seon.config.eval.result/max-collection
+                                bounded-caps))
+                         problems)))
           all-problems
           (me/humanize
-           explanation
+           (or visible-explanation explanation)
            {:wrap #(select-keys % [:value :message])})
-          problem-face (when caps (admitted-face caps all-problems))
+          problem-face (when bounded-caps
+                         (admitted-face bounded-caps all-problems))
+          first-problem (first problems)
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
                             (= :cat (first schema-form))
                             (= 2 (count schema-form)))
                      (second schema-form)
-                     schema-form)]
+                     schema-form)
+          expected-face (when bounded-caps
+                          (admitted-face bounded-caps expected))
+          argument-face (when (and bounded-caps first-problem)
+                          (admitted-face bounded-caps
+                                         (offending-value bounded-caps
+                                                          kind
+                                                          first-problem)))]
       (cond-> {:seon.error/kind ::contract-violated
-               ;; ALL problems, bounded by the ONE general printer (the
-               ;; admission caps) — never a second literal limit. A large
-               ;; problem count is itself the broken-system signal, carried
-               ;; as ::problem-count for the warning consumers.
+               ;; A representative problem context goes through the ONE
+               ;; general printer under the construction-time evidence caps.
+               ;; The complete count remains the broken-system signal for
+               ;; warning consumers without retaining every problem value.
                :seon.error/message
                (str (:fn-name data) " violated its contract ("
                     (name kind) "): "
@@ -202,13 +260,16 @@
                         ::arm (if (= :malli.core/invalid-output kind)
                                 :output
                                 :input)
-                        ::schema (pr-str expected)
+                        ::schema (if expected-face
+                                   (:seon.instrument/text expected-face)
+                                   (pr-str expected))
                         ::problem-count problem-count}
                  (:fn-name data) (assoc ::fn (str (:fn-name data)))
                  problem-face
                  (assoc ::problems (:seon.instrument/edn problem-face)))}
-        caps
-        (update :seon.error/data assoc ::args (admitted-edn caps value))))))
+        argument-face
+        (update :seon.error/data assoc
+                ::args (:seon.instrument/value-edn argument-face))))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.
