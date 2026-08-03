@@ -264,9 +264,13 @@
                     (ex-info "cold start read the offline roster" {})))
                  (operator-var# (symbol "ensure-dependency-cache!"))
                  (fn []
-                   (swap! calls# conj :dependency-cache))
+                   (swap! calls# conj :dependency-cache)
+                   {:seon.dev-cache/path
+                    ~(.getCanonicalPath
+                      (io/file project-root
+                               "target/dev-dependency-classes/test"))})
                  (operator-var# (symbol "launch!"))
-                 (fn [_root# name# _manifest# _ready-port#]
+                 (fn [_root# name# _manifest# _ready-port# _cache-path#]
                    (swap! calls# conj [:launch name#])
                    {:seon.fresh-operator/pid 42})
                  (operator-var# (symbol "record-launched-process!"))
@@ -325,7 +329,10 @@
                 {(operator-var# (symbol "detach-python")) detach-python#}
                 (fn []
                   ((var-get (operator-var# (symbol "launch!")))
-                   ~(str root) "launch-observation" {} 1)
+                   ~(str root) "launch-observation" {} 1
+                   ~(.getCanonicalPath
+                     (io/file project-root
+                              "target/dev-dependency-classes/test")))
                   (prn
                    (clojure.string/split-lines
                     (slurp
@@ -895,7 +902,10 @@
         (is (some #{(str "-J-Dseon.operator.root="
                          (.getCanonicalPath root))}
                   child-command))
-        (is (some #{"-M:dev"} child-command))
+        (is (some #{"-M:dev:seon-cache"} child-command))
+        (is (some #(str/starts-with?
+                    % "-J-Dseon.dependency-cache.path=")
+                  child-command))
         (is (str/includes? (last child-command)
                            (str (io/file root "data" "clusters")))))
       (finally
@@ -904,8 +914,8 @@
 (deftest every-child-jvm-command-uses-the-shared-launch-owner
   (let [source (slurp (io/file project-root "script" "seon"
                                "fresh_operator.clj"))]
-    (is (= 1 (count (re-seq #"\[\"clojure\"" source)))
-        "only the shared owner may construct the Clojure command")
+    (is (= 2 (count (re-seq #"\[\"clojure\"" source)))
+        "only the child owner and dependency-cache target construct Clojure commands")
     (is (= 3 (count (re-seq #"\(start-child-jvm!" source)))
         "offline status, cluster start, and initialization use one owner")))
 

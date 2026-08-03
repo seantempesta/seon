@@ -92,6 +92,11 @@
   (fs/path root "data" "operator" "adoptions"
            (str generation ".ready")))
 
+(defn- dependency-cache-reference-path
+  [generation]
+  (fs/path (repository-root) "target" "dev-dependency-cache-processes"
+           (str generation ".edn")))
+
 (defn- valid-process-record?
   [record]
   (and (map? record)
@@ -103,7 +108,10 @@
          true
          (catch Throwable _ false))
        (string? (:seon.dev.process/root record))
-       (string? (:seon.dev.process/log record))))
+       (string? (:seon.dev.process/log record))
+       (or (nil? (:seon.dev.process/cache-path record))
+           (and (string? (:seon.dev.process/cache-path record))
+                (fs/absolute? (:seon.dev.process/cache-path record))))))
 
 (defn- read-process-records
   [root]
@@ -140,12 +148,19 @@
            {:seon.fresh-operator/process-record record}))
   (state/write-edn!
    (process-record-path root (:seon.dev.process/generation record))
-   record))
+   record)
+  (when (:seon.dev.process/cache-path record)
+    (state/write-edn!
+     (dependency-cache-reference-path
+      (:seon.dev.process/generation record))
+     record))
+  record)
 
 (defn- clear-process-record!
   [root record]
   (let [generation (:seon.dev.process/generation record)
         deleted? (state/delete-edn! (process-record-path root generation))]
+    (state/delete-edn! (dependency-cache-reference-path generation))
     (fs/delete-if-exists (process-adoption-path root generation))
     deleted?))
 
@@ -238,11 +253,24 @@
   (merge (dotenv root) (into {} (System/getenv))))
 
 (defn- start-child-jvm!
-  [{:seon.fresh-operator/keys [root jvm-options arguments detach]}]
+  [{:seon.fresh-operator/keys
+    [root jvm-options arguments detach dependency-cache-path]}]
   (let [root (.getCanonicalPath (io/file root))
+        cache-path (some-> dependency-cache-path io/file .getCanonicalPath)
+        cache-options
+        (when cache-path
+          ["-Sdeps"
+           (pr-str {:aliases
+                    {:seon-cache {:extra-paths [cache-path]}}})])
         child-command
-        (into ["clojure" (str "-J-Dseon.operator.root=" root)]
-              (concat jvm-options ["-M:dev"] arguments))
+        (into ["clojure"]
+              (concat cache-options
+                      [(str "-J-Dseon.operator.root=" root)]
+                      (when cache-path
+                        [(str "-J-Dseon.dependency-cache.path=" cache-path)])
+                      jvm-options
+                      [(if cache-path "-M:dev:seon-cache" "-M:dev")]
+                      arguments))
         command
         (if detach
           (into ["python3" "-c" detach-python
@@ -269,15 +297,32 @@
            ["clojure" "-T:dev-cache" "ensure-cache"])
           (.directory (repository-root))
           (.redirectErrorStream true)))]
-    (with-open [reader (io/reader (.getInputStream process))]
-      (doseq [line (line-seq reader)]
-        (println line)
-        (flush)))
-    (let [exit (.waitFor process)]
+    (let [lines
+          (with-open [reader (io/reader (.getInputStream process))]
+            (reduce
+             (fn [seen line]
+               (println line)
+               (flush)
+               (conj seen line))
+             []
+             (line-seq reader)))
+          exit (.waitFor process)]
       (when-not (zero? exit)
         (fail! "The dependency class cache could not be prepared."
-               {:seon.fresh-operator/exit exit}))))
-  nil)
+               {:seon.fresh-operator/exit exit}))
+      (let [result (try
+                     (edn/read-string (last lines))
+                     (catch Throwable error
+                       (fail! "The dependency cache returned no selection."
+                              {:seon.fresh-operator/cause
+                               (ex-message error)})))
+            path (:seon.dev-cache/path result)]
+        (when-not (and (string? path)
+                       (fs/absolute? path)
+                       (fs/directory? path))
+          (fail! "The dependency cache selected an invalid directory."
+                 {:seon.dev-cache/path path}))
+        result))))
 
 (defn- valid-name!
   [name]
@@ -622,6 +667,8 @@
                         (catch Throwable _ nil)))
                  :seon.fresh-operator/log
                  (process-property handle "seon.operator.log")
+                 :seon.fresh-operator/cache-path
+                 (process-property handle "seon.dependency-cache.path")
                  :seon.fresh-operator/process
                  {:seon.boot/pid (.pid handle)
                   :seon.boot/start-instant (java.util.Date/from start)
@@ -650,6 +697,8 @@
        :seon.dev.process/pid pid
        :seon.dev.process/start-instant start-instant
        :seon.dev.process/root root
+       :seon.dev.process/cache-path
+       (:seon.fresh-operator/cache-path observation)
        :seon.dev.process/log
        (or (:seon.fresh-operator/log observation)
            (str (fs/path root "data" "clusters" "processes"
@@ -1388,10 +1437,10 @@
 (defn- instrument-form
   [instance-symbol name]
   `(let [dials#
-         (seon.config/effective
+         ((ns-resolve 'seon.config (symbol "effective"))
           @(get ~instance-symbol :seon.boot/cluster-connection)
           ~name)]
-     (seon.instrument/apply!
+     ((ns-resolve 'seon.instrument (symbol "apply!"))
       {:seon.config/on-core-error
        (:seon.config/on-core-error dials#)
        :seon.sci.admit/caps
@@ -1442,7 +1491,7 @@
                   ~instance
                   (with-bindings
                     {progress-var# progress!#}
-                    (seon.cluster/start!
+                    ((ns-resolve 'seon.cluster (symbol "start!"))
                      {:seon.boot/root ~(str (cluster-root root))
                       :seon.boot/cluster-name ~name
                       :seon.config/manifest ~manifest}))
@@ -1478,7 +1527,7 @@
               ~instance
               (with-bindings
                 {progress-var# progress!#}
-                (seon.cluster/start!
+                ((ns-resolve 'seon.cluster (symbol "start!"))
                  {:seon.boot/root ~(str (cluster-root root))
                   :seon.boot/cluster-name ~name
                   :seon.config/manifest ~manifest}))
@@ -1495,7 +1544,7 @@
     path))
 
 (defn- launch!
-  [root name manifest ready-port]
+  [root name manifest ready-port dependency-cache-path]
   (let [log (create-log! root name)
         generation (random-uuid)
         adoption-path (process-adoption-path root generation)
@@ -1504,6 +1553,7 @@
         process
         (start-child-jvm!
          {:seon.fresh-operator/root root
+          :seon.fresh-operator/dependency-cache-path dependency-cache-path
           :seon.fresh-operator/jvm-options
           [(str "-J-Dseon.operator.generation=" generation)
            (str "-J-Dseon.operator.log=" log)]
@@ -1520,12 +1570,13 @@
               :seon.fresh-operator/output output}))
     {:seon.fresh-operator/generation generation
      :seon.fresh-operator/pid (parse-long output)
+     :seon.fresh-operator/cache-path dependency-cache-path
      :seon.fresh-operator/adoption-path (str adoption-path)
      :seon.fresh-operator/log (str log)}))
 
 (defn- record-launched-process!
   [root {:seon.fresh-operator/keys
-         [generation pid log adoption-path]}]
+         [generation pid log adoption-path cache-path]}]
   (let [start-instant (state/process-start-instant pid)]
     (when-not start-instant
       (fail! "The cluster JVM exited before its identity could be recorded."
@@ -1536,6 +1587,8 @@
            :seon.dev.process/pid pid
            :seon.dev.process/start-instant start-instant
            :seon.dev.process/root (.getCanonicalPath (java.io.File. root))
+           :seon.dev.process/cache-path
+           (.getCanonicalPath (java.io.File. cache-path))
            :seon.dev.process/log log}]
       (try
         (write-process-record! root record)
@@ -1745,13 +1798,14 @@
                    (:seon.fresh-operator/name anchor)
                    "; that process owns its original stdout/stderr.\n"))
         (print-started! root name value))
-      (do
-        (ensure-dependency-cache!)
+      (let [dependency-cache (ensure-dependency-cache!)
+            dependency-cache-path (:seon.dev-cache/path dependency-cache)]
         (with-open [ready-server
                   (ServerSocket.
                    0 1 (java.net.InetAddress/getLoopbackAddress))]
         (let [launch-result
-              (launch! root name manifest (.getLocalPort ready-server))
+              (launch! root name manifest (.getLocalPort ready-server)
+                       dependency-cache-path)
               pid (:seon.fresh-operator/pid launch-result)
               record
               (try
