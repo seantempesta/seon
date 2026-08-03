@@ -24,6 +24,8 @@
                       [:seon.flow/graph :seon.flow/graph]
                       [:seon.cluster.wake/channel :seon.flow/channel]
                       [:seon.cluster.loop/completion
+                       :seon.flow/channel]
+                      [:seon.cluster.agent/turn-stopped
                        :seon.flow/channel]],
                      :blueprint-request
                      [:map

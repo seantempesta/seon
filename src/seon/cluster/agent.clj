@@ -174,7 +174,8 @@
   core fault and rides this graph's error channel into the cluster's
   fault committer, tagged with the agent. The completion channel is an
   armed-ready permit: arm publishes it before Flow scheduling, an active
-  transform holds it, and `finally` republishes it. Disarm consumes and
+  transform holds it, and `finally` republishes it without an interruptible
+  park. Disarm consumes and
   closes that event, so it waits for real active work without depending
   on a proc that may never have started."
   {:malli/schema [:function
@@ -192,7 +193,12 @@
                                        :seon.cluster.run/id]))})
   ([args]
    (assoc args ::passes 0 ::turns 0))
-  ([state _transition]
+  ([state transition]
+   (when (= ::flow/stop transition)
+     (async/offer!
+      (:seon.cluster.agent/turn-stopped
+       (:seon.cluster.loop/cluster state))
+      ::stopped))
    state)
   ([state _input _message]
    (let [cluster (:seon.cluster.loop/cluster state)
@@ -237,7 +243,13 @@
                 ;; flow's own report channel: observation, never a dependency
                 {::flow/report [report]}])))
          (finally
-           (async/>!! completion ::ready)))
+           (when-not (async/offer! completion ::ready)
+             (throw
+              (ex-info
+               "The agent turn could not publish its terminal completion."
+               {:seon.error/kind ::turn-completion-undeliverable
+                :seon.cluster.agent/id
+                (:seon.cluster.agent/id state)})))))
        [state nil]))))
 
 ;;; ---------------------------------------------------------------------------
@@ -377,10 +389,12 @@
                                  :seon.cluster.agent/id agent-id})))
             wake-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
+            turn-stopped (async/promise-chan)
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
                                 :seon.cluster.wake/channel wake-channel
-                                :seon.cluster.loop/completion completion)
+                                :seon.cluster.loop/completion completion
+                                :seon.cluster.agent/turn-stopped turn-stopped)
             graph (flow/create-flow
                    (graph-definition
                     {:seon.cluster.loop/cluster agent-handle
@@ -391,7 +405,8 @@
                    :seon.cluster.loop/cluster handle
                    :seon.flow/graph graph
                    :seon.cluster.wake/channel wake-channel
-                   :seon.cluster.loop/completion completion}]
+                   :seon.cluster.loop/completion completion
+                   :seon.cluster.agent/turn-stopped turn-stopped}]
         (seon.flow/join-error-fanout!
          {:seon.flow/started started
           :seon.flow/fault-channel (::fault-channel @routing)
@@ -444,13 +459,15 @@
 (defn- await-turn-completion!
   [routing entry]
   (let [completion (:seon.cluster.loop/completion entry)
+        turn-stopped (:seon.cluster.agent/turn-stopped entry)
         {connection :seon.store/branch-connection
          cluster-name :seon.cluster/name}
         (:seon.cluster.loop/cluster entry)
         database-event (async/chan (async/sliding-buffer 1))
         listener-key (random-uuid)]
-    (if-some [ready (async/poll! completion)]
-      ready
+    (if-some [terminal (or (async/poll! completion)
+                           (async/poll! turn-stopped))]
+      terminal
       (try
         (d/listen connection listener-key
                   (fn [_transaction-report]
@@ -463,9 +480,10 @@
                            (provider-call-capture-basis db agent-id)]
                     (db/as-of db basis-t)
                     (let [[value selected]
-                          (async/alts!! [completion database-event]
+                          (async/alts!! [completion turn-stopped database-event]
                                         :priority true)]
-                      (if (= selected completion)
+                      (if (or (= selected completion)
+                              (= selected turn-stopped))
                         value
                         (recur))))))]
           (if-not (map? provider-db)
@@ -475,8 +493,10 @@
                    provider-db cluster-name agent-id)
                   backstop (async/timeout timeout-ms)
                   [value selected]
-                  (async/alts!! [completion backstop] :priority true)]
-              (if (= selected completion)
+                  (async/alts!! [completion turn-stopped backstop]
+                                :priority true)]
+              (if (or (= selected completion)
+                      (= selected turn-stopped))
                 value
                 (let [failure
                       (ex-info
@@ -512,7 +532,8 @@
   law; triggers are rows and survive.
 
   THE ORDER OF THE LAST TWO STEPS IS LOAD-BEARING, not stylistic: the
-  entry is dropped BEFORE the channel is closed, so `wake/route!` can
+  The entry is dropped BEFORE the channel is closed and the graph is stopped,
+  so `wake/route!` can
   never reach a channel this function closed. That is what makes a
   closed-but-reachable route mean exactly one thing — the terminal
   settlement fence — and lets `fenced-route?` make the exact route
@@ -523,16 +544,17 @@
   [{agent-id :seon.cluster.agent/id
     routing :seon.cluster.agent/routing}]
   (when-let [entry (armed routing agent-id)]
-    (flow/stop (:seon.flow/graph entry))
-    (await-turn-completion! routing entry)
-    (async/close! (:seon.cluster.loop/completion entry))
     (swap! routing
            (fn [current]
              (-> current
                  (update ::armed dissoc agent-id)
                  (update ::channels dissoc
                          (:seon.cluster.agent/eid entry)))))
-    (async/close! (:seon.cluster.wake/channel entry)))
+    (async/close! (:seon.cluster.wake/channel entry))
+    (flow/stop (:seon.flow/graph entry))
+    (await-turn-completion! routing entry)
+    (async/close! (:seon.cluster.loop/completion entry))
+    (async/close! (:seon.cluster.agent/turn-stopped entry)))
   nil)
 
 ;;; ---------------------------------------------------------------------------
