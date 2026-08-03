@@ -70,6 +70,11 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   the explicit `seon.db/q` Var late. This is still the one database
   implementation and preserves explicit custody; it is the cycle-breaking
   equivalent of the existing late owner resolution in `seon.oversight`.
+- The render gate falsified the read-table claim that every current `datoms`
+  consumer already used named fields or sequence presence. `seon.render.web`'s
+  generic debug entity used tuple offsets 1 and 2; `seon.db/datoms` deliberately
+  returns ordinary maps. The consumer now reads `:a` and `:v`, and the two
+  `/data` regressions cover both the ordinary entity root and capped 5 MB value.
 
 ## Current source census
 

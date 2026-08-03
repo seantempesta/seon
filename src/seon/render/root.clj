@@ -24,7 +24,7 @@
 
   Crash walk: pure renders over a database value. A kill loses a page
   that re-derives."
-  (:require [datahike.api :as d]
+  (:require [seon.db :as db]
             [seon.problems :as problems]
             [seon.render.block :as block]
             [seon.render.route :as route]))
@@ -76,10 +76,10 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [db (:seon.db/db unit)
-        cluster (d/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
+        cluster (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
                      db)
-        agents (count (d/q '[:find ?a :where [?a :seon.cluster.agent/id _]] db))
-        runs (count (d/q '[:find ?r :where [?r :seon.cluster.run/id _]] db))]
+        agents (count (db/q '[:find ?a :where [?a :seon.cluster.agent/id _]] db))
+        runs (count (db/q '[:find ?r :where [?r :seon.cluster.run/id _]] db))]
     [:header {:id (block/surface-id :header) :class "seon-root-header"}
      [:span {:class "seon-root-mark"} "◆"]
      [:span {:class "seon-root-name"} "seon"]
@@ -104,7 +104,7 @@
   [unit]
   (let [db (:seon.db/db unit)
         agents (sort (map first
-                          (d/q '[:find ?id :where [?a :seon.cluster.agent/id ?id]]
+                          (db/q '[:find ?id :where [?a :seon.cluster.agent/id ?id]]
                                db)))]
     [:section {:id (block/surface-id :agents) :class "seon-root-agents"}
      (heading "agents" (count agents))
@@ -138,7 +138,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [db (:seon.db/db unit)
-        messages (->> (d/q '[:find ?message ?content ?to-id
+        messages (->> (db/q '[:find ?message ?content ?to-id
                              :where
                              [?message :seon.cluster.message/content ?content]
                              [?message :seon.cluster.message/to ?to]

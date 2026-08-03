@@ -47,7 +47,7 @@
 
   Crash walk: pure renders over a database value. A kill loses a prompt
   that re-derives."
-  (:require [datahike.api :as d]
+  (:require [seon.db :as db]
             [seon.render.block :as block]
             [seon.render.route :as route]
             [seon.render.walk :as walk]))
@@ -91,7 +91,7 @@
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
         agent (when (and db agent-id)
-                (d/pull db
+                (db/pull db
                         [:seon.cluster.agent/id
                          :seon.cluster.agent/namespace
                          :seon.cluster.agent/run]
@@ -102,7 +102,7 @@
                 :else :idle)
         namespace (some->> (get-in agent
                                    [:seon.cluster.agent/namespace :db/id])
-                           (d/q '[:find ?name .
+                           (db/q '[:find ?name .
                                   :in $ ?namespace
                                   :where [?namespace :seon.ns/name ?name]]
                                 db))]
@@ -121,7 +121,7 @@
 
 (defn- agent-entity-id
   [db agent-id]
-  (d/q '[:find ?agent .
+  (db/q '[:find ?agent .
          :in $ ?agent-id
          :where [?agent :seon.cluster.agent/id ?agent-id]]
        db agent-id))
@@ -131,29 +131,29 @@
   [db agent-id limit]
   (when-let [agent (agent-entity-id db agent-id)]
     (->> (concat
-          (d/q '[:find ?message
+          (db/q '[:find ?message
                  :in $ ?agent
                  :where [?message :seon.cluster.message/to ?agent]]
                db agent)
-          (d/q '[:find ?message
+          (db/q '[:find ?message
                  :in $ ?agent
                  :where [?message :seon.cluster.message/from ?agent]]
                db agent)
-          (d/q '[:find ?run
+          (db/q '[:find ?run
                  :in $ ?agent
                  :where [?run :seon.cluster.run/agent ?agent]]
                db agent)
-          (d/q '[:find ?receipt
+          (db/q '[:find ?receipt
                  :in $ ?agent
                  :where
                  [?run :seon.cluster.run/agent ?agent]
                  [?receipt :seon.cluster.eval/run ?run]]
                db agent)
-          (d/q '[:find ?error
+          (db/q '[:find ?error
                  :in $ ?agent
                  :where [?error :seon.error/agent ?agent]]
                db agent)
-          (d/q '[:find ?error
+          (db/q '[:find ?error
                  :in $ ?agent
                  :where
                  [?run :seon.cluster.run/agent ?agent]
@@ -215,7 +215,7 @@
 
 (defn- transcript-entry
   [db caps agent-entity entity-id]
-  (let [unit (d/pull db '[*] entity-id)
+  (let [unit (db/pull db '[*] entity-id)
         role (transcript-role agent-entity unit)]
     [:li {:class (str "seon-transcript-entry seon-transcript-" (name role))
           :data-transcript-entity (str entity-id)

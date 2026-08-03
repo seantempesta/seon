@@ -58,6 +58,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -395,11 +396,11 @@
 (defn- direct-attribute
   [db eid attribute]
   (let [values (map (fn [datom]
-                      (let [setting (nth datom 2)]
+                      (let [setting (:v datom)]
                         (if (ref-attribute? db attribute)
                           {:db/id setting}
                           setting)))
-                    (d/datoms db :eavt eid attribute))]
+                    (db/datoms db :eavt eid attribute))]
     (if (many-attribute? db attribute)
       values
       (first values))))
@@ -415,8 +416,8 @@
   and flat error-valued elision match the walk's settled semantics."
   [db eid caps reverse?]
   (let [attributes (into (sorted-set-by #(compare (str %1) (str %2)))
-                         (map #(nth % 1))
-                         (d/datoms db :eavt eid))
+                         (map :a)
+                         (db/datoms db :eavt eid))
         direct
         (into {:db/id eid}
               (map (fn [attribute]
@@ -425,7 +426,7 @@
         width (long (:seon.config.eval.result/max-collection caps))
         reverse-groups
         (when reverse?
-          (->> (d/q '[:find ?source ?attribute
+          (->> (db/q '[:find ?source ?attribute
                       :in $ ?target
                       :where [?source ?attribute ?target]]
                     db eid)
@@ -506,7 +507,7 @@
   "The coalescing floor, read from the config facts at `db` — a live
   dial change applies at the very next pass. 0 when absent."
   [db]
-  (or (d/q '[:find ?value .
+  (or (db/q '[:find ?value .
              :where [_ :seon.config.render/coalesce-ms ?value]]
            db)
       0))
@@ -520,7 +521,7 @@
   delayed partial incapable of repainting over its settled facts."
   [db stream]
   (when-let [run-id (:seon.cluster.run/id stream)]
-    (let [row (d/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
+    (let [row (db/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
                       [::run/id run-id])]
       (and (some? row)
            (not-any? #(contains? row %)
@@ -908,7 +909,7 @@
 (defn- agent-exists?
   [db agent-id]
   (some?
-   (d/q '[:find ?agent .
+   (db/q '[:find ?agent .
           :in $ ?agent-id
           :where [?agent :seon.cluster.agent/id ?agent-id]]
         db agent-id)))
@@ -981,14 +982,14 @@
 (defn- namespace-exists?
   [db namespace-name]
   (some?
-   (d/q '[:find ?namespace .
+   (db/q '[:find ?namespace .
           :in $ ?namespace-name
           :where [?namespace :seon.ns/name ?namespace-name]]
         db namespace-name)))
 
 (defn- agent-namespace
   [db agent-id]
-  (d/q '[:find ?namespace-name .
+  (db/q '[:find ?namespace-name .
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -998,7 +999,7 @@
 
 (defn- current-cluster-name
   [db]
-  (d/q '[:find ?cluster-name .
+  (db/q '[:find ?cluster-name .
          :where [?cluster :seon.cluster/name ?cluster-name]]
        db))
 
@@ -1194,7 +1195,7 @@
 
           entity?
           (when-let [eid (some-> (when entity
-                                   (d/pull db [:db/id] entity))
+                                   (db/pull db [:db/id] entity))
                                  :db/id)]
             (generic-entity db eid caps false))
 
@@ -1352,7 +1353,7 @@
         ;; This is convergent: a running service creates its row once,
         ;; and every later start observes it.
         _ (when-not
-           (d/q '[:find ?process .
+           (db/q '[:find ?process .
                   :in $ ?id
                   :where [?process :seon.db.process/id ?id]]
                 @connection process)

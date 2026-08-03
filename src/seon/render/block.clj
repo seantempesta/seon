@@ -52,7 +52,7 @@
   holds anything; a kill during a render loses hiccup nobody had sent,
   and the next render derives the same value from the same facts."
   (:require [clojure.edn :as edn]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
@@ -128,7 +128,7 @@
   The second hole kind, and deliberately the same shape as the first:
   filling a slot and following a connection are the same act, so they
   are the same marker with a different key and the same bounded walk
-  fills both. `lookup` is anything `d/pull` accepts as an eid — a
+  fills both. `lookup` is anything `db/pull` accepts as an eid — a
   `:db/id`, or a lookup ref like `[:seon.cluster.run/id \"run-7f21\"]`.
 
   This is what makes a rendered unit EMBED its refs: a renderer that
@@ -287,7 +287,7 @@
   `:seon.db/db`, so whatever the entity's renderer needs to query, it
   queries at the same basis the rest of the page was rendered at.
 
-  Nested ref values arrive from `d/pull` as `{:db/id N}` maps, which the
+  Nested ref values arrive from `db/pull` as `{:db/id N}` maps, which the
   hiccup grammar refuses — correctly, since a ref is not content. They
   become expandable holes rather than printed maps: see `expand`.
 
@@ -298,7 +298,7 @@
    [:=> [:cat :seon.db/database-value :seon.render.walk/lookup]
     [:or :seon.render/unit :seon.error/value]]}
   [db lookup]
-  (let [pulled (try (d/pull db '[*] lookup) (catch Throwable _ nil))]
+  (let [pulled (try (db/pull db '[*] lookup) (catch Throwable _ nil))]
     (if (or (nil? pulled) (nil? (:db/id pulled)))
       {:seon.error/kind ::no-such-entity
        :seon.error/message (str "Nothing in the database answers to "

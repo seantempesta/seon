@@ -69,8 +69,7 @@
   commits, or holds anything, so a kill during a render loses a value
   that was never durable. Whether the PROJECTION is pure is the
   projection's own contract; the ones this repository ships are."
-  (:require [datahike.api :as d]
-            [seon.config :as config]
+  (:require [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -116,11 +115,11 @@
 (defn- ambient-database-value
   []
   (or (:seon.db/db *walk-context*)
-      (some-> db/*conn* d/db)))
+      (db/db)))
 
 (defn- custody-cluster-name
   [db agent-id]
-  (d/q '[:find ?cluster-name .
+  (db/q '[:find ?cluster-name .
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -132,14 +131,14 @@
   [db agent-id]
   (let [basis (long (:max-tx db))
         namespace-name
-        (d/q '[:find ?name .
+        (db/q '[:find ?name .
                :in $ ?agent-id
                :where
                [?agent :seon.cluster.agent/id ?agent-id]
                [?agent :seon.cluster.agent/namespace ?namespace]
                [?namespace :seon.ns/name ?name]]
              db agent-id)
-        instant (:db/txInstant (d/pull db [:db/txInstant] basis))]
+        instant (:db/txInstant (db/pull db [:db/txInstant] basis))]
     (str ";; REPL state namespace=" (pr-str namespace-name)
          " basis=" basis
          " time=" (pr-str instant))))

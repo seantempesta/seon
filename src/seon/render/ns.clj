@@ -6,7 +6,7 @@
   a compact public card. Both projections derive from the same database value."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
@@ -41,7 +41,7 @@
   (let [db (:seon.db/db unit)
         eid (:db/id unit)]
     (if (and db eid)
-      (merge unit (d/pull db namespace-selector eid))
+      (merge unit (db/pull db namespace-selector eid))
       unit)))
 
 (defn- function-rows
@@ -49,7 +49,7 @@
   (if-not (and db namespace-eid)
     []
     (let [rows
-          (d/q
+          (db/q
            '[:find [(pull ?function selector) ...]
              :in $ ?namespace selector
              :where [?function :seon.fn/ns ?namespace]]
@@ -62,7 +62,7 @@
   [db namespace-name distance]
   (if-not (and db namespace-name (pos? distance))
     []
-    (->> (d/q
+    (->> (db/q
           '[:find [(pull ?schema selector) ...]
             :in $ ?namespace-name selector
             :where
@@ -78,7 +78,7 @@
 (defn- schema-row
   [db schema-key]
   (when (and db (qualified-keyword? schema-key))
-    (d/pull db schema-selector [:seon.schema/key schema-key])))
+    (db/pull db schema-selector [:seon.schema/key schema-key])))
 
 (defn- cached-schema-row
   [db cache schema-key]

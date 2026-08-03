@@ -8,7 +8,7 @@
   every full, summary, and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
@@ -62,7 +62,7 @@
 (defn- message-count
   [db agent-id]
   (or
-   (d/q '[:find (count-distinct ?message) .
+   (db/q '[:find (count-distinct ?message) .
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
@@ -75,7 +75,7 @@
 (defn- receipt-count
   [db agent-id]
   (or
-   (d/q '[:find (count-distinct ?receipt) .
+   (db/q '[:find (count-distinct ?receipt) .
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
@@ -92,7 +92,7 @@
 
 (defn- recent-message-rows
   [db agent-id limit]
-  (d/q {:query
+  (db/q {:query
         '[:find ?message ?at ?id
           :in $ ?agent-id
           :where
@@ -108,7 +108,7 @@
 
 (defn- recent-receipt-rows
   [db agent-id limit]
-  (d/q {:query
+  (db/q {:query
         '[:find ?receipt ?at ?id
           :in $ ?agent-id ?bootstrap-run-id
           :where
@@ -125,7 +125,7 @@
 
 (defn- pinned-receipt-ids
   [db agent-id]
-  (d/q '[:find [?receipt ...]
+  (db/q '[:find [?receipt ...]
          :in $ ?agent-id ?run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -164,7 +164,7 @@
   (if (seq receipt-ids)
     (into
      {}
-     (d/q '[:find ?receipt ?source
+     (db/q '[:find ?receipt ?source
             :in $ [?receipt ...]
             :where
             [?receipt :seon.cluster.eval/run ?run]
@@ -178,7 +178,7 @@
 (defn- pulled-many
   [db selector entity-ids]
   (if (seq entity-ids)
-    (d/pull-many db selector entity-ids)
+    (db/pull-many db selector entity-ids)
     []))
 
 (defn- identity-attributes
@@ -208,7 +208,7 @@
                         (when (string? identity-value)
                           [(:db/id entity) attribute identity-value])))
                     attributes)))
-           (d/pull-many db selector about-eids))
+           (db/pull-many db selector about-eids))
           [])
         candidate-values (into #{} (map #(nth % 2)) candidates)
         identified
@@ -220,7 +220,7 @@
              (into
               #{}
               (keep (fn [attribute]
-                      (some-> (d/pull db [:db/id]
+                      (some-> (db/pull db [:db/id]
                                       [attribute identity-value])
                               :db/id)))
               attributes)]))
@@ -474,7 +474,7 @@
         agent-id (:seon.cluster.agent/id unit)
         connection (:seon.store/branch-connection unit)]
     (if (and db agent-id)
-      (->> (d/q '[:find [?attempt ...]
+      (->> (db/q '[:find [?attempt ...]
                    :in $ ?agent-id
                    :where
                    [?agent :seon.cluster.agent/id ?agent-id]

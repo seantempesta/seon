@@ -66,7 +66,7 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
   (:require [clojure.string :as str]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.render :as render]
             [seon.render.transcript :as transcript]
@@ -86,7 +86,7 @@
 (defn transacted
   "A pulled entity in the shape it was TRANSACTED in.
 
-  `d/pull` is the canonical read and it wraps every ref as `{:db/id N}`,
+  `db/pull` is the canonical read and it wraps every ref as `{:db/id N}`,
   while the registered attribute schema describes the value a caller
   TRANSACTS — an eid, a tempid or a lookup ref. So a pulled entity does
   not validate against its own registered entity map, and family
@@ -103,7 +103,7 @@
         (map (fn [[attribute value]]
                [attribute
                 (cond
-                  ;; `contains?` and not a key-set equality: `d/pull`
+                  ;; `contains?` and not a key-set equality: `db/pull`
                   ;; expands COMPONENT refs into their full child maps,
                   ;; so an equality check would leave a run's forms as
                   ;; maps in a ref position and the entity would match
@@ -189,7 +189,7 @@
 (defn- concrete-entity
   "Pull every attribute the entity actually carries."
   [db eid]
-  (d/pull db '[*] eid))
+  (db/pull db '[*] eid))
 
 (defn- forward-refs
   "`[attribute eid]` for every ref value the entity itself carries."
@@ -242,7 +242,7 @@
     (vec
      (mapcat
       (fn [attribute]
-        (let [sources (->> (d/datoms db :avet attribute eid)
+        (let [sources (->> (db/datoms db :avet attribute eid)
                            (map :e)
                            distinct
                            sort
@@ -272,7 +272,7 @@
   (when (:seon.cluster.agent/id entity)
     (let [agent-eid (:db/id entity)
           width (long (:seon.config.eval.result/max-collection caps))
-          run-eids (->> (d/q '[:find [?run ...]
+          run-eids (->> (db/q '[:find [?run ...]
                                 :in $ ?agent
                                 :where
                                 [?message :seon.cluster.message/from ?agent]
@@ -344,7 +344,7 @@
   "The entity id `lookup` names at `db`, or nil when nothing answers."
   [db lookup]
   (try
-    (:db/id (d/pull db [:db/id] lookup))
+    (:db/id (db/pull db [:db/id] lookup))
     (catch Throwable _ nil)))
 
 (defn- entity-last-changed
@@ -353,7 +353,7 @@
   (if eid
     (reduce (fn [latest datom] (max latest (long (:tx datom))))
             0
-            (d/datoms db :eavt eid))
+            (db/datoms db :eavt eid))
     0))
 
 (defn- transcript-entity-ids
@@ -362,31 +362,31 @@
   (into #{agent-eid}
         (map first)
         (concat
-         (d/q '[:find ?message
+         (db/q '[:find ?message
                 :in $ ?agent
                 :where [?message :seon.cluster.message/to ?agent]]
               db agent-eid)
-         (d/q '[:find ?message
+         (db/q '[:find ?message
                 :in $ ?agent
                 :where [?message :seon.cluster.message/from ?agent]]
               db agent-eid)
-         (d/q '[:find ?run
+         (db/q '[:find ?run
                 :in $ ?agent
                 :where [?run :seon.cluster.run/agent ?agent]]
               db agent-eid)
-         (d/q '[:find ?receipt
+         (db/q '[:find ?receipt
                 :in $ ?agent
                 :where
                 [?run :seon.cluster.run/agent ?agent]
                 [?receipt :seon.cluster.eval/run ?run]]
               db agent-eid)
-         (d/q '[:find ?attempt
+         (db/q '[:find ?attempt
                 :in $ ?agent
                 :where
                 [?run :seon.cluster.run/agent ?agent]
                 [?attempt :seon.ai.attempt/run ?run]]
               db agent-eid)
-         (d/q '[:find ?form
+         (db/q '[:find ?form
                 :in $ ?agent
                 :where
                 [?run :seon.cluster.run/agent ?agent]
@@ -411,7 +411,7 @@
                           (:seon.cluster.eval/id entity)
                           (:seon.cluster.run.form/id entity))
                   (:db/id entity))))
-        (d/pull-many db
+        (db/pull-many db
                      [:db/id
                       :seon.cluster.message/id
                       :seon.ai.attempt/id
@@ -426,7 +426,7 @@
 
 (defn- assigned-namespace-eid
   [db root-eid]
-  (d/q '[:find ?namespace .
+  (db/q '[:find ?namespace .
          :in $ ?agent
          :where [?agent :seon.cluster.agent/namespace ?namespace]]
        db root-eid))
@@ -666,7 +666,7 @@
                           :else with-render)))))))]
       (if root-eid
         (let [root (node lookup root-eid nil hops)
-              agent-id (d/q '[:find ?id .
+              agent-id (db/q '[:find ?id .
                               :in $ ?agent
                               :where [?agent :seon.cluster.agent/id ?id]]
                             db root-eid)]
