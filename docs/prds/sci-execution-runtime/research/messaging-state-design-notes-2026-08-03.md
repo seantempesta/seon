@@ -84,6 +84,47 @@ design decisions awaiting one PRD; the grounding audit is
    message context migrates to form output the agent can see, re-run, and
    modify; eval receipts stay renderer-owned as the REPL session itself.
 
+8. **NO HAND-BUILT CONTEXT SECTIONS — get by on bootstrap forms alone**
+   (owner, same night: "I want to get rid of all sections and just see if
+   we can get by on the bootstrap forms. hence all the research"). The
+   context = `(help)` (itself a form rendering db instruction facts) +
+   stable lesson forms with outputs (the cacheable prefix) + volatile
+   forms (messages/replied, status, work, unreplied-check) + the agent's
+   own append-only REPL session. The transcript renderer's hand-built
+   sections (messages, status, waiting-on, work) all dissolve into form
+   outputs; the one non-form survivor is the session structure itself
+   (prior forms + results ARE the provider conversation). Cache
+   consequence: append-only session + stable lesson prefix should RAISE
+   the measured 67% hit rate. Risks assigned to live-drive evidence, not
+   argument: per-form output sizes vs a global token budget, and model
+   orientation without section headers — a failed drive fixes forward via
+   a better form or one line of db-resident (help) prose, never a
+   renderer resurrection.
+
+9. **THE AGENT SETS ITS OWN PROMPT LINE (readline)** (owner, same night):
+   in the bootstrap forms the agent queries its current plan — previous
+   1-2 completed items plus what's ahead, nicely formatted through
+   declared `:seon.render/ai` and `:seon.render/html` producers — and
+   then SETS its readline: everything it always wants visible on every
+   output, rendered at the END of the prompt. Cache posture: the readline
+   sits after the cache boundary so its churn is free ("it's at the end
+   of the prompt so it's fine to bust"), unlike the re-evaluated
+   bootstrap forms whose instability busts prefix. Analogy: a
+   self-authored PS1 — the agent owns its own prompt decoration through
+   an ordinary settable mechanism in its starting forms.
+
+10. **THE ACTIONABLE-OUTPUT FILTER for bootstrap forms** (owner, same
+   night, reviewing the curriculum census form — "how is this useful?"):
+   every bootstrap form must pass "what would the agent DO differently
+   having seen this output?" A wall of counts fails; the capability
+   query passes (ten rows you immediately `doc` into). The census lesson
+   is cut. Owner also wants recipes to show idiomatic Clojure composed
+   on query outputs (sort/take-last/->>), and query forms upgraded to
+   the most efficient shapes the Datahike source itself supports (pull
+   in :find, :keys, aggregates, index access) with file:line evidence.
+   The curriculum agent was resumed against the restored default cluster
+   to dramatically revise the report under this filter.
+
 ## Still open (dismissed question set — owner will rule when ready)
 
 - The seven work/identity recommendations (user entity shape, from
