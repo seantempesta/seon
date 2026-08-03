@@ -486,3 +486,22 @@ caught by someone reading source or running a probe.
 So: re-derive before repeating, prove the counterfactual before
 promising a saving, and treat every inherited number in this repository
 as suspect until reproduced.
+
+## Rulings batch — 2026-08-03 morning (owner, via question batch)
+
+- ONE BLOB RULE: unify attempts/messages onto the per-value derived
+  comparison; the 65,536 dial is deleted in that migration. Queued.
+- SCHEMA SPLIT approved, AFTER render lands: domain files, glob-loaded,
+  ONE merging loader refusing exact duplicates; AGENTS.md gains the
+  registry-query-first discovery rule (search before declaring, reuse
+  before creating).
+- LOAD TEST: synthetic-only for now — 1000 synthetic agents with
+  thread/memory/CPU curves recorded; live scaling later. Queued.
+- RUN-FROM-SCI: continue wave-by-wave after the kernel merge (render
+  kernel + evaluate converge on one owner — owner said "do it"); each
+  wave states what left the shared surface and its measured cost.
+- Clarifications recorded: the 100 ms figure was a TEST-configured
+  provider timeout proving bounded teardown, never a function limit;
+  the live default boot failure was a stale-branch data gap (rows
+  predating the provenance migration), fixed by reset/republish per
+  ruling #49; MCP is verified end-to-end from fresh client bindings.
