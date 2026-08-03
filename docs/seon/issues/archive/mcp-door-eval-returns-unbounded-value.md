@@ -1,6 +1,7 @@
 ---
 type: issue
 status: resolved
+severity: friction
 tags: [issue, mcp, sci, runtime]
 ---
 
