@@ -330,13 +330,10 @@
   (mapv #(bit-and 0xff %) ^bytes octets))
 
 (defn- read-opened
-  [request effective directory entry-name]
+  [request effective directory entry-name window-limit]
   (let [path (:my.fs/path request)
         before (relative-observation directory entry-name)
         read-limit (:seon.config.fs/max-read-bytes effective)
-        window-limit (long (min (:seon.config.fs/max-inline-bytes effective)
-                                (or (:my.fs/max-bytes request)
-                                    Long/MAX_VALUE)))
         byte-offset (long (or (:my.fs/byte-offset request) 0))]
     (when-not before
       (refuse! :my.fs/not-found "The file does not exist."
@@ -380,11 +377,8 @@
                           :my.fs/bytes-read
                           (long (alength ^bytes window))})))))))))
 
-(defn- read
-  {:malli/schema
-   [:=> [:cat :my.fs/read-request :seon.config/effective]
-    [:or :my.fs/read-result :seon.error/value]]}
-  [request effective]
+(defn- read-window
+  [request effective window-limit]
   (let [path (:my.fs/path request)]
     (try
       (let [{directory :seon.fs.jvm/directory
@@ -392,12 +386,31 @@
              streams :seon.fs.jvm/streams}
             (parent-access path effective)]
         (try
-          (read-opened request effective directory entry-name)
+          (read-opened request effective directory entry-name window-limit)
           (finally
             (close-streams! streams))))
       (catch Throwable error
         (error-value error :my.fs/read-failed "The file read failed."
                      {:my.fs/path path})))))
+
+(defn- read
+  {:malli/schema
+   [:=> [:cat :my.fs/read-request :seon.config/effective]
+    [:or :my.fs/read-result :seon.error/value]]}
+  [request effective]
+  (read-window
+   request effective
+   (long (min (:seon.config.fs/max-inline-bytes effective)
+              (or (:my.fs/max-bytes request) Long/MAX_VALUE)))))
+
+(defn- read-complete
+  "Read one complete UTF-8 file for a higher-level conditional operation."
+  {:malli/schema
+   [:=> [:cat :my.fs/read-request :seon.config/effective]
+    [:or :my.fs/read-result :seon.error/value]]}
+  [request effective]
+  (read-window request effective
+               (long (:seon.config.fs/max-read-bytes effective))))
 
 (defn- array-content
   [content write-limit]
