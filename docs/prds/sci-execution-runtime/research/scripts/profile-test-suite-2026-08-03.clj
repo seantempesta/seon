@@ -29,6 +29,12 @@
    {:suite.profile/event :suite.profile/end-test
     :suite.profile/prefix "END test "}])
 
+(def ^:private load-event-prefixes
+  [{:suite.profile/event :suite.profile/end-load
+    :suite.profile/prefix "LOADED "}
+   {:suite.profile/event :suite.profile/begin-load
+    :suite.profile/prefix "LOAD "}])
+
 (defn- usage
   []
   (str "Usage: clojure -M " *file*
@@ -106,12 +112,20 @@
 
 (defn- event-description
   [description]
-  (some (fn [{event :suite.profile/event
-              prefix :suite.profile/prefix}]
-          (when (str/starts-with? description prefix)
-            {:suite.profile/event event
-             :suite.profile/subject (subs description (count prefix))}))
-        event-prefixes))
+  (or
+   (some (fn [{event :suite.profile/event
+               prefix :suite.profile/prefix}]
+           (when (str/starts-with? description prefix)
+             {:suite.profile/event event
+              :suite.profile/subject (subs description (count prefix))}))
+         event-prefixes)
+   (some (fn [{event :suite.profile/event
+               prefix :suite.profile/prefix}]
+           (when (str/starts-with? description prefix)
+             {:suite.profile/event event
+              :suite.profile/subject
+              (subs description (inc (.lastIndexOf description " ")))}))
+         load-event-prefixes)))
 
 (defn- parse-progress-line
   [line]
@@ -153,7 +167,9 @@
   (let [event-type (:suite.profile/event event)
         subject (:suite.profile/subject event)
         namespace-name
-        (if (contains? #{:suite.profile/begin-namespace
+        (if (contains? #{:suite.profile/begin-load
+                         :suite.profile/end-load
+                         :suite.profile/begin-namespace
                          :suite.profile/end-namespace}
                        event-type)
           (symbol subject)
@@ -170,6 +186,29 @@
       (cond
         (:suite.profile/error event)
         (anomaly state event "Progress timing event has no valid ISO timestamp.")
+
+        (= :suite.profile/begin-load event-type)
+        (if (:suite.profile/open-load state)
+          (anomaly state event "Namespace load began before the prior load ended.")
+          (assoc state :suite.profile/open-load
+                 {:suite.profile/subject subject :suite.profile/at at}))
+
+        (= :suite.profile/end-load event-type)
+        (let [opened (:suite.profile/open-load state)]
+          (cond
+            (nil? opened)
+            (anomaly state event "Namespace load ended without a matching begin.")
+
+            (not= subject (:suite.profile/subject opened))
+            (anomaly state event "Namespace load end did not match its begin.")
+
+            :else
+            (-> state
+                (update :suite.profile/loads conj
+                        {:suite.profile/namespace (symbol subject)
+                         :suite.profile/load-ms
+                         (elapsed-milliseconds (:suite.profile/at opened) at)})
+                (dissoc :suite.profile/open-load))))
 
         (= :suite.profile/begin-namespace event-type)
         (cond
@@ -199,7 +238,7 @@
             (-> state
                 (update :suite.profile/namespaces conj
                         {:suite.profile/namespace (symbol subject)
-                         :suite.profile/wall-ms
+                         :suite.profile/run-ms
                          (elapsed-milliseconds (:suite.profile/at opened) at)})
                 (dissoc :suite.profile/open-namespace))))
 
@@ -239,6 +278,10 @@
 (defn- finish-capture
   [state]
   (cond-> state
+    (:suite.profile/open-load state)
+    (anomaly {:suite.profile/event :suite.profile/eof}
+             "Namespace LOAD had no LOADED before process exit.")
+
     (:suite.profile/open-test state)
     (anomaly {:suite.profile/event :suite.profile/eof}
              "Test BEGIN had no END before process exit.")
@@ -252,18 +295,26 @@
              "No complete timestamped namespace was observed.")))
 
 (defn- summarize-namespaces
-  [namespaces tests]
-  (let [tests-by-namespace (group-by :suite.profile/namespace tests)]
+  [namespaces loads tests]
+  (let [load-by-namespace (into {}
+                                (map (juxt :suite.profile/namespace identity))
+                                loads)
+        tests-by-namespace (group-by :suite.profile/namespace tests)]
     (mapv
      (fn [namespace-profile]
        (let [namespace-name (:suite.profile/namespace namespace-profile)
+             run-ms (:suite.profile/run-ms namespace-profile)
+             load-ms (get-in load-by-namespace
+                             [namespace-name :suite.profile/load-ms]
+                             0.0)
              namespace-tests (get tests-by-namespace namespace-name [])
              test-ms (reduce + 0.0 (map :suite.profile/wall-ms namespace-tests))]
          (assoc namespace-profile
+                :suite.profile/load-ms load-ms
+                :suite.profile/wall-ms (+ load-ms run-ms)
                 :suite.profile/test-count (count namespace-tests)
                 :suite.profile/test-ms test-ms
-                :suite.profile/non-test-ms
-                (- (:suite.profile/wall-ms namespace-profile) test-ms))))
+                :suite.profile/non-test-run-ms (- run-ms test-ms))))
      namespaces)))
 
 (defn- write-edn!
@@ -296,11 +347,14 @@
              (str "wall_ms=" (decimal (:suite.profile/wall-ms profile)))
              (str "namespaces=" (count (:suite.profile/namespaces profile)))
              (str "tests=" (count (:suite.profile/tests profile))))
-    (println "WORST NAMESPACES (wall_ms test_ms non_test_ms tests namespace)")
+    (println "WORST NAMESPACES"
+             "(total_ms load_ms run_ms test_ms non_test_run_ms tests namespace)")
     (doseq [namespace-profile worst-namespaces]
       (println (decimal (:suite.profile/wall-ms namespace-profile))
+               (decimal (:suite.profile/load-ms namespace-profile))
+               (decimal (:suite.profile/run-ms namespace-profile))
                (decimal (:suite.profile/test-ms namespace-profile))
-               (decimal (:suite.profile/non-test-ms namespace-profile))
+               (decimal (:suite.profile/non-test-run-ms namespace-profile))
                (:suite.profile/test-count namespace-profile)
                (:suite.profile/namespace namespace-profile)))
     (println "WORST TESTS (wall_ms test)")
@@ -332,6 +386,7 @@
                            (InputStreamReader. (.getInputStream process)))
                     log-writer (io/writer raw-log)]
           (loop [state {:suite.profile/selected-namespaces selected
+                        :suite.profile/loads []
                         :suite.profile/namespaces []
                         :suite.profile/tests []
                         :suite.profile/anomalies []}]
@@ -350,6 +405,7 @@
         captured (finish-capture captured)
         namespace-profiles
         (summarize-namespaces (:suite.profile/namespaces captured)
+                              (:suite.profile/loads captured)
                               (:suite.profile/tests captured))
         tests-by-duration
         (vec (sort-by :suite.profile/wall-ms > (:suite.profile/tests captured)))
@@ -367,11 +423,14 @@
          :suite.profile/anomalies (:suite.profile/anomalies captured)}]
     (write-edn! (io/file output-directory "profile.edn") profile)
     (write-tsv! (io/file output-directory "namespaces.tsv")
-                ["wall_ms" "test_ms" "non_test_ms" "test_count" "namespace"]
+                ["total_ms" "load_ms" "run_ms" "test_ms"
+                 "non_test_run_ms" "test_count" "namespace"]
                 (map (fn [namespace-profile]
                        [(decimal (:suite.profile/wall-ms namespace-profile))
+                        (decimal (:suite.profile/load-ms namespace-profile))
+                        (decimal (:suite.profile/run-ms namespace-profile))
                         (decimal (:suite.profile/test-ms namespace-profile))
-                        (decimal (:suite.profile/non-test-ms namespace-profile))
+                        (decimal (:suite.profile/non-test-run-ms namespace-profile))
                         (:suite.profile/test-count namespace-profile)
                         (:suite.profile/namespace namespace-profile)])
                      namespaces-by-duration))
