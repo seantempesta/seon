@@ -1,0 +1,35 @@
+{
+; ---------------------------------------------------------------------------
+ ; THE /data DRILL. Bounded expansion whose cursor says where to resume
+ ; instead of eliding — the same caps and the same walk as a panel, one
+ ; keeping the tail and one throwing it away.
+ ;
+ ; Process-local only. A cursor lives in a URL, not in the database: a
+ ; drilled position is a link somebody can send, and storing it would
+ ; make "where is this reader looking" a fact somebody has to retract.
+ ; ---------------------------------------------------------------------------
+
+ ; A `get-in` path — the quarry's own vocabulary for this, deliberately
+ ; not a new noun. Steps are ordinary values because the things they
+ ; index are: a keyword key, a string key, an integer index.
+ :seon.render.data/path [:vector :any]
+ :seon.render.data/offset [:int {:min 0}]
+
+ :seon.render.data/cursor
+ [:map
+  [:seon.render.data/path :seon.render.data/path]
+  [:seon.render.data/offset :seon.render.data/offset]]
+
+ ; One page, and the honest count beside it. `total` is present always
+ ; because a reader must know a window is a window; the two resume
+ ; offsets are present exactly when there IS somewhere to resume, so
+ ; "is there a next page?" is key presence rather than arithmetic
+ ; repeated at every call site.
+ :seon.render.data/window
+ [:map
+  [:seon.render.data/entries [:vector [:tuple :any :any]]]
+  [:seon.render.data/offset :seon.render.data/offset]
+  [:seon.render.data/total [:int {:min 0}]]
+  [:seon.render.data/next-offset {:optional true} :seon.render.data/offset]
+  [:seon.render.data/previous-offset {:optional true} :seon.render.data/offset]]
+}

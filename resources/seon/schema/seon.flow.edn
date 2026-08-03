@@ -1,0 +1,107 @@
+{
+:seon.config.flow.compute/concurrency [:int {:min 1 :description "Concurrent compute submissions. Default equals the acquired :seon.hardware/cores fact, preserving the measured pre-Flow availableProcessors bound without a runtime fallback."}]
+ :seon.config.flow.compute/queue-depth [:int {:min 1 :description "Queued compute submissions. Default 10 preserves core.async.flow's fixed per-channel default at alpha3; a full channel parks the submitter and loses no work."}]
+ :seon.flow/active-evals [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.flow/active-work [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.flow/admitted? :boolean
+ :seon.flow/attempt [:int {:min 0}]
+ :seon.flow/buffer-capacity [:int {:min 1}]
+ :seon.flow/capacity-observer-request [:map [:seon.flow/parallelism :seon.flow/parallelism] [:seon.flow/active-work :seon.flow/active-work]]
+ :seon.flow/changed-namespace :symbol
+ :seon.flow/changed-source :string
+ :seon.flow/channel [:fn {:gen/gen seon.flow/channel-generator} seon.flow/channel?]
+ ; Callback contracts are function schemas, not predicate-shaped escape
+ ; hatches. Malli therefore constructs real functions from their output
+ ; schemas and the recurring flow gate invokes them with generated inputs.
+ :seon.flow/callback-result
+ [:or :nil :map
+  [:vector :seon.schema/value]
+  [:set :seon.schema/value]
+  [:sequential :seon.schema/value]
+  :string :keyword :symbol :boolean :int :double :uuid :inst]
+ :seon.flow/core-fault :map
+ :seon.flow/commit-drop!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/commit-fault!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/changed-namespace-request
+ [:map
+  [:seon.flow/changed-namespace :seon.flow/changed-namespace]
+  [:seon.flow/changed-source :seon.flow/changed-source]]
+ :seon.flow/compile-namespace-fn
+ [:=> [:cat :seon.flow/changed-namespace-request]
+  :seon.store/transaction-operation]
+ :seon.flow/compute-timeout-ms [:int {:min 1}]
+ :seon.flow/deliver!
+ [:=> [:cat :seon.sci.admit/value] :seon.flow/callback-result]
+ :seon.flow/error-fanout [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/fault-graph :seon.flow/graph] [:seon.flow/application-report-channel :seon.flow/channel] [:seon.flow/monitor-report-channel :seon.flow/channel] [:seon.flow/monitor-error-channel :seon.flow/channel] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/completion :seon.flow/channel]]
+ :seon.flow/error-fanout-request [:map [:seon.flow/graph :seon.flow/graph] [:seon.flow/started [:map [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]] [:seon.flow/fault-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/monitor-buffer-capacity :seon.flow/buffer-capacity] [:seon.flow/read-core-error-mode :seon.flow/read-core-error-mode] [:seon.flow/commit-fault! :seon.flow/commit-fault!] [:seon.flow/commit-drop! :seon.flow/commit-drop!] [:seon.flow/panic! :seon.flow/panic!]]
+ :seon.flow/escalated? :boolean
+ :seon.flow/escalation-request [:map [:seon.flow/turn-count :seon.flow/turn-count] [:seon.flow/failure-count :seon.flow/failure-count] [:seon.flow/max-turns :seon.flow/max-turns] [:seon.flow/max-failures :seon.flow/max-failures]]
+ :seon.flow/eval-proc-request [:map [:seon.flow/parallelism :seon.flow/parallelism] [:seon.flow/active-evals :seon.flow/active-evals] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/executor [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]
+ :seon.flow/failure-count [:int {:min 0}]
+ :seon.flow/fault-committer-proc-request [:map [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/completion :seon.flow/channel] [:seon.flow/read-core-error-mode :seon.flow/read-core-error-mode] [:seon.flow/commit-fault! :seon.flow/commit-fault!] [:seon.flow/panic! :seon.flow/panic!]]
+ :seon.flow/completion :seon.flow/channel
+ :seon.flow/fix-outcome [:enum :seon.flow/fix-succeeds :seon.flow/fix-fails :seon.flow/fix-breaks-other-namespace :seon.flow/no-response]
+ :seon.flow/fix-step-fn
+ [:=> [:cat :map] :seon.flow/fix-outcome]
+ :seon.flow/future [:fn {:gen/gen seon.flow/java-future-generator} seon.flow/java-future?]
+ :seon.flow/graph [:fn {:gen/gen seon.flow/graph-generator} seon.flow/graph?]
+ :seon.flow/join-error-request [:map [:seon.flow/started [:map [:error-chan :seon.flow/channel]]] [:seon.flow/fault-channel :seon.flow/channel] [:seon.flow/tag [:map-of :qualified-keyword :string]]]
+ :seon.flow/indexer-proc-request [:map [:seon.flow/compile-namespace-fn :seon.flow/compile-namespace-fn] [:seon.flow/compute-timeout-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/launcher [:fn {:gen/gen seon.flow/proc-launcher-generator} seon.flow/proc-launcher?]
+ :seon.flow/launcher-configuration [:map  [:seon.config.flow.compute/queue-depth :seon.config.flow.compute/queue-depth] [:seon.config.flow.compute/concurrency :seon.config.flow.compute/concurrency]]
+ :seon.flow/started [:map  [:report-chan :seon.flow/channel] [:error-chan :seon.flow/channel]]
+ :seon.flow/work-launcher
+ [:map
+  [:seon.flow/graph :seon.flow/graph]
+  [:seon.flow/started :seon.flow/started]
+  [:seon.flow/active-work :seon.flow/active-work]
+  [:seon.flow/compute-executor :seon.flow/executor]
+  [:seon.flow/configuration :seon.flow/launcher-configuration]]
+ :seon.flow/lineage-status [:enum :seon.flow/iterating :seon.flow/escalated :seon.flow/done]
+ :seon.flow/lineage-status-request [:map [:seon.flow/owner-count :seon.flow/owner-count] [:seon.flow/successful-owners :seon.flow/successful-owners] [:seon.flow/escalated? :seon.flow/escalated?] [:seon.flow/admitted? :seon.flow/admitted?]]
+ :seon.flow/mailbox-request [:map [:seon.flow/deliver! :seon.flow/deliver!]]
+ :seon.flow/max-failures [:int {:min 1}]
+ :seon.flow/max-turns [:int {:min 1}]
+ :seon.flow/namespace-owner-proc-request [:map [:seon.flow/fix-step-fn :seon.flow/fix-step-fn]]
+ :seon.flow/owner-count [:int {:min 1}]
+ :seon.flow/owner-ordinal [:int {:min 0}]
+ :seon.flow/panic!
+ [:=> [:cat :seon.flow/core-fault] :seon.flow/callback-result]
+ :seon.flow/parallelism [:int {:min 1}]
+ :seon.flow/plan-step-fn [:=> [:cat :map] :map]
+ :seon.flow/planner-proc-request [:map [:seon.flow/plan-step-fn :seon.flow/plan-step-fn]]
+ :seon.flow/read-core-error-mode [:=> [:cat] :seon.config/on-core-error]
+ :seon.flow/read-sources [:=> [:cat] :seon.flow/sources]
+ :seon.flow/seed :int
+ :seon.flow/seeded-outcome-request [:map [:seon.flow/seed :seon.flow/seed] [:seon.flow/owner-ordinal :seon.flow/owner-ordinal] [:seon.flow/attempt :seon.flow/attempt]]
+ :seon.flow/source-enumerator-proc-request [:map [:seon.flow/read-sources :seon.flow/read-sources]]
+ :seon.flow/sources [:map-of :symbol :string]
+ :seon.flow/submission-id [:or :uuid :keyword :string]
+ :seon.flow/submission-wait-ms [:int {:min 0}]
+ :seon.flow/work-result
+ [:or
+  [:map
+   [:seon.flow/outcome [:= :seon.flow/time-limit]]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]
+  [:map
+   [:seon.flow/outcome [:= :seon.flow/completed]]
+   [:seon.flow/value :seon.sci.admit/value]
+   [:seon.flow/submission-wait-ms :seon.flow/submission-wait-ms]]]
+ :seon.flow/successful-owners [:set :keyword]
+ :seon.flow/turn-count [:int {:min 0}]
+ :seon.flow/started! [:=> [:cat] :nil]
+ :seon.flow/work-call
+ [:or
+  [:map
+   [:seon.flow/started! :seon.flow/started!]]
+  [:map
+   [:seon.flow/interrupt-fn :seon.sci.admit/interrupt-fn]]]
+ :seon.flow/work-fn
+ [:=> [:cat :seon.flow/work-call] :seon.sci.admit/value]
+ :seon.flow/work-launcher-request [:map  [:seon.flow/configuration :seon.flow/launcher-configuration]]
+ :seon.flow/work-submission [:map  [:seon.flow/submission-id :seon.flow/submission-id] [:seon.flow/workload :seon.flow/workload] [:seon.flow/work-fn :seon.flow/work-fn] [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]]
+ :seon.flow/workload [:enum :compute]
+}

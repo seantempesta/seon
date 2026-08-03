@@ -1,0 +1,29 @@
+{
+; The wake channel carries no information: it says "look", never
+ ; "here is what changed". Work is derived from facts, so a wake that
+ ; lost its payload lost nothing.
+ :seon.cluster.wake/attributes [:set :keyword]
+ :seon.cluster.wake/key :keyword
+ ; THE ROUTING DELIVERY (F1 §4): one registration per cluster whose
+ ; handler ROUTES each committed wake datom to its recipient's mailbox
+ ; instead of one global channel. `channels` is a zero-arg fn returning
+ ; the CURRENT process-local routing map (recipient entity id →
+ ; mailbox channel) — a fn, not a snapshot, because arming grows the
+ ; map while the listener lives.
+ :seon.cluster.wake/channels fn?
+ ; A two-arg predicate over recipient eid + the exact mailbox route.
+ ; The agent routing owner derives quarantine from its current route;
+ ; no fenced-id set or stored lifecycle flag exists.
+ :seon.cluster.wake/fenced? fn?
+ ; Delivery combines `offer!`'s answer with that derived route fact.
+ ; A closed channel alone is not a fence: a closed render route is a
+ ; genuine delivery failure and remains loud.
+ :seon.cluster.wake/offer-result [:enum true false nil]
+ :seon.cluster.wake/delivery [:enum :seon.cluster.wake/delivered :seon.cluster.wake/fenced :seon.cluster.wake/refused]
+ ; `render-channel` is the THIRD delivery (F2 §1.4): one payload-free
+ ; wake per REPORT, unconditionally, into the render proc's `::interest`
+ ; in-port. Required, not optional — a cluster whose commits reach no
+ ; render pass would serve a page that silently stops updating.
+ :seon.cluster.wake/route-request [:map  [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/channels :seon.cluster.wake/channels] [:seon.cluster.wake/fenced? :seon.cluster.wake/fenced?] [:seon.cluster.wake/armer-channel :seon.flow/channel] [:seon.cluster.wake/render-channel :seon.flow/channel] [:seon.cluster.wake/fault-channel :seon.flow/channel] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+ :seon.cluster.wake/unlisten-request [:map  [:seon.cluster.wake/connection :seon.store/branch-connection] [:seon.cluster.wake/key :seon.cluster.wake/key]]
+}

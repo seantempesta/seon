@@ -1,0 +1,220 @@
+{
+; The current program graph. A function, namespace, or test is found by
+ ; identity-attribute presence and connected through refs; there is no kind
+ ; stamp and no stored projection of callability.
+ :seon.fn/sym [:string {:min 1 :seon.db/identity true}]
+ :seon.fn/ns :seon.db/ref
+ :seon.fn/source [:string {:min 1}]
+ :seon.fn/arglists :string
+ :seon.fn/doc :string
+ :seon.fn/private? :boolean
+ :seon.fn/spec :string
+ :seon.fn/calls [:set :seon.db/ref]
+ :seon.effect/capability :qualified-symbol
+ :seon.fn/arities
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn/ast
+ [:and {:seon.db/component true} :seon.db/ref]
+
+ :seon.fn.arity/order :int
+ ; Malli returns an integer or :varargs; canonical EDN keeps one Datahike type.
+ :seon.fn.arity/arity :string
+ :seon.fn.arity/min :int
+ :seon.fn.arity/max :int
+ :seon.fn.arity/input :seon.db/ref
+ :seon.fn.arity/output :seon.db/ref
+ :seon.fn.arity/guard :seon.db/ref
+ ; Membership only; ordering is irrelevant and cardinality-many is honest.
+ :seon.fn.arity/input-refs [:set :seon.db/ref]
+ :seon.fn.arity/output-refs [:set :seon.db/ref]
+ :seon.fn.arity/guard-refs [:set :seon.db/ref]
+ :seon.fn.arity/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.fn.arity/arity :seon.fn.arity/arity]
+  [:seon.fn.arity/min :seon.fn.arity/min]
+  [:seon.fn.arity/max {:optional true} :seon.fn.arity/max]
+  [:seon.fn.arity/input :seon.fn.arity/input]
+  [:seon.fn.arity/output :seon.fn.arity/output]
+  [:seon.fn.arity/guard {:optional true} :seon.fn.arity/guard]
+  [:seon.fn.arity/input-refs {:optional true} :seon.fn.arity/input-refs]
+  [:seon.fn.arity/output-refs {:optional true} :seon.fn.arity/output-refs]
+  [:seon.fn.arity/guard-refs {:optional true} :seon.fn.arity/guard-refs]]
+
+ ; Every collection-valued AST leaf points through entry components because
+ ; Datahike cardinality-many is a set. The entry order is Malli's order.
+ ; Malli also overloads :value between scalar data and a schema-valued child,
+ ; so the singular value leaf uses the same scalar-or-child entry shape.
+ :seon.fn.ast/type :string
+ :seon.fn.ast/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/input [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/output [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/guard [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/child [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/key [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/ref :seon.db/ref
+ :seon.fn.ast/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/children
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/keys
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/registry
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/values
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast/node
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast/type :seon.fn.ast/type]
+  [:seon.fn.ast/value {:optional true} :seon.fn.ast/value]
+  [:seon.fn.ast/input {:optional true} :seon.fn.ast/input]
+  [:seon.fn.ast/output {:optional true} :seon.fn.ast/output]
+  [:seon.fn.ast/guard {:optional true} :seon.fn.ast/guard]
+  [:seon.fn.ast/child {:optional true} :seon.fn.ast/child]
+  [:seon.fn.ast/key {:optional true} :seon.fn.ast/key]
+  [:seon.fn.ast/ref {:optional true} :seon.fn.ast/ref]
+  [:seon.fn.ast/properties {:optional true} :seon.fn.ast/properties]
+  [:seon.fn.ast/children {:optional true} :seon.fn.ast/children]
+  [:seon.fn.ast/keys {:optional true} :seon.fn.ast/keys]
+  [:seon.fn.ast/registry {:optional true} :seon.fn.ast/registry]
+  [:seon.fn.ast/values {:optional true} :seon.fn.ast/values]]
+
+ ; One ordered child, keyed map/registry entry, property, enum member, or
+ ; singular AST value. A schema-valued value uses `value`; scalar data uses
+ ; canonical `value-edn`.
+ :seon.fn.ast.entry/order :int
+ :seon.fn.ast.entry/key :string
+ :seon.fn.ast.entry/value [:and {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/value-edn :string
+ :seon.fn.ast.entry/properties
+ [:vector {:seon.db/component true} :seon.db/ref]
+ :seon.fn.ast.entry/row
+ [:map {:seon.db/attributes true}
+  [:seon.fn.ast.entry/order {:optional true} :seon.fn.ast.entry/order]
+  [:seon.fn.ast.entry/key {:optional true} :seon.fn.ast.entry/key]
+  [:seon.fn.ast.entry/value {:optional true} :seon.fn.ast.entry/value]
+  [:seon.fn.ast.entry/value-edn {:optional true}
+   :seon.fn.ast.entry/value-edn]
+  [:seon.fn.ast.entry/properties {:optional true}
+   :seon.fn.ast.entry/properties]]
+ ; Explicit only on capability leaves. All other workload classification is
+ ; derived by reachability over the program graph.
+ :seon.fn/workload [:enum :io :compute]
+ :seon.fn/fn
+ [:map {:seon.db/entity true}
+  [:seon.fn/sym :seon.fn/sym]
+  [:seon.schema.admission/source :seon.schema.admission/source]
+  [:seon.fn/ns :seon.fn/ns]
+  [:seon.fn/source :seon.fn/source]
+  [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+  [:seon.fn/doc {:optional true} :seon.fn/doc]
+  [:seon.fn/private? {:optional true} :seon.fn/private?]
+  [:seon.fn/spec {:optional true} :seon.fn/spec]
+  [:seon.fn/calls {:optional true} :seon.fn/calls]
+  [:seon.fn/arities {:optional true} :seon.fn/arities]
+  [:seon.fn/ast {:optional true} :seon.fn/ast]
+  [:seon.fn/workload {:optional true} :seon.fn/workload]
+  [:seon.effect/capability {:optional true} :seon.effect/capability]]
+
+ :seon.schema/schema
+ [:map {:seon.db/entity true}
+  [:seon.schema/key :seon.schema/key]
+  [:seon.schema.admission/source :seon.schema.admission/source]
+  [:seon.schema/form :seon.schema/form]
+  [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
+
+ :seon.db.id/generator
+ [:enum
+  :seon.db.id.generator/human-readable
+  :seon.db.id.generator/compact]
+
+ :seon.ns/name [:symbol {:seon.db/identity true}]
+ :seon.ns/source [:string {:min 1}]
+ :seon.ns/doc :string
+ :seon.ns/requires [:set :seon.db/ref]
+ :seon.ns/aliases
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/imports
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/refers
+ [:set {:seon.db/component true} :seon.db/ref]
+ :seon.ns/ns
+ [:map {:seon.db/entity true
+        :seon.render/ai seon.render.ns/render-ai
+        :seon.render/html seon.render.ns/render-html}
+  [:seon.ns/name :seon.ns/name]
+  [:seon.schema.admission/source
+   {:optional true}
+   :seon.schema.admission/source]
+  [:seon.ns/source {:optional true} :seon.ns/source]
+  [:seon.ns/doc {:optional true} :seon.ns/doc]
+  [:seon.ns/requires {:optional true} :seon.ns/requires]
+  [:seon.ns/aliases {:optional true} :seon.ns/aliases]
+  [:seon.ns/imports {:optional true} :seon.ns/imports]
+  [:seon.ns/refers {:optional true} :seon.ns/refers]]
+
+ ; Effective bindings are namespace-owned components. They preserve SCI's
+ ; resolver inputs rather than the require operations that produced them.
+ :seon.ns.alias/local :symbol
+ :seon.ns.alias/target-ns :symbol
+ :seon.ns.alias/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.alias/local :seon.ns.alias/local]
+ [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]]
+
+ ; A missing target-class is SCI's exact nil mask for a removed default
+ ; import. Class objects never cross the database boundary.
+ :seon.ns.import/local :symbol
+ :seon.ns.import/target-class :symbol
+ :seon.ns.import/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.import/local :seon.ns.import/local]
+  [:seon.ns.import/target-class
+   {:optional true}
+   :seon.ns.import/target-class]]
+
+ :seon.ns.refer/local :symbol
+ :seon.ns.refer/target-ns :symbol
+ :seon.ns.refer/target-name :symbol
+ :seon.ns.refer/binding
+ [:map {:seon.db/entity true}
+  [:seon.ns.refer/local :seon.ns.refer/local]
+  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
+  [:seon.ns.refer/target-name :seon.ns.refer/target-name]]
+
+ :seon.fn/roots [:vector [:string {:min 1}]]
+ :seon.fn/index-request
+ [:map
+  [:seon.store/branch-connection
+   {:optional true}
+   :seon.store/branch-connection]
+  [:seon.db/process {:optional true} :seon.db/ref]
+  [:seon.fn/roots {:optional true} :seon.fn/roots]
+  [:seon.fn/manifest {:optional true} :map]]
+
+ ; One namespace name's current REPL definition. Presence of source means the
+ ; defining form is proven replay-safe; presence of unrestorable states why it
+ ; cannot be reconstructed. Contracted functions remain in :seon.fn only.
+ :seon.code.def/id [:string {:min 1 :seon.db/identity true}]
+ :seon.code.def/ns :seon.db/ref
+ :seon.code.def/name :symbol
+ :seon.code.def/value-edn :string
+ :seon.code.def/blob :seon.blob/digest
+ :seon.code.def/size [:int {:min 0}]
+ :seon.code.def/source [:string {:min 1}]
+ :seon.code.def/unrestorable [:string {:min 1}]
+ :seon.code.def/ordinal [:int {:min 0}]
+ :seon.code.def/def
+ [:map {:seon.db/entity true}
+  [:seon.code.def/id :seon.code.def/id]
+  [:seon.schema.admission/source :seon.schema.admission/source]
+  [:seon.code.def/ns :seon.code.def/ns]
+  [:seon.code.def/name :seon.code.def/name]
+  [:seon.code.def/value-edn {:optional true} :seon.code.def/value-edn]
+  [:seon.code.def/blob {:optional true} :seon.code.def/blob]
+  [:seon.code.def/size {:optional true} :seon.code.def/size]
+  [:seon.code.def/source {:optional true} :seon.code.def/source]
+  [:seon.code.def/unrestorable {:optional true}
+   :seon.code.def/unrestorable]
+  [:seon.code.def/ordinal :seon.code.def/ordinal]]
+}

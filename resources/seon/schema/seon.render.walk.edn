@@ -1,0 +1,66 @@
+{
+; ---------------------------------------------------------------------------
+ ; THE NEIGHBOURHOOD TRAVERSAL — `seon.render.walk`.
+ ;
+ ; Every shape here is IN-MEMORY: a walk transacts nothing, and the
+ ; rendered neighbourhood is a value the consumer assembles and drops.
+ ; The durable half of this mechanism is elsewhere and already exists —
+ ; the family default renderers are `:seon.render/ai`/`:seon.render/html`
+ ; properties on the registered ENTITY maps, which is where a family
+ ; declares everything else about itself.
+ ; ---------------------------------------------------------------------------
+
+ ; Anything `d/pull` accepts as an eid: an entity id, or a lookup ref
+ ; like `[:seon.cluster.run/id "run-7f21"]`. `:any` at a genuinely
+ ; polymorphic dependency boundary — the admissible forms are Datahike's
+ ; and restating them here would be a second contract to drift from the
+ ; database's own.
+ :seon.render.walk/lookup :any
+ :seon.render.walk/target :int
+ :seon.render.walk/back-reference? :boolean
+ :seon.render/would-fall-to-floor? :boolean
+ :seon.render.walk/changed-at [:int {:min 0}]
+
+ ; WHICH CONNECTION a neighbour was reached through. Named on the node
+ ; so a reader never has to re-query to learn why a neighbour is there,
+ ; and so a consumer can group by relationship without a second walk.
+ :seon.render.walk/attribute :qualified-keyword
+
+ :seon.render.walk/connection
+ [:map
+  [:seon.render.walk/attribute :seon.render.walk/attribute]
+  [:seon.render.walk/target {:optional true} :seon.render.walk/target]
+  [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
+  [:seon.error/value {:optional true} :seon.error/value]]
+
+ ; One typed traversal request; every renderer uses the shared SCI context.
+ :seon.render.walk/request
+ [:map
+  [:seon.db/db :seon.db/database-value]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/output [:enum :seon.render/ai :seon.render/html]]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.render/distance {:optional true} :seon.render/distance]]
+
+ ; The traversal returns only flat render-call units.
+ :seon.render.walk/path [:vector [:or :keyword :int]]
+ :seon.render.walk/found-depth [:int {:min 0}]
+ :seon.render.walk/branch :seon.render.walk/path
+ :seon.render.walk/unit
+ [:map
+  [:seon.render.walk/lookup :seon.render.walk/lookup]
+  [:seon.render/distance :seon.render/distance]
+  [:seon.render.walk/changed-at :seon.render.walk/changed-at]
+  [:seon.render.walk/path :seon.render.walk/path]
+  [:seon.render.walk/found-depth :seon.render.walk/found-depth]
+  [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute]
+  [:seon.render.walk/branch {:optional true} :seon.render.walk/branch]
+  [:seon.render/output {:optional true} :seon.render/output]
+  [:seon.error/value {:optional true} :seon.error/value]
+  [:seon.db/tx-data {:optional true} :seon.db/tx-data]]
+ :seon.render.walk/units [:vector :seon.render.walk/unit]
+}

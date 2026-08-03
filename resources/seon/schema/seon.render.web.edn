@@ -1,0 +1,160 @@
+{
+; ---------------------------------------------------------------------------
+ ; THE PAGE ON A SOCKET. Process-local shapes only: a server descriptor,
+ ; a request, a repaint. Nothing here is a database attribute, because
+ ; nothing rendered is stored (O14) and a socket is not a fact.
+ ; ---------------------------------------------------------------------------
+
+ ; `:seon.config.render/coalesce-ms` is DECLARED in the CONFIG section, with the
+ ; other dials and inside the config singleton entity. It is a
+ ; coalescing FLOOR honored at the RENDER PROC (F2 §1.2), read from the
+ ; config facts per pass — not a timer standing in for an unobservable
+ ; event: the observable event is the commit and the routing listener
+ ; already delivers it.
+
+ :seon.render.web/port [:int {:min 0 :max 65535}]
+
+ ; The fan-out the complete revisioned package maps ride: the render proc's
+ ; `::pages` out-port, multed, tapped per tab with a sliding-1.
+ :seon.render.web/pages-mult [:fn {:gen/gen seon.render.web/mult-generator} seon.render.web/mult?]
+
+ ; The watched-agent registration: a process-local atom
+ ; `{agent-id → open-tab count}`, written by the feed's
+ ; on-open/on-close, read by the render pass. Disposable by the
+ ; transport law — it names live sockets, and reconnect = repaint.
+ :seon.render.web/registration [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.render.web/latest-packages [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.render.package/revision [:int {:min 1}]
+ :seon.render.package/base-revision [:int {:min 0}]
+ :seon.render.package/basis-transaction [:int {:min 0}]
+ :seon.render.package/streaming? :boolean
+ :seon.render.package/keyframe [:map-of :seon.render/surface-id :string]
+ :seon.render.package/delta [:map-of :seon.render/surface-id :string]
+ :seon.render.package/frame [:fn {:gen/gen seon.render.web/byte-array-generator} seon.schema/byte-array?]
+ :seon.render.package/size [:int {:min 0}]
+ :seon.render/package
+ [:map
+  [:seon.render.package/revision :seon.render.package/revision]
+  [:seon.render.package/base-revision {:optional true} :seon.render.package/base-revision]
+  [:seon.render.package/basis-transaction :seon.render.package/basis-transaction]
+  [:seon.render.package/streaming? :seon.render.package/streaming?]
+  [:seon.render.package/keyframe :seon.render.package/keyframe]
+  [:seon.render.package/keyframe-bytes :seon.render.package/frame]
+  [:seon.render.package/keyframe-size :seon.render.package/size]
+  [:seon.render.package/delta :seon.render.package/delta]
+  [:seon.render.package/delta-bytes :seon.render.package/frame]
+  [:seon.render.package/delta-size :seon.render.package/size]]
+ :seon.render.web/url [:string {:min 1}]
+ :seon.render.web/root-agent-id :seon.cluster.agent/id
+
+ ; The http-kit server object. A `[:fn]` with an honest generator, the
+ ; supported idiom for a host object — the same shape `seon.store` uses
+ ; for a connection and `seon.flow` for a channel.
+ :seon.render.web/http-server [:fn {:gen/gen seon.render.web/server-generator} seon.render.web/server?]
+
+ ; The port the derivation ASKED for, present exactly when it is not the
+ ; port we got. Key presence answers "did this fall back?" so no reader
+ ; has to remember to compare two numbers.
+ :seon.render.web/wanted-port :seon.render.web/port
+
+ :seon.render.web/server
+ [:map
+  [:seon.render.web/server :seon.render.web/http-server]
+  [:seon.render.web/port :seon.render.web/port]
+  [:seon.render.web/url :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]]
+
+ ; The render proc's process-local view, constructed once by
+ ; `seon.cluster/arm-agents!`. Every opaque member references the existing
+ ; predicate schema with its real generator: channels carry wakes, pages, and
+ ; completion; the atom counts watched agents; the mult fans pages to tabs.
+ ; Loss is free by the transport law, so none of this is database data.
+ :seon.render.web/view
+ [:map
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render/context-channel :seon.flow/channel]
+  [:seon.render.web/pages-channel :seon.flow/channel]
+  [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/latest-packages :seon.render.web/latest-packages]
+  [:seon.render.web/completion :seon.flow/channel]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+  [:seon.render.web/pages-mult :seon.render.web/pages-mult]]
+
+ ; What the handler needs. The database CONNECTION rather than a
+ ; database value, because a page derives at whatever basis is current
+ ; when the request arrives and a feed derives again on every commit —
+ ; a value captured at start would freeze the page at boot.
+ ; `:seon.cluster.run/process` is THIS process's run-holder identity,
+ ; and it is REQUIRED rather than optional on purpose. It is the one
+ ; input the database cannot answer — which processes are alive — and
+ ; the problems block refuses to guess it, correctly: an absent set
+ ; makes every held run look wedged and an assumed-alive default hides
+ ; a real wedge. A service that cannot say who is alive cannot render an
+ ; honest page, so the refusal belongs at construction, not per card.
+ :seon.render.web/service
+ [:map
+  [:seon.store/connection :seon.store/connection]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.config.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+ [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+ [:seon.render.web/registration :seon.render.web/registration]
+ [:seon.render.web/latest-packages :seon.render.web/latest-packages]
+ [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render/context-channel :seon.flow/channel]
+  [:seon.render.web/fault-channel :seon.flow/channel]
+ [:seon.render.web/port {:optional true} :seon.render.web/port]]
+
+ :seon.render.web/feed-request
+ [:map
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.store/connection :seon.store/connection]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.cluster.run/process :seon.cluster.run/process]
+ [:seon.render.web/pages-mult :seon.render.web/pages-mult]
+ [:seon.render.web/registration :seon.render.web/registration]
+ [:seon.render.web/latest-packages :seon.render.web/latest-packages]
+  [:seon.render.web/render-channel :seon.flow/channel]
+  [:seon.render.web/fault-channel :seon.flow/channel]]
+
+ :seon.render.web/page-request
+ [:map
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render/page :seon.render/page]
+  [:seon.render.web/feed-url [:string {:min 1}]]]
+
+ ; The parsed body handed from the Ring dispatcher to the one inbound
+ ; boundary. Content is optional at the wire because a missing field is
+ ; a 422 refusal, not a schema/instrumentation throw. When present it may
+ ; still be blank; the message family owns that refusal.
+ :seon.render.web/inbound
+ [:map
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.cluster.message/inbound-content
+   {:optional true}
+   :seon.cluster.message/inbound-content]]
+
+ ; What ONE agent's paint needs. A map rather than five positional
+ ; arguments because the two optional members carry meaning by
+ ; PRESENCE: an agent that is not streaming has no `:seon.ai/partial`
+ ; at all, and absent is not the same as empty. The database VALUE is
+ ; here, not the connection — a paint is derived at one basis and the
+ ; whole page must be that basis.
+ :seon.render.web/paint-request
+ [:map
+  [:seon.db/db :seon.db/database-value]
+  [:seon.store/branch-connection {:optional true} :seon.store/branch-connection]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.config.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.cluster.run/live-processes :seon.cluster.run/live-processes]
+  [:seon.ai/partial {:optional true} :seon.ai/partial]]
+}

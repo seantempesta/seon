@@ -1,0 +1,172 @@
+{
+:seon.print/face
+ [:enum
+  :seon.print/nil
+  :seon.print/boolean
+  :seon.print/number
+  :seon.print/keyword
+  :seon.print/symbol
+  :seon.print/char
+  :seon.print/string
+  :seon.print/inst
+  :seon.print/uuid
+  :seon.print/vector
+  :seon.print/list
+  :seon.print/set
+  :seon.print/map
+  :seon.print/record
+  :seon.print/var
+  :seon.print/type
+  :seon.print/class
+  :seon.print/object
+  :seon.print/truncated-string
+  :seon.print/failed
+  :seon.print/throwable
+  :seon.print/elided
+  :seon.print/pruned]
+
+ ; Every semantic node is this envelope. Authored values are always children
+ ; under `value`, `items`, or `entries`; they can therefore contain every
+ ; `:seon.print/*` keyword without becoming printer instructions.
+ :seon.print/node
+ [:schema
+  {:registry
+   {:seon.print/node*
+    [:multi {:dispatch :seon.print/face}
+     [:seon.print/nil
+      [:map
+       [:seon.print/face [:= :seon.print/nil]]
+       [:seon.print/value :nil]]]
+     [:seon.print/boolean
+      [:map
+       [:seon.print/face [:= :seon.print/boolean]]
+       [:seon.print/value :boolean]]]
+     [:seon.print/number
+      [:map
+       [:seon.print/face [:= :seon.print/number]]
+       [:seon.print/value
+        [:fn {:gen/gen seon.print/number-generator}
+         seon.print/print-number?]]]]
+     [:seon.print/keyword
+      [:map
+       [:seon.print/face [:= :seon.print/keyword]]
+       [:seon.print/value :keyword]]]
+     [:seon.print/symbol
+      [:map
+       [:seon.print/face [:= :seon.print/symbol]]
+       [:seon.print/value :symbol]]]
+     [:seon.print/char
+      [:map
+       [:seon.print/face [:= :seon.print/char]]
+       [:seon.print/value
+        [:fn {:gen/gen seon.print/char-generator}
+         seon.print/print-char?]]]]
+     [:seon.print/string
+      [:map
+       [:seon.print/face [:= :seon.print/string]]
+       [:seon.print/value :string]]]
+     [:seon.print/inst
+      [:map
+       [:seon.print/face [:= :seon.print/inst]]
+       [:seon.print/value :inst]]]
+     [:seon.print/uuid
+      [:map
+       [:seon.print/face [:= :seon.print/uuid]]
+       [:seon.print/value :uuid]]]
+     [:seon.print/vector
+      [:map
+       [:seon.print/face [:= :seon.print/vector]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/list
+      [:map
+       [:seon.print/face [:= :seon.print/list]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/set
+      [:map
+       [:seon.print/face [:= :seon.print/set]]
+       [:seon.print/items [:vector [:ref :seon.print/node*]]]]]
+     [:seon.print/map
+      [:map
+       [:seon.print/face [:= :seon.print/map]]
+       [:seon.print/entries
+        [:vector
+         [:or
+          [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
+          [:map
+           [:seon.print/face [:= :seon.print/elided]]]]]]]]
+     [:seon.print/record
+      [:map
+       [:seon.print/face [:= :seon.print/record]]
+       [:seon.print/name :string]
+       [:seon.print/entries
+        [:vector
+         [:or
+          [:tuple [:ref :seon.print/node*] [:ref :seon.print/node*]]
+          [:map
+           [:seon.print/face [:= :seon.print/elided]]]]]]]]
+     [:seon.print/var
+      [:map
+       [:seon.print/face [:= :seon.print/var]]
+       [:seon.print/name :string]]]
+     [:seon.print/type
+      [:map
+       [:seon.print/face [:= :seon.print/type]]
+       [:seon.print/name :string]]]
+     [:seon.print/class
+      [:map
+       [:seon.print/face [:= :seon.print/class]]
+       [:seon.print/name :string]]]
+     [:seon.print/object
+      [:map
+       [:seon.print/face [:= :seon.print/object]]
+       [:seon.print/class :string]
+       [:seon.print/address :string]
+       [:seon.print/rep {:optional true} :string]]]
+     [:seon.print/truncated-string
+      [:map
+       [:seon.print/face [:= :seon.print/truncated-string]]
+       [:seon.print/value :string]
+       [:seon.print/length [:int {:min 0}]]]]
+     [:seon.print/failed
+      [:map
+       [:seon.print/face [:= :seon.print/failed]]
+       [:seon.print/class :string]
+       [:seon.print/message :string]]]
+     [:seon.print/throwable
+      [:map
+       [:seon.print/face [:= :seon.print/throwable]]
+       [:seon.print/value [:ref :seon.print/node*]]]]
+     [:seon.print/elided
+      [:map
+       [:seon.print/face [:= :seon.print/elided]]]]
+     [:seon.print/pruned
+      [:map
+       [:seon.print/face [:= :seon.print/pruned]]]]]}}
+  [:ref :seon.print/node*]]
+
+ :seon.print/length
+ [:int {:min 0 :seon.config/dial true :seon.print/default 32}]
+ :seon.print/level
+ [:int {:min 0 :seon.config/dial true :seon.print/default 8}]
+ :seon.print/width
+ [:int {:min 0 :seon.print/default 72}]
+ :seon.print/namespace-maps?
+ [:boolean {:seon.print/default true}]
+ :seon.print/table?
+ [:enum {:seon.print/default :derived} :derived true false]
+ :seon.print/options
+ [:map
+  [:seon.print/length {:optional true} [:maybe :seon.print/length]]
+  [:seon.print/level {:optional true} [:maybe :seon.print/level]]
+  [:seon.print/width {:optional true} :seon.print/width]
+  [:seon.print/namespace-maps? {:optional true}
+   :seon.print/namespace-maps?]
+  [:seon.print/table? {:optional true} :seon.print/table?]]
+
+ :seon.print/sink
+ [:fn {:gen/gen seon.print/sink-generator} seon.print/sink?]
+ :seon.print/result
+ [:map
+  [:seon.print/text :string]
+  [:seon.print/hiccup :seon.render/hiccup]]
+}

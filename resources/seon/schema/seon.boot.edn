@@ -1,0 +1,54 @@
+{
+:seon.boot/advertisement [:map  [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port [:int {:min 1 :max 65535}]] [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant :seon.boot/start-instant] [:seon.render.web/url {:optional true} :seon.render.web/url] [:seon.render.web/port {:optional true} :seon.render.web/port]]
+ :seon.boot/cluster-name [:string {:min 1}]
+ :seon.boot/config [:map  [:seon.boot/cluster-name :seon.boot/cluster-name] [:seon.boot/root :seon.boot/root] [:seon.boot/prepl-host :seon.boot/prepl-host] [:seon.boot/prepl-port :seon.boot/prepl-port] [:seon.boot/log-dir :seon.boot/log-dir] [:seon.boot/store-dir :seon.boot/store-dir]]
+ :seon.boot/instance [:map  [:seon.boot/config :seon.boot/config] [:seon.boot/advertisement :seon.boot/advertisement] [:seon.boot/prepl-server [:fn {:gen/gen seon.cluster/socket-server-generator} seon.cluster/socket-server?]] [:seon.boot/executors :seon.boot/executors] [:seon.store/store {:optional true} :seon.store/store] [:seon.boot/cluster-connection {:optional true} :seon.store/connection] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.boot/config-result {:optional true} :seon.reconcile/result] [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs] [:seon.boot/recovery-operations {:optional true} :seon.boot/recovery-operations] [:seon.cluster.loop/cluster {:optional true} :seon.cluster.loop/cluster] [:seon.flow/graph {:optional true} :seon.flow/graph] [:seon.flow/error-fanout {:optional true} :seon.flow/error-fanout] [:seon.error/drops {:optional true} :seon.error/drops] [:seon.render.web/view {:optional true} :seon.render.web/view] [:seon.render.web/served {:optional true} :seon.render.web/server] [:seon.cluster.agent/routing {:optional true} :seon.cluster.agent/routing] [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]]
+ ; THE ARMED LAYERS, each optional because absence marks where boot
+ ; stopped: the loop's handle, the graph it runs on, the error fan-out
+ ; that makes flow's error channel more than a 100-deep buffer nobody
+ ; reads, and the counter for faults the fan-out had to drop. They are
+ ; ARMED AND IDLE — the graph is running and the wake channel is primed,
+ ; and not one model call happens until a real trigger commits.
+ ; THE PROCESS ROOT'S TWO EXECUTORS, registered ONCE and referenced.
+ ; It was inlined in the instance map and inlined AGAIN on
+ ; `seon.cluster/root-executors`, where malli could not compile it at
+ ; all — a `:malli/schema` goes straight to malli, and a bare `[:fn
+ ; sym]` there has no resolver, so that contract had never once been
+ ; checked. Instrumentation found it the moment it collected. Register
+ ; shared shapes once and reference them; that rule exists for exactly
+ ; this.
+ :seon.boot/executors [:map  [:compute [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]] [:io [:fn {:gen/gen seon.flow/executor-generator} seon.flow/executor?]]]
+
+ :seon.boot/log-dir [:string {:min 1}]
+ :seon.boot/overrides [:map  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name] [:seon.boot/root {:optional true} :seon.boot/root] [:seon.boot/prepl-host {:optional true} :seon.boot/prepl-host] [:seon.boot/prepl-port {:optional true} :seon.boot/prepl-port] [:seon.boot/log-dir {:optional true} :seon.boot/log-dir] [:seon.boot/store-dir {:optional true} :seon.boot/store-dir]]
+ :seon.boot/pid [:int {:min 1}]
+ :seon.boot/prepl-host [:string {:min 1}]
+ :seon.boot/prepl-port [:int {:min 0 :max 65535}]
+ ; What boot recovery found and did. Counts, not status flags: absence
+ ; means the tower stopped before recovery, and zero operations means a
+ ; clean boot — which is the common case and commits nothing.
+ :seon.boot/recovered-runs [:int {:min 0}]
+ :seon.boot/recovery-operations [:int {:min 0}]
+
+ :seon.boot/root [:string {:min 1}]
+ :seon.boot/start-instant :inst
+ :seon.boot/store-dir [:string {:min 1}]
+ :seon.cluster.agent/count [:int {:min 0}]
+
+ ; THE BOOT BANNER'S data, derived from a started instance. Optional
+ ; where the tower may not have reached — a degraded instance still has
+ ; a readiness, and absence marks what never stood.
+ :seon.boot/readiness
+ [:map
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.boot/pid :seon.boot/pid]
+  [:seon.boot/prepl-port [:int {:min 1 :max 65535}]]
+  [:seon.cluster.agent/count :seon.cluster.agent/count]
+  [:seon.problems/problems :seon.problems/problems]
+  [:seon.render.web/url {:optional true} :seon.render.web/url]
+  [:seon.render.web/wanted-port {:optional true} :seon.render.web/wanted-port]
+  [:seon.boot/recovered-runs {:optional true} :seon.boot/recovered-runs]
+  [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+  [:seon.instrument/instrumented {:optional true} [:int {:min 0}]]]
+
+}

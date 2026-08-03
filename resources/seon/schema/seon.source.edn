@@ -1,0 +1,20 @@
+{
+:seon.source/branch :keyword
+ :seon.source/built-at :inst
+ :seon.source/built? :boolean
+ :seon.source/commit-id :uuid
+ :seon.source/current [:map  [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id]]
+ :seon.source/digest [:re {:seon.db/index true} "^[0-9a-f]{64}$"]
+ :seon.source/digest-request [:map  [:seon.source/roots :seon.source/roots]]
+ :seon.source/expected-commit-id :uuid
+ :seon.source/file-digests [:map-of :string :seon.source/digest]
+ :seon.source/populate :qualified-symbol
+ :seon.source/population [:map [:seon.store/branch-connection :seon.store/branch-connection] [:seon.source/digest :seon.source/digest]]
+ :seon.source/population-data :map
+ :seon.source/publish-request [:map  [:seon.store/store :seon.store/store] [:seon.source/digest :seon.source/digest] [:seon.source/populate :seon.source/populate] [:seon.source/population-data {:optional true} :seon.source/population-data]]
+ :seon.source/published [:map  [:seon.source/branch :seon.source/branch] [:seon.source/commit-id :seon.source/commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/built? :seon.source/built?]]
+ :seon.source/rows [:vector :map]
+ :seon.source/roots [:vector [:string {:min 1}]]
+ :seon.source/snapshot [:map  [:seon.source/digest :seon.source/digest] [:seon.source/file-digests :seon.source/file-digests]]
+ :seon.source/upsert-request [:map  [:seon.store/store :seon.store/store] [:seon.source/expected-commit-id :seon.source/expected-commit-id] [:seon.source/digest :seon.source/digest] [:seon.source/rows :seon.source/rows] [:seon.db/process {:optional true} :seon.db/ref]]
+}

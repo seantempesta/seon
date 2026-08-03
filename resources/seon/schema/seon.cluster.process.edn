@@ -1,0 +1,6 @@
+{
+:seon.cluster.process/identity
+ [:map
+  [:seon.boot/pid :seon.boot/pid]
+  [:seon.boot/start-instant :seon.boot/start-instant]]
+}

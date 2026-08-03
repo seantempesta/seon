@@ -1,0 +1,47 @@
+{
+; The derived prompt: a pure function of a database value, assembled
+ ; from the agent's blocks through the ONE router. The request names the
+ ; HELD RUN — never a message id: the run records
+ ; its exact :seon.cluster.run/trigger when it opens, and
+ ; seon.cluster.message/trigger reads it back, so a later queued message
+ ; can never replace the recorded cause (review finding 6, repaired).
+ :seon.cluster.prompt/request
+ [:map
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+  [:seon.config/on-core-error :seon.config/on-core-error]
+  [:seon.render/context-channel :seon.flow/channel]
+  ; HOW MANY HOPS of its own neighbourhood the agent sees (owner ruling
+  ; 2026-07-28 post-midnight). The same optional parameter the surfaces,
+  ; page and expansion requests already carry — the landed accretion
+  ; reached every render request but this one, so a prompt could not ask
+  ; a different question of the same mechanism. Absent is IMPLIED 1,
+  ; written once in `seon.render.block/distance`, so every existing
+  ; caller is unchanged.
+  [:seon.render/distance {:optional true} :seon.render/distance]
+  [:seon.cluster.run/live-processes {:optional true}
+   :seon.cluster.run/live-processes]]
+
+ :seon.cluster.prompt/text [:string {:min 1}]
+
+ ; The render proc's retained-byte response. Prompt assembly adds the
+ ; contribution record only after acquiring these exact bytes and their
+ ; database value.
+ :seon.render/acquired-context
+ [:map
+  [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+  [:seon.db/db :seon.db/database-value]]
+
+ ; The rendered context: the exact text the loop sends, the ordered
+ ; contribution records every other consumer (capture, debug, token
+ ; accounting, cache measurement) reads WITHOUT rerunning a projection,
+ ; and the exact database value it was derived at. In-memory only.
+ :seon.cluster.prompt/rendered-context
+ [:map
+  [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+  [:seon.context/contributions :seon.context/contributions]
+  [:seon.db/db :seon.db/database-value]]
+}
