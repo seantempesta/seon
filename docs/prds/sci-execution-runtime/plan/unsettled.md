@@ -95,6 +95,50 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 23 — 2026-08-03 afternoon, HANDOFF SESSION OPEN: rulings,
+reset, MCP defect found live.**
+
+OWNER RULINGS THIS SESSION: (1) the tools-spine shell environment is
+FULL INHERITANCE — the child process inherits the complete parent JVM
+environment; the PATH/HOME/LANG config dials become optional overrides;
+the spec's sanitization section and its credential-blocking falsifier
+are void (no-hobbling ruling applied) — rewrite
+`research/agent-tools-design-2026-08-03.md` §Config facts before
+`my.shell` implementation. (2) Queue items 2 and 3 run PARALLEL after
+the shared prerequisites (effect owner, then the blob binary/chunk API
+lands first in one lane; background slice 1 and my.fs/my.edit then run
+as parallel lanes with disjoint owners). (3) LLM directions approved:
+prefix-cache stabilization (cache-economics resumed with it), Kimi K3
+enablement (wire-key as a declared descriptor fact + paid calibration),
+and the model-registry-as-facts item; Anthropic wire design NOT
+commissioned now. Owner also asked after Muse: NO descriptor row exists
+in the fresh system (the META_MODEL_API_KEY exists in the environment;
+Meta's docs still do not establish protocol facts — an empirical probe
+against the Meta Model API is the available next step if wanted).
+(4) The ADDENDUM 22 owner-decision batch (three render dispositions,
+web slice timing + search provider, schema split) is to be RULED NOW —
+options being assembled from the render research.
+
+STATE CHANGES: `bin/seon reset --force` executed by owner order — store
+wiped, current-src republished from HEAD, default reforked and READY in
+1,416 ms (fresh JVM pid 31609). Temp data cleaned: all `.shadow-cljs*`
+caches and `out*` build outputs (~4.3 GB of dead CLJS-era artifacts)
+plus `tmp/test-runs/*` deleted; `pod-host/`, `src-diffusion/`,
+`evals/runs/` deliberately preserved.
+
+MCP VERIFICATION (owner-ordered, first ever live pass): all three tools
+respond — `runtime_status`, `eval_clj` jvm+door, `get_value` (validates
+its digest). ONE REAL DEFECT filed at
+`docs/seon/issues/mcp-door-eval-returns-unbounded-value.md`: the door
+envelope for `(vec (range 50000))` is 304,265 chars because
+`print-node-window` bounds only the top level (nested 8,192-element
+admitted vector + 262,144-char result-edn pass through) and the
+`seon.print` length/level dials ship no default. Blob/digest side
+works. Fix lane `mcp-value-window` running with the diagnosis.
+
+LANES RUNNING: `mcp-value-window` (new), `effect-capability` (resumed),
+`cache-economics` (resumed with the prefix-stabilization direction).
+
 **ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
 THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
 
