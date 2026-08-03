@@ -1815,6 +1815,66 @@ may reintroduce a shadow build into the dev feedback path.
   OWNER DECISION OPEN: whether slice 1 ships FORMS ONLY (smaller, strictly
   more faithful, still passes the 200k acceptance) with the value/blob
   path as a later accretion.
+  **Ruling 2026-08-03 #50 (owner, night): THE RENDER MODEL GETS A
+  SIMPLIFICATION AUDIT BEFORE ANY IMPLEMENTATION, AND THE DIRECTION
+  REVISES THE CHANGE MAP.** Owner verbatim on the goal: "Your goal is
+  to understand the simple version of this system that has the least
+  amount of rules and runs the best with the best experience for the
+  agents and the user. Find all the complicated shit and take a hard
+  look and say do we need you or should you behave like this other
+  well understood function of our system." Direction that revises
+  `render-model-2026-08-02.md`'s recommendations: (1) THERE IS NO
+  "MISSING DECLARATION" ERROR STATE — "how can you have a missing
+  render declaration? not everything has to be rendered and we have a
+  floor where the seon.value or something like that function can print
+  it if it needs to reach the ai"; undeclared reaches the floor,
+  period. (2) The HTML floor is "a html decorated version of the value
+  printer" — one printer, two decorations, not two systems. (3) OPEN
+  DESIGN QUESTION, not settled: "I don't see why we couldn't use in
+  process functions for everything — we are either returning text or
+  hiccup so it's just data being rendered. Why have them even hit the
+  main runtime as vars?" The audit must answer what in-process-function
+  producers cost against restart, caching identity, and the crash
+  model, honestly, before anyone implements either representation.
+  (4) FAILURE NOTIFICATION IS STAKEHOLDER-SHAPED: the owning agent
+  always; root "if there are a lot of errors or the agent isn't
+  responding to pings"; a namespace with no agent notifies its
+  stakeholders; "Everyone who is a stakeholder gets a message and a
+  clear explanation as to why and how they can maybe help and they can
+  message the other namespace to ask for more details or just drop it
+  if they think it's not important." (5) `slot`/`expand` are under
+  suspicion by name: "I worry it's yet another unnecessary system."
+  (6) SEQUENCING: render implementation goes LAST; overnight is a
+  research-only simplification audit; no render production code moves
+  before the owner rules on the audit. Also ruled this batch:
+  alter-meta! immutability IS restored (SCI fork change); the 4,096
+  blob threshold is DERIVED not tuned (recorded-cost comparison per the
+  resume precedent); lane cap is 3 implementation + 1 research
+  overnight; the seon.db sweep's quiet window is authorized tonight;
+  the per-cluster-history 6-part integration is authorized (history
+  policy per operator-root store accepted); the union codec decodes
+  EVERYWHERE with the blast-radius table reported for morning review;
+  subagent policy — no Fable subagents, opus and sol lanes only.
+  **Ruling 2026-08-03 #49 (owner, night): TEST RUNS NEVER ACCUMULATE
+  DATA, ALWAYS EXERCISE CURRENT CODE, AND THE SUITE'S DURATION IS A BIG
+  PROBLEM.** Owner verbatim: "dont let the db collect a bunch of test
+  data and maybe not loading the current code base. always be resetting
+  and rebuilding to make sure it's correct. Okay there's a big problem
+  then with our test suite. It shoudnt take that long." Three
+  consequences: (1) test/store hygiene is a standing invariant —
+  measured at ruling time, 34 retained interrupted-run roots totalled
+  3.9 GB under `tmp/test-runs` with no reaper, and the default root's
+  store carried 3.3 GB including dead experiment clusters; retained
+  roots get bounded reaping and dead clusters get destroyed rather than
+  kept as ambient state. (2) Correctness comes from RESETTING AND
+  REBUILDING, never from trusting a long-lived artifact: `bin/test`
+  already clones the current tree into a fresh root with an empty store
+  per run (the right construction); every other verification surface
+  must state whether it exercised freshly published source or a
+  long-lived JVM's loaded image. (3) The 28+ minute suite is ruled a
+  velocity incident with a FIX expected, not only a diagnosis — the
+  tier-0 forbidden list stands (no deleted/skipped tests, no weakened
+  assertions, no reduced generative trials).
   **Ruling 2026-08-02 #41 (owner, afternoon): SEON.DB IS THE ONE
   DATABASE NAMESPACE, AGENT-FIRST, AND EVERYTHING GOES THROUGH IT.**
   Owner verbatim: agents "are supposed to be able to use all datahike's
