@@ -3234,3 +3234,21 @@ produces both, so they cannot drift, but unifying the VALUES rewrites an
 agent-visible error kind already stored in receipts across live clusters —
 a values-drift with no validation failure, which is the accretion law's
 silent-breakage shape. It wants a ruling, not a lane's judgement.
+
+**OWNER RULING — 2026-08-03 night, THE ERROR MODEL: :seon.error/kind IS
+THE KIND ANTI-PATTERN AND CONVERTS TO ATTRIBUTE-SHAPED ERRORS.** Measured
+first: 318 src occurrences, 254 test occurrences, only FIVE dispatch
+sites, ~31 distinct kinds (lower bound). Each failure class becomes its
+own namespaced attribute set whose PRESENCE makes it what it is,
+validated by a registered schema; matching-shapes finds the class; kind
+is DELETED in the same wave. ONE MODEL for in-flight error values and
+committed fault facts (historical facts stay as history). Function
+output specs MAY declare error branches ([:or success err...]) — the
+install gate teaches (advisory, never blocks) when an observed class is
+undeclared; "what errors can f return" and its reverse become graph
+queries. Execution: design-doc-first — the error-catalog research
+(dispatched, opus) produces the exact census and per-class shapes for
+owner review, then ONE cut-first wave executes via reviewed per-class
+seon.edit transform templates (structural, never textual); hands touch
+only the 5 dispatch sites and irregular emissions. This dissolves the
+kernel-merge's eval-vs-kernel kind-unification question entirely.
