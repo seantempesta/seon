@@ -1300,3 +1300,12 @@ Git. Details live in `docs/seon/reference/llm-adapters.md`.
   dependency source map; `src-old/**` appears only as explicitly requested
   quarry;
 - `AGENT.md` — thin delegated-lane compatibility adapter.
+
+## Lane-spec wording (owner-directed 2026-08-03)
+
+Write every lane/agent prompt in neutral software-engineering language:
+"verify", "falsify", "probe", "independent verification" — never
+"attack", "kill", "adversary", or security-flavored framing. Provider
+safety filters reject the latter (a verification lane was refused
+launch for exactly this on 2026-08-03), and neutral wording is the
+accurate description anyway: this is defect-finding, not offense.
