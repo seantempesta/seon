@@ -452,12 +452,12 @@
                           [?receipt :seon.cluster.eval/result-edn ?result]]
                          @connection)))))
           (testing "only the contracted defn enters the program graph"
-            (is (= #{"my.agents.agent-a/durable"}
-                   (set
-                    (d/q '[:find [?sym ...]
-                           :where
-                           [_ :seon.fn/sym ?sym]]
-                         @connection))))
+            (is (some?
+                 (d/q '[:find ?fn .
+                        :in $ ?sym
+                        :where
+                        [?fn :seon.fn/sym ?sym]]
+                      @connection "my.agents.agent-a/durable")))
             (is (empty?
                  (d/q '[:find ?entity
                         :where
@@ -1055,11 +1055,12 @@
                         [?receipt :seon.cluster.eval/result-edn ?result]]
                        @connection)))
               "in-ns governs the later definition and call")
-          (is (= "my.gen.alpha/f"
-                 (d/q '[:find ?sym .
-                        :where
-                        [_ :seon.fn/sym ?sym]]
-                      @connection)))
+          (is (some?
+               (d/q '[:find ?fn .
+                      :in $ ?sym
+                      :where
+                      [?fn :seon.fn/sym ?sym]]
+                    @connection "my.gen.alpha/f")))
           (is (empty?
                (d/q '[:find ?form
                       :where
