@@ -15,6 +15,7 @@
   (is (schema/valid-candidate-value?
        :seon.fn/fn
        {:seon.fn/sym "sample/f"
+        :seon.schema.admission/source :core
         :seon.fn/ns [:seon.ns/name 'sample]
         :seon.fn/source "(defn ^{:seon.workload :io} f [x] x)"
         :seon.fn/arglists "([x])"
@@ -23,6 +24,7 @@
   (is (schema/valid-candidate-value?
        :seon.ns/ns
        {:seon.ns/name 'sample
+        :seon.schema.admission/source :core
         :seon.ns/source "(ns sample)"
         :seon.ns/requires #{}
         :seon.ns/aliases #{}
@@ -30,7 +32,8 @@
         :seon.ns/refers #{}}))
   (is (schema/valid-candidate-value?
        :seon.ns/ns
-       {:seon.ns/name 'my.agents.source-less})
+       {:seon.ns/name 'my.agents.source-less
+        :seon.schema.admission/source :agent})
       "an agent namespace is valid without invented source bytes"))
 
 (deftest catalog-render-declarations-resolve
