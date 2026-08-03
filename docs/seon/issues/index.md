@@ -57,6 +57,7 @@ See `README.md` for the convention.
 | [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | render oversight event wave |
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
 | [Say what a predicate schema expected instead of "unknown error"](predicate-schema-violations-humanize-to-unknown-error.md) | friction | agent-diagnostics repair |
+| [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
 | [Keep session-image refusal evidence as facts, not derived prose](session-image-stores-derived-unrestorable-prose.md) | friction | session-image evidence wave |
