@@ -126,3 +126,35 @@ backstop, 2,000,000 response bytes from the quarry's web heap ceiling, five
 redirect hops, 20 search rows, and 8,192 inline bytes from the current
 filesystem/blob crossover evidence. Each is one config fact and no fallback
 literal lives in the handler.
+
+## Verification boundary
+
+The implementation namespaces load successfully with jsoup `1.22.2` on the
+classpath. The focused test run reached the two public-entry metadata/schema
+falsifiers (13 passing assertions), then failed during every file-database
+fixture before a web handler ran. The concurrent program-indexing change
+attempted to transact `[:seon.cluster.agent/id
+:seon.config/agent-overlay]` as one value of `:seon.fn/keywords`; the installed
+attribute accepts a keyword, not a vector. The exact refusing boundary is
+`seon.fn/index!`'s declarations phase, called by
+`seon.test-support/populate-database!`.
+
+Per the lane stop rule, handler falsifiers and the through-`effect/request!`
+receipt proof remain pending behind that external indexing boundary. The
+direct transport comparison and paid Serper probe above are complete; no
+second paid query was attempted.
+
+## Tool/render feedback
+
+- Hato's Ring-shaped request/response maps add surface but no measured web
+  behavior over the JDK client for this capability; keeping it reference-only
+  makes the protected handler easier to inspect.
+- `seon.blob/put-binary!` left its explicit staging file behind when a bounded
+  producer failed after staging began. The web spill falsifier exposed that
+  cleanup seam; the implementation deletes only that exact staging path on
+  exceptional exit.
+- The focused runner emitted roughly 23 MB of repeated transaction stack data
+  for four fixtures sharing the same indexing refusal. That output is noisy
+  enough to obscure the first causal value; recurring test reporting should
+  preserve the complete artifact while presenting one grouped cause in the
+  human-facing summary.

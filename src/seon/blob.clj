@@ -202,6 +202,11 @@
                      (+ next-total-size remaining-size) file digester))
                   (catch Throwable error
                     (.close stage-output)
+                    ;; Publication may fail after the staging file exists
+                    ;; (for example, a bounded producer refuses its next
+                    ;; chunk). Delete only that explicit path; `Files/delete`
+                    ;; removes a swapped link entry rather than following it.
+                    (Files/deleteIfExists (.toPath ^File file))
                     (throw error)))))))))))
 
 (defn read-chunk
