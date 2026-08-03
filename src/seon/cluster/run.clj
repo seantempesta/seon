@@ -54,7 +54,7 @@
   known unowned issue), and a receipt started before its eval settles
   (recovery asserts its `interrupted-at`)."
   (:require [clojure.edn :as edn]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -175,7 +175,7 @@
   The mid-transaction pull IS the eligibility read: a missing lookup ref
   pulls to nil rather than throwing, so absence is an ordinary value."
   [db id]
-  (d/pull db '[*] [::id id]))
+  (db/pull db '[*] [::id id]))
 
 (defn- held-run
   "The run's current facts when `request` names its exact custody.
@@ -206,11 +206,11 @@
   stamp share one transaction, so a settled receipt can never be
   stamped from a stale basis (custody revision, Revision 4)."
   [db run-eid]
-  (->> (d/q '[:find [?receipt ...]
+  (->> (db/q '[:find [?receipt ...]
               :in $ ?run
               :where [?receipt :seon.cluster.eval/run ?run]]
             db run-eid)
-       (map #(d/pull db '[*] %))
+       (map #(db/pull db '[*] %))
        (remove terminal?)))
 
 (defn- interrupt-stamps
@@ -244,14 +244,14 @@
                   [:vector :some]]}
   [db request]
   (let [{::keys [id agent trigger opened-at]} request
-        agent-eid (:db/id (d/pull db [:db/id] agent))
+        agent-eid (:db/id (db/pull db [:db/id] agent))
         run-tempid (str "seon.cluster.run/" id)]
     (cond
       (nil? agent-eid) (refuse! `open-call ::no-such-agent request)
       (some? (current-run db id)) (refuse! `open-call ::run-exists request)
 
       (some? (:seon.cluster.agent/run
-              (d/pull db [:seon.cluster.agent/run] agent-eid)))
+              (db/pull db [:seon.cluster.agent/run] agent-eid)))
       (refuse! `open-call ::agent-already-running request)
 
       ; the pointer and the run's own ::agent are the SAME resolved
@@ -362,7 +362,7 @@
         ; close retracts — the request carries no agent id to disagree
         agent-eid (:db/id (::agent run))
         pointer (:seon.cluster.agent/run
-                 (d/pull db [:seon.cluster.agent/run] agent-eid))]
+                 (db/pull db [:seon.cluster.agent/run] agent-eid))]
     (when-not (= (:db/id run) (:db/id pointer))
       (refuse! `close-call ::agent-pointer-broken request))
     (conj (retract-custody run)
@@ -399,7 +399,7 @@
         run (held-run db `plan-call request)
         run-eid (:db/id run)
         agent-namespace
-        (d/q '[:find ?namespace-name .
+        (db/q '[:find ?namespace-name .
                :in $ ?agent
                :where
                [?agent :seon.cluster.agent/namespace ?namespace]
@@ -466,7 +466,7 @@
   change is unrepresentable, strictly stronger than the epoch this
   replaced (custody revision 2026-07-28)."
   [db id ordinal]
-  (d/pull db '[*] [:seon.cluster.eval/id (pr-str [id ordinal])]))
+  (db/pull db '[*] [:seon.cluster.eval/id (pr-str [id ordinal])]))
 
 (defn- receipt-run
   "The open run of a receipt request, or refuse."
@@ -595,7 +595,7 @@
     (into []
           (comp
            (filter #(contains? (:schema db) %))
-           (filter #(seq (d/datoms db :aevt %))))
+           (filter #(seq (db/datoms db :aevt %))))
           (sort (affected-schema-attributes projection affected)))))
 
 (defn- assert-schema-data-unused!
@@ -673,7 +673,7 @@
           (into []
                 (keep (fn [[identity-attribute identity-value]]
                         (when-let [declaration
-                                   (d/pull db [:db/id]
+                                   (db/pull db [:db/id]
                                            [identity-attribute identity-value])]
                           declaration)))
                 deleted-identities)]
@@ -689,9 +689,9 @@
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
-          existing (when identity (d/pull db '[*] [identity identity-value]))]
+          existing (when identity (db/pull db '[*] [identity identity-value]))]
       (when (and namespace-ref
-                 (not (:db/id (d/pull db [:db/id] namespace-ref))))
+                 (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
       (let [current-projection
             (when (#{:seon.fn/sym :seon.schema/key} identity)
@@ -851,10 +851,10 @@
        :as request}]
   (let [receipt (current-receipt db id ordinal)
         run-eid (get-in receipt [:seon.cluster.eval/run :db/id])
-        run (when run-eid (d/pull db '[*] run-eid))
+        run (when run-eid (db/pull db '[*] run-eid))
         agent-eid (get-in run [::agent :db/id])
         pointer-eid (get-in (when agent-eid
-                              (d/pull db [:seon.cluster.agent/run] agent-eid))
+                              (db/pull db [:seon.cluster.agent/run] agent-eid))
                             [:seon.cluster.agent/run :db/id])]
     (if (or (nil? receipt) (terminal? receipt))
       []
@@ -928,7 +928,7 @@
       (let [agent-eid (:db/id (::agent run))
             pointer (when agent-eid
                       (:seon.cluster.agent/run
-                       (d/pull db [:seon.cluster.agent/run] agent-eid)))]
+                       (db/pull db [:seon.cluster.agent/run] agent-eid)))]
         (cond-> (into (interrupt-stamps db (:db/id run) now)
                       (when (some? holder)
                         (retract-custody run)))
@@ -965,14 +965,14 @@
 
 (defn- run-forms
   [db run-eid]
-  (d/q '[:find [(pull ?form [*]) ...]
+  (db/q '[:find [(pull ?form [*]) ...]
          :in $ ?run
          :where [?form :seon.cluster.run.form/run ?run]]
        db run-eid))
 
 (defn- run-receipts
   [db run-eid]
-  (d/q '[:find [(pull ?receipt [*]) ...]
+  (db/q '[:find [(pull ?receipt [*]) ...]
          :in $ ?run
          :where [?receipt :seon.cluster.eval/run ?run]]
        db run-eid))

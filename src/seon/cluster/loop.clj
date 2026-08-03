@@ -37,7 +37,6 @@
   (:require [clojure.core.async :as async]
             [sci.core :as sci]
             [clojure.core.async.flow :as flow]
-            [datahike.api :as d]
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.context :as context]
@@ -133,7 +132,7 @@
                           :seon.fn/private? private?}
                    (seq arglists)
                    (assoc :seon.fn/arglists arglists)))
-               (d/q '[:find ?sym ?private ?arglists
+               (db/q '[:find ?sym ?private ?arglists
                       :where
                       [?function :seon.fn/sym ?sym]
                       [(get-else $ ?function :seon.fn/private? false)
@@ -342,7 +341,7 @@
   [db roots unproven-called-vars]
   (let [program-row
         (fn [function-symbol]
-          (d/pull db
+          (db/pull db
                   [:seon.fn/sym :seon.fn/workload
                    {:seon.fn/calls [:seon.fn/sym]}]
                   [:seon.fn/sym (str function-symbol)]))]
@@ -366,7 +365,7 @@
 (defn- exact-session-row-tx
   [db row]
   (let [row (program/canonical-row row)
-        existing (d/pull db '[*]
+        existing (db/pull db '[*]
                          [:seon.code.def/id (:seon.code.def/id row)])
         changed (when existing (program/changed-attributes existing row))]
     (concat
@@ -461,7 +460,7 @@
         (get-in evaluation [:seon.sci.eval/program-row :seon.fn/sym])
         contracted-entry
         (when contracted-id
-          (d/pull db [:db/id]
+          (db/pull db [:db/id]
                   [:seon.code.def/id contracted-id]))]
     (into
      (if contracted-entry
@@ -472,7 +471,7 @@
 
 (defn- result-blob-threshold
   [db]
-  (d/q '[:find ?threshold .
+  (db/q '[:find ?threshold .
          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
        db))
 
@@ -500,7 +499,7 @@
 
 (defn- result-window-page-size
   [db]
-  (d/q '[:find ?size .
+  (db/q '[:find ?size .
          :where [_ :seon.render.value/max-collection ?size]]
        db))
 
@@ -853,7 +852,7 @@
   sites that would each have to remember."
   [db run-id]
   (long
-   (count (d/q '[:find ?attempt
+   (count (db/q '[:find ?attempt
                  :in $ ?run-id
                  :where
                  [?run :seon.cluster.run/id ?run-id]
@@ -1006,14 +1005,14 @@
   "The source and parse-time namespace of one form of a run, by ordinal."
   [db run-id ordinal]
   (when-let [form-eid
-             (d/q '[:find ?form .
+             (db/q '[:find ?form .
                     :in $ ?run-id ?ordinal
                     :where
                     [?run :seon.cluster.run/id ?run-id]
                     [?form :seon.cluster.run.form/run ?run]
                     [?form :seon.cluster.run.form/ordinal ?ordinal]]
                   db run-id ordinal)]
-    (let [form (d/pull db
+    (let [form (db/pull db
                        [:seon.cluster.run.form/source
                         {:seon.cluster.run.form/ns [:seon.ns/name]}]
                        form-eid)]
@@ -1038,7 +1037,7 @@
             (second (:seon.cluster.run.form/ns form))
             fallback-namespace)
         namespace-row
-        (d/pull db
+        (db/pull db
                 '[* {:seon.ns/requires [:seon.ns/name]}
                     {:seon.ns/aliases [*]}
                     {:seon.ns/imports [*]}
@@ -1611,7 +1610,7 @@
     ;; takeover `settle-interruption!` already uses, and it is what
     ;; makes "only the holder may close a run" a rule the loop can
     ;; keep rather than one it repeatedly breaks.
-    (let [held (d/pull @connection [:seon.cluster.run/process]
+    (let [held (db/pull @connection [:seon.cluster.run/process]
                        [:seon.cluster.run/id run-id])
           claimed (when-not (= process (:seon.cluster.run/process held))
                     (db/transact!

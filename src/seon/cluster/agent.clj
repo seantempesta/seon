@@ -68,6 +68,7 @@
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.work :as work]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.flow :as seon.flow]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date]))
@@ -104,7 +105,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
                   [:maybe :seon.cluster.agent/id]]}
   [db namespace-name]
-  (d/q '[:find ?agent-id .
+  (db/q '[:find ?agent-id .
          :in $ ?namespace-name
          :where
          [?namespace :seon.ns/name ?namespace-name]
@@ -150,7 +151,7 @@
   `::flow/state`, which is what retired the serial-dependent global
   query F2 §3.3 deleted."
   [db agent-id process]
-  (d/q '[:find ?id .
+  (db/q '[:find ?id .
          :in $ ?agent-id ?process
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -366,7 +367,7 @@
     routing :seon.cluster.agent/routing}]
   (or (armed routing agent-id)
       (let [connection (:seon.store/branch-connection handle)
-            eid (d/q '[:find ?agent .
+            eid (db/q '[:find ?agent .
                        :in $ ?id
                        :where [?agent :seon.cluster.agent/id ?id]]
                      @connection agent-id)
@@ -430,7 +431,7 @@
 
 (defn- provider-call-capture-basis
   [db agent-id]
-  (d/q '[:find ?basis-t .
+  (db/q '[:find ?basis-t .
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -460,7 +461,7 @@
                 (let [db @connection]
                   (if-let [basis-t
                            (provider-call-capture-basis db agent-id)]
-                    (d/as-of db basis-t)
+                    (db/as-of db basis-t)
                     (let [[value selected]
                           (async/alts!! [completion database-event]
                                         :priority true)]
@@ -579,7 +580,7 @@
    (let [handle (:seon.cluster.loop/cluster state)
          routing (:seon.cluster.agent/routing state)
          db @(:seon.store/branch-connection handle)
-         agents (d/q '[:find [?id ...]
+         agents (db/q '[:find [?id ...]
                        :where [_ :seon.cluster.agent/id ?id]]
                      db)
          unarmed (remove #(contains? (::armed @routing) %) agents)]

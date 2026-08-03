@@ -53,7 +53,7 @@
   - kill during recovery itself: `recover-tx` is idempotent and every
     terminal receipt is byte-untouched, so the derivation is unchanged."
   (:require [clojure.edn :as edn]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.schema.edn :as schema.edn]))
@@ -73,7 +73,7 @@
   The agent's pointer IS the open-run fact: N2 retracts it at close, so
   there is no `status` to read and no closed run to filter out here."
   [db agent-id]
-  (let [run (d/q '[:find (pull ?run [*]) .
+  (let [run (db/q '[:find (pull ?run [*]) .
                    :in $ ?agent-id
                    :where
                    [?agent :seon.cluster.agent/id ?agent-id]
@@ -94,7 +94,7 @@
   receipts with `interrupted-at`, so an interrupted form is DONE being
   attempted and the fold moves past it. Nothing re-executes."
   [db run-id]
-  (let [ordinals (d/q '[:find [?ordinal ...]
+  (let [ordinals (db/q '[:find [?ordinal ...]
                         :in $ ?run-id
                         :where
                         [?run :seon.cluster.run/id ?run-id]
@@ -102,7 +102,7 @@
                         [?form :seon.cluster.run.form/ordinal ?ordinal]]
                       db run-id)
         settled (into #{}
-                      (d/q '[:find [?ordinal ...]
+                      (db/q '[:find [?ordinal ...]
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
@@ -189,7 +189,7 @@
   [db run-id ordinal interrupted?]
   (boolean
    (or interrupted?
-       (d/q '[:find ?receipt .
+       (db/q '[:find ?receipt .
               :in $ ?run-id ?ordinal
               :where
               [?run :seon.cluster.run/id ?run-id]
@@ -207,7 +207,7 @@
   (let [form-eid (:db/id form)
         namespace-owner
         (when (contains? (:schema db) :seon.cluster.run.form/ns)
-          (d/q '[:find ?owner-id .
+          (db/q '[:find ?owner-id .
                  :in $ ?form
                  :where
                  [?form :seon.cluster.run.form/ns ?namespace]
@@ -215,7 +215,7 @@
                  [?owner :seon.cluster.agent/id ?owner-id]]
                db form-eid))]
     (or namespace-owner
-        (d/q '[:find ?author-id .
+        (db/q '[:find ?author-id .
                :in $ ?form
                :where
                [?form :seon.cluster.run.form/run ?run]
@@ -233,7 +233,7 @@
 
 (defn- form-receipt
   [db form]
-  (d/q '[:find (pull ?receipt [*]) .
+  (db/q '[:find (pull ?receipt [*]) .
          :in $ ?run ?ordinal
          :where
          [?receipt :seon.cluster.eval/run ?run]
@@ -244,7 +244,7 @@
 
 (defn- form-run-id
   [db form]
-  (d/q '[:find ?run-id .
+  (db/q '[:find ?run-id .
          :in $ ?form
          :where
          [?form :seon.cluster.run.form/run ?run]
@@ -256,21 +256,21 @@
   (let [form-eid (:db/id form)
         receipt-eid (:db/id receipt)
         author-eid
-        (d/q '[:find ?author .
+        (db/q '[:find ?author .
                :in $ ?form
                :where
                [?form :seon.cluster.run.form/run ?run]
                [?run :seon.cluster.run/agent ?author]]
              db form-eid)
         owner-eid
-        (d/q '[:find ?owner .
+        (db/q '[:find ?owner .
                :in $ ?owner-id
                :where [?owner :seon.cluster.agent/id ?owner-id]]
              db owner-id)
         assignment?
         (boolean
          (and receipt-eid owner-eid author-eid
-              (d/q '[:find ?assignment .
+              (db/q '[:find ?assignment .
                      :in $ ?problem ?author ?owner
                      :where
                      [?assignment :seon.cluster.message/about ?problem]
@@ -280,7 +280,7 @@
         declination?
         (boolean
          (and assignment?
-              (d/q '[:find ?declination .
+              (db/q '[:find ?declination .
                      :in $ ?problem ?author ?owner
                      :where
                      [?declination :seon.cluster.message/about ?problem]
@@ -297,7 +297,7 @@
                        :seon.cluster.run.form/id]
                   :seon.cluster.work/form-settlement]}
   [db form-id]
-  (let [form (d/pull db '[*] [:seon.cluster.run.form/id form-id])
+  (let [form (db/pull db '[*] [:seon.cluster.run.form/id form-id])
         receipt (form-receipt db form)
         owner-id (form-owner db form)
         {:seon.cluster.work/keys [assignment? declination?]}
@@ -338,7 +338,7 @@
                   :seon.cluster.work/plan-settlement]}
   [db run-id]
   (let [form-ids
-        (d/q '[:find ?form-id ?ordinal
+        (db/q '[:find ?form-id ?ordinal
                :in $ ?run-id
                :where
                [?run :seon.cluster.run/id ?run-id]
@@ -372,7 +372,7 @@
   error loop must not have its cap reset by its own failure
   notifications)."
   [db message-id]
-  (nil? (d/q '[:find ?message .
+  (nil? (db/q '[:find ?message .
                :in $ ?id
                :where
                [?message :seon.cluster.message/id ?id]
@@ -400,7 +400,7 @@
                   :seon.cluster.work/episode-runs]}
   [db agent-id]
   (let [first-outside-txs
-        (d/q '[:find ?message (min ?tx)
+        (db/q '[:find ?message (min ?tx)
                :in $ ?agent-id
                :where
                [?agent :seon.cluster.agent/id ?agent-id]
@@ -411,7 +411,7 @@
                (not [?message :seon.cluster.message/about _])]
              db agent-id)
         outside-tx (reduce max 0 (map second first-outside-txs))]
-    (or (d/q '[:find (count ?run) .
+    (or (db/q '[:find (count ?run) .
                :in $ ?agent-id ?outside-tx
                :where
                [?agent :seon.cluster.agent/id ?agent-id]
@@ -427,7 +427,7 @@
   at the very next pass. Nil when absent, and absence is FAIL-CLOSED
   for agent-sent triggers (the `max-chain` precedent)."
   [db]
-  (d/q '[:find ?value .
+  (db/q '[:find ?value .
          :where [_ :seon.config.run/max-episode-runs ?value]]
        db))
 
@@ -443,7 +443,7 @@
 (defn- latest-closed-run
   "The latest run this agent closed, ordered by its closing transaction."
   [db agent-id]
-  (->> (d/q '[:find ?run ?run-id ?opened-tx ?closed-tx
+  (->> (db/q '[:find ?run ?run-id ?opened-tx ?closed-tx
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
@@ -467,14 +467,14 @@
     (when-let [[run _run-id _opened-tx _closed-tx]
                (latest-closed-run db agent-id)]
       (when (some lint-refusal-receipt?
-                  (d/q '[:find [(pull ?receipt
+                  (db/q '[:find [(pull ?receipt
                                   [:seon.cluster.eval/result-edn]) ...]
                          :in $ ?run
                          :where
                          [?receipt :seon.cluster.eval/run ?run]
                          [?receipt :seon.cluster.eval/result-edn _]]
                        db run))
-        (d/q '[:find ?trigger-id .
+        (db/q '[:find ?trigger-id .
                :in $ ?run
                :where
                [?run :seon.cluster.run/trigger ?trigger]
@@ -623,7 +623,7 @@
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (->> (d/q '[:find ?id ?at
+  (->> (db/q '[:find ?id ?at
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]

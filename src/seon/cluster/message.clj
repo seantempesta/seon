@@ -53,7 +53,7 @@
   declination carrying `about` instead derives its identity from the
   resolved (about entity, recipient), so concurrent terminal
   transactions upsert one answer at Datahike's serial commit point."
-  (:require [datahike.api :as d]
+  (:require [seon.db :as db]
             [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
 
@@ -75,7 +75,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.run/id]
                   [:maybe :seon.cluster.message/id]]}
   [db run-id]
-  (d/q '[:find ?message-id .
+  (db/q '[:find ?message-id .
          :in $ ?run-id
          :where
          [?run :seon.cluster.run/id ?run-id]
@@ -86,7 +86,7 @@
 (defn- caused-by
   "The message whose answering produced `message-id`, or nil."
   [db message-id]
-  (d/q '[:find ?parent-id .
+  (db/q '[:find ?parent-id .
          :in $ ?message-id
          :where
          [?message :seon.cluster.message/id ?message-id]
@@ -124,7 +124,7 @@
                        :seon.cluster.message/id]
                   [:maybe :seon.cluster.agent/id]]}
   [db message-id]
-  (d/q '[:find ?agent-id .
+  (db/q '[:find ?agent-id .
          :in $ ?message-id
          :where
          [?message :seon.cluster.message/id ?message-id]
@@ -187,7 +187,7 @@
 
 (defn- agent-exists?
   [db agent-id]
-  (some? (d/q '[:find ?agent .
+  (some? (db/q '[:find ?agent .
                 :in $ ?id
                 :where [?agent :seon.cluster.agent/id ?id]]
               db agent-id)))
@@ -215,7 +215,7 @@
       (when (= :db.unique/identity
                (get-in db [:schema attribute :db/unique]))
         entity)))
-   (d/q '[:find ?entity ?attribute
+   (db/q '[:find ?entity ?attribute
           :in $ ?identity
           :where [?entity ?attribute ?identity]]
         db identity)))
@@ -449,7 +449,7 @@
         content (get unit ::content)
         agent-id (fn [ref]
                    (when (and db (:db/id ref))
-                     (d/q '[:find ?id .
+                     (db/q '[:find ?id .
                             :in $ ?agent
                             :where [?agent :seon.cluster.agent/id ?id]]
                           db (:db/id ref))))]
