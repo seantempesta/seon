@@ -451,7 +451,11 @@
               (let [initial (read-complete-paint! stream connection)
                     page (:seon.render.package/keyframe
                           (get @(:latest-packages context) agent-id))]
-                (is (= 15 (count page))
+                ; The census pin: walk surfaces plus transcript and stream
+                ; chrome, no separate transcript surface. Legitimate schema
+                ; accretion moves it — 15 -> 17 on 2026-08-03 when effect
+                ; receipts and fs config declarations entered the walk.
+                (is (= 17 (count page))
                     "transcript content is inside the agent owner's ordinary unit")
                 (is (boolean
                      (some #(str/includes? % "id=\"surface-fleet-oversight\"")
