@@ -505,3 +505,19 @@ as suspect until reproduced.
   the live default boot failure was a stale-branch data gap (rows
   predating the provenance migration), fixed by reset/republish per
   ruling #49; MCP is verified end-to-end from fresh client bindings.
+
+## Owner direction — 2026-08-03 morning: the accretion-testing pipeline
+
+Ruled direction, verbatim intent: functions WITHOUT schemas are
+REJECTED at definition; functions without declared effects get
+AUTOMATIC GENERATIVE TESTS (never auto-generate against effectful
+functions — and evaluate whether effect-reach is DERIVABLE via SCI
+analysis/call-graph rather than only declared); existing tests run
+too, plus downstream consumers' tests via the call edge; missing tests
+produce ENCOURAGEMENT in the agent's returned context. The candidate
+context tests the new function AND its new tests together as one unit
+before install (owner's own derivation). Design the RETURN VALUES of
+every step deliberately — the right context at the right time; the
+owner is moving from monolithic instruction walls to a minimalist
+bootstrap-forms model where the bootstrap series educates and pulls
+live context, with caching keeping LLM evals cheap.
