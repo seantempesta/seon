@@ -1,7 +1,7 @@
 ---
 type: issue
-status: active
-severity: high
+status: resolved
+severity: blocker
 tags: [issue, runtime, lifecycle, flow]
 ---
 
@@ -46,3 +46,20 @@ idempotent against an already-completed lower layer.
 - The advertisement and registry entry disappear only after all remaining
   layers release.
 - No teardown completion is inferred from a clock or swallowed exception.
+
+## Resolution — 2026-08-03
+
+Commit `387c3d05a` makes armer-channel closure the observable completion fact
+for that teardown step. `disarm-agents!` now closes the channel only after the
+armer publishes `::quiesced`; a later stop skips that already-completed step
+when the exact restored channel is closed, then continues the remaining
+teardown. A failed put or missing acknowledgement remains a loud failure.
+
+The named `a-failed-stop-remains-addressable-and-retryable` proof passed 1 test
+/ 11 assertions. It observes that the retry reaches the root-store release
+that originally failed, removes the final canonical process-root holder,
+removes the advertisement and registry entry, and admits a same-name
+replacement. The focused `seon.cluster.boot-test`,
+`seon.cluster.store-test`, and `seon.cluster.armed-test` checkpoint passed 51
+tests / 251 assertions with zero failures or errors, retaining the existing
+degraded-stop, branch, flock, and armed-flow lifecycle proofs.

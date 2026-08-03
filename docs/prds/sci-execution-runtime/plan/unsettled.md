@@ -16,6 +16,17 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, CLUSTER STOP RETRY IS RESUMABLE.** Commit
+`387c3d05a` makes each stop derive the remaining teardown from observable
+state: armer-channel closure is published only after acknowledged quiescence,
+and a retry skips that completed step while continuing every later release.
+The injected mid-teardown release failure proof passed 1 test / 11 assertions,
+including the retried release leaf, final process-root holder removal,
+advertisement and registry removal, and same-name branch replacement. The
+focused boot/store/armed lifecycle checkpoint passed 51 tests / 251 assertions
+with zero failures or errors. The resolved issue is archived at
+`docs/seon/issues/archive/cluster-stop-retry-repeats-disarm.md`.
+
 **ADDENDUM — 2026-08-03, DATAHIKE RETURN-MAP ORDERING REPAIRED.** Upstream
 commit `ebbd623a` (PR #795) placed return-map conversion before `:order-by`,
 causing valid `:keys` + `:order-by` queries to hand maps to a positional
