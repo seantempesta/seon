@@ -2088,7 +2088,16 @@ may reintroduce a shadow build into the dev feedback path.
   `research/store-amplification-anatomy-2026-08-02.md`. CONSEQUENCE TO
   REVISIT: the 4,096-character blob threshold was lowered on the
   disproven reading, so its value is now unjustified rather than wrong
-  — it needs deciding against the real model. Only then the known
+  — it needs deciding against the real model.
+  **SETTLED 2026-08-03:** a one-commit production-splitter file-store
+  curve falsified 4,096 (21,184 B inline versus 9,925 B blob) and placed
+  the physical crossover between 343 characters (6,157 B inline versus
+  6,159 B blob) and 344 (6,163 B versus 6,160 B). Because the splitter
+  uses `>`, the derived shipped default is 343; the operator override
+  remains for the measured blob-latency trade-off. The cheap in-memory
+  regression and full curve are in
+  `research/blob-threshold-derivation-2026-08-03.md`.
+  Only then the known
   wins, all filed and none adopted: the store is created WITHOUT any of
   the three write-amplification options our Datahike fork already ships
   and without the writer's batching dial (one small commit costs ~123
