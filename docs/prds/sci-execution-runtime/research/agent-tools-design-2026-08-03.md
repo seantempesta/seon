@@ -88,7 +88,7 @@ also fits Seon's data and error boundaries.
 | Package | Maturity and API fit | Decision and exact source requirement |
 |---|---|---|
 | rewrite-clj | The project dates to 2013, describes v1 as widely adopted, preserves whitespace/comments, and exposes nodes, parsers, and zippers (`reference-code/rewrite-clj/README.adoc:25-31`; `doc/01-user-guide.adoc:33-67,104-125,147-180`). It is used by cljfmt, clojure-lsp, refactor-nrepl, Babashka, and Clojure MCP. Pure parse/transform failures wrap naturally as flat errors. | **Adopt for `seon.edit` pure form transforms.** The checkout is `60782e501aaf312cb90c9ff0bee05d5da5125563` (`v1.2.51-5-g60782e5`); upstream `v1.2.55` peels to `99bdfb2b3f8b775b4936521c87d11341cca755d1`. Advance the existing `reference-code/rewrite-clj` submodule to that tag only after its tests and Seon's lossless falsifiers pass. Move it from test-only to the production dependency set; do not copy source. |
-| babashka.fs | A focused JDK NIO wrapper with familiar `path`, `glob`, stat, link, and traversal functions. The recent changelog still exercises symlink behavior and glob semantics; its public API throws, follows links in some operations, and does not enforce Seon's root policy. | **Adopt as a protected JVM convenience, not as policy.** Vendor `reference-code/babashka-fs` at `v0.5.33`, commit `3fdcbcb8de6af0c880a0082700a295c55ffd2ecd`. Seon's handler owns canonical roots, no-follow traversal, byte limits, conditional writes, and flat errors. Do not bind babashka.fs directly into SCI. |
+| babashka.fs | A focused JDK NIO wrapper with familiar `path`, `glob`, stat, link, and traversal functions. The recent changelog still exercises symlink behavior and glob semantics; its public API throws, follows links in some operations, and does not enforce Seon's root policy. | **Adopt as a protected JVM convenience, not as policy.** Use the nested checkout `reference-code/babashka/fs` at `v0.5.33`, commit `3fdcbcb8de6af0c880a0082700a295c55ffd2ecd`. Seon's handler owns canonical roots, no-follow traversal, byte limits, conditional writes, and flat errors. Do not bind babashka.fs directly into SCI. |
 | babashka.process | `process` returns streams and a dereferenceable process record; `:out :bytes` exists, stdout/stderr are drained concurrently for captured modes, and `destroy-tree` is provided (`reference-code/babashka-process/src/babashka/process.cljc:117-148,360-451,453-470`; `README.md:150-201,303-321`). Timed deref only returns the timeout value; it does not terminate the process. `shell` tokenizes a string and throws on nonzero exit (`process.cljc:674-708`). | **Adopt `process`, never `shell` or `check`.** The existing `reference-code/babashka-process` pin is `16a84e0af0da51b8c84e289970f6b7cc35b35d18` (`v0.6.25`). Seon supplies argv only, event/timeout cleanup, streamed sinks, sanitized environment, and error conversion. |
 | Hato | A Ring-shaped synchronous/async client over JDK 11 `HttpClient`, with a stable `1.0.0` release and broad Clojars use. Its synchronous form matches virtual-thread `:io` execution and exceptions can be flattened at one handler. See [Hato 1.0.0](https://cljdoc.org/d/hato/hato/1.0.0) and [Hato's repository](https://github.com/gnarroway/hato). | **Preferred candidate for the later outbound `my.web` handler**, subject to a direct comparison with the current JDK client in `seon.ai`. Vendor `reference-code/hato` at `v1.0.0`, commit `8c80539c7fce9fa92320fa711d9c22ff78e7d3dd`, before implementation. Do not create a second retry or redirect policy in the wrapper. |
 | http-kit client | Mature and well-known, but its callback/future client shape is unnecessary in fresh synchronous CLJ. Seon's maintained fork is already the Datastar SSE server dependency (`deps.edn:60-71`) at `238a85cc555a38892f2f9a7583c9cf5cec0fb201`. | **Do not expand it into the agent HTTP client.** Keep `reference-code/http-kit` for its existing web UI owner. A second use would couple agent fetch policy to the server fork and reintroduce async coloring. |
@@ -162,14 +162,16 @@ function remains the owner and passes its own Var to `effect/request!`:
   {:malli/schema [:=> [:cat :my.fs/read-request]
                   [:or :my.fs/read-result :seon.error/value]]
    :seon.workload :io
-   :seon.effect/capability seon.fs.jvm/read}
+   :seon.effect/capability 'seon.fs.jvm/read}
   [request]
   (effect/request! #'read request))
 ```
 
-This is declaration, not a registration table. `var-row` accepts only a
-qualified handler symbol, stores it on the same `:seon.fn` entity, and refuses
-these malformed states during indexing:
+The quote is required Clojure source syntax for metadata naming a private Var;
+the runtime metadata value and the indexed value are both the qualified symbol
+`seon.fs.jvm/read`. This is declaration, not a registration table. `var-row`
+accepts only a qualified handler symbol, stores it on the same `:seon.fn`
+entity, and refuses these malformed states during indexing:
 
 - a capability marker without `:seon.workload`;
 - a capability workload other than `:io` for this initial host-tool slice;
