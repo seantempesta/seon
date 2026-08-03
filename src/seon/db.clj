@@ -649,6 +649,48 @@
         (append-database-evidence! database :all)
         (dependency-error ::temporal-read cause)))))
 
+(defn- database-identity
+  [operation operation-name database]
+  (if (error-value? database)
+    database
+    (try
+      (let [result (operation database)]
+        (append-database-evidence! database :all)
+        result)
+      (catch Throwable cause
+        (append-database-evidence! database :all)
+        (dependency-error operation-name cause)))))
+
+(defn commit-id
+  "Commit ID of an explicit or current database value."
+  {:malli/schema
+   [:function
+    [:=> [:cat]
+     [:or :nil :uuid :seon.error/value]]
+    [:=> [:cat :seon.db/database-value]
+     [:or :nil :uuid :seon.error/value]]]}
+  ([]
+   (database-identity d/commit-id ::commit-id (current-database-value)))
+  ([database]
+   (database-identity d/commit-id ::commit-id database)))
+
+(defn committed-value-identity
+  "Process-local identity of an explicit or current database value."
+  {:malli/schema
+   [:function
+    [:=> [:cat]
+     [:or :nil :map :seon.error/value]]
+    [:=> [:cat :seon.db/database-value]
+     [:or :nil :map :seon.error/value]]]}
+  ([]
+   (database-identity d/committed-value-identity
+                      ::committed-value-identity
+                      (current-database-value)))
+  ([database]
+   (database-identity d/committed-value-identity
+                      ::committed-value-identity
+                      database)))
+
 (defn history
   "Historical view of an explicit or current database value."
   {:malli/schema

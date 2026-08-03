@@ -163,6 +163,20 @@
                    {:selector schema-pattern
                     :eids [schema-ref missing-schema-ref schema-ref]})))))))))
 
+(deftest database-identities-support-explicit-and-current-custody
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection]
+       (binding [db/*conn* connection]
+         (is (= (db/commit-id database) (db/commit-id)))
+         (is (uuid? (db/commit-id database)))
+         (is (= (db/committed-value-identity database)
+                (db/committed-value-identity)))
+         (is (= #{:datahike.value/connection-id
+                  :datahike.value/generation
+                  :datahike.value/commit-id}
+                (set (keys (db/committed-value-identity database))))))))))
+
 (deftest current-database-resolves-once-per-call
   (test-support/with-database
    (fn [connection]
