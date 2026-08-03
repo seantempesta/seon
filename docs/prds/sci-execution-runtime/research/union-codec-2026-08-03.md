@@ -8,9 +8,10 @@ tags: [research, database, schema, datahike]
 
 ## Read and dependency ledger
 
-I read `AGENTS.md`, `plan/overnight-2026-08-03.md`, and
+I read `AGENTS.md`, `plan/overnight-2026-08-03.md`, and the then-open
 `docs/seon/issues/mixed-union-datahike-declaration-lacks-fresh-edn-codec.md`
-whole before designing or editing. I also read the complete
+(now under `docs/seon/issues/archive/`) whole before designing or editing. I
+also read the complete
 `data-oriented-clojure`, `datahike`, and `clojure-testing` skill files before
 the work. The overnight plan makes this a core `seon.db` seam, requires a
 fail-first qualified-symbol round trip, and forbids a render-specific decoder

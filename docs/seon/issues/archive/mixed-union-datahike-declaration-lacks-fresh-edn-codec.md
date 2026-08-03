@@ -87,4 +87,4 @@ The previous issue was first filed when the declaration bridge existed without
 either codec half. It was archived after `encode-transaction` and
 `decode-attribute-value` plus a manual round-trip test landed. The 2026-08-02
 render vocabulary audit reopened it because the claimed application-read
-integration does not exist.
+integration did not exist.
