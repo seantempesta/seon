@@ -795,20 +795,30 @@
   (:seon.schema.admission/source
    (schema/admission-from-asserting-transaction db source-tx)))
 
+(defn- forwarding-host-var
+  "An SCI Var that calls the current root of one compiled host Var."
+  [host-var sci-namespace]
+  (let [host-meta (meta host-var)
+        local-name (:name host-meta)]
+    (sci/new-var local-name host-var
+                 (assoc host-meta :name local-name :ns sci-namespace))))
+
 (defn- install-loaded-first-party-namespaces!
   "Bind loaded first-party namespaces as their actual compiled JVM Vars.
 
   Namespace membership is the intersection of core-provenanced program rows
   and Clojure's loaded namespace set. `ns-publics` supplies the namespace's
-  public real Vars, not copied roots, so a re-evaluated `defn` changes the next
-  host call without reacquisition. Private implementation Vars are excluded in
+  public real Vars. Direct bindings retain those Vars; a target named by a
+  declared refer becomes an SCI Var whose root is the real Var, because SCI's
+  resolver requires that shape. Both paths therefore observe a re-evaluated
+  `defn` without reacquisition. Private implementation Vars are excluded in
   agreement with every program-graph projection of the agent-facing surface.
 
   Safety residual from ruling #20: once execution enters one compiled host
   call, SCI's interrupt hook sees no interpreted function entrance. Runaway
   work inside that call is bounded by the submit-level wedge backstop, not the
   evaluation time-limit."
-  [ctx namespace-assertions source-for-transaction]
+  [ctx namespace-assertions source-for-transaction namespace-rows]
   (let [first-party-names
         (into #{}
               (comp
@@ -816,11 +826,27 @@
                          (= :core (source-for-transaction source-tx))))
                (map first))
               namespace-assertions)
-        loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))]
+        loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))
+        referred-symbols
+        (into #{}
+              (comp (map row-bindings) (mapcat (comp vals :refers)))
+              namespace-rows)]
     (doseq [namespace-name (sort-by str first-party-names)
             :let [host-namespace (get loaded-by-name namespace-name)]
             :when host-namespace]
-      (sci/add-namespace! ctx namespace-name (ns-publics host-namespace)))))
+      (let [sci-namespace (sci/create-ns namespace-name)]
+        (sci/add-namespace!
+         ctx namespace-name
+         (into {}
+               (map
+                (fn [[local-name host-var]]
+                  [local-name
+                   (if (contains?
+                        referred-symbols
+                        (symbol (str namespace-name) (str local-name)))
+                     (forwarding-host-var host-var sci-namespace)
+                     host-var)]))
+               (ns-publics host-namespace)))))))
 
 (defn- install-host-namespace!
   [ctx namespace-name intern-map]
@@ -911,6 +937,16 @@
                [?namespace :seon.ns/name ?namespace-name]
                [?namespace :seon.ns/source ?source ?source-tx]]
              db)
+        namespace-source-by-name
+        (into {}
+              (map (fn [[namespace-name source source-tx]]
+                     [namespace-name [source source-tx]]))
+              namespace-assertions)
+        all-namespace-names
+        (db/q '[:find [?namespace-name ...]
+                :where
+                [_ :seon.ns/name ?namespace-name]]
+              db)
         agent-authored?
         (fn [source-tx]
           (= :agent (source-for-transaction source-tx)))
@@ -939,18 +975,22 @@
         all-namespace-rows
         (into
          []
-         (map (fn [[namespace-name source source-tx]]
-                (assoc
-                 (db/pull db
-                          '[* {:seon.ns/requires [:seon.ns/name]}
-                              {:seon.ns/aliases [*]}
-                              {:seon.ns/imports [*]}
-                              {:seon.ns/refers [*]}]
-                          [:seon.ns/name namespace-name])
-                 ::namespace-source source
-                 ::namespace-source-tx source-tx
-                 ::agent-authored? (agent-authored? source-tx))))
-         namespace-assertions)
+         (map (fn [namespace-name]
+                (let [[source source-tx]
+                      (get namespace-source-by-name namespace-name)]
+                  (assoc
+                   (db/pull db
+                            '[* {:seon.ns/requires [:seon.ns/name]}
+                                {:seon.ns/aliases [*]}
+                                {:seon.ns/imports [*]}
+                                {:seon.ns/refers [*]}]
+                            [:seon.ns/name namespace-name])
+                   ::namespace-source source
+                   ::namespace-source-tx source-tx
+                   ::agent-authored?
+                   (boolean (and source-tx
+                                 (agent-authored? source-tx)))))))
+         all-namespace-names)
         all-namespace-row-by-name
         (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
         namespace-rows
@@ -1054,11 +1094,11 @@
     (doseq [[namespace-name row] namespace-row-by-name]
       (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings row) :refers {})))
-    ;; Namespace declarations establish aliases/imports first; copied host Vars
-    ;; then populate the same SCI namespaces without being erased by that
-    ;; declaration install. Selected definitions overwrite only their own Vars.
+    ;; Namespace declarations establish aliases/imports first; compiled host
+    ;; bindings then populate the same SCI namespaces without being erased by
+    ;; that declaration install. Selected definitions overwrite only their Vars.
     (install-loaded-first-party-namespaces!
-     ctx namespace-assertions source-for-transaction)
+     ctx namespace-assertions source-for-transaction all-namespace-rows)
     (let [functions-installed
           (reduce
            (fn [state namespace-name]

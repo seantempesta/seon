@@ -191,7 +191,8 @@
                {:seon.ai/text
                 (if (= "restart-a" (active-agent-id @connection))
                   (str
-                     "(require '[seon.schema :as schema])\n"
+                     "(require '[seon.schema :as schema] "
+                     "'[seon.bootstrap :refer [help dir doc]])\n"
                      "(require '[clojure.string :as s1])\n"
                      "(require '[clojure.string :as s2])\n"
                      "(require '[clojure.string :refer [upper-case] "
@@ -313,6 +314,19 @@
                   "a computed require's alias survives acquisition")
               (is (= 'clojure.string/upper-case (get refers 'up))
                   "a renamed refer retains its target Var identity")
+              (is (= {'help 'seon.bootstrap/help
+                      'dir 'seon.bootstrap/dir
+                      'doc 'seon.bootstrap/doc}
+                     (select-keys refers '[help dir doc]))
+                  "bootstrap refers resolve after cold acquisition")
+              (let [help-expansion
+                    (:val
+                     (sci/eval-string+
+                      ctx "(macroexpand-1 '(help))"
+                      {:ns (sci/create-ns 'my.agents.restart-a)}))]
+                (is (= 'clojure.core/print (first help-expansion)))
+                (is (= (bootstrap/help-text) (second help-expansion))
+                    "the cold bootstrap help binding is callable"))
               (is (some #{'clojure.set} (:requires bindings)))
               (is (not (some #{'missing.restart.namespace}
                              (:requires bindings)))))
