@@ -290,7 +290,7 @@ behavior (`reference-code/sci/test/sci/core_test.cljc:1298-1322`).
 Root commit `e6f92b09b` pins that fork revision and replaces the former
 characterization with an acceptance regression. Both mutation operations now
 return a flat `:seon.sci.eval/evaluation-failed` value, the compiled Var's
-metadata remains byte-for-byte equal, and instrumentation reads the original
+metadata remains exactly equal, and instrumentation reads the original
 arglists (`test/seon/sci/eval_test.clj:307-360`). The maintained SCI focus
 passed 139 tests / 677 assertions under both Clojure 1.10.3 and 1.11.1; the
 combined Seon eval/instrument focus passed 55 tests / 246 assertions.
