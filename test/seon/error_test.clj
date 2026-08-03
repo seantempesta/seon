@@ -283,13 +283,15 @@
       (is (= :wake (:seon.error/cid three)))
       (is (not (contains? three :seon.error/op))))
     (testing "all three name the Throwable's class"
-      (is (= "clojure.lang.ExceptionInfo" (:seon.error/class one)))
-      (is (= "clojure.lang.ExceptionInfo" (:seon.error/class three))))))
+      (is (= "clojure.lang.ExceptionInfo"
+             (:seon.error/throwable-class one)))
+      (is (= "clojure.lang.ExceptionInfo"
+             (:seon.error/throwable-class three))))))
 
 (deftest a-value-that-was-never-a-throwable-has-no-class
   (let [fact (error/normalize (request {:seon.error/kind :seon.ai/no-credential
                                         :seon.error/message "unset"}))]
-    (is (not (contains? fact :seon.error/class)))
+    (is (not (contains? fact :seon.error/throwable-class)))
     (is (= :seon.ai/no-credential (:seon.error/kind fact)))
     (is (= "unset" (:seon.error/message fact)))))
 

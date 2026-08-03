@@ -1,4 +1,6 @@
-#:seon.ai{:api-key-variable [:string {:min 1}],
+#:seon.ai{:extra-body :boolean,
+          :wire [:vector [:tuple :string :qualified-symbol]],
+          :api-key-variable [:string {:min 1}],
           :attempt
           [:map
            {:seon.db/entity true,

@@ -1,4 +1,7 @@
-#:seon.config{:applied-manifest-digest [:re "^[0-9a-f]{64}$"],
+#:seon.config{:dial :boolean,
+              :optional :boolean,
+              :per-agent :boolean,
+              :applied-manifest-digest [:re "^[0-9a-f]{64}$"],
               :apply-request
               [:map
                [:seon.config/connection :any]

@@ -6,7 +6,6 @@
             [seon.cluster.run :as run]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private base-key :seon.schema-usage-guard/base)
@@ -63,7 +62,9 @@
      connection
      (into
       (schema.datahike/malli->datahike-schema-in
-       projection (schema.form/database-attributes selected-forms))
+       projection
+       (schema.datahike/database-attributes-for-in
+        projection selected-forms))
       (map (fn [[schema-key definition]]
              (schema-row schema-key definition)))
       selected-forms))))

@@ -540,12 +540,6 @@
   "The opaque provenance identity for the boot schema population."
   "seon.db.process/boot")
 
-(def ^:private schema-row-pattern
-  [:seon.schema/key
-   :seon.schema/form
-   :seon.schema.admission/source
-   :seon.db.id/generator])
-
 (declare require-committed!)
 
 (defn- incompatible-declaration-message
@@ -605,7 +599,7 @@
    (keep
     (fn [{schema-key :seon.schema/key :as desired}]
       (let [current
-            (some-> (db/pull db schema-row-pattern
+            (some-> (db/pull db (vec (keys desired))
                             [:seon.schema/key schema-key])
                     (dissoc :db/id))]
         (when-not (= desired (select-keys current (keys desired)))

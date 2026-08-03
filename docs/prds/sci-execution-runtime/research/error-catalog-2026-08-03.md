@@ -13,6 +13,12 @@ set whose PRESENCE makes it what it is, validated by a registered schema and
 found by `matching-shapes-in`. One model covers in-flight error values and
 committed fault facts.
 
+The pre-wave stored JVM throwable-class string is renamed to
+`:seon.error/throwable-class`. Historical `:seon.error/class` string datoms are
+not migrated. The freed `:seon.error/class` attribute is the native boolean
+schema-row marker described below; slice-2 templates use
+`:seon.error/throwable-class` whenever they preserve JVM class evidence.
+
 Method: every claim below is from reading the constructions, not from a keyword
 count. I read `src/seon/error.clj` end to end, plus the dispatch sites,
 `seon.fn`, `seon.ai`, `seon.effect`, `seon.fs.jvm`, `seon.edit`,

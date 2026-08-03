@@ -2100,19 +2100,20 @@
   ([]
    (canonical-schema-rows (registered-schemas)))
   ([forms]
-   (into
-    []
-    (keep
-     (fn [[schema-key definition]]
-       (when (keyword? schema-key)
-         (let [properties (form/attr-form-properties definition)]
-           (cond-> {:seon.schema/key schema-key
-                    :seon.schema/form (pr-str definition)
-                    :seon.schema.admission/source :core}
-             (contains? properties :seon.db.id/generator)
-             (assoc :seon.db.id/generator
-                    (:seon.db.id/generator properties))))))
-    forms))))
+   (let [projection {:seon.schema.projection/forms forms}
+         storable-properties-in
+         (requiring-resolve
+          'seon.schema.datahike/storable-properties-in)]
+     (into
+      []
+      (keep
+       (fn [[schema-key definition]]
+         (when (keyword? schema-key)
+           (merge (storable-properties-in projection definition)
+                  {:seon.schema/key schema-key
+                   :seon.schema/form (pr-str definition)
+                   :seon.schema.admission/source :core})))
+      forms)))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.
@@ -2126,7 +2127,8 @@
   ([]
    (canonical-database-attributes (registered-schemas)))
   ([forms]
-   (form/database-attributes forms)))
+   ((requiring-resolve 'seon.schema.datahike/database-attributes-in)
+    {:seon.schema.projection/forms forms})))
 
 (defn registered?
   "Check if a schema keyword is registered."

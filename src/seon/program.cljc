@@ -30,8 +30,7 @@
    :seon.schema/key
    {:seon.program/identity-attribute :seon.schema/key
     :seon.program/source-attribute :seon.schema/form
-    :seon.program/owned-attributes
-    [:seon.schema/key :seon.schema/form :seon.schema.admission/source]}
+    :seon.program/owned-attributes :seon.program/schema-row-properties}
    :seon.test/sym
    {:seon.program/identity-attribute :seon.test/sym
     :seon.program/source-attribute :seon.test/source
@@ -347,18 +346,22 @@
        identities
        {}))
     (when-let [[identity-attribute _] (first identities)]
-      (into {}
-            (remove (fn [[attribute value]]
-                      (or (nil? value)
-                          (and (contains? #{:seon.ns/requires
-                                            :seon.ns/aliases
-                                            :seon.ns/imports
-                                            :seon.ns/refers}
-                                          attribute)
-                               (empty? value)))))
-            (select-keys row
-                         (:seon.program/owned-attributes
-                          (shape identity-attribute)))))))
+      (let [owned-attributes
+            (:seon.program/owned-attributes (shape identity-attribute))
+            owned-attributes
+            (if (= :seon.program/schema-row-properties owned-attributes)
+              (into [] (filter qualified-keyword?) (keys row))
+              owned-attributes)]
+        (into {}
+              (remove (fn [[attribute value]]
+                        (or (nil? value)
+                            (and (contains? #{:seon.ns/requires
+                                              :seon.ns/aliases
+                                              :seon.ns/imports
+                                              :seon.ns/refers}
+                                            attribute)
+                                 (empty? value)))))
+              (select-keys row owned-attributes))))))
 
 (def ^:private declaration-required-attributes
   {:seon.ns/name [:seon.ns/source]
@@ -390,6 +393,19 @@
           (:seon.test/sym event) event
           (:seon.code.def/id event) event
           :else nil)
+        candidate
+        (if (and (:seon.schema/key candidate)
+                 (:seon.schema/form candidate))
+          (let [schema-key (:seon.schema/key candidate)
+                definition (read-edn (:seon.schema/form candidate))
+                row (some #(when (= schema-key (:seon.schema/key %)) %)
+                          (schema/canonical-schema-rows
+                           (assoc (schema/registered-schemas)
+                                  schema-key definition)))]
+            (assoc row
+                   :seon.schema.admission/source
+                   (:seon.schema.admission/source candidate)))
+          candidate)
         row (canonical-row candidate)]
     (when row
       (let [[identity-attribute _ :as program-identity] (row-identity row)
@@ -410,12 +426,20 @@
   [current desired]
   (if-let [[identity-attribute _]
            (or (row-identity desired) (row-identity current))]
-    (into
-     []
-     (comp
-      (remove #{identity-attribute})
-      (filter #(not= (get current %) (get desired %))))
-     (:seon.program/owned-attributes (shape identity-attribute)))
+    (let [owned-attributes
+          (:seon.program/owned-attributes (shape identity-attribute))
+          owned-attributes
+          (if (= :seon.program/schema-row-properties owned-attributes)
+            (into #{}
+                  (filter qualified-keyword?)
+                  (concat (keys current) (keys desired)))
+            owned-attributes)]
+      (into
+       []
+       (comp
+        (remove #{identity-attribute})
+        (filter #(not= (get current %) (get desired %))))
+       owned-attributes))
     []))
 
 (def ^:private component-owned-attributes

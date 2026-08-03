@@ -319,7 +319,7 @@
                                               (top-frame failure))
              :seon.error/data-edn (:seon.cluster.eval/result-edn admitted)
              :seon.error/capped? (:seon.sci.admit/capped? admitted)}
-      class-name (assoc :seon.error/class class-name)
+      class-name (assoc :seon.error/throwable-class class-name)
       ;; each flow key rides exactly when the arriving shape carried it,
       ;; because absence is the state — two of the three shapes have no
       ;; op and one has no cid
@@ -543,7 +543,7 @@
   [notice]
   (let [fact (:seon.error/fact notice)
         {:seon.error/keys [id at kind message process signature
-                           class proc op cid run basis-t]} fact
+                           throwable-class proc op cid run basis-t]} fact
         source (fact-source fact)
         data (flat-data fact)
         aggregate? (:seon.error/occurrences notice)]
@@ -587,7 +587,7 @@
        (when basis-t (str "basis-t=" basis-t))
        (str "at=" (pr-str at))
        (when-not aggregate? (str "sig=" signature))
-       (when class (str "class=" class))
+       (when throwable-class (str "class=" throwable-class))
        (when-let [occurrence (:seon.error/occurrence notice)]
          (str "occurrence=" occurrence))
        (when-let [limit (:seon.error/notification-limit notice)]
@@ -774,7 +774,7 @@
         silent? (or (not bounded?) (> occurrence limit))
         ;; the fact says whether this was a Throwable; nothing else has
         ;; to be asked, and no caller gets to have an opinion about it
-        interrupted-a-run? (some? (:seon.error/class fact))
+        interrupted-a-run? (some? (:seon.error/throwable-class fact))
         ;; ATTRIBUTION IS READ BACK OFF THE FACT, never off the request.
         ;; The two differ exactly when the caller named an agent this
         ;; database does not have: attribution is dropped, and asking

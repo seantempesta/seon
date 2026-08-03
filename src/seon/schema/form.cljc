@@ -43,6 +43,25 @@
       (when (and (seq body) (map? (first body)))
         (first body)))))
 
+(defn namespaced-properties
+  "Qualified Malli properties carried by one authored schema form."
+  {:malli/schema [:=> [:cat :any] :map]}
+  [form]
+  (into {}
+        (comp
+         (filter (comp qualified-keyword? key))
+         (remove (comp nil? val)))
+        (or (attr-form-properties form) {})))
+
+(defn property-attributes
+  "Qualified Malli property keys present across one schema population."
+  {:malli/schema
+   [:=> [:cat [:fn clojure.core/map?]] [:set :qualified-keyword]]}
+  [forms]
+  (into #{}
+        (mapcat (comp keys namespaced-properties val))
+        forms))
+
 (defn database-attributes
   "Compute persisted database attributes from one immutable schema-form map."
   {:malli/schema

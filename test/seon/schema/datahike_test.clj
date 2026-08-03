@@ -105,6 +105,23 @@
           (finally
             (schema/restore-state! snapshot)))))))
 
+(deftest schema-row-properties-lift-only-when-their-declarations-are-storable
+  (let [forms {:seon.error/class [:= true]
+               :gen/schema :seon.schema/definition
+               :seon.error/message :string
+               ::error
+               [:map {:seon.error/class true
+                      :gen/schema :string}
+                [:seon.error/message :seon.error/message]]}
+        projection {:seon.schema.projection/forms forms}
+        attributes (set (schema.datahike/database-attributes-in projection))]
+    (is (schema.datahike/storable-attribute-in?
+         projection :seon.error/class))
+    (is (not (schema.datahike/storable-attribute-in?
+              projection :gen/schema)))
+    (is (contains? attributes :seon.error/class))
+    (is (not (contains? attributes :gen/schema)))))
+
 (def ^:private refused-form-generator
   (gen/elements
    [{:form [:maybe :string] :rule :nilable}

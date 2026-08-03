@@ -1,4 +1,11 @@
-#:seon.db{:connection
+#:seon.db{:attributes :boolean,
+          :component :boolean,
+          :entity :boolean,
+          :identity :boolean,
+          :index :boolean,
+          :no-history? :boolean,
+          :unique :boolean,
+          :connection
           [:fn
            {:error/message
             "must be a live unreleased Datahike connection from the calling cluster"

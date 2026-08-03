@@ -265,6 +265,45 @@
    {:seon.schema.projection/forms (schema/registered-schemas)}
    attrs))
 
+(defn storable-attribute-in?
+  "True when an attribute exists and the bridge maps its declared value."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] :boolean]}
+  [projection attr]
+  (boolean
+   (when (contains? (:seon.schema.projection/forms projection) attr)
+     (try
+       (malli->datahike-attr-in projection attr)
+       true
+       (catch clojure.lang.ExceptionInfo _ false)))))
+
+(defn storable-properties-in
+  "Namespaced properties whose own declarations are database-storable."
+  {:malli/schema [:=> [:cat :map :seon.schema/definition] :map]}
+  [projection definition]
+  (into {}
+        (filter (fn [[property _]]
+                  (storable-attribute-in? projection property)))
+        (schema.form/namespaced-properties definition)))
+
+(defn database-attributes-for-in
+  "Database attributes in `forms`, including properties storable by `projection`."
+  {:malli/schema
+   [:=> [:cat :map [:fn clojure.core/map?]]
+    [:vector :qualified-keyword]]}
+  [projection forms]
+  (->> (schema.form/property-attributes forms)
+         (filter #(storable-attribute-in? projection %))
+         (into (set (schema.form/database-attributes forms)))
+         (sort-by str)
+         vec))
+
+(defn database-attributes-in
+  "Database attributes plus bridge-storable schema-row properties."
+  {:malli/schema [:=> [:cat :map] [:vector :qualified-keyword]]}
+  [projection]
+  (database-attributes-for-in
+   projection (:seon.schema.projection/forms projection)))
+
 (defn edn-encoded-attr-in?
   "True when an attribute in `projection` uses the EDN string fallback."
   {:malli/schema [:=> [:cat :map :keyword] :boolean]}

@@ -385,7 +385,7 @@
               (reset! run-id rid)
               (is (some? fact) "the refused settlement became a fault fact")
               (is (= "clojure.lang.ExceptionInfo"
-                     (:seon.error/class fact)))
+                     (:seon.error/throwable-class fact)))
               (is (= :seon.cluster.agent/turn (:seon.error/proc fact))
                   "it traversed the agent graph's error channel")
               (is (pos?
@@ -495,7 +495,8 @@
             (testing "exactly one error fact, carrying what happened"
               (is (some? fact))
               (is (= ::injected (:seon.error/kind fact)))
-              (is (= "clojure.lang.ExceptionInfo" (:seon.error/class fact)))
+              (is (= "clojure.lang.ExceptionInfo"
+                     (:seon.error/throwable-class fact)))
               (is (= :seon.cluster.agent/turn (:seon.error/proc fact)))
               (is (= "root"
                      (db/q '[:find ?agent-id .

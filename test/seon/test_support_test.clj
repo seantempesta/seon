@@ -11,6 +11,7 @@
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (deftest a-canonical-database-is-the-production-source-population
@@ -39,6 +40,21 @@
         (is (every? #(not (contains? % :seon.schema/created-at))
                     (schema/canonical-schema-rows packaged-forms)))
         (is (= expected-schema-keys (set actual-schema-keys)))
+        (is (= (set
+                (keep (fn [[schema-key definition]]
+                        (when (true? (:seon.db/entity
+                                     (schema.form/namespaced-properties
+                                      definition)))
+                          schema-key))
+                      packaged-forms))
+               (set
+                (db/q
+                 '[:find [?schema-key ...]
+                   :where
+                   [?schema :seon.schema/key ?schema-key]
+                   [?schema :seon.db/entity true]]
+                 database)))
+            "arbitrary boolean schema properties are native queryable datoms")
         (is (= #{cluster/boot-process-identity
                  config/managing-process-identity}
                (set

@@ -130,6 +130,25 @@
       (finally
         (schema/restore-state! state)))))
 
+(deftest canonical-rows-carry-arbitrary-namespaced-properties
+  (let [schema-key :seon.schema-test/class
+        definition
+        [:map {:seon.error/class true
+               :gen/schema :string
+               :seon.unknown/property :ignored}
+         [:seon.error/message :seon.error/message]]
+        forms {:seon.error/class [:= true]
+               :gen/schema :seon.schema/definition
+               schema-key definition}
+        row (some #(when (= schema-key (:seon.schema/key %)) %)
+                  (schema/canonical-schema-rows forms))]
+    (is (= true (:seon.error/class row)))
+    (is (not (contains? row :gen/schema))
+        "a declared but non-storable property remains compile-time Malli data")
+    (is (not (contains? row :seon.unknown/property))
+        "an undeclared property remains compile-time Malli data")
+    (is (= (pr-str definition) (:seon.schema/form row)))))
+
 (deftest agent-authored-function-input-maps-accrete
   (is (empty?
        (schema/assert-complete-contract!

@@ -642,8 +642,7 @@
                   (map (juxt :db/ident identity))
                   (schema.datahike/malli->datahike-schema-in
                    projection
-                   (schema.form/database-attributes
-                    (:seon.schema.projection/forms projection))))
+                   (schema.datahike/database-attributes-in projection)))
             {}))
         current-declarations (declarations-in current-projection)
         candidate-declarations (declarations-in candidate-projection)
@@ -745,11 +744,11 @@
                 (schema-attribute-change-tx
                  db current-projection candidate-projection)
                 (let [current-attributes
-                      (schema.form/database-attributes
-                       (:seon.schema.projection/forms current-projection))
+                      (schema.datahike/database-attributes-in
+                       current-projection)
                       candidate-attributes
-                      (schema.form/database-attributes
-                       (:seon.schema.projection/forms candidate-projection))
+                      (schema.datahike/database-attributes-in
+                       candidate-projection)
                       required
                       (into []
                             (comp

@@ -253,6 +253,27 @@
            :seon.test/subject [:seon.fn/sym "sample/subject"]
            :unowned/value :ignored}))))
 
+(deftest schema-row-properties-survive-and-retract-exactly
+  (let [current {:seon.schema/key :sample/error
+                 :seon.schema/form "[:map {:seon.error/class true}]"
+                 :seon.schema.admission/source :agent
+                 :seon.error/class true
+                 :seon.render/ai 'sample/render-ai}
+        desired (dissoc current :seon.render/ai)]
+    (is (= current (program/canonical-row current)))
+    (is (= [:seon.render/ai]
+           (program/changed-attributes current desired)))))
+
+(deftest runtime-schema-declarations-project-namespaced-properties
+  (let [event (one-event
+               "(seon.schema/register! ::error [:map {:seon.error/class true :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
+        row (program/declaration-row
+             (assoc event :seon.schema.admission/source :agent)
+             :contracted)]
+    (is (= true (:seon.error/class row)))
+    (is (= 'sample/render-ai (:seon.render/ai row)))
+    (is (= :agent (:seon.schema.admission/source row)))))
+
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
   (let [source (str "(ns sample (:require [clojure.test :refer [deftest]] "
                     "[foo :as foo]))\n"

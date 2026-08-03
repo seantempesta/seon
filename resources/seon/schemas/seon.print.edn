@@ -1,4 +1,5 @@
-#:seon.print{:face
+#:seon.print{:default [:or :boolean :int :keyword],
+             :face
              [:enum
               :seon.print/nil
               :seon.print/boolean

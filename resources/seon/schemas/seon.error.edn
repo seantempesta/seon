@@ -3,7 +3,7 @@
              :basis-t [:int {:min 0}],
              :capped? :boolean,
              :cid :keyword,
-             :class [:string {:min 1}],
+             :class [:= true],
              :commit-tx-request
              [:map
               [:seon.error/source :seon.error/source]
@@ -47,7 +47,9 @@
               [:seon.error/signature :seon.error/signature]
               [:seon.error/data-edn :seon.error/data-edn]
               [:seon.error/capped? :seon.error/capped?]
-              [:seon.error/class {:optional true} :seon.error/class]
+              [:seon.error/throwable-class
+               {:optional true}
+               :seon.error/throwable-class]
               [:seon.error/proc {:optional true} :seon.error/proc]
               [:seon.error/op {:optional true} :seon.error/op]
               [:seon.error/cid {:optional true} :seon.error/cid]
@@ -142,7 +144,9 @@
               :recurring
               :failover],
              :run [:and #:seon.db{:index true} :seon.db/ref],
+             :refusal :boolean,
              :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
+             :throwable-class [:string {:min 1}],
              :source :any,
              :value
              [:map

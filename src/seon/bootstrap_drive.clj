@@ -312,7 +312,7 @@
          :seon.bootstrap-drive/terminal
          {:seon.bootstrap-drive/outcome :failed}
          :seon.bootstrap-drive/error
-         {:seon.error/class (.getName (class failure))
+         {:seon.error/throwable-class (.getName (class failure))
           :seon.error/message (or (ex-message failure)
                                   (.getName (class failure)))}}
         path (write-report! report)]
