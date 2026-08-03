@@ -104,3 +104,21 @@ delivery is a private history-off operator root plus the reconciliation reader
 fix and a real boot proof. A mixed history-on/history-off shared store requires
 the explicit Datahike conversion design above and must not be improvised in
 Seon's branch wrapper.
+
+## Night implementation evidence
+
+The pinned-fork and physical-replay result is now recorded in
+[[per-cluster-history-2026-08-02]]. Datahike's record is branch-local, but every
+supported branch/fork operation inherits it; there is no history-representation
+conversion. Commit `918d33623` lands creation, persisted-policy reopen,
+mismatch refusal, descendant-branch inheritance, and the non-temporal
+reconciliation fallback. Commit `6ce45b4eb` exposes application of the same
+already-compiled config value at the post-connection seam.
+
+The real archived-episode replay measured 10,513,866 B history-on growth versus
+6,533,688 B history-off growth: **3,980,178 B / 37.856% saved** with identical
+current domain datoms. An isolated history-off root published `current-src` and
+opened the cluster branch. READY proof is presently blocked by the protected
+schema lane's unrelated `:seon.ai/usage` agent-contract `:any`; this issue stays
+open until the exact protected boot/config/database-view handoff in the research
+report lands and both live shapes complete.
