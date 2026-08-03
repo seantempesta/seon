@@ -1868,7 +1868,17 @@ may reintroduce a shadow build into the dev feedback path.
   COMPUTED from declared contracts (ruling #33's input/output refs),
   never from names (ruling #47 stands). The audit resolves the open
   edge: two qualifying functions in ONE namespace for one shape —
-  most-specific-input wins, or loud, but proposed with evidence. Also ruled this batch:
+  most-specific-input wins, or loud, but proposed with evidence.
+  AMENDED AGAIN same night (owner): RENDER IMPLEMENTATION IS AUTHORIZED
+  TONIGHT once the simplification audit lands and the queued non-render
+  work completes — "if the report comes back and you finish the other
+  work please start and complete the renderer work. We can always roll
+  back as long as you are committing along the way." Sequencing item
+  (6) is superseded: render goes LAST, not never-tonight. Condition:
+  small coherent path-limited commits throughout so any slice rolls
+  back cleanly. Where the audit's minimal model and
+  render-model-2026-08-02.md conflict, the audit's model wins unless it
+  contradicts a recorded ruling. Also ruled this batch:
   alter-meta! immutability IS restored (SCI fork change); the 4,096
   blob threshold is DERIVED not tuned (recorded-cost comparison per the
   resume precedent); lane cap is 3 implementation + 1 research
