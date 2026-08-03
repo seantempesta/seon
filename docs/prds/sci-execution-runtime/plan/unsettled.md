@@ -3158,3 +3158,15 @@ Recorded because the failure mode is systematic, not incidental:
 
 **So: re-grep a row's evidence before acting on it.** Every claim in this file
 was verified on 2026-07-26 and may already be stale.
+
+**RESTART-BOUNDARY GATE (2026-08-03 evening):** final fast tier on the
+quiet tree: 864 tests / 4,250 assertions, 10 failures / 0 errors — two
+known causes only: (1) the pre-existing
+`seon.cluster.loop-test/call-resolves-once-records-settings-and-sees-
+next-turn-config` boundary (9 assertions, empty provider request
+vector/attempt rows, predates the wave, flagged in the handoff);
+(2) `seon.render.web-test/the-initial-paint-sends-every-walk-surface-
+once` (deterministic, new this wave — suspect the structural-window
+strings-whole change `03764a4f6` or render census churn; UNATTRIBUTED,
+fix first after restart). Everything else green including all of
+today's landings.
