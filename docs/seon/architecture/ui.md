@@ -396,11 +396,56 @@ The live channel uses `core.async.flow` graphs inside the cluster JVM:
    agent-authored calls cross the bounded SCI launcher with `:interrupt-fn`,
    invocation-class `time-limit`, admission, and output caps;
 4. the cache compares the completed bytes/digest and suppresses equal output;
-5. a `mult` fans each changed stable-ID element patch to one per-tab
-   `(sliding-buffer 1)` tap for each visible render unit; and
-6. one connection-owned virtual thread per tab reads its tap and batches
-   available Datastar element patches onto that tab's single SSE connection,
-   with bounded writes.
+5. the render proc builds ONE REVISIONED COMPOSITE PACKAGE per page —
+   `{:seon.render.package/revision, /base-revision, /keyframe-bytes,
+   /delta-bytes, /keyframe-size, /delta-size}` — where the keyframe is one
+   complete Datastar event carrying every block and the delta is one
+   changed-fragment event, both serialized exactly once; and
+6. a `mult` publishes that immutable package to ONE `(sliding-buffer 1)` tap
+   PER TAB — not one per render unit — and one connection-owned virtual
+   thread per tab reads its tap and writes to that tab's single SSE
+   connection with bounded writes.
+
+**Every pending value independently repairs the page.** A tab whose delivered
+revision is contiguous applies the delta; a tab that detects a REVISION GAP —
+because it was late, stalled, or parked behind a slow write — applies the
+package's keyframe instead. There is no delta-only buffer and no accumulated
+patch list, so a slow browser can never hold up the `mult`, the render proc, or
+any other tab. Tabs hold only their delivered revision; they do not keep
+complete HTML maps and never diff.
+
+**Late tabs need a snapshot, because `mult` does not replay.** The render proc
+is the single writer of one process-local latest-package snapshot; feeds only
+dereference it when joining. Like the equality cache, it is disposable derived
+memory — never a database fact, a replay log, or a second render owner. A proc
+restart simply derives a fresh keyframe from current database truth.
+
+**Initial page load is fully rendered and cached.** The initial document embeds
+the cached keyframe bytes rather than calling the renderer, so a tab paints a
+complete page immediately and thereafter receives only changed blocks. That
+preserves ONE serialization owner: bytes are produced once by the render proc
+and reused everywhere, never re-derived per connection.
+
+**Serialization happens once, in the render proc.** The connection writer does
+no Hiccup work and no Datastar framing — it sends already-framed bytes. SCI
+render, admission, serialization, equality comparison and event framing are
+`:compute` work; connection reads, sends, and pending-write waits are `:io`.
+
+**No generic server-side Hiccup differ exists or should be built.** Datastar
+computes persistent IDs, greedily matches children, preserves ID-addressed
+nodes, and stops descending at `isEqualNode`. Server granularity is the
+stable-ID block; a finer semantic fragment is introduced only where measurement
+demands it, the first being the active streamed reply. Measured: a 250-event
+block morph is 1.2–1.5 ms p95 in Chrome and its patch about 85.5 KB, against
+437 bytes for the active row — so a hot block stays bounded (roughly 1,000
+events) and splits or pages before it grows past a 16 ms budget.
+
+Full measured derivation, alternatives rejected, and the owner decisions behind
+this shape are in
+`docs/prds/sci-execution-runtime/research/render-pipeline-design-2026-07-29.md`.
+READ THAT DOCUMENT WHOLE before changing the pipeline; it is 904 lines and its
+verdict, its "differences from the current pipeline" section, and its owner
+decisions each carry constraints a grep will miss.
 
 Flow topology is static within each `graph-def`. The cluster render graph names
 the interest and render procs, their `step-fn`s, bounded channels, and `conns`.
