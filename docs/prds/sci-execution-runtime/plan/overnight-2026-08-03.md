@@ -56,6 +56,23 @@ own source for is the known integration-bug generator.
    GB → 384 MB), default root reset and rebuilt from current source,
    dead experiment clusters destroyed. bin/test gains bounded reaping
    via the suite-speed lane.
+6. MID-NIGHT STATE (post suite-speed + adversarial pass): tier 0 fix
+   LANDED — 586 fixtures each rebuilt the source manifest, ~23 of 36
+   minutes; now one immutable in-memory base per JVM, a branch per
+   test (c2857ae5c), measured up to 77x per namespace; clean full
+   timing comes from the quiet-window gate. The adversarial pass
+   (f87169220) CONFIRMED the codec's four read paths, the fork
+   closure, and all five fixture-isolation probes, and FILED: the
+   process work launcher is REPLACED AND STOPPED by every cluster
+   start (blocker — cluster B's boot kills A's accepted work; fix =
+   per-cluster launcher, queued first after history-unblock releases
+   cluster.clj); two render consumers silently (first) an overlapping
+   shapes match (feeds render step 3); one positional schema
+   extraction remains; co-hosted clusters share one unbounded heap and
+   the compute pool has no per-cluster fairness (ruling #51 census,
+   filed). Blob threshold 343 is UNDER REVIEW — the derivation may
+   have omitted the window row stored beside every blob and the settle
+   fsync; follow-up running before acceptance.
 
 Written 2026-08-02 night, after a session that landed 100+ commits. This
 is the ordered work for an overnight run where lanes can go SLOWER and
