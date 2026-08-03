@@ -4,15 +4,19 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.tools.build.api :as b])
-  (:import [java.nio.file AtomicMoveNotSupportedException Files
-            StandardCopyOption]
+  (:import [java.io RandomAccessFile]
+           [java.nio.file AtomicMoveNotSupportedException FileAlreadyExistsException
+            Files StandardCopyOption]
            [java.security MessageDigest]))
 
-(def cache-dir "target/dev-dependency-classes")
-(def staging-dir "target/dev-dependency-classes.next")
+(def cache-root "target/dev-dependency-classes")
+(def staging-root "target/dev-dependency-classes.next")
 (def result-file "target/dev-dependency-cache-result.edn")
+(def selection-file "target/dev-dependency-cache-current.edn")
+(def process-reference-root "target/dev-dependency-cache-processes")
+(def lock-file "target/dev-dependency-cache.lock")
 (def manifest-file "META-INF/seon-dev-cache.edn")
-(def cache-version 2)
+(def cache-version 3)
 
 (defn- canonical-file
   [path]
@@ -20,8 +24,8 @@
 
 (defn- cached-path?
   [path]
-  (= (.getCanonicalPath (canonical-file cache-dir))
-     (.getCanonicalPath (canonical-file path))))
+  (.startsWith (.toPath (canonical-file path))
+               (.toPath (canonical-file cache-root))))
 
 (defn- uncached-classpath
   [basis]
@@ -124,7 +128,7 @@
        (compile (symbol namespace-name#)))))
 
 (defn- run-child!
-  [basis form failure-message]
+  [basis form failure-message rejected-path]
   (let [classpath (str/join java.io.File/pathSeparator
                             (uncached-classpath basis))
         command (into ["java"]
@@ -140,28 +144,30 @@
                 {:seon.dev-cache/exit (:exit process)
                  :seon.dev-cache/out (:out process)
                  :seon.dev-cache/err (:err process)
-                 :seon.dev-cache/rejected staging-dir})))
+                 :seon.dev-cache/rejected rejected-path})))
     process))
 
 (defn- run-build!
-  [basis]
+  [basis staging-dir]
   (let [staging (.getCanonicalPath (canonical-file staging-dir))
         result (.getCanonicalPath (canonical-file result-file))
         discovery (discovery-form (dependency-containers basis) result)]
     (run-child! basis discovery
-                "Development dependency-cache discovery failed.")
+                "Development dependency-cache discovery failed."
+                staging)
     (when-not (.isFile (io/file result))
       (throw
        (ex-info "Development dependency-cache discovery wrote no result."
                 {:seon.dev-cache/result result})))
     (let [rows (edn/read-string (slurp result))]
       (run-child! basis (compile-form rows staging)
-                  "Development dependency-cache compilation failed.")
+                  "Development dependency-cache compilation failed."
+                  staging)
       rows)))
 
 (defn- loader-class
-  [namespace-symbol]
-  (io/file staging-dir
+  [directory namespace-symbol]
+  (io/file directory
            (str (-> (str namespace-symbol)
                     clojure.core/munge
                     (str/replace "." "/"))
@@ -221,10 +227,10 @@
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- validate!
-  [rows]
+  [directory rows]
   (doseq [{namespace-symbol :seon.dev-cache/namespace
            source-url :seon.dev-cache/source-url} rows
-          :let [class-file (loader-class namespace-symbol)
+          :let [class-file (loader-class directory namespace-symbol)
                 source-connection (.openConnection (java.net.URL. source-url))
                 source-mtime (.getLastModified source-connection)]]
     (when-not (.isFile class-file)
@@ -237,21 +243,22 @@
                        :seon.dev-cache/class-mtime (.lastModified class-file)
                        :seon.dev-cache/source-mtime
                        source-mtime}))))
-  (let [first-party-root (io/file staging-dir "seon")]
+  (let [first-party-root (io/file directory "seon")]
     (when (and (.exists first-party-root)
                (some #(str/ends-with? (.getName ^java.io.File %)
                                       "__init.class")
                      (file-seq first-party-root)))
       (throw (ex-info "The dependency cache contains first-party classes."
-                      {:seon.dev-cache/rejected staging-dir})))))
+                      {:seon.dev-cache/rejected directory})))))
 
 (defn- write-manifest!
-  [rows digest project-source-digest duration-ms]
-  (let [manifest (io/file staging-dir manifest-file)]
+  [directory rows digest cache-digest project-source-digest duration-ms]
+  (let [manifest (io/file directory manifest-file)]
     (.mkdirs (.getParentFile manifest))
     (spit manifest
-            (str (pr-str {:seon.dev-cache/version cache-version
+          (str (pr-str {:seon.dev-cache/version cache-version
                         :seon.dev-cache/digest digest
+                        :seon.dev-cache/cache-digest cache-digest
                         :seon.dev-cache/project-digest project-source-digest
                         :seon.dev-cache/namespaces
                         (mapv :seon.dev-cache/namespace rows)
@@ -260,87 +267,273 @@
                "\n"))))
 
 (defn- read-manifest
-  []
-  (let [manifest (io/file cache-dir manifest-file)]
+  [directory]
+  (let [manifest (io/file directory manifest-file)]
     (when (.isFile manifest)
       (try
         (edn/read-string (slurp manifest))
         (catch Throwable _
           nil)))))
 
-(defn- current-cache
-  []
-  (when-let [manifest (read-manifest)]
+(defn- hex-digest
+  [values]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (doseq [value values]
+      (digest-bytes! digest (str value)))
+    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+
+(defn- cache-identity
+  [dependency-digest project-source-digest]
+  (hex-digest [cache-version dependency-digest project-source-digest]))
+
+(defn- cache-directory
+  [cache-digest]
+  (canonical-file (io/file cache-root cache-digest)))
+
+(defn- valid-cache
+  [directory expected-project-digest]
+  (when-let [manifest (read-manifest directory)]
     (try
       (when (and (= cache-version (:seon.dev-cache/version manifest))
-                 (= (project-digest)
+                 (= (.getName ^java.io.File (canonical-file directory))
+                    (:seon.dev-cache/cache-digest manifest))
+                 (= expected-project-digest
                     (:seon.dev-cache/project-digest manifest))
                  (= (sha-256 (:seon.dev-cache/sources manifest))
                     (:seon.dev-cache/digest manifest))
                  (every?
                   (fn [namespace-symbol]
-                    (.isFile
-                     (io/file cache-dir
-                              (str (-> (str namespace-symbol)
-                                       clojure.core/munge
-                                       (str/replace "." "/"))
-                                   "__init.class"))))
+                    (.isFile (loader-class directory namespace-symbol)))
                   (:seon.dev-cache/namespaces manifest)))
         manifest)
       (catch Throwable _
         nil))))
 
-(defn- admit!
+(defn- atomic-write-edn!
+  [path value]
+  (let [target (canonical-file path)
+        parent (.getParentFile target)
+        candidate (io/file parent (str (.getName target) "." (random-uuid)))]
+    (.mkdirs parent)
+    (try
+      (spit candidate (str (pr-str value) "\n"))
+      (try
+        (Files/move (.toPath candidate) (.toPath target)
+                    (into-array StandardCopyOption
+                                [StandardCopyOption/ATOMIC_MOVE
+                                 StandardCopyOption/REPLACE_EXISTING]))
+        (catch AtomicMoveNotSupportedException _
+          (Files/move (.toPath candidate) (.toPath target)
+                      (into-array StandardCopyOption
+                                  [StandardCopyOption/REPLACE_EXISTING]))))
+      value
+      (finally
+        (Files/deleteIfExists (.toPath candidate))))))
+
+(defn- selected-cache
   []
-  (let [source (.toPath (canonical-file staging-dir))
-        target (.toPath (canonical-file cache-dir))]
-    (b/delete {:path cache-dir})
+  (try
+    (when-let [selection (when (.isFile (io/file selection-file))
+                           (edn/read-string (slurp selection-file)))]
+      (let [directory (canonical-file (:seon.dev-cache/path selection))]
+        (when (= (.getCanonicalPath (canonical-file cache-root))
+                 (.getCanonicalPath (.getParentFile directory)))
+          selection)))
+    (catch Throwable _
+      nil)))
+
+(defn- current-cache
+  []
+  (let [project-source-digest (project-digest)]
+    (when-let [selection (selected-cache)]
+      (let [directory (canonical-file (:seon.dev-cache/path selection))]
+        (when-let [manifest (valid-cache directory project-source-digest)]
+          {:seon.dev-cache/directory directory
+           :seon.dev-cache/manifest manifest})))))
+
+(defn- admit!
+  [staging directory]
+  (let [source (.toPath (canonical-file staging))
+        target (.toPath (canonical-file directory))]
+    (.mkdirs (.getParentFile (canonical-file directory)))
     (try
       (Files/move source target
                   (into-array StandardCopyOption
                               [StandardCopyOption/ATOMIC_MOVE]))
       (catch AtomicMoveNotSupportedException _
-        (Files/move source target (make-array StandardCopyOption 0))))))
+        (Files/move source target (make-array StandardCopyOption 0)))
+      (catch FileAlreadyExistsException _
+        nil))))
 
-(defn refresh
-  "Rebuild the directory-source dependency cache reached by seon.artifact."
-  [_]
+(defn- cache-result
+  [directory manifest status]
+  {:seon.dev-cache/digest (:seon.dev-cache/cache-digest manifest)
+   :seon.dev-cache/source-digest (:seon.dev-cache/digest manifest)
+   :seon.dev-cache/namespaces
+   (count (:seon.dev-cache/namespaces manifest))
+   :seon.dev-cache/status status
+   :seon.dev-cache/path (.getCanonicalPath ^java.io.File directory)})
+
+(defn- select-cache!
+  [directory manifest]
+  (atomic-write-edn!
+   selection-file
+   {:seon.dev-cache/digest (:seon.dev-cache/cache-digest manifest)
+    :seon.dev-cache/path (.getCanonicalPath ^java.io.File directory)}))
+
+(defn- with-cache-lock
+  [transition]
+  (let [lock-path (canonical-file lock-file)]
+    (.mkdirs (.getParentFile lock-path))
+    (with-open [file (RandomAccessFile. lock-path "rw")
+                channel (.getChannel file)
+                _ (.lock channel)]
+      (transition))))
+
+(defn- refresh!
+  []
   (let [started (System/nanoTime)
         basis (b/create-basis {:project "deps.edn" :aliases [:dev]})
-        project-source-digest (project-digest)]
-    (b/delete {:path staging-dir})
+        project-source-digest (project-digest)
+        staging (str staging-root "/" (random-uuid))]
     (b/delete {:path result-file})
-    (.mkdirs (io/file staging-dir))
+    (.mkdirs (io/file staging))
     (println "seon cache: discovering the dependency closure")
     (flush)
-    (let [rows (run-build! basis)
-          digest (sha-256 rows)
-          duration-ms (long (/ (- (System/nanoTime) started) 1000000))]
-      (println "seon cache: compiled" (count rows) "dependency namespaces")
-      (flush)
-      (validate! rows)
-      (write-manifest! rows digest project-source-digest duration-ms)
-      (admit!)
-      (let [result {:seon.dev-cache/digest digest
-                    :seon.dev-cache/namespaces (count rows)
-                    :seon.dev-cache/duration-ms duration-ms
-                    :seon.dev-cache/path cache-dir}]
-        (prn result)
-        result))))
+    (try
+      (let [rows (run-build! basis staging)
+            dependency-digest (sha-256 rows)
+            cache-digest (cache-identity dependency-digest
+                                         project-source-digest)
+            directory (cache-directory cache-digest)
+            duration-ms (long (/ (- (System/nanoTime) started) 1000000))]
+        (println "seon cache: compiled" (count rows) "dependency namespaces")
+        (flush)
+        (validate! staging rows)
+        (write-manifest! staging rows dependency-digest cache-digest
+                         project-source-digest duration-ms)
+        (admit! staging directory)
+        (let [manifest (or (valid-cache directory project-source-digest)
+                           (throw
+                            (ex-info
+                             "The immutable dependency cache is invalid."
+                             {:seon.dev-cache/path
+                              (.getCanonicalPath directory)})))]
+          (select-cache! directory manifest)
+          (cache-result directory manifest :rebuilt)))
+      (finally
+        (b/delete {:path staging})))))
+
+(defn refresh
+  "Publish a new immutable cache for the dependency closure."
+  [_]
+  (let [result (with-cache-lock refresh!)]
+    (prn result)
+    result))
 
 (defn ensure-cache
   "Reuse the current dependency cache, or rebuild it when inputs changed."
   [_]
-  (if-let [manifest (current-cache)]
-    (let [result {:seon.dev-cache/digest
-                  (:seon.dev-cache/digest manifest)
-                  :seon.dev-cache/namespaces
-                  (count (:seon.dev-cache/namespaces manifest))
-                  :seon.dev-cache/status :current
-                  :seon.dev-cache/path cache-dir}]
-      (prn result)
-      result)
-    (do
-      (println "seon cache: inputs changed; rebuilding")
-      (flush)
-      (assoc (refresh nil) :seon.dev-cache/status :rebuilt))))
+  (let [result
+        (with-cache-lock
+          #(if-let [{:seon.dev-cache/keys [directory manifest]}
+                    (current-cache)]
+             (cache-result directory manifest :current)
+             (do
+               (println "seon cache: inputs changed; rebuilding")
+               (flush)
+               (refresh!))))]
+    (prn result)
+    result))
+
+(defn- process-reference-files
+  []
+  (let [directory (io/file process-reference-root)]
+    (if (.isDirectory directory)
+      (->> (.listFiles directory)
+           (filter #(.isFile ^java.io.File %))
+           (sort-by #(.getName ^java.io.File %)))
+      [])))
+
+(defn- live-process-reference?
+  [record]
+  (try
+    (let [pid (:seon.dev.process/pid record)
+          start-instant (:seon.dev.process/start-instant record)
+          cache-path (:seon.dev.process/cache-path record)
+          optional (java.lang.ProcessHandle/of (long pid))]
+      (when (and (pos-int? pid) (string? start-instant)
+                 (string? cache-path)
+                 (= (.getCanonicalPath (canonical-file cache-root))
+                    (.getCanonicalPath
+                     (.getParentFile (canonical-file cache-path))))
+                 (.isPresent optional))
+        (let [handle (.get optional)
+              observed (.startInstant (.info handle))]
+          (and (.isAlive handle)
+               (.isPresent observed)
+               (= start-instant (str (.get observed)))))))
+    (catch Throwable _
+      false)))
+
+(defn- read-live-process-references!
+  []
+  (reduce
+   (fn [result file]
+     (let [record (try (edn/read-string (slurp file))
+                       (catch Throwable _ nil))]
+       (if (live-process-reference? record)
+         (conj result record)
+         (do
+           (Files/deleteIfExists (.toPath ^java.io.File file))
+           result))))
+   []
+   (process-reference-files)))
+
+(defn- cache-directories
+  []
+  (let [root (io/file cache-root)]
+    (if (.isDirectory root)
+      (->> (.listFiles root)
+           (filter #(.isDirectory ^java.io.File %))
+           (remove #(Files/isSymbolicLink (.toPath ^java.io.File %)))
+           (filter #(some? (read-manifest %)))
+           (sort-by #(.getName ^java.io.File %)))
+      [])))
+
+(defn reap
+  "Delete only immutable caches unreferenced by a recorded live process."
+  [_]
+  (let [result
+        (with-cache-lock
+          (fn []
+            (let [references (read-live-process-references!)
+                  live-paths
+                  (into #{}
+                        (map #(-> (:seon.dev.process/cache-path %)
+                                  canonical-file
+                                  .getCanonicalPath))
+                        references)
+                  selected-path (some-> (selected-cache)
+                                        :seon.dev-cache/path
+                                        canonical-file
+                                        .getCanonicalPath)
+                  protected-paths (cond-> live-paths
+                                    selected-path (conj selected-path))
+                  reaped
+                  (into []
+                        (comp
+                         (remove #(contains? protected-paths
+                                             (.getCanonicalPath
+                                              ^java.io.File %)))
+                         (map (fn [directory]
+                                (let [path (.getCanonicalPath
+                                            ^java.io.File directory)]
+                                  (b/delete {:path path})
+                                  path))))
+                        (cache-directories))]
+              {:seon.dev-cache/live-processes (count references)
+               :seon.dev-cache/protected (count protected-paths)
+               :seon.dev-cache/reaped reaped})))]
+    (prn result)
+    result))

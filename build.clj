@@ -56,7 +56,7 @@
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- initialization-pages
-  []
+  [cache-path]
   (let [output (.getCanonicalPath (io/file initialization-build-file))
         _ (.mkdirs (.getParentFile (io/file output)))
         _ (b/delete {:path output})
@@ -90,7 +90,12 @@
          "(shutdown-agents))")
         result
         (checked-process!
-         {:command-args ["clojure" "-M:dev" "-e" expression]
+         {:command-args
+          ["clojure"
+           "-Sdeps"
+           (pr-str {:aliases
+                    {:seon-cache {:extra-paths [cache-path]}}})
+           "-M:dev:seon-cache" "-e" expression]
           :out :capture
           :err :capture}
          "Fresh initialization-page generation failed")]
@@ -155,11 +160,12 @@
 (defn uber
   "Build the standalone fresh-system artifact."
   [_]
-  (let [_ (dev-cache/ensure-cache nil)
-        pages (initialization-pages)]
+  (let [cache (dev-cache/ensure-cache nil)
+        cache-path (:seon.dev-cache/path cache)
+        pages (initialization-pages cache-path)]
     (b/delete {:path class-dir})
     (b/delete {:path artifact-file})
-    (b/copy-dir {:src-dirs [dev-cache/cache-dir "src" "resources"]
+    (b/copy-dir {:src-dirs [cache-path "src" "resources"]
                  :target-dir class-dir})
     (b/copy-file {:src default-manifest-path
                   :target (str class-dir "/" default-manifest-path)})

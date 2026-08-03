@@ -90,8 +90,7 @@
   ;; writer-calibrated heap; they ride every -M invocation that loads the
   ;; database closure.
   :dev
-  {:extra-paths ["target/dev-dependency-classes"]
-   :jvm-opts ["--add-modules" "jdk.incubator.vector"
+  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
               "-XX:G1PeriodicGCInterval=30000"]}
@@ -106,8 +105,9 @@
   ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
   ;; in-memory Datahike, seconds per cycle.
   :test
-  {:extra-paths ["test" "script" "target/dev-dependency-classes"]
-   :extra-deps {;; JVM-only testbed dependency; the Seon fork is published
+  {:extra-paths ["test" "script" "."]
+   :extra-deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
+                ;; JVM-only testbed dependency; the Seon fork is published
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
