@@ -474,10 +474,17 @@ database at its parsed source position (`src/seon/db.clj:172-248`;
 
 ```clojure
 ;; relation / scalar / collection / single-tuple — chosen by :find shape:
-(db/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] database)   ;=> #{["A" 1] …}
-(db/q '[:find ?n . :where [?e ::name ?n]] database)                   ;=> "A"  (one scalar)
-(db/q '[:find [?n ...] :where [?e ::name ?n]] database)               ;=> ["A" "B"]
-(db/q '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] database) ;=> ["A" 1]
+(db/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] database)
+#{["A" 1] ["B" 2]}
+
+(db/q '[:find ?n . :where [?e ::name ?n]] database)
+"A"
+
+(db/q '[:find [?n ...] :where [?e ::name ?n]] database)
+["A" "B"]
+
+(db/q '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] database)
+["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
 (db/q '[:find [?n ...] :in $ ?min

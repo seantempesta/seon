@@ -21,7 +21,7 @@ immutable database value to `d/q`. Reads are synchronous.
 (d/q '[:find (count ?e) (avg ?score) (max ?score)
        :where [?e ::score ?score]]
      db)
-;; => [[3 30.0 42.0]]
+[[3 30.0 42.0]]
 ```
 
 Built-ins: `count`, `count-distinct`, `sum`, `avg`, `min`, `max`, `median`,
@@ -120,7 +120,7 @@ must declare which vars unify with the outer query.
 (d/q '[:find (pull ?e [::name {::parent [::name]}])
        :where [?e ::name _]]
      db)
-;; => [[{::name "child" ::parent {::name "parent"}}]]
+[[{::name "child" ::parent {::name "parent"}}]]
 
 ;; wildcard everything for matched entities:
 (d/q '[:find (pull ?e [*]) :where [?e ::id _]] db)
