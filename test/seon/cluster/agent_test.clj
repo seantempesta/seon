@@ -30,6 +30,7 @@
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
+            [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
@@ -40,6 +41,8 @@
 (set! *warn-on-reflection* true)
 
 (def ^:dynamic *work-launcher* nil)
+(def ^:dynamic *context-channel* nil)
+(def ^:dynamic *stream-channel* nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture — canonical attributes, the handle, the source-driven evaluator
@@ -81,15 +84,56 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (let [launcher
+      (let [ctx (sci.eval/cluster-ctx @connection connection)
+            launcher
             (seon.flow/start-work-launcher!
              {::seon.flow/configuration
               {:seon.config.flow.compute/queue-depth 10
-               :seon.config.flow.compute/concurrency 3}})]
+               :seon.config.flow.compute/concurrency 3}})
+            context-channel (async/chan)
+            stream-channel (async/chan (async/sliding-buffer 1))
+            render-channel (async/chan (async/sliding-buffer 1))
+            pages-channel (async/chan (async/sliding-buffer 1))
+            completion (async/promise-chan)
+            graph
+            (flow/create-flow
+             {:procs
+              {:seon.render.web/render
+               {:proc
+                (seon.flow/var-process
+                 #'web/render-step :io
+                 {:seon.render.web/render-channel render-channel
+                  :seon.render/context-channel context-channel
+                  :seon.render.web/pages-channel pages-channel
+                  :seon.render.web/registration (atom {})
+                  :seon.render.web/latest-packages (atom {})
+                  :seon.render.web/completion completion
+                  :seon.render.web/root-agent-id "root"
+                  :seon.cluster.loop/cluster
+                  {:seon.store/branch-connection connection
+                   :seon.cluster.loop/stream-channel stream-channel
+                   :seon.sci.admit/caps
+                   {:seon.config.eval.result/max-depth 6
+                    :seon.config.eval.result/max-collection 8
+                    :seon.config.eval.result/max-string 4096
+                    :seon.config.eval.result/max-nodes 256}
+                   :seon.sci.eval/ctx ctx
+                   :seon.config.eval/time-limit-ms 2000
+                   :seon.config/on-core-error :panic
+                   :seon.cluster.run/process process}})}}
+              :conns []})
+            {:keys [report-chan error-chan]} (flow/start graph)]
+        (async/go-loop [] (when (async/<! report-chan) (recur)))
+        (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
-          (binding [*work-launcher* launcher]
-            (body connection (sci.eval/cluster-ctx @connection)))
+          (flow/resume graph)
+          (binding [*work-launcher* launcher
+                    *context-channel* context-channel
+                    *stream-channel* stream-channel]
+            (body connection ctx))
           (finally
+            (flow/stop graph)
+            (async/<!! completion)
             (seon.flow/stop-work-launcher! launcher)))))))
 
 (defn- handle
@@ -100,6 +144,8 @@
         @connection)
    :seon.flow/work-launcher *work-launcher*
    :seon.sci.eval/ctx ctx
+   :seon.render/context-channel *context-channel*
+   :seon.cluster.loop/stream-channel *stream-channel*
    :seon.cluster.run/process process
    ;; replaced per agent by arm! — present so the handle validates
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
@@ -304,6 +350,54 @@
                            ":seon.render/context-channel"))
         (is (schema/valid-candidate-value? :seon.error/value failure)
             "the missing input is already the loop's admitted error shape")))))
+
+(deftest prompt-refusals-stop-at-the-existing-episode-cap
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            requests (atom [])
+            events (database-events connection)
+            cluster (dissoc (handle connection ctx)
+                            :seon.render/context-channel)]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id "prompt-refusal-cap"}
+          (config-row "prompt-refusal-cap"
+                      {:seon.config.run/max-episode-runs 3})])
+        (try
+          (with-redefs [ai/complete
+                        (recording-completer
+                         requests
+                         (constantly "unused"))]
+            (let [entry
+                  (agent/arm!
+                   {:seon.cluster.loop/cluster cluster
+                    :seon.cluster.agent/id "prompt-refusal-cap"
+                    :seon.cluster.agent/routing routing})]
+              (outside-trigger! connection "prompt-refusal-cap"
+                                "prompt-refusal-message" "derive context")
+              (async/offer! (:seon.cluster.wake/channel entry) ::wake)
+              (await-quiescence! events ["prompt-refusal-cap"] 0)
+              (is (empty? @requests)
+                  "no provider call occurs without a valid prompt")
+              (is (= 3 (work/episode-runs @connection
+                                          "prompt-refusal-cap")))
+              (is (= 3 (or (db/q '[:find (count ?error) .
+                                   :where
+                                   [?error :seon.error/kind
+                                    :seon.cluster.prompt/refused]]
+                                 @connection)
+                           0))
+                  "each bounded turn records one flat prompt refusal")
+              (is (nil? (work/next-agent-work
+                         @connection
+                         {:seon.cluster.agent/id "prompt-refusal-cap"
+                          :seon.cluster.run/process process
+                          :seon.cluster.work/now (Date.)}))
+                  "the existing episode cap derives no fourth turn")))
+          (finally
+            (stop-database-events! connection events)
+            (disarm-all! routing)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ruling #22 — lint refusals continue the episode without a message

@@ -125,3 +125,19 @@ no bound.
 Focused proof before unrelated schema-lane churn: `bin/test
 seon.cluster.agent-test` passed 14 tests / 100 assertions / 0 failures / 0
 errors.
+
+## Completion-totality verification — 2026-08-03
+
+The later `lint-refusals-continue-the-episode-until-the-cap` hang did not expose
+a completion-delivery hole. The retained ThreadMXBean dump omitted virtual
+threads; a virtual-thread-aware `jcmd Thread.dump_to_file -format=json` dump
+showed the active Flow turn inside `call-turn` → `refused!` → `db/transact!`.
+The turn had not terminated, so `disarm!` correctly waited for its ready permit.
+
+Source inspection verifies the permit remains total at
+`src/seon/cluster/agent.clj:239`: every transform branch after acquiring the
+permit is inside one `try`, and the one `finally` republishes readiness after
+settled, refused, errored, or interrupted termination. The actual defect was a
+pre-provider prompt refusal that never closed its run and therefore re-entered
+`:call` indefinitely. That separate refusal-cap repair leaves the completion
+mechanism unchanged.

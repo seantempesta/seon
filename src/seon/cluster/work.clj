@@ -455,25 +455,41 @@
                   [closed-tx opened-tx run-id]))
        last))
 
-(defn- lint-refusal-continuation-trigger
-  "The latest closed run's trigger when any receipt was lint-refused.
+(defn- pre-provider-refusal?
+  "True when a run recorded an error before any model attempt existed."
+  [db run]
+  (and
+   (some? (db/q '[:find ?error .
+                  :in $ ?run
+                  :where [?error :seon.error/run ?run]]
+                db run))
+   (nil? (db/q '[:find ?attempt .
+                :in $ ?run
+                :where [?attempt :seon.ai.attempt/run ?run]]
+              db run))))
+
+(defn- refusal-continuation-trigger
+  "The latest closed run's trigger when work was refused.
 
   Presence derives the continuation below the existing episode cap. The
   trigger identity is reused; no message, timer, cursor, or retry fact is
   created. Selecting the latest closed run before examining its receipts
-  prevents an older refusal from resurfacing after a later successful turn."
+  prevents an older refusal from resurfacing after a later successful turn.
+  A lint refusal is present in a terminal receipt. A prompt/capture refusal is
+  structurally earlier: the run has a durable error fact and no model attempt."
   [db agent-id]
   (when-not (episode-capped? db agent-id)
     (when-let [[run _run-id _opened-tx _closed-tx]
                (latest-closed-run db agent-id)]
-      (when (some lint-refusal-receipt?
-                  (db/q '[:find [(pull ?receipt
-                                  [:seon.cluster.eval/result-edn]) ...]
-                         :in $ ?run
-                         :where
-                         [?receipt :seon.cluster.eval/run ?run]
-                         [?receipt :seon.cluster.eval/result-edn _]]
-                       db run))
+      (when (or (pre-provider-refusal? db run)
+                (some lint-refusal-receipt?
+                      (db/q '[:find [(pull ?receipt
+                                      [:seon.cluster.eval/result-edn]) ...]
+                             :in $ ?run
+                             :where
+                             [?receipt :seon.cluster.eval/run ?run]
+                             [?receipt :seon.cluster.eval/result-edn _]]
+                           db run)))
         (db/q '[:find ?trigger-id .
                :in $ ?run
                :where
@@ -568,7 +584,7 @@
 
       :else
       (when-let [trigger-id
-                 (or (lint-refusal-continuation-trigger db agent-id)
+                 (or (refusal-continuation-trigger db agent-id)
                      (:seon.cluster.message/id
                       (openable-trigger db agent-id)))]
         {:seon.cluster.work/situation :open

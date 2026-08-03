@@ -1218,24 +1218,42 @@
                                  {:seon.cluster.agent/id agent-id
                                   :seon.cluster.run/id run-id
                                   :seon.ai/partial snapshot})))
-          fail! (fn [failure]
-                  ;; ONE transaction: the run closes and WHY it closed
-                  ;; lands with it. This terminal FACT is also the
-                  ;; stream terminal: its render wake replaces any
-                  ;; transient partial. Before this the error value
-                  ;; evaporated — the drive sat claimed-with-no-plan
-                  ;; for two minutes and the operator had to reproduce
-                  ;; the call by hand to learn it was a missing key.
-                  (db/transact!
-                   connection
-                   (into [[:db/add [:seon.cluster.run/id run-id]
-                           :seon.cluster.run/error
-                           (:seon.error/message failure)]]
-                         (run/close-tx
-                          {:seon.cluster.run/id run-id
-                           :seon.cluster.run/process process
-                           :seon.cluster.run/closed-at now})))
-                  (report :error 0))
+          fail! (fn fail!
+                  ([failure]
+                   (fail! failure false))
+                  ([failure record-refusal?]
+                   ;; ONE transaction: the run closes and WHY it closed
+                   ;; lands with it. A pre-provider refusal also commits its
+                   ;; error fact here, so the existing episode derivation can
+                   ;; distinguish it structurally from a failed model attempt.
+                   ;; This terminal FACT is also the stream terminal: its
+                   ;; render wake replaces any transient partial.
+                   (let [db @connection
+                         recording
+                         (when record-refusal?
+                           (error-tx
+                            cluster db failure now
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-id}))
+                         outcome
+                         (db/transact!
+                          connection
+                          (into (vec recording)
+                                (cons
+                                 [:db/add [:seon.cluster.run/id run-id]
+                                  :seon.cluster.run/error
+                                  (:seon.error/message failure)]
+                                 (run/close-tx
+                                  {:seon.cluster.run/id run-id
+                                   :seon.cluster.run/process process
+                                   :seon.cluster.run/closed-at now}))))]
+                     (when (and record-refusal?
+                                (:seon.error/kind outcome))
+                       (terminal-settlement-fault!
+                        cluster
+                        "Pre-provider refusal settlement was refused."
+                        {::settlement outcome}))
+                     (report :error 0))))
           freeze!
           (fn [completion]
             ;; Freeze the reply's exact ordered source. Static admission is
@@ -1319,12 +1337,12 @@
           ;; text and alone places that string in `:seon.ai/prompt` —
           ;; the bytes the capture recorded are the bytes sent.
           text (:seon.cluster.prompt/text rendered)]
-      (if (refused! cluster captured now
-                    {:seon.cluster.agent/id agent-id
-                     :seon.cluster.run/id run-id})
-        ;; a refused capture ends the turn exactly as a refused plan
-        ;; freeze does — NO provider call without its durable evidence
-        (report :error 0)
+      (if (:seon.error/kind captured)
+        ;; A refused prompt/capture closes this run and records the refusal.
+        ;; The next pass derives correction from those facts below the ONE
+        ;; episode cap; at the cap it derives no work. No provider call occurs
+        ;; without durable prompt evidence.
+        (fail! captured true)
         (loop [target primary
                ordinal (attempts @connection run-id)
                ;; ABSENT on the primary and on every backoff retry;
