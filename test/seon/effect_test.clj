@@ -1,9 +1,12 @@
 (ns seon.effect-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.async :as async]
+            [clojure.test :refer [deftest is testing]]
+            [datahike.core :as datahike]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.flow :as flow]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -45,14 +48,68 @@
                (str (:name handler-meta)))}])))
 
 (defn- request-context
-  [connection]
-  {:seon.store/branch-connection connection
-   :seon.cluster.run/id "effect-run"
-   :seon.cluster.run.form/ordinal 3
-   :seon.boot/cluster-name "default"
-   :seon.sci.admit/caps (config/result-caps (config/defaults))
-   :seon.config/on-core-error :record
-   :seon.effect/counter (atom -1)})
+  ([connection]
+   (request-context connection nil))
+  ([connection launcher]
+   {:seon.store/branch-connection connection
+    :seon.cluster.agent/id "effect-agent"
+    :seon.cluster.run/id "effect-run"
+    :seon.cluster.run.form/ordinal 3
+    :seon.boot/cluster-name "default"
+    :seon.flow/work-launcher launcher
+    :seon.sci.admit/caps (config/result-caps (config/defaults))
+    :seon.config/on-core-error :record
+    :seon.effect/counter (atom -1)}))
+
+(deftest background-request-returns-its-notifying-receipt-and-settles-once
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.config/cluster "default"}
+        {:seon.cluster.agent/id "effect-agent"}
+        {:seon.cluster.run/id "effect-run"
+         :seon.cluster.run/agent
+         [:seon.cluster.agent/id "effect-agent"]}])
+      (install-capability! connection)
+      (let [events (async/chan 4)
+            listener-key (random-uuid)
+            _ (datahike/listen! connection listener-key #(async/put! events %))
+            launcher
+            (flow/start-work-launcher!
+             {::flow/configuration
+              {:seon.config.flow.compute/queue-depth 1
+               :seon.config.flow.compute/concurrency 1
+               :seon.config.flow.io/queue-depth 1
+               :seon.config.flow.io/concurrency 1}})
+            effect-id (pr-str ["effect-run" 3 0])
+            result-ref [:seon.effect/id effect-id]]
+        (try
+          (is (= result-ref
+                 (binding [effect/*context*
+                           (request-context connection launcher)]
+                   (effect/request!
+                    #'capability-owner
+                    {:seon.effect-test/value 7}
+                    {:seon.effect/background? true}))))
+          (test-support/await-event!
+           events
+           ::background-effect-settled
+           #(some (fn [datom]
+                    (= :seon.effect/to (:a datom)))
+                  (:tx-data %)))
+          (let [receipt
+                (db/pull @connection '[*]
+                         [:seon.effect/id effect-id])]
+            (is (= [:seon.cluster.agent/id "effect-agent"]
+                   (:seon.effect/to receipt)))
+            (is (nil? (:seon.effect/notify receipt)))
+            (is (int? (:seon.effect/duration-ms receipt)))
+            (is (not (neg? (:seon.effect/duration-ms receipt)))))
+          (finally
+            (datahike/unlisten! connection listener-key)
+            (async/close! events)
+            (flow/stop-work-launcher! launcher)))))))
 
 (deftest capability-reachability-is-a-database-query
   (test-support/with-database
