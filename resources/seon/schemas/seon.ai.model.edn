@@ -1,0 +1,136 @@
+{:seon.ai.model/id
+ [:and {:seon.db/identity true} :seon.config.ai/model]
+
+ :seon.ai.model/provider :seon.db/ref
+ :seon.ai.model/provider-id
+ [:string {:min 1 :seon.db/identity true}]
+ :seon.ai.model/openai-chat-completions [:= true]
+ :seon.ai.model/output-token-wire-key [:string {:min 1}]
+
+ :seon.ai.model/context-window-tokens [:int {:min 1}]
+ :seon.ai.model/max-output-tokens :seon.ai/max-tokens
+ :seon.ai.model/input-usd-per-mtok [:double {:min 0.0}]
+ :seon.ai.model/output-usd-per-mtok [:double {:min 0.0}]
+ :seon.ai.model/cached-input-usd-per-mtok [:double {:min 0.0}]
+ :seon.ai.model/input-modalities [:set :keyword]
+ :seon.ai.model/thinking-dials [:set :seon.ai/thinking]
+
+ :seon.ai.model/last-tokens-per-second
+ [:double {:min 0.0 :seon.db/no-history? true}]
+ :seon.ai.model/last-latency-ms
+ [:int {:min 0 :seon.db/no-history? true}]
+ :seon.ai.model/last-used-at
+ [:and {:seon.db/no-history? true} :inst]
+
+ :seon.ai.model/deepseek-off-peak-windows [:set :seon.db/ref]
+ :seon.ai.model/deepseek-window-id
+ [:string {:min 1 :seon.db/identity true}]
+ :seon.ai.model/deepseek-utc-start [:string {:min 1}]
+ :seon.ai.model/deepseek-utc-end [:string {:min 1}]
+ :seon.ai.model/deepseek-regular-price-factor [:double {:min 0.0}]
+ :seon.ai.model/deepseek-peak-price-factor [:double {:min 0.0}]
+ :seon.ai.model/deepseek-pricing-schedule-status
+ [:enum :announced :active]
+
+ :seon.ai.model/meta-search-usd-per-kquery [:double {:min 0.0}]
+ :seon.ai.model/meta-free-requests-per-minute [:int {:min 1}]
+ :seon.ai.model/meta-free-tokens-per-minute [:int {:min 1}]
+ :seon.ai.model/meta-paid-requests-per-minute [:int {:min 1}]
+ :seon.ai.model/meta-paid-tokens-per-minute [:int {:min 1}]
+
+ :seon.ai.model/provider-entity
+ [:map
+  {:seon.db/entity true
+   :seon.render/ai seon.ai/provider-ai
+   :seon.render/html seon.ai/provider-html}
+  [:seon.ai.model/provider-id :seon.ai.model/provider-id]
+  [:seon.config.ai/endpoint :seon.config.ai/endpoint]
+  [:seon.config.ai/api-key-variable :seon.config.ai/api-key-variable]
+  [:seon.ai.model/openai-chat-completions
+   :seon.ai.model/openai-chat-completions]
+  [:seon.ai.model/output-token-wire-key
+   :seon.ai.model/output-token-wire-key]]
+
+ :seon.ai.model/deepseek-window-entity
+ [:map
+  {:seon.db/entity true}
+  [:seon.ai.model/deepseek-window-id
+   :seon.ai.model/deepseek-window-id]
+  [:seon.ai.model/deepseek-utc-start
+   :seon.ai.model/deepseek-utc-start]
+  [:seon.ai.model/deepseek-utc-end
+   :seon.ai.model/deepseek-utc-end]
+  [:seon.ai.model/deepseek-regular-price-factor
+   :seon.ai.model/deepseek-regular-price-factor]
+  [:seon.ai.model/deepseek-peak-price-factor
+   :seon.ai.model/deepseek-peak-price-factor]]
+
+ :seon.ai.model/entity
+ [:map
+  {:seon.db/entity true
+   :seon.render/ai seon.ai/model-ai
+   :seon.render/html seon.ai/model-html}
+  [:seon.ai.model/id :seon.ai.model/id]
+  [:seon.ai.model/provider :seon.ai.model/provider]
+  [:seon.ai.model/context-window-tokens
+   {:optional true}
+   :seon.ai.model/context-window-tokens]
+  [:seon.ai.model/max-output-tokens
+   {:optional true}
+   :seon.ai.model/max-output-tokens]
+  [:seon.ai.model/input-usd-per-mtok
+   {:optional true}
+   :seon.ai.model/input-usd-per-mtok]
+  [:seon.ai.model/output-usd-per-mtok
+   {:optional true}
+   :seon.ai.model/output-usd-per-mtok]
+  [:seon.ai.model/cached-input-usd-per-mtok
+   {:optional true}
+   :seon.ai.model/cached-input-usd-per-mtok]
+  [:seon.ai.model/input-modalities
+   {:optional true}
+   :seon.ai.model/input-modalities]
+  [:seon.ai.model/thinking-dials
+   {:optional true}
+   :seon.ai.model/thinking-dials]
+  [:seon.ai.model/deepseek-off-peak-windows
+   {:optional true}
+   :seon.ai.model/deepseek-off-peak-windows]
+  [:seon.ai.model/deepseek-pricing-schedule-status
+   {:optional true}
+   :seon.ai.model/deepseek-pricing-schedule-status]
+  [:seon.ai.model/meta-search-usd-per-kquery
+   {:optional true}
+   :seon.ai.model/meta-search-usd-per-kquery]
+  [:seon.ai.model/meta-free-requests-per-minute
+   {:optional true}
+   :seon.ai.model/meta-free-requests-per-minute]
+  [:seon.ai.model/meta-free-tokens-per-minute
+   {:optional true}
+   :seon.ai.model/meta-free-tokens-per-minute]
+  [:seon.ai.model/meta-paid-requests-per-minute
+   {:optional true}
+   :seon.ai.model/meta-paid-requests-per-minute]
+  [:seon.ai.model/meta-paid-tokens-per-minute
+   {:optional true}
+   :seon.ai.model/meta-paid-tokens-per-minute]
+  [:seon.ai.model/last-tokens-per-second
+   {:optional true}
+   :seon.ai.model/last-tokens-per-second]
+  [:seon.ai.model/last-latency-ms
+   {:optional true}
+   :seon.ai.model/last-latency-ms]
+  [:seon.ai.model/last-used-at
+   {:optional true}
+   :seon.ai.model/last-used-at]]
+
+ :seon.ai.model/models [:vector :seon.ai.model/entity]
+
+ :seon.ai.model/observation-request
+ [:map
+  [:seon.ai.model/id :seon.ai.model/id]
+  [:seon.ai.model/last-used-at :seon.ai.model/last-used-at]
+  [:seon.ai.model/last-latency-ms
+   {:optional true}
+   :seon.ai.model/last-latency-ms]
+  [:seon.ai/usage {:optional true} :seon.ai/usage]]}

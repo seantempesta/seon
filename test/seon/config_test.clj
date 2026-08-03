@@ -21,17 +21,116 @@
         (comp (filter vector?) (map first))
         (schema/schema-definition :seon.config/manifest)))
 
+(defn- with-default-document
+  [document body]
+  (let [directory (io/file "tmp/config-test-initialization")
+        packaged-file (io/file directory "default.edn")]
+    (.mkdirs directory)
+    (spit packaged-file (str (pr-str document) "\n"))
+    (try
+      (with-redefs [io/resource
+                    (fn [path]
+                      (when (= config/default-manifest-path path)
+                        (-> packaged-file .toURI .toURL)))]
+        (body))
+      (finally
+        (.delete packaged-file)
+        (.delete directory)))))
+
 (deftest the-default-document-has-one-canonical-complete-location
   (is (.equals "config/default.edn" config/default-manifest-path))
   (is (.isFile (io/file config/default-manifest-path)))
   (is (= dial-attributes
          (set
-          (keys
-           (edn/read-string (slurp config/default-manifest-path)))))
+          (remove
+           #{config/initialization-key}
+           (keys
+            (edn/read-string (slurp config/default-manifest-path))))))
       "the shipped EDN itself, not a second registry, covers every production attribute")
   (is (= dial-attributes
          (set (keys (config/default-decisions))))
       "the shipped document makes one decision for every registered config attribute"))
+
+(deftest shipped-initialization-admission-is-registry-derived
+  (let [base (edn/read-string (slurp config/default-manifest-path))
+        row {:seon.db.process/id "config-population-admission-test"}]
+    (testing "a declared row with exactly one declared identity is admitted"
+      (with-default-document
+        (assoc base config/initialization-key [row])
+        #(is (= [row] (config/default-population)))))
+    (testing "the reserved entry is not a sparse overlay dial"
+      (let [data
+            (test-support/refusal-data
+             #(config/compile-manifest
+               {:seon.config/manifest
+                {config/initialization-key [row]}}))]
+        (is (= ::config/initialization-not-allowed (::config/rule data)))))
+    (doseq [[label population expected-rule expected-key]
+            [["the population must be a vector"
+              row
+              ::config/invalid-initialization
+              nil]
+             ["every member must be a map"
+              ["not-a-row"]
+              ::config/invalid-initialization-row
+              nil]
+             ["keys must be qualified keywords"
+              [{:id "x"}]
+              ::config/invalid-initialization-attribute
+              :id]
+             ["unknown attributes are refused"
+              [{:seon.unknown/id "x"}]
+              ::config/unknown-initialization-attribute
+              :seon.unknown/id]
+             ["declared values are rigorously validated"
+              [{:seon.db.process/id ""}]
+              ::config/invalid-initialization-value
+              :seon.db.process/id]
+             ["a row must have an identity attribute"
+              [{:seon.config/on-core-error :panic}]
+              ::config/invalid-initialization-identity
+              nil]
+             ["a row cannot have two identity attributes"
+              [{:seon.db.process/id "x"
+                :seon.config/cluster "x"}]
+              ::config/invalid-initialization-identity
+              nil]]]
+      (testing label
+        (let [data
+              (with-default-document
+                (assoc base config/initialization-key population)
+                #(test-support/refusal-data config/default-population))]
+          (is (= expected-rule (::config/rule data)))
+          (when expected-key
+            (is (= expected-key (::config/key data)))))))))
+
+(deftest initialization-rows-apply-query-and-converge-with-the-config-row
+  (let [base (edn/read-string (slurp config/default-manifest-path))
+        process-id "seon.db.process/config-population-test"
+        document
+        (assoc base config/initialization-key
+               [{:seon.db.process/id process-id}])]
+    (with-default-document
+      document
+      #(test-support/with-database
+         (fn [connection]
+           (let [first-result
+                 (config/apply! {:seon.config/connection connection})
+                 committed-basis (:max-tx @connection)
+                 second-result
+                 (config/apply! {:seon.config/connection connection})]
+             (is (false? (:seon.reconcile/converged? first-result)))
+             (is (= process-id
+                    (db/q
+                     '[:find ?id .
+                       :in $ ?id
+                       :where [_ :seon.db.process/id ?id]]
+                     @connection
+                     process-id)))
+             (is (true? (:seon.reconcile/converged? second-result)))
+             (is (zero? (:seon.reconcile/operations second-result)))
+             (is (= committed-basis (:max-tx @connection))
+                 "an identical config and population write no transaction")))))))
 
 (deftest packaged-defaults-use-the-same-shipped-document-authority
   (let [directory (io/file "tmp/config-test-packaged")
@@ -60,7 +159,8 @@
   (let [flat-error {:seon.error/kind :seon.db/rejected
                     :seon.error/message "injected config refusal"}
         result
-        (with-redefs [reconcile/reconcile! (fn [& _] flat-error)]
+        (with-redefs [reconcile/plan (fn [& _] [{}])
+                      db/transact! (fn [& _] flat-error)]
           (test-support/refusal-data
            #(config/apply-compiled!
              (atom :database)

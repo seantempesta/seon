@@ -876,6 +876,9 @@
   "Provider evidence projected from one completion or failure value."
   [{completion :seon.ai/completion}]
   (cond-> {}
+    (:seon.ai.model/last-latency-ms completion)
+    (assoc :seon.ai.model/last-latency-ms
+           (:seon.ai.model/last-latency-ms completion))
     (or (:seon.ai/usage completion)
         (get-in completion [:seon.error/data :seon.ai/usage]))
     (assoc :seon.ai/usage
@@ -919,7 +922,7 @@
     agent-id :seon.cluster.agent/id}]
   (let [settings (ai/settings (config/effective db cluster-name)
                               (ai/agent-overlay db agent-id))
-        targets (ai/targets settings)
+        targets (ai/targets db settings)
         primary (:seon.ai/primary targets)
         backup (:seon.ai/backup targets)
         strategy (ai/retry-strategy settings)]
@@ -949,6 +952,7 @@
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
          usage :seon.ai/usage
+         latency-ms :seon.ai.model/last-latency-ms
          settings :seon.ai/settings
          reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
@@ -997,7 +1001,17 @@
               failover-from (assoc :seon.ai.attempt/failover-from
                                    [:seon.ai.attempt/id failover-from])
               delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms))
-        outcome (db/transact! connection (conj (vec commit) row))]
+        observation-tx
+        (ai/model-observation-tx
+         db
+         (cond-> {:seon.ai.model/id (:seon.ai/model target)
+                  :seon.ai.model/last-used-at now}
+           (some? latency-ms)
+           (assoc :seon.ai.model/last-latency-ms latency-ms)
+           usage (assoc :seon.ai/usage usage)))
+        outcome
+        (db/transact! connection
+                      (into (conj (vec commit) row) observation-tx))]
     (when-not (:seon.error/kind outcome)
       (some-> commit first (dissoc :db/id)))))
 

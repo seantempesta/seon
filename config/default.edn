@@ -343,4 +343,101 @@
  ; against the one deadline a turn already carries; three seconds
  ; covers the base + one doubled wait without making a backed-off turn
  ; feel wedged.
- :seon.config.ai.retry/maximum-total-delay-ms 3000}
+ :seon.config.ai.retry/maximum-total-delay-ms 3000
+
+ ; DECLARED INITIALIZATION ROWS. Provider wire facts live only on provider
+ ; descriptor rows; model rows point to them and carry only model facts.
+ :seon.config/initialization
+ [{:seon.ai.model/provider-id "deepseek"
+   :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
+   :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
+   :seon.ai.model/openai-chat-completions true
+   :seon.ai.model/output-token-wire-key "max_tokens"}
+
+  {:seon.ai.model/provider-id "moonshot"
+   :seon.config.ai/endpoint "https://api.moonshot.ai/v1/chat/completions"
+   :seon.config.ai/api-key-variable "MOONSHOT_API_KEY"
+   :seon.ai.model/openai-chat-completions true
+   :seon.ai.model/output-token-wire-key "max_completion_tokens"}
+
+  {:seon.ai.model/provider-id "meta"
+   :seon.config.ai/endpoint "https://api.meta.ai/v1/chat/completions"
+   :seon.config.ai/api-key-variable "META_MODEL_API_KEY"
+   :seon.ai.model/openai-chat-completions true
+   :seon.ai.model/output-token-wire-key "max_tokens"}
+
+  ; Current DeepSeek prices and announced peak/off-peak schedule retrieved
+  ; 2026-08-03: docs/prds/sci-execution-runtime/research/
+  ; model-registry-deepseek-pricing-2026-08-03.md.
+  {:seon.ai.model/id "deepseek-v4-flash"
+   :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]
+   :seon.ai.model/context-window-tokens 1000000
+   :seon.ai.model/max-output-tokens 384000
+   :seon.ai.model/input-usd-per-mtok 0.14
+   :seon.ai.model/cached-input-usd-per-mtok 0.0028
+   :seon.ai.model/output-usd-per-mtok 0.28
+   :seon.ai.model/input-modalities #{:text}
+   :seon.ai.model/thinking-dials #{:disabled :low :high :max}
+   :seon.ai.model/deepseek-pricing-schedule-status :announced
+   :seon.ai.model/deepseek-off-peak-windows
+   #{[:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"]
+     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"]
+     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"]}}
+
+  {:seon.ai.model/id "deepseek-v4-pro"
+   :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]
+   :seon.ai.model/context-window-tokens 1000000
+   :seon.ai.model/max-output-tokens 384000
+   :seon.ai.model/input-usd-per-mtok 0.435
+   :seon.ai.model/cached-input-usd-per-mtok 0.003625
+   :seon.ai.model/output-usd-per-mtok 0.87
+   :seon.ai.model/input-modalities #{:text}
+   :seon.ai.model/thinking-dials #{:disabled :low :high :max}
+   :seon.ai.model/deepseek-pricing-schedule-status :announced
+   :seon.ai.model/deepseek-off-peak-windows
+   #{[:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"]
+     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"]
+     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"]}}
+
+  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"
+   :seon.ai.model/deepseek-utc-start "00:00"
+   :seon.ai.model/deepseek-utc-end "01:00"
+   :seon.ai.model/deepseek-regular-price-factor 1.0
+   :seon.ai.model/deepseek-peak-price-factor 0.5}
+
+  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"
+   :seon.ai.model/deepseek-utc-start "04:00"
+   :seon.ai.model/deepseek-utc-end "06:00"
+   :seon.ai.model/deepseek-regular-price-factor 1.0
+   :seon.ai.model/deepseek-peak-price-factor 0.5}
+
+  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"
+   :seon.ai.model/deepseek-utc-start "10:00"
+   :seon.ai.model/deepseek-utc-end "24:00"
+   :seon.ai.model/deepseek-regular-price-factor 1.0
+   :seon.ai.model/deepseek-peak-price-factor 0.5}
+
+  ; Kimi K3 always thinks; its descriptor therefore admits only its three
+  ; supported efforts and owns the provider's preferred output-budget field.
+  {:seon.ai.model/id "kimi-k3"
+   :seon.ai.model/provider [:seon.ai.model/provider-id "moonshot"]
+   :seon.ai.model/context-window-tokens 1000000
+   :seon.ai.model/max-output-tokens 131072
+   :seon.ai.model/input-modalities #{:text}
+   :seon.ai.model/thinking-dials #{:low :high :max}}
+
+  ; Muse usage fields were empirically unobserved and are intentionally absent:
+  ; docs/prds/sci-execution-runtime/research/
+  ; model-registry-muse-probe-2026-08-03.md (one streamed call, 2026-08-03).
+  {:seon.ai.model/id "muse-spark-1.1"
+   :seon.ai.model/provider [:seon.ai.model/provider-id "meta"]
+   :seon.ai.model/context-window-tokens 1048576
+   :seon.ai.model/input-usd-per-mtok 1.25
+   :seon.ai.model/cached-input-usd-per-mtok 0.15
+   :seon.ai.model/output-usd-per-mtok 4.25
+   :seon.ai.model/input-modalities #{:text :image :video :audio :pdf}
+   :seon.ai.model/meta-search-usd-per-kquery 2.50
+   :seon.ai.model/meta-free-requests-per-minute 60
+   :seon.ai.model/meta-free-tokens-per-minute 2000000
+   :seon.ai.model/meta-paid-requests-per-minute 3000
+   :seon.ai.model/meta-paid-tokens-per-minute 4000000}]}

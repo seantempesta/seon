@@ -112,6 +112,185 @@
   [unit]
   (render.value/render-html (attempt-without-reasoning unit)))
 
+(def ^:private model-pull
+  '[*])
+
+(def ^:private model-detail-pull
+  '[*
+    {:seon.ai.model/provider [*]}
+    {:seon.ai.model/deepseek-off-peak-windows [*]}])
+
+(defn- pulled-ref-id
+  [value]
+  (if (map? value) (:db/id value) value))
+
+(defn- ordinary-model-row
+  [row]
+  (cond-> row
+    (:seon.ai.model/provider row)
+    (update :seon.ai.model/provider pulled-ref-id)
+
+    (:seon.ai.model/deepseek-off-peak-windows row)
+    (update :seon.ai.model/deepseek-off-peak-windows
+            #(into #{} (map pulled-ref-id) %))
+
+    (:seon.ai.model/input-modalities row)
+    (update :seon.ai.model/input-modalities set)
+
+    (:seon.ai.model/thinking-dials row)
+    (update :seon.ai.model/thinking-dials set)))
+
+(defn model-row
+  "The registered row for one model id, or nil."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.ai.model/id]
+    [:maybe :seon.ai.model/entity]]}
+  [database model-id]
+  (some-> (db/pull database model-pull [:seon.ai.model/id model-id])
+          ordinary-model-row))
+
+(defn models
+  "Every registered model row, ordered by model id."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.ai.model/models]}
+  [database]
+  (->> (db/q '[:find [?model-id ...]
+               :where [_ :seon.ai.model/id ?model-id]]
+             database)
+       sort
+       (mapv #(model-row database %))))
+
+(defn- model-details
+  [database model-id]
+  (db/pull database model-detail-pull [:seon.ai.model/id model-id]))
+
+(defn- rendered-model
+  [unit]
+  (let [value (:seon.render/value unit unit)
+        model-id (:seon.ai.model/id value)]
+    (or (when (and model-id (:seon.db/db unit))
+          (model-details (:seon.db/db unit) model-id))
+        value)))
+
+(defn- usd-per-million
+  [value]
+  (when (number? value)
+    (format "$%.6f/M" (double value))))
+
+(defn- labelled-price
+  [label value]
+  (when-let [price (usd-per-million value)]
+    (str label " " price)))
+
+(defn model-ai
+  "Render one model's capabilities, economics, and latest observation."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (let [model (rendered-model unit)
+        provider (:seon.ai.model/provider model)
+        price-parts
+        (keep identity
+              [(labelled-price
+                "input" (:seon.ai.model/input-usd-per-mtok model))
+               (labelled-price
+                "cached input"
+                (:seon.ai.model/cached-input-usd-per-mtok model))
+               (labelled-price
+                "output" (:seon.ai.model/output-usd-per-mtok model))])]
+    (str
+     "Model " (:seon.ai.model/id model)
+     (when-let [provider-id (:seon.ai.model/provider-id provider)]
+       (str " · provider " provider-id))
+     (when-let [context (:seon.ai.model/context-window-tokens model)]
+       (str " · context " context " tokens"))
+     (when-let [maximum (:seon.ai.model/max-output-tokens model)]
+       (str " · maximum output " maximum " tokens"))
+     (when (seq price-parts)
+       (str "\nPricing: " (str/join ", " price-parts) "."))
+     (when-let [modalities (seq (:seon.ai.model/input-modalities model))]
+       (str "\nInputs: " (str/join ", " (sort (map name modalities))) "."))
+     (when-let [latency (:seon.ai.model/last-latency-ms model)]
+       (str "\nLatest: " latency " ms"
+            (when-let [rate (:seon.ai.model/last-tokens-per-second model)]
+              (str ", " (format "%.2f" (double rate)) " tokens/s"))
+            (when-let [used-at (:seon.ai.model/last-used-at model)]
+              (str " at " used-at))
+            ".")))))
+
+(defn model-html
+  "Render one model as a readable registry card."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [model (rendered-model unit)
+        provider (:seon.ai.model/provider model)
+        details
+        (keep identity
+              [(when-let [provider-id (:seon.ai.model/provider-id provider)]
+                 [:div [:dt "Provider"] [:dd provider-id]])
+               (when-let [context (:seon.ai.model/context-window-tokens model)]
+                 [:div [:dt "Context"] [:dd (str context " tokens")]])
+               (when-let [maximum (:seon.ai.model/max-output-tokens model)]
+                 [:div [:dt "Maximum output"]
+                  [:dd (str maximum " tokens")]])
+               (when-let [price (:seon.ai.model/input-usd-per-mtok model)]
+                 [:div [:dt "Input"] [:dd (usd-per-million price)]])
+               (when-let [price
+                          (:seon.ai.model/cached-input-usd-per-mtok model)]
+                 [:div [:dt "Cached input"] [:dd (usd-per-million price)]])
+               (when-let [price (:seon.ai.model/output-usd-per-mtok model)]
+                 [:div [:dt "Output"] [:dd (usd-per-million price)]])
+               (when-let [latency (:seon.ai.model/last-latency-ms model)]
+                 [:div [:dt "Latest latency"] [:dd (str latency " ms")]])
+               (when-let [rate
+                          (:seon.ai.model/last-tokens-per-second model)]
+                 [:div [:dt "Latest speed"]
+                  [:dd (str (format "%.2f" (double rate)) " tokens/s")]])])]
+    [:article {:class "seon-family-entry seon-ai-model-entry"}
+     [:h3 (:seon.ai.model/id model)]
+     (into [:dl] details)]))
+
+(defn provider-ai
+  "Render one model provider descriptor without its credential value."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (let [provider (:seon.render/value unit unit)]
+    (str "Model provider " (:seon.ai.model/provider-id provider)
+         " · " (:seon.config.ai/endpoint provider)
+         " · output budget field "
+         (:seon.ai.model/output-token-wire-key provider) ".")))
+
+(defn provider-html
+  "Render one model provider descriptor as a readable card."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [provider (:seon.render/value unit unit)]
+    [:article {:class "seon-family-entry seon-ai-provider-entry"}
+     [:h3 (:seon.ai.model/provider-id provider)]
+     [:dl
+      [:div [:dt "Endpoint"] [:dd (:seon.config.ai/endpoint provider)]]
+      [:div [:dt "Output budget field"]
+       [:dd (:seon.ai.model/output-token-wire-key provider)]]]]))
+
+(defn registry-ai
+  "Render the query-derived model registry for agent context."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :string]}
+  [database]
+  (str "Available models\n"
+       (str/join "\n"
+                 (map #(model-ai {:seon.db/db database
+                                  :seon.render/value %})
+                      (models database)))))
+
+(defn registry-html
+  "Render the query-derived model registry for the web UI."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.render/hiccup]}
+  [database]
+  (into [:section {:class "seon-ai-model-registry"}
+         [:h3 "Available models"]]
+        (map #(model-html {:seon.db/db database
+                           :seon.render/value %}))
+        (models database)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
@@ -157,6 +336,30 @@
               value])))
         dials))
 
+(defn- resolved-target
+  [database target]
+  (if-let [model (model-details database (:seon.ai/model target))]
+    (let [provider (:seon.ai.model/provider model)
+          thinking-dials (:seon.ai.model/thinking-dials model)
+          configured-thinking (:seon.ai/thinking target)]
+      (cond-> target
+        provider
+        (->
+         (assoc :seon.ai/endpoint (:seon.config.ai/endpoint provider)
+                :seon.ai/api-key-variable
+                (:seon.config.ai/api-key-variable provider)
+                :seon.ai.model/output-token-wire-key
+                (:seon.ai.model/output-token-wire-key provider))
+         (dissoc :seon.config.ai/no-auth))
+
+        (:seon.ai.model/max-output-tokens model)
+        (update :seon.ai/max-tokens min
+                (:seon.ai.model/max-output-tokens model))
+
+        (not (contains? thinking-dials configured-thinking))
+        (dissoc :seon.ai/thinking)))
+    target))
+
 (defn targets
   "The primary descriptor row and the OPTIONAL backup, from the dials.
   PURE, and the ONE assembly for both roles — a second hand-written
@@ -174,29 +377,35 @@
 
   Absence, never nil: with no backup the key is simply not there, which
   is exactly what `:seon.ai/backup?` reads downstream."
-  {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai/targets]}
-  [dials]
-  (let [primary-settings (primary-setting-entries dials)
-        primary
-        (if (:seon.config.ai/no-auth dials)
-          (dissoc primary-settings :seon.ai/api-key-variable)
-          (dissoc primary-settings :seon.config.ai/no-auth))]
-    (cond-> {:seon.ai/primary primary}
-      (:seon.config.ai.backup/model dials)
-      (assoc :seon.ai/backup
-             (cond-> (assoc primary :seon.ai/model
-                            (:seon.config.ai.backup/model dials))
-               (:seon.config.ai.backup/endpoint dials)
-               (assoc :seon.ai/endpoint
-                      (:seon.config.ai.backup/endpoint dials))
-               (:seon.config.ai.backup/api-key-variable dials)
-               (->
-                (dissoc :seon.config.ai/no-auth)
-                (assoc :seon.ai/api-key-variable
-                       (:seon.config.ai.backup/api-key-variable dials)))
-               (:seon.config.ai.backup/timeout-ms dials)
-               (assoc :seon.ai/timeout-ms
-                      (:seon.config.ai.backup/timeout-ms dials)))))))
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.config/effective] :seon.ai/targets]
+    [:=> [:cat :seon.db/database-value :seon.config/effective]
+     :seon.ai/targets]]}
+  ([dials]
+   (let [primary-settings (primary-setting-entries dials)
+         primary
+         (if (:seon.config.ai/no-auth dials)
+           (dissoc primary-settings :seon.ai/api-key-variable)
+           (dissoc primary-settings :seon.config.ai/no-auth))]
+     (cond-> {:seon.ai/primary primary}
+       (:seon.config.ai.backup/model dials)
+       (assoc :seon.ai/backup
+              (cond-> (assoc primary :seon.ai/model
+                             (:seon.config.ai.backup/model dials))
+                (:seon.config.ai.backup/endpoint dials)
+                (assoc :seon.ai/endpoint
+                       (:seon.config.ai.backup/endpoint dials))
+                (:seon.config.ai.backup/api-key-variable dials)
+                (->
+                 (dissoc :seon.config.ai/no-auth)
+                 (assoc :seon.ai/api-key-variable
+                        (:seon.config.ai.backup/api-key-variable dials)))
+                (:seon.config.ai.backup/timeout-ms dials)
+                (assoc :seon.ai/timeout-ms
+                       (:seon.config.ai.backup/timeout-ms dials)))))))
+  ([database dials]
+   (update-vals (targets dials) #(resolved-target database %))))
 
 (defn retry-strategy
   "The backoff strategy row, from the dials. Pure projection.
@@ -331,7 +540,12 @@
          (if (or (contains? inert config-ident)
                  (not (contains? request request-ident)))
            result
-           (let [wire-value ((coercion-function coercion)
+           (let [wire-key
+                 (if (= :seon.config.ai/max-tokens config-ident)
+                   (or (:seon.ai.model/output-token-wire-key request)
+                       wire-key)
+                   wire-key)
+                 wire-value ((coercion-function coercion)
                              (get request request-ident))]
              (if (= omit-wire-value wire-value)
                result
@@ -660,6 +874,32 @@
       (int? cached)
       (assoc :seon.ai.usage/cached-tokens cached))))
 
+(defn model-observation-tx
+  "The noHistory gauge upsert for one settled attempt, or no transaction
+  data when the effective model has no registry row. Durable attempt facts
+  remain the usage authority; this contains only current display gauges."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.ai.model/observation-request]
+    :seon.db/tx-data]}
+  [database observation]
+  (if (model-row database (:seon.ai.model/id observation))
+    (let [latency-ms (:seon.ai.model/last-latency-ms observation)
+          completion-tokens
+          (some-> (:seon.ai/usage observation)
+                  normalize-usage
+                  :seon.ai.usage/completion-tokens)]
+      [(cond->
+         {:seon.ai.model/id (:seon.ai.model/id observation)
+          :seon.ai.model/last-used-at
+          (:seon.ai.model/last-used-at observation)}
+         (some? latency-ms)
+         (assoc :seon.ai.model/last-latency-ms latency-ms)
+
+         (and (pos? (or latency-ms 0)) (some? completion-tokens))
+         (assoc :seon.ai.model/last-tokens-per-second
+                (/ (* 1000.0 completion-tokens) latency-ms)))])
+    []))
+
 (defn credential
   "The API key named by `:seon.ai/api-key-variable`, or nil.
   THE one place the environment is read, and the reason a credential
@@ -947,7 +1187,10 @@
       body
 
       (or no-auth key)
-      (send-request (http-request-data request key body))
+      (let [started (System/nanoTime)
+            result (send-request (http-request-data request key body))]
+        (assoc result :seon.ai.model/last-latency-ms
+               (long (/ (- (System/nanoTime) started) 1000000))))
 
       :else
       {:seon.error/kind ::no-credential

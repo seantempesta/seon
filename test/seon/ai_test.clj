@@ -153,7 +153,8 @@
     (is (not (contains? target :seon.ai/api-key-variable))
         "the assembled target keeps exactly one authentication declaration")
     (is (schema/valid-candidate-value? :seon.ai/target target))
-    (is (= {:seon.ai/text "local reply"} outcome))
+    (is (= "local reply" (:seon.ai/text outcome)))
+    (is (int? (:seon.ai.model/last-latency-ms outcome)))
     (is (= {"content-type" "application/json"}
            (:seon.ai.http/headers (first @requests)))
         "the F4 recorder seam observes no Authorization header")))
@@ -199,6 +200,118 @@
     (is (not (contains? (ai/targets (assoc @dials dial "set-but-alone"))
                         :seon.ai/backup))
         (str dial " alone is not a backup, and it is not half of one"))))
+
+(defn- seed-registry!
+  [connection]
+  (db/transact!
+   connection
+   [{:seon.ai.model/provider-id "test-provider"
+     :seon.config.ai/endpoint "https://example.invalid/v1/chat/completions"
+     :seon.config.ai/api-key-variable "TEST_PROVIDER_KEY"
+     :seon.ai.model/openai-chat-completions true
+     :seon.ai.model/output-token-wire-key "max_completion_tokens"}
+    {:seon.ai.model/id "registered-model"
+     :seon.ai.model/provider
+     [:seon.ai.model/provider-id "test-provider"]
+     :seon.ai.model/context-window-tokens 1000000
+     :seon.ai.model/max-output-tokens 100
+     :seon.ai.model/input-usd-per-mtok 0.25
+     :seon.ai.model/output-usd-per-mtok 1.0
+     :seon.ai.model/input-modalities #{:text}
+     :seon.ai.model/thinking-dials #{:high}}]))
+
+(deftest registry-resolution-accretes-provider-facts-onto-a-working-target
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [settings (assoc @dials
+                            :seon.config.ai/model "registered-model"
+                            :seon.config.ai/max-tokens 500
+                            :seon.config.ai/thinking :disabled)
+            target (:seon.ai/primary (ai/targets @connection settings))
+            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+        (is (= "https://example.invalid/v1/chat/completions"
+               (:seon.ai/endpoint target)))
+        (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))
+        (is (= 100 (:seon.ai/max-tokens target))
+            "the declared model maximum bounds the effective request")
+        (is (not (contains? target :seon.ai/thinking))
+            "an inadmissible setting leaves the provider default untouched")
+        (is (= 100 (get body "max_completion_tokens")))
+        (is (not (contains? body "max_tokens"))
+            "the provider row, not the model name, selects the wire field")))))
+
+(deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
+  (test-support/with-database
+    (fn [connection]
+      (let [settings (assoc @dials :seon.config.ai/model "unregistered-model")]
+        (is (= (ai/targets settings)
+               (ai/targets @connection settings)))))))
+
+(deftest model-rows-are-queryable-open-and-rendered-without-wire-duplication
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [model (ai/model-row @connection "registered-model")
+            accreted (assoc model :seon.ai.model/future-tailored-fact
+                            {:seon.ai.model/example true})
+            ai-render (ai/registry-ai @connection)
+            html-render (ai/registry-html @connection)]
+        (is (= ["registered-model"]
+               (mapv :seon.ai.model/id (ai/models @connection))))
+        (is (not (contains? model :seon.config.ai/endpoint))
+            "provider wire facts never duplicate onto model rows")
+        (is (schema/valid-candidate-value? :seon.ai.model/entity accreted)
+            "a tailored fact can accrete without breaking the open row")
+        (is (str/includes? ai-render "input $0.250000/M"))
+        (is (str/includes? ai-render "registered-model"))
+        (is (schema/valid-candidate-value? :seon.render/hiccup html-render))))))
+
+(deftest no-history-gauges-retain-current-and-drop-superseded-values
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [first-observation
+            {:seon.ai.model/id "registered-model"
+             :seon.ai.model/last-used-at (java.util.Date. 1000)
+             :seon.ai.model/last-latency-ms 1000
+             :seon.ai/usage {"completion_tokens" 10}}
+            second-observation
+            {:seon.ai.model/id "registered-model"
+             :seon.ai.model/last-used-at (java.util.Date. 2000)
+             :seon.ai.model/last-latency-ms 200
+             :seon.ai/usage {"completion_tokens" 20}}]
+        (db/transact! connection
+                      (ai/model-observation-tx @connection first-observation))
+        (db/transact! connection
+                      (ai/model-observation-tx @connection second-observation))
+        (is (= 100.0
+               (:seon.ai.model/last-tokens-per-second
+                (ai/model-row @connection "registered-model"))))
+        (is (= #{200}
+               (set
+                (db/q
+                 '[:find [?latency ...]
+                   :in $ ?model-id
+                   :where
+                   [?model :seon.ai.model/id ?model-id]
+                   [?model :seon.ai.model/last-latency-ms ?latency]]
+                 (db/history @connection)
+                 "registered-model")))
+            "the current noHistory value remains visible in history")
+        (is (not
+             (contains?
+              (set
+               (db/q
+                '[:find [?latency ...]
+                  :in $ ?model-id
+                  :where
+                  [?model :seon.ai.model/id ?model-id]
+                  [?model :seon.ai.model/last-latency-ms ?latency]]
+                (db/history @connection)
+                "registered-model"))
+              1000))
+            "the superseded noHistory value is gone")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The backoff schedule: a finite value, never a control structure
@@ -579,7 +692,8 @@
              (swap! requests conj request-data)
              {:seon.ai/text "local reply"})}
           #(ai/complete request))]
-    (is (= {:seon.ai/text "local reply"} outcome))
+    (is (= "local reply" (:seon.ai/text outcome)))
+    (is (int? (:seon.ai.model/last-latency-ms outcome)))
     (is (= 1 (count @requests)))
     (is (= {"content-type" "application/json"}
            (:seon.ai.http/headers (first @requests)))

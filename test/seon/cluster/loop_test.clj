@@ -82,12 +82,14 @@
 
 (deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
   (let [project (private-loop-fn 'attempt-evidence)]
-    (is (= {:seon.ai/usage {:source :completion}
+    (is (= {:seon.ai.model/last-latency-ms 42
+            :seon.ai/usage {:source :completion}
             :seon.ai/reasoning-content "fallback reasoning"
             :seon.ai/finish-reason "stop"}
            (project
             {:seon.ai/completion
              {:seon.ai/usage {:source :completion}
+              :seon.ai.model/last-latency-ms 42
               :seon.ai/finish-reason "stop"
               :seon.error/data
               {:seon.ai/usage {:source :error}
@@ -98,6 +100,7 @@
   (let [failure {:seon.error/kind :provider/refused
                  :seon.error/message "refused"}
         evidence {:seon.ai/usage {"prompt_tokens" 3}
+                  :seon.ai.model/last-latency-ms 42
                   :seon.ai/reasoning-content "reasoning"
                   :seon.ai/finish-reason "length"}]
     (is (= {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
@@ -107,6 +110,7 @@
             :seon.cluster.agent/id "agent-1"
             :seon.ai.attempt/ordinal 2
             :seon.ai/usage {"prompt_tokens" 3}
+            :seon.ai.model/last-latency-ms 42
             :seon.ai/reasoning-content "reasoning"
             :seon.ai/finish-reason "length"
             :seon.error/value failure
@@ -146,8 +150,9 @@
                     (swap! calls conj
                            [:settings actual-cluster-settings actual-overlay])
                     settings)
-                  ai/targets (fn [actual-settings]
-                               (swap! calls conj [:targets actual-settings])
+                  ai/targets (fn [actual-db actual-settings]
+                               (swap! calls conj
+                                      [:targets actual-db actual-settings])
                                {:seon.ai/primary primary
                                 :seon.ai/backup backup})
                   ai/retry-strategy
@@ -169,10 +174,39 @@
       (is (= [[:effective db "cluster"]
               [:overlay db "agent"]
               [:settings cluster-settings overlay]
-              [:targets settings]
+              [:targets db settings]
               [:strategy settings]]
              @calls)
           "a configured backup makes the schedule empty without deriving delays"))))
+
+(deftest attempt-settlement-updates-the-registered-model-gauges
+  (test-support/with-database
+    (fn [connection]
+      (config/apply! {:seon.config/connection connection})
+      (db/transact! connection [{:seon.cluster.run/id "gauge-run"}])
+      ((private-loop-fn 'record-attempt!)
+       {:seon.store/branch-connection connection}
+       {:seon.ai/target
+        {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
+         :seon.ai/model "deepseek-v4-flash"}
+        :seon.ai/settings {:seon.config.ai/model "deepseek-v4-flash"}
+        :seon.cluster.run/id "gauge-run"
+        :seon.cluster.agent/id "gauge-agent"
+        :seon.ai.attempt/ordinal 0
+        :seon.ai.model/last-latency-ms 200
+        :seon.ai/usage {"completion_tokens" 20}}
+       now)
+      (let [model (ai/model-row @connection "deepseek-v4-flash")]
+        (is (= now (:seon.ai.model/last-used-at model)))
+        (is (= 200 (:seon.ai.model/last-latency-ms model)))
+        (is (= 100.0 (:seon.ai.model/last-tokens-per-second model)))
+        (is (= 1
+               (db/q
+                '[:find (count ?attempt) .
+                  :where
+                  [?attempt :seon.ai.attempt/id "gauge-run-attempt-0"]]
+                @connection))
+            "the durable attempt and display gauges settle together")))))
 
 (deftest admitted-form-preserves-current-namespace-and-lints-one-source
   (let [db {:immutable :database-value}

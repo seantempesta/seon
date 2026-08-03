@@ -14,6 +14,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
+            [seon.ai :as ai]
             [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -59,7 +60,9 @@
      "evaluation " (:seon.config.eval/time-limit-ms unit) " ms; Flow "
      (:seon.config.flow.compute/concurrency unit) " compute / "
      (:seon.config.flow.io/concurrency unit) " I/O; core faults "
-     (name (:seon.config/on-core-error unit)) ".")))
+     (name (:seon.config/on-core-error unit)) "."
+     (when-let [database (:seon.db/db unit)]
+       (str "\n\n" (ai/registry-ai database))))))
 
 (defn render-html
   "`:seon.render/html` — one readable effective-configuration card."
@@ -67,24 +70,27 @@
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [cluster (:seon.config/cluster unit)]
-    [:article {:class "seon-family-entry seon-config-entry"}
-     [:h3 (str "Configuration " cluster)]
-     [:dl
-      [:div [:dt "Manifest digest"]
-       [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
-      [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
-      [:div [:dt "Thinking"]
-       [:dd (name (:seon.config.ai/thinking unit))]]
-      [:div [:dt "Maximum output"]
-       [:dd (str (:seon.config.ai/max-tokens unit) " tokens")]]
-      [:div [:dt "Evaluation limit"]
-       [:dd (str (:seon.config.eval/time-limit-ms unit) " ms")]]
-      [:div [:dt "Flow concurrency"]
-       [:dd (str (:seon.config.flow.compute/concurrency unit)
-                 " compute / "
-                 (:seon.config.flow.io/concurrency unit) " I/O")]]
-      [:div [:dt "Core faults"]
-       [:dd (name (:seon.config/on-core-error unit))]]]]))
+    (cond->
+      [:article {:class "seon-family-entry seon-config-entry"}
+       [:h3 (str "Configuration " cluster)]
+       [:dl
+        [:div [:dt "Manifest digest"]
+         [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
+        [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
+        [:div [:dt "Thinking"]
+         [:dd (name (:seon.config.ai/thinking unit))]]
+        [:div [:dt "Maximum output"]
+         [:dd (str (:seon.config.ai/max-tokens unit) " tokens")]]
+        [:div [:dt "Evaluation limit"]
+         [:dd (str (:seon.config.eval/time-limit-ms unit) " ms")]]
+        [:div [:dt "Flow concurrency"]
+         [:dd (str (:seon.config.flow.compute/concurrency unit)
+                   " compute / "
+                   (:seon.config.flow.io/concurrency unit) " I/O")]]
+        [:div [:dt "Core faults"]
+         [:dd (name (:seon.config/on-core-error unit))]]]]
+      (:seon.db/db unit)
+      (conj (ai/registry-html (:seon.db/db unit))))))
 
 (def ^:private available-processors
   :seon.config/available-processors)
@@ -365,6 +371,42 @@
   []
   (:seon.config/effective (compile-manifest {})))
 
+(defn- desired-tempid
+  [identity]
+  (str "seon.config.initialization/" (pr-str identity)))
+
+(defn- population-transaction-data
+  [database desired]
+  (let [identities (mapv row-identity desired)
+        entity-ids
+        (into {}
+              (map
+               (fn [identity]
+                 [identity
+                  (or (:db/id (db/pull database [:db/id] identity))
+                      (desired-tempid identity))]))
+              identities)
+        ref-value
+        (fn [value]
+          (if-let [entity-id (and (vector? value) (get entity-ids value))]
+            entity-id
+            value))]
+    (mapv
+     (fn [row]
+       (into {:db/id (get entity-ids (row-identity row))}
+             (map
+              (fn [[attribute value]]
+                (let [attribute-schema (get-in database [:schema attribute])]
+                  [attribute
+                   (if (= :db.type/ref (:db/valueType attribute-schema))
+                     (if (= :db.cardinality/many
+                            (:db/cardinality attribute-schema))
+                       (into (empty value) (map ref-value) value)
+                       (ref-value value))
+                     value)])))
+             row))
+     desired)))
+
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
   {:malli/schema
@@ -375,12 +417,29 @@
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
         identities (into #{} (keep row-identity) desired)
+        request
+        {::reconcile/desired desired
+         ::reconcile/process managing-process-identity
+         ::reconcile/adopt-identities identities}
+        operations (count (reconcile/plan @connection request))
         result
-        (reconcile/reconcile!
-         connection
-         {::reconcile/desired desired
-          ::reconcile/process managing-process-identity
-          ::reconcile/adopt-identities identities})]
+        (if (zero? operations)
+          {::reconcile/converged? true
+           ::reconcile/operations 0}
+          (let [transaction-result
+                (db/transact!
+                 connection
+                 {:tx-data
+                  (conj
+                   (population-transaction-data @connection desired)
+                   [:db.fn/call #'reconcile/reconcile-call request])
+                  :tx-meta
+                  {:seon.db/process
+                   [:seon.db.process/id managing-process-identity]}})]
+            (if (:seon.error/kind transaction-result)
+              transaction-result
+              {::reconcile/converged? false
+               ::reconcile/operations operations})))]
     (when (:seon.error/kind result)
       (refuse! ::reconcile-refused
                {:seon.config/reconcile-result result}
