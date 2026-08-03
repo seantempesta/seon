@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, error, agent]
 ---
@@ -114,3 +114,18 @@ hide a real context hole.
 The original ref-shape defect at `src/seon/error.clj:466-506,837-866` still
 needs its recurring committed-fault walk proof. Nothing in the guarded-kernel
 ruling proves that older data-shape bug fixed, so this issue remains open.
+
+## Resolution
+
+Commit `a837c063a` seals both surviving claims. Renderer failures retain the
+flat private error for system handling but contribute only the prepared
+unavailable output to ordinary AI/HTML consumers; the walk assembler prefers
+that safe output and therefore cannot print the renderer's exception as agent
+context. The namespace owner receives the actionable durable message instead.
+
+The original ref-shape path now has a recurring database proof:
+`seon.error-test/a-committed-fault-renders-its-evidence-without-renderer-
+failure-prose` commits a real fault, reaches it from the attributed agent's
+walk, and asserts actionable error evidence with neither projection-failure
+nor contract-violation prose. `bin/test seon.error-test` passes 25 tests and 74
+assertions.

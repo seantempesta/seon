@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, errors, web]
 ---
@@ -70,3 +70,22 @@ current signature omits them (`src/seon/error.clj:251-258,315-323`).
 
 No code or closure evidence was produced in this research lane, so the issue
 remains open.
+
+## Resolution
+
+Commits `230e5f452` and `a837c063a` remove the silent resolution branches and
+the silent feed catch. The selector now returns deterministic flat ambiguity
+and invocation failures, renderer failure rows retain their private value
+while public HTML says only unavailable, and the explicitly assigned namespace
+owner receives one digest-identified durable message. Repeating the same
+failure produces no second row. A feed-writer exception enters the cluster's
+existing fault channel with agent, page, tab, and HTML-output provenance.
+
+The ruled limits remain explicit: agentless stakeholder fan-out is absent
+because no stakeholder relation exists, and loading is absent because no
+repair-acceptance event exists. Neither gap was replaced by a list or clock.
+
+Proof: `seon.render-simplification-test/broken-renderer-is-private-to-browser-
+and-loud-to-owner`, `seon.render.web-test/a-feed-writer-failure-enters-the-
+cluster-fault-path`, and the focused render gate (61 tests, 305 assertions;
+only the sealed Step 8 package-reuse assertions remained red before Step 8).
