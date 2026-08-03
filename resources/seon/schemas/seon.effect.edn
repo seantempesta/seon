@@ -16,7 +16,9 @@
               :owner :seon.db/ref,
               :receipt
               [:map
-               #:seon.db{:entity true}
+               {:seon.db/entity true
+                :seon.render/ai seon.effect/render-ai
+                :seon.render/html seon.effect/render-html}
                [:seon.effect/id :seon.effect/id]
                [:seon.effect/run :seon.effect/run]
                [:seon.effect/owner :seon.effect/owner]

@@ -83,6 +83,56 @@
 (schema.edn/load! {})
 (schema/activate! (schema/snapshot))
 
+(defn- ref-identity
+  [database ref attribute]
+  (when (and database (:db/id ref))
+    (get (db/pull database [attribute] (:db/id ref)) attribute)))
+
+(defn render-ai
+  "`:seon.render/ai` — one cluster and its load-bearing connections."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [name (:seon.cluster/name unit)]
+    (let [database (:seon.db/db unit)
+          config-name (ref-identity database
+                                    (:seon.cluster/config unit)
+                                    :seon.config/cluster)
+          plan-id (ref-identity database
+                                (:seon.cluster/bootstrap-plan unit)
+                                :seon.bootstrap.plan/id)
+          instructions (count (:seon.cluster/instructions unit))
+          toolkit (count (:seon.cluster/toolkit unit))]
+      (str "Cluster " name ".\n"
+           "Configuration " (or config-name "is connected")
+           " and bootstrap plan " (or plan-id "is connected")
+           "; " instructions " shared instruction"
+           (when-not (= 1 instructions) "s")
+           " and " toolkit " toolkit namespace"
+           (when-not (= 1 toolkit) "s") "."))))
+
+(defn render-html
+  "`:seon.render/html` — one readable cluster card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [name (:seon.cluster/name unit)]
+    (let [database (:seon.db/db unit)
+          config-name (ref-identity database
+                                    (:seon.cluster/config unit)
+                                    :seon.config/cluster)
+          plan-id (ref-identity database
+                                (:seon.cluster/bootstrap-plan unit)
+                                :seon.bootstrap.plan/id)]
+      [:article {:class "seon-family-entry seon-cluster-entry"}
+       [:h3 (str "Cluster " name)]
+       [:dl
+        [:div [:dt "Configuration"] [:dd (str (or config-name "Connected"))]]
+        [:div [:dt "Bootstrap plan"] [:dd [:code (str (or plan-id "Connected"))]]]
+        [:div [:dt "Shared instructions"]
+         [:dd (str (count (:seon.cluster/instructions unit)))]]
+        [:div [:dt "Toolkit namespaces"]
+         [:dd (str (count (:seon.cluster/toolkit unit)))]]]])))
+
 (declare readiness)
 
 (def ^:dynamic ^:private *boot-progress!*

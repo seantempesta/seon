@@ -3,6 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.run :as run]
             [seon.db :as db]
             [seon.schema :as schema]))
@@ -10,6 +11,72 @@
 (def plan-id
   "The inherited bootstrap-plan identity on every cluster branch."
   :default)
+
+(defn- plan-summary
+  [unit]
+  (let [database (:seon.db/db unit)
+        eid (:db/id unit)
+        designations
+        (if (and database eid)
+          (db/q '[:find [?designation ...]
+                  :in $ ?plan
+                  :where
+                  [?plan :seon.bootstrap.plan/forms ?form]
+                  [?form :seon.ns/name-designation ?designation]]
+                database eid)
+          (keep :seon.ns/name-designation
+                (:seon.bootstrap.plan/forms unit)))
+        contexts
+        (if (and database eid)
+          (db/q '[:find [?context ...]
+                  :in $ ?plan
+                  :where
+                  [?plan :seon.bootstrap.plan/forms ?form]
+                  [?form :seon.bootstrap.plan.form/context ?context]]
+                database eid)
+          (keep :seon.bootstrap.plan.form/context
+                (:seon.bootstrap.plan/forms unit)))
+        counts (frequencies designations)]
+    {:forms (count designations)
+     :agent (get counts :agent 0)
+     :user (get counts :user 0)
+     :contexts (count contexts)
+     :context-tokens (reduce + 0 (map tokens/estimate contexts))}))
+
+(defn render-ai
+  "`:seon.render/ai` — one bootstrap plan without its source payloads."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [id (:seon.bootstrap.plan/id unit)]
+    (let [{:keys [forms agent user contexts context-tokens]}
+          (plan-summary unit)]
+      (str "Bootstrap plan " id " · digest "
+           (:seon.bootstrap.plan/digest unit) ".\n"
+           forms " ordered evaluation forms: " agent " agent, " user
+           " user; " contexts " starting-context form"
+           (when-not (= 1 contexts) "s") " · approximately "
+           context-tokens " tokens."))))
+
+(defn render-html
+  "`:seon.render/html` — one readable bootstrap-plan card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [id (:seon.bootstrap.plan/id unit)]
+    (let [{:keys [forms agent user contexts context-tokens]}
+          (plan-summary unit)]
+      [:article {:class "seon-family-entry seon-bootstrap-plan-entry"}
+       [:h3 (str "Bootstrap plan " id)]
+       [:dl
+        [:div [:dt "Digest"]
+         [:dd [:code (:seon.bootstrap.plan/digest unit)]]]
+        [:div [:dt "Ordered forms"] [:dd (str forms)]]
+        [:div [:dt "Namespace designation"]
+         [:dd (str agent " agent / " user " user")]]
+        [:div [:dt "Starting context"]
+         [:dd (str contexts " form"
+                   (when-not (= 1 contexts) "s") " · approximately "
+                   context-tokens " tokens")]]]])))
 
 (def ^:private resource-path
   "seon/bootstrap.edn")

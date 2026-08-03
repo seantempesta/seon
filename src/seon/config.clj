@@ -24,6 +24,10 @@
   "The one repository/artifact-relative shipped defaults document."
   "config/default.edn")
 
+(def initialization-key
+  "The reserved shipped-default key carrying desired initialization rows."
+  :seon.config/initialization)
+
 (def managing-process-identity
   "The opaque reconcile scope owned by configuration."
   "seon.db.process/config")
@@ -35,6 +39,52 @@
   removes a defaulted optional attribute from the effective map and desired
   database row; the marker itself is never stored."
   :seon.config/absent)
+
+(defn- short-digest
+  [digest]
+  (when digest
+    (subs digest 0 (min 12 (count digest)))))
+
+(defn render-ai
+  "`:seon.render/ai` — the bounded decision face of one effective config."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [cluster (:seon.config/cluster unit)]
+    (str
+     "Configuration " cluster " · manifest "
+     (short-digest (:seon.config/applied-manifest-digest unit)) ".\n"
+     "Model " (:seon.config.ai/model unit)
+     " (thinking " (name (:seon.config.ai/thinking unit))
+     ", max " (:seon.config.ai/max-tokens unit) " output tokens); "
+     "evaluation " (:seon.config.eval/time-limit-ms unit) " ms; Flow "
+     (:seon.config.flow.compute/concurrency unit) " compute / "
+     (:seon.config.flow.io/concurrency unit) " I/O; core faults "
+     (name (:seon.config/on-core-error unit)) ".")))
+
+(defn render-html
+  "`:seon.render/html` — one readable effective-configuration card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [cluster (:seon.config/cluster unit)]
+    [:article {:class "seon-family-entry seon-config-entry"}
+     [:h3 (str "Configuration " cluster)]
+     [:dl
+      [:div [:dt "Manifest digest"]
+       [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
+      [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
+      [:div [:dt "Thinking"]
+       [:dd (name (:seon.config.ai/thinking unit))]]
+      [:div [:dt "Maximum output"]
+       [:dd (str (:seon.config.ai/max-tokens unit) " tokens")]]
+      [:div [:dt "Evaluation limit"]
+       [:dd (str (:seon.config.eval/time-limit-ms unit) " ms")]]
+      [:div [:dt "Flow concurrency"]
+       [:dd (str (:seon.config.flow.compute/concurrency unit)
+                 " compute / "
+                 (:seon.config.flow.io/concurrency unit) " I/O")]]
+      [:div [:dt "Core faults"]
+       [:dd (name (:seon.config/on-core-error unit))]]]]))
 
 (def ^:private available-processors
   :seon.config/available-processors)
@@ -122,7 +172,11 @@
   [layer]
   (let [dials (dial-attributes)]
     (doseq [key (keys layer)]
-      (when-not (contains? dials key)
+      (cond
+        (= initialization-key key)
+        (refuse! ::initialization-not-allowed {::key key} nil)
+
+        (not (contains? dials key))
         (refuse! ::unknown-key {::key key} nil)))
     (doseq [[key value] layer]
       (when-not (or (= absent value)
@@ -134,19 +188,77 @@
          nil)))
     layer))
 
-(defn default-decisions
-  "Read the complete shipped decision map.
+(defn- row-identity
+  [row]
+  (let [identities
+        (into []
+              (comp
+               (filter schema/identity-attr?)
+               (map (fn [attribute] [attribute (get row attribute)])))
+              (keys row))]
+    (when (= 1 (count identities))
+      (first identities))))
 
-  An optional registration's generic floor is explicit absence; a
-  registration-attached default overrides that floor. The shipped EDN document
-  must decide every production attribute explicitly; symbolic machine and
-  absence decisions are resolved only by `compile-manifest`."
-  {:malli/schema [:=> [:cat] :map]}
+(defn- admit-initialization
+  [population]
+  (when-not (vector? population)
+    (refuse! ::invalid-initialization
+             {::explanation {:seon.config/expected :vector-of-maps}}
+             nil))
+  (let [database-attributes (set (schema/canonical-database-attributes))]
+    (mapv
+     (fn [row]
+       (when-not (map? row)
+         (refuse! ::invalid-initialization-row {} nil))
+       (doseq [[attribute value] row]
+         (cond
+           (not (qualified-keyword? attribute))
+           (refuse! ::invalid-initialization-attribute
+                    {::key attribute}
+                    nil)
+
+           (not (contains? database-attributes attribute))
+           (refuse! ::unknown-initialization-attribute
+                    {::key attribute}
+                    nil)
+
+           (not (schema/valid-candidate-value? attribute value))
+           (refuse! ::invalid-initialization-value
+                    {::key attribute
+                     ::explanation
+                     (schema/explain-candidate-value attribute value)}
+                    nil)))
+       (when-not (row-identity row)
+         (refuse! ::invalid-initialization-identity
+                  {::explanation
+                   {:seon.config/identity-attributes
+                    (into [] (filter schema/identity-attr?) (keys row))}}
+                  nil))
+       row)
+     population)))
+
+(defn- default-document
   []
-  (let [document (read-edn-map
-                  (or (io/resource default-manifest-path)
-                      default-manifest-path))
-        dials (dial-attributes)
+  (read-edn-map
+   (or (io/resource default-manifest-path)
+       default-manifest-path)))
+
+(defn- admitted-default-document
+  [document]
+  {:seon.config/decisions (dissoc document initialization-key)
+   :seon.config/initialization
+   (admit-initialization (get document initialization-key []))})
+
+(defn default-population
+  "Read and admit the shipped initialization entity rows."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (:seon.config/initialization
+   (admitted-default-document (default-document))))
+
+(defn- validate-default-decisions
+  [document]
+  (let [dials (dial-attributes)
         decisions (merge (registration-defaults) document)
         missing (set/difference dials (set (keys decisions)))]
     (doseq [key (keys document)]
@@ -168,6 +280,19 @@
           ::explanation (schema/explain-candidate-value key decision)}
          nil)))
     decisions))
+
+(defn default-decisions
+  "Read the complete shipped decision map.
+
+  An optional registration's generic floor is explicit absence; a
+  registration-attached default overrides that floor. The shipped EDN document
+  must decide every production attribute explicitly; symbolic machine and
+  absence decisions are resolved only by `compile-manifest`."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (validate-default-decisions
+   (:seon.config/decisions
+    (admitted-default-document (default-document)))))
 
 (defn read-manifest
   "Read and validate one sparse plain-EDN overlay without compiling it."
@@ -191,10 +316,13 @@
   {:malli/schema
    [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
   [request]
-  (let [manifest (validate-layer (or (:seon.config/manifest request) {}))
+  (let [{:seon.config/keys [decisions initialization]}
+        (admitted-default-document (default-document))
+        manifest (validate-layer (or (:seon.config/manifest request) {}))
         environment
         (validate-layer (or (:seon.config/environment request) {}))
-        decisions (merge (default-decisions) manifest environment)
+        defaults (validate-default-decisions decisions)
+        decisions (merge defaults manifest environment)
         required (required-dial-attributes)]
     (doseq [[key decision] decisions]
       (when (and (= absent decision) (contains? required key))
@@ -228,6 +356,7 @@
         {:seon.config/effective effective
          :seon.config/applied-manifest-digest digest
          :seon.config/desired-row row
+         :seon.config/initialization initialization
          :seon.config/resolved-attributes (set (keys decisions))}))))
 
 (defn defaults
@@ -242,14 +371,16 @@
    [:=> [:cat :seon.store/branch-connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (let [result
+  (let [desired
+        (into [(:seon.config/desired-row compiled)]
+              (:seon.config/initialization compiled))
+        identities (into #{} (keep row-identity) desired)
+        result
         (reconcile/reconcile!
          connection
-         {::reconcile/desired [(:seon.config/desired-row compiled)]
+         {::reconcile/desired desired
           ::reconcile/process managing-process-identity
-          ::reconcile/adopt-identities
-          #{[:seon.config/cluster
-             (:seon.config/cluster (:seon.config/desired-row compiled))]}})]
+          ::reconcile/adopt-identities identities})]
     (when (:seon.error/kind result)
       (refuse! ::reconcile-refused
                {:seon.config/reconcile-result result}

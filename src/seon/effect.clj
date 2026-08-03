@@ -8,10 +8,12 @@
   (:require [clojure.string :as str]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
+            [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
+            [seon.print :as print]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -26,6 +28,107 @@
   nil)
 
 (schema.edn/load! {})
+
+(defn- ref-attribute
+  [database ref attribute]
+  (when (and database (:db/id ref))
+    (get (db/pull database [attribute] (:db/id ref)) attribute)))
+
+(defn- receipt-state
+  [unit]
+  (cond
+    (contains? unit :seon.effect/interrupted-at) :interrupted
+    (contains? unit :seon.effect/result-edn) :returned
+    :else :pending))
+
+(defn- payload-preview
+  [payload]
+  (let [width (:seon.print/width (print/default-options))
+        preview-tokens (max 1 (quot width tokens/chars-per-token))]
+    (tokens/clip-str payload preview-tokens)))
+
+(defn- payload-face
+  [label payload]
+  (str label " (~" (tokens/estimate payload) " tokens): "
+       (payload-preview payload)))
+
+(defn- receipt-identities
+  [unit]
+  (let [database (:seon.db/db unit)]
+    {:owner (ref-attribute database
+                           (:seon.effect/owner unit)
+                           :seon.fn/sym)
+     :run (ref-attribute database
+                         (:seon.effect/run unit)
+                         :seon.cluster.run/id)}))
+
+(defn render-ai
+  "`:seon.render/ai` — one effect receipt, derived from terminal attributes."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [id (:seon.effect/id unit)]
+    (let [{:keys [owner run]} (receipt-identities unit)
+          state (receipt-state unit)
+          request (:seon.effect/request-edn unit)
+          result (:seon.effect/result-edn unit)
+          identity-line
+          (str "Effect " (or owner id) " · run " (or run "unknown")
+               ", form " (:seon.effect/form-ordinal unit)
+               ", effect " (:seon.effect/ordinal unit) " · "
+               (case state
+                 :returned (if-some [duration
+                                     (:seon.effect/duration-ms unit)]
+                             (str "returned in " duration " ms.")
+                             "returned.")
+                 :interrupted (str "interrupted at "
+                                   (pr-str (:seon.effect/interrupted-at unit))
+                                   ".")
+                 :pending (str "pending since "
+                               (pr-str (:seon.effect/opened-at unit)) ".")))]
+      (str identity-line
+           (when request (str "\n" (payload-face "Request" request)))
+           (when result
+             (str "\n" (payload-face "Result" result)
+                  (when-let [digest (:seon.effect/result-blob unit)]
+                    (str " · blob digest " digest))))))))
+
+(defn render-html
+  "`:seon.render/html` — one readable effect-receipt card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [id (:seon.effect/id unit)]
+    (let [{:keys [owner run]} (receipt-identities unit)
+          state (receipt-state unit)
+          request (:seon.effect/request-edn unit)
+          result (:seon.effect/result-edn unit)]
+      (into
+       [:article {:class "seon-family-entry seon-effect-receipt-entry"}
+        [:h3 (str "Effect " (or owner id))]
+        (into
+         [:dl
+          [:div [:dt "Run"] [:dd (str (or run "Unknown"))]]
+          [:div [:dt "Form / effect"]
+           [:dd (str (:seon.effect/form-ordinal unit) " / "
+                     (:seon.effect/ordinal unit))]]
+          [:div [:dt "Disposition"] [:dd (name state)]]]
+         (when-let [duration (and (= :returned state)
+                                  (:seon.effect/duration-ms unit))]
+           [[:div [:dt "Duration"] [:dd (str duration " ms")]]]))]
+       (concat
+        (when request
+          [[:details {:class "seon-effect-request"}
+            [:summary (str "Request · approximately "
+                           (tokens/estimate request) " tokens")]
+            [:code (payload-preview request)]]])
+        (when result
+          [[:details {:class "seon-effect-result"}
+            [:summary (str "Result · approximately "
+                           (tokens/estimate result) " tokens")]
+            [:code (payload-preview result)]]])
+        (when-let [digest (:seon.effect/result-blob unit)]
+          [[:p {:class "seon-effect-blob"}
+            "Blob digest " [:code digest]]]))))))
 
 (def ^:private reach-rules
   '[[(reachable ?function ?target)
