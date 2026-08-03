@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, repl, render]
 ---
@@ -44,3 +44,16 @@ The one value-artifact seam shared by `seon.cluster/mcp-project` and
   internal evaluation envelope exceeds the blob threshold.
 - Recurring MCP tests cover root, nested, and offset drills without teaching
   callers an implementation-only `:seon.sci.admit/value` prefix.
+
+## Resolution
+
+Resolved by commit `4f299cba4`. `seon.cluster/mcp-project` now stores an
+evaluation result's print node as the value artifact while retaining the
+evaluation record beside the text face. Non-evaluation values keep the same
+artifact semantics.
+
+The focused and drill-owner gate passed 16 tests and 60 assertions across
+`seon.cluster.mcp-test` and `seon.render.value-test`. Live door evaluation of
+`(vec (range 50000))`, after `(require 'seon.cluster :reload)`, returned a
+digest whose root window began `[0 1 2 3 4 5 6 7]`; offset 7 began
+`[7 8 9 10 11 12 13 14]`; projecting either drill minted no second digest.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, repl, context]
 ---
@@ -35,3 +35,20 @@ returned the event and before it enters the caller's context.
 - JVM and door modes preserve their raw io-prepl semantics, including named
   session `*1`, while routine results no longer carry the wrapper bulk.
 - Focused bridge tests assert exact user-source fidelity in both modes.
+
+## Resolution
+
+Resolved by commit `de6c617b8`. The MCP bridge replaces io-prepl's transport
+wrapper in every returned event's `:form` with the exact source string supplied
+by the caller. It leaves event tags, values, namespaces, output, exception
+flags, and degraded results unchanged.
+
+The direct response-construction proof passed for JVM and door modes across
+both successful and evaluation-error responses. The combined owned gate passed
+35 tests and 193 assertions across `seon.cluster.mcp-test`,
+`seon.render.value-test`, and `seon.dev.mcp-bridge-test`.
+
+The already-running MCP client must be restarted before it loads this bridge
+change. That client-lifecycle boundary prevents a truthful same-session live
+proof; the direct function-level proof is the acceptance evidence until
+restart.
