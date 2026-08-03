@@ -131,10 +131,13 @@
         content-digest (blob/digest content)
         threshold (:seon.config.eval.result/blob-threshold effective)
         oversized? (> (count content) threshold)
-        page-size (:seon.render.value/max-collection effective)
+        page-size (min (:seon.render.value/max-collection effective)
+                       (:seon.print/length effective))
         print-node (:seon.sci.admit/print-node artifact)
         projected-node (if oversized?
-                         (render.value/print-node-window print-node page-size)
+                         (render.value/print-node-window
+                          print-node page-size threshold
+                          (:seon.print/level effective))
                          print-node)
         stored-digest (when (and oversized? connection)
                         (blob/put! connection content))]

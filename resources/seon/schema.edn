@@ -1785,9 +1785,9 @@
   [:ref :seon.print/node*]]
 
  :seon.print/length
- [:int {:min 0 :seon.print/default nil}]
+ [:int {:min 0 :seon.config/dial true :seon.print/default 32}]
  :seon.print/level
- [:int {:min 0 :seon.print/default nil}]
+ [:int {:min 0 :seon.config/dial true :seon.print/default 8}]
  :seon.print/width
  [:int {:min 0 :seon.print/default 72}]
  :seon.print/namespace-maps?

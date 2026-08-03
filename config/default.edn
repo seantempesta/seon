@@ -54,6 +54,16 @@
  ; structural renderer's proven readable default and must not inherit it.
  :seon.render.value/max-collection 8
 
+ ; Unit: collection entries printed before the `...` marker. Provenance:
+ ; the surviving JVM printer used 32 while keeping structural `/data`
+ ; navigation at 8; this is the ordinary REPL face, not an admission cap.
+ :seon.print/length 32
+
+ ; Unit: nested collection levels printed before the `#` marker. Provenance:
+ ; the surviving JVM printer used 8 to keep accidental recursive values
+ ; readable while leaving normal result shapes intact.
+ :seon.print/level 8
+
  ; Unit: milliseconds of wall clock per agent evaluation.
  ; Provenance: the ONLY limit sci has — it counts no steps, so this is
  ; the whole bound on an interpreted form (reference-code/sci/doc/

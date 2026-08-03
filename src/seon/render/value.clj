@@ -283,33 +283,96 @@
   [stored]
   (admit/print-node-edn (:seon.sci.admit/print-node stored)))
 
-(defn print-node-window
-  "Return the first structural window of one admitted print node."
-  {:malli/schema [:=> [:cat :seon.print/node :int] :seon.print/node]}
-  [node size]
-  (let [face (:seon.print/face node)
-        limit (max 0 (dec size))]
-    (case face
-      (:seon.print/vector :seon.print/list :seon.print/set)
-      (let [items (:seon.print/items node)
-            cut? (> (count items) limit)]
-        (assoc node :seon.print/items
-               (cond-> (subvec (vec items) 0 (min limit (count items)))
-                 cut? (conj {:seon.print/face :seon.print/elided}))))
+(def ^:private structural-faces
+  #{:seon.print/vector :seon.print/list :seon.print/set
+    :seon.print/map :seon.print/record :seon.print/throwable})
 
-      (:seon.print/map :seon.print/record)
-      (let [entries (:seon.print/entries node)
-            cut? (> (count entries) limit)]
-        (assoc node :seon.print/entries
-               (cond-> (subvec (vec entries) 0 (min limit (count entries)))
-                 cut? (conj {:seon.print/face :seon.print/elided}))))
-
-      :seon.print/string
+(defn- window-string
+  [node max-string]
+  (let [value (:seon.print/value node)
+        retained (min (count value) max-string)
+        original-length (or (:seon.print/length node) (count value))]
+    (if (and (= :seon.print/string (:seon.print/face node))
+             (= retained (count value)))
+      node
       {:seon.print/face :seon.print/truncated-string
-       :seon.print/value ""
-       :seon.print/length (count (:seon.print/value node))}
+       :seon.print/value (subs value 0 retained)
+       :seon.print/length original-length})))
 
-      node)))
+(declare window-node)
+
+(defn- window-entry
+  [entry size level max-string depth]
+  (if (vector? entry)
+    (mapv #(window-node % size level max-string (inc depth)) entry)
+    entry))
+
+(defn- window-children
+  [children size level max-string depth child-window]
+  (let [limit (max 0 (dec size))
+        cut? (> (count children) limit)]
+    (cond-> (into []
+                  (map #(child-window % size level max-string (inc depth)))
+                  (subvec (vec children) 0 (min limit (count children))))
+      cut? (conj {:seon.print/face :seon.print/elided}))))
+
+(defn- window-node
+  [node size level max-string depth]
+  (let [face (:seon.print/face node)]
+    (if (and (some? level)
+             (>= depth level)
+             (contains? structural-faces face))
+      {:seon.print/face :seon.print/pruned}
+      (case face
+        (:seon.print/vector :seon.print/list :seon.print/set)
+        (assoc node :seon.print/items
+               (window-children (:seon.print/items node)
+                                size level max-string depth window-node))
+
+        (:seon.print/map :seon.print/record)
+        (assoc node :seon.print/entries
+               (window-children (:seon.print/entries node)
+                                size level max-string depth window-entry))
+
+        :seon.print/throwable
+        (update node :seon.print/value
+                window-node size level max-string (inc depth))
+
+        (:seon.print/string :seon.print/truncated-string)
+        (window-string node max-string)
+
+        node))))
+
+(defn- projected-size
+  [node]
+  (alength
+   (.getBytes ^String (admit/canonical-edn (admit/semantic-value node))
+              "UTF-8")))
+
+(defn print-node-window
+  "Return a recursively bounded structural window of one admitted print node."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.print/node :int] :seon.print/node]
+    [:=> [:cat :seon.print/node :int :int :int] :seon.print/node]]}
+  ([node size]
+   (window-node node size nil 0 0))
+  ([node size max-size level]
+   (loop [string-limit max-size
+          level level]
+     (let [windowed (window-node node size level string-limit 0)]
+       (cond
+         (<= (projected-size windowed) max-size)
+         windowed
+
+         (pos? string-limit)
+         (recur (quot string-limit 2) level)
+
+         (pos? level)
+         (recur 0 (dec level))
+
+         :else
+         windowed)))))
 
 (defn result-window-edn
   "Store a small tagged data window beside an oversized result blob."
