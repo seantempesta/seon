@@ -17,24 +17,26 @@
     :seon.program/source-attribute :seon.ns/source
     :seon.program/owned-attributes
     [:seon.ns/name :seon.ns/source :seon.ns/doc
-     :seon.ns/requires :seon.ns/aliases :seon.ns/imports :seon.ns/refers]}
+     :seon.ns/requires :seon.ns/aliases :seon.ns/imports :seon.ns/refers
+     :seon.schema.admission/source]}
    :seon.fn/sym
    {:seon.program/identity-attribute :seon.fn/sym
     :seon.program/source-attribute :seon.fn/source
     :seon.program/owned-attributes
     [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
      :seon.fn/doc :seon.fn/private? :seon.fn/spec :seon.fn/arities
-     :seon.fn/ast :seon.fn/workload]}
+     :seon.fn/ast :seon.fn/workload :seon.schema.admission/source]}
    :seon.schema/key
    {:seon.program/identity-attribute :seon.schema/key
     :seon.program/source-attribute :seon.schema/form
     :seon.program/owned-attributes
-    [:seon.schema/key :seon.schema/form]}
+    [:seon.schema/key :seon.schema/form :seon.schema.admission/source]}
    :seon.test/sym
    {:seon.program/identity-attribute :seon.test/sym
     :seon.program/source-attribute :seon.test/source
     :seon.program/owned-attributes
-    [:seon.test/sym :seon.test/ns :seon.test/source]}
+    [:seon.test/sym :seon.test/ns :seon.test/source
+     :seon.schema.admission/source]}
    :seon.code.def/id
    {:seon.program/identity-attribute :seon.code.def/id
     :seon.program/source-attribute :seon.code.def/source
@@ -42,7 +44,7 @@
     [:seon.code.def/id :seon.code.def/ns :seon.code.def/name
      :seon.code.def/value-edn :seon.code.def/blob :seon.code.def/size
      :seon.code.def/source :seon.code.def/unrestorable
-     :seon.code.def/ordinal]}})
+     :seon.code.def/ordinal :seon.schema.admission/source]}})
 
 (defn shape
   "The program shape owned by `identity-attribute`."

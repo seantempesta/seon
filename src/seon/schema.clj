@@ -470,130 +470,33 @@
                (= application preprocessed))
       application)))
 
-(defn- one-value [values]
-  (when (= 1 (count values))
-    (first values)))
-
-(defn- installed-attribute? [db attribute]
-  ;; Historical database values do not expose `:schema` as a map entry.
-  ;; Datahike's IDB operation is the one schema interface for current and
-  ;; filtered values (AsOfDB deliberately delegates it to its origin).
-  (contains? (dbi/-schema db) attribute))
-
-(defn- asserting-process-ref [db asserting-tx-eid]
-  (when (installed-attribute? db :seon.db/process)
-    (one-value
-     (d/q '[:find [?process ...]
-            :in $ ?tx
-            :where [?tx :seon.db/process ?process]]
-          db
-          asserting-tx-eid))))
-
-(defn- current-process-id [db process-ref]
-  (when (and process-ref
-             (installed-attribute? db :seon.db.process/id))
-    (one-value
-     (d/q '[:find [?process-id ...]
-            :in $ ?process
-            :where [?process :seon.db.process/id ?process-id]]
-          db
-          process-ref))))
-
-(defn- current-user [db asserting-tx-eid]
-  (let [user-ref
-        (when (installed-attribute? db :seon.db/user)
-          (one-value
-           (d/q '[:find [?user ...]
-                  :in $ ?tx
-                  :where [?tx :seon.db/user ?user]]
-                db
-                asserting-tx-eid)))]
-    (if user-ref
-      (into {}
-            (keep
-             (fn [attribute]
-               (when (installed-attribute? db attribute)
-                 (when-let [value
-                            (one-value
-                             (d/q '[:find [?value ...]
-                                    :in $ ?user ?attribute
-                                    :where [?user ?attribute ?value]]
-                                  db
-                                  user-ref
-                                  attribute))]
-                   [attribute value]))))
-            [:seon.agent/id :seon.user/id])
-      {})))
-
-(defn- history-value [db]
-  ;; `seon.db` depends on this namespace for schema registration, so this
-  ;; domain-specific fallback resolves the database owner only when admission
-  ;; provenance is actually derived. A flat temporal refusal means the
-  ;; database retained no first-assertion provenance and admission fails closed.
-  (let [history ((requiring-resolve 'seon.db/history) db)]
-    (when-not (:seon.error/kind history)
-      history)))
-
-(defn- source-seal-tx [db history]
-  (when (and history
-             (installed-attribute? db :seon.source/digest))
-    (let [current-sources
-          (d/q '[:find [?source ...]
-                 :where [?source :seon.source/digest _]]
-               db)]
-      (when (= 1 (count current-sources))
-        ;; Publication advances the ONE source entity's current digest. The
-        ;; original positive assertion remains the genesis boundary: later
-        ;; digest values describe explicit source publication, not a new
-        ;; trust boundary. Multiple current source
-        ;; entities still fail closed.
-        (d/q '[:find (min ?tx) .
-               :in $ ?source
-               :where
-               [?source :seon.source/digest _ ?tx true]]
-             history
-             (first current-sources))))))
-
-(defn- first-process-id-tx [history process-ref process-id]
-  (when (and history process-ref process-id)
-    (let [transactions
-          (d/q '[:find [?tx ...]
-                 :in $ ?process ?process-id
-                 :where
-                 [?process :seon.db.process/id ?process-id ?tx true]]
-               history
-               process-ref
-               process-id)]
-      (when (seq transactions)
-        (apply min transactions)))))
-
 (defn admission-from-asserting-transaction
-  "Derive strictness source from one canonical row's asserting transaction.
+  "Read admission source recorded on a row asserted by `asserting-tx-eid`.
 
-   Missing and unrecognized provenance deliberately fail closed as
-   agent-authored. The note is projection-cache guidance, not database truth."
+   Missing, ambiguous, and unrecognized facts deliberately fail closed as
+   agent-authored. Temporal history is irrelevant to admission strictness."
   {:malli/schema [:=> [:cat :map :int] :map]}
   [db asserting-tx-eid]
-  (let [process-ref (asserting-process-ref db asserting-tx-eid)
-        process-id (current-process-id db process-ref)
-        user (current-user db asserting-tx-eid)
-        history (history-value db)
-        seal-tx (source-seal-tx db history)
-        first-process-tx
-        (first-process-id-tx history process-ref process-id)
-        core? (and seal-tx
-                   first-process-tx
-                   (< first-process-tx seal-tx))
-        source (if core? :core :agent)]
+  (let [sources
+        (when (contains? (dbi/-schema db) :seon.schema.admission/source)
+          (set
+           (d/q '[:find [?source ...]
+                  :in $ ?tx
+                  :where
+                  [?declaration _ _ ?tx]
+                  [?declaration :seon.schema.admission/source ?source]]
+                db
+                asserting-tx-eid)))
+        recorded (when (= 1 (count sources)) (first sources))
+        recognized? (contains? #{:core :agent} recorded)
+        source (if recognized? recorded :agent)]
     (cond->
-      {:seon.schema.admission/source source
-       :seon.schema.admission/process-id process-id
-       :seon.schema.admission/user user}
-      (not core?)
+      {:seon.schema.admission/source source}
+      (not recognized?)
       (assoc :seon.schema.admission/note
-             (str "The asserting transaction has no process identity whose "
-                  "first assertion precedes the source seal, so this row "
-                  "is admitted as agent-authored.")))))
+             (str "The asserting transaction does not identify exactly one "
+                  "recorded admission source, so this row is admitted as "
+                  "agent-authored.")))))
 
 (defn- candidate-forms []
   (if *candidate-forms-overlay*
@@ -720,7 +623,8 @@
   (update-candidate-forms!
    merge
    {:seon.schema/key [:keyword {:seon.db/identity true}]
-    :seon.schema/form :string}))
+    :seon.schema/form :string
+    :seon.schema.admission/source [:enum :core :agent]}))
 
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
@@ -1666,7 +1570,13 @@
           artifact-exports #{}
           pure-predicate-symbols #{}}}
     reusable-projection]
-   (letfn [(parse-rows [rows identity-fn identity-label]
+   (let [admission-for-transaction
+         (memoize
+          (fn [asserting-tx-eid]
+            (admission-from-asserting-transaction
+             database-value
+             asserting-tx-eid)))]
+     (letfn [(parse-rows [rows identity-fn identity-label]
             (reduce
               (fn [parsed row]
                 (when-not (and (sequential? row)
@@ -1697,9 +1607,7 @@
                          {:seon.schema.parsed/form
                           (edn/read-string form-string)
                           :seon.schema.parsed/admission
-                          (admission-from-asserting-transaction
-                            database-value
-                            asserting-tx-eid)})))
+                          (admission-for-transaction asserting-tx-eid)})))
               {}
               rows))]
     (let [schemas
@@ -1762,9 +1670,7 @@
                                   :seon.schema/identity identity
                                   :seon.error/kind :core-bug})))
                (assoc admissions identity
-                      (admission-from-asserting-transaction
-                       database-value
-                       asserting-tx-eid))))
+                      (admission-for-transaction asserting-tx-eid))))
            {}
            function-source-rows)
           artifact-exports
@@ -1821,7 +1727,7 @@
           :seon.schema/function-source-admissions source-admissions
           :seon.schema/artifact-exports artifact-exports
           :seon.schema/pure-predicate-symbols pure-predicate-symbols
-          :seon.schema/predicate-functions (core-predicate-functions)}))))))
+          :seon.schema/predicate-functions (core-predicate-functions)})))))))
 
 (defn projection-from-database
   "Build the immutable program projection at exactly `db`.
@@ -2195,7 +2101,8 @@
        (when (keyword? schema-key)
          (let [properties (form/attr-form-properties definition)]
            (cond-> {:seon.schema/key schema-key
-                    :seon.schema/form (pr-str definition)}
+                    :seon.schema/form (pr-str definition)
+                    :seon.schema.admission/source :core}
              (contains? properties :seon.db.id/generator)
              (assoc :seon.db.id/generator
                     (:seon.db.id/generator properties))))))

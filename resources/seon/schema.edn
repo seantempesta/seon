@@ -169,13 +169,25 @@
  ; independently of choices because Gemini attaches cumulative usage to
  ; content chunks while OpenAI-compatible providers emit one final
  ; choices-empty chunk — the portable fold must not assume either.
- :seon.ai/usage [:map-of :string :any]
+ :seon.ai/json-value
+ [:schema
+  {:registry
+   {:seon.ai.json/value
+    [:or
+     :nil
+     :boolean
+     [:or :int :double]
+     :string
+     [:vector [:ref :seon.ai.json/value]]
+     [:map-of :string [:ref :seon.ai.json/value]]]}}
+  [:ref :seon.ai.json/value]]
+ :seon.ai/usage [:map-of :string :seon.ai/json-value]
  :seon.ai/tokens [:int {:min 0}]
  :seon.ai/finish-reason [:string {:min 1}]
 
  ; Request settings are canonical Clojure data until this one projection
  ; applies the registration's [wire-key coercion] pairs.
- :seon.ai/sent [:map-of :string :any]
+ :seon.ai/sent [:map-of :string :seon.ai/json-value]
  :seon.ai/inert [:set :qualified-keyword]
  :seon.ai/wire-settings
  [:map
@@ -2061,6 +2073,7 @@
  :seon.fn/fn
  [:map {:seon.db/entity true}
   [:seon.fn/sym :seon.fn/sym]
+  [:seon.schema.admission/source :seon.schema.admission/source]
   [:seon.fn/ns :seon.fn/ns]
   [:seon.fn/source :seon.fn/source]
   [:seon.fn/arglists {:optional true} :seon.fn/arglists]
@@ -2075,6 +2088,7 @@
  :seon.schema/schema
  [:map {:seon.db/entity true}
   [:seon.schema/key :seon.schema/key]
+  [:seon.schema.admission/source :seon.schema.admission/source]
   [:seon.schema/form :seon.schema/form]
   [:seon.db.id/generator {:optional true} :seon.db.id/generator]]
 
@@ -2098,6 +2112,7 @@
         :seon.render/ai seon.render.ns/render-ai
         :seon.render/html seon.render.ns/render-html}
   [:seon.ns/name :seon.ns/name]
+  [:seon.schema.admission/source :seon.schema.admission/source]
   [:seon.ns/source {:optional true} :seon.ns/source]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
   [:seon.ns/requires {:optional true} :seon.ns/requires]
@@ -2159,6 +2174,7 @@
  :seon.code.def/def
  [:map {:seon.db/entity true}
   [:seon.code.def/id :seon.code.def/id]
+  [:seon.schema.admission/source :seon.schema.admission/source]
   [:seon.code.def/ns :seon.code.def/ns]
   [:seon.code.def/name :seon.code.def/name]
   [:seon.code.def/value-edn {:optional true} :seon.code.def/value-edn]
@@ -2713,6 +2729,7 @@
  :seon.test/test
  [:map {:seon.db/entity true}
   [:seon.test/sym :seon.test/sym]
+  [:seon.schema.admission/source :seon.schema.admission/source]
   [:seon.test/ns {:optional true} :seon.test/ns]
   [:seon.test/source {:optional true} :seon.test/source]]
 

@@ -17,6 +17,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [malli.core :as m]
+            [malli.generator :as mg]
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -33,6 +35,32 @@
 (defn- error? [value]
   (and (map? value) (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
+
+(def ^:private json-number-generator
+  (gen/one-of
+   [gen/small-integer
+    (gen/fmap (fn [n] (/ (double n) 10.0)) gen/small-integer)]))
+
+(def ^:private json-value-generator
+  (gen/recursive-gen
+   (fn [inner]
+     (gen/one-of
+      [(gen/vector inner 0 4)
+       (gen/map gen/string-alphanumeric inner {:max-elements 4})]))
+   (gen/one-of
+    [(gen/return nil)
+     gen/boolean
+     json-number-generator
+     gen/string-alphanumeric])))
+
+(defn- compiled-json-value-schema []
+  (let [projection (schema/build-projection (schema/registered-schemas))]
+    (m/schema
+     :seon.ai/json-value
+     {:registry (:seon.schema.projection/registry projection)})))
+
+(defn- json-round-trip? [value]
+  (= value (json/read-str (json/write-str value))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The descriptor rows: one derivation, two roles
@@ -259,12 +287,52 @@
 ;;; The pure halves
 ;;; ---------------------------------------------------------------------------
 
+(deftest provider-documents-use-one-named-recursive-json-schema
+  (let [payload
+        {"prompt_tokens" 91
+         "completion_tokens" 42
+         "details" {"cached" true
+                    "classes" [nil "hit" 1.5]}}]
+    (doseq [value [nil false 7 1.25 "text" [] {} [nil {"ok" true}]]]
+      (is (schema/valid-candidate-value? :seon.ai/json-value value)
+          (pr-str value)))
+    (is (schema/valid-candidate-value? :seon.ai/usage payload))
+    (is (= payload (json/read-str (json/write-str payload))))
+    (is (not (schema/valid-candidate-value?
+              :seon.ai/json-value
+              (fn [] :not-json))))))
+
+(deftest generated-json-values-validate-and-round-trip
+  (let [compiled (compiled-json-value-schema)
+        schema-values (mg/sample compiled {:seed 2026080301 :size 30})]
+    (is (seq schema-values))
+    (is (every? #(m/validate compiled %) schema-values))
+    (doseq [[json-partition seed generator]
+            [[:null 2026080310 (gen/return nil)]
+             [:boolean 2026080311 gen/boolean]
+             [:number 2026080312 json-number-generator]
+             [:string 2026080313 gen/string-alphanumeric]
+             [:array 2026080314 (gen/vector json-value-generator 0 4)]
+             [:object 2026080315 (gen/map gen/string-alphanumeric
+                                          json-value-generator
+                                          {:max-elements 4})]]]
+      (let [check
+            (tc/quick-check
+             40
+             (prop/for-all
+              [value generator]
+              (and (m/validate compiled value)
+                   (json-round-trip? value)))
+             :seed seed)]
+        (is (true? (:result check))
+            (str (name json-partition) " JSON round-trip failed: "
+                 (pr-str check)))))))
+
 (deftest the-request-body-carries-the-model-and-the-messages
   (let [body (ai/request-body (assoc base :seon.ai/system "be brief"))]
     (is (map? body))
-    ;; STRING keys at the wire boundary, no keyword fallback: the body
-    ;; is the one :any third-party document and we project out of it
-    ;; immediately rather than pretending it is Clojure data
+    ;; STRING keys at the wire boundary, no keyword fallback: the body is one
+    ;; named JSON provider document, not arbitrary Clojure data.
     (is (= "probe-model" (get body "model")))
     (is (= 8192 (get body "max_tokens"))
         "the descriptor's positive output budget reaches the wire")

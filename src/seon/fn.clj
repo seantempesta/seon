@@ -718,8 +718,9 @@
                   {:seon.error/kind ::index-refused
                    :seon.schema/key schema-key}))))
     (add-contract-facts
-     (into (into (vec source-only) external-namespace-rows)
-           canonical-schemas))))
+     (mapv #(assoc % :seon.schema.admission/source :core)
+           (into (into (vec source-only) external-namespace-rows)
+                 canonical-schemas)))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis."

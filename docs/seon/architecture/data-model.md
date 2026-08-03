@@ -265,11 +265,11 @@ normalization and retry disposition derive at read.
 
 | Entity schema | Persisted attributes |
 |---|---|
-| `:seon.fn/fn` | `:seon.fn/sym`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload` |
-| `:seon.schema/schema` | `:seon.schema/key`, `/form`, optional `:seon.db.id/generator` |
-| `:seon.ns/ns` | `:seon.ns/name`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
-| `:seon.test/test` | `:seon.test/sym`, `/ns`, `/source` |
-| `:seon.code.def/def` | `:seon.code.def/id`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
+| `:seon.fn/fn` | `:seon.fn/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload` |
+| `:seon.schema/schema` | `:seon.schema/key`, `:seon.schema.admission/source`, `/form`, optional `:seon.db.id/generator` |
+| `:seon.ns/ns` | `:seon.ns/name`, `:seon.schema.admission/source`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
+| `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source` |
+| `:seon.code.def/def` | `:seon.code.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
 
 Function contracts persist twice through one producer: `/spec` retains the
 canonical Malli form, while `/arities` and `/ast` point to ordered component
@@ -283,6 +283,11 @@ preserve SCI's effective resolver inputs. `:seon.code.def` stores one current
 REPL definition per namespace/name: a replay-safe source, a faithful inline or
 blob value, or an honest unrestorable reason. Restore order derives from
 `/ordinal`; namespace identity, not an agent-private context, owns the image.
+
+Every program row records `:seon.schema.admission/source` at admission. Static
+source publication writes `:core`; a runtime declaration writes `:agent`.
+Contract strictness reads that fact and fails closed when it is absent or
+ambiguous. It never derives trust from optional temporal history.
 
 The program graph is live per cluster. Every agent in one cluster calls the
 same graph; another cluster has another database branch and SCI context.

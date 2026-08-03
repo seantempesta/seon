@@ -1108,6 +1108,7 @@
                             [:seon.fn/sym "my.agents.agent-a/f"])]
             (is (= "(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] (+ x 2))"
                    (:seon.fn/source row)))
+            (is (= :agent (:seon.schema.admission/source row)))
             (is (not (contains? row :seon.fn/doc)))
             (is (not (contains? row :seon.fn/workload)))))))))
 
@@ -1172,6 +1173,9 @@
                 "the row contains evaluated canonical EDN, not `(vector ...)`")
             (is (= "[:string {:min 1}]"
                    (:seon.schema/form value-row)))
+            (is (= :agent
+                   (:seon.schema.admission/source persistent-row)
+                   (:seon.schema.admission/source value-row)))
             (is (not (contains? persistent-row :seon.schema/ns))
                 "schema identity is global, never namespace-owned")
             (is (= 1 (count tx-pairs)))
