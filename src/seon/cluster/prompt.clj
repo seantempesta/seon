@@ -35,12 +35,12 @@
 
 (defn- missing-required-keys
   [explanation]
-  (into []
-        (comp
-         (filter #(= :malli.core/missing-key (:type %)))
-         (map (comp last :in))
-         distinct)
-        (:errors explanation)))
+  (->> (:errors explanation)
+       (keep (fn [problem]
+               (when (= :malli.core/missing-key (:type problem))
+                 (last (:in problem)))))
+       distinct
+       vec))
 
 (defn- validate-request!
   [request]
