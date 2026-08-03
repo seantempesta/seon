@@ -477,13 +477,19 @@ database at its parsed source position (`src/seon/db.clj:172-248`;
 (db/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] database)
 #{["A" 1] ["B" 2]}
 
-(db/q '[:find ?n . :where [?e ::name ?n]] database)
+(db/q '[:find ?n . :in $ ?wanted
+        :where [?e ::name ?n] [(= ?n ?wanted)]]
+      database "A")
 "A"
 
-(db/q '[:find [?n ...] :where [?e ::name ?n]] database)
-["A" "B"]
+(db/q '[:find [?n ...] :in $ ?wanted
+        :where [?e ::name ?n] [(= ?n ?wanted)]]
+      database "A")
+["A"]
 
-(db/q '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] database)
+(db/q '[:find [?n ?r] :in $ ?wanted
+        :where [?e ::name ?n] [?e ::rank ?r] [(= ?n ?wanted)]]
+      database "A")
 ["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
