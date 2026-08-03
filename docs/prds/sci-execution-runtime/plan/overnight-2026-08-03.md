@@ -12,14 +12,45 @@ take their time: deeper reading, more falsification, no rushing to a
 commit. Everything here is either owner-ruled or explicitly marked as
 needing a decision.
 
-Standing conditions for every lane below, so each spec need not repeat
-them: suite runs isolate per operator root (concurrent runs are fine,
-keep to two); no CPU stress tools; use your OWN operator root under
-`tmp/` for anything live and take it down after; never touch the
-default operator root or the live `default` cluster; commit
-path-limited and DO NOT PUSH; when a claim is stated, cite `file:line`;
-mark anything unverified as unverified. Stop and report at a real
-boundary rather than editing another lane's file.
+## READ THE WHOLE SPEC. DO NOT GREP IT.
+
+This is the first standing condition because violating it cost the most
+time on 2026-08-02. The orchestrator grepped
+`render-pipeline-design-2026-07-29.md` twice and got the model wrong
+BOTH times; a research lane reported a per-call render cache as "must be
+introduced" when it was specified in two places, one of them the
+architecture target's own numbered flow. Three separate wrong
+conclusions came from partial reads of documents that were correct.
+
+So: when a subject below names a document, READ THAT DOCUMENT END TO
+END before designing, deciding, or reporting on it. These specs are
+dense and load-bearing — a verdict section, a "differences from the
+current pipeline" section, and a numbered owner-decisions list each
+carry constraints that a keyword search will not surface. If a document
+is long, that is the reason to read it, not the excuse for grepping it.
+State in your report that you read it whole.
+
+The specs, by subject:
+
+| subject | read whole |
+|---|---|
+| render delivery, packages, caching, morphs | `research/render-pipeline-design-2026-07-29.md` (904 lines) AND `docs/seon/architecture/ui.md` |
+| the render model as of tonight | `research/render-model-2026-08-02.md` |
+| distance, the context walk, namespace membership | `research/context-walk-synthesis-2026-07-31.md` AND `docs/seon/architecture/context.md` |
+| custody, isolation, SCI internals | `research/custody-isolation-design-2026-08-02.md` AND `research/sci-var-semantics-2026-08-02.md` |
+| storage cost and the validated model | `research/store-amplification-anatomy-2026-08-02.md` AND `research/store-census-2026-08-02.md` |
+| the MCP surface | `docs/prds/mcp-surface/README.md` |
+| definition-time testing and accretion | `research/definition-seam-design-2026-08-02.md` |
+| binding law and rulings | `AGENTS.md` whole, and `plan/README.md` rulings #20-#48 |
+
+Other standing conditions, so each subject need not repeat them: suite
+runs isolate per operator root (concurrent runs are fine, keep to two);
+no CPU stress tools; use your OWN operator root under `tmp/` for
+anything live and take it down after; never touch the default operator
+root or the live `default` cluster; commit path-limited and DO NOT PUSH;
+cite `file:line` for every claim; mark anything unverified as unverified
+rather than asserting it. Stop and report at a real boundary rather than
+editing another lane's file.
 
 ## The state this starts from
 
@@ -171,6 +202,126 @@ eval roots), to be designed rather than forced.
   `:seon.test` rows carry only `sym`, `ns`, `source`.
 - The store's write-amplification options and GC cutoff, both filed and
   measured but unadopted.
+
+## The mixed models to collapse
+
+Owner direction, 2026-08-02 night: "schedule fixes for all the confusing
+mixed ideas and simplify everything down." Tonight's render investigation
+kept finding the same shape — TWO MODELS COEXISTING where one is a
+survivor of a design we already replaced. Each entry below names the
+confusion, the ONE model that should remain, and what that means
+concretely. Simplification is the deliverable; a lane that leaves both
+models in place has not done the work.
+
+**1. THE RENDER PIPELINE ITSELF IS THE MIXED MODEL, and `raw` is only a
+symptom.** READ `render-pipeline-design-2026-07-29.md` IN FULL before
+touching any of this — the orchestrator grepped it twice and got the
+model wrong both times.
+
+The settled design (its own Verdict and owner decisions 1-7): ONE
+revisioned composite package per agent page, rendered and serialized
+ONCE, carrying both `keyframe-bytes` (one complete Datastar event, every
+block) and `delta-bytes` (changed fragments). The render proc publishes
+that immutable package through one `mult`; every tab has one sliding-1
+tap. A contiguous tab applies the delta; a tab that detects a revision
+gap snaps to the keyframe. Equality and delta selection live ENTIRELY in
+the render proc. INITIAL PAGE LOAD IS FULLY RENDERED AND CACHED —
+decision #7, recommended as cached-keyframe embedding "if it can
+preserve one serialization owner" — and thereafter blocks are patched
+IFF they change. Stable-ID render-unit fragments are the default
+granularity; NO generic server-side Hiccup differ, because Datastar
+already computes persistent IDs, matches children, and stops descending
+at `isEqualNode`.
+
+THE CURRENT CODE IS THE PREVIOUS INCARNATION. The design's own
+"Differences from the current pipeline" section says `web.clj` derives a
+complete `{agent-id → {surface-id → html}}` snapshot, mults it, lets
+every tab diff against its own delivered map, and performs a SEPARATE
+`page-of` derivation PER CONNECTION. The target has tabs hold only a
+delivered revision, paints initial feed from the latest package rather
+than re-deriving, uses one tap per TAB (not per render unit), and leaves
+the writer doing no Hiccup or Datastar framing at all.
+
+So: `hiccup/raw`'s four uses (`src/seon/render/web.clj:1077,1079,1104,
+1109`) re-embed already-serialized bytes because the shell is still
+assembling pages by hand. Under the settled design the one legitimate
+embedding is the cached keyframe in the initial document, preserving ONE
+serialization owner. The AI pane (`:1104`) is a SEPARATE question: it
+embeds the agent's context TEXT, so if that is plain text then escaping
+is correct and `raw` there is a defect, not residue.
+
+Note the design also records that `web/render-step` is tagged `:io`
+while it derives and serializes pages — the design calls that
+current-state evidence, not the target, since SCI render, admission,
+serialization, equality and framing are all `:compute` work.
+
+**2. Renderer identity: output type versus declaration.** Identifying a
+renderer by "returns hiccup" makes helpers (`slot`, `expand`,
+`emit-hiccup`) renderer candidates. ONE MODEL: a function is a renderer
+because something DECLARED it one; the output type is a VALIDITY CHECK on
+that declaration, never the identity. Helpers are never declared, so they
+never qualify.
+
+**3. Renderer resolution: four paths.** Today: explicit attribute, the
+`render-<kind>` NAME CONVENTION, schema shape-match, floor. ONE MODEL,
+all levels DECLARED, most specific first — explicit keys on the data
+(any data, regardless of its schema), then the owning namespace's
+renderer, then another namespace's renderer ordered by DISTANCE, then the
+schema's default property, then the floor. The name convention is
+deleted (ruling #47).
+
+**4. Distance: two jobs, one word.** `:seon.render/distance` today
+governs the context WALK — ref hops, spent per connection, one default
+site at `src/seon/render/block.clj:168-178`. The renderer hierarchy needs
+distance between NAMESPACES. DECIDE AND RECORD whether that is the same
+measure reused or a second notion that needs its own name, and say what
+actually measures namespace distance (the require graph? shared prefix
+depth? something already in the program graph?). Two unrelated namespaces
+both declaring a renderer must be orderable, or the hierarchy has a hole.
+Owner says this was spec'd; find the spec before designing.
+
+**5. Render caching: it is DESIGNED, not missing.** The render research
+reported "a real per-call cache must be introduced"; that is wrong, and
+so was the orchestrator for repeating it. The pipeline design specifies
+a SINGLE-WRITER LATEST-PACKAGE SNAPSHOT owned by the render proc
+(required because vendored `mult` does not replay to late taps —
+REPL-confirmed in the design), plus an equality cache, plus the explicit
+rule that initial paint and the cached keyframe REUSE CACHED BYTES
+RATHER THAN CALL THE RENDERER. Both are "disposable derived memory, like
+equality suppression — not a database fact, replay log, or second render
+owner." ONE MODEL: reuse that. Do not build a second cache.
+
+The genuinely open question is narrow: the design assumed COMPILED
+renderers, and under ruling #46 every render becomes a guarded SCI
+invocation whose declaration may resolve differently per cluster. So
+does the equality key (the actual serialized fragment bytes) still hold,
+and does the snapshot need to be per cluster? Answer that against the
+design rather than inventing around it.
+
+**6. Closed maps masking schema debt.** Ruling #48 opened the maps and
+immediately exposed a forbidden `:any` in `:seon.ai/usage` that broke
+publication, plus six unions that relied on closedness to be
+distinguishable. ONE MODEL: declarations are honest and open; ambiguity
+is resolved by an EXPLICIT DISCRIMINANT, never by forbidding extra keys.
+Two issue notes carry this —
+`closed-map-contracts-survive-outside-schema-population.md` (inline
+`{:closed true}` in `:malli/schema` metadata, so the migration is wider
+than the 172 in the schema resource) and
+`map-unions-have-no-explicit-discriminants.md`.
+
+**7. Anonymous and `:any` contracts.** 18 schema keys carrying 19 `:any`
+leaves; 58 `:any` and 22 `:some` in active source, each verdicted. ONE
+MODEL: a named schema for every shape that has one; `:any` only at a
+PROVEN polymorphic boundary. Concrete: `render.hiccup/raw` returns
+`:any`, instrumentation returns `[:set :any]`, database and Var inputs
+typed `:any`, and 19 `:some` transaction-data returns that should
+reference `:seon.store/transaction-data`.
+
+**The test for every one of these:** after the change, can a reader name
+ONE model and find ONE mechanism implementing it? If both models still
+exist — even with one marked deprecated — the simplification did not
+happen. Git is the archive; delete the superseded path in the same
+change.
 
 ## What needs the owner, not a lane
 
