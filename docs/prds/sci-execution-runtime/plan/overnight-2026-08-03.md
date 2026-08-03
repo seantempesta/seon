@@ -75,6 +75,52 @@ implementation.
 
 Later items assume earlier ones. Within a tier, lanes are independent.
 
+### Tier 0 — the suite takes 28+ minutes (velocity incident)
+
+A lane (`suite-speed`) was launched at session close and may not have
+finished. Its brief and the orchestrator's measurements:
+
+- 862 tests / 4,276 assertions. A run reached 642 tests in ~28 minutes —
+  roughly **2.6 SECONDS PER TEST**, far too slow for tests that mostly do
+  not boot anything.
+- **38 full cluster boots** happen during a run: `seon.cluster.boot-test`
+  23, `seon.cluster.armed-test` 8, `seon.oversight-test` 2,
+  `seon.config-application-test` 2, `seon.cluster.program-restart-test`
+  2, `seon.bootstrap-drive-test` 1.
+- Across `test/` there are **45 `cluster/start!` call sites in 7 files**;
+  `boot_test.clj` alone has 30 and `armed_test.clj` 6.
+- A boot is expensive by construction: open the store, fork a branch,
+  build the SCI ctx (`cluster-ctx` measured at 636 ms), instrument 447
+  vars, start flow graphs and a web service. A fresh isolated root
+  reached READY in 1,449 ms.
+- So boots plausibly account for only ~60-110 s. **THE BULK IS
+  UNEXPLAINED** and that is the real question.
+
+THE OWNER'S QUESTION, which is sharper than the orchestrator's and
+should drive the work: **why are we loading every cluster to run the
+tests at all?** Part of the answer is legitimate — `boot_test`'s
+subjects genuinely ARE the boot tower (process-root store identity,
+root executors and their thread kinds, REPL-first under the ten-second
+bound, two-instance isolation, stale advertisements, recycled-pid
+refusal, delayed stop versus replacement). Those need real boots. But 30
+`start!` calls for that namespace's tests suggests some boots are
+FIXTURES OF CONVENIENCE rather than the subject, and those are waste.
+Separate the two before optimising either.
+
+LEADING HYPOTHESIS for the unexplained bulk, to confirm or refute FIRST:
+the per-test database fixture. If every test builds a fresh in-memory
+connection AND installs the complete 652-key schema population AND
+applies instrumentation, that per-test constant dominates everything
+else. Measure one fixture setup in isolation and multiply by the test
+count rather than inferring from the total.
+
+PROFILE BEFORE CHANGING ANYTHING, and note the suite's new per-test
+BEGIN/END progress lines carry no timestamps — adding them is itself
+worth doing, because a suite that cannot say where its time goes will
+drift again. FORBIDDEN: deleting or skipping tests, reducing generative
+trial counts, weakening assertions, excluding slow tests from the
+default run, or sharing mutable state between tests.
+
 ### Tier 1 — unblockers (start here)
 
 **1A. The union read-decoding codec.** OWNER-RULED, not started. Mixed
