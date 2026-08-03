@@ -292,7 +292,7 @@
                 (when (= :seon.blob/digest
                          (edn/read-string serialized-form))
                   attribute)))
-        (d/q '[:find ?attribute ?form
+        (db/q '[:find ?attribute ?form
                :where
                [?schema :seon.schema/key ?attribute]
                [?schema :seon.schema/form ?form]]
@@ -310,7 +310,7 @@
         (into #{}
               (mapcat
                (fn [attribute]
-                 (d/q '[:find [?digest ...]
+                 (db/q '[:find [?digest ...]
                         :in $ ?attribute
                         :where [_ ?attribute ?digest]]
                       history-db attribute)))

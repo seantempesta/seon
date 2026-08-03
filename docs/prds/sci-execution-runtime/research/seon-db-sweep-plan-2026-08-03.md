@@ -71,6 +71,10 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   the explicit `seon.db/q` Var late. This is still the one database
   implementation and preserves explicit custody; it is the cycle-breaking
   equivalent of the existing late owner resolution in `seon.oversight`.
+- The final census found that `seon.cluster.registry`'s two planned blob-GC
+  queries had been omitted from the earlier source checkpoint. Their source
+  still matched the plan's non-exempt judgment, so both moved to `seon.db/q`
+  in a corrective registry checkpoint before acceptance.
 - The render gate falsified the read-table claim that every current `datoms`
   consumer already used named fields or sequence presence. `seon.render.web`'s
   generic debug entity used tuple offsets 1 and 2; `seon.db/datoms` deliberately
