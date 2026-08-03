@@ -45,10 +45,14 @@
   loop commits as a receipt. The loop has no catch around this call
   because there is nothing to catch.
 
-  ONE OWNER FOR `interrupted?`. This namespace answers \"is this
-  throwable sci's uncatchable interrupt?\" for the whole system, walking
-  wrappers through their causes with sci's own marker predicate.
-  `seon.sci.admit` resolves this owner rather than copying the test.
+  ONE GUARDED OWNER, TWO ENTRANCES. `seon.sci.kernel` owns the process
+  guard, arming, the deadline, `interrupted?`, and the one failure
+  classifier; this namespace is the FORM entrance and `kernel/invoke` is
+  the NAMED-FUNCTION entrance a renderer call takes. Neither copies the
+  other's guard semantics, so they cannot drift: work reached while this
+  context is already armed on this thread inherits that arm and its
+  deadline, and a different context on an armed thread is refused as an
+  ordinary flat error value.
 
   AN AGENT EVALUATES IN ITS OWN NAMESPACE, by construction. The eval
   binds sci's own `*ns*` to `my.agents.<id>` for the whole form, so a
@@ -101,6 +105,7 @@
             [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
+            [my.background]
             [my.message]
             [my.run]
             [sci.core :as sci]
@@ -112,7 +117,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
-            [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -155,6 +159,7 @@
   []
   (let [{guard ::kernel/guard :as kernel-options} (kernel/context-options)
         run-ns (sci/create-ns 'my.run)
+        background-ns (sci/create-ns 'my.background)
         message-ns (sci/create-ns 'my.message)
         bootstrap-ns (sci/create-ns 'seon.bootstrap)
         schema-ns (sci/create-ns 'seon.schema)
@@ -186,6 +191,10 @@
                 (ns-publics 'clojure.test))
           'my.run {'wait (sci/copy-var my.run/wait run-ns)
                    'complete (sci/copy-var my.run/complete run-ns)}
+          'my.background
+          {'background (sci/copy-var my.background/background background-ns)
+           'poll (sci/copy-var my.background/poll background-ns)
+           'await (sci/copy-var my.background/await background-ns)}
           ;; the second agent-facing value family, bound the same way and
           ;; for the same reason: it is a PURE function returning a map,
           ;; so copying the var into the base ctx is the whole binding —
@@ -239,23 +248,6 @@
 ;;; The armed boundary
 ;;; ---------------------------------------------------------------------------
 
-(defn interrupted?
-  "True when `throwable` is SCI's uncatchable interrupt."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [throwable]
-  (kernel/interrupted? throwable))
-(defn- arm
-  [ctx time-limit-ms]
-  (let [{:keys [interrupt-fn]
-         stop! ::kernel/stop!
-         record ::kernel/record
-         built-in-calls ::kernel/built-in-calls}
-        (kernel/arm ctx time-limit-ms)]
-    {:interrupt-fn interrupt-fn
-     ::stop! stop!
-     ::record record
-     ::built-in-calls built-in-calls}))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
@@ -271,37 +263,6 @@
       text
       (subs text 0 limit))))
 
-(defn- diagnosis
-  [throwable record]
-  (if (= :time (:seon.eval/outcome record))
-    (str "Ran out of time after " (:seon.eval/duration-ms record) "ms.")
-    (or (ex-message throwable) (.getName (class throwable)))))
-
-(defn- failure-value
-  "The flat error value an agent sees for a failed evaluation."
-  [throwable record]
-  (let [refusal (error/refusal throwable)
-        evidence {:seon.sci.eval/throwable (.getName (class throwable))
-                  :seon.sci.admit/record record}]
-    (if (= :seon.instrument/contract-violated
-           (:seon.error/kind refusal))
-      (update refusal :seon.error/data merge evidence)
-      {:seon.error/kind (if (= :time (:seon.eval/outcome record))
-                          ::time-limit
-                          ::evaluation-failed)
-       :seon.error/message (diagnosis throwable record)
-       :seon.error/data (cond-> evidence
-                          (ex-data throwable)
-                          (assoc :seon.sci.eval/data
-                                 (ex-data throwable)))})))
-
-(defn invoke
-  "Invoke one live SCI Var through the shared guarded kernel."
-  {:malli/schema
-   [:=> [:cat :seon.sci.eval/invocation-request]
-    :seon.sci.eval/invocation-result]}
-  [request]
-  (kernel/invoke request))
 (declare deleted-schema-key)
 
 (defn- program-row
@@ -1437,8 +1398,9 @@
      or nil for an isolated base ctx;
   2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
-  3. arm its stable interrupt-fn on the current thread with
-     `::time-limit-ms`, the ONLY limit;
+  3. arm through `kernel/arm` with `::time-limit-ms`, the ONLY limit —
+     or INHERIT this context's active arm when one already governs this
+     thread, so nested work never restarts the clock;
   4. consume THE ONE reader event; source is never reparsed;
   5. evaluate;
   6. ADMIT the value — realized and bounded — while still armed;
@@ -1459,6 +1421,7 @@
     run-id :seon.cluster.run/id
     form-ordinal :seon.cluster.run.form/ordinal
     cluster-name :seon.boot/cluster-name
+    work-launcher :seon.flow/work-launcher
     namespace-ref :seon.cluster.run.form/ns
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
@@ -1466,11 +1429,28 @@
         ;; discard the caller's accumulated defs, which is the bug this
         ;; contract exists to not repeat
         evaluation-ctx (or ctx (build-base-ctx))
-        {:keys [interrupt-fn]
-         stop! ::stop!
-         record ::record
-         built-in-calls ::built-in-calls}
-        (arm evaluation-ctx time-limit-ms)
+        ;; ARMING HAPPENS INSIDE THE BOUNDARY, and these reach it through
+        ;; one volatile. `kernel/arm` refuses a DIFFERENT context already
+        ;; armed on this thread, and a refusal at an agent-facing operation
+        ;; is a VALUE like every other failure here — binding the arm before
+        ;; the try would let that refusal escape as a throw and contradict
+        ;; this namespace's own contract. The interrupt-fn needs no arm: it
+        ;; is the ctx's stable process guard, inert until armed.
+        started-at (System/nanoTime)
+        arm-state (volatile! nil)
+        interrupt-fn (get-in evaluation-ctx
+                             [::kernel/guard ::kernel/interrupt-fn])
+        record (fn [outcome]
+                 (if-let [armed-record (::kernel/record @arm-state)]
+                   (armed-record outcome)
+                   (kernel/unarmed-record started-at)))
+        built-in-calls (fn []
+                         (if-let [observed (::kernel/built-in-calls @arm-state)]
+                           (observed)
+                           #{}))
+        stop! (fn []
+                (when-let [disarm (::kernel/stop! @arm-state)]
+                  (disarm)))
         printed (java.io.StringWriter.)
         namespace-name (or (second namespace-ref)
                            (when agent-id (agent-namespace agent-id))
@@ -1489,12 +1469,15 @@
                          [::custody :seon.store/branch-connection])
                  :seon.cluster.run/id run-id
                  :seon.cluster.run.form/ordinal form-ordinal
+                 :seon.cluster.agent/id agent-id
+                 :seon.flow/work-launcher work-launcher
                  :seon.boot/cluster-name cluster-name
                  :seon.sci.admit/caps caps
                  :seon.config/on-core-error on-core-error
                  :seon.effect/counter (atom -1)})]
       (try
-        (let [before-reader-context
+        (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
+            before-reader-context
             (reader-context evaluation-ctx namespace-name)
             event (one-event source namespace-name evaluation-ctx)
             form (:seon.sci.reader/form event)
@@ -1603,7 +1586,8 @@
             :seon.sci.eval/session-defs session-defs
             :seon.sci.eval/program-row row}))
         (catch Throwable throwable
-          (let [record (record (if (interrupted? throwable) :time :error))
+          (let [record (record (if (kernel/interrupted? throwable)
+                                 :time :error))
                 session-defs
                 (when-let [{failed-ctx :seon.sci.eval/ctx
                             before :seon.sci.eval/before-intern-values
@@ -1616,7 +1600,10 @@
                   (changed-session-defs
                    failed-ctx namespace-name before source failed-form nil
                    (built-in-calls)))
-                value (failure-value throwable record)
+                value (kernel/failure-value
+                       {::kernel/time-limit-kind ::time-limit
+                        ::kernel/failure-kind ::evaluation-failed}
+                       throwable record)
                 admitted
                 (admit/admit
                  {:seon.sci.admit/value value

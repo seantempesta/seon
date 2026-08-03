@@ -26,6 +26,7 @@
             [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -1048,7 +1049,7 @@
 
 (deftest disarm-clears-the-current-threads-flag-exactly
   (let [ctx (eval/build-base-ctx)
-        {stop! :seon.sci.eval/stop!} (#'eval/arm ctx 30)
+        {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30)
         interrupt-fn (:interrupt-fn ctx)
         backstop (+ (System/nanoTime) 1000000000)
         reached
@@ -1060,7 +1061,7 @@
                     (interrupt-fn)
                     false
                     (catch Throwable failure
-                      (if (eval/interrupted? failure)
+                      (if (kernel/interrupted? failure)
                         true
                         (throw failure))))]
               (if interrupted
@@ -1161,17 +1162,155 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest interrupted?-recognises-only-the-real-marker
-  (is (false? (eval/interrupted? (ex-info "ordinary" {}))))
-  (is (false? (eval/interrupted? (RuntimeException. "ordinary"))))
+  (is (false? (kernel/interrupted? (ex-info "ordinary" {}))))
+  (is (false? (kernel/interrupted? (RuntimeException. "ordinary"))))
   (is (false?
-       (eval/interrupted? (ex-info "forged" {:sci.impl/interrupt false})))
+       (kernel/interrupted? (ex-info "forged" {:sci.impl/interrupt false})))
       "sci's private marker identity, not key presence, owns the answer")
   (let [interrupt
         (try ((requiring-resolve 'sci.interrupt/interrupt!) "x")
              (catch Throwable failure failure))]
-    (is (true? (eval/interrupted? interrupt)))
-    (is (true? (eval/interrupted?
+    (is (true? (kernel/interrupted? interrupt)))
+    (is (true? (kernel/interrupted?
                 (ex-info "location wrapper" {:sci/error true} interrupt))))
-    (is (false? (eval/interrupted?
+    (is (false? (kernel/interrupted?
                  (ex-info "ordinary wrapper" {}
                           (RuntimeException. "ordinary")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; One guarded owner, two entrances
+;;;
+;;; `evaluate` (a form) and `kernel/invoke` (a named live Var, which is how
+;;; every renderer runs) must not carry two copies of the guard's semantics.
+;;; Each test below fixes one semantic and asserts it at BOTH entrances, so a
+;;; future divergence fails here rather than in production.
+;;; ---------------------------------------------------------------------------
+
+(defn- invoked-value
+  "Invoke one already-live symbol through the guarded kernel entrance."
+  ([ctx database function-symbol] (invoked-value ctx database function-symbol [] 2000))
+  ([ctx database function-symbol arguments time-limit-ms]
+   ;; the database installer is never reached: the definition is already
+   ;; live in this context, which is exactly the renderer's cache-hit path
+   (kernel/mark-installed! ctx function-symbol)
+   (:seon.sci.admit/value
+    (kernel/invoke {:seon.sci.eval/ctx ctx
+                    :seon.db/db database
+                    :seon.fn/sym (str function-symbol)
+                    :seon.sci.eval/args arguments
+                    :seon.sci.eval/time-limit-ms time-limit-ms
+                    :seon.sci.admit/caps caps
+                    :seon.config/on-core-error :record}))))
+
+(deftest a-re-entrant-evaluation-inherits-the-governing-arm
+  ;; Before the merge this threw :seon.sci.kernel/already-armed straight out
+  ;; of `evaluate`, contradicting this namespace's own "nothing throws"
+  ;; contract, while `invoke` on the identical situation returned a value.
+  (let [ctx (eval/build-base-ctx)
+        {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30000)]
+    (try
+      (let [evaluation (run-in ctx "(+ 1 2)" 1000)]
+        (is (ok? evaluation) "the inherited arm evaluates, it does not throw")
+        (is (= 3 (:seon.sci.admit/value evaluation))))
+      (finally (stop!)))
+    (is (ok? (run-in ctx "(+ 2 2)" 1000))
+        "the inherited arm left the outer owner's disarm intact")))
+
+(deftest an-inherited-arm-keeps-the-governing-deadline
+  ;; The reason inheritance is the rule and not a convenience: nested work
+  ;; must never restart the clock and outlive the limit that admitted it.
+  (let [ctx (eval/build-base-ctx)
+        {stop! :seon.sci.kernel/stop!} (kernel/arm ctx 50)]
+    (try
+      (let [evaluation (deadlined-in ctx "(loop [i 0] (recur (inc i)))" 600000)]
+        (is (cut? evaluation)
+            "the outer 50ms arm stopped work that asked for ten minutes"))
+      (finally (stop!)))))
+
+(deftest a-foreign-armed-context-is-refused-as-a-value
+  (let [armed-ctx (eval/build-base-ctx)
+        other-ctx (eval/build-base-ctx)
+        {stop! :seon.sci.kernel/stop!} (kernel/arm armed-ctx 30000)]
+    (try
+      (let [evaluation (run-in other-ctx "(+ 1 2)" 1000)]
+        (is (some? (:seon.cluster.eval/error evaluation))
+            "a refusal at an agent-facing operation is a value, never a throw")
+        (is (= :seon.sci.kernel/already-armed
+               (:seon.error/kind (:seon.sci.admit/value evaluation)))))
+      (finally (stop!)))))
+
+(deftest both-entrances-classify-one-failure-identically
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (eval/build-base-ctx)
+           _ (is (ok? (run-in ctx (str "(defn probe-throw [x]"
+                                       " (throw (ex-info \"boom\" {:a x})))")
+                              2000)))
+           _ (is (ok? (run-in ctx (str "(defn probe-spin [x]"
+                                       " (loop [i x] (recur (inc i))))")
+                              2000)))
+           evaluated-throw (:seon.sci.admit/value
+                            (run "(throw (ex-info \"boom\" {:a 1}))"))
+           invoked-throw (invoked-value ctx database 'user/probe-throw [1] 2000)
+           evaluated-cut (:seon.sci.admit/value
+                          (deadlined-in nil "(loop [i 0] (recur (inc i)))" 50))
+           invoked-cut (invoked-value ctx database 'user/probe-spin [0] 50)]
+       (testing "an agent mistake"
+         (is (= :seon.sci.eval/evaluation-failed
+                (:seon.error/kind evaluated-throw)))
+         (is (= :seon.sci.kernel/invocation-failed
+                (:seon.error/kind invoked-throw))
+             "only the subject differs — the kind names which entrance ran")
+         (is (= "boom" (:seon.error/message evaluated-throw)))
+         (is (= "Invocation of user/probe-throw failed: boom"
+                (:seon.error/message invoked-throw)))
+         (is (= "clojure.lang.ExceptionInfo"
+                (:seon.sci.eval/throwable (:seon.error/data evaluated-throw))
+                (:seon.sci.eval/throwable (:seon.error/data invoked-throw)))
+             "one classifier, so the same evidence rides both faces")
+         (is (every? #(contains? (:seon.error/data evaluated-throw) %)
+                     [:seon.sci.eval/throwable :seon.sci.admit/record]))
+         (is (every? #(contains? (:seon.error/data invoked-throw) %)
+                     [:seon.sci.eval/throwable :seon.sci.admit/record
+                      :seon.fn/sym])
+             "the invocation entrance adds only its subject"))
+       (testing "the one deadline"
+         (is (= :seon.sci.eval/time-limit (:seon.error/kind evaluated-cut)))
+         (is (= :seon.sci.kernel/time-limit (:seon.error/kind invoked-cut)))
+         (is (str/starts-with? (:seon.error/message evaluated-cut)
+                               "Ran out of time after"))
+         (is (str/starts-with?
+              (:seon.error/message invoked-cut)
+              "Invocation of user/probe-spin failed: Ran out of time after")
+             "one message shape, prefixed only by the subject")
+         (is (= :time (:seon.eval/outcome
+                       (:seon.sci.admit/record
+                        (:seon.error/data evaluated-cut)))))
+         (is (= :time (:seon.eval/outcome
+                       (:seon.sci.admit/record
+                        (:seon.error/data invoked-cut))))))))))
+
+(deftest a-refusal-keeps-its-own-kind-at-both-entrances
+  ;; A refusal our own guarded machinery raised already says what went
+  ;; wrong. One classifier means neither entrance can flatten it into a
+  ;; generic failure while the other preserves it.
+  (test-support/with-database
+   (fn [connection]
+     (let [evaluated (:seon.sci.admit/value (run "(+ 1 2) (+ 3 4)"))
+           invoked (:seon.sci.admit/value
+                    (kernel/invoke
+                     {:seon.sci.eval/ctx (eval/build-base-ctx)
+                      :seon.db/db @connection
+                      :seon.fn/sym "user/never-defined"
+                      :seon.sci.eval/args []
+                      :seon.sci.eval/time-limit-ms 1000
+                      :seon.sci.admit/caps caps
+                      :seon.config/on-core-error :record}))]
+       (is (= :seon.sci.eval/reader-event-count (:seon.error/kind evaluated))
+           "the reader's refusal is not flattened into evaluation-failed")
+       (is (= :seon.sci.kernel/missing-function-installer
+              (:seon.error/kind invoked))
+           "nor is the kernel's own refusal flattened into invocation-failed")
+       (is (some? (:seon.sci.admit/record (:seon.error/data invoked)))
+           "a preserved refusal still gains the boundary's own evidence")))))

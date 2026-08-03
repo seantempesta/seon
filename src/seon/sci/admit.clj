@@ -348,7 +348,10 @@
     (project-node value depth state)
     (catch Throwable failure
       ;; the interrupt is the one throwable admission must not swallow
-      (when ((requiring-resolve 'seon.sci.eval/interrupted?) failure)
+      ;; resolved at call time because the guarded kernel requires this
+      ;; namespace: the owner of "is this sci's interrupt?" sits above
+      ;; admission, and admission must not swallow its one throwable
+      (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
         (throw failure))
       ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
       ;; the drafted marker-only choice): a value the total codec cannot

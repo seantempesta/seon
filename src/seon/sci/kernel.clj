@@ -10,6 +10,7 @@
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.db :as db]
+            [seon.error.refusal :as error.refusal]
             [seon.sci.admit :as admit])
   (:import [java.lang.management ManagementFactory]
            [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
@@ -186,8 +187,51 @@
        -1)
      :seon.eval/outcome (or @(::outcome armed) final-outcome)}))
 
+(defn- own-arm
+  [ctx guard time-limit-ms]
+  (let [^ThreadLocal thread-arm (::thread-arm guard)
+        allocated-at-start (allocated-bytes)
+        armed {::ctx ctx
+               ::entries (long-array 1)
+               ::sampled (long-array 1)
+               ::host-interop-observations (long-array 1)
+               ::built-in-calls (volatile! #{})
+               ::reached (AtomicBoolean. false)
+               ::outcome (volatile! nil)
+               ::started-at (System/nanoTime)
+               ::allocated-at-start allocated-at-start
+               ::measurable (not (neg? allocated-at-start))}]
+    (.set thread-arm armed)
+    (try
+      (let [task (.schedule deadline-timer
+                            ^Runnable #(.set ^AtomicBoolean (::reached armed)
+                                             true)
+                            (long time-limit-ms)
+                            TimeUnit/MILLISECONDS)]
+        {:interrupt-fn (::interrupt-fn guard)
+         ::built-in-calls (fn [] @(::built-in-calls armed))
+         ::stop!
+         (fn []
+           (.cancel ^Future task false)
+           (.set ^AtomicBoolean (::reached armed) false)
+           (.remove thread-arm)
+           nil)
+         ::record #(record armed %)})
+      (catch Throwable failure
+        (.remove thread-arm)
+        (throw failure)))))
+
 (defn arm
-  "Arm `ctx` on this thread and return its stop, record, and observers."
+  "Arm `ctx` on this thread and return its stop, record, and observers.
+
+  ONE re-entrancy rule for every entrance, because a second rule is how the
+  two boundaries diverged: work reached while the IDENTICAL context is
+  already armed on this thread INHERITS that arm — the outer deadline keeps
+  governing, the returned `::stop!` is inert, and no second timer exists, so
+  nested work can never restart the clock and outlive the limit that admitted
+  it. A DIFFERENT context on an armed thread is refused, because one thread
+  cannot honestly serve two limits. `::built-in-calls` reports the governing
+  arm's observations either way."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx
                        :seon.sci.eval/time-limit-ms]
                   :map]}
@@ -197,93 +241,62 @@
       (throw
        (ex-info "SCI context has no stable interrupt guard."
                 {:seon.error/kind ::missing-interrupt-guard})))
-    (let [^ThreadLocal thread-arm (::thread-arm guard)]
-      (when (.get thread-arm)
-        (throw
-         (ex-info "SCI context is already armed on this thread."
-                  {:seon.error/kind ::already-armed})))
-      (let [allocated-at-start (allocated-bytes)
-            armed {::ctx ctx
-                   ::entries (long-array 1)
-                   ::sampled (long-array 1)
-                   ::host-interop-observations (long-array 1)
-                   ::built-in-calls (volatile! #{})
-                   ::reached (AtomicBoolean. false)
-                   ::outcome (volatile! nil)
-                   ::started-at (System/nanoTime)
-                   ::allocated-at-start allocated-at-start
-                   ::measurable (not (neg? allocated-at-start))}]
-        (.set thread-arm armed)
-        (try
-          (let [task (.schedule deadline-timer
-                                ^Runnable #(.set ^AtomicBoolean (::reached armed)
-                                                 true)
-                                (long time-limit-ms)
-                                TimeUnit/MILLISECONDS)]
-            {:interrupt-fn (::interrupt-fn guard)
-             ::built-in-calls (fn [] @(::built-in-calls armed))
-             ::stop!
-             (fn []
-               (.cancel ^Future task false)
-               (.set ^AtomicBoolean (::reached armed) false)
-               (.remove thread-arm)
-               nil)
-             ::record #(record armed %)})
-          (catch Throwable failure
-            (.remove thread-arm)
-            (throw failure)))))))
+    (if-let [armed (.get ^ThreadLocal (::thread-arm guard))]
+      (do
+        (when-not (identical? ctx (::ctx armed))
+          (throw
+           (ex-info "A different SCI context is already armed on this thread."
+                    {:seon.error/kind ::already-armed})))
+        {:interrupt-fn (::interrupt-fn guard)
+         ::built-in-calls (fn [] @(::built-in-calls armed))
+         ::stop! (constantly nil)
+         ::record #(record armed %)})
+      (own-arm ctx guard time-limit-ms))))
 
-(defn- invocation-arm
-  [ctx time-limit-ms]
-  (let [guard (::guard ctx)]
-    (when-not guard
-      (throw
-       (ex-info "Invocation context has no stable interrupt guard."
-                {:seon.error/kind ::missing-interrupt-guard})))
-    (let [^ThreadLocal thread-arm (::thread-arm guard)
-          armed (.get thread-arm)]
-      (if-not armed
-        (arm ctx time-limit-ms)
-        (do
-          (when-not (identical? ctx (::ctx armed))
-            (throw
-             (ex-info "A different SCI context is already armed on this thread."
-                      {:seon.error/kind ::already-armed})))
-          {:interrupt-fn (::interrupt-fn guard)
-           ::stop! (constantly nil)
-           ::record #(record armed %)})))))
+(defn failure-value
+  "The ONE flat `:seon.error` value for a failure at the guarded boundary.
 
-(defn- refusal
-  [throwable]
-  (loop [candidate throwable]
-    (if candidate
-      (let [data (ex-data candidate)]
-        (if (:seon.error/kind data)
-          data
-          (recur (ex-cause candidate))))
-      nil)))
-
-(defn- failure-value
-  [function-symbol throwable diagnostic-record]
+  Both entrances classify here so they cannot drift apart. A throwable that
+  already carries a refusal — an instrument contract violation, a refused
+  schema declaration, an unresolved invocation — keeps its own
+  `:seon.error/kind` and gains this boundary's evidence; everything else
+  becomes `::time-limit-kind` when the diagnostic record's outcome is `:time`
+  and `::failure-kind` otherwise. `:seon.fn/sym` is the invoked function
+  symbol when one exists: it prefixes the message and rides in the data. A
+  form evaluation supplies no symbol, which is the ONLY difference between
+  the two entrances — the classification itself is identical."
+  {:malli/schema [:=> [:cat :seon.sci.kernel/failure-request
+                       :any
+                       :seon.sci.admit/record]
+                  :seon.error/value]}
+  [{subject :seon.fn/sym
+    time-limit-kind ::time-limit-kind
+    failure-kind ::failure-kind}
+   throwable
+   diagnostic-record]
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
-        existing (refusal throwable)]
-    (if existing
-      (update existing :seon.error/data merge
-              {:seon.fn/sym function-symbol
-               :seon.sci.admit/record diagnostic-record})
-      {:seon.error/kind (if timed-out? ::time-limit ::invocation-failed)
-       :seon.error/message
-       (str "Invocation of " function-symbol " failed: "
-            (if timed-out?
-              (str "ran out of time after "
-                   (:seon.eval/duration-ms diagnostic-record) "ms")
-              (or (ex-message throwable) (.getName (class throwable)))))
-       :seon.error/data
-       {:seon.fn/sym function-symbol
-        :seon.sci.eval/throwable (.getName (class throwable))
-        :seon.sci.admit/record diagnostic-record}})))
+        evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
+                          :seon.sci.admit/record diagnostic-record}
+                   subject (assoc :seon.fn/sym subject))
+        existing (error.refusal/refusal throwable)]
+    (if (:seon.error/kind existing)
+      (update existing :seon.error/data merge evidence)
+      (cond-> {:seon.error/kind (if timed-out? time-limit-kind failure-kind)
+               :seon.error/message
+               (cond->> (if timed-out?
+                          (str "Ran out of time after "
+                               (:seon.eval/duration-ms diagnostic-record) "ms.")
+                          (or (ex-message throwable)
+                              (.getName (class throwable))))
+                 subject (str "Invocation of " subject " failed: "))
+               :seon.error/data evidence}
+        (ex-data throwable)
+        (assoc-in [:seon.error/data :seon.sci.eval/data]
+                  (ex-data throwable))))))
 
-(defn- unarmed-record
+(defn unarmed-record
+  "The diagnostic record for a failure that never reached an arm."
+  {:malli/schema [:=> [:cat :int] :seon.sci.admit/record]}
   [started-at]
   {:seon.eval/fn-entries 0
    :seon.eval/host-interop-count 0
@@ -309,7 +322,7 @@
         function-symbol (symbol function-symbol-string)]
     (try
       (let [{:keys [interrupt-fn] record-fn ::record :as armed}
-            (invocation-arm ctx time-limit-ms)]
+            (arm ctx time-limit-ms)]
         (vreset! arm-state armed)
         (ensure-function! ctx database function-symbol)
         (binding [db/*conn*
@@ -337,8 +350,11 @@
               (if-let [record-fn (::record @arm-state)]
                 (record-fn (if (interrupted? throwable) :time :error))
                 (unarmed-record started-at))
-              failure (failure-value function-symbol-string throwable
-                                     record-value)]
+              failure (failure-value
+                       {:seon.fn/sym function-symbol-string
+                        ::time-limit-kind ::time-limit
+                        ::failure-kind ::invocation-failed}
+                       throwable record-value)]
           (try
             (admit/admit-value
              {:seon.sci.admit/value failure

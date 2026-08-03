@@ -1,0 +1,5 @@
+#:seon.sci.kernel{:failure-request
+                  [:map
+                   [:seon.fn/sym {:optional true} :seon.fn/sym]
+                   [:seon.sci.kernel/time-limit-kind :qualified-keyword]
+                   [:seon.sci.kernel/failure-kind :qualified-keyword]]}
