@@ -62,6 +62,22 @@
    {:mode :live :consumer 'seon.cluster/mcp-project}
    :seon.print/level
    {:mode :live :consumer 'seon.cluster/mcp-project}
+   :seon.config.fs/working-root
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/roots
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-read-bytes
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-inline-bytes
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-write-bytes
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-glob-results
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-traversal-entries
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
+   :seon.config.fs/max-depth
+   {:mode :live :consumer 'seon.fs.jvm/path-plan}
    :seon.config.ai/endpoint
    {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/model
