@@ -517,24 +517,26 @@
         (.countDown release)
         (sut/stop-installed-work-launcher!)))))
 
-(deftest launcher-stop-precedes-ready-submissions
-  (let [launcher
+(deftest launcher-stop-precedes-a-flood-of-ready-submissions
+  (let [queue-depth 256
+        launcher
         (sut/install-work-launcher!
          {::sut/configuration
-          {:seon.config.flow.compute/queue-depth 1
+          {:seon.config.flow.compute/queue-depth queue-depth
            :seon.config.flow.compute/concurrency 1}})
         graph (::sut/graph launcher)
         step-var (ns-resolve 'seon.flow 'work-launcher-step)
         original-step @step-var
         stop-transition (CountDownLatch. 1)
-        queued-result (promise)
-        queued-status (atom ::sut/queued)
         queued
-        {::sut/submission-id ::queued-before-stop
-         ::sut/workload :compute
-         ::sut/work-fn (fn [_] ::unexpected-queued-run)
-         ::sut/result queued-result
-         ::sut/status queued-status}]
+        (mapv
+         (fn [ordinal]
+           {::sut/submission-id (keyword (str "queued-before-stop-" ordinal))
+            ::sut/workload :compute
+            ::sut/work-fn (fn [_] ::unexpected-queued-run)
+            ::sut/result (promise)
+            ::sut/status (atom ::sut/queued)})
+         (range queue-depth))]
     (try
       (flow/pause graph)
       (is (= :paused
@@ -545,7 +547,7 @@
             (flow/inject
              graph
              [::sut/work-launcher ::sut/compute-submission]
-             [queued])
+             queued)
             test-support/event-backstop-seconds
             TimeUnit/SECONDS)
       (alter-var-root
@@ -568,10 +570,10 @@
       (test-support/await-event!
        stop-transition
        ::work-launcher-stop-transition)
-      (is (= ::sut/queued @queued-status)
-          "control wins while the submission channel is ready")
-      (is (false? (realized? queued-result))
-          "stop does not drain queued work")
+      (is (every? #(= ::sut/queued @(::sut/status %)) queued)
+          "control wins while every flooded submission is ready")
+      (is (every? #(false? (realized? (::sut/result %))) queued)
+          "stop does not drain any flooded work")
       (finally
         (alter-var-root step-var (constantly original-step))
         (sut/stop-installed-work-launcher!)))))
