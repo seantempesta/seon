@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, cluster, flow, runtime]
 ---
@@ -50,3 +50,21 @@ either one launcher per cluster, addressed from that cluster's graph, or one
 genuinely process-root launcher whose single process-wide configuration is not
 reinstalled by cluster boot. A concurrent two-cluster proof holds work in A,
 starts and exercises B, and observes A complete exactly once.
+
+## Resolution — 2026-08-03
+
+Commit `b50050968` deletes the process-global launcher slot and its
+install/current/stop-installed API. Every boot now starts one launcher from its
+cluster's acquired config facts, publishes it on the cluster instance and loop
+handle, passes it explicitly to `submit!!`, and stops only that launcher during
+that instance's reverse-order teardown. Launcher tasks run on the process-root
+shared `:io` executor; stopping a launcher never shuts down either root
+executor.
+
+The red falsifier held accepted work in A and started B. Before the repair, B's
+install interrupted A with `InterruptedException`. After the repair, the
+focused sibling-launcher regression completed B and then A exactly once in
+2.3 ms. The integrated `two-instances-are-isolated` boot proof co-hosted
+clusters `a` and `b`, and the complete boot namespace passed 28 tests / 133
+assertions / 0 failures / 0 errors. The shared-fixture generative loop gate
+passed 3 tests / 19 assertions / 0 failures / 0 errors.

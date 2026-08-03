@@ -197,14 +197,24 @@ run; the agent adapts from those facts.
 
 One process root holds the physical Datahike store lock and shared executors;
 each cluster owns its branch connection, program graph, agents, render graph,
-and web service. The run's process identity is custody, not agent identity or a
-second process registry.
+web service, and bounded compute work-launcher graph. Submissions carry that
+cluster-owned launcher explicitly; starting or stopping a sibling cluster
+cannot replace its configuration or interrupt its accepted work. The run's
+process identity is custody, not agent identity or a second process registry.
 
 Every proc explicitly uses `:io` or `:compute`. Remote model calls and socket
 writes may block on `:io`; SCI evaluation and pure derivation run on bounded
 `:compute`; unresolved mixed chains fail closed to Flow's expensive `:mixed`
 workload. Core faults travel through Flow's error channel to the one fault
 committer. Agent mistakes become flat values and receipts.
+
+Orderly agent stop joins the turn's completion event. While work remains
+process-observable, database commits wake that join without polling. A durable
+prompt capture is the boundary after which a remote provider call may be
+unobservable; only there may teardown arm a loud backstop derived from the
+turn's effective provider timeout and finite retry budget. Per-agent error
+fan-out blocks on the shared `:io` virtual-thread executor, never on a parked
+platform worker.
 
 ## Source authority
 

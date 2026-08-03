@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, lifecycle, testing]
 ---
@@ -103,3 +103,25 @@ completed through prepl and reaped its empty JVM. A second boot followed by
 `bin/seon --root ... down` completed through prepl plus SIGTERM, released the
 flock, and left 0/0 clusters alive with no orphan Seon JVMs. The default
 operator root and live default cluster were never addressed.
+
+## Provider-call backstop closure — 2026-08-03
+
+The readiness permit repairs observable proc-start and parked-state races, but
+an active turn can still be inside a remote provider call whose completion is
+not observable by Flow. Commit `d62561f24` keeps teardown event-driven until a
+durable prompt-capture fact proves that a provider call may have crossed the
+external boundary. Only then does it arm a loud last-resort backstop derived
+from that turn's effective primary/backup provider timeout and finite retry
+budget. Firing offers the existing Flow fault value, prints a core-fault line,
+throws, and leaves the route armed so stop is retryable.
+
+The local never-answering socket regression configured a 100 ms provider
+timeout with zero retries and observed the 100 ms derived backstop plus the
+matching fault value. The whole regression completed in 226 ms including
+fixture setup, socket release, and the successful retry. Before this repair,
+two captured suite JVMs remained stuck for 91 and 83 minutes; the old wait had
+no bound.
+
+Focused proof before unrelated schema-lane churn: `bin/test
+seon.cluster.agent-test` passed 14 tests / 100 assertions / 0 failures / 0
+errors.

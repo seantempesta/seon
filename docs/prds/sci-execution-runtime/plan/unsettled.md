@@ -16,6 +16,18 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, RULING #51 FLOW-EDGE CLOSURE.** Four crash-model
+edges are closed: the work launcher uses Flow's stock priority control
+protocol; active provider-call teardown has a loud provider-derived backstop;
+agent fault fan-out parks on virtual `:io` tasks; and every cluster owns its
+launcher graph while sharing only the process-root executors. Commits:
+`b22b58d33`, `d62561f24`, `53ca533cd`, `b50050968`, and `d3e97d2ea`.
+Measured 1,000-source fan-out changed from +1,017 platform threads to zero;
+the integrated two-cluster boot gate passed 28 tests / 133 assertions. The
+agent/turn combined rerun is presently unverified at the independent schema
+lane's missing `:seon.db/trigger` fixture-base boundary; the focused stop gate
+passed before that churn.
+
 **ADDENDUM — 2026-08-01, RULING #35 IMPLEMENTED; LIVE PROOF PENDING.**
 Provider reasoning now remains separate from visible text through one-shot and
 streaming parsing and settles on the attempt row through ruling #25's existing

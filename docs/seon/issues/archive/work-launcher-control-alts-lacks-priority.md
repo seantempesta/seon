@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, lifecycle, architecture]
 ---
@@ -61,7 +61,7 @@ The minimal fix, if the rebuild is deferred, is `:priority true` at
 Proof: a regression that saturates the submission channel to its configured
 queue depth and shows `flow/stop` taking effect without draining the queue.
 
-## Implementation evidence — 2026-08-02, pending orchestrator review
+## Resolution — 2026-08-03
 
 This issue and
 [[work-submission-can-block-before-its-time-limit]] have different immediate
@@ -86,7 +86,19 @@ standard step's stop transition, and proves the queued submission remains
 queued and unrealized. The proof waits on the transition event with only the
 shared loud backstop; it has no sleep or wall-duration assertion.
 
-Focused gate: `bin/test seon.flow-test` ran 21 tests containing 126 assertions
-with zero failures and zero errors. The implementation evidence functionally
-closes this issue together with the bounded-submission blocker; its status
-remains open for orchestrator review as requested.
+The larger, honest repair had already landed in `28540c431`: the custom
+launcher was deleted in favor of an ordinary `var-process`, so the stock Flow
+loop owns `alts!! :priority true`, transitions, and command handling. A new
+`:priority` token in `src/seon/flow.clj` would have recreated the duplicate
+protocol this issue rejects.
+
+Commit `b22b58d33` floods the paused input with 256 ready submissions. Commit
+`53ca533cd` makes the stop ordering deterministic at the resume transition and
+keeps the regression stable under executor churn. The stop transition was
+observed in 1.67 ms in the combined focused run (`03:32:48.922393` through
+`03:32:48.924067`) without draining the 256-item flood. The deleted custom
+loop had no finite command-latency guarantee under that load; a numeric
+pre-repair latency was not preserved and is therefore **UNVERIFIED**.
+
+Focused proof: `bin/test seon.flow-test` passed 23 tests / 197 assertions / 0
+failures / 0 errors after all flow-edge changes.

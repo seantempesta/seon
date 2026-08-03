@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, agent, evidence]
 ---
@@ -93,3 +93,24 @@ worker with `thread`, and `thread` dispatches to `:mixed`, not `:io`
 (`reference-code/core.async/src/main/clojure/clojure/core/async.clj:509-536,
 590-599`). The executor repair therefore does not dissolve the measured
 per-armed-agent platform thread.
+
+## Resolution — 2026-08-03
+
+Commit `53ca533cd` replaces `async/pipeline` with one blocking task per source
+on the process-root `:io` executor. Those tasks are virtual threads; source
+close publishes a completion value, and no source ever closes the shared fault
+channel. A `go-loop` prototype was rejected after the 1,000-source falsifier
+showed that it still grew core.async's platform dispatcher by nine threads.
+
+The committed probe
+`research/scripts/agent-error-fanout-thread-count-2026-08-03.clj` measured the
+same 1,000-source workload in fresh JVMs:
+
+| implementation | platform before | platform after | `async-mixed` delta |
+|---|---:|---:|---:|
+| legacy `pipeline` | 26 | 1,043 | +1,017 |
+| root `:io` virtual tasks | 26 | 26 | 0 |
+
+The recurring 64-source regression also proves tag preservation, completion on
+source close, and that the committer inbox remains open. `bin/test
+seon.flow-test` passed 23 tests / 197 assertions / 0 failures / 0 errors.
