@@ -421,6 +421,8 @@
    :seon.schema.admission/source
    :seon.db.id/generator])
 
+(declare require-committed!)
+
 (defn- incompatible-declaration-message
   [cluster-name attribute]
   (let [target-name (or cluster-name "NAME")
@@ -526,17 +528,23 @@
   (let [forms (schema.edn/packaged-forms)
         declarations (declaration-changes @connection forms cluster-name)]
     (when (seq declarations)
-      (d/transact connection {:tx-data declarations}))
+      (require-committed!
+       (db/transact! connection {:tx-data declarations})
+       {:seon.boot/population :seon.schema/declarations}))
     (let [process-rows (missing-process-rows @connection)]
       (when (seq process-rows)
-        (d/transact connection {:tx-data process-rows})))
+        (require-committed!
+         (db/transact! connection {:tx-data process-rows})
+         {:seon.boot/population :seon.db/processes})))
     (let [schema-rows (schema-row-changes @connection forms)]
       (when (seq schema-rows)
-        (d/transact connection
-                    {:tx-data schema-rows
-                     :tx-meta
-                     {:seon.db/process
-                      [:seon.db.process/id boot-process-identity]}}))))
+        (require-committed!
+         (db/transact! connection
+                       {:tx-data schema-rows
+                        :tx-meta
+                        {:seon.db/process
+                         [:seon.db.process/id boot-process-identity]}})
+         {:seon.boot/population :seon.schema/rows}))))
   nil)
 
 (defn populate-source!
@@ -558,20 +566,24 @@
   (accrete-schema-population! connection nil)
   (let [rows (bootstrap/population-tx @connection)]
     (when (seq rows)
-      (d/transact connection
-                  {:tx-data rows
-                   :tx-meta
-                   {:seon.db/process
-                    [:seon.db.process/id boot-process-identity]}})))
+      (require-committed!
+       (db/transact! connection
+                     {:tx-data rows
+                      :tx-meta
+                      {:seon.db/process
+                       [:seon.db.process/id boot-process-identity]}})
+       {:seon.boot/population :seon.bootstrap/rows})))
   (let [rows (instruction-row-changes
               @connection
               (instruction/seed-rows))]
     (when (seq rows)
-      (d/transact connection
-                  {:tx-data rows
-                   :tx-meta
-                   {:seon.db/process
-                    [:seon.db.process/id boot-process-identity]}})))
+      (require-committed!
+       (db/transact! connection
+                     {:tx-data rows
+                      :tx-meta
+                      {:seon.db/process
+                       [:seon.db.process/id boot-process-identity]}})
+       {:seon.boot/population :seon.cluster.instruction/rows})))
   (seon.fn/index!
    (cond-> {:seon.store/branch-connection connection
             :seon.db/process
@@ -922,7 +934,9 @@
                               :seon.cluster.run/now now})))
                          open-runs)]
     (when (seq operations)
-      (d/transact connection operations))
+      (require-committed!
+       (db/transact! connection operations)
+       {:seon.boot/population :seon.cluster.run/recovery}))
     {:seon.boot/recovered-runs (count open-runs)
      :seon.boot/recovery-operations (count operations)}))
 

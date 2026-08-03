@@ -6,6 +6,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.schema]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
@@ -176,6 +177,23 @@
                                :where [_ :seon.source.test/marker ?marker]]
                              current-db)))
                 "complete population repairs stale rows under an equal digest")))))))
+
+(deftest flat-scratch-write-refusal-retires-the-candidate
+  (with-store
+    (fn [opened]
+      (let [result
+            (with-redefs [db/transact!
+                          (fn [& _]
+                            {:seon.error/kind :seon.db/invalid-transaction
+                             :seon.error/message "injected refusal"})]
+              (refusal #(publish opened digest-a)))]
+        (is (= :seon.cluster.source/scratch-schema-refused
+               (:seon.cluster.source/rule result)))
+        (is (= :seon.db/invalid-transaction
+               (get-in result
+                       [:seon.source/transaction-result :seon.error/kind])))
+        (is (= #{:db} (set (registry/roster opened))))
+        (is (empty? (scratch-branches opened)))))))
 
 (deftest incremental-upsert-is-one-transaction-on-the-expected-commit
   (with-store

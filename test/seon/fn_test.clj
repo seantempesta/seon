@@ -422,7 +422,7 @@
                   (fn [_]
                     (throw (ex-info "analysis must not run" {})))
                   db/q (fn [& _] nil)
-                  d/transact
+                  db/transact!
                   (fn [_ request]
                     (swap! transactions conj request)
                     {})]
@@ -434,7 +434,25 @@
         (is (= 'prebuilt
                (-> @transactions first :tx-data first :seon.ns/name)))
         (is (some #(= "prebuilt/value" (:seon.fn/sym %))
-                  (-> @transactions second :tx-data)))))))
+                  (-> @transactions second :tx-data)))))
+    (let [attempts (atom 0)
+          result
+          (with-redefs [db/q (fn [& _] nil)
+                        db/transact!
+                        (fn [& _]
+                          (swap! attempts inc)
+                          {:seon.error/kind :seon.db/invalid-transaction})]
+            (try
+              (seon.fn/index!
+               {:seon.store/branch-connection (atom :database)
+                :seon.fn/manifest manifest})
+              ::committed
+              (catch clojure.lang.ExceptionInfo failure
+                (ex-data failure))))]
+      (is (= :seon.fn/index-refused (:seon.error/kind result)))
+      (is (= :seon.fn/namespaces (:seon.fn/index-phase result)))
+      (is (= 1 @attempts)
+          "a refused identity phase prevents dependent transactions"))))
 
 (deftest blocking-analysis-keeps-the-fresh-branch-unpublished
   (let [root (fixture-root)]

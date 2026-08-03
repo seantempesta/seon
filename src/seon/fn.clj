@@ -5,7 +5,6 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
-            [datahike.api :as d]
             [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
@@ -20,6 +19,16 @@
 (def source-roots
   "The Clojure source roots admitted to the program graph."
   ["src" "test"])
+
+(defn- require-committed!
+  [result phase]
+  (when (:seon.error/kind result)
+    (throw
+     (ex-info "Program indexing transaction was refused."
+              {:seon.error/kind ::index-refused
+               :seon.fn/index-phase phase
+               :seon.fn/transaction-result result})))
+  result)
 
 (defn- project-root
   []
@@ -679,9 +688,11 @@
                [(assoc parsed :db/id function)]))))
          (sort-by second missing))]
     (when (seq tx-data)
-      (d/transact connection
-                  (cond-> {:tx-data tx-data}
-                    process (assoc :tx-meta {:seon.db/process process}))))
+      (require-committed!
+       (db/transact! connection
+                     (cond-> {:tx-data tx-data}
+                       process (assoc :tx-meta {:seon.db/process process})))
+       :seon.fn/backfill-contract-facts))
     {:seon.reconcile/converged? (empty? tx-data)
      :seon.reconcile/operations (count missing)}))
 
@@ -758,17 +769,21 @@
                         (when (seq (:seon.fn/calls row))
                           (select-keys row [:seon.fn/sym :seon.fn/calls]))))
                 declarations)
-          transact! (fn [tx-data]
-                      (when (seq tx-data)
-                        (d/transact connection
-                                    (cond-> {:tx-data tx-data}
-                                      process (assoc :tx-meta
-                                                     {:seon.db/process process})))))]
+          commit-phase! (fn [phase tx-data]
+                          (when (seq tx-data)
+                            (require-committed!
+                             (db/transact!
+                              connection
+                              (cond-> {:tx-data tx-data}
+                                process (assoc :tx-meta
+                                               {:seon.db/process process})))
+                             phase)))]
       ;; Datahike processes tx-data in order. Every identity therefore exists
       ;; before a requires lookup ref resolves it, including the shared
       ;; name-only rows for external namespaces.
-      (transact! (into namespace-bases namespace-relations))
-      (transact! declaration-bases)
-      (transact! call-rows)
+      (commit-phase! :seon.fn/namespaces
+                     (into namespace-bases namespace-relations))
+      (commit-phase! :seon.fn/declarations declaration-bases)
+      (commit-phase! :seon.fn/calls call-rows)
       {:seon.reconcile/converged? false
        :seon.reconcile/operations (count program-rows)})))

@@ -35,6 +35,13 @@
                          :seon.error/kind ::refused
                          ::rule rule))))
 
+(defn- require-committed!
+  [result rule message data]
+  (when (:seon.error/kind result)
+    (refuse! rule message
+             (assoc data :seon.source/transaction-result result)))
+  result)
+
 (defn- source-file?
   [filename]
   (or (str/ends-with? filename ".clj")
@@ -149,9 +156,14 @@
             ;; population. If population fails immediately, this prevents its
             ;; branch from remaining an alias of `:db`, whose commit is an
             ;; ordinary ancestor of the already-published source history.
-            (d/transact connection
-                        {:tx-data (schema.datahike/malli->datahike-schema
-                                   source-attributes)})
+            (require-committed!
+             (db/transact!
+              connection
+              {:tx-data (schema.datahike/malli->datahike-schema
+                         source-attributes)})
+             ::scratch-schema-refused
+             "the source scratch schema transaction was refused"
+             {:seon.source/digest source-digest})
             (populate-fn
              (merge population-data
                     {:seon.store/branch-connection connection
@@ -159,9 +171,14 @@
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process
             ;; facts; the digest and build instant are the final complete fact.
-            (d/transact connection
-                        {:tx-data [{:seon.source/digest source-digest
-                                    :seon.source/built-at (java.util.Date.)}]})
+            (require-committed!
+             (db/transact!
+              connection
+              {:tx-data [{:seon.source/digest source-digest
+                          :seon.source/built-at (java.util.Date.)}]})
+             ::source-seal-refused
+             "the source seal transaction was refused"
+             {:seon.source/digest source-digest})
             (if expected-commit
               ;; The scratch commit is deliberately NOT a parent. Published
               ;; history follows the prior `current-src` commit, keeping the
@@ -244,16 +261,21 @@
             (let [digest-entity (first digest-entities)
                   old-digest (:seon.source/digest
                               (db/entity @connection digest-entity))]
-              (d/transact
-               connection
-               (cond->
-                {:tx-data
-                 (into [[:db/retract digest-entity
-                         :seon.source/digest old-digest]
-                        [:db/add digest-entity
-                         :seon.source/digest source-digest]]
-                       rows)}
-                 process (assoc :tx-meta {:seon.db/process process}))))
+              (require-committed!
+               (db/transact!
+                connection
+                (cond->
+                 {:tx-data
+                  (into [[:db/retract digest-entity
+                          :seon.source/digest old-digest]
+                         [:db/add digest-entity
+                          :seon.source/digest source-digest]]
+                        rows)}
+                  process (assoc :tx-meta {:seon.db/process process})))
+               ::incremental-source-refused
+               "the incremental source transaction was refused"
+               {:seon.source/digest source-digest
+                :seon.source/expected-commit-id expected-commit}))
             (d/force-branch! @connection current-branch #{expected-commit}
                              {:expected-current-commit expected-commit}))
             (finally
