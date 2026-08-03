@@ -202,7 +202,7 @@ from Malli global state:
   ((schema/projection-validator
     projection :seon.schema-usage-guard/base)
    7))
-;; => true
+true
 ```
 
 The full production operation should use

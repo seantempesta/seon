@@ -209,6 +209,13 @@ the expected total for 25 reached namespace cards.
 
 ## Verbatim captured projections
 
+Every capture and model reply below is preserved pre-decision-11 evidence.
+Its comment-framed walk/transcript output, comment-prefixed docstrings and
+notices, and any displayed comment-only pseudo-entry are superseded display
+shapes, not examples to copy. Current display is form then actual computed
+value, with notices as ordinary values. Input-side comments authored by the
+agent remain valid and the reply parser still preserves them.
+
 ### NURSERY BIRTH CONTEXT d1
 
 ```clojure

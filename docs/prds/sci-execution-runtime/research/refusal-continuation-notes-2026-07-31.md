@@ -86,6 +86,14 @@ section is retained as evidence that the authorized model call was not spent.
 
 ## Verbatim captured projections
 
+All projections and model replies below are preserved byte-for-byte evidence
+from before decision 11. Their comment-framed walk/transcript output,
+`(comment …)` pseudo-results, and displayed comment-only forms are explicitly
+superseded and must not be copied into a current renderer. The current target
+is form then actual computed value; notices are ordinary values. Input-side
+comments in an agent-authored form remain valid and the parser still preserves
+them.
+
 ### REAL AGENT EVAL (seon.render/walk) RESULT
 
 ```clojure

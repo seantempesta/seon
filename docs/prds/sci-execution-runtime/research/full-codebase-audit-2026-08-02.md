@@ -254,12 +254,19 @@ enabled (`script/seon/dev/markdown.clj:598-648,705-713`). Filed together as the
 one absence-as-health feedback class in
 `docs/seon/issues/dev-feedback-gates-observe-deleted-owners.md`.
 
-#### F13. Production docstrings teach deleted semantics
+#### F13. Production docstrings and renderers teach deleted semantics
 
-Agent-visible docs disagree about error shapes, shared SCI context, run closure,
-and comment grammar (`src/my/message.cljc:49-54`,
-`src/my/run.cljc:40-55,62-82`, `src/seon/cluster/instruction.cljc:17-34`,
-`src/seon/cluster/reply.cljc:78-85,211-217`). Other namespace docs still
+Agent-visible docs disagree about error shapes, shared SCI context, and run
+closure. Decision 11 settles the comment boundary: `;`/`;;` remain an
+input-side source-writing convention, while displayed forms, results,
+docstrings, and notices never use comments as output. The remaining current
+violations are `program-doc-var`'s `;`-prefixed docstrings
+(`src/seon/sci/eval.clj:838-855`), transcript comment headers and elision
+(`src/seon/render/transcript.clj:326-330,503-505`), effect notices
+(`src/seon/effect.clj:618-634`), and walk error/state framing
+(`src/seon/render.clj:375-377,404-408`). The reply parser's source-comment
+construction (`src/seon/cluster/reply.clj:77-84,210-244`) is intentionally
+unchanged and is not display authority. Other namespace docs still
 sequence unbuilt work or call plan reduction a fold
 (`src/seon/reconcile.cljc:5-12`, `src/seon/cluster/run.cljc:5-12`,
 `src/seon/cluster/loop.cljc:1380-1387,1547-1585`). Filed as

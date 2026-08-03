@@ -71,7 +71,7 @@ process-global atom (`src/seon/cluster.clj:185`).
 
 ```clojure
 (sort (keys @@#'seon.cluster/running-instances))
-;;=> ("xp-a" "xp-b")
+("xp-a" "xp-b")
 ```
 
 Note the double deref: `@#'x` gives you the *atom*, not its value. Getting this
@@ -135,8 +135,11 @@ Ranked by how often it earned its keep:
 
    ```clojure
    (observe/diff (fn [n] (count (d/q '[:find [?a ...] :where [?a :db/ident _]] (observe/db n)))))
-   ;;=> {158 ["xp-a" "xp-b"]}      ; same schema population — nothing to see
+   {158 ["xp-a" "xp-b"]}
    ```
+
+   The single grouped key means the two clusters had the same schema
+   population.
 
    A result with two keys is a finding; a result with one key is a
    *falsification* of "my cluster is special", which is usually what you
@@ -176,24 +179,24 @@ cluster's shared plumbing:
 
 ```clojure
 (observe/plumbing "xp-a")
-;;=> {:seon.cluster.agent/armer  {:status :running, :passes 0,
-;;                                :state {:passes 0, :armed-count 2},
-;;                                :queued {:arm 0}}
-;;    :seon.render.web/render    {:status :running, :passes 13,
-;;                                :state {:passes 13, :watched-agents 0,
-;;                                        :tap-count 0, :streaming-agents 0},
-;;                                :queued {:interest 0, :stream 0, :pages 0}}}
+{:seon.cluster.agent/armer  {:status :running, :passes 0,
+                             :state {:passes 0, :armed-count 2},
+                             :queued {:arm 0}}
+ :seon.render.web/render    {:status :running, :passes 13,
+                             :state {:passes 13, :watched-agents 0,
+                                     :tap-count 0, :streaming-agents 0},
+                             :queued {:interest 0, :stream 0, :pages 0}}}
 ```
 
 And every agent's own graph, since every agent is its own flow:
 
 ```clojure
 (observe/agents "xp-a")
-;;=> {"peer" {:seon.cluster.agent/mailbox {:status :running, :passes 3,
-;;                                         :state {:deliveries 3}, :queued {:wake 0, :episode 0}}
-;;            :seon.cluster.agent/turn    {:status :running, :passes 3,
-;;                                         :state {:passes 3, :turns 2}, :queued {:episode 0}}}
-;;    "root" {…:turn {:passes 4, :state {:passes 4, :turns 4}}…}}
+{"peer" {:seon.cluster.agent/mailbox {:status :running, :passes 3,
+                                      :state {:deliveries 3}, :queued {:wake 0, :episode 0}}
+         :seon.cluster.agent/turn    {:status :running, :passes 3,
+                                      :state {:passes 3, :turns 2}, :queued {:episode 0}}}
+ "root" {…:turn {:passes 4, :state {:passes 4, :turns 4}}…}}
 ```
 
 Three questions this answers instantly that facts alone do not:
@@ -221,11 +224,11 @@ nothing", the answer is almost always an error receipt sitting right there:
 
 ```clojure
 (observe/last-turn "xp-a" "root")
-;;=> {:run "crash-suffix-run"
-;;    :forms    [{:ordinal 0 :source "(def planted 1)"}
-;;               {:ordinal 1 :source "(my.message/send \"peer\" …)"}]
-;;    :receipts [{:ordinal 0 :interrupted-at #inst "…"}
-;;               {:ordinal 1 :result-edn "{:my.message/to \"peer\", …}"}]}
+{:run "crash-suffix-run"
+ :forms    [{:ordinal 0 :source "(def planted 1)"}
+            {:ordinal 1 :source "(my.message/send \"peer\" …)"}]
+ :receipts [{:ordinal 0 :interrupted-at #inst "…"}
+            {:ordinal 1 :result-edn "{:my.message/to \"peer\", …}"}]}
 ```
 
 ### Lens 4: the transaction stream — `(observe/watch! …)` / `(observe/recent …)`
@@ -267,9 +270,9 @@ then committing a new agent:
 (alter-var-root #'seon.cluster.agent/armer-step
                 (fn [f] (fn [& args] (swap! probe conj :stepped) (apply f args))))
 ;; commit a new agent, wait 400ms, restore
-;;=> {:armer-steps-before 0
-;;    :armer-steps-after  1
-;;    :armed-now ("hotreload-witness" "peer" "root")}
+{:armer-steps-before 0
+ :armer-steps-after  1
+ :armed-now ("hotreload-witness" "peer" "root")}
 ```
 
 The running proc picked up the new root on its very next step — no restart, no
@@ -313,11 +316,11 @@ Probed, one form each, across two separate socket connections:
 ```clojure
 ;; connection 1
 (do (def session-witness :interned-in-the-jvm) 42)
-;;=> 42
+42
 
 ;; connection 2 — a brand new socket
 {:def-survived (resolve 'user/session-witness) :star1 (try *1 (catch Throwable t :unbound))}
-;;=> {:def-survived #'user/session-witness, :star1 nil}
+{:def-survived #'user/session-witness, :star1 nil}
 ```
 
 **A `def` is JVM state, not session state.** It is interned into a real
@@ -430,16 +433,18 @@ milliseconds:
 ```clojure
 ;; A — lost def
 (run! ["(def x 41)" "(inc x)"] [0])
-;;=> ordinal 1: :error "Unable to resolve symbol: x"
+{:ordinal 1 :error "Unable to resolve symbol: x"}
 
 ;; B — lost require/alias (the reading half)
 (run! ["(require '[clojure.string :as s])" "(s/upper-case \"hi\")"] [0])
-;;=> ordinal 1: :error "Unable to resolve symbol: s/upper-case"
+{:ordinal 1 :error "Unable to resolve symbol: s/upper-case"}
 
 ;; C — independent forms
 (run! ["(+ 1 1)" "(+ 2 2)"] [0])
-;;=> ordinal 1: :result-edn "4"      ← executed fine. And that is the problem.
+{:ordinal 1 :result-edn "4"}
 ```
+
+Case C executed successfully, which is the problem.
 
 Case C is the one that matters. It is not a failure; it is the audit's bug.
 

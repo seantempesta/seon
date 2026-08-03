@@ -10,9 +10,10 @@ tags: [prd, research, render, context]
 
 W2b implements the transcript as one pure, bounded agent-level render unit in
 `seon.render.transcript`. It derives a time-ordered history from messages in
-both directions plus eval receipts on the agent's runs. Both projections use
-the same selected entries and detail levels: AI emits reader-valid REPL text;
-HTML wraps those same bytes in stable per-entry elements.
+both directions plus eval receipts on the agent's runs. Decision 11 now
+constrains both projections to strict REPL display: each form is followed by
+its actual computed value, and notices are ordinary values rather than source
+comments. HTML wraps those same bytes in stable per-entry elements.
 
 This is a **pure-call proof**, not a live-context or attached-walk proof. Per
 the owner's attachment ruling, W2b does not add message-family render keys and
@@ -52,8 +53,8 @@ not maintain an identity-attribute hand list. It reads the ref's eid, derives
 identity attributes from Datahike's own `db[:schema]` `:db/unique` facts, and
 selects a string that resolves uniquely to the same entity under the delivery
 owner's rule. If later database changes make that impossible, the projection
-emits a loud `:seon.transcript/unresolved-about?` comment instead of inventing
-an eid or silently dropping the relation.
+emits an ordinary value carrying `:seon.transcript/unresolved-about?` instead
+of inventing an eid or silently dropping the relation.
 
 ## Projection and budget contract
 
@@ -85,9 +86,9 @@ The generator covers empty through 18-entry histories, tied timestamps,
 inbound/outbound/self/about/declination messages, successful, failed,
 interrupted, running, waiting, malformed-byte, and co-present
 result/error/interruption/output receipts. Schema-valid malformed source or
-result bytes are retained inside reader-valid comment data; one bad stored
-string cannot corrupt the rest of the transcript. Seed `2026073104`, 40
-trials.
+result bytes are retained inside bounded ordinary values; they are never
+smuggled into comments, and one bad stored string cannot corrupt the rest of
+the transcript. Seed `2026073104`, 40 trials.
 
 ## Attachment seam for W4
 
@@ -143,7 +144,6 @@ same transcript bytes present inside the HTML entry `<code>` elements:
 (my.message/decline "transcript-peer" "problem-transcript" "The namespace is not mine.")
 
 (my.run/wait "waiting for the peer review")
-;; =>
 {:my.run/disposition :wait :my.run/note "waiting for the peer review"}
 ```
 
@@ -153,24 +153,32 @@ facts as mutually exclusive:
 
 ```clojure
 (missing.function/call)
-;; =>
 {:seon.error/kind :seon.sci.eval/refused}
-(comment {:seon.cluster.eval/error "No such namespace: missing.function", :seon.error/kind :seon.sci.eval/refused, :seon.problems/id "problem-eval-error"})
-(comment #:seon.cluster.eval{:interrupted-at #inst "2026-07-31T12:13:24.501-00:00"} "Its effect may have happened; nothing was retried.")
+{:seon.cluster.eval/error "No such namespace: missing.function"
+ :seon.error/kind :seon.sci.eval/refused
+ :seon.problems/id "problem-eval-error"}
+{:seon.cluster.eval/interrupted-at #inst "2026-07-31T12:13:24.501-00:00"
+ :seon.cluster.eval/notice "Its effect may have happened; nothing was retried."}
 ```
 
 The first two entries were age-derived summaries while the newest six were
 full. At the tight budget both projections emitted the same loud marker:
 
 ```clojure
-;; transcript/elided 7
-;; 7 older transcript entries elided by the token budget.
+{:seon.transcript/elided 7
+ :seon.transcript/notice "7 older transcript entries elided by the token budget."}
 ```
 
 The HTML marker was verbatim
 `<p class="seon-transcript-elision" data-transcript-elided="7">7 older
 transcript entries elided by the token budget.</p>`, followed by the newest
 entry at stable id `surface-seon.transcript.message_2f_self-4`.
+
+This document's original comment-framed proof established ordering, bounds,
+and twin parity, but decision 11 supersedes that display shape. Current
+`entry-header` and the elision arm still emit `;;` text
+(`src/seon/render/transcript.clj:326-330,503-505`); those sites are an
+implementation defect, not evidence that comments remain an output type.
 
 ## Recurring evidence
 

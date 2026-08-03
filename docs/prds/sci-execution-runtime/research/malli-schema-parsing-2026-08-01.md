@@ -118,7 +118,7 @@ Round-trip verdict: all three Seon contracts below satisfy exactly:
 ```clojure
 (= (m/form compiled)
    (m/form (m/from-ast (m/ast compiled options) options)))
-;; => true
+true
 ```
 
 Malli's own test suite covers recursive `:ref`/`:schema` registries and exact
@@ -674,8 +674,8 @@ The single pure operation belongs in `seon.program` conceptually as:
 ```clojure
 (contract-facts {:seon.program/spec spec-string
                  :seon.program/compile-options compile-options})
-;; => {:seon.fn/arities [nested arity component maps ...]
-;;     :seon.fn/ast nested-AST-root-component-map}
+{:seon.fn/arities [nested arity component maps ...]
+ :seon.fn/ast nested-AST-root-component-map}
 ```
 
 It must:

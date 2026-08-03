@@ -28,8 +28,9 @@ The decisive SCI probe was:
 
 A source comment therefore records prose in the plan without resolving or
 invoking any of its tokens. A comment-only source still receives an ordinary
-terminal receipt from the fresh plan fold; unlike the historical system, the
-fresh data model has no separate narration-only row.
+terminal receipt from the fresh plan fold. Decision 11 does not change that
+input-side parser or receipt behavior; it changes display, which omits a
+comment-only pseudo-entry rather than presenting it as output.
 
 ## The old design in three sentences
 
@@ -41,7 +42,8 @@ a comment-only entry
 stored that narration on `:seon.eval/narration`, skipped evaluation for a
 comment-only entry, and rendered it back into context as comments
 (`9dc4848a6:src/seon/eval.cljs:1694-1701,2163-2176,2308-2321`;
-`9dc4848a6:src/seon/ctx.cljs:558-590`). Commit `a0ca1cc10` then deliberately
+`9dc4848a6:src/seon/ctx.cljs:558-590`). That historical comment-as-output
+shape is explicitly superseded by decision 11. Commit `a0ca1cc10` then deliberately
 reversed bare-prose preservation because rendering it as `;;` trained agents
 to imitate the code-comment channel; the present quarry drops bare prose but
 keeps real comments and forms
@@ -87,8 +89,8 @@ live `/etc/hosts` case in
 | Case | Comment-preserving quarry (`9dc4848a6`) | `2a49cbd75` | Revised splitter |
 |---|---|---|---|
 | Pure code | Kept collection-shaped forms in order; later quarry narrowed runnable forms to lists plus result references | Kept structured forms and standalone symbol lines exactly | Same pure-code sources and round trip; consecutive forms may share a line |
-| Pure prose | One comment-only eval row; no prose evaluation or error | `::no-forms`, exact raw text only inside the error | One single-`;` comment source; SCI reads nil, so no prose token resolves |
-| Mixed prose + code | Prose became narration on the next form; trailing prose became a comment-only row | Rejected the whole reply, losing valid code | Prose becomes comments attached to the next line-leading form; trailing prose is a comment-only source, and a parenthesized expression mentioned inside a prose line stays prose |
+| Pure prose | One comment-only eval row; no prose evaluation or error | `::no-forms`, exact raw text only inside the error | One single-`;` comment source; SCI reads nil, so no prose token resolves, and display omits the pseudo-entry |
+| Mixed prose + code | Prose became narration on the next form; trailing prose became a comment-only row | Rejected the whole reply, losing valid code | Prose becomes comments attached to the next line-leading form; trailing prose is a comment-only source but is not displayed as output, and a parenthesized expression mentioned inside a prose line stays prose |
 | Malformed or unbalanced code | `:read` entry, then one-span parinfer repair attempt; unrepaired input stayed a visible read failure | Whole reply becomes `::unreadable` with SCI position | Still `::unreadable`; no repair stack was restored |
 | Fenced Markdown code | Removed fence lines, retained surrounding content for normal prose/form classification | Extracted only fenced blocks, dropping outside explanation | Removes backtick or tilde fence lines, comments outside Markdown, keeps fenced forms |
 | Live word salad plus completion | Bare words were prose; the completion form survived | Zero plan forms, so the 22-token disease died but the completion was lost | One plan source: the sentence as `;` prose plus the completion form; none of the 22 tokens is a form |
@@ -113,3 +115,9 @@ line-leading collection is code. The irreducible ambiguity remains explicit:
 a line-leading list-shaped English sentence is indistinguishable from a
 Clojure list without namespace resolution, so this change does not invent a
 semantic classifier.
+
+Decision 11 narrows the conclusion at the display boundary: stored source may
+still contain an agent's leading comments and the parser may still synthesize
+source comments for prose, but no renderer may model those comments as a
+computed result. Display is the form followed by its actual value; a
+comment-only plan source contributes no displayed output entry.

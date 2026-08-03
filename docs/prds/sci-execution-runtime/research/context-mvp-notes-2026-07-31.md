@@ -47,6 +47,13 @@ assistant text. DeepSeek was then used as the pre-authorized real run.
 
 ## Full first-turn context
 
+The following contexts and reply are verbatim pre-decision-11 evidence. They
+remain unchanged so the failed drive is reproducible. Their `;;` render
+headers, comment-framed notices, and instruction that prose is kept as comments
+are superseded display behavior, not examples to copy: current target display
+is the form followed by its actual value, while comments survive only in an
+agent's input source.
+
 ````clojure
 ;; (seon.render/walk {:root [:seon.cluster.agent/id "context-mvp"] :depth 2}) => root=[:seon.cluster.agent/id "context-mvp"] basis=536870928 depth=2
 ;; path=[:seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0 :seon.render.walk/neighbours 0] depth=3 provenance=:seon.render.walk/elided

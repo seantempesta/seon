@@ -47,9 +47,10 @@ design decisions awaiting one PRD; the grounding audit is
    strongest. No hidden auto-reply returns; no moralizing prompt prose.
 
 4. **The reply norm is taught by a self-describing bootstrap form.** The
-   bootstrap includes the unreplied-messages query — `;;` comments carry
-   the norm and the empty-vs-rows meaning (empty = caught up; rows =
-   people waiting, reply before completing). REPLIED? is derived per
+   bootstrap includes the unreplied-messages query. Its form is followed only
+   by the actual row value; db-resident `(help)` prose carries the norm and the
+   empty-vs-rows meaning (empty = caught up; rows = people waiting, reply
+   before completing). REPLIED? is derived per
    display: an outbound message from me to that sender committed after the
    inbound one — one reply covers all earlier messages from that sender;
    never a stored flag, never resurrected threading. `my.message/reason`

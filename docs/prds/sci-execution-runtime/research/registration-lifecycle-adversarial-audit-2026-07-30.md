@@ -176,7 +176,7 @@ The direct falsifier:
          {:seon.sci.reader/text
           "(clojure.core/ns-unmap 'a 'f)"
           :seon.sci.reader/ns 'user})))
-;; => nil
+nil
 ```
 
 The SCI form still executes, so it removes the live Var while leaving the

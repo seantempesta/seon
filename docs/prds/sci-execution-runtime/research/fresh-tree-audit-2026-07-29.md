@@ -54,7 +54,7 @@ Falsified directly:
   (a/offer! ch {:seon.cluster.agent/id "a"})                                  ; A's clear
   (a/offer! ch {:seon.cluster.agent/id "b" :seon.ai/partial {:seon.ai/text "hi"}})
   (a/poll! ch))
-;; => B's partial. A's clear is gone.
+{:seon.cluster.agent/id "b" :seon.ai/partial {:seon.ai/text "hi"}}
 ```
 
 This is the transport law applied where its own precondition fails. Loss is
@@ -82,8 +82,11 @@ the throw cannot work: it passes `(:seon.error/kind rendered)`, a KEYWORD, as
 ```clojure
 (try (throw (ex-info "boom" :seon.render/unroutable))
      (catch Throwable t (class t)))
-;; => java.lang.ClassCastException — Keyword cannot be cast to IPersistentMap
+java.lang.ClassCastException
 ```
+
+The exception message says that a keyword cannot be cast to
+`IPersistentMap`.
 
 So a failing fleet block becomes a confusing `ClassCastException` core fault
 rather than a rendered error card, and the actual failure is never reported.

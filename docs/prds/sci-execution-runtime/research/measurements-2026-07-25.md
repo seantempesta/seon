@@ -509,10 +509,12 @@ but not `clojure-string`. Carry D16 forward only as an invariant the new
 
 ```clojure
 (alength (byte-array 200000000))
-;; => 200,033,752 bytes allocated, 1 ms, 0 fn entries, outcome :ok
-;; under BOTH a 500 ms time-limit AND a 64 MB allocation cap
-
+200000000
 ```
+
+The surrounding evaluation record reported 200,033,752 allocated bytes, 1 ms,
+0 function entries, and outcome `:ok` under both a 500 ms time limit and a
+64 MB allocation cap.
 
 `(alength (byte-array 100000000))` likewise charges 0 entries. **No interrupt-fn
 cadence can see this, and none ever will** — the entry count is the only clock and

@@ -494,7 +494,7 @@ The exact probe:
 (let [s [:fn {:gen/schema [:= 0]} pos?]
       v (mg/generate s {:seed 7})]
   {:value v :valid? (m/validate s v)})
-;;=> {:value 0, :valid? false}
+{:value 0, :valid? false}
 
 ```
 
@@ -520,9 +520,9 @@ The selected JVM classpath produced:
 (mg/generate
  [:re {:gen/elements
        ["0000000000000000000000000000000000000000000000000000000000000000"]}
-  "^[0-9a-f]{64}$"]
+ "^[0-9a-f]{64}$"]
  {:seed 7})
-;;=> "0000000000000000000000000000000000000000000000000000000000000000"
+"0000000000000000000000000000000000000000000000000000000000000000"
 
 ```
 
@@ -538,9 +538,9 @@ The selected string generator is alphanumeric and honors length. The probe:
   {:valid? (m/validate [:string {:min 64 :max 64}] v)
    :hex? (boolean (re-matches #"[0-9a-f]{64}" v))
    :value v})
-;;=> {:valid? true,
-;;    :hex? false,
-;;    :value "RTySbMo08C00Za6qusTAglS0L69D361GiaZ7hyvR2uPrAZ6D0oLkeXV2766PI4GE"}
+{:valid? true,
+ :hex? false,
+ :value "RTySbMo08C00Za6qusTAglS0L69D361GiaZ7hyvR2uPrAZ6D0oLkeXV2766PI4GE"}
 
 ```
 
@@ -644,7 +644,7 @@ No probe script was created. These forms were evaluated directly with
   {:all-valid? (every? #(m/validate schema %) values)
    :sample-count (count values)
    :max-printed-chars (apply max (map (comp count pr-str) values))})
-;;=> {:all-valid? true, :sample-count 20, :max-printed-chars 184}
+{:all-valid? true, :sample-count 20, :max-printed-chars 184}
 
 ```
 

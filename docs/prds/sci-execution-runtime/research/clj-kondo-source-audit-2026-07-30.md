@@ -114,12 +114,12 @@ one value out:
  :seon.code.candidate/namespace-context {...}
  :seon.db/db <one immutable database value>}
 
-;; => either
 {:seon.code.candidate/sources [...]
  :seon.code.candidate/findings [...]}
-
-;; or one flat :seon.error value
 ```
+
+The operation returns either the successful candidate map shown above or one
+flat `:seon.error` value.
 
 The successful vector is then the vector digested and committed by
 `run/plan-tx`. No receipt exists yet. A correction should replace the complete

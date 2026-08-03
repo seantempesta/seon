@@ -22,6 +22,8 @@ because `:readers {}` does not refuse Edamame's built-in tags and `:read-eval`
 is not made explicit. Its S3 recovery claim also lacks enough durable input to
 reconstruct aliases/refers, and the read-event-only evaluator has no event for
 the comment-only plan sources the revised splitter deliberately preserves.
+Decision 11 leaves that input-side source behavior unchanged but forbids a
+renderer from displaying the comment-only receipt as output.
 
 Cross-plan answer: **one accepted-code reader can serve generate-code, eval/N5,
 and agent-authored UI code without contradiction, but these three plans do not
@@ -148,6 +150,12 @@ Commit `7d32ecec5` intentionally changed the contract:
   (`reply.cljc:23-32,206-225`);
 - SCI reads that source as nil today, so it records a normal form receipt
   without resolving prose tokens (`reply_test.clj:108-125`).
+
+Decision 11 subsequently settled the presentation half: the parser may retain
+and evaluate that input-side source exactly as before, but transcript/lesson
+display omits a comment-only pseudo-entry. The source/receipt question below
+remains relevant to the historical read-event-only evaluator proposal; it is
+not authority to render the entry.
 
 The focused current suite is green: **7 tests, 25 assertions, 0 failures,
 0 errors**.

@@ -206,8 +206,10 @@ eight verbs, `src/seon/operator.clj:44-132`):
   {:seon.test.runner/namespaces ['seon.blob-threshold-test]
    :seon.test.runner/tier :default        ; or :full
    :seon.test.runner/reload? true})
-;; => :seon.test.runner/run-result, or a flat :seon.error/value
 ```
+
+The form returns either a `:seon.test.runner/run-result` value or a flat
+`:seon.error/value`.
 
 The return shape already exists and is already schema'd:
 `runner.clj/run!` returns `:seon.test.runner/run-result` — summary counts plus

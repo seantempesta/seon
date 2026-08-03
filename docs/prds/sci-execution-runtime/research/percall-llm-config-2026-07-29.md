@@ -519,12 +519,14 @@ The proposed public contract is:
 ```clojure
 (resolve-target
  {:seon.ai/default-provider provider-id
-  :seon.ai/provider-descriptors {provider-id descriptor, ...}
-  :seon.ai/default-target target
-  :seon.ai/agent-row agent-row
-  :seon.ai/overrides call-overrides})
-;; => :seon.ai/target | :seon.error/value
+ :seon.ai/provider-descriptors {provider-id descriptor, ...}
+ :seon.ai/default-target target
+ :seon.ai/agent-row agent-row
+ :seon.ai/overrides call-overrides})
 ```
+
+The computed value is either a `:seon.ai/target` or a flat
+`:seon.error/value`.
 
 Semantics:
 

@@ -49,6 +49,12 @@ code.
 
 ## Verbatim after excerpts
 
+These excerpts are preserved measurement bytes from the pre-decision-11
+renderer. Their `;;` headers and comment-framed instruction text are evidence
+of what the proof observed, not current display guidance. Decision 11 requires
+future display to show a form followed by its actual value, with notices as
+ordinary values and no comment-prefixed results.
+
 The nursery context now opens with one compact frontier followed immediately
 by its own entity:
 

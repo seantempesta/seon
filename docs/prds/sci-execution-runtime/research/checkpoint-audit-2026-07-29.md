@@ -556,11 +556,11 @@ while KEEPING the transaction result:
 ```clojure
 (probe2! "audit-g" "string-kind"
   {:seon.error/kind "not-a-keyword" :seon.error/message "hostile kind"})
-;; => {:minimal-commit #:seon.error{:kind :seon.db/rejected
-;;      :message "Bad entity value \"not-a-keyword\" at
-;;                [:db/add 2570 :seon.error/kind \"not-a-keyword\"] …"}
-;;     :terminal-refused!-returned true
-;;     :receipt-terminal? false :run-closed? false :run-held? true}
+{:minimal-commit #:seon.error{:kind :seon.db/rejected
+ :message "Bad entity value \"not-a-keyword\" at
+           [:db/add 2570 :seon.error/kind \"not-a-keyword\"] …"}
+ :terminal-refused!-returned true
+ :receipt-terminal? false :run-closed? false :run-held? true}
 ```
 
 The minimal commit was REFUSED and `terminal-refused!` returned `true` anyway:

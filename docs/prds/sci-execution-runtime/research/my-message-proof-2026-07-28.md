@@ -19,7 +19,7 @@ defects the proof exposed, and the live evidence.
 
 ```clojure
 (my.message/send "bob" "how many primes under 100?")
-;; => {:my.message/to "bob" :my.message/content "how many primes under 100?"}
+{:my.message/to "bob" :my.message/content "how many primes under 100?"}
 ```
 
 Nothing is delivered by calling it. The form's value carries the map out

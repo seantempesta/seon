@@ -82,8 +82,8 @@ launcher description:
       (get-in definition
               [:procs :seon.cluster.agent/turn :proc])]
   (datafy/datafy launcher))
-;; => {:step seon.cluster.agent/turn-step,
-;;     :desc {... :workload :io ...}}
+{:step seon.cluster.agent/turn-step,
+ :desc {... :workload :io ...}}
 ```
 
 The suite is green for the wrong reason at this seam. The Flow tests exercise
