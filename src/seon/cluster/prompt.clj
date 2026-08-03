@@ -11,6 +11,7 @@
             [seon.cluster.message :as message]
             [seon.context :as context]
             [seon.render :as render]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -26,9 +27,32 @@
 (def ^:private default-depth 2)
 
 (defn- refuse!
-  [rule data]
-  (throw (ex-info (str "prompt refused: " (name rule))
-                  (assoc data :seon.error/kind ::refused ::rule rule))))
+  [rule message]
+  (throw (ex-info message
+                  {:seon.error/kind ::refused
+                   :seon.error/message message
+                   ::rule rule})))
+
+(defn- missing-required-keys
+  [explanation]
+  (into []
+        (comp
+         (filter #(= :malli.core/missing-key (:type %)))
+         (map (comp last :in))
+         distinct)
+        (:errors explanation)))
+
+(defn- validate-request!
+  [request]
+  (when-let [explanation
+             (schema/explain-candidate-value
+              :seon.cluster.prompt/request request)]
+    (let [missing (missing-required-keys explanation)]
+      (refuse!
+       ::missing-input
+       (if (seq missing)
+         (str "Prompt request is missing required input " (pr-str missing) ".")
+         "Prompt request violates :seon.cluster.prompt/request.")))))
 
 (defn- walk-contribution
   [text]
@@ -48,9 +72,11 @@
                        :seon.cluster.prompt/request]
                   :seon.cluster.prompt/rendered-context]}
   [db request]
+  (validate-request! request)
   (let [run-id (:seon.cluster.run/id request)
         _ (or (message/trigger db run-id)
-              (refuse! ::no-trigger request))
+              (refuse! ::no-trigger
+                       "Prompt request's held run has no recorded trigger."))
         acquired (render/acquire-context!
                   (:seon.render/context-channel request)
                   (assoc request

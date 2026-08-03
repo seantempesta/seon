@@ -23,12 +23,14 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
+            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.net ServerSocket Socket]
@@ -258,6 +260,50 @@
                      value))
                  (catch Exception _ nil))))
        vec))
+
+(deftest prompt-request-without-context-channel-is-a-flat-refusal
+  (with-connection
+    (fn [connection ctx]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id "missing-context"}
+        {:seon.cluster.message/id "missing-context-message"
+         :seon.cluster.message/to
+         [:seon.cluster.agent/id "missing-context"]
+         :seon.cluster.message/content "derive context"
+         :seon.cluster.message/at now}
+        {:seon.cluster.run/id "missing-context-run"
+         :seon.cluster.run/agent
+         [:seon.cluster.agent/id "missing-context"]
+         :seon.cluster.run/trigger
+         [:seon.cluster.message/id "missing-context-message"]
+         :seon.cluster.run/process process
+         :seon.cluster.run/opened-at now}
+        {:seon.cluster.agent/id "missing-context"
+         :seon.cluster.agent/run
+         [:seon.cluster.run/id "missing-context-run"]}])
+      (let [failure
+            (test-support/refusal-data
+             #(prompt/prompt
+               @connection
+               {:seon.cluster.run/id "missing-context-run"
+                :seon.cluster.agent/id "missing-context"
+                :seon.sci.admit/caps
+                {:seon.config.eval.result/max-depth 6
+                 :seon.config.eval.result/max-collection 8
+                 :seon.config.eval.result/max-string 4096
+                 :seon.config.eval.result/max-nodes 256}
+                :seon.sci.eval/ctx ctx
+                :seon.sci.eval/time-limit-ms 2000
+                :seon.config/on-core-error :panic}))]
+        (is (= :seon.cluster.prompt/refused
+               (:seon.error/kind failure)))
+        (is (= :seon.cluster.prompt/missing-input
+               (:seon.cluster.prompt/rule failure)))
+        (is (str/includes? (:seon.error/message failure)
+                           ":seon.render/context-channel"))
+        (is (schema/valid-candidate-value? :seon.error/value failure)
+            "the missing input is already the loop's admitted error shape")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ruling #22 — lint refusals continue the episode without a message
