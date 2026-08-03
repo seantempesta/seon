@@ -59,7 +59,8 @@
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form])
   (:import [java.nio.charset StandardCharsets]
            [java.util Date]))
 
@@ -201,7 +202,9 @@
   ;; builds it.
   (into #{:seon.cluster.agent/run}
         (comp (mapcat (fn [entity]
-                        (drop 2 (schema/schema-definition entity))))
+                        (schema.form/map-entries
+                         (schema/schema-definition entity))))
+              (filter vector?)
               (map first))
         [:seon.cluster.run/run
          :seon.cluster.run.form/form

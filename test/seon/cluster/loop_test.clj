@@ -381,14 +381,13 @@
                 :seon.cluster.message/at now}])
   (d/transact
    connection
-   {:tx-data [{:seon.cluster.run/id run-id
-               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-               :seon.cluster.run/opened-at now
-               :seon.cluster.run/process process}
-              {:seon.cluster.agent/id agent-id
-               :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
-    :tx-meta {:seon.db/trigger
-              [:seon.cluster.message/id message-id]}}))
+   [{:seon.cluster.run/id run-id
+     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+     :seon.cluster.run/trigger [:seon.cluster.message/id message-id]
+     :seon.cluster.run/opened-at now
+     :seon.cluster.run/process process}
+    {:seon.cluster.agent/id agent-id
+     :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]))
 
 (defn- call-work
   [agent-id run-id]
@@ -643,6 +642,23 @@
     (testing "and the trigger is NOT — that is the wake, not our write"
       (is (not (contains? committed :seon.cluster.message/to))))))
 
+(deftest the-committed-set-extracts-map-entries-by-shape
+  (let [entries [[:seon.test/first :string]
+                 [:seon.test/second :string]]
+        expected #{:seon.test/first :seon.test/second}
+        committed-test-attributes
+        (fn [definition]
+          (with-redefs [schema/schema-definition (constantly definition)]
+            (into #{}
+                  (filter #(= "seon.test" (namespace %)))
+                  (cluster.loop/committed-attributes))))]
+    (is (= expected (committed-test-attributes (into [:map] entries)))
+        "a propertyless Malli map keeps its first entry")
+    (is (= expected
+           (committed-test-attributes
+            (into [:map {:seon.db/entity true}] entries)))
+        "an optional properties map does not change the extracted entries")))
+
 (deftest a-disposition-is-read-only-when-it-really-is-one
   (is (= (my.run/wait "later") (cluster.loop/disposition (my.run/wait "later"))))
   (is (= (my.run/complete "done")
@@ -737,21 +753,21 @@
                                 [:seon.cluster.agent/id "alice"]
                                 :seon.cluster.message/content "count the widgets"
                                 :seon.cluster.message/at now}]))))
-      (testing "the run, its agent pointer, and the trigger as tx-meta"
+      (testing "the run, its agent pointer, and recorded trigger"
         (is (map? (d/transact
                    connection
                    {:tx-data [{:seon.cluster.run/id "run-live"
                                :seon.cluster.run/agent
                                [:seon.cluster.agent/id "alice"]
+                               :seon.cluster.run/trigger
+                               [:seon.cluster.message/id "m-live"]
                                :seon.cluster.run/opened-at now
                                :seon.cluster.run/process "process/one"
                                :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a"))}
                               {:seon.cluster.agent/id "alice"
                                :seon.cluster.agent/run
-                               [:seon.cluster.run/id "run-live"]}]
-                    :tx-meta {:seon.db/trigger
-                              [:seon.cluster.message/id "m-live"]}}))))
+                               [:seon.cluster.run/id "run-live"]}]}))))
       (testing "one frozen form"
         (is (map? (d/transact connection
                               [{:seon.cluster.run.form/id "f-0"
@@ -821,7 +837,8 @@
 
 (def ^:private attributes
   [:seon.cluster.agent/id :seon.cluster.agent/run
-   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/opened-at
+   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/trigger
+   :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at :seon.cluster.run/process
    :seon.cluster.run/plan-digest :seon.cluster.run/forms
    :seon.cluster.run.form/id :seon.cluster.run.form/run
@@ -831,8 +848,7 @@
    :seon.cluster.eval/interrupted-at :seon.cluster.eval/result-edn
    :seon.cluster.eval/error
    :seon.cluster.message/id :seon.cluster.message/to
-   :seon.cluster.message/content :seon.cluster.message/at
-   :seon.db/trigger])
+   :seon.cluster.message/content :seon.cluster.message/at])
 
 (def ^:private request
   "The AGENT-SCOPED request (F2 §3.2): the kill positions below are
@@ -867,6 +883,8 @@
    {:tx-data
     (cond-> [(cond-> {:seon.cluster.run/id "run-1"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.run/trigger
+                      [:seon.cluster.message/id "m-1"]
                       :seon.cluster.run/opened-at now}
                held? (assoc :seon.cluster.run/process process)
                planned? (assoc :seon.cluster.run/plan-digest
@@ -897,8 +915,7 @@
                      (assoc :seon.cluster.eval/result-edn "2")
                      (= :interrupted state)
                      (assoc :seon.cluster.eval/interrupted-at now)))
-                 receipts)))
-    :tx-meta {:seon.db/trigger [:seon.cluster.message/id "m-1"]}}))
+                 receipts)))}))
 
 ;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
 ;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
