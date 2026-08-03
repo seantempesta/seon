@@ -275,12 +275,22 @@ compares B's complete namespace and Var-root snapshot after every form. The
 forms include definitions, namespace creation/removal, database reads, and
 attempts to resolve every relocated process root. B remains unchanged.
 
-### Accepted residual: compiled Var metadata
+### Former residual resolved under ruling #50
 
-Compiled Var behavior remains immutable from SCI, but `alter-meta!` can still
-change a compiled Var's metadata process-wide. This is explicitly accepted as
-the ruling-#43 residual: it can change what instrumentation and documentation
-derive from metadata, but cannot change the function root or another cluster's
-SCI environment. The characterization
-`known-gap-agent-code-can-change-compiled-var-metadata` keeps the consequence
-visible until a later metadata policy restores immutability.
+Ruling #43 accepted compiled Var metadata mutation as an explicit residual;
+ruling #50 revoked that acceptance and restored immutability. Maintained SCI
+commit `2db3358cba913b6fbbe49c7b5b34d7ac72715924` routes the JVM
+`clojure.core/alter-meta!` and `/reset-meta!` entries through one compiled-Var
+refusal before either operation can run
+(`reference-code/sci/src/sci/impl/namespaces.cljc:842-861,1713-1716,2049-2052`).
+SCI-local Vars still use their ordinary `sci.lang.Var` metadata methods, so
+agent-owned `defn` docstrings and explicit local metadata mutation remain REPL
+behavior (`reference-code/sci/test/sci/core_test.cljc:1298-1322`).
+
+Root commit `e6f92b09b` pins that fork revision and replaces the former
+characterization with an acceptance regression. Both mutation operations now
+return a flat `:seon.sci.eval/evaluation-failed` value, the compiled Var's
+metadata remains byte-for-byte equal, and instrumentation reads the original
+arglists (`test/seon/sci/eval_test.clj:307-360`). The maintained SCI focus
+passed 139 tests / 677 assertions under both Clojure 1.10.3 and 1.11.1; the
+combined Seon eval/instrument focus passed 55 tests / 246 assertions.
