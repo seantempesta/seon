@@ -23,8 +23,10 @@
             [my.message :as my.message]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
+            [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -66,8 +68,7 @@
   id)
 
 (defn- deliver!
-  "Commit a delivery the way the loop commits one: the rows, and the
-  trigger as transaction metadata. Returns the delivery."
+  "Commit a delivery the way the loop commits its ordinary rows."
   [connection {:keys [sender trigger run ordinal value chain]
                :or {ordinal 0 chain limit}}]
   (let [delivery (message/delivery
@@ -81,12 +82,7 @@
                     trigger (assoc :seon.cluster.message/trigger trigger)))
         rows (:seon.cluster.message/rows delivery)]
     (when (seq rows)
-      (d/transact connection
-                  (cond-> {:tx-data rows}
-                    trigger
-                    (assoc :tx-meta
-                           {:seon.db/trigger
-                            [:seon.cluster.message/id trigger]}))))
+      (d/transact connection rows))
     delivery))
 
 (def ^:private agent-ids ["alice" "bob" "carol" "dana"])
@@ -220,8 +216,8 @@
                  (d/q '[:find ?parent-id .
                         :in $ ?id
                         :where
-                        [?message :seon.cluster.message/id ?id ?tx]
-                        [?tx :seon.db/trigger ?parent]
+                        [?message :seon.cluster.message/id ?id]
+                        [?message :seon.cluster.message/caused-by ?parent]
                         [?parent :seon.cluster.message/id ?parent-id]]
                       db id)]
              [id
@@ -266,12 +262,7 @@
             delivery (message/delivery @connection request)
             rows (:seon.cluster.message/rows delivery)]
         (when (seq rows)
-          (d/transact connection
-                      (cond-> {:tx-data rows}
-                        trigger
-                        (assoc :tx-meta
-                               {:seon.db/trigger
-                                [:seon.cluster.message/id trigger]}))))
+          (d/transact connection rows))
         [next-model
          (and
           (or (nil? chain-limit)
@@ -376,20 +367,52 @@
 ;;; The chain — derived, and the human barrier that comes free with it
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-trigger-of-a-run-is-read-from-its-own-transaction
+(deftest the-trigger-of-a-run-is-a-recorded-ref
   (with-database
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
       (d/transact connection
-                  {:tx-data [{:seon.cluster.run/id "r-1"
-                              :seon.cluster.run/agent
-                              [:seon.cluster.agent/id "alice"]
-                              :seon.cluster.run/opened-at now}]
-                   :tx-meta {:seon.db/trigger
-                             [:seon.cluster.message/id "m-0"]}})
+                  [{:seon.cluster.run/id "r-1"
+                    :seon.cluster.run/agent
+                    [:seon.cluster.agent/id "alice"]
+                    :seon.cluster.run/trigger
+                    [:seon.cluster.message/id "m-0"]
+                    :seon.cluster.run/opened-at now}])
       (is (= "m-0" (message/trigger @connection "r-1"))
-          "nothing is stored on the run for this — the night ruling")
+          "the cause is an ordinary run fact")
       (is (nil? (message/trigger @connection "no-such-run"))))))
+
+(deftest a-non-temporal-run-retains-its-trigger-without-a-transaction-entity
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :keep-history? false
+                       :schema-flexibility :write}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (d/transact
+       connection
+       (schema.datahike/malli->datahike-schema
+        (schema/canonical-database-attributes)))
+      (d/transact connection [{:seon.cluster.agent/id "alice"}])
+      (ask! connection "m-0" "alice" "hello")
+      (let [report
+            (d/transact
+             connection
+             (run/open-tx
+              {:seon.cluster.run/id "r-1"
+               :seon.cluster.run/agent
+               [:seon.cluster.agent/id "alice"]
+               :seon.cluster.run/trigger
+               [:seon.cluster.message/id "m-0"]
+               :seon.cluster.run/opened-at now}))
+            transaction (:max-tx (:db-after report))]
+        (is (nil? (d/pull @connection '[*] transaction))
+            "the HISTORY-OFF database has no transaction entity")
+        (is (= "m-0" (message/trigger @connection "r-1"))
+            "the run's ordinary trigger ref survives independently"))
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; THE CLASS-KILLER: the polite infinite conversation terminates

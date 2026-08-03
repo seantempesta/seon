@@ -236,13 +236,14 @@
   BOTH derived from the one `::agent` ref in the request; there is no
   separate agent-id field to disagree with it."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::agent ::agent]
+                        [::trigger {:optional true} ::trigger]
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id agent opened-at]} request
+  (let [{::keys [id agent trigger opened-at]} request
         agent-eid (:db/id (d/pull db [:db/id] agent))
         run-tempid (str "seon.cluster.run/" id)]
     (cond
@@ -255,15 +256,16 @@
 
       ; the pointer and the run's own ::agent are the SAME resolved
       ; entity, so they cannot disagree
-      :else [{:db/id run-tempid
-              ::id id
-              ::agent agent-eid
-              ::opened-at opened-at}
+      :else [(cond-> {:db/id run-tempid
+                      ::id id
+                      ::agent agent-eid
+                      ::opened-at opened-at}
+               trigger (assoc ::trigger trigger))
              {:db/id agent-eid :seon.cluster.agent/run run-tempid}])))
 
 (defn claim-tx
   "Transaction data claiming `::id` for `::process`."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]
                              [::live-processes [:set ::process]]
@@ -448,9 +450,10 @@
 
 (defn open-tx
   "Transaction data opening one run for an agent."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::agent ::agent]
+                             [::trigger {:optional true} ::trigger]
                              [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [request]

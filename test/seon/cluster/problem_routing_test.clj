@@ -32,22 +32,20 @@
         :seon.cluster.message/at now}])
      (d/transact
       connection
-      {:tx-data
-       [{:seon.cluster.message/id "planner-goal"
-         :seon.cluster.message/to [:seon.cluster.agent/id "planner"]
-         :seon.cluster.message/from [:seon.cluster.agent/id "root"]
-         :seon.cluster.message/content "Generate the program."
-         :seon.cluster.message/at now}]
-       :tx-meta {:seon.db/trigger [:seon.cluster.message/id "goal"]}})
+      [{:seon.cluster.message/id "planner-goal"
+        :seon.cluster.message/to [:seon.cluster.agent/id "planner"]
+        :seon.cluster.message/from [:seon.cluster.agent/id "root"]
+        :seon.cluster.message/caused-by [:seon.cluster.message/id "goal"]
+        :seon.cluster.message/content "Generate the program."
+        :seon.cluster.message/at now}])
      (d/transact
       connection
-      {:tx-data
-       [{:seon.cluster.run/id run-id
-         :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
-         :seon.cluster.run/opened-at now
-         :seon.cluster.run/plan-digest "settlement-digest"}]
-       :tx-meta
-       {:seon.db/trigger [:seon.cluster.message/id "planner-goal"]}})
+      [{:seon.cluster.run/id run-id
+        :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
+        :seon.cluster.run/trigger
+        [:seon.cluster.message/id "planner-goal"]
+        :seon.cluster.run/opened-at now
+        :seon.cluster.run/plan-digest "settlement-digest"}])
      (body connection))))
 
 (defn- form-row

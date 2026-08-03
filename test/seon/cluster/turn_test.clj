@@ -1743,18 +1743,18 @@
                               [_ :seon.cluster.run/error ?e]] @connection))))
         (testing "so the agent's next prompt tells it what happened"
           ;; the NEXT prompt belongs to the next held run: open it the
-          ;; way the loop does — creating transaction carries the
-          ;; trigger, agent pointer names the run
+          ;; way the loop does — the run carries the trigger and the
+          ;; agent pointer names the run
           (d/transact connection
                       {:tx-data [{:seon.cluster.run/id "run-next"
                                   :seon.cluster.run/agent
                                   [:seon.cluster.agent/id "agent-a"]
+                                  :seon.cluster.run/trigger
+                                  [:seon.cluster.message/id "m-1"]
                                   :seon.cluster.run/opened-at (Date.)}
                                  {:seon.cluster.agent/id "agent-a"
                                   :seon.cluster.agent/run
-                                  [:seon.cluster.run/id "run-next"]}]
-                       :tx-meta {:seon.db/trigger
-                                 [:seon.cluster.message/id "m-1"]}})
+                                  [:seon.cluster.run/id "run-next"]}]})
           (is (re-find #"DEEPSEEK_API_KEY"
                        (:seon.cluster.prompt/text
                         (prompt/prompt @connection
@@ -1806,14 +1806,13 @@
            :seon.cluster.message/at now}])
         (d/transact
          connection
-         {:tx-data
-          [{:seon.cluster.run/id route-run
-            :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-            :seon.cluster.run/opened-at now
-            :seon.cluster.run/process process
-            :seon.cluster.run/plan-digest "route-digest"}]
-          :tx-meta
-          {:seon.db/trigger [:seon.cluster.message/id "route-goal"]}})
+         [{:seon.cluster.run/id route-run
+           :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+           :seon.cluster.run/trigger
+           [:seon.cluster.message/id "route-goal"]
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/process process
+           :seon.cluster.run/plan-digest "route-digest"}])
         (d/transact
          connection
          [{:seon.cluster.agent/id "agent-a"
@@ -2550,8 +2549,8 @@
                               "please count the widgets"]
                              [?m :seon.cluster.message/id ?id]]
                            @connection)))
-                "the conversation's depth is walkable from committed
-                 transaction metadata alone — no hop counter anywhere")))))))
+                "the conversation's depth is walkable from committed refs
+                 alone — no hop counter anywhere")))))))
 
 (deftest delivery-rows-and-refusal-facts-share-the-terminal-transaction
   ;; Characterization before delivery-rows extraction: one delivery result can
@@ -2732,11 +2731,11 @@
 (deftest the-call-prompts-with-the-trigger-the-run-opened-on
   ;; simplification-catalog-2026-07-28 group 3's confirmed defect: the
   ;; :call pass re-asked `unanswered-triggers` for the prompt's cause,
-  ;; but the run-opening transaction ANSWERS its trigger, so the re-ask
+  ;; but the recorded run ref ANSWERS its trigger, so the re-ask
   ;; selected whatever message arrived NEXT (and only prompted the
   ;; right content when none had, because nil matched anything). The
-  ;; trigger the run OPENED on is the trigger: recorded as tx-meta on
-  ;; the opening transaction, derived back by `message/trigger`.
+  ;; trigger the run OPENED on is the trigger: recorded on the run and
+  ;; read back by `message/trigger`.
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.store/branch-connection cluster)

@@ -217,3 +217,31 @@ custody. The remaining design must record causal facts directly and migrate
 every consumer together: run trigger, answeredness, conversation-chain depth,
 and episode bounds. The exact live exit remains one history-off DeepSeek turn
 with a committed context capture.
+
+## Final graduation proof — 2026-08-03
+
+The causal relationship is now ordinary data. Run opening records
+`:seon.cluster.run/trigger`; delivery records
+`:seon.cluster.message/caused-by`; all causal consumers query those refs rather
+than transaction entities. The dedicated non-temporal regression proves the
+opening transaction entity is absent while `seon.cluster.message/trigger`
+still returns the triggering message. The complete focused checkpoint passed
+213 tests / 1,069 assertions, and the final direct runtime checkpoint passed
+84 tests / 464 assertions.
+
+Fresh isolated history-off and history-on branches were reforked from the same
+published source digest
+`66c3301646b4c243cc598d4df1d0e1702cf2a29d3a3a25d115125bd6d563fcda`.
+The history-off root returned the flat
+`:seon.db/non-temporal-database` error from `history`, `as-of`, and `since`;
+the history-on root returned three Datahike database values.
+
+HTTP submission to the history-off root returned 204 and completed run
+`62b82530-4b06-40b6-8598-110bcfd03b28`. Its recorded trigger was
+`inbound-536870954-0`; the run closed with one terminal receipt, one committed
+context capture, and one real `deepseek-v4-flash` attempt. The attempt recorded
+6,898 prompt tokens, 28 completion tokens, and 6,926 total tokens. The captured
+prompt was 21,313 characters, the derived context render was 9,035 characters,
+and `/ns/my.agents.root/debug` returned HTTP 200 with 85,731 bytes. Both roots
+were taken down through `bin/seon down`; each reported `0/0 clusters alive`, a
+readable offline roster, and no orphan Seon JVMs.

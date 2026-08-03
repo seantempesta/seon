@@ -37,6 +37,7 @@
    :seon.cluster.agent/run
    :seon.cluster.run/id
    :seon.cluster.run/agent
+   :seon.cluster.run/trigger
    :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at
    :seon.cluster.run/process
@@ -57,9 +58,9 @@
    :seon.cluster.message/to
    :seon.cluster.message/content
    :seon.cluster.message/at
+   :seon.cluster.message/caused-by
    :seon.config/cluster
-   :seon.config.run/max-episode-runs
-   :seon.db/trigger])
+   :seon.config.run/max-episode-runs])
 
 (def ^:private process "process/one")
 (def ^:private other-process "process/two")
@@ -98,10 +99,7 @@
                 :seon.cluster.message/at now}]))
 
 (defn- open-run!
-  "Open a run, optionally claimed by `holder`, optionally planned.
-  The run-opening transaction carries the trigger as TX-META when one
-  exists — the ruling's one deliberate provenance extension, and the
-  only thing that makes a trigger answered."
+  "Open a run, optionally claimed by `holder`, optionally planned."
   [connection {:keys [holder planned? triggered?]}]
   (d/transact
    connection
@@ -110,6 +108,9 @@
                               :seon.cluster.run/agent
                               [:seon.cluster.agent/id agent-id]
                               :seon.cluster.run/opened-at now}
+                       triggered?
+                       (assoc :seon.cluster.run/trigger
+                              [:seon.cluster.message/id message-id])
                        holder (assoc :seon.cluster.run/process holder)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
@@ -121,10 +122,7 @@
                             [:seon.cluster.run/id run-id]
                             :seon.cluster.run.form/ordinal ordinal
                             :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
-                         (range 2))))}
-     triggered?
-     (assoc :tx-meta
-            {:seon.db/trigger [:seon.cluster.message/id message-id]}))))
+                         (range 2))))})))
 
 (defn- terminal-receipt!
   ([connection ordinal]
@@ -167,6 +165,8 @@
    {:tx-data
     (into [{:seon.cluster.run/id id
             :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+            :seon.cluster.run/trigger
+            [:seon.cluster.message/id trigger-id]
             :seon.cluster.run/opened-at at
             :seon.cluster.run/process process
             :seon.cluster.run/plan-digest digest}
@@ -178,9 +178,7 @@
               :seon.cluster.run.form/run [:seon.cluster.run/id id]
               :seon.cluster.run.form/ordinal ordinal
               :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
-           result-values))
-    :tx-meta {:seon.db/trigger
-              [:seon.cluster.message/id trigger-id]}})
+           result-values))})
   (d/transact
    connection
    (map-indexed
@@ -514,18 +512,18 @@
                        (work/interruption db agent-id)))
             "it is wreckage to bury, not work to continue")))))
 
-(deftest answeredness-is-transaction-metadata
+(deftest answeredness-is-a-recorded-run-ref
   (with-database
     (fn [connection]
       (add-trigger! connection)
-      (testing "a trigger no run-opening transaction points at is unanswered"
+      (testing "a trigger no run points at is unanswered"
         (is (= [message-id]
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers (d/db connection) agent-id)))))
       (open-run! connection {:holder process :triggered? true})
       (testing "opening a run against it answers it — with no flag anywhere"
         (is (empty? (work/unanswered-triggers (d/db connection) agent-id))))
-      (testing "and a run opened WITHOUT the tx-meta answers nothing"
+      (testing "and a run opened without a trigger ref answers nothing"
         (close-run! connection)
         (is (empty? (work/unanswered-triggers (d/db connection) agent-id))
             "the first trigger stays answered")

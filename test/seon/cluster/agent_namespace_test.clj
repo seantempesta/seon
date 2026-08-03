@@ -76,9 +76,11 @@
       (test-support/seed-cluster! connection "test")
       (d/transact connection
                   [{:seon.ns/name 'example.unowned
-                    :seon.ns/source "(ns example.unowned)"}
+                    :seon.ns/source "(ns example.unowned)"
+                    :seon.schema.admission/source :agent}
                    {:seon.ns/name 'example.owned
-                    :seon.ns/source "(ns example.owned)"}
+                    :seon.ns/source "(ns example.owned)"
+                    :seon.schema.admission/source :agent}
                    {:seon.cluster.agent/id "owner"
                     :seon.cluster.agent/cluster [:seon.cluster/name "test"]
                     :seon.cluster.agent/namespace

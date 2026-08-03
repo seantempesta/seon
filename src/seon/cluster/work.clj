@@ -144,7 +144,7 @@
 (defn planner-scoped-attempt?
   "True when `run-id` belongs to a goal's caused-by message chain.
 
-  A planner attempt's opening transaction points at one member of the chain:
+  A planner attempt's recorded run trigger points at one member of the chain:
   either the depth-zero goal message itself or a later caused-by message.
   A triggerless historical run has no membership edge and fails closed."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -384,9 +384,9 @@
   "The agent's runs since the one answering the last outside trigger.
 
   Inclusive of that run, and derived purely from committed facts: every
-  run's opening transaction names its trigger as `:seon.db/trigger`
-  tx-meta. Refusal correction reuses that trigger, so the episode anchor
-  is the FIRST answering transaction for each outside trigger, then the
+  run records its trigger as `:seon.cluster.run/trigger` when it opens.
+  Refusal correction reuses that trigger, so the episode anchor is the
+  FIRST answering run for each outside trigger, then the
   latest of those first answers; later corrective runs cannot reset their
   own bound. A trigger is outside exactly when it carries neither `from`
   nor `about` (R3 — the error recorder never resets the episode). Zero
@@ -406,7 +406,7 @@
                [?agent :seon.cluster.agent/id ?agent-id]
                [?run :seon.cluster.run/agent ?agent]
                [?run :seon.cluster.run/id _ ?tx]
-               [?tx :seon.db/trigger ?message]
+               [?run :seon.cluster.run/trigger ?message]
                (not [?message :seon.cluster.message/from _])
                (not [?message :seon.cluster.message/about _])]
              db agent-id)
@@ -464,7 +464,7 @@
   prevents an older refusal from resurfacing after a later successful turn."
   [db agent-id]
   (when-not (episode-capped? db agent-id)
-    (when-let [[run _run-id opened-tx _closed-tx]
+    (when-let [[run _run-id _opened-tx _closed-tx]
                (latest-closed-run db agent-id)]
       (when (some lint-refusal-receipt?
                   (d/q '[:find [(pull ?receipt
@@ -475,11 +475,11 @@
                          [?receipt :seon.cluster.eval/result-edn _]]
                        db run))
         (d/q '[:find ?trigger-id .
-               :in $ ?opened-tx
+               :in $ ?run
                :where
-               [?opened-tx :seon.db/trigger ?trigger]
+               [?run :seon.cluster.run/trigger ?trigger]
                [?trigger :seon.cluster.message/id ?trigger-id]]
-             db opened-tx)))))
+             db run)))))
 
 (defn- openable-trigger
   "The trigger `agent-id`'s next run answers, under the episode gate.
@@ -612,11 +612,9 @@
 (defn unanswered-triggers
   "The agent's trigger messages no run has answered, oldest first.
 
-  A trigger is answered exactly when some run-opening transaction
-  points at it. Answeredness is TRANSACTION METADATA, not a flag on the message and
-  not a flag on the run (owner ruling, 2026-07-27 night): the
-  run-opening transaction carries `:seon.db/trigger`, so this is one
-  query over transactions and there is nothing to keep in sync. A
+  A trigger is answered exactly when some run points at it through the
+  connection committed when that run opens. This is one query over
+  ordinary facts and there is nothing to keep in sync. A
   message with no run pointing at it is unanswered by construction —
   which is also why deleting a run would make its trigger live again,
   and why nothing deletes runs."
@@ -632,9 +630,9 @@
               [?message :seon.cluster.message/to ?agent]
               [?message :seon.cluster.message/id ?id]
               [?message :seon.cluster.message/at ?at]
-              ;; answered = SOME transaction named it as its trigger.
+              ;; answered = SOME run names it as its trigger.
               ;; The absence is the fact; there is no flag to maintain.
-              (not [_ :seon.db/trigger ?message])]
+              (not [_ :seon.cluster.run/trigger ?message])]
             db agent-id)
        (sort-by (fn [[id at]] [(inst-ms at) id]))
        (mapv (fn [[id at]] {:seon.cluster.message/id id

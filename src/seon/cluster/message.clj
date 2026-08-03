@@ -20,15 +20,14 @@
   infinite conversation, every message different, every hop a paid
   model call. The error path's fence counts occurrences of one
   SIGNATURE, so it cannot see this: nothing repeats. What repeats is
-  the CHAIN, and the chain is already recorded — every run-opening
-  transaction names its trigger in `:seon.db/trigger` transaction
-  metadata, and a terminal transaction that delivers messages names the
-  same trigger. So the depth of a conversation is a WALK over committed
-  transaction metadata, derived on demand:
+  the CHAIN, and the chain is already recorded — every run records its
+  trigger message when it opens, and every outbound message records the
+  message that caused it. So the depth of a conversation is a WALK over
+  ordinary committed connections, derived on demand:
 
-      message → the transaction that created it → its trigger → …
+      message → its cause → …
 
-  and the walk ends at a message whose transaction named no trigger —
+  and the walk ends at a message with no recorded cause —
   which is exactly a message from outside the agent population: a
   human's nudge, or the error recorder's. THE HUMAN BARRIER IS
   THEREFORE FREE. The quarry paid for it twice: it stored a `hops`
@@ -65,24 +64,22 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The chain, walked from transaction metadata
+;;; The chain, walked from recorded connections
 ;;; ---------------------------------------------------------------------------
 
 (defn trigger
   "The message the run `run-id` is answering, or nil.
-  Read from the run's OWN creating transaction: the `:open` transition
-  commits the run and names its trigger as `:seon.db/trigger` tx-meta
-  in one transaction, so the run's identity datom and the trigger ref
-  share a transaction entity. Nothing is stored on the run for this —
-  that is the night ruling, and this is the read it implies."
+  The `:open` transition commits this connection with the run itself,
+  so the cause is equally available in temporal and non-temporal
+  databases."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.run/id]
                   [:maybe :seon.cluster.message/id]]}
   [db run-id]
   (d/q '[:find ?message-id .
          :in $ ?run-id
          :where
-         [?run :seon.cluster.run/id ?run-id ?tx]
-         [?tx :seon.db/trigger ?message]
+         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.cluster.run/trigger ?message]
          [?message :seon.cluster.message/id ?message-id]]
        db run-id))
 
@@ -92,8 +89,8 @@
   (d/q '[:find ?parent-id .
          :in $ ?message-id
          :where
-         [?message :seon.cluster.message/id ?message-id ?tx]
-         [?tx :seon.db/trigger ?parent]
+         [?message :seon.cluster.message/id ?message-id]
+         [?message :seon.cluster.message/caused-by ?parent]
          [?parent :seon.cluster.message/id ?parent-id]]
        db message-id))
 
@@ -101,7 +98,7 @@
   "How many agent hops separate `message-id` from outside the population.
   Zero for a message nobody's turn produced — a human's, or the error
   recorder's — and one more for each answering hop after that. DERIVED
-  by walking transaction metadata; there is no counter to keep, which
+  by walking recorded refs; there is no counter to keep, which
   is why nothing can reset it wrongly and nothing can forget to
   increment it.
 
@@ -411,6 +408,9 @@
                     :seon.cluster.message/content
                     (or (:my.message/content candidate) reason)
                     :seon.cluster.message/at at}
+                    trigger
+                    (assoc :seon.cluster.message/caused-by
+                           [:seon.cluster.message/id trigger])
                     about
                     (assoc :seon.cluster.message/about
                            (:seon.cluster.message/about about))

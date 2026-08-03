@@ -110,7 +110,7 @@
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
-              [?opened-tx :seon.db/trigger ?message]
+              [?run :seon.cluster.run/trigger ?message]
               [?run :seon.cluster.run/id ?run-id ?opened-tx]]
             db message-id)
        (sort-by second)

@@ -306,8 +306,7 @@
           (is (= "boot-window-message"
                  (d/q '[:find ?message-id .
                         :where
-                        [?run :seon.cluster.run/id _ ?tx]
-                        [?tx :seon.db/trigger ?message]
+                        [?run :seon.cluster.run/trigger ?message]
                         [?message :seon.cluster.message/id ?message-id]]
                       @(:seon.boot/cluster-connection instance)))
               "the committed message opened a run without a later wake")

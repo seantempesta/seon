@@ -32,17 +32,15 @@
                     :seon.cluster.message/content "inspect this walk"
                     :seon.cluster.message/at (Date. 1700000000000)}])
       (d/transact connection
-                  {:tx-data
-                   [{:seon.cluster.run/id "walk-run"
-                     :seon.cluster.run/agent
-                     [:seon.cluster.agent/id "walker"]
-                     :seon.cluster.run/opened-at (Date. 1700000001000)}
-                    {:seon.cluster.agent/id "walker"
-                     :seon.cluster.agent/run
-                     [:seon.cluster.run/id "walk-run"]}]
-                   :tx-meta
-                   {:seon.db/trigger
-                    [:seon.cluster.message/id "walk-message"]}})
+                  [{:seon.cluster.run/id "walk-run"
+                    :seon.cluster.run/agent
+                    [:seon.cluster.agent/id "walker"]
+                    :seon.cluster.run/trigger
+                    [:seon.cluster.message/id "walk-message"]
+                    :seon.cluster.run/opened-at (Date. 1700000001000)}
+                   {:seon.cluster.agent/id "walker"
+                    :seon.cluster.agent/run
+                    [:seon.cluster.run/id "walk-run"]}])
       (body connection))))
 
 (def ^:private request

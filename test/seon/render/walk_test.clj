@@ -299,15 +299,13 @@
                         :seon.cluster.message/at
                         (java.util.Date. (long index))}])
           (d/transact connection
-                      {:tx-data
-                       [{:seon.cluster.run/id (str "asked-run-" index)
-                         :seon.cluster.run/agent
-                         [:seon.cluster.agent/id "answerer"]
-                         :seon.cluster.run/opened-at
-                         (java.util.Date. (long index))}]
-                       :tx-meta
-                       {:seon.db/trigger
-                        [:seon.cluster.message/id message-id]}})))
+                      [{:seon.cluster.run/id (str "asked-run-" index)
+                        :seon.cluster.run/agent
+                        [:seon.cluster.agent/id "answerer"]
+                        :seon.cluster.run/trigger
+                        [:seon.cluster.message/id message-id]
+                        :seon.cluster.run/opened-at
+                        (java.util.Date. (long index))}])))
       (let [db @connection
             asker-eid (:db/id
                         (d/pull db [:db/id]
@@ -506,10 +504,13 @@
     (fn [connection]
       (seed-agents! connection "derived" ["asker" "answerer"])
       (d/transact connection
-                  [{:seon.ns/name 'derived.target}
-                   {:seon.ns/name 'external.missing}])
+                  [{:seon.ns/name 'derived.target
+                    :seon.schema.admission/source :agent}
+                   {:seon.ns/name 'external.missing
+                    :seon.schema.admission/source :agent}])
       (d/transact connection
                   [{:seon.ns/name 'my.agents/asker
+                    :seon.schema.admission/source :agent
                     :seon.ns/requires
                     #{[:seon.ns/name 'derived.target]
                       [:seon.ns/name 'external.missing]}}
@@ -521,23 +522,18 @@
                     :seon.cluster.message/content "please answer"
                     :seon.cluster.message/at (java.util.Date.)}])
       (d/transact connection
-                  {:tx-data
-                   [{:seon.cluster.run/id "derived-run"
-                     :seon.cluster.run/agent
-                     [:seon.cluster.agent/id "answerer"]
-                     :seon.cluster.run/opened-at (java.util.Date.)}
-                    {:seon.cluster.agent/id "answerer"
-                     :seon.cluster.agent/run
-                     [:seon.cluster.run/id "derived-run"]}]
-                   :tx-meta
-                   {:seon.db/trigger
-                    [:seon.cluster.message/id "derived-message"]}})
+                  [{:seon.cluster.run/id "derived-run"
+                    :seon.cluster.run/agent
+                    [:seon.cluster.agent/id "answerer"]
+                    :seon.cluster.run/trigger
+                    [:seon.cluster.message/id "derived-message"]
+                    :seon.cluster.run/opened-at (java.util.Date.)}
+                   {:seon.cluster.agent/id "answerer"
+                    :seon.cluster.agent/run
+                    [:seon.cluster.run/id "derived-run"]}])
       (let [db @connection
             asker (:db/id
                    (d/pull db [:db/id] [:seon.cluster.agent/id "asker"]))
-            answerer (:db/id
-                      (d/pull db [:db/id]
-                              [:seon.cluster.agent/id "answerer"]))
             run-eid (:db/id
                      (d/pull db [:db/id]
                              [:seon.cluster.run/id "derived-run"]))
@@ -552,7 +548,7 @@
                          (d/pull db [:db/id]
                                  [:seon.ns/name 'external.missing]))
             asker-refs (walk/refs db asker base-caps)
-            answerer-refs (walk/refs db answerer base-caps)
+            run-refs (walk/refs db run-eid base-caps)
             namespace-refs
             (walk/refs db
                        (:db/id
@@ -564,10 +560,10 @@
                            (:seon.render.walk/attribute %))
                         (= run-eid (:seon.render.walk/target %)))
                   asker-refs))
-        (is (some #(and (= :seon.db/trigger
+        (is (some #(and (= :seon.cluster.run/trigger
                            (:seon.render.walk/attribute %))
                         (= message-eid (:seon.render.walk/target %)))
-                  answerer-refs))
+                  run-refs))
         (is (some #(= target-ns (:seon.render.walk/target %)) namespace-refs))
         (is (some #(= external-ns (:seon.render.walk/target %)) namespace-refs))
         (is (some #(and (= :seon.ns/requires

@@ -20,7 +20,7 @@ One episode leaves a connected set of facts:
 
 ```text
 agent ← message
-  ↑        ↓ run-opening transaction metadata
+  ↑        ↓ run trigger
   └── run ← context capture
         ├── provider attempt(s)
         ├── ordered form(s)
@@ -31,9 +31,10 @@ agent ← message
 The durable joins are concrete:
 
 - the agent is `:seon.cluster.agent/id`;
-- messages point through `:seon.cluster.message/to`, optional `/from`, and
-  optional `/about`;
-- runs point through `:seon.cluster.run/agent` and the agent's current `/run`;
+- messages point through `:seon.cluster.message/to`, optional `/from`,
+  optional `/about`, and optional `/caused-by`;
+- runs point through `:seon.cluster.run/agent`, their recorded `/trigger`, and
+  the agent's current `/run`;
 - context captures and attempts point to the run through their `/run` refs;
 - forms and receipts point to the run and join by `/ordinal`; and
 - error facts may point to `/agent` and `/run`.

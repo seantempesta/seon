@@ -190,13 +190,12 @@
        db))
 
 (defn- answers-by-trigger
-  "message-id → how many run-opening transactions named it as trigger."
+  "Message id to the number of runs recording it as trigger."
   [db]
   (into {}
         (d/q '[:find ?message-id (count ?run)
                :where
-               [?run :seon.cluster.run/id _ ?tx]
-               [?tx :seon.db/trigger ?message]
+               [?run :seon.cluster.run/trigger ?message]
                [?message :seon.cluster.message/id ?message-id]]
              db)))
 
@@ -863,21 +862,20 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- opened-run!
-  "Open+claim+close one run answering `message-id`, via the REAL
-  transitions with the trigger as tx-meta — the loop's own shape."
+  "Open, claim, and close one run answering `message-id`."
   [connection agent-id run-id message-id at]
   (d/transact connection
               {:tx-data (into (run/open-tx {:seon.cluster.run/id run-id
                                             :seon.cluster.run/agent
                                             [:seon.cluster.agent/id agent-id]
+                                            :seon.cluster.run/trigger
+                                            [:seon.cluster.message/id message-id]
                                             :seon.cluster.run/opened-at at})
                               (run/claim-tx {:seon.cluster.run/id run-id
                                              :seon.cluster.run/process process
                                              :seon.cluster.run/live-processes
                                              #{process}
-                                             :seon.cluster.run/now at}))
-               :tx-meta {:seon.db/trigger
-                         [:seon.cluster.message/id message-id]}})
+                                             :seon.cluster.run/now at}))})
   (d/transact connection
               (run/close-tx {:seon.cluster.run/id run-id
                              :seon.cluster.run/process process
@@ -1097,15 +1095,15 @@
                                      {:seon.cluster.run/id "run-dead"
                                       :seon.cluster.run/agent
                                       [:seon.cluster.agent/id "midfold"]
+                                      :seon.cluster.run/trigger
+                                      [:seon.cluster.message/id "m-dead"]
                                       :seon.cluster.run/opened-at now})
                                     (run/claim-tx
                                      {:seon.cluster.run/id "run-dead"
                                       :seon.cluster.run/process dead
                                       :seon.cluster.run/live-processes
                                       #{dead}
-                                      :seon.cluster.run/now now}))
-                     :tx-meta {:seon.db/trigger
-                               [:seon.cluster.message/id "m-dead"]}})
+                                      :seon.cluster.run/now now}))})
         (d/transact connection
                     (run/plan-tx {:seon.cluster.run/id "run-dead"
                                   :seon.cluster.run/process dead
@@ -1275,15 +1273,15 @@
                                      {:seon.cluster.run/id "run-held"
                                       :seon.cluster.run/agent
                                       [:seon.cluster.agent/id "held"]
+                                      :seon.cluster.run/trigger
+                                      [:seon.cluster.message/id "m-held"]
                                       :seon.cluster.run/opened-at now})
                                     (run/claim-tx
                                      {:seon.cluster.run/id "run-held"
                                       :seon.cluster.run/process other
                                       :seon.cluster.run/live-processes
                                       #{other}
-                                      :seon.cluster.run/now now}))
-                     :tx-meta {:seon.db/trigger
-                               [:seon.cluster.message/id "m-held"]}})
+                                      :seon.cluster.run/now now}))})
         (is (nil? (work/next-agent-work
                    @connection
                    {:seon.cluster.agent/id "held"

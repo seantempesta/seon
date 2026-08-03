@@ -39,9 +39,9 @@
   something the walk could ever render.
 
   `:trigger` is no longer a scaffold block. The universal walk derives
-  the `:seon.db/trigger` connection from the run's creating transaction
-  and follows it directly to the message. The transaction remains
-  provenance rather than becoming a separately rendered unit, while the
+  the `:seon.cluster.run/trigger` connection recorded on the run and
+  follows it directly to the message. The run stays the ordinary owner
+  of its cause rather than making a transaction a runtime unit, while the
   message a run answers is present through the same walk as every other
   neighbour.
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, testing]
 ---
@@ -215,3 +215,55 @@ The full isolated tower independently stopped at the same remaining boundary:
 evidence was unavailable, then its `:any` was refused. The API migration is
 correct and quiet; history-off boot remains ungraduated. Exact results are in
 [[adversarial-pass-2026-08-03]].
+
+## Resolution — recorded causal facts and paired live proof
+
+The second temporal dependency is removed. A run now records its triggering
+message as the optional cardinality-one indexed ref
+`:seon.cluster.run/trigger` in the run-opening transaction itself
+(`resources/seon/schema.edn:2502-2521`, `src/seon/cluster/run.clj:231-264`).
+Outbound messages record the message that caused them as the optional
+cardinality-one indexed ref `:seon.cluster.message/caused-by`
+(`resources/seon/schema.edn:1573-1600`,
+`src/seon/cluster/message.clj:398-418`). Trigger lookup, answeredness,
+conversation depth, episode bounds, correction continuation, bootstrap/eval
+run discovery, and render traversal all read those ordinary refs
+(`src/seon/cluster/message.clj:70-109`,
+`src/seon/cluster/work.clj:402-482,612-639`,
+`src/seon/render/walk.clj:270-305`). The obsolete synthetic render edge was
+deleted because the installed ref is already traversed by the universal ref
+walk.
+
+The widened transaction-metadata census found no remaining causal read on the
+boot/runtime path. `bootstrap_drive.clj` and `eval/drive.clj` retain datom
+transaction IDs only for deterministic ordering and same-transaction receipt
+joins. `cluster/work.clj` retains opening/closing transaction IDs only to order
+runs. `schema.clj` uses datom transaction IDs to associate assertions with the
+admission source recorded on the declaration entity. `reconcile.cljc`'s
+`:seon.db/process` transaction read is provenance ownership and is bypassed
+when `:keep-history?` is false. `render.clj`'s `:db/txInstant` pull is
+display-only and renders nil without blocking. Transaction metadata writers
+for `:seon.db/user` and `:seon.db/process` remain provenance, not runtime
+causality.
+
+The class-killer creates a real non-temporal Datahike database, opens a run
+through `run/open-tx`, proves its transaction entity is nil, and still resolves
+the recorded trigger (`test/seon/cluster/message_test.clj:385-415`). The final
+focused checkpoint passed **213 tests / 1,069 assertions** across 19 schema,
+config, boot, message/run/work, render, agent, turn, and instrumentation
+namespaces. After the final open-map contract correction, the four directly
+affected runtime namespaces passed **84 tests / 464 assertions**.
+
+Paired isolated roots were reforked from source digest
+`66c3301646b4c243cc598d4df1d0e1702cf2a29d3a3a25d115125bd6d563fcda`.
+Both reached READY. The history-on root returned database values from
+`history`, `as-of`, and `since`; the history-off root returned the flat
+`:seon.db/non-temporal-database` value for all three. A real HTTP message on
+the history-off root opened and closed run
+`62b82530-4b06-40b6-8598-110bcfd03b28`; its trigger resolved to
+`inbound-536870954-0`. The run recorded one DeepSeek
+`deepseek-v4-flash` attempt (6,926 total tokens), one 21,313-character context
+capture, one terminal receipt, and a nonempty 9,035-character context render.
+The debug namespace page returned HTTP 200 with 85,731 bytes. `bin/seon down`
+then left both roots at `0/0 clusters alive`, with readable offline rosters and
+no orphan Seon JVMs.

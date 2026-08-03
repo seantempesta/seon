@@ -22,6 +22,9 @@
    {:mode :arm-time :consumer 'seon.flow/start-work-launcher!}
    :seon.config.flow.compute/concurrency
    {:mode :arm-time :consumer 'seon.flow/start-work-launcher!}
+   :seon.config.flow/ping-timeout-ms
+   {:mode :live :consumer '[seon.oversight/cluster-flow-status
+                            seon.cluster/mcp-runtime-observation]}
    :seon.config.eval.result/max-depth
    {:mode :arm-time :consumer 'seon.cluster/loop-handle}
    :seon.config.eval.result/max-collection
@@ -108,6 +111,7 @@
   {:seon.config.db/keep-history? true
    :seon.config.flow.compute/queue-depth 3
    :seon.config.flow.compute/concurrency 1
+   :seon.config.flow/ping-timeout-ms 11
    :seon.config.eval.result/max-depth 2
    :seon.config.eval.result/max-collection 3
    :seon.config.eval.result/max-string 17

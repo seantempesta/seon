@@ -267,19 +267,6 @@
                 :seon.render.walk/elided-count elided}}}))))
       (installed-ref-attributes db)))))
 
-(defn- trigger-message-edges
-  [db entity _caps]
-  (when-let [run-eid (some-> entity :seon.cluster.agent/run :db/id)]
-    (when-let [trigger
-               (d/q '[:find ?trigger .
-                      :in $ ?run
-                      :where
-                      [?run :seon.cluster.run/id _ ?tx]
-                      [?tx :seon.db/trigger ?trigger]]
-                    db run-eid)]
-      [{:seon.render.walk/attribute :seon.db/trigger
-        :seon.render.walk/target trigger}])))
-
 (defn- asked-for-run-edges
   [db entity caps]
   (when (:seon.cluster.agent/id entity)
@@ -289,8 +276,7 @@
                                 :in $ ?agent
                                 :where
                                 [?message :seon.cluster.message/from ?agent]
-                                [?run :seon.cluster.run/id _ ?tx]
-                                [?tx :seon.db/trigger ?message]]
+                                [?run :seon.cluster.run/trigger ?message]]
                               db agent-eid)
                         sort
                         reverse)
@@ -316,7 +302,7 @@
             :seon.render.walk/elided-count elided}}})))))
 
 (def ^:private derived-edge-functions
-  [trigger-message-edges asked-for-run-edges])
+  [asked-for-run-edges])
 
 (defn- derived-refs
   [db entity caps]

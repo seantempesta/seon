@@ -167,11 +167,14 @@ has an identity, cluster ref, namespace ownership ref, optional additive
 instructions, and no current run. Committing `:seon.cluster.agent/id` also wakes
 the cluster's arm owner so a graph is created for the new agent.
 
-A message is one recipient, content, and instant, with optional sender and
-`about` ref. Absence of `/from` means the message came from outside the agent
-population; no origin enum repeats that fact. The `/to` ref is the wake
-attribute. Answeredness follows from the run-opening transaction metadata that
-records its trigger, not a flag on the message.
+A message is one recipient, content, and instant, with optional sender,
+`about`, and `caused-by` refs. Absence of `/from` means the message came from
+outside the agent population; no origin enum repeats that fact. The `/to` ref
+is the wake attribute. A run records its `/trigger` ref when it opens, so
+answeredness is the presence of that connection rather than a flag on the
+message or a temporal transaction artifact. Outbound delivery records the
+trigger as the message's `/caused-by` ref, making conversation depth an
+ordinary ref walk.
 
 There is no durable parent tree, schedule entity, interaction entity, browser
 session, hop counter, or delivery acknowledgement in the runtime model.
