@@ -32,6 +32,18 @@ also references `seon.cluster/socket-server?`, while loading `seon.cluster`
 activates the schema population. The current program graph is built after this
 gate and does not describe top-level registration or activation effects.
 
+The same hand-maintained reload boundary caused a second incident on
+2026-08-03. `seon.program` gained ownership of `:seon.fn/calls`, but live
+publication reloaded `seon.fn` without reloading `seon.program`. Its stale
+`canonical-row` Var removed the newly analyzed call edges, so the capability
+index refused `my.edit/exact` as `:capability-without-request` even though the
+fresh analyzer row contained a direct `seon.effect/request!` call. Commit
+`be232fa32` reloads `seon.program` before `seon.fn` and extends the existing
+live-operator regression by deliberately installing a call-edge-dropping
+`canonical-row` before `bin/seon init`. Publication then succeeded as
+`:current-src` commit `6a70d410-a771-585a-bee5-d2c88e2f909c` with digest
+`804b096f7733a36015a5562c483be70870375345607904fb740e6e66e5c505e9`.
+
 ## Owner
 
 The source-publication reload boundary in `seon.fresh-operator`, together with
