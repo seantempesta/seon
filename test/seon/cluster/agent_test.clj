@@ -356,9 +356,7 @@
     (fn [connection ctx]
       (let [routing (armory)
             requests (atom [])
-            events (database-events connection)
-            cluster (dissoc (handle connection ctx)
-                            :seon.render/context-channel)]
+            events (database-events connection)]
         (db/transact!
          connection
          [{:seon.cluster.agent/id "prompt-refusal-cap"}
@@ -369,15 +367,24 @@
                         (recording-completer
                          requests
                          (constantly "unused"))]
-            (let [entry
+            (let [cluster (dissoc (handle connection ctx)
+                                  :seon.render/context-channel)
+                  entry
                   (agent/arm!
                    {:seon.cluster.loop/cluster cluster
                     :seon.cluster.agent/id "prompt-refusal-cap"
                     :seon.cluster.agent/routing routing})]
+              (while (async/poll! (:seon.cluster.agent-test/events events)))
               (outside-trigger! connection "prompt-refusal-cap"
                                 "prompt-refusal-message" "derive context")
               (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-              (await-quiescence! events ["prompt-refusal-cap"] 0)
+              (test-support/await-event!
+               (:seon.cluster.agent-test/events events)
+               ::prompt-refusal-cap
+               #(let [db (:db-after %)]
+                  (and (= 3 (work/episode-runs db
+                                               "prompt-refusal-cap"))
+                       (quiescent? db ["prompt-refusal-cap"]))))
               (is (empty? @requests)
                   "no provider call occurs without a valid prompt")
               (is (= 3 (work/episode-runs @connection
