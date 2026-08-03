@@ -3362,6 +3362,15 @@ everything and carry the event fact id back-reference. (4) The
 background-work PRD already existed and is owner-approved — no new
 design needed; wave-close owns its proof.
 
+**OWNER STANDING ORDER — 2026-08-03 night, CRASHING BUGS ARE FIXED
+IMMEDIATELY.** Any bug that crashes, wedges, or kills a running system
+component gets a fix lane the moment it is identified — never parked
+behind feature work, same posture as the velocity ruling. Provenance:
+the soft-reference class-eviction bug killed the default JVM's Datahike
+writer while the process stayed alive; the owner ordered immediate
+fixes for it, the first-contracted-defn failure, and the class
+generally.
+
 **OWNER RULING — 2026-08-03 night, LUCENE FULL-TEXT SEARCH ADOPTED.**
 Overriding the search research's predicate-scan recommendation: Seon
 adopts Apache Lucene as the one full-text substrate, set up once and
