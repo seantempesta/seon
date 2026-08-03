@@ -209,7 +209,13 @@
         task (FutureTask. ^java.util.concurrent.Callable
                           (bound-fn [] (handler request effective)))]
     (.execute ^Executor executor task)
-    (.get task)))
+    (try
+      (.get task)
+      (catch InterruptedException interrupted
+        ;; Waiting stopped, so the capability task must stop too. Capability
+        ;; handlers own their resource-specific cleanup on interruption.
+        (.cancel task true)
+        (throw interrupted)))))
 
 (def ^:private byte-array-class (class (byte-array 0)))
 
@@ -252,18 +258,20 @@
       [[:db.fn/call #'settle-call request]])}))
 
 (defn- interrupt!
-  [connection effect-id]
+  ([connection effect-id]
+   (interrupt! connection effect-id
+               (flat-error :seon.effect/interrupted
+                           "The effect handler was interrupted."
+                           {:seon.effect/id effect-id})))
+  ([connection effect-id value]
   (let [interrupted-at (Date.)]
-    {:seon.effect/value
-     (flat-error :seon.effect/interrupted
-                 "The effect handler was interrupted."
-                 {:seon.effect/id effect-id})
+    {:seon.effect/value value
      :seon.effect/transaction
      (db/transact!
       connection
       [[:db.fn/call #'interrupt-call
         {:seon.effect/id effect-id
-         :seon.effect/interrupted-at interrupted-at}]])}))
+         :seon.effect/interrupted-at interrupted-at}]])})))
 
 (defn- handler-failure
   [owner-sym]
@@ -387,12 +395,21 @@
                          result-ref)
                        (let [outcome
                              (try
-                               (settle-value!
-                                connection effect-id opened-at threshold
-                                (dispatch
-                                 handler
-                                 (:seon.sci.admit/value projected-request)
-                                 effective))
+                               (let [handler-value
+                                     (dispatch
+                                      handler
+                                      (:seon.sci.admit/value projected-request)
+                                      effective)]
+                                 (if (= :interrupted
+                                        (:seon.effect/disposition
+                                         handler-value))
+                                   (interrupt!
+                                    connection effect-id
+                                    (dissoc handler-value
+                                            :seon.effect/disposition))
+                                   (settle-value!
+                                    connection effect-id opened-at threshold
+                                    handler-value)))
                                (catch InterruptedException _
                                  (interrupt! connection effect-id))
                                (catch ExecutionException _

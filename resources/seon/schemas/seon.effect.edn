@@ -1,5 +1,6 @@
 #:seon.effect{:capability :qualified-symbol,
               :background? :boolean,
+              :disposition [:enum :interrupted],
               :execution-options
               [:map
                [:seon.effect/background?
