@@ -123,7 +123,7 @@
       (println "\tlocked synchronizer" synchronizer))))
 
 (defn- liveness-diagnostic
-  [progress silence-seconds suite-start]
+  [progress silence-seconds suite-start virtual-thread-dump]
   (let [process (ProcessHandle/current)
         child-processes (vec (.toList (.descendants process)))
         thread-bean (ManagementFactory/getThreadMXBean)
@@ -152,9 +152,43 @@
          (doseq [child-process child-processes]
            (println "bin/test:  " (process-description child-process)))
          (println "bin/test:   none"))
-       (println "bin/test: full JVM thread dump")
+       (println "bin/test: virtual-thread-aware JVM dump" virtual-thread-dump)
+       (println "bin/test: platform-thread MXBean supplement")
        (doseq [info (.dumpAllThreads thread-bean true true)]
          (print (thread-info-text info))))}))
+
+(def ^:private jcmd-backstop-seconds
+  "The foreign diagnostic process's loud last-resort bound."
+  10)
+
+(defn- persist-virtual-thread-dump!
+  []
+  (let [directory (io/file "tmp" "test-liveness")
+        _ (.mkdirs directory)
+        file (io/file directory
+                      (str (.pid (ProcessHandle/current)) "-"
+                           (System/currentTimeMillis) "-threads.json"))
+        jcmd (io/file (System/getProperty "java.home") "bin" "jcmd")
+        command [(str jcmd)
+                 (str (.pid (ProcessHandle/current)))
+                 "Thread.dump_to_file"
+                 "-format=json"
+                 (.getCanonicalPath file)]
+        process (.start (ProcessBuilder. (into-array String command)))
+        completed? (.waitFor process jcmd-backstop-seconds TimeUnit/SECONDS)]
+    (when-not completed?
+      (.destroyForcibly process)
+      (throw
+       (ex-info "jcmd did not complete its virtual-thread-aware dump."
+                {::command command})))
+    (let [output (str/trim (slurp (.getInputStream process)))]
+      (when-not (zero? (.exitValue process))
+        (throw
+         (ex-info "jcmd refused the virtual-thread-aware dump."
+                  {::command command
+                   ::exit (.exitValue process)
+                   ::output output}))))
+    (.getCanonicalPath file)))
 
 (defn- persist-diagnostic!
   [text]
@@ -174,8 +208,14 @@
 
 (defn- fire-liveness-backstop!
   [progress silence-seconds suite-start]
-  (let [{::keys [child-processes text]}
-        (liveness-diagnostic progress silence-seconds suite-start)
+  (let [virtual-thread-dump
+        (try
+          (persist-virtual-thread-dump!)
+          (catch Throwable failure
+            (str "unavailable: " (ex-message failure))))
+        {::keys [child-processes text]}
+        (liveness-diagnostic progress silence-seconds suite-start
+                             virtual-thread-dump)
         log-path (try
                    (persist-diagnostic! text)
                    (catch Throwable failure

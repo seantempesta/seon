@@ -1,13 +1,15 @@
 (ns seon.test-runner-test
   "The opt-in JVM test-result fact sink."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.util.concurrent CountDownLatch]))
 
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private git-sha (apply str (repeat 40 "a")))
@@ -89,3 +91,27 @@
             :seon.boot/root "tmp/test-result-default-refusal"}))]
     (is (= :seon.test.runner/default-cluster-refused
            (:seon.error/kind refusal)))))
+
+(deftest liveness-dump-includes-virtual-threads
+  (let [release (CountDownLatch. 1)
+        path (volatile! nil)
+        thread
+        (-> (Thread/ofVirtual)
+            (.name "seon-test-runner-virtual-thread-proof")
+            (.start
+             (reify Runnable
+               (run [_]
+                 (.await release)))))]
+    (try
+      (let [dump-path (#'runner/persist-virtual-thread-dump!)
+            _ (vreset! path dump-path)
+            dump (slurp dump-path)]
+        (is (str/includes? dump
+                           "seon-test-runner-virtual-thread-proof"))
+        (is (str/includes? dump "\"virtual\": true")
+            "the retained diagnostic is not the platform-only MXBean view"))
+      (finally
+        (.countDown release)
+        (.join thread)
+        (when-let [dump-path @path]
+          (io/delete-file dump-path true))))))
