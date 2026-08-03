@@ -521,3 +521,33 @@ every step deliberately — the right context at the right time; the
 owner is moving from monolithic instruction walls to a minimalist
 bootstrap-forms model where the bootstrap series educates and pulls
 live context, with caching keeping LLM evals cheap.
+
+## Owner direction — 2026-08-03: the tools spine, ruled details
+
+- MULTI-LANGUAGE EDITING over Clojure-editing: Clojure's real editor is
+  the REPL (overwrite a defn -> upserted live for the cluster; write a
+  schema -> installed; DELETION via REPL is a known gap to complete).
+  File tools target OTHER languages: LSP integration / per-language
+  validation (python lint/indent etc.) for good multi-language
+  feedback.
+- NO HAND-MAINTAINED EFFECT LISTS: investigate deriving effect/system
+  boundaries from SCI's own parsed internals (host-interop observation
+  already exists in our fork); when an agent evals something needing OS
+  access, FEEDBACK tells them to annotate; schemas catch errors at
+  function boundaries BEFORE execution. All outputs flow through the
+  render system (no context dumps); evaluate PER-TOOL custom renders
+  and sensible default limits. Extend the blob mechanism as THE way
+  agents read large results in chunks at leisure (real data
+  structures, not text); DETECT re-run-to-tail patterns and teach the
+  drill mechanism instead.
+- METADATA: owner wants ONE central annotation story (workload, effect,
+  schema, privacy) — inventory current metadata, find double-duty and
+  suboptimal encodings, exploit for scheduling/processing/evals.
+- ASYNC/BACKGROUND WORK: separate research + PRD (launched): virtual
+  threads make blocking cheap, but agents need await-or-notify —
+  possibly auto-backgrounding IO + explicit (background ...) form;
+  must compose with flow (NO new scheduler, NO process management if
+  avoidable; babashka.process is for OS subprocesses only).
+- THE ORCHESTRATOR PERSONALLY writes the core tool implementation specs
+  (naming, composition, shared data shapes so tool outputs chain) after
+  reading research/agent-tools-design-2026-08-03.md whole.
