@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, sci, runtime]
 ---
@@ -65,8 +65,8 @@ and custody defaults to the calling agent's cluster.
    `toolkit.md` state the landed reality in the same wave, and no
    current authority calls `seon.db` a "facade".
 
-Blocked by: the consolidation lane's in-flight files landing (the
-sweep collides with them). The ambient-connection blocker
+Historical dependency: the consolidation lane's in-flight files had to land
+before the sweep could take the quiet window. The ambient-connection blocker
 ([[agent-evals-never-bind-the-ambient-cluster-connection]]) RESOLVED
 2026-08-02 (`643719904`) — the ambient default is real; its two loose
 ends transfer here: `bootstrap_drive.clj:141-155` holds a connection it
@@ -121,8 +121,30 @@ Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
   `:seon.db/rejected` carrying Datahike's `:transact/schema`. The operator
   root was taken down after the proof.
 
-Still open: acceptance item 3's 34-namespace direct-call sweep, its write-site
-classification, and the authority updates that graduate the complete issue.
+## Resolution — 2026-08-03
+
+Resolved by the path-limited quiet-window checkpoints from `4da65e9ee` through
+`09531af57`. Every planned production and test caller was handled according to
+the caller-level judgment in
+`docs/prds/sci-execution-runtime/research/seon-db-sweep-plan-2026-08-03.md`;
+the plan's divergence log records the source corrections discovered during
+execution.
+
+The final production census has zero non-exempt `datahike.api` core calls. The
+exact residual is ten exempt namespaces / 68 calls: 32 implementation calls in
+`seon.db`, 30 lifecycle/custody calls in the store, registry, branch, source,
+and process owners, and six listener calls in `seon.cluster.agent`,
+`seon.cluster.wake`, and `seon.eval.drive`. The sole core-shaped call outside
+`seon.db` is the documented `d/db` readiness check inside
+`seon.cluster.store/open-store!`. Tests retain 138 calls in 26 files, all
+lifecycle/listener fixtures or intentional below-boundary parity and encoded
+storage probes.
+
+A newly published isolated operator root exercised ambient agent SCI
+`transact!`, `q`, `pull`, and `history`; the declared message round-tripped and
+an undeclared attribute returned `:seon.db/rejected` with
+`:transact/schema`. The bare final `bin/test` gate passed 883 tests / 4,405
+assertions with zero failures or errors in 697.50 seconds wall time.
 
 ## Independent codec-window evidence — 2026-08-03
 
@@ -133,10 +155,8 @@ it through both namespaces. `seon.db` returned `clojure.lang.Symbol` through
 `java.lang.String` through every equivalent path, including query tuple and
 pull-expression positions.
 
-The current production population census found 24 union declarations but zero
-installed fallback mixed-union attributes. Therefore no live production direct
-call site reads a union-capable installed attribute today; the migration-window
-risk is dormant, not hypothetical. The first such attribute exposed before the
-34-namespace sweep completes will be string-valued for every bypassing reader.
-Full probe output and source anchors are in
+The production population census found 24 union declarations but zero
+installed fallback mixed-union attributes. The completed sweep removed that
+migration-window risk by routing logical reads through `seon.db`. Full probe
+output and source anchors are in
 [[adversarial-pass-2026-08-03]].

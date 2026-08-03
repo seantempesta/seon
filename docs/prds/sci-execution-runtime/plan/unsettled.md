@@ -16,6 +16,18 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, RULING #41 CALL-SITE SWEEP LANDED.** The ordered
+quiet-window sweep in `research/seon-db-sweep-plan-2026-08-03.md` is complete:
+all non-exempt production and test core reads/writes now use `seon.db`, and
+each caller preserves its classified refusal, boot, HTTP, runner, or fixture
+semantics. The production residual is exactly the documented implementation,
+custody, and listener ledger: ten namespaces / 68 direct calls, with no
+non-exempt call. A fresh isolated operator root proved ambient SCI
+`transact!`/`q`/`pull`/`history` and undeclared-attribute rejection. The bare
+full gate passed 883 tests / 4,405 assertions with zero failures or errors in
+697.50 seconds. Source, test, and authority checkpoints run from `4da65e9ee`
+through `09531af57`; the resolved issue is archived.
+
 **ADDENDUM — 2026-08-03, RULING #51 FLOW-EDGE CLOSURE.** Four crash-model
 edges are closed: the work launcher uses Flow's stock priority control
 protocol; active provider-call teardown has a loud provider-derived backstop;

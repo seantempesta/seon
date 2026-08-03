@@ -100,6 +100,27 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   instrumentation turned the pull into `:seon.db/invalid-read`. The database
   owner now requires a keyword before that predicate call, with an
   instrumented wildcard-pull regression.
+- The final production census is zero non-exempt `datahike.api` core calls.
+  Ten exempt namespaces retain 68 direct calls: 32 inside `seon.db`, 30 in
+  store/registry and branch/process custody owners, and six listener calls in
+  `seon.cluster.agent`, `seon.cluster.wake`, and `seon.eval.drive`. The only
+  core-shaped call outside `seon.db` is `seon.cluster.store/open-store!`'s
+  documented custody-time `d/db` readiness check. The test census retains 138
+  direct calls in 26 files, all database lifecycle/listener fixtures or the
+  intentional below-boundary storage/parity probes in `seon.db-test` and
+  `seon.cluster.store-transact-test`.
+- The integrated changed-test selector's operator boundary passed 26 tests / 148
+  assertions. Its writer process reached the selector's fixed 300-second limit
+  while still progressing through `seon.cluster.turn-test`; no test failure had
+  occurred. The required bare full suite subsequently passed 883 tests / 4,405
+  assertions with zero failures or errors in 697.50 seconds wall time.
+- The reset-boundary live proof published the finished source into isolated
+  operator root `tmp/seon-db-sweep-live`, forked and booted `default`, and ran
+  through a real agent SCI context. Ambient `transact!` returned a transaction
+  report, `q` returned `"seon-db-sweep-live"`, `pull` returned the matching
+  message id, `history` contained the write, and an undeclared attribute
+  returned `:seon.db/rejected` with `:transact/schema`. The root was taken down
+  after the proof.
 
 ## Current source census
 
