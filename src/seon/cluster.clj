@@ -253,26 +253,16 @@
               (str/starts-with? class-name (str prefix "$")))))
       namespace-names))))
 
-(defn- exception-face
-  [value connection effective]
+(defn- exception-summary
+  [value connection]
   (let [cause (or (:cause value) (:message (last (:via value))))
         exception-class (:type (last (:via value)))
         frame (first (filter (partial namespace-frame?
                                       (program-namespaces connection))
-                             (:trace value)))
-        summary
-        (cond-> {:seon.dev.mcp/exception-class (str exception-class)
-                 :seon.dev.mcp/exception-message (str cause)}
-          frame (assoc :seon.dev.mcp/frame frame))
-        admitted-summary
-        (admit/admit-value
-         {:seon.sci.admit/value summary
-          :seon.sci.admit/interrupt-fn (fn [])
-          :seon.sci.admit/caps (config/result-caps effective)
-          :seon.config/on-core-error
-          (:seon.config/on-core-error effective)})]
-    (text-face (:seon.sci.admit/print-node admitted-summary)
-               effective summary)))
+                             (:trace value)))]
+    (cond-> {:seon.dev.mcp/exception-class (str exception-class)
+             :seon.dev.mcp/exception-message (str cause)}
+      frame (assoc :seon.dev.mcp/frame frame))))
 
 (defn- mcp-project
   [cluster-name bootstrap-effective value]
@@ -281,13 +271,15 @@
         effective (mcp-effective cluster-name bootstrap-effective)
         evaluation-print-node (evaluation-node value)
         exception-envelope? (prepl-exception-envelope? value)
+        exception-summary-value (when exception-envelope?
+                                  (exception-summary value connection))
         admitted
         (if evaluation-print-node
           {:seon.sci.admit/print-node evaluation-print-node
            :seon.sci.admit/capped?
            (boolean (:seon.sci.admit/capped? value))}
           (admit/admit-value
-           {:seon.sci.admit/value value
+           {:seon.sci.admit/value (or exception-summary-value value)
             :seon.sci.admit/interrupt-fn (fn [])
             :seon.sci.admit/caps (config/result-caps effective)
             :seon.config/on-core-error
@@ -297,7 +289,7 @@
         content-digest (blob/digest content)
         threshold (:seon.config.eval.result/blob-threshold effective)
         oversized? (> (count content) threshold)
-        artifact-backed? (or oversized? exception-envelope?)
+        artifact-backed? oversized?
         page-size (min (:seon.render.value/max-collection effective)
                        (:seon.print/length effective))
         print-node (:seon.sci.admit/print-node artifact)
@@ -309,14 +301,8 @@
         stored-digest (when (and artifact-backed? connection)
                         (blob/put! connection content))]
     (cond-> {:seon.dev.mcp/value
-             (cond
-               evaluation-print-node
+             (if evaluation-print-node
                (evaluation-face value evaluation-print-node effective)
-
-               exception-envelope?
-               (exception-face value connection effective)
-
-               :else
                (admit/semantic-value projected-node))
              :seon.sci.admit/capped?
              (:seon.sci.admit/capped? artifact)

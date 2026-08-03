@@ -86,23 +86,26 @@
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest)))))
 
-(deftest jvm-exceptions-use-the-shared-text-face-and-retain-the-full-artifact
+(deftest jvm-exceptions-retain-one-summary-and-blob-only-oversized-messages
   (let [cluster-name "mcp-jvm-exception-face-test"
         effective (config/defaults)
+        inline-ceiling (:seon.config.eval.result/blob-threshold effective)
         dependency-frame
         ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
         first-party-frame
         ['seon.cluster.mcp_test$explode 'invokeStatic "mcp_test.clj" 99]
+        small-message "The contract value was wrong."
+        oversized-message (apply str (repeat (inc inline-ceiling) \x))
         envelope
         {:via [{:type 'clojure.lang.ExceptionInfo
                 :message "The wrapper."
                 :at dependency-frame}
                {:type 'java.lang.IllegalArgumentException
-                :message "The contract value was wrong."
+                :message small-message
                 :at first-party-frame}]
          :trace (into [dependency-frame first-party-frame]
                       (repeat 500 dependency-frame))
-         :cause "The contract value was wrong."
+         :cause small-message
          :phase :execution}]
     (support/with-database
       {:seon.test-support/fresh-store? true}
@@ -118,24 +121,32 @@
         (try
           (let [result (projected cluster-name effective envelope)
                 face (:seon.dev.mcp/value result)
-                retained-cause
+                oversized-result
+                (projected cluster-name effective
+                           (assoc envelope :cause oversized-message))
+                retained-message
                 (cluster/mcp-get-value
-                 cluster-name (:seon.blob/digest result) [:cause] 0)]
-            (is (string? (:seon.dev.mcp/text face)))
-            (is (str/includes? (or (:seon.dev.mcp/text face) "")
-                               "java.lang.IllegalArgumentException"))
-            (is (str/includes? (or (:seon.dev.mcp/text face) "")
-                               "The contract value was wrong."))
-            (is (str/includes? (or (:seon.dev.mcp/text face) "")
-                               "mcp_test.clj"))
-            (is (not (contains? face :trace))
-                "the trace is absent from the inline response")
-            (is (< (utf8-size result) 2048)
+                 cluster-name (:seon.blob/digest oversized-result)
+                 [:seon.dev.mcp/exception-message] 0)]
+            (is (= {:seon.dev.mcp/exception-class
+                    "java.lang.IllegalArgumentException"
+                    :seon.dev.mcp/exception-message small-message
+                    :seon.dev.mcp/frame first-party-frame}
+                   face)
+                "the exception sentence has one structured face")
+            (is (not (contains? face :seon.dev.mcp/text))
+                "the same sentence is not rendered again inside the face")
+            (is (false? (:seon.dev.mcp/windowed? result)))
+            (is (not (contains? result :seon.blob/digest))
+                "a small exception does not retain its bulky prepl envelope")
+            (is (< (utf8-size result) 1024)
                 "the complete Throwable->map does not become the inline face")
-            (is (true? (:seon.dev.mcp/retrievable? result)))
-            (is (= "The contract value was wrong."
-                   (:seon.render.value/window retained-cause))
-                "the complete envelope remains available by digest"))
+            (is (true? (:seon.dev.mcp/windowed? oversized-result)))
+            (is (string? (:seon.blob/digest oversized-result)))
+            (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
+            (is (= oversized-message
+                   (:seon.render.value/window retained-message))
+                "a genuinely oversized message remains available by digest"))
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
