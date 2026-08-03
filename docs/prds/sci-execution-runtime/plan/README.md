@@ -2066,6 +2066,31 @@ may reintroduce a shadow build into the dev feedback path.
   by default (`README.md:294`) — the hazard is self-inflicted by our
   closed convention, so the fix belongs in render-resolution matching and
   never in loosening the declarations, which are load-bearing elsewhere.
+  **Ruling 2026-08-02 #48 (owner, night): MAPS ARE OPEN. FUNCTIONS
+  ACCRETE TOO.** Owner verbatim: "I want functions to accrete
+  functionality which means they are not closed and every function can
+  accept other data and if the function doesn't use it then that's
+  fine." So `{:closed true}` comes off — 172 declarations in
+  `resources/seon/schema.edn` carrying it as HOUSE STYLE WITH NO
+  RECORDED REASON (`docs/conventions.md` shows it in every example and
+  never justifies it). This settles the accretion contradiction: an
+  entity IS its attributes and extra ones never change what it is, a
+  change should require no more and provide no less, yet a closed map
+  also FORBIDS more, so adding a key broke every producer validating
+  against it. Malli's own maps are open by default
+  (`reference-code/malli/README.md:294`). The orchestrator argued for a
+  split — closed arguments, open entities — and the owner rejected it
+  because functions accrete for the same reason data does. WHAT IS
+  ACTUALLY GIVEN UP is narrow and was overstated in that argument: a
+  MISSING REQUIRED key still fails against an open map, so the only loss
+  is that a misspelled OPTIONAL key is silently ignored as extra data.
+  DIRECT CONSEQUENCE, and the reason this surfaced: `matching-shapes-in`
+  (`src/seon/schema.clj:2394-2416`) selects schemas that VALIDATE a
+  value, so under closed maps a unit carrying extra render attributes
+  matched NOTHING and silently fell to the generic floor. Opening the
+  declarations DISSOLVES that hazard instead of patching the matcher —
+  the better outcome, and the one ruling #47's render work should now
+  build on.
   **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
   THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
   (1) Owner verbatim: "we OWN sci now with our fork. Design with the
