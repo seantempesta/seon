@@ -103,9 +103,20 @@ FIRST THREE ACTIONS, in order:
    still running at close, migrating `{:closed true}` out under ruling
    #48. Collect it, verify its claims, commit anything coherent it left.
 2. `bin/seon init` then `bin/test` — publication was BROKEN mid-session
-   by that migration and repaired; confirm both. The last full green was
-   856 tests / 4,251 assertions, measured mid-migration, so re-establish
-   the number on the quiet tree.
+   by that migration and repaired; confirm both. VERIFIED at session
+   close on the settled tree: **862 tests / 4,276 assertions, 3
+   failures, 0 errors**, and all three failures are ONE known cause —
+   `seon.config-test/the-default-document-has-one-canonical-complete-location`
+   and `zero-overlay-compilation-resolves-every-registered-config-attribute`,
+   filed at `issues/config-derivation-drops-one-backup-attribute.md`
+   (the derived config attribute set drops
+   `:seon.config.ai.backup/api-key-variable` even though all four
+   backup keys are declared identically). No other failures. Fixing
+   that one defect should give a clean suite.
+   NOTE the run retained its failed isolated operator root at
+   `tmp/test-runs/run.SmGhgm` for inspection — that is the liveness
+   work behaving correctly, not litter, but clean it up once the
+   config defect is understood.
 3. Read `plan/overnight-2026-08-03.md` WHOLE. Its first standing
    condition — READ THE WHOLE SPEC, DO NOT GREP IT — is there because
    partial reads produced three wrong conclusions in one evening,
