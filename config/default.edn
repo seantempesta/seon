@@ -203,6 +203,29 @@
  ; ephemeral one and reports BOTH numbers.
  :seon.config.web/port :seon.config/absent
 
+ ; my.web ceilings. PROVENANCE: these are UNCALIBRATED starting points
+ ; chosen to match the measured filesystem ceilings (16 MiB read, 8 KiB
+ ; inline window) so one family's limits do not silently contradict
+ ; another's; they ship because a declared dial without a default
+ ; refuses every cluster start, not because anything measured them.
+ ; Calibrate against real fetches and record the numbers.
+ ; Unit: bytes streamed through one complete response read.
+ :seon.config.web/max-response-bytes 16777216
+ ; Unit: bytes retained inline before the body rides the blob tier.
+ :seon.config.web/max-inline-bytes 8192
+ ; Unit: redirect hops followed before one fetch refuses.
+ :seon.config.web/max-redirects 5
+ ; Unit: milliseconds for one outbound request. A remote host is
+ ; genuinely unobservable, so this deadline is a legitimate backstop.
+ :seon.config.web/timeout-ms 30000
+ ; Unit: result rows returned by one search.
+ :seon.config.web/max-search-results 10
+ ; The search provider is a config fact, never a provider-shaped API.
+ ; Verified live 2026-08-03: research/serper-probe-2026-08-03.md.
+ :seon.config.web/search-endpoint "https://google.serper.dev/search"
+ :seon.config.web/search-api-key-variable "SERPER_API_KEY"
+ :seon.config.web/search-result-projection seon.web.search/organic-results
+
  ; Unit: milliseconds between repaints of one tab. Provenance: 16 ms is
  ; one frame at 60 fps, the owner's stated bar, and it is a FLOOR rather
  ; than a tick — a burst of commits inside one window costs one repaint
