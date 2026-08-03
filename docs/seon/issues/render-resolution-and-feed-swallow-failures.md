@@ -46,3 +46,27 @@ path.
   and projection provenance before the feed closes.
 - Regressions inject namespace load, schema matching, projection resolution,
   and writer failures and distinguish all four from ordinary absence.
+
+## Research update — 2026-08-02 render-model map
+
+The counted change map is
+`docs/prds/sci-execution-runtime/research/render-model-2026-08-02.md`.
+The issue survives intact and is broader than the router catch sites:
+
+- `src/seon/render/block.clj:309-324` currently exposes the renderer's internal
+  error message to humans;
+- `src/seon/render/walk.clj:844-857` prints the same failure to every viewing
+  agent rather than specifically the renderer owner;
+- `src/seon/render/web.clj:804-842` has no asserted feed-writer fault path; and
+- `src/seon/cluster.clj:954-962` does not hand the existing fault channel to the
+  web service.
+
+The settled persistent surface is event-derived: unavailable after the
+fault/message commit, loading only while the exact repair message has an open
+held run, then success or unavailable after settlement. An unchanged renderer
+signature must neither recommit nor remessage. This requires renderer,
+projection, and stable call identity in the durable repair signature; the
+current signature omits them (`src/seon/error.clj:251-258,315-323`).
+
+No code or closure evidence was produced in this research lane, so the issue
+remains open.

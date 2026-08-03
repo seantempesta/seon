@@ -77,3 +77,23 @@ reusing the REPL evaluator, and making successful render admission omit the
 `result-edn` sink while retaining the same bounded walk. That saving is
 unverified until prototyped. The issue remains open pending owner rulings D1–D4
 and implementation/live proof.
+
+## Research update — 2026-08-02 render-model map
+
+Implementation was stopped by owner instruction while the vocabulary and
+declaration model settled. The complete counted change map is
+`docs/prds/sci-execution-runtime/research/render-model-2026-08-02.md`.
+
+The program graph currently contains zero functions returning
+`:seon.render/ai`, zero returning `:seon.render/html`, 48 functions accepting
+the retiring `:seon.render/unit`, and 33 functions whose output refs include
+the collapsing `:seon.render/hiccup`. The vocabulary/contracts/default
+validation must therefore land atomically before the guarded router can
+validate any declared renderer. The report also found that the ruled per-call
+cache is not implemented: `src/seon/render/web.clj:528-583` suppresses only
+after rebuilding the complete watched page.
+
+This issue remains open. Its acceptance now includes declared thing → schema
+default → floor resolution, exact program-graph validation, the shared cluster
+SCI `ctx`, per-call caching, and end-to-end throw/non-Hiccup/`raw`/interpreted
+loop proofs. No implementation evidence was produced in this research lane.

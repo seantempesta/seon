@@ -95,3 +95,22 @@ evidence is — with no projection-failure text and no empty fields, proved by a
 recurring test that walks an agent holding a committed fault and asserts on the
 rendered contribution. No renderer may emit its own exception message as agent
 context; if a projection cannot render a unit it says nothing.
+
+## Research update — 2026-08-02 owner ruling #46
+
+The counted change map is
+`docs/prds/sci-execution-runtime/research/render-model-2026-08-02.md`.
+This issue survives, but its final acceptance sentence is superseded: a failed
+renderer must not silently say nothing. Ruling #46 requires a loud,
+unignorable AI error to the renderer-owning agent plus one ordinary repair
+message, while HTML shows no internals.
+
+The remaining owner decision is what a non-owning agent sees when its walk
+reaches the failed block. Current `src/seon/render/walk.clj:844-857` exposes the
+raw failure to every viewer. The report recommends full detail only for the
+owner and a short unavailable contribution for other agents; omission would
+hide a real context hole.
+
+The original ref-shape defect at `src/seon/error.clj:466-506,837-866` still
+needs its recurring committed-fault walk proof. Nothing in the guarded-kernel
+ruling proves that older data-shape bug fixed, so this issue remains open.
