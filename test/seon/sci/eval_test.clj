@@ -304,26 +304,60 @@
         (alter-var-root #'*compiled-runtime-dynamic-victim*
                         (constantly dynamic-root))))))
 
-(deftest ^{:seon.test/characterization true
-           :seon.test/open-issue
-           "agent-evals-reach-every-cluster-and-the-runtime-roots"}
-  known-gap-agent-code-can-change-compiled-var-metadata
+(deftest compiled-runtime-metadata-cannot-be-changed-by-agent-code
   (let [ctx (compiled-runtime-ctx)
         before (meta #'compiled-runtime-victim)
-        marker ::agent-metadata-change]
+        mutation-forms
+        ["(alter-meta! #'stability.host/victim assoc :arglists '([poisoned]))"
+         "(reset-meta! #'stability.host/victim {:arglists '([poisoned])})"]]
     (try
-      (let [evaluation
-            (run-in
-             ctx
-             (str "(do (alter-meta! #'stability.host/victim assoc "
-                  (pr-str marker) " true) :changed)")
-             2000)]
-        (is (ok? evaluation))
-        (is (= :changed (:seon.sci.admit/value evaluation)))
-        (is (true? (get (meta #'compiled-runtime-victim) marker))
-            "KNOWN GAP: agent mutation of compiled Var metadata is process-global"))
+      (doseq [source mutation-forms]
+        (let [evaluation (run-in ctx source 2000)
+              refusal (:seon.sci.admit/value evaluation)
+              instrumentation-read
+              (#'instrument/violation
+               nil :malli.core/invalid-arity
+               {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
+                :arity 9})]
+          (is (failed? evaluation) source)
+          (is (= :seon.sci.eval/evaluation-failed
+                 (:seon.error/kind refusal))
+              source)
+          (is (str/includes? (:seon.error/message refusal)
+                             "metadata is read-only from SCI")
+              source)
+          (is (= before (meta #'compiled-runtime-victim)) source)
+          (is (= (:arglists before)
+                 (::instrument/arglists
+                  (:seon.error/data instrumentation-read)))
+              "instrumentation reads only the unpoisoned compiled metadata")))
       (finally
         (reset-meta! #'compiled-runtime-victim before)))))
+
+(deftest agent-owned-sci-var-metadata-remains-mutable
+  (let [ctx (eval/build-base-ctx)
+        altered
+        (run-in
+         ctx
+         (str "(do (defn local-meta \"Original doc.\" [] :ok) "
+              "(alter-meta! #'local-meta assoc :agent-owned true) "
+              "[(:doc (meta #'local-meta)) "
+              "(:agent-owned (meta #'local-meta))])")
+         2000)
+        reset
+        (run-in
+         ctx
+         (str "(do (reset-meta! #'local-meta "
+              "(assoc (meta #'local-meta) :doc \"Reset doc.\" :reset true)) "
+              "[(:doc (meta #'local-meta)) (:reset (meta #'local-meta))])")
+         2000)]
+    (is (ok? altered))
+    (is (= ["Original doc." true]
+           (:seon.sci.admit/value altered))
+        "defn doc metadata and explicit SCI-local mutation remain ordinary REPL behavior")
+    (is (ok? reset))
+    (is (= ["Reset doc." true]
+           (:seon.sci.admit/value reset)))))
 
 (deftest sci-fork-copies-existing-var-roots-on-write
   (let [parent (eval/build-base-ctx)
