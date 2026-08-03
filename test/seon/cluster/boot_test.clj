@@ -870,7 +870,7 @@
   (let [root (fresh-root)
         cluster-name "config-unlock"
         observed (atom [])
-        install-work-launcher! seon.flow/install-work-launcher!
+        start-work-launcher! seon.flow/start-work-launcher!
         arm-agents! (var-get (ns-resolve 'seon.cluster 'arm-agents!))]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
@@ -883,13 +883,13 @@
             :seon.config.flow.compute/queue-depth 1}]})
         (cluster/stop! instance))
       (with-redefs-fn
-        {#'seon.flow/install-work-launcher!
+        {#'seon.flow/start-work-launcher!
          (fn [request]
            (swap! observed conj
                   [:launcher
                    (:seon.config.flow.compute/queue-depth
                     (::seon.flow/configuration request))])
-           (install-work-launcher! request))
+           (start-work-launcher! request))
          (ns-resolve 'seon.cluster 'arm-agents!)
          (fn [instance connection name]
            (swap! observed conj

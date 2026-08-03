@@ -168,7 +168,7 @@
                              :seon.config/manifest applied})
             connection (:seon.boot/cluster-connection instance)
             handle (:seon.cluster.loop/cluster instance)
-            launcher (flow/current-work-launcher)]
+            launcher (:seon.flow/work-launcher instance)]
         (try
           (testing "the database representation is fixed at store creation"
             (is (true?

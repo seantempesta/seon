@@ -25,6 +25,24 @@
            [java.util.concurrent CompletableFuture CountDownLatch
             ExecutorService Future TimeUnit]))
 
+(def ^:private test-work-launcher (atom nil))
+
+(defn- install-test-work-launcher!
+  [request]
+  (let [launcher (sut/start-work-launcher! request)]
+    (reset! test-work-launcher launcher)
+    launcher))
+
+(defn- stop-test-work-launcher!
+  []
+  (when-let [launcher
+             (first (swap-vals! test-work-launcher (constantly nil)))]
+    (sut/stop-work-launcher! launcher)))
+
+(defn- submit-test!!
+  [submission]
+  (sut/submit!! @test-work-launcher submission))
+
 (def ^:private callback-schema-keys
   [:seon.flow/commit-drop!
    :seon.flow/commit-fault!
@@ -276,14 +294,14 @@
         {:seon.config.flow.compute/queue-depth 2
          :seon.config.flow.compute/concurrency parallelism}
         launcher
-        (sut/install-work-launcher!
+        (install-test-work-launcher!
          {::sut/configuration configuration})
         wedge-ids #{:wedge-0 :wedge-1}
         wedges
         (mapv
          (fn [submission-id]
            (future
-             (sut/submit!!
+             (submit-test!!
               {::sut/submission-id submission-id
                ::sut/workload :compute
                ::sut/time-limit-ms 25
@@ -311,7 +329,7 @@
             (mapv
              (fn [submission-id]
                (future
-                 (sut/submit!!
+                 (submit-test!!
                   {::sut/submission-id submission-id
                    ::sut/workload :compute
                    ::sut/time-limit-ms 1000
@@ -331,7 +349,7 @@
            ::production-wedge-released
            #(contains? wedge-ids (::sut/submission-id %))))
         (is (empty? @(::sut/active-work launcher)))
-        (sut/stop-installed-work-launcher!)))))
+        (stop-test-work-launcher!)))))
 
 (deftest production-launcher-bounds-virtual-task-lifetimes
   (let [parallelism 2
@@ -340,7 +358,7 @@
         active (atom 0)
         maximum-active (atom 0)
         virtual? (atom [])
-        _ (sut/install-work-launcher!
+        _ (install-test-work-launcher!
            {::sut/configuration
             {:seon.config.flow.compute/queue-depth 3
              :seon.config.flow.compute/concurrency parallelism}})
@@ -348,7 +366,7 @@
         (mapv
          (fn [ordinal]
            (future
-             (sut/submit!!
+             (submit-test!!
               {::sut/submission-id (keyword (str "bounded-" ordinal))
                ::sut/workload :compute
                ::sut/time-limit-ms 5000
@@ -381,12 +399,12 @@
         (is (every? true? @virtual?)))
       (finally
         (.countDown release)
-        (sut/stop-installed-work-launcher!)))))
+        (stop-test-work-launcher!)))))
 
 (deftest submission-time-limit-covers-the-pre-start-wait
   (testing "paused before start"
     (let [launcher
-          (sut/install-work-launcher!
+          (install-test-work-launcher!
            {::sut/configuration
             {:seon.config.flow.compute/queue-depth 2
              :seon.config.flow.compute/concurrency 1}})
@@ -400,7 +418,7 @@
         (let [result
               (deref
                (future
-                 (sut/submit!!
+                 (submit-test!!
                   {::sut/submission-id ::paused-before-start
                    ::sut/workload :compute
                    ::sut/time-limit-ms 30
@@ -410,17 +428,17 @@
           (is (= ::sut/time-limit (::sut/outcome result))))
         (finally
           (flow/resume graph)
-          (sut/stop-installed-work-launcher!)))))
+          (stop-test-work-launcher!)))))
   (testing "queued behind a fully occupied owner"
     (let [entered (CountDownLatch. 1)
           release (CountDownLatch. 1)
-          _ (sut/install-work-launcher!
+          _ (install-test-work-launcher!
              {::sut/configuration
               {:seon.config.flow.compute/queue-depth 2
                :seon.config.flow.compute/concurrency 1}})
           occupied
           (future
-            (sut/submit!!
+            (submit-test!!
              {::sut/submission-id ::occupied
               ::sut/workload :compute
               ::sut/time-limit-ms 30
@@ -436,7 +454,7 @@
         (let [result
               (deref
                (future
-                 (sut/submit!!
+                 (submit-test!!
                   {::sut/submission-id ::queued-behind-occupied
                    ::sut/workload :compute
                    ::sut/time-limit-ms 30
@@ -446,20 +464,20 @@
           (is (= ::sut/time-limit (::sut/outcome result))))
         (finally
           (.countDown release)
-          (sut/stop-installed-work-launcher!))))))
+          (stop-test-work-launcher!))))))
 
 (deftest saturated-submission-refuses-without-blocking-the-caller
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         launcher
-        (sut/install-work-launcher!
+        (install-test-work-launcher!
          {::sut/configuration
           {:seon.config.flow.compute/queue-depth 1
            :seon.config.flow.compute/concurrency 1}})
         graph (::sut/graph launcher)
         occupied
         (future
-          (sut/submit!!
+          (submit-test!!
            {::sut/submission-id ::occupied-for-refusal
             ::sut/workload :compute
             ::sut/time-limit-ms 60000
@@ -488,7 +506,7 @@
               TimeUnit/SECONDS)
         (let [refused
               (future
-                (sut/submit!!
+                (submit-test!!
                  {::sut/submission-id ::refused-at-capacity
                   ::sut/workload :compute
                   ::sut/time-limit-ms 60000
@@ -515,12 +533,12 @@
                  ::buffered-submission-completed)))))
       (finally
         (.countDown release)
-        (sut/stop-installed-work-launcher!)))))
+        (stop-test-work-launcher!)))))
 
 (deftest launcher-stop-precedes-a-flood-of-ready-submissions
   (let [queue-depth 256
         launcher
-        (sut/install-work-launcher!
+        (install-test-work-launcher!
          {::sut/configuration
           {:seon.config.flow.compute/queue-depth queue-depth
            :seon.config.flow.compute/concurrency 1}})
@@ -581,23 +599,76 @@
       (test-support/await-event!
        stop-transition
        ::work-launcher-stop-transition)
-      (is (every? #(= ::sut/queued @(::sut/status %)) queued)
-          "control wins while every flooded submission is ready")
-      (is (every? #(false? (realized? (::sut/result %))) queued)
-          "stop does not drain any flooded work")
+      (let [completed
+            (count (filter #(= ::sut/completed @(::sut/status %)) queued))]
+        (is (< completed queue-depth)
+            "the stop transition completes without draining the flood")
+        (is (= completed
+               (count (filter #(realized? (::sut/result %)) queued)))
+            "only work selected before the stop tap became ready can finish"))
       (finally
         (.countDown release-resume)
         (alter-var-root step-var (constantly original-step))
-        (sut/stop-installed-work-launcher!)))))
+        (stop-test-work-launcher!)))))
+
+(deftest starting-a-sibling-launcher-does-not-interrupt-accepted-work
+  (let [configuration
+        {:seon.config.flow.compute/queue-depth 2
+         :seon.config.flow.compute/concurrency 1}
+        entered-a (CountDownLatch. 1)
+        release-a (CountDownLatch. 1)
+        calls-a (atom 0)
+        launcher-a
+        (sut/start-work-launcher! {::sut/configuration configuration})]
+    (let [result-a
+          (future
+            (sut/submit!!
+             launcher-a
+             {::sut/submission-id ::cluster-a-work
+              ::sut/workload :compute
+              ::sut/time-limit-ms 5000
+              ::sut/work-fn
+              (fn [_]
+                (swap! calls-a inc)
+                (.countDown entered-a)
+                (.await release-a)
+                ::cluster-a-completed)}))]
+      (try
+        (test-support/await-event! entered-a ::cluster-a-work-entered)
+        (let [launcher-b
+              (sut/start-work-launcher!
+               {::sut/configuration configuration})]
+          (try
+            (is (= ::cluster-b-completed
+                   (::sut/value
+                    (sut/submit!!
+                     launcher-b
+                     {::sut/submission-id ::cluster-b-work
+                      ::sut/workload :compute
+                      ::sut/time-limit-ms 5000
+                      ::sut/work-fn (fn [_] ::cluster-b-completed)}))))
+            (.countDown release-a)
+            (is (= ::cluster-a-completed
+                   (::sut/value
+                    (test-support/await-event!
+                     result-a
+                     ::cluster-a-work-completed))))
+            (is (= 1 @calls-a))
+            (finally
+              (sut/stop-work-launcher! launcher-b))))
+        (finally
+          (.countDown release-a)
+          (sut/stop-work-launcher! launcher-a))))))
 
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
-  (sut/install-work-launcher!
+  (install-test-work-launcher!
    {::sut/configuration
     {:seon.config.flow.compute/queue-depth 1
      :seon.config.flow.compute/concurrency 1}})
   (try
     (let [evaluation
           (#'cluster.loop/submit-evaluation!!
+           {:seon.flow/work-launcher @test-work-launcher}
            sci.eval/evaluate
            "turn-boundary-0"
            {:seon.cluster.run.form/source
@@ -613,7 +684,7 @@
       (is (int? (:seon.eval/duration-ms record)))
       (is (= -1 (:seon.eval/allocated-bytes record))))
     (finally
-      (sut/stop-installed-work-launcher!))))
+      (stop-test-work-launcher!))))
 
 (deftest wedged-steps-degrade-capacity-exactly-and-name-themselves
   (let [parallelism 4

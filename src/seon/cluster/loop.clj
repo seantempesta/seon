@@ -570,9 +570,10 @@
      :seon.cluster.eval/interrupted-at (Date.)}))
 
 (defn- submit-evaluation!!
-  [evaluate submission-id request]
+  [cluster evaluate submission-id request]
   (let [submission
         (seon.flow/submit!!
+         (:seon.flow/work-launcher cluster)
          {::seon.flow/submission-id submission-id
           ::seon.flow/workload :compute
           ::seon.flow/time-limit-ms
@@ -1462,6 +1463,7 @@
                   (second (:seon.cluster.run.form/ns form))
                   evaluation
                   (submit-evaluation!!
+                   cluster
                    evaluate
                    receipt-id
                    (evaluation-request

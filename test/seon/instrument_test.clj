@@ -324,9 +324,6 @@
    (fn [_]
      (doseq [boundary [#'flow/start-work-launcher!
                        #'flow/stop-work-launcher!
-                       #'flow/install-work-launcher!
-                       #'flow/stop-installed-work-launcher!
-                       #'flow/current-work-launcher
                        #'flow/submit!!]]
        (is (some? (mi/-schema boundary))
            (str boundary " was omitted from Malli collection"))))))

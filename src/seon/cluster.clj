@@ -1058,11 +1058,13 @@
   from current cluster and agent facts once per turn, so config apply and
   per-agent overrides take effect on the next turn without rebuilding the
   graph."
-  [connection cluster-name process ctx wake-channel stream-channel completion]
+  [connection cluster-name process ctx work-launcher
+   wake-channel stream-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> {:seon.store/branch-connection connection
               :seon.cluster/name cluster-name
               :seon.cluster.run/process process
+              :seon.flow/work-launcher work-launcher
               :seon.sci.eval/ctx ctx
               :seon.cluster.wake/channel wake-channel
               ;; the cluster's ONE stream conn (F2 §2.1): sliding-1, so
@@ -1133,6 +1135,7 @@
         completion (async/promise-chan)
         handle (loop-handle connection cluster-name process
                             (:seon.sci.eval/ctx instance)
+                            (:seon.flow/work-launcher instance)
                             armer-channel stream-channel completion)
         routing (cluster.agent/routing)
         ;; the render pipeline's external ports (F2 §1): the wake
@@ -1365,10 +1368,13 @@
         ;; CLUSTER-scoped dial silently mutating PROCESS-global var
         ;; roots is the wrong seam besides. The fresh operator turns it on
         ;; where a human is watching. See `seon.instrument`.
-        _ (flow/install-work-launcher!
-           {::flow/configuration
-            (select-keys (config/effective @connection cluster-name)
-                         flow/flow-workload-attributes)})
+        work-launcher
+        (flow/start-work-launcher!
+         {::flow/configuration
+          (select-keys (config/effective @connection cluster-name)
+                       flow/flow-workload-attributes)})
+        instance (publish!
+                  (assoc instance :seon.flow/work-launcher work-launcher))
         instance (publish!
                   (merge instance
                          (arm-agents! instance connection cluster-name)))
@@ -1626,8 +1632,8 @@
         ;; the armed layers first: nothing new may be derived while the
         ;; database resources are being released
         (disarm-agents! instance)
-        (when (= 1 (count @running-instances))
-          (flow/stop-installed-work-launcher!))
+        (some-> (:seon.flow/work-launcher instance)
+                flow/stop-work-launcher!)
         (when-let [connection (:seon.boot/cluster-connection instance)]
           (d/release connection))
         (when (:seon.store/store instance)

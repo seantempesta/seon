@@ -36,6 +36,8 @@
 
 (set! *warn-on-reflection* true)
 
+(def ^:dynamic *work-launcher* nil)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture — canonical attributes, the handle, the source-driven evaluator
 ;;; ---------------------------------------------------------------------------
@@ -76,14 +78,16 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (try
-        (seon.flow/install-work-launcher!
-         {::seon.flow/configuration
-          {:seon.config.flow.compute/queue-depth 10
-           :seon.config.flow.compute/concurrency 3}})
-        (body connection (sci.eval/cluster-ctx @connection))
-        (finally
-          (seon.flow/stop-installed-work-launcher!))))))
+      (let [launcher
+            (seon.flow/start-work-launcher!
+             {::seon.flow/configuration
+              {:seon.config.flow.compute/queue-depth 10
+               :seon.config.flow.compute/concurrency 3}})]
+        (try
+          (binding [*work-launcher* launcher]
+            (body connection (sci.eval/cluster-ctx @connection)))
+          (finally
+            (seon.flow/stop-work-launcher! launcher)))))))
 
 (defn- handle
   [connection ctx]
@@ -91,6 +95,7 @@
    :seon.cluster/name
    (d/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
         @connection)
+   :seon.flow/work-launcher *work-launcher*
    :seon.sci.eval/ctx ctx
    :seon.cluster.run/process process
    ;; replaced per agent by arm! — present so the handle validates

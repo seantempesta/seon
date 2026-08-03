@@ -16,7 +16,7 @@
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
-           [java.util.concurrent Executor ExecutorService Executors Future]
+           [java.util.concurrent Executor Executors Future]
            [java.util.concurrent.atomic AtomicLong]))
 
 (set! *warn-on-reflection* true)
@@ -130,10 +130,6 @@
   {:malli/schema [:=> [:catn [::parallelism ::parallelism]] ::executor]}
   [parallelism]
   (Executors/newFixedThreadPool (int parallelism)))
-
-(defn- virtual-task-executor
-  []
-  (Executors/newVirtualThreadPerTaskExecutor))
 
 (defn- capacity-facts
   [parallelism active-work]
@@ -336,9 +332,7 @@
             ::active-count 0
             ::flow/in-ports
             {::completion (async/chan parallelism)})))
-  ([{::keys [task-executor] :as state} transition]
-   (when (= ::flow/stop transition)
-     (.shutdownNow ^ExecutorService task-executor))
+  ([state _transition]
    state)
   ([{::keys [active-count active-work admission-buffer task-executor]
      :as state}
@@ -422,7 +416,7 @@
      :compute-exec compute-executor}))
 
 (defn start-work-launcher!
-  "Start the one bounded work launcher from acquired config facts."
+  "Start one cluster-owned bounded work launcher from acquired config facts."
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher-request]
     :seon.flow/work-launcher]}
@@ -435,7 +429,7 @@
         active-work (atom {})
         root-executors
         ((requiring-resolve 'seon.operator.runtime/root-executors))
-        task-executor (virtual-task-executor)
+        task-executor (:io root-executors)
         graph
         (flow/create-flow
          (work-launcher-graph-definition
@@ -453,51 +447,12 @@
      ::configuration configuration}))
 
 (defn stop-work-launcher!
-  "Stop a work launcher and interrupt its owned compute executor."
+  "Stop one cluster-owned work launcher without touching root executors."
   {:malli/schema [:=> [:cat :seon.flow/work-launcher] :nil]}
-  [{::keys [graph compute-executor]}]
+  [{::keys [graph]}]
   (when graph
     (flow/stop graph))
-  (when compute-executor
-    (.shutdownNow ^ExecutorService compute-executor))
   nil)
-
-(defonce ^:private installed-work-launcher
-  (atom nil))
-
-(defn install-work-launcher!
-  "Replace the process work launcher with one built from acquired facts."
-  {:malli/schema
-   [:=> [:cat :seon.flow/work-launcher-request]
-    :seon.flow/work-launcher]}
-  [{::keys [configuration]}]
-  (let [launcher
-        (start-work-launcher! {::configuration configuration})
-        [previous _]
-        (swap-vals! installed-work-launcher (constantly launcher))]
-    (when previous
-      (stop-work-launcher! previous))
-    launcher))
-
-(defn stop-installed-work-launcher!
-  "Stop and forget the process work launcher."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (when-let [launcher
-             (first
-              (swap-vals! installed-work-launcher (constantly nil)))]
-    (stop-work-launcher! launcher))
-  nil)
-
-(defn current-work-launcher
-  "Return the installed work launcher or fail the readiness check."
-  {:malli/schema [:=> [:cat] :seon.flow/work-launcher]}
-  []
-  (or @installed-work-launcher
-      (throw
-       (ex-info
-        "The bounded work launcher is not installed."
-        {:seon.error/kind :configuration}))))
 
 (defn submit!!
   "Submit bounded compute work and await its terminal value.
@@ -508,9 +463,16 @@
   execution. `::submission-wait-ms` measures time to start, refusal, or the
   limit, whichever terminates the submission wait."
   {:malli/schema
-   [:=> [:cat :seon.flow/work-submission] :seon.flow/work-result]}
-  [{::keys [submission-id workload work-fn time-limit-ms]}]
-  (let [{::keys [graph active-work]} (current-work-launcher)
+   [:=> [:cat :seon.flow/work-launcher :seon.flow/work-submission]
+    :seon.flow/work-result]}
+  [work-launcher
+   {::keys [submission-id workload work-fn time-limit-ms]}]
+  (when-not work-launcher
+    (throw
+     (ex-info
+      "A compute submission must name its cluster's work launcher."
+      {:seon.error/kind :configuration})))
+  (let [{::keys [graph active-work]} work-launcher
         result (promise)
         status (atom ::queued)
         work-fn (bound-fn* work-fn)

@@ -99,8 +99,8 @@
           (is (str/starts-with? ai1 source))
           (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote source))
                                   ai1))))
-          (is (str/includes? ai1 "(defn current-work-launcher"))
-          (is (str/includes? ai1 "@installed-work-launcher")
+          (is (str/includes? ai1 "(defn start-work-launcher!"))
+          (is (str/includes? ai1 "(defn- work-launcher-step")
               "the full d1 tier includes private member source too")
           (is (reader-valid? (the-ns 'seon.flow) ai1)))
         (testing "distance two is the public compact card"
@@ -108,12 +108,12 @@
           (is (not (str/includes? ai2 "#:db"))
               "required namespace refs render their nested names")
           (is (str/includes? ai2 "; schema :seon.flow/"))
-          (is (str/includes? ai2 "; fn seon.flow/current-work-launcher — [:=>"))
+          (is (str/includes? ai2 "; fn seon.flow/start-work-launcher! — [:=>"))
           (is (str/includes?
                ai2
                "; fn seon.flow/->CountedDroppingBuffer — <no contract>"))
           (is (not (str/includes? ai2 "fault-graph-definition")))
-          (is (not (str/includes? ai2 "@installed-work-launcher")))
+          (is (not (str/includes? ai2 "work-launcher-step")))
           (is (reader-valid? ai2)))
         (testing "the HTML projection has the same tier membership"
           (is (str/includes? html1-text "seon-namespace-source"))
@@ -121,16 +121,16 @@
                html1-text
                "Production-shaped core.async.flow launchers"))
           (is (str/includes? html1-text "seon-namespace-definitions"))
-          (is (str/includes? html1-text "seon.flow/current-work-launcher"))
+          (is (str/includes? html1-text "seon.flow/start-work-launcher!"))
           (is (str/includes? html2-text "seon-namespace-own-schemas"))
-          (is (str/includes? html2-text "seon.flow/current-work-launcher"))
+          (is (str/includes? html2-text "seon.flow/start-work-launcher!"))
           (is (str/includes?
                html2-text
                (str "id=\""
-                    (block/surface-id :seon.flow/current-work-launcher)
+                    (block/surface-id :seon.flow/start-work-launcher!)
                     "\"")))
           (is (not (str/includes? html2-text "fault-graph-definition")))
-          (is (not (str/includes? html2-text "@installed-work-launcher"))))))))
+          (is (not (str/includes? html2-text "work-launcher-step"))))))))
 
 (deftest distance-one-never-drops-a-member-when-source-is-absent
   (support/with-database

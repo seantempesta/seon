@@ -33,7 +33,7 @@
     self-rewake into this agent's OWN mailbox when more remains.
 
   Evals are NOT a proc here: the turn's resume branch submits every form
-  through the process-root `seon.flow/submit!!` owner. That owner admits
+  through this cluster's `seon.flow/submit!!` launcher. That owner admits
   at most configured C eval lifetimes with Q more queued, runs admitted
   tasks on virtual threads, and returns the evaluator's flat value.
   `:mixed` appears nowhere — `var-process` refuses it at construction.

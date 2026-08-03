@@ -68,11 +68,12 @@
   [body]
   (test-support/with-database
    (fn [connection]
-     (seon.flow/install-work-launcher!
-     {::seon.flow/configuration
-       {:seon.config.flow.compute/queue-depth 10
-        :seon.config.flow.compute/concurrency 2}})
-     (try
+     (let [launcher
+           (seon.flow/start-work-launcher!
+            {::seon.flow/configuration
+             {:seon.config.flow.compute/queue-depth 10
+              :seon.config.flow.compute/concurrency 2}})]
+      (try
        (test-support/seed-cluster! connection "generate-code-v0")
        (d/transact connection
                    (conj cast-rows
@@ -88,6 +89,7 @@
                      (fn [{source :seon.cluster.loop/source}] source)]
          (body {:seon.store/branch-connection connection
                 :seon.cluster/name "generate-code-v0"
+                :seon.flow/work-launcher launcher
                 :seon.cluster.run/process process
                 :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
                 :seon.cluster.wake/channel
@@ -103,7 +105,7 @@
                  :seon.config.eval.result/max-string 4096
                  :seon.config.eval.result/max-nodes 256}}))
        (finally
-         (seon.flow/stop-installed-work-launcher!))))))
+         (seon.flow/stop-work-launcher! launcher)))))))
 
 (defn- agent-ids
   [db]

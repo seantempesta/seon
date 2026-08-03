@@ -38,7 +38,6 @@
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -88,18 +87,14 @@
   {:seon.cluster.agent/id agent-id})
 
 (defn- with-cluster [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (seon.flow/install-work-launcher!
-       {::seon.flow/configuration
-        {:seon.config.flow.compute/queue-depth 10
-         :seon.config.flow.compute/concurrency 2}})
-      (d/transact connection
-                  (schema.datahike/malli->datahike-schema
-                   (schema/canonical-database-attributes)))
+  (test-support/with-database
+   (fn [connection]
+    (let [launcher
+          (seon.flow/start-work-launcher!
+           {::seon.flow/configuration
+            {:seon.config.flow.compute/queue-depth 10
+             :seon.config.flow.compute/concurrency 2}})]
+     (try
       (d/transact connection
                   [{:seon.ns/name 'clojure.set}
                    {:seon.ns/name 'clojure.test}
@@ -141,6 +136,7 @@
          (fn [{source :seon.cluster.loop/source}] source)]
         (body {:seon.store/branch-connection connection
                :seon.cluster/name "turn-test"
+               :seon.flow/work-launcher launcher
                :seon.cluster.run/process process
                :seon.sci.eval/ctx (sci.eval/build-base-ctx)
                :seon.cluster.wake/channel
@@ -166,9 +162,7 @@
                 :seon.config.eval.result/max-string 4096
                 :seon.config.eval.result/max-nodes 256}}))
       (finally
-        (seon.flow/stop-installed-work-launcher!)
-        (d/release connection)
-        (d/delete-database configuration)))))
+        (seon.flow/stop-work-launcher! launcher)))))))
 
 (defn- request
   "The AGENT-SCOPED work request (F2 §3.2).
