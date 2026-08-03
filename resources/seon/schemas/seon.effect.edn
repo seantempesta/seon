@@ -1,0 +1,42 @@
+{
+; One deterministic identity per capability request. An open receipt has no
+; terminal attribute; result-edn or interrupted-at closes it. Recovery never
+; dispatches an existing identity again.
+ :seon.effect/id [:string {:min 1 :seon.db/identity true}]
+ :seon.effect/run [:and {:seon.db/index true} :seon.db/ref]
+ :seon.effect/owner :seon.db/ref
+ :seon.effect/form-ordinal [:int {:min 0}]
+ :seon.effect/ordinal [:int {:min 0}]
+ :seon.effect/request-edn [:string {:seon.db/no-history? true}]
+ :seon.effect/result-edn [:string {:seon.db/no-history? true}]
+ :seon.effect/opened-at :inst
+ :seon.effect/settled-at :inst
+ :seon.effect/interrupted-at :inst
+ :seon.effect/receipt
+ [:map {:seon.db/entity true}
+  [:seon.effect/id :seon.effect/id]
+  [:seon.effect/run :seon.effect/run]
+  [:seon.effect/owner :seon.effect/owner]
+  [:seon.effect/form-ordinal :seon.effect/form-ordinal]
+  [:seon.effect/ordinal :seon.effect/ordinal]
+  [:seon.effect/request-edn :seon.effect/request-edn]
+  [:seon.effect/opened-at :seon.effect/opened-at]
+  [:seon.effect/result-edn {:optional true} :seon.effect/result-edn]
+  [:seon.effect/settled-at {:optional true} :seon.effect/settled-at]
+  [:seon.effect/interrupted-at {:optional true}
+   :seon.effect/interrupted-at]]
+ :seon.effect/open-request :seon.effect/receipt
+ :seon.effect/settle-request
+ [:map
+  [:seon.effect/id :seon.effect/id]
+  [:seon.effect/result-edn :seon.effect/result-edn]
+  [:seon.effect/settled-at :seon.effect/settled-at]]
+ :seon.effect/request-context
+ [:map
+  [:seon.store/branch-connection :seon.store/branch-connection]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.config/on-core-error :seon.config/on-core-error]]
+}

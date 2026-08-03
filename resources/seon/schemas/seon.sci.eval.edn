@@ -66,7 +66,7 @@
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.run.form/ordinal {:optional true} :seon.cluster.run.form/ordinal] [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
  ; What one evaluation leaves behind: the terminal facts the receipt
  ; stores (result-edn always; error when it failed; interrupted-at when
  ; the time limit fired), the admitted value the loop reads a
