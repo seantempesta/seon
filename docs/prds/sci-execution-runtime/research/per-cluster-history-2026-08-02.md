@@ -183,3 +183,37 @@ The protected owner should land these as one coherent change:
 Until those protected edits and the blocked live gate land, the honest exposed
 mechanism is history policy per isolated operator-root store, not mixed policy
 among branches of one process-root store.
+
+## History-unblock follow-up 2026-08-03
+
+The protected source-row admission dependency is now removed. Program rows
+record `:seon.schema.admission/source` at admission, and projection
+classification reads that current fact rather than temporal history. The
+history-off boot regression passes; the focused AI, admission, and program
+gate passed 48 tests / 207 assertions, the runtime settlement gate passed 46
+tests / 264 assertions, and the complete boot namespace passed 28 tests / 133
+assertions. The final ten-namespace schema/config/database/AI/program/runtime
+gate passed 148 tests / 732 assertions.
+
+Paired isolated roots then published source digest
+`1ee19366384d9b520ba3393be69256d1367f0f64ffd77c225913ccb6a10c1514`
+and reached READY. The history-on root produced database values for `history`,
+`as-of`, and `since`; the history-off root produced the flat
+`:seon.db/non-temporal-database` value. Both were shut down cleanly.
+
+The real-turn half falsified the preceding temporal reader census. That census
+found direct `d/history` calls but missed Datalog joins against transaction
+entities. A 204 message opened run
+`3192cbaa-dbd4-45b0-9124-64b1f3b31bee` on the history-off root. Its identity
+datom reports opening transaction `536870956`, but `(pull ?tx [*])` returned
+nil; `seon.cluster.message/trigger` therefore returned nil. Prompt construction
+committed repeated `:seon.cluster.prompt/no-trigger` errors before a context
+capture or provider attempt could exist. The implicated current owners are
+`src/seon/cluster/message.clj:71-99` and
+`src/seon/cluster/work.clj:387-490`.
+
+This is not repaired by trusting non-temporal rows or by weakening prompt
+custody. The remaining design must record causal facts directly and migrate
+every consumer together: run trigger, answeredness, conversation-chain depth,
+and episode bounds. The exact live exit remains one history-off DeepSeek turn
+with a committed context capture.

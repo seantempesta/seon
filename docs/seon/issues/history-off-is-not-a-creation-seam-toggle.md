@@ -163,6 +163,44 @@ history-off READY → real DeepSeek turn → rendered context → flat temporal
 error proof and the paired history-on `history` / `as-of` / `since` proof.
 Until then the issue remains open and no live-proof acceptance is claimed.
 
+## History-unblock result 2026-08-03
+
+The source-row blocker is dissolved without touching the protected SCI files.
+Every admitted program row now records `:seon.schema.admission/source`; static
+publication writes `:core`, runtime settlement writes `:agent`, and projection
+classification reads the recorded fact with no temporal view
+(`src/seon/fn.clj:718-724`, `src/seon/cluster/run.clj:678-686`,
+`src/seon/schema.clj:473-501`). Missing or ambiguous evidence still fails
+closed as agent-authored. The history-off boot regression now passes as part
+of `seon.cluster.boot-test`: 28 tests / 133 assertions. The final affected
+ten-namespace gate passed 148 tests / 732 assertions.
+
+The paired live roots published the same source digest
+`1ee19366384d9b520ba3393be69256d1367f0f64ffd77c225913ccb6a10c1514`
+and both reached READY. The history-on root returned Datahike database values
+from `seon.db/history`, `as-of`, and `since`. The history-off root returned the
+flat `:seon.db/non-temporal-database` error before Datahike was called.
+
+The real-turn gate exposed a different boot-independent history dependency.
+HTTP `POST /agent/root/message` returned 204 and opened run
+`3192cbaa-dbd4-45b0-9124-64b1f3b31bee`, but a non-temporal database retains the
+run identity datom while omitting the opening transaction entity: the live
+probe returned `[[536870956 nil]]`. Consequently
+`seon.cluster.message/trigger` returned nil and prompt construction repeatedly
+committed `:seon.cluster.prompt/no-trigger`; no provider attempt or context
+capture could be created. The missed consumers are ordinary Datalog queries
+over `:seon.db/trigger` transaction metadata, not direct calls to `d/history`
+(`src/seon/cluster/message.clj:71-99`, `src/seon/cluster/work.clj:387-490`).
+
+Exact remainder: replace the transaction-entity-only causal record with one
+declared fact model that preserves run trigger, answeredness, conversation
+depth, and episode bounds equally in temporal and non-temporal databases. A
+point fallback in prompt construction is not acceptable because the same
+metadata is the authority for every one of those consumers. Then rerun the
+history-off real DeepSeek turn and committed context-capture proof. Both live
+roots were taken down through `bin/seon down`; each reported `0/0 clusters
+alive`, a readable offline roster, and no orphan Seon JVMs.
+
 ## Independent adversarial confirmation — 2026-08-03
 
 A separate low-level history-off probe confirmed that `seon.db/history`,

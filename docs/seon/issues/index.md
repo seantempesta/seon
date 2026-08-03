@@ -34,12 +34,11 @@ See `README.md` for the convention.
 | [Give each cluster durable work-launcher ownership](process-work-launcher-is-replaced-by-every-cluster-start.md) | blocker | shared-surface runtime repair |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 
-## Friction (76)
+## Friction (75)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
-| [Give provider JSON values a named recursive schema](provider-json-contracts-use-unbounded-any.md) | friction | schema honesty wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
 | [Make the AI transport taxonomy test assert its premise](ai-transport-taxonomy-test-can-run-zero-assertions.md) | friction | AI provider-integrity wave |
 | [Give the SCI source-size cap a declared owner](sci-reader-hides-a-production-source-cap.md) | friction | SCI reader-limit wave |
