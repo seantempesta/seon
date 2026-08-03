@@ -2821,6 +2821,7 @@
                           :seon.render.web/pages-channel
                           (async/chan (async/sliding-buffer 1))
                           :seon.render.web/registration (atom {})
+                          :seon.render.web/latest-packages (atom {})
                           :seon.render.web/completion completion
                           :seon.render.web/root-agent-id "root"
                           :seon.cluster.loop/cluster cluster})}}

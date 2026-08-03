@@ -215,8 +215,17 @@
 
 (deftest settled-package-is-reused-by-every-join
   (let [keyframe "<article id=\"one\">one</article>"
+        keyframe-bytes (.getBytes keyframe "UTF-8")
         package {:seon.render.package/revision 7
-                 :seon.render.package/keyframe {"one" keyframe}}]
+                 :seon.render.package/base-revision 6
+                 :seon.render.package/basis-transaction 1
+                 :seon.render.package/streaming? false
+                 :seon.render.package/keyframe {"one" keyframe}
+                 :seon.render.package/keyframe-bytes keyframe-bytes
+                 :seon.render.package/keyframe-size (alength keyframe-bytes)
+                 :seon.render.package/delta {"one" keyframe}
+                 :seon.render.package/delta-bytes keyframe-bytes
+                 :seon.render.package/delta-size (alength keyframe-bytes)}]
     (with-redefs [web/page-of (fn [& _]
                                (throw (ex-info "rerendered on join" {})))
                   hiccup/->string (fn [& _]

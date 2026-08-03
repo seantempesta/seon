@@ -39,11 +39,11 @@
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.render :as render]
+            [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
             [seon.sci.admit :as admit]
-            [seon.test-support :as support]
-            [starfederation.datastar.clojure.api :as datastar])
+            [seon.test-support :as support])
   (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
@@ -79,12 +79,14 @@
             render-channel (async/chan (async/sliding-buffer 1))
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
+            latest-packages (atom {})
             completion (async/promise-chan)
             fault-channel (async/chan (async/dropping-buffer 8))
             stream-channel (async/chan (async/sliding-buffer 1))
             view {:seon.render.web/render-channel render-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
+                  :seon.render.web/latest-packages latest-packages
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id agent-id}
             graph (flow.core/create-flow
@@ -132,6 +134,7 @@
                            :seon.cluster.run/process process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
+                           :seon.render.web/latest-packages latest-packages
                            :seon.render.web/render-channel render-channel
                            :seon.render.web/fault-channel fault-channel}))
           (body connection @server
@@ -140,6 +143,7 @@
                  :render-channel render-channel
                  :stream-channel stream-channel
                  :fault-channel fault-channel
+                 :latest-packages latest-packages
                  :registration registration})
           (finally
             (when @server (web/stop! @server))
@@ -297,10 +301,12 @@
 
 (defn- read-complete-paint!
   [stream connection]
-  (let [page (page-at connection)
-        paint (read-patches! stream (count page))]
-    (is (= (count page) (patches paint))
-        "the feed paints every surface derived by page-of")
+  (let [_current-page (page-at connection)
+        paint (read-patches! stream 1)]
+    (is (= 1 (patches paint))
+        "the feed sends one proc-framed keyframe event")
+    (is (str/includes? paint "surface-stream")
+        "the proc-framed keyframe carries the stable stream surface")
     paint))
 
 ;;; ---------------------------------------------------------------------------
@@ -440,9 +446,12 @@
 (deftest a-feed-writer-failure-enters-the-cluster-fault-path
   (with-server
     (fn [_connection server context]
-      (with-redefs [datastar/patch-elements!
-                    (fn [& _]
-                      (throw (ex-info "injected writer failure" {})))]
+      (let [send! http/send!]
+        (with-redefs [http/send!
+                      (fn [channel content close-after-send?]
+                        (if (bytes? content)
+                          (throw (ex-info "injected writer failure" {}))
+                          (send! channel content close-after-send?)))]
         (let [stream (open-feed server (str "/feed/" agent-id))]
           (try
             (let [fault (support/await-event!
@@ -455,7 +464,7 @@
               (is (string? (:seon.render.web/tab-id data)))
               (is (= agent-id (:seon.render.web/page data)))
               (is (= :seon.render/html (:seon.render/output data))))
-            (finally (.close stream))))))))
+            (finally (.close stream)))))))))
 
 (deftest only-the-walk-surface-that-changed-goes-on-the-wire
   (with-server
@@ -463,12 +472,22 @@
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! stream connection)
-          (db/transact! connection
-                      [{:seon.ns/name 'my.agents.root
-                        :seon.ns/source "(ns my.agents.root)\n(def changed true)"}])
-          (let [repaint (read-until! stream "def changed true")]
-            (is (< (patches repaint) (count (page-at connection)))
-                "a changed walk unit does not resend the complete page"))
+          (let [serialize! hiccup/->string
+                serialized (atom 0)
+                surface-count (count (page-at connection))]
+            (with-redefs [hiccup/->string
+                          (fn [value]
+                            (swap! serialized inc)
+                            (serialize! value))]
+              (db/transact! connection
+                            [{:seon.ns/name 'my.agents.root
+                              :seon.ns/source
+                              "(ns my.agents.root)\n(def changed true)"}])
+              (let [repaint (read-until! stream "def changed true")]
+                (is (= 1 (patches repaint))
+                    "one proc-framed delta event carries the changed unit")
+                (is (< @serialized surface-count)
+                    "equal retained units are not serialized again"))))
           (finally (.close stream)))))))
 
 (deftest reconnect-is-repaint
@@ -491,20 +510,36 @@
           (finally (.close second-stream)))))))
 
 (deftest two-tabs-each-get-their-own-complete-paint
-  ;; ONE DERIVATION, N TABS — the shared registration's whole claim,
-  ;; and the reason the proc exists. Both tabs still get their own
-  ;; complete paint and their own byte-identical morph; what changed is
-  ;; that the page behind them was derived once for the cluster.
   (with-server
-    (fn [connection server _context]
-      (let [a (open-feed server (str "/feed/" agent-id))
-            b (open-feed server (str "/feed/" agent-id))]
-        (try
-          (let [to-a (read-complete-paint! a connection)
-                to-b (read-complete-paint! b connection)]
-            (is (= to-a to-b)
-                "each tab receives the same complete walk-derived paint"))
-          (finally (.close a) (.close b)))))))
+    (fn [_connection server context]
+      ;; The document join settles one current fact-only package first.
+      (is (= 200 (.statusCode (fetch server "/"))))
+      (let [package (get @(:latest-packages context) agent-id)
+            keyframe (:seon.render.package/keyframe-bytes package)
+            before (derivations context)
+            send! http/send!
+            sent (atom [])]
+        (with-redefs [web/page-of
+                      (fn [& _] (throw (ex-info "rerendered on join" {})))
+                      hiccup/->string
+                      (fn [& _] (throw (ex-info "serialized on join" {})))
+                      http/send!
+                      (fn [channel content close-after-send?]
+                        (when (bytes? content) (swap! sent conj content))
+                        (send! channel content close-after-send?))]
+          (let [a (open-feed server (str "/feed/" agent-id))
+                b (open-feed server (str "/feed/" agent-id))]
+            (try
+              (let [to-a (read-patches! a 1)
+                    to-b (read-patches! b 1)]
+                (is (= to-a to-b)
+                    "each tab receives the same complete keyframe event")
+                (is (= 2 (count @sent)))
+                (is (every? #(identical? keyframe %) @sent)
+                    "both writers receive the exact cached byte array")
+                (is (= before (derivations context))
+                    "joining a current package performs no render pass"))
+              (finally (.close a) (.close b)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — seeds 2026072822, 2026072823, 2026072824, 2026072828
@@ -563,19 +598,23 @@
               ;; slow tap stayed full — never parked, never blocked
               (read-until! fast (str "def slow " n)))
             (let [pending (support/await-event! slow [:slow-tap-newest])
-                  page (get pending agent-id)]
-              (is (some? page) "the slow tap yielded a value")
-              (is (= (count (page-at connection)) (count page))
-                  "a COMPLETE page — every block present, not a patch")
-              (is (= page (web/page-of
+                  package (get pending agent-id)
+                  keyframe (:seon.render.package/keyframe package)]
+              (is (some? package) "the slow tap yielded a package")
+              (is (= (count (page-at connection)) (count keyframe))
+                  "a COMPLETE keyframe — every block present, not only a delta")
+              (is (= keyframe (web/page-of
                            {:seon.db/db @connection
                             :seon.cluster.agent/id agent-id
                             :seon.render.web/root-agent-id agent-id
                             :seon.sci.admit/caps caps
                             :seon.cluster.run/live-processes #{process}}))
-                  "and it is the NEWEST page: byte-equal to a fresh
+                  "and it is the NEWEST keyframe: byte-equal to a fresh
                    derivation at the current basis, so no block was lost
                    to displacement")
+              (is (identical? package
+                              (get @(:latest-packages context) agent-id))
+                  "joins reuse the proc-owned immutable package")
               (is (nil? (async/poll! slow))
                   "exactly ONE value was pending, newest-wins")
               (let [passes (- (derivations context) before)]
@@ -605,6 +644,7 @@
                   :seon.cluster.run/process process
                   :seon.render.web/pages-mult (async/mult pages-channel)
                   :seon.render.web/registration (atom {})
+                  :seon.render.web/latest-packages (atom {})
                   :seon.render.web/render-channel render-channel
                   :seon.render.web/fault-channel fault-channel
                   :seon.render.web/port 0})
@@ -1217,6 +1257,7 @@
                             :seon.render.web/pages-mult
                             (async/mult (async/chan (async/sliding-buffer 1)))
                             :seon.render.web/registration (atom {})
+                            :seon.render.web/latest-packages (atom {})
                             :seon.render.web/render-channel
                             (async/chan (async/sliding-buffer 1))
                             :seon.render.web/fault-channel
@@ -1227,7 +1268,7 @@
               "it bound somewhere else")
           (is (= taken (:seon.render.web/wanted-port second-server))
               "and it says which bookmark just stopped working")
-          (is (= 200 (.statusCode (fetch second-server "/")))
+          (is (= 200 (.statusCode (fetch second-server "/css/input.css")))
               "while serving normally — the collision costs a port, not a view")
           (finally (web/stop! second-server))))))
   (testing "a clean bind reports no wanted-port at all, so key presence

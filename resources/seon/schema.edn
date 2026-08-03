@@ -2993,6 +2993,27 @@
  ; on-open/on-close, read by the render pass. Disposable by the
  ; transport law — it names live sockets, and reconnect = repaint.
  :seon.render.web/registration [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.render.web/latest-packages [:fn {:gen/gen seon.flow/atom-reference-generator} seon.flow/atom-reference?]
+ :seon.render.package/revision [:int {:min 1}]
+ :seon.render.package/base-revision [:int {:min 0}]
+ :seon.render.package/basis-transaction [:int {:min 0}]
+ :seon.render.package/streaming? :boolean
+ :seon.render.package/keyframe [:map-of :seon.render/surface-id :string]
+ :seon.render.package/delta [:map-of :seon.render/surface-id :string]
+ :seon.render.package/frame [:fn {:gen/gen seon.render.web/byte-array-generator} seon.schema/byte-array?]
+ :seon.render.package/size [:int {:min 0}]
+ :seon.render/package
+ [:map
+  [:seon.render.package/revision :seon.render.package/revision]
+  [:seon.render.package/base-revision {:optional true} :seon.render.package/base-revision]
+  [:seon.render.package/basis-transaction :seon.render.package/basis-transaction]
+  [:seon.render.package/streaming? :seon.render.package/streaming?]
+  [:seon.render.package/keyframe :seon.render.package/keyframe]
+  [:seon.render.package/keyframe-bytes :seon.render.package/frame]
+  [:seon.render.package/keyframe-size :seon.render.package/size]
+  [:seon.render.package/delta :seon.render.package/delta]
+  [:seon.render.package/delta-bytes :seon.render.package/frame]
+  [:seon.render.package/delta-size :seon.render.package/size]]
  :seon.render.web/url [:string {:min 1}]
  :seon.render.web/root-agent-id :seon.cluster.agent/id
 
@@ -3023,6 +3044,7 @@
   [:seon.render.web/render-channel :seon.flow/channel]
   [:seon.render.web/pages-channel :seon.flow/channel]
   [:seon.render.web/registration :seon.render.web/registration]
+  [:seon.render.web/latest-packages :seon.render.web/latest-packages]
   [:seon.render.web/completion :seon.flow/channel]
   [:seon.render.web/root-agent-id :seon.render.web/root-agent-id]
   [:seon.cluster.run/process :seon.cluster.run/process]
@@ -3047,6 +3069,7 @@
   [:seon.cluster.run/process :seon.cluster.run/process]
  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
  [:seon.render.web/registration :seon.render.web/registration]
+ [:seon.render.web/latest-packages :seon.render.web/latest-packages]
  [:seon.render.web/render-channel :seon.flow/channel]
   [:seon.render.web/fault-channel :seon.flow/channel]
  [:seon.render.web/port {:optional true} :seon.render.web/port]]
@@ -3060,6 +3083,7 @@
   [:seon.cluster.run/process :seon.cluster.run/process]
  [:seon.render.web/pages-mult :seon.render.web/pages-mult]
  [:seon.render.web/registration :seon.render.web/registration]
+ [:seon.render.web/latest-packages :seon.render.web/latest-packages]
   [:seon.render.web/render-channel :seon.flow/channel]
   [:seon.render.web/fault-channel :seon.flow/channel]]
 

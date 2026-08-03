@@ -1132,6 +1132,7 @@
                        (select-keys view
                                     [:seon.render.web/pages-mult
                                      :seon.render.web/registration
+                                     :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
                                      :seon.render.web/fault-channel
                                      :seon.cluster.run/process])))]
@@ -1300,9 +1301,11 @@
         ;; completion — all process-local, all free to lose
         render-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
+        latest-packages (atom {})
         view {:seon.render.web/render-channel render-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
+              :seon.render.web/latest-packages latest-packages
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
               ;; THE ONE THING THE DATABASE CANNOT ANSWER, carried to

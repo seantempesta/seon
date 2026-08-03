@@ -69,9 +69,13 @@
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [starfederation.datastar.clojure.adapter.common :as datastar.common]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
-            [starfederation.datastar.clojure.api :as datastar])
+            [starfederation.datastar.clojure.api :as datastar]
+            [starfederation.datastar.clojure.api.elements :as datastar.elements]
+            [starfederation.datastar.clojure.consts :as datastar.consts])
   (:import [java.net URI URLDecoder]
+           [java.nio.charset StandardCharsets]
            [java.util Date]
            [java.util.concurrent CompletableFuture Executors]))
 
@@ -113,6 +117,10 @@
 (def mult-generator
   "An honest generator: a real mult over a real channel, created once."
   (gen/fmap (fn [_] @generator-mult) (gen/return nil)))
+
+(def byte-array-generator
+  "Platform byte arrays for process-local package schemas."
+  gen/bytes)
 
 (schema/register-core-predicate! 'seon.render.web/mult? mult?)
 
@@ -322,7 +330,8 @@
            :seon.render.web/root-agent-id
            :seon.store/branch-connection] caps :seon.sci.admit/caps
     live-processes :seon.cluster.run/live-processes
-    stream-partial :seon.ai/partial}]
+    stream-partial :seon.ai/partial
+    retained :seon.render.web/retained-fragments}]
   (let [node (render.walk/neighborhood (walk-request db caps id
                                                      :seon.render/html
                                                      branch-connection))
@@ -332,13 +341,17 @@
                                    [(:seon.render.walk/path unit) rank]))
                     (reverse units))
         rows (mapv (fn [unit]
-                     (let [element-id (unit-id id unit)]
+                     (let [element-id (unit-id id unit)
+                           rank (get ranks (:seon.render.walk/path unit))
+                           evidence [unit rank]
+                           previous (get retained element-id)]
                        {:seon.render.web/element-id element-id
                         :seon.render.walk/path (:seon.render.walk/path unit)
+                        :seon.render.fragment/evidence evidence
                         :seon.render.web/html
-                        (surface-html id unit
-                                      (get ranks
-                                           (:seon.render.walk/path unit)))}))
+                        (if (= evidence (:seon.render.fragment/evidence previous))
+                          (:seon.render.web/html previous)
+                          (surface-html id unit rank))}))
                    units)
         fleet-row
         (when (= id root-agent-id)
@@ -346,18 +359,34 @@
                          :seon.cluster.agent/id root-agent-id
                          :seon.sci.admit/caps caps
                          :seon.cluster.run/live-processes live-processes}
-                output (oversight/block-html request)]
+                output (oversight/block-html request)
+                evidence [output]
+                previous (get retained (block/surface-id :fleet-oversight))]
             {:seon.render.web/element-id
              (block/surface-id :fleet-oversight)
              :seon.render.walk/path [::fleet-oversight]
+             :seon.render.fragment/evidence evidence
              :seon.render.web/html
-             (hiccup/->string
-              (if (:seon.error/kind output)
-                [:article {:id (block/surface-id :fleet-oversight)}
-                 [:div {:class "seon-render-unavailable"}
-                  "renderer unavailable"]]
-                output))}))
-        rows (cond-> rows fleet-row (conj fleet-row))
+             (if (= evidence (:seon.render.fragment/evidence previous))
+               (:seon.render.web/html previous)
+               (hiccup/->string
+                (if (:seon.error/kind output)
+                  [:article {:id (block/surface-id :fleet-oversight)}
+                   [:div {:class "seon-render-unavailable"}
+                    "renderer unavailable"]]
+                  output)))}))
+        stream-evidence [stream-partial]
+        previous-stream (get retained stream-strip-id)
+        stream-row
+        {:seon.render.web/element-id stream-strip-id
+         :seon.render.walk/path [::stream-strip]
+         :seon.render.fragment/evidence stream-evidence
+         :seon.render.web/html
+         (if (= stream-evidence
+                (:seon.render.fragment/evidence previous-stream))
+           (:seon.render.web/html previous-stream)
+           (stream-strip-html stream-partial))}
+        rows (cond-> rows fleet-row (conj fleet-row) true (conj stream-row))
         paths (into {stream-strip-id [::stream-strip]}
                     (map (juxt :seon.render.web/element-id
                                :seon.render.walk/path))
@@ -372,8 +401,11 @@
                    (map (juxt :seon.render.web/element-id
                               :seon.render.web/html))
                    rows)
-        page (assoc page stream-strip-id (stream-strip-html stream-partial))]
+        fragments (into {}
+                        (map (juxt :seon.render.web/element-id identity))
+                        rows)]
     {:seon.render.web/page page
+     :seon.render.web/fragments fragments
      :seon.db/tx-data
      (into [] (mapcat :seon.db/tx-data) units)}))
 
@@ -503,6 +535,83 @@
          (sort-by key page))
    :seon.render.web/delivered page})
 
+(defn join-package
+  "Return the render proc's settled package unchanged.
+
+  A page or feed join consumes retained serialized bytes. It never derives a
+  page and never serializes a fragment; identity is therefore part of this
+  deliberately tiny boundary."
+  {:malli/schema [:=> [:cat :seon.render/package] :seon.render/package]}
+  [package]
+  package)
+
+(defn- package-bytes
+  [frame]
+  (alength ^bytes frame))
+
+(def ^:private build-event
+  (datastar.common/->build-event-str))
+
+(defn- frame-bytes
+  "Build one complete Datastar patch event from retained fragment strings."
+  [fragments]
+  (.getBytes
+   ^String
+   (build-event datastar.consts/event-type-patch-elements
+                (datastar.elements/->patch-elements-seq
+                 (mapv val (sort-by key fragments)) {})
+                {})
+   StandardCharsets/UTF_8))
+
+(defn- next-package
+  "Advance retained package bytes and their current-facts evidence."
+  [previous page basis-transaction streaming?]
+  (let [keyframe (:seon.render.package/keyframe previous)]
+    (if (= keyframe page)
+      [(assoc previous
+              :seon.render.package/basis-transaction basis-transaction
+              :seon.render.package/streaming? streaming?)
+       false]
+      (let [revision (inc (long (:seon.render.package/revision previous 0)))
+            delta (into (sorted-map)
+                        (filter (fn [[id html]]
+                                  (not= html (get keyframe id))))
+                        page)
+            keyframe-bytes (frame-bytes page)
+            delta-bytes (frame-bytes delta)]
+        [{:seon.render.package/revision revision
+          :seon.render.package/base-revision (dec revision)
+          :seon.render.package/basis-transaction basis-transaction
+          :seon.render.package/streaming? streaming?
+          :seon.render.package/keyframe page
+          :seon.render.package/keyframe-bytes keyframe-bytes
+          :seon.render.package/keyframe-size (package-bytes keyframe-bytes)
+          :seon.render.package/delta delta
+          :seon.render.package/delta-bytes delta-bytes
+          :seon.render.package/delta-size (package-bytes delta-bytes)}
+         true]))))
+
+(defn- fresh-fact-package
+  [connection latest-packages registration-key]
+  (let [package (get @latest-packages registration-key)]
+    (when (and package
+               (not (:seon.render.package/streaming? package))
+               (= (long (:max-tx @connection))
+                  (:seon.render.package/basis-transaction package)))
+      (join-package package))))
+
+(defn- package-patches
+  "Select a contiguous smaller delta, otherwise the repair keyframe."
+  [delivered-revision package]
+  (let [keyframe (:seon.render.package/keyframe-bytes package)
+        delta (:seon.render.package/delta-bytes package)]
+    (if (and (= delivered-revision
+                (:seon.render.package/base-revision package))
+             (< (:seon.render.package/delta-size package)
+                (:seon.render.package/keyframe-size package)))
+      delta
+      keyframe)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The render proc — the cluster graph's second proc (F2 §1)
 ;;; ---------------------------------------------------------------------------
@@ -532,29 +641,20 @@
                      [::run/plan-digest ::run/error ::run/closed-at])))))
 
 (defn- render-pass
-  "ONE pass over ONE database value: derive every WATCHED agent's page,
-  suppress against the last value PRODUCED, and return
-  `[state' pages-or-nil]` — `pages` is the COMPLETE
-  `{agent-id → {surface-id → html}}` snapshot exactly when anything
-  changed."
+  "Derive every registered page and retain its serialized package.
+
+  Every emitted value is the complete latest-package map, so channel
+  displacement loses nothing. A package carries both its predecessor delta
+  and a repair keyframe assembled from bytes already serialized by this proc."
   [{registration :seon.render.web/registration :as state}]
   (let [handle (:seon.cluster.loop/cluster state)
         connection (:seon.store/branch-connection handle)
         caps (:seon.sci.admit/caps handle)
         db @connection
-        watched (into (sorted-set)
-                      (keep (fn [[agent-id tabs]]
-                              (when (and (string? agent-id)
-                                         (pos? (long tabs)))
-                                agent-id)))
+        watched (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
+                      (keep (fn [[registration-key tabs]]
+                              (when (pos? (long tabs)) registration-key)))
                       @registration)
-        debug-watched?
-        (boolean
-         (some (fn [[registration-key tabs]]
-                 (and (vector? registration-key)
-                      (= ::debug-tab (first registration-key))
-                      (pos? (long tabs))))
-               @registration))
         ;; The run id makes each partial self-describing. Keep only
         ;; entries whose run is still unsettled at THIS immutable
         ;; database value; terminal facts supersede and remove them.
@@ -564,38 +664,75 @@
                       (::streams state))
         results
         (into {}
-              (map (fn [agent-id]
-                     [agent-id
-                      (page-result
-                       (cond-> {:seon.db/db db
-                                :seon.cluster.agent/id agent-id
-                                :seon.render.web/root-agent-id
-                                (:seon.render.web/root-agent-id state)
-                                :seon.sci.admit/caps caps
-                                :seon.store/branch-connection connection
-                                :seon.cluster.run/live-processes
-                                #{(:seon.cluster.run/process handle)}}
-                         (get-in streams [agent-id :seon.ai/partial])
-                         (assoc :seon.ai/partial
-                                (get-in streams
-                                        [agent-id :seon.ai/partial]))))]))
+              (map (fn [registration-key]
+                     (let [debug? (and (vector? registration-key)
+                                       (= ::debug-tab
+                                          (first registration-key)))
+                           agent-id (if debug?
+                                      (second registration-key)
+                                      registration-key)]
+                       [registration-key
+                        (if debug?
+                          {:seon.render.web/page
+                           (debug-page-of db connection agent-id
+                                          (:seon.render.web/root-agent-id state)
+                                          caps)
+                           :seon.render.web/fragments {}}
+                          (page-result
+                           (cond-> {:seon.db/db db
+                                    :seon.cluster.agent/id agent-id
+                                    :seon.render.web/root-agent-id
+                                    (:seon.render.web/root-agent-id state)
+                                    :seon.sci.admit/caps caps
+                                    :seon.store/branch-connection connection
+                                    :seon.cluster.run/live-processes
+                                    #{(:seon.cluster.run/process handle)}
+                                    :seon.render.web/retained-fragments
+                                    (get-in state [::fragments registration-key] {})}
+                             (get-in streams [agent-id :seon.ai/partial])
+                             (assoc :seon.ai/partial
+                                    (get-in streams
+                                            [agent-id :seon.ai/partial])))))])))
               watched)
-        pages (into {}
-                    (map (fn [[agent-id result]]
-                           [agent-id (:seon.render.web/page result)]))
-                    results)
         tx-data (into []
                       (mapcat (comp :seon.db/tx-data val))
                       results)
         _ (when (seq tx-data)
             (db/transact! connection tx-data))
+        advanced
+        (reduce-kv
+         (fn [{latest :packages changed? :changed?}
+              registration-key result]
+           (let [debug? (vector? registration-key)
+                 agent-id (if debug? (second registration-key)
+                              registration-key)
+                 [package package-changed?]
+                 (next-package
+                  (get latest registration-key)
+                  (:seon.render.web/page result)
+                  (long (:max-tx db))
+                  (boolean (and (not debug?) (get streams agent-id))))]
+             {:packages (assoc latest registration-key package)
+              :changed? (or changed? package-changed?)}))
+         {:packages (::packages state) :changed? false}
+         results)
+        packages (:packages advanced)
+        changed? (:changed? advanced)
+        fragments
+        (reduce-kv
+         (fn [retained registration-key result]
+           (assoc retained registration-key
+                  (:seon.render.web/fragments result)))
+         (::fragments state)
+         results)
+        _ (when (not= packages (::packages state))
+            (reset! (:seon.render.web/latest-packages state) packages))
         state (-> state
                   (update ::passes inc)
                   (assoc ::watched (count watched)
                          ::streams streams))]
-    (if (and (= pages (::produced state)) (not debug-watched?))
-      [state nil]
-      [(assoc state ::produced pages) pages])))
+    [(assoc state ::packages packages ::fragments fragments)
+     (when changed? packages)]))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
@@ -656,7 +793,8 @@
    (let [ports {::interest (:seon.render.web/render-channel args)
                 ::stream (:seon.cluster.loop/stream-channel
                           (:seon.cluster.loop/cluster args))
-                ::pages (:seon.render.web/pages-channel args)}]
+                ::pages (:seon.render.web/pages-channel args)
+                ::latest-packages (:seon.render.web/latest-packages args)}]
      (when-let [missing (seq (sort (keep (fn [[port channel]]
                                            (when-not channel port))
                                          ports)))]
@@ -670,7 +808,8 @@
                      (:seon.cluster.loop/cluster args))}
           ::flow/out-ports
           {::pages (:seon.render.web/pages-channel args)}
-          ::produced {}
+          ::packages {}
+          ::fragments {}
           ::streams {}
           ::passes 0
           ::watched 0
@@ -686,6 +825,7 @@
    (let [settlement
          (when (and (= ::interest input) (map? message))
            (::settlement message))
+         join? (and (= ::interest input) (map? message) (::join message))
          state (case input
                  ;; A repaint is facts only. Partials were never facts,
                  ;; so a commit wake or reconnect wake cannot restore
@@ -708,7 +848,8 @@
        ;; sliding-1 in-ports coalesce the burst and one derivation
        ;; serves it whole
        (Thread/sleep (long remainder)))
-     (let [[state pages] (render-pass state)]
+     (let [[state packages] (render-pass state)
+           published (if join? (::packages state) packages)]
        ;; A settlement request rides the same sliding-1 in-port as the
        ;; wakes it fences. Its reply is the pass count produced by this
        ;; exact derivation, so a proof need not sample Flow's published
@@ -717,7 +858,7 @@
        (when settlement
          (async/put! settlement (::passes state)))
        [(assoc state ::last-pass-nanos (System/nanoTime))
-        (when pages {::pages [pages]})]))))
+        (when (seq published) {::pages [published]})]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The feed — per tab: a tap and a virtual thread (F2 §1.3)
@@ -738,8 +879,8 @@
                (assoc watched registration-key remaining)
                (dissoc watched registration-key))))))
 
-(defn- write-patches!
-  "Write one batch, parking after an event enters http-kit's queue.
+(defn- write-package!
+  "Write one already-framed package event, then park for queue drain.
 
   `send!` retains its established meaning: `false` says the channel was
   already closed, so that inherited seam still closes the generator.
@@ -748,23 +889,44 @@
   thread on that exact drain-or-close completion before the next event.
 
   While parked, the per-tab `(sliding-buffer 1)` retains only the newest
-  complete page. Queue drain is permission for another write, never
+  complete package. Queue drain is permission for another write, never
   remote-delivery acknowledgement."
-  [channel generator patches]
-  (reduce
-   (fn [_accepted? [_id html]]
-     (if (datastar/patch-elements! generator html)
-       (let [{pending-bytes :http-kit.write/pending-bytes
-              drained :http-kit.write/drained}
-             (http/write-state channel)]
-         (when (pos? pending-bytes)
-           (.join ^CompletableFuture drained))
-         true)
-       (do
-         (datastar/close-sse! generator)
-         (reduced false))))
-   true
-   patches))
+  [channel generator frame]
+  (if (http/send! channel frame false)
+    (let [{pending-bytes :http-kit.write/pending-bytes
+           drained :http-kit.write/drained}
+          (http/write-state channel)]
+      (when (pos? pending-bytes)
+        (.join ^CompletableFuture drained))
+      true)
+    (do
+      (datastar/close-sse! generator)
+      false)))
+
+(defn- settle-package!
+  "Tap first, request one proc-owned join publication, and consume its package."
+  [{registration :seon.render.web/registration
+    render-channel :seon.render.web/render-channel
+    pages-mult :seon.render.web/pages-mult
+    connection :seon.store/connection
+    latest-packages :seon.render.web/latest-packages}
+   registration-key]
+  (let [tap (async/chan (async/sliding-buffer 1))]
+    (register-tab! registration registration-key)
+    (async/tap pages-mult tap)
+    (try
+      (or (fresh-fact-package connection latest-packages registration-key)
+          (do
+            (async/offer! render-channel {::join true})
+            (loop []
+              (when-let [packages (async/<!! tap)]
+                (if-let [package (get packages registration-key)]
+                  (join-package package)
+                  (recur))))))
+      (finally
+        (async/untap pages-mult tap)
+        (async/close! tap)
+        (deregister-tab! registration registration-key)))))
 
 (defn feed
   "The SSE response for one tab: a tap and a virtual thread — never a
@@ -787,27 +949,16 @@
   `on-close` untaps and deregisters. The connection owns exactly one
   virtual thread and one map; nothing outlives the socket."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
-  [request {:keys [:seon.cluster.agent/id :seon.store/connection
-                   :seon.render.web/root-agent-id]
-            caps :seon.sci.admit/caps
-            process :seon.cluster.run/process
+  [request {:keys [:seon.cluster.agent/id]
+            connection :seon.store/connection
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
+            latest-packages :seon.render.web/latest-packages
             render-channel :seon.render.web/render-channel
             fault-channel :seon.render.web/fault-channel}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
         registration-key (if debug? [::debug-tab id] id)
-        paint (if debug?
-                (fn [] (debug-page-of @connection connection id
-                                      root-agent-id caps))
-                (fn []
-                  (page-of {:seon.db/db @connection
-                            :seon.cluster.agent/id id
-                            :seon.render.web/root-agent-id root-agent-id
-                            :seon.sci.admit/caps caps
-                            :seon.store/branch-connection connection
-                            :seon.cluster.run/live-processes #{process}})))
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
         tab-id (str (random-uuid))
@@ -825,25 +976,31 @@
          (Thread/ofVirtual)
          (fn []
            (try
-             (let [initial (paint)]
-               ;; the initial full paint: every block, at its own id
-               (when (write-patches! channel generator (sort-by key initial))
-                 (async/offer! render-channel ::wake)
-                 (loop [delivered initial]
+             (let [initial (fresh-fact-package connection latest-packages
+                                               registration-key)
+                   delivered-revision
+                   (if initial
+                     (do
+                       (write-package!
+                        channel generator
+                        (:seon.render.package/keyframe-bytes initial))
+                       (:seon.render.package/revision initial))
+                     (do (async/offer! render-channel {::join true}) 0))]
+               (loop [delivered-revision delivered-revision]
                    (when @painting
-                     (when-let [pages (async/<!! tap)]
-                       (if-let [page (if debug? (paint) (get pages id))]
-                         (let [{:seon.render.web/keys [patches]}
-                               (changed delivered page)]
-                           ;; default patch mode is `outer` — a complete
-                           ;; morph of one element; the id rides in the
-                           ;; element itself
-                           (when (write-patches! channel generator patches)
-                             (recur page)))
-                         ;; a snapshot that predates this tab's interest
-                         ;; carries no entry for its agent; the wake this
-                         ;; tab offered brings the next one
-                         (recur delivered)))))))
+                     (when-let [packages (async/<!! tap)]
+                       (if-let [package (some-> (get packages registration-key)
+                                                join-package)]
+                         (let [revision
+                               (:seon.render.package/revision package)]
+                           (if (<= (long revision) delivered-revision)
+                             (recur delivered-revision)
+                             (when (write-package!
+                                    channel generator
+                                    (package-patches
+                                     delivered-revision package))
+                               (recur revision))))
+                         (recur delivered-revision))))))
              (catch Throwable failure
                (async/offer!
                 fault-channel
@@ -1089,17 +1246,10 @@
    #(render/walk namespace-walk-options)))
 
 (defn- page-response
-  [{:keys [:seon.store/connection :seon.cluster.agent/id]
-    caps :seon.sci.admit/caps
-    process :seon.cluster.run/process}
+  [service
    agent-id]
-  (let [db @connection
-        page (page-of {:seon.db/db db
-                       :seon.cluster.agent/id agent-id
-                       :seon.render.web/root-agent-id id
-                       :seon.sci.admit/caps caps
-                       :seon.store/branch-connection connection
-                       :seon.cluster.run/live-processes #{process}})
+  (let [page (:seon.render.package/keyframe
+              (settle-package! service agent-id))
         stream-html (get page stream-strip-id)
         unit-html (vals (dissoc page stream-strip-id))]
     {:status 200
@@ -1121,11 +1271,10 @@
                    (route/path ::route/feed {:id agent-id})})}))
 
 (defn- debug-response
-  [{:keys [:seon.store/connection :seon.cluster.agent/id]
-    caps :seon.sci.admit/caps}
+  [service
    agent-id]
-  (let [db @connection
-        page (debug-page-of db connection agent-id id caps)
+  (let [page (:seon.render.package/keyframe
+              (settle-package! service [::debug-tab agent-id]))
         ai-id (str "debug-ai-" agent-id)
         ai (get page ai-id)
         html (vals (dissoc page ai-id))]
@@ -1205,6 +1354,7 @@
                              :seon.cluster.run/process
                              :seon.render.web/pages-mult
                              :seon.render.web/registration
+                             :seon.render.web/latest-packages
                              :seon.render.web/render-channel
                              :seon.render.web/fault-channel]))))
 
