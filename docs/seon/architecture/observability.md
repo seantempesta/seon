@@ -135,11 +135,15 @@ message, content signature, bounded data projection, capped flag, and optional
 class/Flow/run/agent/instrumentation evidence.
 
 Kinds are producer-owned namespaced keywords, never a central enum or entity
-discriminator. Recurrence is a query over `/signature`. The `/agent` and `/run`
-refs route the same evidence into the responsible agent's context and root's
-overview. A render failure therefore appears in place and remains forensics;
-fixing the renderer removes the current derived problem without deleting
-history.
+discriminator. Recurrence is a query over `/signature`. The core fault
+committer retains at most one bounded fact per signature and process: its
+disposable signature set collapses repeat attempts while a database writer is
+unavailable, and a database query remains the authority after a proc rebuild.
+Distinct signatures remain distinct; no stored recurrence tally is needed.
+The `/agent` and `/run` refs route the same evidence into the responsible
+agent's context and root's overview. A render failure therefore appears in
+place and remains forensics; fixing the renderer removes the current derived
+problem without deleting history.
 
 Core faults enter through Flow's error channel and the fault committer. Agent
 mistakes become flat values and eval receipts. The channel, not a guessed kind

@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: friction
 tags: [issue, operator, render]
 ---
 
@@ -8,7 +9,7 @@ tags: [issue, operator, render]
 
 ## Evidence
 
-Three lanes independently on 2026-08-03:
+Two lanes independently on 2026-08-03:
 
 - `keyword-edges-gate`: shared-root init printed only `✗ Read timed out`;
   the equivalent publication was in fact proceeding (the root's writer was
@@ -16,8 +17,6 @@ Three lanes independently on 2026-08-03:
 - `operator-stale-vars`: `bin/seon init` twice printed only
   `✗ Read timed out` even though the operation completed; the same
   publication run in-JVM succeeded clearly in 27 seconds.
-- `my-web` (adjacent): the runner emitted ~23 MB of repeated identical
-  stack traces for one refusal — same family of operator-output defects.
 
 ## Observed mismatch
 

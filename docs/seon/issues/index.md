@@ -30,14 +30,11 @@ See `README.md` for the convention.
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [Bound internal contract violations before they retain the schema registry](internal-contract-violation-renders-whole-registry.md) | blocker | contract error-construction wave |
 
-## Friction (83)
+## Friction (80)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [`bin/seon init` reports only `✗ Read timed out` while the operation succeeds](seon-init-reports-read-timed-out-while-succeeding.md) | friction | operator integration wave |
-| [Collapse repeated identical core faults into one bounded record](fault-committer-repeats-identical-stack-traces.md) | friction | fault-output lane |
-| [Collapse repeated identical test-runner failures](test-runner-repeats-identical-failure-traces.md) | friction | runner-output lane |
-| [Render one bounded diagnostic in MCP contract-failure envelopes](mcp-contract-failure-envelope-repeats-diagnostics.md) | friction | mcp-output lane |
 | [Stop reporting an MCP-proven live prepl as unreachable](status-reports-a-live-mcp-proven-prepl-unreachable.md) | friction | operator status-truth wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
