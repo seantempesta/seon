@@ -2,7 +2,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.tools.build.api :as b])
+            [clojure.tools.build.api :as b]
+            [dev-cache :as dev-cache])
   (:import [java.security MessageDigest]))
 
 (def lib 'seon/seon)
@@ -154,10 +155,11 @@
 (defn uber
   "Build the standalone fresh-system artifact."
   [_]
-  (let [pages (initialization-pages)]
+  (let [_ (dev-cache/ensure-cache nil)
+        pages (initialization-pages)]
     (b/delete {:path class-dir})
     (b/delete {:path artifact-file})
-    (b/copy-dir {:src-dirs ["src" "resources"]
+    (b/copy-dir {:src-dirs [dev-cache/cache-dir "src" "resources"]
                  :target-dir class-dir})
     (b/copy-file {:src default-manifest-path
                   :target (str class-dir "/" default-manifest-path)})
