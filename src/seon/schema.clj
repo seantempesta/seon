@@ -2195,6 +2195,57 @@
       schema-key
       {:registry (:seon.schema.projection/registry projection)})))
 
+(defn function-accepts-in?
+  "True when one arity of `function-symbol` accepts `arguments` in `projection`.
+
+  This validates the complete declared input contract, not merely one referenced
+  schema. The acquired program snapshot bounds candidates; this function is the
+  exact semantic check over that bounded set."
+  {:malli/schema
+   [:=> [:cat ::projection :qualified-symbol :seon.schema/arguments]
+    :boolean]}
+  [projection function-symbol arguments]
+  (try
+    (when-let [contract
+               (get (:seon.schema.projection/function-contracts projection)
+                    function-symbol)]
+      (let [compiled
+            (m/function-schema
+             contract
+             {:registry (:seon.schema.projection/registry projection)})]
+        (boolean
+         (some (fn [arity]
+                 (let [input (:input (m/-function-info arity))]
+                   ((m/validator input) arguments)))
+               (m/-function-schema-arities compiled)))))
+    (catch Throwable _ false)))
+
+(defn function-returns-in?
+  "True when one arity of `function-symbol` declares `output-schema`.
+
+  Built-in Malli schemas such as `:string` do not have program-graph entities,
+  so output-ref datoms alone cannot express this question. The durable function
+  contract in the immutable projection is the authority for both built-in and
+  registered output schemas."
+  {:malli/schema
+   [:=> [:cat ::projection :qualified-symbol ::registry-key]
+    :boolean]}
+  [projection function-symbol output-schema]
+  (try
+    (when-let [contract
+               (get (:seon.schema.projection/function-contracts projection)
+                    function-symbol)]
+      (let [compiled
+            (m/function-schema
+             contract
+             {:registry (:seon.schema.projection/registry projection)})]
+        (boolean
+         (some (fn [arity]
+                 (= output-schema
+                    (m/form (:output (m/-function-info arity)))))
+               (m/-function-schema-arities compiled)))))
+    (catch Throwable _ false)))
+
 (defn projection-explainer
   "Compile an explainer against exactly one immutable projection."
   {:malli/schema [:=> [:catn [::projection ::projection]

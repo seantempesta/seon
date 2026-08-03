@@ -117,10 +117,8 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
-            [seon.sci.reader :as reader])
-  (:import [java.lang.management ManagementFactory]
-           [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicBoolean]))
+            [seon.sci.kernel :as kernel]
+            [seon.sci.reader :as reader]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -150,13 +148,11 @@
 ;;; The base context
 ;;; ---------------------------------------------------------------------------
 
-(declare process-interrupt-guard)
-
 (defn build-base-ctx
   "Build one independent SCI program context with the process guard."
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
-  (let [guard @process-interrupt-guard
+  (let [{guard ::kernel/guard :as kernel-options} (kernel/context-options)
         run-ns (sci/create-ns 'my.run)
         message-ns (sci/create-ns 'my.message)
         bootstrap-ns (sci/create-ns 'seon.bootstrap)
@@ -164,9 +160,9 @@
         test-ns (sci/create-ns 'clojure.test)
         ctx
         (sci/init
-        {:interrupt-fn (::interrupt-fn guard)
-         :host-interop-observer (::host-interop-observer guard)
-         :built-in-call-observer (::built-in-call-observer guard)
+        {:interrupt-fn (:interrupt-fn kernel-options)
+         :host-interop-observer (:host-interop-observer kernel-options)
+         :built-in-call-observer (:built-in-call-observer kernel-options)
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -224,7 +220,7 @@
      {'dir dir-var
       'doc doc-var
       'help help-var})
-    (assoc ctx ::interrupt-guard guard)))
+    (kernel/attach ctx guard)))
 
 (defn agent-namespace
   "The ONE namespace name for an agent: `my.agents.<id>`.
@@ -240,147 +236,21 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn interrupted?
-  "True when `throwable` is sci's uncatchable interrupt.
-  THE single owner of this question. Walk wrappers through their cause
-  chains and ask sci's own marker predicate
-  (`reference-code/sci/src/sci/impl/utils.cljc:51-56`) rather than
-  matching a message, class, or raw key, because the marker is the only
-  thing sandboxed code cannot forge."
+  "True when `throwable` is SCI's uncatchable interrupt."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [throwable]
-  (loop [candidate throwable]
-    (cond
-      (nil? candidate) false
-      (sci.utils/interrupt-ex? candidate) true
-      :else (recur (ex-cause candidate)))))
-
-(def ^:private thread-mx (ManagementFactory/getThreadMXBean))
-
-(defn- allocated-bytes
-  "Allocated bytes for the calling JVM thread, or -1."
-  []
-  (.getCurrentThreadAllocatedBytes
-   ^com.sun.management.ThreadMXBean thread-mx))
-
-(defonce ^:private ^ScheduledThreadPoolExecutor deadline-timer
-  (doto (ScheduledThreadPoolExecutor.
-         1
-         (reify java.util.concurrent.ThreadFactory
-           (newThread [_ runnable]
-             (doto (Thread. runnable "seon-sci-time-limit")
-               (.setDaemon true)))))
-    (.setRemoveOnCancelPolicy true)))
-
-;;; The sampling mask: allocation is read every 1024th entrance rather
-;;; than every one, because the interrupt-fn runs on EVERY interpreted
-;;; body and its cost is the interpreter's cost. The time flag is read
-;;; every time — that one is the limit and may not be sampled.
-
-(defn- interrupt-guard
-  "A stable hook whose armed evaluation state is thread-scoped."
-  []
-  (let [thread-arm (ThreadLocal.)
-        interrupt-fn
-        (fn []
-          (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (let [^longs entries (::entries armed)
-                  ^longs sampled (::sampled armed)
-                  ^AtomicBoolean reached (::reached armed)
-                  outcome (::outcome armed)
-                  ^long allocated-at-start (::allocated-at-start armed)
-                  entrance-count (unchecked-inc (aget entries 0))]
-              (aset entries 0 (long entrance-count))
-              (when (.get reached)
-                (vreset! outcome :time)
-                (sci.interrupt/interrupt! "time-limit"))
-              (when (and (::measurable armed)
-                         (zero? (bit-and entrance-count 1023)))
-                (aset sampled 0
-                      (long (- (allocated-bytes)
-                               allocated-at-start)))))))
-        host-interop-observer
-        (fn []
-          (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (let [^longs observations (::host-interop-observations armed)]
-              (aset observations 0
-                    (long (unchecked-inc (aget observations 0)))))))
-        built-in-call-observer
-        (fn [qualified-symbol]
-          (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (vswap! (::built-in-calls armed) conj qualified-symbol)))]
-    {::thread-arm thread-arm
-     ::interrupt-fn interrupt-fn
-     ::host-interop-observer host-interop-observer
-     ::built-in-call-observer built-in-call-observer}))
-
-(defonce ^:private process-interrupt-guard
-  (delay (interrupt-guard)))
-
+  (kernel/interrupted? throwable))
 (defn- arm
-  "Arm one guarded context on the current thread; return stop! and record.
-  A scheduled task flips this evaluation's flag at the deadline. The
-  process-wide interrupt-fn reads the current thread's armed state, so
-  base-created and acquired functions use this deadline without sharing it
-  with concurrent invocations on other threads."
   [ctx time-limit-ms]
-  (let [guard (::interrupt-guard ctx)]
-    (when-not guard
-      (throw
-       (ex-info "Evaluation context has no stable interrupt guard."
-                {:seon.error/kind ::missing-interrupt-guard})))
-    (let [^ThreadLocal thread-arm (::thread-arm guard)]
-      (when (.get thread-arm)
-        (throw
-         (ex-info "Evaluation context is already armed on this thread."
-                  {:seon.error/kind ::already-armed})))
-      (let [entries (long-array 1)
-            sampled (long-array 1)
-            host-interop-observations (long-array 1)
-            built-in-calls (volatile! #{})
-            reached (AtomicBoolean. false)
-            outcome (volatile! nil)
-            started-at (System/nanoTime)
-            allocated-at-start (allocated-bytes)
-            measurable (not (neg? allocated-at-start))
-            armed {::entries entries
-                   ::sampled sampled
-                   ::host-interop-observations host-interop-observations
-                   ::built-in-calls built-in-calls
-                   ::reached reached
-                   ::outcome outcome
-                   ::started-at started-at
-                   ::allocated-at-start allocated-at-start
-                   ::measurable measurable}]
-        (.set thread-arm armed)
-        (try
-          (let [task (.schedule deadline-timer
-                                ^Runnable #(.set reached true)
-                                (long time-limit-ms)
-                                TimeUnit/MILLISECONDS)]
-            {:interrupt-fn (::interrupt-fn guard)
-             ::built-in-calls (fn [] @built-in-calls)
-             ::stop!
-             (fn []
-               (.cancel ^Future task false)
-               (.set reached false)
-               (.remove thread-arm)
-               nil)
-             ::record
-             (fn [final-outcome]
-               {:seon.eval/fn-entries (aget entries 0)
-                :seon.eval/host-interop-count
-                (aget host-interop-observations 0)
-                :seon.eval/duration-ms
-                (quot (- (System/nanoTime) started-at) 1000000)
-                :seon.eval/allocated-bytes
-                (if measurable
-                  (max (aget sampled 0)
-                       (- (allocated-bytes) allocated-at-start))
-                  -1)
-                :seon.eval/outcome (or @outcome final-outcome)})})
-          (catch Throwable failure
-            (.remove thread-arm)
-            (throw failure)))))))
+  (let [{:keys [interrupt-fn]
+         stop! ::kernel/stop!
+         record ::kernel/record
+         built-in-calls ::kernel/built-in-calls}
+        (kernel/arm ctx time-limit-ms)]
+    {:interrupt-fn interrupt-fn
+     ::stop! stop!
+     ::record record
+     ::built-in-calls built-in-calls}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
@@ -421,6 +291,13 @@
                           (assoc :seon.sci.eval/data
                                  (ex-data throwable)))})))
 
+(defn invoke
+  "Invoke one live SCI Var through the shared guarded kernel."
+  {:malli/schema
+   [:=> [:cat :seon.sci.eval/invocation-request]
+    :seon.sci.eval/invocation-result]}
+  [request]
+  (kernel/invoke request))
 (declare deleted-schema-key)
 
 (defn- program-row
@@ -801,32 +678,33 @@
     row :seon.sci.eval/program-row}]
   (let [projection (or (context-projection ctx)
                        (schema/projection-from-database db))
-        [identity value]
+        [identity-attribute value]
         (some (fn [attribute]
                 (when-some [value (get row attribute)]
                   [attribute value]))
               (conj program/identity-attributes
                     :seon.program/delete-identities))
-        committed (when-not (= identity :seon.program/delete-identities)
+        committed (when-not (= identity-attribute
+                               :seon.program/delete-identities)
                     (db/pull db
-                            (if (= identity :seon.ns/name)
+                            (if (= identity-attribute :seon.ns/name)
                               '[* {:seon.ns/requires [:seon.ns/name]}
                                   {:seon.ns/aliases [*]}
                                   {:seon.ns/imports [*]}
                                   {:seon.ns/refers [*]}]
                               '[*])
-                            [identity value]))]
-    (when (and (#{:seon.fn/sym :seon.test/sym} identity)
+                            [identity-attribute value]))]
+    (when (and (#{:seon.fn/sym :seon.test/sym} identity-attribute)
                (let [source-attribute
                      (:seon.program/source-attribute
-                      (program/shape identity))]
+                      (program/shape identity-attribute))]
                  (not= (get row source-attribute)
                        (get committed source-attribute))))
       (throw (ex-info "Committed declaration source does not match install request."
                       {:seon.error/kind ::install-source-mismatch
-                       :seon.program/identity [identity value]})))
+                       :seon.program/identity [identity-attribute value]})))
     (let [installed
-          (case identity
+          (case identity-attribute
       :seon.ns/name
       (let [namespace-name (:seon.ns/name committed)]
         (sci/install-namespace-bindings!
@@ -844,9 +722,12 @@
         (when event
           (sci/binding [sci/ns (sci/create-ns namespace-name)]
             (sci/eval-form ctx (:seon.sci.reader/form event))))
-        (install-function-contract! ctx committed next-projection db)
+        (kernel/mark-installed! ctx (symbol (:seon.fn/sym committed)))
+        (when-not (::skip-contract-install? row)
+          (install-function-contract! ctx committed next-projection db))
         {:seon.schema/projection next-projection
-         :seon.sci.eval/installed 1})
+         :seon.sci.eval/installed
+         (if (::skip-contract-install? row) 0 1)})
 
       :seon.schema/key
       {:seon.schema/projection
@@ -931,6 +812,34 @@
             :when host-namespace]
       (sci/add-namespace! ctx namespace-name (ns-publics host-namespace)))))
 
+(defn- install-host-namespace!
+  [ctx namespace-name intern-map]
+  (let [sci-namespace (sci/create-ns namespace-name)]
+    (sci/add-namespace!
+     ctx namespace-name
+     (into {}
+           (map (fn [[local-name host-var]]
+                  [local-name (sci/copy-var* host-var sci-namespace)]))
+           intern-map))))
+
+(defn- isolate-function-vars!
+  [ctx function-symbols]
+  (doseq [function-symbol function-symbols
+          :let [namespace-name (symbol (namespace function-symbol))
+                local-name (symbol (name function-symbol))
+                host-namespace
+                (or (find-ns namespace-name)
+                    (try
+                      (require namespace-name)
+                      (find-ns namespace-name)
+                      (catch java.io.FileNotFoundException _ nil)))
+                host-var (when host-namespace
+                           (ns-resolve host-namespace local-name))]
+          :when host-var]
+    (install-host-namespace! ctx namespace-name
+                             (ns-interns host-namespace)))
+  ctx)
+
 (defn- program-documentation
   "Public function documentation derived from one database value."
   [db]
@@ -976,13 +885,27 @@
     (sci/add-namespace! ctx 'clojure.core {'doc doc-var})
     ctx))
 
-(defn acquire!
-  "Install compiled first-party and interpreted agent program into one ctx.
+(defn- install-declared-classes!
+  "Install every non-masked class named by acquired namespace facts."
+  [ctx namespace-rows]
+  (doseq [class-name
+          (->> namespace-rows
+               (mapcat (comp vals :imports row-bindings))
+               (remove nil?)
+               set
+               (sort-by str))]
+    (sci/add-class! ctx class-name (Class/forName (str class-name))))
+  ctx)
 
-  Loaded core-provenanced namespaces bind their actual JVM Vars. Current
-  agent-authored namespaces, contracted functions, and tests then install from
-  database program rows through the existing interpreted path. Receipts and
-  eval results are outside both derivations by construction."
+(defn acquire!
+  "Install declared renderer roots and agent code plus remaining compiled core.
+
+  Renderer identities come only from the schema projection's explicit
+  `:seon.render/ai` and `:seon.render/html` properties. Their durable definitions
+  install from database source and call remaining first-party helpers through
+  the documented host-call interruption ceiling. Current agent-authored
+  namespaces, contracted functions, and tests use the same interpreted path.
+  Receipts and eval results are outside all derivations by construction."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
   (let [projection (schema/projection-from-database db)
@@ -999,35 +922,59 @@
         agent-authored?
         (fn [source-tx]
           (= :agent (source-for-transaction source-tx)))
-        _ (install-loaded-first-party-namespaces!
-           ctx namespace-assertions source-for-transaction)
-        _ (install-program-doc! ctx db)
-        namespace-rows
-        (into
-         []
-         (comp
-          (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
-          (map (fn [[namespace-name _ _]]
-                 (db/pull db
-                         '[* {:seon.ns/requires [:seon.ns/name]}
-                             {:seon.ns/aliases [*]}
-                             {:seon.ns/imports [*]}
-                             {:seon.ns/refers [*]}]
-                         [:seon.ns/name namespace-name]))))
-         namespace-assertions)
-        function-rows
-        (into
-         []
-         (filter
-          (fn [[_ _ _ source-tx]] (agent-authored? source-tx)))
-         (db/q '[:find ?sym ?source ?namespace-name ?source-tx
+        declared-renderer-symbols
+        (into #{}
+              (comp
+               (mapcat (fn [row]
+                         (keep row [:seon.render/ai :seon.render/html])))
+               (filter qualified-symbol?))
+              (vals (:seon.schema.projection/shape-rows projection)))
+        all-function-rows
+        (db/q '[:find ?sym ?source ?namespace-name ?source-tx ?private
                 :where
                 [?function :seon.fn/sym ?sym]
                 [?function :seon.fn/source ?source ?source-tx]
-                [?function :seon.fn/spec _]
+                [?function :seon.fn/private? ?private]
                 [?function :seon.fn/ns ?namespace]
                 [?namespace :seon.ns/name ?namespace-name]]
-              db))
+              db)
+        function-rows
+        (into []
+              (filter
+               (fn [[sym _ _ source-tx _]]
+                 (or (agent-authored? source-tx)
+                     (contains? declared-renderer-symbols (symbol sym)))))
+              all-function-rows)
+        interpreted-symbols (into #{} (map (comp symbol first)) function-rows)
+        _ (install-program-doc! ctx db)
+        selected-namespace-names
+        (into (into #{} (map #(nth % 2)) function-rows)
+              (comp
+               (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
+               (map first))
+              namespace-assertions)
+        all-namespace-rows
+        (into
+         []
+         (map (fn [[namespace-name source source-tx]]
+                (assoc
+                 (db/pull db
+                          '[* {:seon.ns/requires [:seon.ns/name]}
+                              {:seon.ns/aliases [*]}
+                              {:seon.ns/imports [*]}
+                              {:seon.ns/refers [*]}]
+                          [:seon.ns/name namespace-name])
+                 ::namespace-source source
+                 ::namespace-source-tx source-tx
+                 ::agent-authored? (agent-authored? source-tx))))
+         namespace-assertions)
+        all-namespace-row-by-name
+        (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
+        namespace-rows
+        (into []
+              (keep (fn [namespace-name]
+                      (get all-namespace-row-by-name namespace-name)))
+              selected-namespace-names)
         test-rows
         (into
          []
@@ -1045,6 +992,18 @@
         (group-by #(nth % 2) test-rows)
         namespace-row-by-name
         (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
+        _ (kernel/cache-program!
+           ctx
+           (into {}
+                 (map (fn [[sym source namespace-name source-tx private?]]
+                        [(symbol sym)
+                         {::function-source source
+                          ::function-source-tx source-tx
+                          ::function-namespace namespace-name
+                          ::function-private? private?
+                          ::agent-authored? (agent-authored? source-tx)}]))
+                 all-function-rows)
+           all-namespace-row-by-name)
         namespace-names
         (into (set (keys namespace-row-by-name))
               (concat (keys function-rows-by-ns)
@@ -1103,11 +1062,21 @@
              :seon.sci.eval/installed
              (+ (:seon.sci.eval/installed state)
                 (:seon.sci.eval/installed installed))}))]
+    ;; Imports are explicit namespace facts. Install their named classes before
+    ;; the namespace bindings resolve them; SCI is containment, not a security
+    ;; boundary, and the program graph—not a hand list—declares the set.
+    (install-declared-classes! ctx namespace-rows)
     ;; Create every namespace and publish aliases first. Alias targets need not
     ;; exist: this is the effective behavior of SCI's `:as-alias` too.
     (doseq [[namespace-name row] namespace-row-by-name]
       (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings row) :refers {})))
+    ;; Namespace declarations establish aliases/imports first; copied host Vars
+    ;; then populate the same SCI namespaces without being erased by that
+    ;; declaration install. Selected definitions overwrite only their own Vars.
+    (install-loaded-first-party-namespaces!
+     ctx namespace-assertions source-for-transaction)
+    (isolate-function-vars! ctx interpreted-symbols)
     (let [functions-installed
           (reduce
            (fn [state namespace-name]
@@ -1119,12 +1088,15 @@
              (reduce
               install-row
               (cond-> state
-                (contains? namespace-row-by-name namespace-name)
+                (::agent-authored?
+                 (get namespace-row-by-name namespace-name))
                 (update :seon.sci.eval/installed inc))
-              (map (fn [[sym source _ _]]
+              (map (fn [[sym source _ source-tx _]]
                      {:seon.fn/sym sym
                       :seon.fn/source source
-                      :seon.fn/ns [:seon.ns/name namespace-name]})
+                      :seon.fn/ns [:seon.ns/name namespace-name]
+                      ::skip-contract-install?
+                      (not (agent-authored? source-tx))})
                    (sort-by first
                             (get function-rows-by-ns namespace-name)))))
            {:seon.schema/projection projection
@@ -1144,6 +1116,42 @@
                (sort-by first (get test-rows-by-ns namespace-name)))))
        functions-installed
        namespace-order))))
+
+(defn- install-function-from-database!
+  "Install one selected function from the acquired database snapshot."
+  [ctx _db function-symbol]
+  (let [{source ::function-source
+         namespace-name ::function-namespace
+         agent-authored? ::agent-authored?}
+        (kernel/program-function ctx function-symbol)
+        namespace-row
+        (kernel/program-namespace ctx namespace-name)]
+    (when-not source
+      (throw
+       (ex-info "Selected function has no durable program row."
+                {:seon.error/kind ::missing-function-row
+                 :seon.fn/sym (str function-symbol)})))
+    (let [required-names
+          (into #{} (map :seon.ns/name) (:seon.ns/requires namespace-row))]
+      (when-not agent-authored?
+        (require namespace-name)
+        (doseq [required-name required-names
+                :let [host-namespace (find-ns required-name)]
+                :when host-namespace]
+          (install-host-namespace! ctx required-name
+                                   (ns-publics host-namespace)))
+        (install-host-namespace! ctx namespace-name
+                                 (ns-interns (find-ns namespace-name))))
+      (install-declared-classes! ctx [namespace-row])
+      (sci/install-namespace-bindings!
+       ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
+      (sci/install-namespace-bindings! ctx namespace-name
+                                       (row-bindings namespace-row))
+      (let [event (one-event source namespace-name ctx)]
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event))))
+      (kernel/mark-installed! ctx function-symbol)))
+  function-symbol)
 
 (defn install-session-image!
   "Restore namespace session definitions into one cold cluster ctx.
@@ -1220,7 +1228,9 @@
   ([db connection]
    (let [ctx (assoc (build-base-ctx)
                     ::custody
-                    {:seon.store/branch-connection connection})
+                    {:seon.store/branch-connection connection}
+                    ::kernel/install-function!
+                    install-function-from-database!)
          acquired (acquire! {:seon.sci.eval/ctx ctx
                              :seon.db/db db})
          projection (:seon.schema/projection acquired)

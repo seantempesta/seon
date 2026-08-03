@@ -71,14 +71,165 @@
   projection's own contract; the ones this repository ships are."
   (:require [seon.config :as config]
             [seon.db :as db]
+            [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Contract-derived renderer selection and guarded invocation
+;;; ---------------------------------------------------------------------------
+
+(defn- render-value
+  [request]
+  (get request :seon.render/value request))
+
+(defn- render-argument
+  [request]
+  (let [value (render-value request)
+        context (select-keys request
+                             [:seon.db/db
+                              :seon.cluster.agent/id
+                              :seon.sci.admit/caps
+                              :seon.render/distance
+                              :seon.cluster.run/live-processes
+                              :seon.ai/partial])]
+    (if (map? value)
+      (assoc (merge value context) :seon.render/value value)
+      (assoc context :seon.render/value value))))
+
+(defn candidates
+  "Contract-fitting public functions in the explicit owning namespace.
+
+  The acquired database snapshot bounds candidates by explicit namespace and
+  public-function facts. The immutable schema projection then validates the
+  complete input and typed output contracts against the actual render argument.
+  Results are sorted so database insertion order cannot decide ambiguity."
+  {:malli/schema [:=> [:cat :seon.render/candidate-request]
+                  [:vector :seon.fn/sym]]}
+  [{ctx :seon.sci.eval/ctx
+    namespace-name :seon.render/namespace
+    output-schema :seon.render/output-schema
+    :as request}]
+  (if-not namespace-name
+    []
+    (let [projection (sci.kernel/context-projection ctx)
+          argument (render-argument request)
+          symbols (sci.kernel/public-functions-in ctx namespace-name)]
+      (into []
+            (comp
+             (filter #(= namespace-name (symbol (namespace %))))
+             (distinct)
+             (filter #(schema/function-accepts-in?
+                       projection % [argument]))
+             (filter #(schema/function-returns-in?
+                       projection % output-schema))
+             (map str))
+            (sort-by str symbols)))))
+
+(defn- ambiguity
+  [namespace-name output candidate-symbols]
+  {:seon.error/kind ::ambiguous
+   :seon.error/message
+   (str "More than one function in " namespace-name
+        " accepts this value and returns " output ".")
+   :seon.error/data
+   {:seon.render/namespace namespace-name
+    :seon.render/output output
+    :seon.render/candidates (vec candidate-symbols)}})
+
+(defn- explicit-producer
+  [request output]
+  (let [value (render-value request)]
+    (or (when (map? value) (get value output))
+        (get request output))))
+
+(defn- schema-producer
+  [projection value output]
+  (when (map? value)
+    (let [producers
+          (->> (schema/matching-shapes-in projection value)
+               (keep #(get % output))
+               distinct
+               (sort-by str)
+               vec)]
+      (cond
+        (= 1 (count producers)) (first producers)
+        (> (count producers) 1)
+        (ambiguity nil output producers)))))
+
+(defn- producer
+  [{ctx :seon.sci.eval/ctx
+    namespace-name :seon.render/namespace
+    :as request}
+   output output-schema]
+  (let [value (render-value request)
+        projection (sci.kernel/context-projection ctx)
+        explicit (explicit-producer request output)]
+    (if explicit
+      explicit
+      (let [fits (candidates (assoc request
+                                    :seon.render/output-schema output-schema))]
+        (cond
+          (= 1 (count fits)) (symbol (first fits))
+          (> (count fits) 1) (ambiguity namespace-name output fits)
+          :else (or (schema-producer projection value output)
+                    (if (= output :seon.render/html)
+                      'seon.render.value/render-html
+                      'seon.render.value/render-ai)))))))
+
+(defn- invoke-producer
+  [{ctx :seon.sci.eval/ctx
+    caps :seon.sci.admit/caps
+    time-limit-ms :seon.sci.eval/time-limit-ms
+    on-core-error :seon.config/on-core-error
+    :as request}
+   output output-schema]
+  (let [selected (producer request output output-schema)]
+    (if (:seon.error/kind selected)
+      selected
+      (:seon.sci.admit/value
+       (sci.kernel/invoke
+        {:seon.sci.eval/ctx ctx
+         :seon.db/db (:seon.db/db request)
+         :seon.fn/sym (str selected)
+         :seon.sci.eval/args [(render-argument request)]
+         :seon.sci.eval/time-limit-ms time-limit-ms
+         :seon.sci.admit/caps caps
+         :seon.config/on-core-error on-core-error})))))
+
+(defn render-ai
+  "Render one value as text through the unique selected live SCI Var."
+  {:malli/schema [:=> [:cat :seon.render/call-request]
+                  [:or :nil :string :seon.error/value]]}
+  [request]
+  (let [rendered (invoke-producer request :seon.render/ai :string)]
+    (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
+      rendered
+      {:seon.error/kind ::invalid-ai-output
+       :seon.error/message "The selected AI renderer did not return text."
+       :seon.error/data {:seon.render/output rendered}})))
+
+(defn render-html
+  "Render one value as Hiccup through the unique selected live SCI Var."
+  {:malli/schema [:=> [:cat :seon.render/call-request]
+                  [:or :nil :seon.render/hiccup :seon.error/value]]}
+  [request]
+  (let [rendered (invoke-producer request :seon.render/html
+                                  :seon.render/hiccup)]
+    (if (or (nil? rendered)
+            (:seon.error/kind rendered)
+            (hiccup/hiccup? rendered))
+      rendered
+      {:seon.error/kind ::invalid-html-output
+       :seon.error/message "The selected HTML renderer did not return Hiccup."
+       :seon.error/data {:seon.render/output rendered}})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient walk custody
@@ -258,11 +409,11 @@
   [unit]
   (let [value (get unit :seon.render/value unit)]
     (into #{}
-          (keep (fn [[key declaration]]
-                  (when (and (qualified-keyword? key)
-                             (= "seon.render" (namespace key))
+          (keep (fn [[render-key declaration]]
+                  (when (and (qualified-keyword? render-key)
+                             (= "seon.render" (namespace render-key))
                              (declaration? declaration))
-                    key)))
+                    render-key)))
           (concat
            (when (map? value) value)
            (when (and (map? unit) (not (identical? unit value))) unit)))))
