@@ -163,6 +163,37 @@
            "and with no caps to bound them they are OMITTED, never
             printed unbounded")))))
 
+(deftest contract-problems-have-a-readable-inline-face-and-a-complete-tree
+  (let [caps {:seon.config.eval.result/max-depth 8
+              :seon.config.eval.result/max-collection 32
+              :seon.config.eval.result/max-string 4096
+              :seon.config.eval.result/max-nodes 1024}]
+    (try
+      (instrument/apply! {:seon.config/on-core-error :panic
+                          :seon.sci.admit/caps caps})
+      (let [failure
+            (try
+              (closed-map-input
+               {:seon.instrument-test/expected "not an int"})
+              (catch Exception thrown thrown))
+            data (ex-data failure)
+            message (:seon.error/message data)
+            problems (get-in data
+                             [:seon.error/data :seon.instrument/problems])]
+        (is (str/includes? message "seon.instrument-test"))
+        (is (str/includes? message ":expected"))
+        (is (str/includes? message "\"not an int\""))
+        (is (str/includes? message "should be an integer"))
+        (is (not (str/includes? message ":seon.print/face"))
+            "the print-node tree is rendered rather than serialized inline")
+        (is (not (str/includes? message "\n"))
+            "contract feedback is one readable line")
+        (is (string? problems))
+        (is (str/includes? (or problems "") "seon.print{:face")
+            "the complete admitted explanation remains in the failure data"))
+      (finally
+        (instrument/remove!)))))
+
 (deftest many-problem-contract-violations-have-bounded-headlines
   (let [caps {:seon.config.eval.result/max-depth 4
               :seon.config.eval.result/max-collection 4

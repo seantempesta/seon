@@ -85,6 +85,7 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]
+            [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -119,14 +120,28 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
+(defn- admitted-face
+  [caps value]
+  (let [admitted
+        (admit/admit
+         {:seon.sci.admit/value value
+          :seon.sci.admit/interrupt-fn (constantly nil)
+          :seon.sci.admit/caps caps
+          ;; the reporter may not panic on the way to reporting a panic
+          :seon.config/on-core-error :record})]
+    {:seon.instrument/edn (:seon.cluster.eval/result-edn admitted)
+     :seon.instrument/text
+     (print/emit-text
+      (:seon.sci.admit/print-node admitted)
+      {:seon.print/length
+       (:seon.config.eval.result/max-collection caps)
+       :seon.print/level (:seon.config.eval.result/max-depth caps)
+       :seon.print/width 0
+       :seon.print/table? false})}))
+
 (defn- admitted-edn
   [caps value]
-  (:seon.cluster.eval/result-edn
-   (admit/admit {:seon.sci.admit/value value
-                 :seon.sci.admit/interrupt-fn (constantly nil)
-                 :seon.sci.admit/caps caps
-                 ;; the reporter may not panic on the way to reporting a panic
-                 :seon.config/on-core-error :record})))
+  (:seon.instrument/edn (admitted-face caps value)))
 
 (defn- violation
   "One malli report as a flat, bounded, agent-readable value.
@@ -160,7 +175,11 @@
                              [(:input data) (:args data)])
           explanation (m/explain offended value)
           problem-count (count (:errors explanation))
-          all-problems (me/humanize explanation)
+          all-problems
+          (me/humanize
+           explanation
+           {:wrap #(select-keys % [:value :message])})
+          problem-face (when caps (admitted-face caps all-problems))
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
                             (= :cat (first schema-form))
@@ -176,7 +195,7 @@
                (str (:fn-name data) " violated its contract ("
                     (name kind) "): "
                     (if caps
-                      (admitted-edn caps all-problems)
+                      (:seon.instrument/text problem-face)
                       (pr-str all-problems)))
                :seon.error/data
                (cond-> {::malli kind
@@ -185,7 +204,9 @@
                                 :input)
                         ::schema (pr-str expected)
                         ::problem-count problem-count}
-                 (:fn-name data) (assoc ::fn (str (:fn-name data))))}
+                 (:fn-name data) (assoc ::fn (str (:fn-name data)))
+                 problem-face
+                 (assoc ::problems (:seon.instrument/edn problem-face)))}
         caps
         (update :seon.error/data assoc ::args (admitted-edn caps value))))))
 
