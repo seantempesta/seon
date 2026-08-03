@@ -29,7 +29,9 @@
   stolen held run, a reopened closed run, a second plan) or refuses
   when the model says commit is a counterexample. Invariants over
   durable facts are asserted after every command."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.main :as main]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -38,6 +40,32 @@
             [seon.cluster.run :as run]
             [seon.schema]
             [seon.schema.datahike :as schema.datahike]))
+
+(deftest receipt-ai-is-only-repl-output
+  (is (= "42"
+         (run/render-receipt-ai {:seon.cluster.eval/result-edn "42"})))
+  (is (= "side effect\nnil"
+         (run/render-receipt-ai
+          {:seon.cluster.eval/output "side effect\n"
+           :seon.cluster.eval/result-edn "nil"})))
+  (is (nil? (run/render-receipt-ai {})))
+  (is (nil? (run/render-receipt-ai
+             {:seon.cluster.eval/interrupted-at true})))
+  (let [triage-edn
+        (try
+          (/ 1 0)
+          (catch Throwable throwable
+            (pr-str (main/ex-triage (Throwable->map throwable)))))
+        rendered
+        (run/render-receipt-ai
+         {:seon.cluster.eval/error "Divide by zero"
+          :seon.cluster.eval/triage-edn triage-edn})]
+    (is (str/starts-with? rendered
+                          "Execution error (ArithmeticException) at"))
+    (is (str/ends-with? rendered "Divide by zero"))
+    (is (= 2 (count (str/split-lines rendered))))
+    (is (not (str/includes? rendered "Form ")))
+    (is (not (str/includes? rendered "failed:")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; In-memory database fixture

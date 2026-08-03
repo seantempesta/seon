@@ -1,8 +1,10 @@
 #:seon.cluster.agent{:agent
                      [:map
                       {:seon.db/entity true,
-                       :seon.render/ai seon.render.agent/agent-ai,
-                       :seon.render/html seon.render.agent/agent-html}
+                       :seon.render/ai
+                       seon.render.transcript/render-session-ai,
+                       :seon.render/html
+                       seon.render.transcript/render-session-html}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/namespace
                        {:optional true}

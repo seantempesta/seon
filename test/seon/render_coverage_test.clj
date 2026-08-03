@@ -6,11 +6,13 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
+            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
@@ -110,6 +112,14 @@
    (some #(when (= attribute (:seon.render.walk/attribute %)) %) units)))
 
 (deftest important-runtime-entities-declare-and-use-readable-faces
+  (is (= {:seon.render/ai `transcript/render-session-ai
+          :seon.render/html `transcript/render-session-html}
+         (select-keys (family-properties :seon.cluster.agent/agent)
+                      [:seon.render/ai :seon.render/html])))
+  (is (= {:seon.render/ai `run/render-receipt-ai
+          :seon.render/html `run/render-receipt-html}
+         (select-keys (family-properties :seon.cluster.eval/receipt)
+                      [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `cluster/render-ai
           :seon.render/html `cluster/render-html}
          (select-keys (family-properties :seon.cluster/cluster)

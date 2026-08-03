@@ -102,6 +102,7 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require [clojure.edn :as edn]
+            [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
@@ -1369,6 +1370,7 @@
     session-defs :seon.sci.eval/session-defs
     record :seon.sci.admit/record
     value :seon.sci.admit/value
+    triage-edn :seon.cluster.eval/triage-edn
     interrupted-at :seon.cluster.eval/interrupted-at
     :as request}]
   (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
@@ -1380,6 +1382,8 @@
            :seon.cluster.eval/error (:seon.error/message value)
            :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
            :seon.sci.admit/record record}
+    (string? triage-edn)
+    (assoc :seon.cluster.eval/triage-edn triage-edn)
     (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
@@ -1503,7 +1507,9 @@
                             sci/out printed
                             sci/err printed
                             sci/print-length @sci/print-length
-                            sci/print-level @sci/print-level]
+                            sci/print-level @sci/print-level
+                            sci/print-namespace-maps true
+                            sci/print-readably true]
                 (try
                   (let [value (sci/eval-form execution-ctx form)]
                     (vreset! ending-namespace (sci/ns-name @sci/ns))
@@ -1619,7 +1625,10 @@
                     :seon.print/options @print-options
                     :seon.sci.eval/session-defs session-defs
                     :seon.sci.admit/record record
-                    :seon.sci.admit/value value}
+                    :seon.sci.admit/value value
+                    :seon.cluster.eval/triage-edn
+                    (pr-str
+                     (main/ex-triage (Throwable->map throwable)))}
              ;; the instant the interrupt was OBSERVED — the one
              ;; genuinely new fact a cut evaluation leaves. Its
              ;; presence IS the interrupted state; there is no label.

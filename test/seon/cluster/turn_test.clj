@@ -32,6 +32,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.instrument :as instrument]
+            [seon.render.transcript :as transcript]
             [sci.core :as sci.core]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
@@ -1932,6 +1933,46 @@
                                    @connection)))))
             (testing "and the run is closed, so the agent is idle again"
               (is (nil? (work/next-agent-work @connection (request connection)))))))))))
+
+(deftest a-pure-prose-reply-records-input-without-a-failed-receipt
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.store/branch-connection cluster)]
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         "I explained the result without another form."})]
+          (is (= [:open :call :close]
+                 (mapv :seon.cluster.work/situation (drive! cluster 10))))
+          (is (= ["; I explained the result without another form."]
+                 (db/q '[:find [?source ...]
+                        :where
+                        [?form :seon.cluster.run.form/source ?source]]
+                       @connection)))
+          (is (empty?
+               (db/q '[:find [?receipt ...]
+                      :where
+                      [?receipt :seon.cluster.eval/id _]]
+                     @connection)))
+          (is (empty?
+               (db/q '[:find [?receipt ...]
+                      :where
+                      [?receipt :seon.cluster.eval/error _]]
+                     @connection)))
+          (let [rendered
+                (transcript/render-ai
+                 {:seon.db/db @connection
+                  :seon.cluster.agent/id "agent-a"
+                  :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                  :seon.sci.eval/time-limit-ms 2000
+                  :seon.config/on-core-error :panic
+                  :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                  :seon.render.transcript/token-budget 100000})]
+            (is (str/includes?
+                 rendered
+                 "user=> ; I explained the result without another form."))
+            (is (not (str/includes? rendered "failed")))
+            (is (not (str/includes? rendered "nil")))))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster

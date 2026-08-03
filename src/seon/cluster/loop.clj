@@ -269,6 +269,9 @@
       (assoc :seon.cluster.eval/result-size
              (:seon.cluster.eval/result-size settlement-evaluation))
       error (assoc :seon.cluster.eval/error error)
+      (:seon.cluster.eval/triage-edn evaluation)
+      (assoc :seon.cluster.eval/triage-edn
+             (:seon.cluster.eval/triage-edn evaluation))
       (:seon.cluster.eval/interrupted-at evaluation)
       (assoc :seon.cluster.eval/interrupted-at
              (:seon.cluster.eval/interrupted-at evaluation))
@@ -295,6 +298,7 @@
            :seon.cluster.run.form/ordinal
            :seon.cluster.eval/result-edn :seon.cluster.eval/result-blob
            :seon.cluster.eval/result-size :seon.cluster.eval/error
+           :seon.cluster.eval/triage-edn
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.cluster.eval/ns
            :seon.sci.eval/program-row :seon.error/kind
@@ -306,6 +310,8 @@
                   result-blob (assoc :seon.cluster.eval/result-blob result-blob)
                   result-size (assoc :seon.cluster.eval/result-size result-size)
                   error (assoc :seon.cluster.eval/error error)
+                  triage-edn
+                  (assoc :seon.cluster.eval/triage-edn triage-edn)
                   ;; the cut instant, present exactly when the time
                   ;; limit fired — its presence IS the interrupted state
                   interrupted-at (assoc :seon.cluster.eval/interrupted-at

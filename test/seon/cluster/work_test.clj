@@ -337,6 +337,35 @@
                 (is (seon.schema/valid-candidate-value?
                      :seon.cluster.work/next derived))))))))))
 
+(deftest comment-only-input-is-recorded-but-never-becomes-eval-work
+  (with-database
+    (fn [connection]
+      (add-trigger! connection)
+      (open-run! connection {:holder process :planned? true
+                             :triggered? true})
+      (db/transact!
+       connection
+       [[:db/add [:seon.cluster.run.form/id (str run-id "-0")]
+         :seon.cluster.run.form/source "; pure prose"]])
+      (is (= {:seon.cluster.work/situation :resume
+              :seon.cluster.run/id run-id
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.run.form/ordinal 1}
+             (work/next-agent-work @connection request)))
+      (terminal-receipt! connection 1)
+      (is (= {:seon.cluster.work/situation :close
+              :seon.cluster.run/id run-id
+              :seon.cluster.agent/id agent-id}
+             (work/next-agent-work @connection request)))
+      (is (empty?
+           (db/q '[:find [?receipt ...]
+                  :in $ ?run-id
+                  :where
+                  [?run :seon.cluster.run/id ?run-id]
+                  [?receipt :seon.cluster.eval/run ?run]
+                  [?receipt :seon.cluster.eval/ordinal 0]]
+                @connection run-id))))))
+
 (deftest a-lint-refusal-derives-an-immediate-corrective-turn
   (doseq [[label results]
           [["all forms were refused" [lint-refusal lint-refusal]]

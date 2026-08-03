@@ -25,7 +25,7 @@ decisions 4–11). The agent's context is rebuilt on four pillars:
    result (no marker before results), comment-only entries produce
    NOTHING, errors as Clojure's standard one-liners. Comments are never
    modeled as output. The exact contract is pinned by
-   `repl-display-conventions-2026-08-03.md` (in flight) with a
+   [repl-display-conventions-2026-08-03.md](../sci-execution-runtime/research/repl-display-conventions-2026-08-03.md) with a
    divergence table against `seon.render.transcript` — each divergence
    fixed at its owner.
 3. **Teach fishing with actionable outputs.** Every form passes "what
@@ -92,7 +92,7 @@ agents should imitate.
 | Dependency | State | Evidence |
 |---|---|---|
 | Curriculum + recipes + helper verdict | DONE (revised under the actionable filter) | [bootstrap-curriculum-2026-08-03.md](../sci-execution-runtime/research/bootstrap-curriculum-2026-08-03.md) |
-| REPL display contract | IN FLIGHT | `repl-display-conventions-2026-08-03.md`; local measurement: bare results, out-before-result, comments produce nothing |
+| REPL display contract | DONE (slice 1) | [repl-display-conventions-2026-08-03.md](../sci-execution-runtime/research/repl-display-conventions-2026-08-03.md); focused behavioral gates cover namespace prompts, input comments, output-before-result, bare values, standard errors, and zero-event comment forms |
 | Comments-as-output purge | IN FLIGHT | `comment-output-sweep` lane; ruling = notes decision 11 |
 | Message-context form + replied derivation | RULED | notes decisions 4, 5, 7 (X is a literal in the agent's own form) |
 | Status/board derivation | RULED | notes decision 2; the readline renders the agent's own row |
@@ -103,10 +103,13 @@ agents should imitate.
 
 ## Implementation order
 
-1. **Display contract first** — land the divergence-table fixes in
+1. **Display contract first — DONE (slice 1).** The divergence-table fixes landed in
    `seon.render.transcript`/`seon.cluster.reply` display (prompt-per-form,
    bare results, comment handling, error one-liners). Everything else
-   renders through this.
+   renders through this. Receipt and session shapes declare both render
+   producers; discovery is the output-declaration query rather than a
+   walk attachment. The message/status sections remain until their
+   bootstrap-form replacements land in slice 2.
 2. **The form series rewrite** — replace `resources/seon/bootstrap.edn`
    per the revised curriculum: fix the `{:closed true}` defect (live in
    every agent's context today), the capability/`my.*` query lessons, the
@@ -125,7 +128,7 @@ agents should imitate.
 ## Falsifiers / graduation
 
 - A fresh agent's first turn renders: `(help)` + lessons + volatile forms
-  + empty session + default readline — byte-stable prefix across two
+  plus empty session + default readline — byte-stable prefix across two
   turns except declared-volatile forms (measured hit rate recorded).
 - The rendered session is accepted verbatim by a real Clojure reader of
   transcripts: prompts, bare results, no comment appears as output.

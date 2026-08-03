@@ -28,8 +28,8 @@
   Everything else is coalesced back into its original prose span,
   prefixed with the agent-facing single-`;` comment grammar, and
   attached to the next form. Trailing or pure prose becomes one
-  comment-only plan source: SCI reads that as nil, so the prose is
-  recorded but no prose token is resolved or invoked.
+  comment-only plan source. The reader produces zero events for it, so
+  the prose is recorded as input without an evaluation or receipt.
 
   SOURCES, NOT FORMS. The return is a vector of plan forms, each one a
   SOURCE STRING plus the namespace it was written under. The evaluator

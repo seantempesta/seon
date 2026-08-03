@@ -1,5 +1,5 @@
 (ns seon.render.transcript-test
-  (:require [clojure.edn :as edn]
+  (:require [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -14,8 +14,7 @@
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support])
-  (:import [java.io PushbackReader StringReader]))
+            [seon.test-support :as support]))
 
 (def ^:private property-seed 2026073104)
 (def ^:private agent-id "transcript-agent")
@@ -56,21 +55,6 @@
      :seon.config/on-core-error :record
      :seon.sci.admit/caps caps})))
 
-(defn- reader-valid?
-  [text]
-  (try
-    (with-open [reader (PushbackReader. (StringReader. text))]
-      (loop []
-        (let [form (read {:eof ::eof
-                          :read-cond :allow
-                          :features #{:clj}}
-                         reader)]
-          (when-not (= ::eof form)
-            (recur)))))
-    true
-    (catch Throwable _
-      false)))
-
 (defn- nodes
   [hiccup]
   (filter vector? (tree-seq sequential? seq hiccup)))
@@ -99,30 +83,36 @@
     (nodes rendered))
    0))
 
-(defn- ai-entries
-  [rendered]
-  (into
-   []
-   (map (fn [[_ kind id-source detail]]
-          {:id (edn/read-string id-source)
-           :kind (keyword kind)
-           :detail (keyword detail)}))
-   (re-seq
-    #"(?m)^;; transcript/entry :(message|eval) (\"(?:\\.|[^\"])*\") :(full|summary)$"
-    rendered)))
+(def ^:private forbidden-session-narration
+  ["Form 0 returned"
+   "Form 0 failed"
+   "It printed:"
+   "(comment "
+   ";; transcript/entry"
+   ";; transcript/elided"
+   "is still running"
+   "was interrupted"])
 
-(defn- ai-elided
+(defn- assert-no-session-narration
   [rendered]
-  (or (some-> (re-find #"(?m)^;; transcript/elided (\d+)$" rendered)
-              second
-              parse-long)
-      0))
+  (doseq [forbidden forbidden-session-narration]
+    (is (not (str/includes? rendered forbidden))
+        (str "session contains invented display grammar: " forbidden))))
+
+(defn- arithmetic-triage-edn
+  []
+  (try
+    (/ 1 0)
+    (catch Throwable throwable
+      (pr-str (main/ex-triage (Throwable->map throwable))))))
 
 (defn- seed-populated-history!
   [connection]
   (db/transact!
    connection
-   [{:seon.cluster.agent/id agent-id}
+   [{:seon.ns/name 'my.agents.transcript}
+    {:seon.cluster.agent/id agent-id
+     :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.transcript]}
     {:seon.cluster.agent/id peer-id}
     {:seon.problems/id "problem-transcript"}
     {:seon.cluster.message/id "outside-0"
@@ -142,11 +132,15 @@
     {:seon.cluster.run.form/id "form-result"
      :seon.cluster.run.form/run [:seon.cluster.run/id "run-result"]
      :seon.cluster.run.form/ordinal 0
-     :seon.cluster.run.form/source "(+ 20 22)"}
+     :seon.cluster.run.form/source
+     ";; calculate the answer\n(do (println \"side effect\") (+ 20 22))"
+     :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.transcript]}
     {:seon.cluster.eval/id "eval-result"
      :seon.cluster.eval/run [:seon.cluster.run/id "run-result"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 2000)
+     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
+     :seon.cluster.eval/output "side effect\n"
      :seon.cluster.eval/result-edn "42"}
     {:seon.cluster.message/id "send-2"
      :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
@@ -188,6 +182,7 @@
      :seon.cluster.eval/result-edn
      "{:seon.error/kind :seon.sci.eval/refused}"
      :seon.cluster.eval/error "No such namespace: missing.function"
+     :seon.cluster.eval/triage-edn (arithmetic-triage-edn)
      :seon.error/kind :seon.sci.eval/refused
      :seon.problems/id "problem-eval-error"
      :seon.cluster.eval/interrupted-at (at 4501)}
@@ -205,16 +200,12 @@
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
             html (hiccup/->string html-value)
-            ai-rows (ai-entries ai)
             html-rows (html-entries html-value)]
         (testing "messages and eval receipts interleave by their stored time"
           (is (= ["outside-0" "peer-1" "eval-result" "send-2"
                   "eval-wait" "decline-3" "eval-error" "self-4"]
-                 (mapv :id ai-rows)))
-          (is (= (mapv #(select-keys % [:id :kind :detail]) html-rows)
-                 ai-rows)))
-        (testing "recent entries are full reader-valid REPL history"
-          (is (reader-valid? ai))
+                 (mapv :id html-rows))))
+        (testing "recent receipts reproduce prompt, input, output, and result"
           (is (str/includes?
                ai
                "Agent transcript-peer said to transcript-agent: Repair the owning namespace."))
@@ -226,15 +217,18 @@
           (is (str/includes? ai "From outside this cluster to transcript-agent"))
           (is (not (str/includes? ai
                                   "Agent transcript-agent said to transcript-agent: Start with")))
-          (is (str/includes? ai "Form 0 returned 42"))
+          (is (str/includes?
+               ai
+               (str "my.agents.transcript=> ;; calculate the answer\n"
+                    "(do (println \"side effect\") (+ 20 22))\n"
+                    "side effect\n42")))
           (is (str/includes? ai "waiting for the peer review"))
-          (is (str/includes? ai "No such namespace: missing.function"))
-          (is (str/includes? ai ":seon.sci.eval/refused"))
-          (is (str/includes? ai "problem-eval-error"))
-          (is (str/includes? ai "its effect may have happened")))
+          (is (str/includes? ai "Execution error (ArithmeticException) at"))
+          (is (str/includes? ai "Divide by zero"))
+          (assert-no-session-narration ai))
         (testing "old entries age only in the projection"
           (is (= [:summary :summary :full :full :full :full :full :full]
-                 (mapv :detail ai-rows))))
+                 (mapv :detail html-rows))))
         (testing "HTML is the same structure with stable entry ids"
           (is (= (block/surface-id :transcript) (get-in html-value [1 :id])))
           (doseq [{:keys [id kind dom-id]} html-rows]
@@ -254,18 +248,16 @@
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
             html (hiccup/->string html-value)
-            visible (ai-entries ai)
-            elided (ai-elided ai)]
+            visible (html-entries html-value)
+            elided (html-elided html-value)]
         (is (pos? floor))
         (is (pos? elided))
         (is (= 8 (+ elided (count visible))))
-        (is (= elided (html-elided html-value)))
-        (is (= (mapv :id visible) (mapv :id (html-entries html-value))))
         (is (str/includes? ai (str elided " older transcript entr")))
         (is (str/includes? html (str elided " older transcript entr")))
         (is (<= (tokens/estimate ai) budget))
         (is (<= (tokens/estimate html) budget))
-        (is (reader-valid? ai))))))
+        (assert-no-session-narration ai)))))
 
 (defn- seed-pinned-bootstrap-history!
   [connection]
@@ -322,30 +314,26 @@
             ai (transcript/render-ai (unit db budget))
             html-value (transcript/render-html (unit db budget))
             html (hiccup/->string html-value)
-            ai-rows (ai-entries ai)
             html-rows (html-entries html-value)
             bootstrap-run-id (bootstrap/run-id agent-id)
             pinned-ids (mapv #(pr-str [bootstrap-run-id %]) (range 13))
             newest-ids (mapv #(str "newest-" %) (range 6))
-            visible-ids (mapv :id ai-rows)
-            pinned-end (.indexOf ai (str "\"" (last pinned-ids) "\""))
-            marker-start (.indexOf ai ";; transcript/elided")
-            newest-start (.indexOf ai (str "\"" (first newest-ids) "\""))]
-        (is (pos? (ai-elided ai)))
-        (is (= (ai-elided ai) (html-elided html-value)))
+            visible-ids (mapv :id html-rows)
+            pinned-end (.indexOf ai "user=> (identity 12)\n12")
+            marker-start (.indexOf ai "middle transcript entries elided")
+            newest-start (.indexOf ai "newest history 0")]
+        (is (pos? (html-elided html-value)))
         (is (= pinned-ids (subvec visible-ids 0 13)))
-        (is (every? #(= :full (:detail %)) (take 13 ai-rows)))
+        (is (every? #(= :full (:detail %)) (take 13 html-rows)))
         (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
         (is (< pinned-end marker-start newest-start))
         (is (str/includes? ai "middle transcript entries elided"))
         (is (< (.indexOf html (last pinned-ids))
                (.indexOf html "seon-transcript-elision")
                (.indexOf html (first newest-ids))))
-        (is (= (mapv #(select-keys % [:id :kind :detail]) html-rows)
-               ai-rows))
         (is (<= (tokens/estimate ai) budget))
         (is (<= (tokens/estimate html) budget))
-        (is (reader-valid? ai))))))
+        (assert-no-session-narration ai)))))
 
 (deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
   (support/with-database
@@ -374,14 +362,12 @@
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/result-edn "{"}])
       (let [ai (transcript/render-ai (unit @connection 100000))]
-        (is (reader-valid? ai))
         (is (str/includes?
              ai
              "Agent transcript-agent said to transcript-peer: Inspect the test fact."))
-        (is (str/includes? ai "#:seon.cluster.run.form{:source \"(\"}"))
-        (is (str/includes? ai ":seon.cluster.eval/result-edn \\\"{\\\""))
-        (is (= ["about-test" "eval-malformed"]
-               (mapv :id (ai-entries ai))))))))
+        (is (str/includes? ai "user=> ("))
+        (is (str/includes? ai ":seon.cluster.eval/result-edn \"{\""))
+        (assert-no-session-narration ai)))))
 
 (deftest receipt-content-enters-the-shared-capped-floor
   (support/with-database
@@ -411,10 +397,10 @@
            :seon.cluster.eval/result-edn (pr-str result)}])
         (let [ai (transcript/render-ai
                   (unit @connection 100000 narrow-caps))]
-          (is (reader-valid? ai))
           (is (str/includes? ai "…"))
           (is (str/includes? ai "elided"))
-          (is (not (str/includes? ai ":audit/field-39"))))))))
+          (is (not (str/includes? ai ":audit/field-39")))
+          (assert-no-session-narration ai))))))
 
 (deftest capped-state-is-derived-from-receipt-size-without-a-boolean
   (support/with-database
@@ -443,10 +429,10 @@
           (is (transcript/capped-result? receipt))
           (is (not (contains? receipt :seon.sci.admit/capped?)))
           (let [ai (transcript/render-ai (unit @connection 100000))]
-            (is (str/includes? ai "; CAPPED: showing"))
-            (is (str/includes? ai "of 189000 chars"))
-            (is (str/includes? ai (str "result-blob " digest)))
-            (is (reader-valid? ai))))))))
+            (is (str/includes? ai stored))
+            (is (not (str/includes? ai "CAPPED:")))
+            (is (not (str/includes? ai digest)))
+            (assert-no-session-narration ai)))))))
 
 (deftest reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
   (support/with-database
@@ -532,7 +518,7 @@
                                (swap! pulled conj (count entity-ids))
                                (pull-many database selector entity-ids))]
                  (transcript/render-ai (unit db floor)))]
-        (is (= 100 (ai-elided ai)))
+        (is (str/includes? ai "100 older transcript entries elided"))
         (is (every? #(<= % (max 6 floor)) @pulled))
         (is (<= (tokens/estimate ai) floor))))))
 
@@ -651,21 +637,18 @@
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
                       html (hiccup/->string html-value)
-                      ai-rows (ai-entries ai)
                       html-rows (html-entries html-value)
-                      visible-ids (mapv :id ai-rows)
+                      visible-ids (mapv :id html-rows)
                       ordered-ids (mapv :id (expected-order events))
-                      elided (ai-elided ai)
+                      elided (html-elided html-value)
                       visible-id-set (set visible-ids)
+                      events-by-id (into {} (map (juxt :id identity)) events)
                       visible-declines
                       (filter #(and (= :message-decline (:event-kind %))
                                     (contains? visible-id-set (:id %)))
                               events)]
                   (and
-                   (= ai-rows
-                      (mapv #(select-keys % [:id :kind :detail]) html-rows))
-                   (= elided (html-elided html-value))
-                   (= (count events) (+ elided (count ai-rows)))
+                   (= (count events) (+ elided (count html-rows)))
                    (= visible-ids (subvec ordered-ids elided))
                    (= (count visible-ids) (count (distinct visible-ids)))
                    (or (zero? elided)
@@ -676,9 +659,23 @@
                                   (str/includes? ai
                                                  (str "declined: " content))))
                            visible-declines)
+                   (every?
+                    (fn [id]
+                      (let [{:keys [kind content source-index]}
+                            (get events-by-id id)]
+                        (if (= :message kind)
+                          (str/includes? ai content)
+                          (str/includes? ai
+                                         (if (= :receipt-invalid
+                                                (:event-kind
+                                                 (get events-by-id id)))
+                                           "user=> ("
+                                           (str "(identity " source-index ")"))))))
+                    visible-ids)
                    (<= (tokens/estimate ai) budget)
                    (<= (tokens/estimate html) budget)
-                   (reader-valid? ai)))))))
+                   (not-any? #(str/includes? ai %)
+                             forbidden-session-narration)))))))
          :seed property-seed)]
     (support/assert-check!
      check

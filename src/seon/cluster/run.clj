@@ -54,6 +54,8 @@
   known unowned issue), and a receipt started before its eval settles
   (recovery asserts its `interrupted-at`)."
   (:require [clojure.edn :as edn]
+            [clojure.main :as main]
+            [clojure.string :as str]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.program :as program]
@@ -1007,13 +1009,6 @@
                  (catch Throwable _
                    nil)))))
 
-(defn- background-result-ref?
-  [value]
-  (and (vector? value)
-       (= 2 (count value))
-       (= :seon.effect/id (first value))
-       (string? (second value))))
-
 (defn- unfinished-warning
   "The first form recovery closed before it started, and the missing count."
   [forms receipts]
@@ -1146,41 +1141,37 @@
      [:p text]]))
 
 (defn render-receipt-ai
-  "`:seon.render/ai` — one eval receipt, as the outcome of one form.
+  "`:seon.render/ai` — the exact output and bare result of one form.
 
-  PRESENCE IS THE STATE and the optionals ARE the states: a result, an
-  error, an `interrupted-at`, or none of them (still running). Nothing
-  here reads a status, because none is stored.
-
-  IT DOES NOT RESTATE THE PAUSE NOTE, and the omission is the design:
-  the note is a condition of the RUN, which sits one hop from its agent
-  where a receipt sits two, so `render-ai` above owns that sentence. A
-  receipt reached at distance 2 then adds the form-level detail under
-  its run's summary instead of repeating it — two lenses, one fact,
-  said once."
+  Printed output precedes the result. Failures reconstruct Clojure's
+  standard concise REPL error from the recorded `ex-triage` data.
+  A receipt with no terminal value says nothing: a running REPL has not
+  printed a result, and recovery interruption is not English narration."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (let [ordinal (get unit :seon.cluster.eval/ordinal)
-        result (get unit :seon.cluster.eval/result-edn)
-        value (when result (receipt-value unit))
-        output (get unit :seon.cluster.eval/output)]
-    (when ordinal
-      (str
-       (cond
-         (get unit :seon.cluster.eval/interrupted-at)
-         (str "Form " ordinal " was interrupted — its effect may have "
-              "happened, and nothing was retried.")
-
-         (get unit :seon.cluster.eval/error)
-         (str "Form " ordinal " failed: " (get unit :seon.cluster.eval/error))
-
-         result (str "Form " ordinal " returned " result)
-         :else (str "Form " ordinal " is still running."))
-       (when output (str " It printed: " output))
-       (when (background-result-ref? value)
-         (str " Keep working, or use (my.background/await "
-              (pr-str value)
-              " note) as the last form to close this run until it lands."))))))
+  (let [result (get unit :seon.cluster.eval/result-edn)
+        output (get unit :seon.cluster.eval/output)
+        triage-edn (get unit :seon.cluster.eval/triage-edn)
+        error
+        (when (get unit :seon.cluster.eval/error)
+          (or
+           (when triage-edn
+             (try
+               (-> triage-edn
+                   edn/read-string
+                   main/ex-str
+                   str/trim-newline)
+               (catch Throwable _
+                 nil)))
+           (get unit :seon.cluster.eval/error)))
+        terminal (or error result)]
+    (when (or (seq output) (some? terminal))
+      (str output
+           (when (and (seq output)
+                      (some? terminal)
+                      (not (str/ends-with? output "\n")))
+             "\n")
+           terminal))))
 
 (defn render-receipt-html
   "`:seon.render/html` — one receipt, with the same facts as its AI twin."

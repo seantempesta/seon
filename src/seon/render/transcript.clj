@@ -1,11 +1,10 @@
 (ns seon.render.transcript
   "One agent's messages and eval receipts as a bounded REPL transcript.
 
-  The renderer is an agent-level derived product, not a message-family lens:
-  messages are reverse connections at d1 while receipts are reached through
-  the agent's runs. W4 attaches these twins as one separate render call when
-  membership inverts to the walk. Raw facts never acquire a detail level;
-  every full, summary, and elided decision is derived for this call."
+  The renderer is the schema-declared agent-session projection. Messages are
+  reverse connections while form input and receipts are reached through the
+  agent's runs. Raw facts never acquire a detail level; every full, summary,
+  and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.db :as db]
@@ -14,10 +13,12 @@
             [seon.bootstrap :as bootstrap]
             [seon.print :as print]
             [seon.render :as render]
+            [seon.render.agent :as agent]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
-            [seon.render.walk :as walk])
+            [seon.render.walk :as walk]
+            [seon.sci.reader :as reader])
   (:import [java.io PushbackReader StringReader]))
 
 (def ^:private recent-entry-count
@@ -45,12 +46,28 @@
    :seon.cluster.eval/result-blob
    :seon.cluster.eval/result-size
    :seon.cluster.eval/error
+   :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.problems/id
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run [:db/id :seon.cluster.run/id]}])
+
+(def ^:private form-selector
+  [:db/id
+   :seon.cluster.run.form/id
+   :seon.cluster.run.form/ordinal
+   :seon.cluster.run.form/source
+   {:seon.cluster.run.form/ns [:db/id :seon.ns/name]}
+   {:seon.cluster.run.form/run
+    [:db/id
+     :seon.cluster.run/id
+     :seon.cluster.run/opened-at
+     {:seon.cluster.run/agent
+      [:db/id
+       :seon.cluster.agent/id
+       {:seon.cluster.agent/namespace [:db/id :seon.ns/name]}]}]}])
 
 (def ^:private reasoning-attempt-selector
   [:db/id
@@ -86,10 +103,38 @@
         db agent-id)
    0))
 
+(defn- comment-only-source?
+  [source]
+  (let [events (reader/read {:seon.sci.reader/text source
+                             :seon.sci.reader/defer-auto-resolve? true})]
+    (and (vector? events) (empty? events))))
+
+(defn- comment-form-rows
+  [db agent-id]
+  (->> (db/q {:query
+              '[:find ?form ?at ?id ?source
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?run :seon.cluster.run/agent ?agent]
+                [?run :seon.cluster.run/opened-at ?at]
+                [?form :seon.cluster.run.form/run ?run]
+                [?form :seon.cluster.run.form/id ?id]
+                [?form :seon.cluster.run.form/source ?source]
+                [?form :seon.cluster.run.form/ordinal ?ordinal]
+                (not-join [?run ?ordinal]
+                          [?receipt :seon.cluster.eval/run ?run]
+                          [?receipt :seon.cluster.eval/ordinal ?ordinal])]
+              :args [db agent-id]
+              :order-by '[?at :desc ?id :desc]})
+       (filter (fn [[_ _ _ source]] (comment-only-source? source)))))
+
 (defn- history-count
   [db agent-id]
   (if (and db agent-id)
-    (+ (message-count db agent-id) (receipt-count db agent-id))
+    (+ (message-count db agent-id)
+       (receipt-count db agent-id)
+       (count (comment-form-rows db agent-id)))
     0))
 
 (defn- recent-message-rows
@@ -125,6 +170,10 @@
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
 
+(defn- recent-comment-rows
+  [db agent-id limit]
+  (take limit (comment-form-rows db agent-id)))
+
 (defn- pinned-receipt-ids
   [db agent-id]
   (db/q '[:find [?receipt ...]
@@ -143,10 +192,12 @@
               (map #(into [:message] %)
                    (recent-message-rows db agent-id limit))
               (map #(into [:eval] %)
-                   (recent-receipt-rows db agent-id limit)))
+                   (recent-receipt-rows db agent-id limit))
+              (map (fn [[form at id _source]] [:input form at id])
+                   (recent-comment-rows db agent-id limit)))
              (sort-by (fn [[kind _ at id]]
                         [(.getTime ^java.util.Date at)
-                         (case kind :message 0 :eval 1)
+                         (case kind :message 0 :input 1 :eval 2)
                          id])
                       #(compare %2 %1))
              (take limit)
@@ -277,20 +328,40 @@
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.cluster.run/id])
      ::source (get sources receipt-eid)
+     ::namespace (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
      ::result (:seon.cluster.eval/result-edn receipt)
      ::result-blob (:seon.cluster.eval/result-blob receipt)
      ::result-size (:seon.cluster.eval/result-size receipt)
      ::capped? (capped-result? receipt)
      ::error (:seon.cluster.eval/error receipt)
+     ::triage-edn (:seon.cluster.eval/triage-edn receipt)
      ::error-kind (:seon.error/kind receipt)
      ::problem-id (:seon.problems/id receipt)
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
      ::output (:seon.cluster.eval/output receipt)}))
 
+(defn- input-entry
+  [form]
+  {::kind :input
+   ::entity form
+   ::id (:seon.cluster.run.form/id form)
+   ::at (get-in form [:seon.cluster.run.form/run
+                      :seon.cluster.run/opened-at])
+   ::run-id (get-in form [:seon.cluster.run.form/run
+                          :seon.cluster.run/id])
+   ::source (:seon.cluster.run.form/source form)
+   ::namespace
+   (or (get-in form [:seon.cluster.run.form/ns :seon.ns/name])
+       (get-in form [:seon.cluster.run.form/run
+                     :seon.cluster.run/agent
+                     :seon.cluster.agent/namespace
+                     :seon.ns/name])
+       'user)})
+
 (defn- entry-order
   [entry]
   [(.getTime ^java.util.Date (::at entry))
-   (case (::kind entry) :message 0 :attempt 1 :eval 2)
+   (case (::kind entry) :message 0 :attempt 1 :input 2 :eval 3)
    (::id entry)])
 
 (defn- history
@@ -298,13 +369,15 @@
   (let [ids (candidate-entity-ids db agent-id limit)
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
+        inputs (pulled-many db form-selector (:input ids))
         identities (about-identities db messages)
         sources (form-sources db (:eval ids))]
     (->> (concat (map (partial message-entry identities) messages)
+                 (map input-entry inputs)
                  (map (partial receipt-entry sources) receipts))
          (map (fn [entry]
                 (assoc entry ::pinned?
-                       (and (= :eval (::kind entry))
+                       (and (contains? #{:eval :input} (::kind entry))
                             (= (bootstrap/run-id agent-id)
                                (::run-id entry))))))
          (sort-by entry-order)
@@ -323,21 +396,9 @@
         (catch Throwable _
           {::unreadable? true})))))
 
-(defn- entry-header
-  [entry detail]
-  (str ";; transcript/entry " (pr-str (::kind entry)) " "
-       (pr-str (::id entry)) " " (pr-str detail) "\n"
-       ";; at " (pr-str (::at entry))))
-
 (defn- floor-text
   [unit value]
   (value/render-ai (assoc unit :seon.render/value value)))
-
-(defn- floor-value
-  [unit value]
-  (let [text (floor-text unit value)
-        {::keys [read-value unreadable?]} (read-result text)]
-    (if unreadable? text read-value)))
 
 (defn- bounded-scalar
   [unit value]
@@ -359,26 +420,21 @@
                  rendered)]
     (bounded-scalar unit output)))
 
-(defn- message-extra
-  [entry]
-  (cond-> {}
-    (::about entry) (assoc :seon.cluster.message/about (::about entry))
-    (and (::about-ref? entry) (nil? (::about entry)))
-    (assoc :seon.transcript/unresolved-about? true)
-    (::reason entry) (assoc :my.message/reason (::reason entry))))
-
 (defn- message-text
-  [unit entry detail]
+  [unit entry _detail]
   (let [entity (cond-> (::entity entry)
                  (::content entry)
                  (assoc :seon.cluster.message/content
                         (bounded-scalar unit (::content entry))))
         sentence (rendered-family unit entity 1)
-        extra (message-extra entry)]
-    (str (bounded-scalar unit (entry-header entry detail)) "\n"
-         (pr-str
-          (cond-> (list 'comment sentence)
-            (seq extra) (concat (list (floor-value unit extra))))))))
+        extra (cond-> {}
+                (::about entry)
+                (assoc :seon.cluster.message/about (::about entry))
+                (and (::about-ref? entry) (nil? (::about entry)))
+                (assoc :seon.transcript/unresolved-about? true)
+                (::reason entry) (assoc :my.message/reason (::reason entry)))]
+    (str sentence
+         (when (seq extra) (str "\n" (floor-text unit extra))))))
 
 (defn- bounded-result
   [unit serialized]
@@ -396,18 +452,16 @@
 
         :else (floor-text unit read-value)))))
 
-(defn- receipt-extra
+(defn- prompted-source
   [entry]
-  (cond-> {}
-    (::source entry) (assoc :seon.cluster.run.form/source (::source entry))
-    (::error entry) (assoc :seon.cluster.eval/error (::error entry))
-    (::error-kind entry) (assoc :seon.error/kind (::error-kind entry))
-    (::problem-id entry) (assoc :seon.problems/id (::problem-id entry))
-    (::interrupted-at entry)
-    (assoc :seon.cluster.eval/interrupted-at (::interrupted-at entry))))
+  (str (or (::namespace entry) 'user) "=> " (::source entry)))
+
+(defn- input-text
+  [_unit entry _detail]
+  (prompted-source entry))
 
 (defn- receipt-text
-  [unit entry detail]
+  [unit entry _detail]
   (let [entity
         (cond-> (::entity entry)
           (::result entry)
@@ -416,21 +470,14 @@
           (::error entry)
           (assoc :seon.cluster.eval/error
                  (bounded-scalar unit (::error entry)))
+          (::triage-edn entry)
+          (assoc :seon.cluster.eval/triage-edn (::triage-edn entry))
           (::output entry)
           (assoc :seon.cluster.eval/output
                  (bounded-scalar unit (::output entry))))
-        sentence (rendered-family unit entity 2)
-        extra (receipt-extra entry)]
-    (str (bounded-scalar unit (entry-header entry detail)) "\n"
-         (pr-str (list 'comment sentence (floor-value unit extra)))
-         (when (::capped? entry)
-           (str "\n; CAPPED: showing " (count (::result entry))
-                " of " (::result-size entry)
-                " chars — full value "
-                (if-some [digest (::result-blob entry)]
-                  (str "result-blob " digest)
-                  "unavailable")
-                " (result-size " (::result-size entry) " chars)")))))
+        result (rendered-family unit entity 2)]
+    (str (prompted-source entry)
+         (when (seq result) (str "\n" result)))))
 
 (defn- projected-entry
   [unit entry detail]
@@ -441,6 +488,7 @@
    ::detail detail
    ::text (case (::kind entry)
             :message (message-text unit entry detail)
+            :input (input-text unit entry detail)
             :eval (receipt-text unit entry detail))})
 
 (defn reasoning-disclosure
@@ -501,8 +549,7 @@
    (cond-> []
      (seq pinned) (into (map ::text pinned))
      (pos? elided)
-     (conj (str ";; transcript/elided " elided "\n;; "
-                (marker-text elided (seq pinned))))
+     (conj (marker-text elided (seq pinned)))
      (seq entries) (into (map ::text entries)))))
 
 (defn- html-entries
@@ -613,7 +660,7 @@
   (::minimum-token-budget (projection (assoc unit ::token-budget 0))))
 
 (defn render-ai
-  "Render one agent's bounded transcript as reader-valid REPL text."
+  "Render one agent's bounded messages and faithful REPL session."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
   (let [{::keys [pinned entries elided]} (projection unit)]
@@ -631,3 +678,30 @@
                  (sort-by entry-order
                           (into entries (reasoning-attempts unit)))
                  elided)))
+
+(defn- transcript-unit
+  [unit]
+  (assoc unit ::token-budget
+         (quot (long (get-in unit [:seon.sci.admit/caps
+                                   :seon.config.eval.result/max-string]))
+               tokens/chars-per-token)))
+
+(defn render-session-ai
+  "Render the schema-declared agent session while status survives slice 1."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [status (agent/agent-ai unit)]
+    (let [history (when (and (:seon.db/db unit)
+                             (:seon.sci.admit/caps unit))
+                    (render-ai (transcript-unit unit)))]
+      (str status (when (seq history) (str "\n" history))))))
+
+(defn render-session-html
+  "Render the schema-declared HTML agent session with stable transcript ids."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [status (agent/agent-html unit)]
+    (if (and (:seon.db/db unit) (:seon.sci.admit/caps unit))
+      (conj status (render-html (transcript-unit unit)))
+      status)))

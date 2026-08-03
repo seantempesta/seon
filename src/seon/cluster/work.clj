@@ -23,8 +23,9 @@
     part, so a second trigger during a model call cannot start a second
     turn (the claim-early half of n3-plan §9.1, which the night ruling
     kept);
-  - `:close` — an open run whose every form already has a terminal
-    receipt. The fold is done. This is its own situation rather than a
+  - `:close` — an open run whose every evaluable form already has a terminal
+    receipt. Comment-only input has no reader event and needs no receipt.
+    The fold is done. This is its own situation rather than a
     `:resume` carrying no ordinal, because fold-vs-close is a different
     instruction to the turn proc and an instruction must be visible in the
     value, never inferred from an absent key (seal revision,
@@ -56,7 +57,8 @@
             [seon.db :as db]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.reader :as reader]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -85,22 +87,31 @@
     ;; named it the first time it ran.
     (when (and run (run/open? run)) run)))
 
+(defn- evaluable-source?
+  [source]
+  (let [events (reader/read {:seon.sci.reader/text source
+                             :seon.sci.reader/defer-auto-resolve? true})]
+    (or (map? events) (seq events))))
+
 (defn- next-ordinal
-  "The first form ordinal of `run` with no terminal receipt, or nil.
+  "The first evaluable form with no terminal receipt, or nil.
   Resume is a QUERY, never a cursor: a receipt is terminal when it
   carries a terminal fact — `result-edn`, `error`, or `interrupted-at`
   (the query twin of `run/terminal?`; there is no status to read) —
   and `recover-tx` has already stamped a dead process's dangling
   receipts with `interrupted-at`, so an interrupted form is DONE being
-  attempted and the fold moves past it. Nothing re-executes."
+  attempted and the fold moves past it. A comment-only source produces
+  zero reader events, so it is durable input but never work. Nothing
+  re-executes."
   [db run-id]
-  (let [ordinals (db/q '[:find [?ordinal ...]
-                        :in $ ?run-id
-                        :where
-                        [?run :seon.cluster.run/id ?run-id]
-                        [?form :seon.cluster.run.form/run ?run]
-                        [?form :seon.cluster.run.form/ordinal ?ordinal]]
-                      db run-id)
+  (let [forms (db/q '[:find ?ordinal ?source
+                     :in $ ?run-id
+                     :where
+                     [?run :seon.cluster.run/id ?run-id]
+                     [?form :seon.cluster.run.form/run ?run]
+                     [?form :seon.cluster.run.form/ordinal ?ordinal]
+                     [?form :seon.cluster.run.form/source ?source]]
+                   db run-id)
         settled (into #{}
                       (db/q '[:find [?ordinal ...]
                              :in $ ?run-id
@@ -113,7 +124,13 @@
                                  [?receipt
                                   :seon.cluster.eval/interrupted-at _])]
                            db run-id))]
-    (first (sort (remove settled ordinals)))))
+    (->> forms
+         (keep (fn [[ordinal source]]
+                 (when (and (not (contains? settled ordinal))
+                            (evaluable-source? source))
+                   ordinal)))
+         sort
+         first)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Routed-problem settlement — derived, never stored

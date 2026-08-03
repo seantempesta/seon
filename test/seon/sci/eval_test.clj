@@ -674,6 +674,16 @@
     (is (nil? (:seon.cluster.eval/error evaluation))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 
+(deftest a-failed-evaluation-records-reconstructable-throwable-data
+  (let [evaluation (run "(/ 1 0)")
+        triage-data
+        (edn/read-string (:seon.cluster.eval/triage-edn evaluation))]
+    (is (= "Divide by zero" (:clojure.error/cause triage-data)))
+    (is (= :execution (:clojure.error/phase triage-data)))
+    (is (= 'java.lang.ArithmeticException
+           (:clojure.error/class triage-data)))
+    (is (= "Divide by zero" (:seon.cluster.eval/error evaluation)))))
+
 (deftest an-instrumented-multi-arity-miss-reads-like-clojure
   (test-support/with-database
     (fn [connection]

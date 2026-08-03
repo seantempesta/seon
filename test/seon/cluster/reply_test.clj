@@ -20,7 +20,8 @@
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
             [seon.cluster.reply :as reply]
-            [seon.schema]))
+            [seon.schema]
+            [seon.sci.reader :as reader]))
 
 (defn- read-back
   "Read one source string with a throwaway sci reader, as the evaluator
@@ -132,8 +133,10 @@
           result (sources text)]
       (is (= ["; I explained what I had done. The result was fifty-five."]
              result))
-      (is (nil? (read-back (first result)))
-          "SCI reads a comment-only source as nil; no prose token resolves")))
+      (is (empty?
+           (reader/read {:seon.sci.reader/text (first result)
+                         :seon.sci.reader/defer-auto-resolve? true}))
+          "a comment-only source records input and produces zero events")))
 
   (testing "mixed prose attaches to the next form and trailing prose survives"
     (let [text (str "First I will add the values.\n"
