@@ -126,11 +126,18 @@
                 :seon.error/kind :seon.sci.eval/evaluation-failed
                 :seon.cluster.eval/error "Unable to resolve symbol: widgets"}]))
 
+(defn- commit-missing-model!
+  [connection]
+  (db/transact! connection
+                [{:seon.config/cluster "default"
+                  :seon.config.ai/model "missing-model"}]))
+
 (def ^:private families
   {:seon.problems/error-signatures commit-error!
    :seon.problems/wedged-runs commit-wedged-run!
    :seon.problems/failed-runs commit-failed-run!
-   :seon.problems/errored-receipts commit-errored-receipt!})
+   :seon.problems/errored-receipts commit-errored-receipt!
+   :seon.problems/missing-models commit-missing-model!})
 
 ;;; ---------------------------------------------------------------------------
 ;;; A healthy cluster says nothing at all
@@ -152,6 +159,68 @@
             schema.form/schema-properties)]
     (is (= `problems/stale-var-ai (:seon.render/ai properties)))
     (is (= `problems/stale-var-html (:seon.render/html properties)))))
+
+(deftest missing-model-findings-declare-their-render-producers
+  (let [properties
+        (-> (schema.edn/packaged-forms)
+            (get :seon.problems/missing-model)
+            schema.form/schema-properties)]
+    (is (= `problems/missing-model-ai (:seon.render/ai properties)))
+    (is (= `problems/missing-model-html (:seon.render/html properties)))))
+
+(deftest configured-models-without-registry-rows-are-derived
+  (with-db
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.config/cluster "default"
+         :seon.config.ai/model "z-cluster-model"}
+        {:seon.cluster.agent/id "agent-a"
+         :seon.config.ai/model "a-agent-model"}
+        {:seon.cluster.agent/id "agent-b"
+         :seon.config.ai/model "z-cluster-model"}])
+      (let [value (found connection)
+            entries (:seon.problems/missing-models value)]
+        (is (= [{:seon.config.ai/model "a-agent-model"}
+                {:seon.config.ai/model "z-cluster-model"}]
+               entries)
+            "cluster and agent assertions deduplicate and sort by model id")
+        (is (str/includes? (problems/ai-prose value) "a-agent-model"))
+        (is (str/includes? (problems/log-report value) "z-cluster-model"))
+        (is (str/includes?
+             (hiccup/->string (problems/html-report value))
+             "no registry row"))
+        (is (seon.schema/valid-candidate-value?
+             :seon.problems/problems value))
+
+        (is (nil?
+             (:seon.error/kind
+              (db/transact!
+               connection
+               [{:seon.ai.model/id "a-agent-model"}
+                {:seon.ai.model/id "z-cluster-model"}]))))
+        (is (nil? (:seon.problems/missing-models (found connection)))
+            "adding matching registry rows makes the finding disappear")))))
+
+(deftest a-matching-model-registry-row-prevents-the-finding
+  (with-db
+    (fn [connection]
+      (db/transact! connection
+                    [{:seon.config/cluster "default"
+                      :seon.config.ai/model "registered-model"}])
+      (is (= [{:seon.config.ai/model "registered-model"}]
+             (:seon.problems/missing-models (found connection))))
+      (is (nil?
+           (:seon.error/kind
+            (db/transact! connection
+                          [{:seon.ai.model/id "registered-model"}]))))
+      (is (nil? (:seon.problems/missing-models (found connection)))))))
+
+(deftest missing-model-values-accrete-extra-attributes
+  (is (seon.schema/valid-candidate-value?
+       :seon.problems/missing-model
+       {:seon.config.ai/model "open-model"
+        :seon.test/extra "ignored until declared"})))
 
 (deftest a-deleted-function-var-is-derived-from-the-loaded-image
   (with-db

@@ -73,7 +73,10 @@
                   [:vector :seon.problems/unowned-namespace]]
                  [:seon.problems/stale-vars
                   {:optional true}
-                  [:vector :seon.problems/stale-var]]],
+                  [:vector :seon.problems/stale-var]]
+                 [:seon.problems/missing-models
+                  {:optional true}
+                  [:vector :seon.problems/missing-model]]],
                 :request
                 [:map
                  [:seon.cluster.run/live-processes
@@ -85,6 +88,11 @@
                  #:seon.render{:ai seon.problems/stale-var-ai,
                                :html seon.problems/stale-var-html}
                  [:seon.fn/sym :seon.fn/sym]],
+                :missing-model
+                [:map
+                 #:seon.render{:ai seon.problems/missing-model-ai,
+                               :html seon.problems/missing-model-html}
+                 [:seon.config.ai/model :seon.config.ai/model]],
                 :wedged-run
                 [:map
                  [:seon.cluster.run/id :seon.cluster.run/id]

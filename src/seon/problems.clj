@@ -21,7 +21,7 @@
   `:type` discriminator because the key a family arrives under IS the
   family.
 
-  SEVEN FAMILIES, and each one is a fact nobody has to maintain:
+  EIGHT FAMILIES, and each one is a fact nobody has to maintain:
 
   - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
     signature. Grouping is the point: a hundred errors of one signature
@@ -46,6 +46,9 @@
   - STALE VARS — function Vars still interned in a loaded first-party
     namespace after their `[namespace name]` pair disappeared from the
     published program graph. Restarting the JVM removes them.
+  - MISSING MODELS — configured model strings with no matching model
+    registry row. Adding the row makes the finding disappear; its
+    absence never blocks an otherwise valid provider call.
 
   WHAT IS DELIBERATELY NOT HERE: a stale-trigger family. \"Unanswered\"
   is derivable and already owned (`work/unanswered-triggers`); STALE is
@@ -310,11 +313,25 @@
                    (str (symbol (str namespace-name) (str intern-name)))})))
           first-party-namespaces)))
 
+(defn- missing-models
+  "Configured model strings absent from the model registry."
+  [db]
+  (->> (db/q '[:find [?model ...]
+               :where
+               [_ :seon.config.ai/model ?model]
+               (not [_ :seon.ai.model/id ?model])]
+             db)
+       sort
+       (mapv (fn [model]
+               {:seon.config.ai/model model}))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
 
-(declare ai-prose html-report stale-var-ai stale-var-html)
+(declare ai-prose html-report
+         missing-model-ai missing-model-html
+         stale-var-ai stale-var-html)
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
@@ -339,6 +356,7 @@
         deferred (deferred-agents db)
         unowned (unowned-namespaces db)
         stale (stale-vars db)
+        missing-model-rows (missing-models db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq wedged) (assoc :seon.problems/wedged-runs wedged)
@@ -347,7 +365,9 @@
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
                 (seq unowned)
                 (assoc :seon.problems/unowned-namespaces unowned)
-                (seq stale) (assoc :seon.problems/stale-vars stale))]
+                (seq stale) (assoc :seon.problems/stale-vars stale)
+                (seq missing-model-rows)
+                (assoc :seon.problems/missing-models missing-model-rows))]
     found))
 
 ;;; ---------------------------------------------------------------------------
@@ -387,6 +407,22 @@
   (str "Restart the JVM to remove stale loaded Var "
        (:seon.fn/sym entry)
        "; it is absent from the published program graph."))
+
+(defn missing-model-html
+  "A configured model missing its registry row as one surface row."
+  {:malli/schema
+   [:=> [:cat :seon.problems/missing-model] :seon.render/hiccup]}
+  [entry]
+  (row "model" (:seon.config.ai/model entry)
+       "problem" "no registry row"))
+
+(defn missing-model-ai
+  "Steering for a configured model absent from the registry."
+  {:malli/schema [:=> [:cat :seon.problems/missing-model] :string]}
+  [entry]
+  (str "Configured model " (:seon.config.ai/model entry)
+       " has no :seon.ai.model/id registry row. "
+       "Add its descriptor; provider calls continue unchanged."))
 
 (defn html-report
   "`:seon.render/html` — everything wrong now, as a surface.
@@ -454,7 +490,10 @@
       (row "namespace" (:seon.ns/name entry))))
    (family-section
     "stale vars"
-    (map stale-var-html (:seon.problems/stale-vars found)))])
+    (map stale-var-html (:seon.problems/stale-vars found)))
+   (family-section
+    "missing models"
+    (map missing-model-html (:seon.problems/missing-models found)))])
 
 (defn block
   "The problems BLOCK's html render: derive, then project.
@@ -511,7 +550,8 @@
                " self-triggered runs since the last outside trigger; "
                (:seon.problems/deferred-count entry)
                " triggers are deferred until one arrives."))
-        (map stale-var-ai (:seon.problems/stale-vars found)))
+        (map stale-var-ai (:seon.problems/stale-vars found))
+        (map missing-model-ai (:seon.problems/missing-models found)))
        (str/join "\n")))
 
 (defn log-report
@@ -562,5 +602,9 @@
                (:seon.ns/name entry)))
         (for [entry (:seon.problems/stale-vars found)]
           (str "seon.problems stale-var var=" (:seon.fn/sym entry)
-               " (absent from the published program graph; restart the JVM)")))
+               " (absent from the published program graph; restart the JVM)"))
+        (for [entry (:seon.problems/missing-models found)]
+          (str "seon.problems missing-model model="
+               (pr-str (:seon.config.ai/model entry))
+               " (no :seon.ai.model/id registry row; calls continue unchanged)")))
        (str/join "\n")))
