@@ -146,6 +146,7 @@
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
                            :seon.render.web/render-channel render-channel
+                           :seon.render/context-channel context-channel
                            :seon.render.web/fault-channel fault-channel}))
           (body connection @server
                 {:graph graph

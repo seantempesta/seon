@@ -1134,6 +1134,7 @@
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
+                                     :seon.render/context-channel
                                      :seon.render.web/fault-channel
                                      :seon.cluster.run/process
                                      :seon.sci.eval/ctx
@@ -1463,7 +1464,8 @@
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
     (async/close! (:seon.cluster.wake/channel handle))
-    (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
+    (some-> (:seon.cluster.loop/stream-channel handle) async/close!)
+    (some-> (:seon.render/context-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has
   ;; published its completion: a tab still looping on a tap sees its tap
   ;; close and falls out of the loop
