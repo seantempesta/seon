@@ -3170,3 +3170,19 @@ once` (deterministic, new this wave — suspect the structural-window
 strings-whole change `03764a4f6` or render census churn; UNATTRIBUTED,
 fix first after restart). Everything else green including all of
 today's landings.
+
+**OWNER RULINGS — 2026-08-03 evening batch (accretion pipeline + operator
+vocabulary + Kimi):** (1) ACCRETION TESTING GATES INSTALLS: green-to-install
+— a function and its tests evaluate together in a candidate context (SCI
+copy-on-write makes candidates ~free) and the install lands only when tests
+pass; failure returns as teaching feedback with the failing case, nothing
+installs. (2) TEST LINKAGE IS DERIVED PLUS EXPLICIT OVERRIDE: index the
+test→function call edge so coverage is a query, and accept an explicit
+:seon.test/subject ref for tests whose subject is not reached by calls
+(generative schema properties); both are declared facts, names infer
+nothing. (3) OPERATOR VOCABULARY (owner delegated the pick): ONE NAME —
+"status" — on both surfaces, with documented scopes: bin/seon status
+reconciles from outside and may observe a dead JVM; (seon.operator/status)
+derives from inside. No "reconcile" verb exists in code and none is added.
+(4) KIMI K3 CALIBRATION runs AFTER the prefix-cache work banks, so one paid
+matrix measures both providers on the same stable prefix.
