@@ -12,6 +12,7 @@
 (def staging-dir "target/dev-dependency-classes.next")
 (def result-file "target/dev-dependency-cache-result.edn")
 (def manifest-file "META-INF/seon-dev-cache.edn")
+(def cache-version 2)
 
 (defn- canonical-file
   [path]
@@ -166,6 +167,49 @@
                     (str/replace "." "/"))
                 "__init.class")))
 
+(defn- digest-bytes!
+  [^MessageDigest digest value]
+  (let [value-bytes (if (string? value)
+                      (.getBytes ^String value
+                                 java.nio.charset.StandardCharsets/UTF_8)
+                      value)]
+    (.update digest ^bytes value-bytes)
+    (.update digest (byte-array [(byte 0)]))))
+
+(defn- digest-file!
+  [^MessageDigest digest file]
+  (digest-bytes! digest (.getCanonicalPath ^java.io.File file))
+  (with-open [input (io/input-stream file)]
+    (let [buffer (byte-array 65536)]
+      (loop []
+        (let [read-count (.read input buffer)]
+          (when (pos? read-count)
+            (.update digest buffer 0 read-count)
+            (recur))))))
+  (.update digest (byte-array [(byte 0)])))
+
+(defn- project-input-files
+  []
+  (let [source-root (io/file "src")]
+    (->> (concat [(io/file "deps.edn")]
+                 (file-seq source-root))
+         (filter #(.isFile ^java.io.File %))
+         (filter (fn [file]
+                   (let [filename (.getName ^java.io.File file)]
+                     (or (= "deps.edn" filename)
+                         (str/ends-with? filename ".clj")
+                         (str/ends-with? filename ".cljc")))))
+         (map canonical-file)
+         (sort-by #(.getCanonicalPath ^java.io.File %))
+         vec)))
+
+(defn- project-digest
+  []
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (doseq [file (project-input-files)]
+      (digest-file! digest file))
+    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+
 (defn- sha-256
   [rows]
   (let [digest (MessageDigest/getInstance "SHA-256")]
@@ -173,8 +217,7 @@
             value [(str (:seon.dev-cache/namespace row))
                    (:seon.dev-cache/source-url row)
                    (slurp (:seon.dev-cache/source-url row))]]
-      (.update digest (.getBytes value java.nio.charset.StandardCharsets/UTF_8))
-      (.update digest (byte-array [(byte 0)])))
+      (digest-bytes! digest value))
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- validate!
@@ -203,17 +246,49 @@
                       {:seon.dev-cache/rejected staging-dir})))))
 
 (defn- write-manifest!
-  [rows digest duration-ms]
+  [rows digest project-source-digest duration-ms]
   (let [manifest (io/file staging-dir manifest-file)]
     (.mkdirs (.getParentFile manifest))
     (spit manifest
-          (str (pr-str {:seon.dev-cache/version 1
+            (str (pr-str {:seon.dev-cache/version cache-version
                         :seon.dev-cache/digest digest
+                        :seon.dev-cache/project-digest project-source-digest
                         :seon.dev-cache/namespaces
                         (mapv :seon.dev-cache/namespace rows)
                         :seon.dev-cache/sources rows
                         :seon.dev-cache/duration-ms duration-ms})
                "\n"))))
+
+(defn- read-manifest
+  []
+  (let [manifest (io/file cache-dir manifest-file)]
+    (when (.isFile manifest)
+      (try
+        (edn/read-string (slurp manifest))
+        (catch Throwable _
+          nil)))))
+
+(defn- current-cache
+  []
+  (when-let [manifest (read-manifest)]
+    (try
+      (when (and (= cache-version (:seon.dev-cache/version manifest))
+                 (= (project-digest)
+                    (:seon.dev-cache/project-digest manifest))
+                 (= (sha-256 (:seon.dev-cache/sources manifest))
+                    (:seon.dev-cache/digest manifest))
+                 (every?
+                  (fn [namespace-symbol]
+                    (.isFile
+                     (io/file cache-dir
+                              (str (-> (str namespace-symbol)
+                                       clojure.core/munge
+                                       (str/replace "." "/"))
+                                   "__init.class"))))
+                  (:seon.dev-cache/namespaces manifest)))
+        manifest)
+      (catch Throwable _
+        nil))))
 
 (defn- admit!
   []
@@ -231,15 +306,20 @@
   "Rebuild the directory-source dependency cache reached by seon.artifact."
   [_]
   (let [started (System/nanoTime)
-        basis (b/create-basis {:project "deps.edn" :aliases [:dev]})]
+        basis (b/create-basis {:project "deps.edn" :aliases [:dev]})
+        project-source-digest (project-digest)]
     (b/delete {:path staging-dir})
     (b/delete {:path result-file})
     (.mkdirs (io/file staging-dir))
+    (println "seon cache: discovering the dependency closure")
+    (flush)
     (let [rows (run-build! basis)
           digest (sha-256 rows)
           duration-ms (long (/ (- (System/nanoTime) started) 1000000))]
+      (println "seon cache: compiled" (count rows) "dependency namespaces")
+      (flush)
       (validate! rows)
-      (write-manifest! rows digest duration-ms)
+      (write-manifest! rows digest project-source-digest duration-ms)
       (admit!)
       (let [result {:seon.dev-cache/digest digest
                     :seon.dev-cache/namespaces (count rows)
@@ -247,3 +327,20 @@
                     :seon.dev-cache/path cache-dir}]
         (prn result)
         result))))
+
+(defn ensure-cache
+  "Reuse the current dependency cache, or rebuild it when inputs changed."
+  [_]
+  (if-let [manifest (current-cache)]
+    (let [result {:seon.dev-cache/digest
+                  (:seon.dev-cache/digest manifest)
+                  :seon.dev-cache/namespaces
+                  (count (:seon.dev-cache/namespaces manifest))
+                  :seon.dev-cache/status :current
+                  :seon.dev-cache/path cache-dir}]
+      (prn result)
+      result)
+    (do
+      (println "seon cache: inputs changed; rebuilding")
+      (flush)
+      (assoc (refresh nil) :seon.dev-cache/status :rebuilt))))
