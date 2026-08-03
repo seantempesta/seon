@@ -31,7 +31,7 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 
-## Friction (75)
+## Friction (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -50,10 +50,7 @@ See `README.md` for the convention.
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Delete dev feedback gates that observe deleted owners](dev-feedback-gates-observe-deleted-owners.md) | friction | dev feedback deletion wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
-| [Let `eval_clj` reach any root, cluster, namespace, and the agent door](mcp-eval-cannot-reach-every-jvm-cluster-and-namespace.md) | friction | MCP probe-surface wave |
-| [Give MCP results the value system instead of a second truncation](mcp-truncates-instead-of-using-the-value-system.md) | friction | MCP surface PRD |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
-| [Make `:keep-history? false` actually bootable](history-off-is-not-a-creation-seam-toggle.md) | friction | eval-scale economics wave |
 | [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
 | [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | render oversight event wave |
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
@@ -71,7 +68,6 @@ See `README.md` for the convention.
 | [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
-| [Give MCP frame provenance the program graph's source-root authority](mcp-frame-provenance-duplicates-the-program-source-root-roster.md) | friction | MCP provenance repair |
 | [Give the elision marker its count and identity](elided-marker-carries-no-count-or-identity.md) | friction | print-path follow-up |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |

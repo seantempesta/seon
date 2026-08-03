@@ -280,10 +280,10 @@ semantics stated, ~58 test files. ONE lane, quiet tree, nothing else
 running — it touches nearly every namespace. A full suite afterward is
 the proof.
 
-**3B. MCP value chain** (ruling #44). Blocked on a protected owner:
-`seon.sci.admit` must publicly expose its print-node→semantic
-derivation and retain `:seon.sci.admit/print-node`, and the artifact
-declaration needs `resources/seon/schema.edn`. The corrected design is
+**3B. MCP value chain** (ruling #44) — IMPLEMENTED 2026-08-03.
+`seon.sci.admit` now publicly exposes its print-node→semantic
+derivation and retains `:seon.sci.admit/print-node`; the artifact
+declaration is in `resources/seon/schema.edn`. The corrected design is
 ONE SOURCE — store the print node, derive both the drill data and the
 result EDN from it. Do not store both; the fidelity falsifier proved
 the semantic projection cannot reconstruct the printed form (687,341
@@ -291,7 +291,13 @@ characters original versus 302,086 reconstructed). Also needs `/data`
 blob selection in `render/web.clj`'s private `data-response`, and the
 `valf` projector installed in `cluster.clj` (a bridge-side wrapper
 would put the projection into `*1` and break the stateful-session
-contract).
+contract). All named seams landed with the print node as the sole stored
+source. Focused gates are green for admission/value, MCP bridge, MCP blob
+drill, oversight, and config application. The `/data` artifact regression is
+green; its owning namespace remains red only at
+`an-agent-page-is-the-same-mechanism-as-root`, an unrelated render-walk lane
+assertion. Isolated live proof retrieved the stored remainder by digest and
+then read the raw prior result through `*1`.
 
 **3C. Per-cluster history** — in flight tonight; if unfinished,
 continue. Owner wants the dial genuinely per cluster (eval clusters
