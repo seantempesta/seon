@@ -711,7 +711,40 @@ The compact invariants are:
   positional arguments for ordinary functions;
 - every public function has a correct Malli input/output schema;
 - no `:type`/`:kind` entity taxonomy, stored nil, `[:maybe X]`, bare key, or
-  `:any` without a proven genuinely polymorphic boundary.
+  `:any` without a proven genuinely polymorphic boundary;
+- **maps are OPEN — we do not write closed checks** (owner ruling #48).
+
+### Accretion is the goal, so nothing is closed
+
+THE SYSTEM EXISTS TO ACCRETE FUNCTIONALITY. Owner ruling 2026-08-02 #48,
+verbatim: "I want functions to accrete functionality which means they are not
+closed and every function can accept other data and if the function doesn't
+use it then that's fine."
+
+The rule in one sentence: **if something declares it needs `foo` and `bar`,
+then `foo` and `bar` are validated RIGOROUSLY, and a supplied `bat` is simply
+IGNORED.** Never refused. This holds for function arguments and for entity and
+value shapes alike — functions accrete for the same reason data does.
+
+So `{:closed true}` does not appear in `resources/seon/schema.edn`, and a
+reviewer treats a new one as a defect. Malli's maps are already open by
+default (`reference-code/malli/README.md:294`); the strictness was ours and it
+contradicted everything else here — an entity IS its attributes, extra ones
+never change what it is, and a change should require no more and provide no
+less, yet a closed map also FORBIDS more, so adding a key broke every producer
+validating against it.
+
+What this does NOT relax: a MISSING REQUIRED key still fails, and declared
+keys are still validated against their declared shapes. The only thing given
+up is that a misspelled OPTIONAL key is ignored as extra data rather than
+refused.
+
+The hazard this dissolved, as the worked example of why closedness costs more
+than it gives: `matching-shapes-in` (`src/seon/schema.clj`) selects schemas
+that VALIDATE a value, so under closed maps a render unit carrying extra
+render attributes matched NOTHING and silently fell through to the generic
+render floor. Opening the declarations removed the failure rather than
+patching the matcher.
 
 An entity is its attributes and connections. Query attribute presence to find
 entities, use a unique identity attribute to identify one, and follow refs to
