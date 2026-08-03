@@ -16,6 +16,12 @@
  ; here; 22 concurrent evals queued 4 with 71 ms max wait.)
  :seon.config.flow.compute/concurrency :seon.config/available-processors
 
+ ; Unit: milliseconds allowed for one Flow ping response. Provenance: F1
+ ; measured parked mailbox and turn replies in microseconds; 20 ms leaves
+ ; orders of magnitude of scheduling room. A missing reply is reported as
+ ; unknown, never converted into a healthy observation.
+ :seon.config.flow/ping-timeout-ms 20
+
  ; The eval result caps: how much of an agent value `seon.sci.admit`
  ; projects into a receipt's result-edn. Units below; provenance: the
  ; 2026-08-01 measurements in tmp/admission-caps-2026-08-01/. Wide values

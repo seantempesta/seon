@@ -10,6 +10,7 @@
  :seon.config.eval.result/max-depth [:int {:min 1}]
  :seon.config.eval.result/max-nodes [:int {:min 1}]
  :seon.config.eval.result/max-string [:int {:min 1}]
+ :seon.config.flow/ping-timeout-ms [:int {:min 1}]
 
  ; The recorded diagnostics. NEVER limits (the vocabulary table's word):
  ; 271M fn-entries in 500 ms reads as a spin, 12 reads as blocked in a
@@ -45,8 +46,15 @@
  ; the record through untouched, and an absent record stays absent
  ; rather than becoming a stored nil.
  :seon.sci.admit/request [:map  [:seon.sci.admit/value :any] [:seon.sci.admit/interrupt-fn :seon.sci.admit/interrupt-fn] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
- :seon.sci.admit/admitted [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/admitted [:map  [:seon.sci.admit/print-node :seon.print/node] [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
+ :seon.sci.admit/print-node :seon.print/node
  :seon.sci.admit/value :any
+
+ :seon.render.value/artifact
+ [:map
+  [:seon.sci.admit/print-node :seon.print/node]
+  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]
 
 ;; ===========================================================================
 ;; AGENT
@@ -652,7 +660,7 @@
  ; HOW LONG AN AGENT MAY RUN ON ITS OWN STEAM. Unit: consecutive runs
  ; per idle→running episode — runs since (and including) the one
  ; answering the last OUTSIDE trigger, derived purely from committed
- ; facts (the run's opening transaction names its trigger; a trigger
+ ; facts (the run records its trigger when it opens; a trigger
  ; with no :seon.cluster.message/from and no
  ; :seon.cluster.message/about came from outside the population's
  ; autonomous activity — a human, or a schedule fire). No stored
@@ -668,7 +676,7 @@
  ; conversation is a REAL shape, and unlike the error storm it never
  ; repeats a signature, so the recurrence fence cannot see it. Each hop
  ; is also a paid model call, so the bound is a spend bound as much as
- ; a liveness one. Counted by walking committed transaction metadata,
+ ; a liveness one. Counted by walking committed `caused-by` refs,
  ; never a stored counter (the quarry stored `hops` on every message
  ; and then needed a second rule to reset it).
  :seon.config.message/max-chain
@@ -1563,11 +1571,11 @@
  ; ref carries no persistence facet and would never install, and
  ; "what did bob send me" is a query BY the ref.
  :seon.cluster.message/from [:and {:seon.db/index true} :seon.db/ref]
- ; The run that produced an outbound message. Absent on messages from
- ; outside the agent population. Conversation causality follows this
- ; ref to the run's recorded trigger; it never consults a transaction
- ; entity, so the relationship survives a non-temporal database.
- :seon.cluster.message/run [:and {:seon.db/index true} :seon.db/ref]
+ ; The message whose answering produced this outbound message. Absent
+ ; on messages from outside the agent population. The delivery records
+ ; this ref from the run's trigger; conversation causality never
+ ; consults a transaction entity and survives a non-temporal database.
+ :seon.cluster.message/caused-by [:and {:seon.db/index true} :seon.db/ref]
 
  ; THE ENTITY MAP, and it is not decoration: `canonical-database-
  ; attributes` installs entity-map entries BY CONSTRUCTION and
@@ -1587,7 +1595,9 @@
   [:seon.cluster.message/content :seon.cluster.message/content]
   [:seon.cluster.message/at :seon.cluster.message/at]
   [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]
-  [:seon.cluster.message/run {:optional true} :seon.cluster.message/run]
+  [:seon.cluster.message/caused-by
+   {:optional true}
+   :seon.cluster.message/caused-by]
   ; The referenced fact this message assigns to the recipient. The
   ; attribute is declared with its persistence facet in the ERROR section,
   ; where the error recorder first established the same relation.
@@ -2508,7 +2518,7 @@
  ; present = held, absent = unheld. There is no claim epoch and no
  ; lease clock — the flock + single writer make a competing claimant
  ; unrepresentable, and the settle-once presence fences carry the rest.
- :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai :seon.render/html seon.cluster.run/render-html} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/trigger :seon.cluster.run/trigger] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
+ :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai :seon.render/html seon.cluster.run/render-html} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/trigger {:optional true} :seon.cluster.run/trigger] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
  ; The ordered form entity. Same reason as the message map: without it
  ; only `/id` installed, so a frozen plan could not be transacted on the
  ; live boot path. Every entry is required — `plan-call` writes all four
