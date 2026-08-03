@@ -54,6 +54,44 @@
       (finally
         (delete-files! [config directory])))))
 
+(deftest pre-edit-exact-reconstruction-uses-structural-edit-refusals
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        source (io/file directory "prospective.clj")
+        invoke
+        (fn [old-string new-string]
+          (run-process
+           {::command [(str (io/file repo-root "bin/seon-hook"))]
+            ::directory repo-root
+            ::environment {"SEON_HOOK_CONFIG" (str config)}
+            ::input
+            (json/generate-string
+             {:hook_event_name "PreToolUse"
+              :tool_name "Edit"
+              :tool_input {:file_path (str source)
+                           :old_string old-string
+                           :new_string new-string}})}))]
+    (try
+      (spit config
+            (str "{:seon.config/on-core-error :log\n"
+                 " :changed-tests {:enabled false}\n"
+                 " :review {:enabled false}}\n"))
+      (spit source "(ns prospective)\n(def value 1)\n(def other 1)\n")
+      (testing "one exact occurrence is reconstructed and checked"
+        (let [result (invoke "(def value 1)" "(def value")
+              response (json/parse-string (str/trim (::stdout result)) true)]
+          (is (zero? (::exit result)) (::stderr result))
+          (is (= "block" (:decision response)))
+          (is (str/includes? (:reason response) "[error/syntax]"))))
+      (testing "an ambiguous exact occurrence produces no invented first edit"
+        (let [result (invoke " 1)" "")
+              response (json/parse-string (str/trim (::stdout result)) true)]
+          (is (zero? (::exit result)) (::stderr result))
+          (is (true? (:continue response)))
+          (is (nil? (:decision response)))))
+      (finally
+        (delete-files! [source config directory])))))
+
 (deftest split-schema-edits-run-admission-before-publication
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")

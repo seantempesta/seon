@@ -263,7 +263,27 @@
     (str "schema admission failed: "
          (:seon.hook.analysis/reason analysis))))
 
-(declare clip-feedback)
+(declare clip-feedback load-direct-check!)
+
+(defn- reconstruct-exact-edit
+  [current tool-input]
+  (let [old-string (:old_string tool-input)]
+    (when (seq old-string)
+      (try
+        (load-direct-check! 'seon.edit)
+        (let [transformed
+              ((requiring-resolve 'seon.edit/exact)
+               current
+               {:my.edit/path "hook-prospective"
+                :my.edit/expected-digest (apply str (repeat 64 "0"))
+                :my.edit/old-string old-string
+                :my.edit/new-string (or (:new_string tool-input) "")
+                :my.edit/replace-all? (true? (:replace_all tool-input))}
+               1)]
+          (:seon.edit/source transformed))
+        (catch Exception error
+          (log! "EXACT_RECONSTRUCTION_ERROR" (.getMessage error))
+          nil)))))
 
 (defn- reconstruct-file-content [event]
   (let [tool-name (:tool_name event)
@@ -274,15 +294,11 @@
       (:content tool-input)
 
       (= tool-name "Edit")
-      (let [old-string (:old_string tool-input)
-            new-string (:new_string tool-input)]
-        (when (and file-path old-string)
+      (when (and file-path (:old_string tool-input))
           (try
-            (let [current (slurp (absolute-file-path file-path))]
-              (if (:replace_all tool-input)
-                (clojure.string/replace current old-string new-string)
-                (clojure.string/replace-first current old-string new-string)))
-            (catch Exception _ nil))))
+            (reconstruct-exact-edit
+             (slurp (absolute-file-path file-path)) tool-input)
+            (catch Exception _ nil)))
 
       :else nil)))
 
