@@ -149,6 +149,35 @@
         "an undeclared property remains compile-time Malli data")
     (is (= (pr-str definition) (:seon.schema/form row)))))
 
+(deftest matching-shapes-derive-required-attributes-through-and-refs
+  (let [state (schema/snapshot-state)]
+    (try
+      (let [forms {:seon.error/message :string
+                   :seon.error/refusal-value
+                   [:map [:seon.error/message :seon.error/message]]
+                   :seon.schema-test/refused [:= true]
+                   :seon.schema-test/refused-error
+                   [:and {:seon.error/class true
+                          :seon.render/ai 'seon.error/refusal-prose}
+                    :seon.error/refusal-value
+                    [:map
+                     [:seon.schema-test/refused
+                      :seon.schema-test/refused]]]}
+            projection (schema/build-projection forms)
+            value {:seon.schema-test/refused true
+                   :seon.error/message "The transition was refused."}
+            row (get (:seon.schema.projection/shape-rows projection)
+                     :seon.schema-test/refused-error)]
+        (is (= #{:seon.schema-test/refused :seon.error/message}
+               (:seon.schema/required-attrs row)))
+        (is (= 'seon.error/refusal-prose (:seon.render/ai row)))
+        (is (= :seon.schema-test/refused-error
+               (-> (schema/matching-shapes-in projection value)
+                   first
+                   :seon.schema/key))))
+      (finally
+        (schema/restore-state! state)))))
+
 (deftest agent-authored-function-input-maps-accrete
   (is (empty?
        (schema/assert-complete-contract!

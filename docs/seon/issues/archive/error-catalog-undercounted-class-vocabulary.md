@@ -19,7 +19,8 @@ class declarations.
 An independent construction-site pass found 163 distinct current kinds,
 including omitted `:my.fs/invalid-glob`, two indirect SCI-kernel classes, and
 one cluster-store failure. Applying the ruled merges, splits, AI replacements,
-and blame-site replacements yields exactly 224 catalog-scope class schemas.
+and blame-site replacements yields exactly 225 catalog-scope class schemas.
+The grouped audit's SCI/outcome subtotal is 21, not its initially reported 20.
 
 ## Owner
 
@@ -35,4 +36,4 @@ pinning the obsolete estimate.
 ## Resolution
 
 Resolved in the error-wave slice-1 documentation correction. The catalog now
-records 224 target classes and names the corrected census inputs.
+records 225 target classes and names the corrected census inputs.

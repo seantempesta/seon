@@ -271,7 +271,7 @@ normalization and retry disposition derive at read.
 | `:seon.fn/fn` | `:seon.fn/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload` |
 | `:seon.schema/schema` | `:seon.schema/key`, `:seon.schema.admission/source`, `/form`, optional `:seon.db.id/generator` |
 | `:seon.ns/ns` | `:seon.ns/name`, `:seon.schema.admission/source`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
-| `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source` |
+| `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `:seon.fn/calls`, `:seon.test/subject` |
 | `:seon.code.def/def` | `:seon.code.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
 
 Function contracts persist twice through one producer: `/spec` retains the
@@ -280,6 +280,13 @@ rows shaped from Malli's own parser. Arity rows carry order, arity, min/max,
 input/output/guard refs, and their transitive schema refs. AST nodes and entries
 carry Malli's parsed keys and explicit ordinals. This makes contract queries
 ordinary graph queries without a hand-written parser or second writer.
+
+Test linkage is declared in the same program graph. Static analysis writes
+direct first-party call-position refs through the shared `:seon.fn/calls`
+attribute; reverse and transitive coverage is queried rather than stored. A
+test whose subject is not reached through a call, such as a schema property,
+may instead declare the optional `:seon.test/subject` function ref. Test and
+function identities remain separate even when their symbol strings match.
 
 Namespace alias, import, and refer bindings are owned component rows. They
 preserve SCI's effective resolver inputs. `:seon.code.def` stores one current

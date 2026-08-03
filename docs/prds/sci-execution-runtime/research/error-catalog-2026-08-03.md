@@ -133,15 +133,17 @@ the kind at all, it reads the ATTRIBUTES. The kind is already vestigial here.
 | `:core-bug` (22), `:user-input` (31) — the blame taxonomy | 53 | varies per site; each site's real evidence is already beside the kind | nobody dispatches on them | replaced per site |
 | `:seon.error/unclassified` | 1 (`src/seon/error.clj:164`) | the whole source in `data-edn` | the fail-closed floor | O (it must say honestly that nothing recognized it) |
 
-**Corrected source-derived count: 224 target class schemas.** The earlier
+**Corrected source-derived count: 225 target class schemas.** The earlier
 approximately-118 arithmetic incorrectly subtracted 53 blame *occurrences* as
 though they were 53 distinct kinds; they are only the two literals `:core-bug`
 and `:user-input`. A complete construction-site pass found 163 distinct current
 kinds, then applied the two ruled pair merges, the 11-way `index-refused`
 split, 10 additional unique AI replacement names (`timeout` overlaps), and 45
 real replacements for the blame sites: 39 schema classes, five blob classes,
-and one cluster-store class. The concurrent shell work adds five classes outside
-this catalog's scope and is not included in 224.
+and one cluster-store class. The grouped inclusion oracle adds to 225; its SCI,
+evaluation, and program-outcome group contains 21 rather than the initially
+reported 20. The concurrent shell work adds five classes outside this catalog's
+scope and is not included in 225.
 
 ## 2. Per-class design — the replacement shape
 

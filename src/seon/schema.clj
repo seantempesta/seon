@@ -1188,12 +1188,9 @@
               (keep
                 (fn [[k raw]]
                   (let [form (internal/with-entity-id-attr forms raw)
-                        map-shape? (form/map-shape? form)
-                        props (when map-shape?
-                                (or (form/schema-properties form) {}))
+                        props (or (form/attr-form-properties form) {})
                         required-attrs
-                        (when map-shape?
-                          (set (internal/map-required-attrs form)))
+                        (some-> (internal/map-required-attrs forms form) set)
                         id-attr (:seon.entity/id-attr props)]
                     (when (seq required-attrs)
                       [k (cond->

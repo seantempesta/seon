@@ -184,23 +184,45 @@
     (map-identity-entry-key schemas v)))
 
 (defn map-required-attrs
-  "Entry keys of `:map` form `v` whose props do NOT carry `{:optional
-   true}` (excluding the `::m/default` sentinel) — the required-attrs
-   index for schemas-as-queryable-data."
+  "Required map-entry keys reached through refs and `:and` composition.
+
+   This is the required-attrs index for schemas-as-queryable-data. Optional
+   entries and Malli's default sentinel are excluded."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] [:maybe [:vector :keyword]]]}
-  [v]
-  (when (form/map-shape? v)
-    (into []
-          (keep (fn [entry]
-                  (when (vector? entry)
-                    (let [k     (first entry)
-                          props (let [p (second entry)] (when (map? p) p))]
-                      (when (and (keyword? k)
-                                 (not= k :malli.core/default)
-                                 (not (:optional props)))
-                        k)))))
-          (form/map-entries v))))
+   [:function
+    [:=> [:cat :seon.schema/definition] [:maybe [:vector :keyword]]]
+    [:=> [:cat :map :seon.schema/definition]
+     [:maybe [:vector :keyword]]]]}
+  ([v]
+   (map-required-attrs {} v))
+  ([schemas v]
+   (letfn [(required [form visited]
+             (cond
+               (and (keyword? form)
+                    (contains? schemas form)
+                    (not (contains? visited form)))
+               (required (get schemas form) (conj visited form))
+
+               (form/map-shape? form)
+               (into #{}
+                     (keep (fn [entry]
+                             (when (vector? entry)
+                               (let [k (first entry)
+                                     properties (when (map? (second entry))
+                                                  (second entry))]
+                                 (when (and (keyword? k)
+                                            (not= k :malli.core/default)
+                                            (not (:optional properties)))
+                                   k)))))
+                     (form/map-entries form))
+
+               (and (vector? form) (= :and (first form)))
+               (into #{}
+                     (mapcat #(required % visited))
+                     (remove map? (rest form)))
+
+               :else #{}))]
+     (not-empty (vec (sort-by str (required v #{})))))))
 
 (defn with-entity-id-attr
   "Attach `{:seon.entity/id-attr <k>}` to `v`'s props when `v` is a
