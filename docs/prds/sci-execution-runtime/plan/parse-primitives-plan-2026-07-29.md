@@ -483,6 +483,9 @@ the receipt carries a nil result; after S3 the receipt carries no result. The
 reply suite asserts *sources*, not receipt shape, so it stays green (S2's
 promise holds); the receipt change is S3's own test. This must also compose with
 generate-code's E2 — a comment-only source is never red and never stops the fold.
+It remains input/source history only: the display emits no output or pseudo-entry
+for it. Leading comments attached to a following form remain that form's submitted
+source; this display rule does not change the parser.
 
 ## 2. Classification at the parse area
 

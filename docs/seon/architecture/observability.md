@@ -90,7 +90,8 @@ happened. Recovery never retries it.
 
 ## Forms and eval receipts — the authentic REPL history
 
-The transcript interleaves messages with eval receipts. A frozen plan records
+The session displays messages through explicit query forms and their returned
+values beside eval receipts. A frozen plan records
 each form's exact source, ordinal, and optional reader namespace. Its matching
 receipt records the instant, ending namespace, printed output, admitted result,
 blob address and full size when large, error, or interruption.

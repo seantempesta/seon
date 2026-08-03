@@ -475,7 +475,7 @@ lane counts as NOT COVERED.
 
 Stated explicitly so no one reads a green suite as more than it is:
 
-- **Style.** Idiom, naming, comment grammar, docstring quality, whether the
+- **Style.** Idiom, naming, source-comment grammar, docstring quality, whether the
   agent's renderer is pretty. A correct ugly answer scores CORRECT.
 - **Prose quality.** Nothing scores the reply's wording, tone, explanation, or
   helpfulness. Every prose check in this file is an extraction of derived

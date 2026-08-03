@@ -59,8 +59,12 @@ this PRD adds no fourth destination.
  :seon.cluster/started "acme"             ; the marker: namespaced, subject-valued
  :seon.cluster/ready-ms 1416}             ; evidence rides as siblings
 
-;; the log line the same emission writes
-;; 2026-08-03T… cluster started acme ready-ms=1416 event=<fact-id>
+```
+
+The same emission also writes this log line:
+
+```text
+2026-08-03T… cluster started acme ready-ms=1416 event=<fact-id>
 ```
 
 One emitter function owns both writes; call sites never write a log line

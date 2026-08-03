@@ -167,7 +167,7 @@ Form 7:
                     [?a :seon.fn.arity/input-refs ?s]
                     [?f :seon.fn/arities ?a]
                     [?f :seon.fn/sym ?sym]])
-;; => #{["my.run/complete"]}
+#{["my.run/complete"]}
 ```
 
 Form 13:
@@ -258,7 +258,8 @@ So the split is:
 - **Inline `;` comments carry only NARRATION of the agent's own
   reasoning** ("; both of these read the graph; nothing depends on the
   first, so they go together") — which is behavior modelling, not
-  instruction, and is what a real REPL transcript legitimately contains.
+  instruction, and is preserved only as submitted source before its forms.
+  Comments never represent a form's output.
 - **Everything else is a form whose output is the lesson.**
 
 `(help)` is deliberately a function rather than a system message: a
@@ -407,11 +408,10 @@ this lane's to fix.
    value is `"my.agents.tally/largest"`; a stock Clojure REPL prints
    `#'my.agents.tally/largest`. A REPL-parity divergence sitting on the
    single most common form an agent writes.
-2. **Elision does not say how much was elided.** A capped collection
-   renders `… 8190 :seon.sci.admit/elided]` — a bare keyword. Ruling #25
-   promises a loud "N of M shown" derived from `result-size`; the door
-   face carries no count and no receipt identity to re-query. A model
-   cannot tell whether it lost three elements or 300,000.
+2. **Elision does not expose how much was elided in the returned value.** A
+   capped collection renders `… 8190 :seon.sci.admit/elided]` — a bare
+   keyword. The remedy must enrich the ordinary value or expose an explicit
+   query; it must not append a synthetic "N of M shown" notice or comment.
 3. **`my.*` docstrings are maintenance diaries.** `my.run/complete`'s
    costs 205 tokens of agent context to say something worth ~60, most of
    it about a 2026-07-27 seal revision (§3).

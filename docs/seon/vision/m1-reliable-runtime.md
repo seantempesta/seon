@@ -22,10 +22,10 @@ An agent working on `seon.trading.signals` hits an infinite loop. Its JVM pegs a
 ```clojure
 ;; The operator checks system health after the crash
 (user/status)
-;; => {:datahike {:ok true, :mode :started}
-;;     :flow {:ok true, :processes 8}
-;;     :pool {:ok true, :available 2, :in-use 1}
-;;     :web {:ok true, :port 8080}}
+{:datahike {:ok true, :mode :started}
+ :flow {:ok true, :processes 8}
+ :pool {:ok true, :available 2, :in-use 1}
+ :web {:ok true, :port 8080}}
 
 ```
 

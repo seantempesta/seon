@@ -103,7 +103,7 @@ The checkout was probed on 2026-08-03 with the dependency's actual executor:
             #(deliver p {:name (.getName (Thread/currentThread))
                          :virtual? (.isVirtual (Thread/currentThread))}))
   (deref p 2000 :timed-out))
-;; => {:name "", :virtual? true}
+{:name "", :virtual? true}
 ```
 
 The result agrees with core.async's implementation: on a supporting JDK the
@@ -125,7 +125,7 @@ The initial syntax is one macro over one direct declared capability call:
 (def result-ref
   (my.background/background
    (my.web/get {:my.web/url "https://example.test/report"})))
-;; => [:seon.effect/id "<run-id>/<form-ordinal>/<effect-ordinal>"]
+[:seon.effect/id "<run-id>/<form-ordinal>/<effect-ordinal>"]
 ```
 
 The macro exists because evaluating an ordinary function argument first would

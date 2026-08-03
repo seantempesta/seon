@@ -806,7 +806,9 @@ referenced by a recorded live process identity.
   NEVER to chastise agents into perfect syntax: fix what we are SURE
   is the intended code and REWRITE it so the agent never sees the
   failure — it sees the correction (prose line → `;;` prose line
-  above the defn), reinforcing proper behavior going forward. Pipeline
+  above the defn), reinforcing proper SOURCE-WRITING behavior going forward.
+  This is submitted input only; decision 11 on 2026-08-03 forbids displaying
+  that comment or any other comment as a computed result. Pipeline
   shape: an explicit repair pass BEFORE reading (its output re-enters
   the one reader — repair is a pure pre-plan transform, never an
   implicit fallback inside the reader), then sci evaluation; on eval
@@ -1542,10 +1544,11 @@ referenced by a recorded live process identity.
   **Ruling 2026-07-31 #13 (owner): NO MAGIC — context assembly IS an
   explicit `seon.render/walk` eval.** The agent's context is the
   printed output of a visible REPL call recorded as an ordinary eval
-  receipt in its run record — never a hidden assembly process. The
-  walk's ai output labels every unit with a `;;` header carrying its
-  PATH (a real get-in drill handle, the debug view's vocabulary), the
-  DEPTH it was found at, and provenance; groupings are shared path
+  receipt in its run record — never a hidden assembly process. Its original
+  `;;`-header presentation is superseded by 2026-08-03 decision 11: the call
+  is displayed as the form and its computed neighbourhood is the actual value,
+  whose data carries each unit's PATH (a real get-in drill handle, the debug
+  view's vocabulary), the DEPTH it was found at, and provenance; groupings are shared path
   prefixes; cross-branch order stays dumb last-changed. The same
   function is agent-callable with arguments (root, depth, branch) —
   to see more, call it again; the explanation of the system is the
@@ -1732,6 +1735,12 @@ referenced by a recorded live process identity.
   outputs-as-comments rules are deleted. The session must be as close
   to a stock Clojure REPL as possible (realism audit:
   `research/sci-repl-realism-audit-2026-08-01.md`).
+  **AMENDED 2026-08-03, decision 11:** strict display means form, then actual
+  computed value. Results, `doc`/`dir` output, system notices, lessons, and
+  message reads never use comment prefixes, decorative comment framing,
+  `;; =>` annotations, or comment-only pseudo-entries. Agent-authored leading
+  comments remain submitted source and the reply parser remains unchanged.
+  Explanatory teaching prose is the actual return of `(help)`.
   **Ruling 2026-08-01 #25 (owner): ADMISSION CAPS MOVE TO THE MEASURED
   COMPUTE KNEES AND THE BLOB TIER IS BUILT.** Caps must never impede
   normal work — crossing one is a loud derived warning meaning
@@ -1744,8 +1753,10 @@ referenced by a recorded live process identity.
   projection ONCE as a blob (measured 80× store amplification for
   datom-stored payloads vs 10 ms/8 MB via konserve), the receipt
   carrying result-blob (digest) + result-size + a bounded window.
-  `capped?` is DERIVED from result-size, never stored; the transcript
-  prints the loud "N of M shown" line from it. Preconditions: the
+  `capped?` is DERIVED from result-size, never stored. Under decision 11 the
+  transcript appends no "N of M shown" notice; elision is visible in the
+  actual value, and fuller size data is obtained by an explicit query.
+  Preconditions: the
   admit `inst?` hotspot fix and decoupling render page size from
   max-collection (issues filed 2026-08-01).
   **Ruling 2026-08-01 #26 (owner): THE PRINT PATH CONTRACT IS SEALED**

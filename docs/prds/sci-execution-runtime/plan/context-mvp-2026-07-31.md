@@ -19,10 +19,10 @@ Contract authority: `context-render-data-model-spec.md` + README rulings
 ## In (the cut)
 
 1. **The walk labeling layer** (`seon.render.walk`, ai projection):
-   `;;` headers per unit — path (get-in drill handle), depth,
-   provenance; grouped last-changed order, stable front / churn tail /
-   ties clustered by branch; ONE walk header line with root + basis +
-   depth.
+   ordinary returned data carries each unit's path (get-in drill handle),
+   depth, and provenance; grouped last-changed order, stable front / churn
+   tail / ties clustered by branch. The walk call is the form and the
+   neighbourhood value carries root, basis, and depth without comment framing.
 2. **Assembly = the walk** (`seon.cluster.prompt`): delete block
    composition; context = walk projection at the turn's basis,
    displayed as the agent's opening eval. No receipt written for it.
@@ -43,7 +43,8 @@ Contract authority: `context-render-data-model-spec.md` + README rulings
    > see more. Your reply is read as forms and evaluated in your
    > namespace. A `defn` with `:malli/schema` becomes permanent;
    > anything else is scratch. Talk to other agents with
-   > `(my.message/send! …)`. Prose lines are kept as `;;` comments.
+   > `(my.message/send! …)`. In submitted source, agent-written prose is
+   > preserved as `;;` input comments; displayed results are ordinary values.
 
 7. **The seeded-block deletion** (the eleven, plus the five superseded
    `context.clj` projections) — dies in the same commit assembly

@@ -22,9 +22,8 @@ An agent writes a new trading signal function. It registers a schema for the sig
 (db/transact! :seon [{:seon.trading/signal-id "sig-001"
                       :seon.trading/signal-type :buuy
                       :seon.trading/confidence 0.85}])
-;; => ExceptionInfo: Validation failed for :seon.trading/signal-type
-;;    Expected: [:enum :buy :sell :hold]
-;;    Got: :buuy
+Execution error (ExceptionInfo) at seon.db/transact! (REPL:1).
+Validation failed for :seon.trading/signal-type
 
 ```
 
@@ -35,9 +34,9 @@ Later, the same signal is read by another agent in a different JVM. The data cro
 ```clojure
 ;; In the remote agent JVM
 (db/pull :seon [:seon.trading/signal-id "sig-001"])
-;; => {:seon.trading/signal-id "sig-001"
-;;     :seon.trading/signal-type :buy
-;;     :seon.trading/confidence 0.85}
+{:seon.trading/signal-id "sig-001"
+ :seon.trading/signal-type :buy
+ :seon.trading/confidence 0.85}
 
 ```
 
@@ -98,7 +97,7 @@ The validation gate works. Nippy works. Generative roundtrip tests exist. The ga
 
 ;; Generative roundtrip for all registered types
 (user/run-tests 'seon.db.pipeline-test)
-;; => {:pass-count N, :fail-count 0}
+{:pass-count N, :fail-count 0}
 
 ;; Nippy preserves types across the wire
 (let [original {:k :keyword :d 3.14 :i (java.util.Date.) :s #{:a :b}}

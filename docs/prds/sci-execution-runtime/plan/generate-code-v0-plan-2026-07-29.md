@@ -645,8 +645,9 @@ and `src/seon/schema/message.edn` at the time of this revision; check
 exactly:
 
 ```clojure
-(my.message/send to content about)   ; about = a string identity
-;; → {:my.message/to … :my.message/content … :my.message/about "<identity>"}
+;; about = a string identity
+(my.message/send to content about)
+{:my.message/to … :my.message/content … :my.message/about "<identity>"}
 ```
 
 with a flat `::no-about` error value for a blank or non-string identity, and
@@ -675,10 +676,14 @@ The value:
 
 ```clojure
 (my.message/decline to about reason)
-;; → {:my.message/to      "planner"        ; the delegator that assigned it
-;;    :my.message/about   "<problem-id>"   ; WHICH problem — string identity
-;;    :my.message/reason  "…"}             ; WHY — for readers, never parsed
+{:my.message/to      "planner"
+ :my.message/about   "<problem-id>"
+ :my.message/reason  "…"}
 ```
+
+The returned map names the delegator in `:my.message/to`, the problem's string
+identity in `:my.message/about`, and the reader-facing explanation in
+`:my.message/reason`; the explanation is never parsed.
 
 Registered beside the existing message shapes:
 

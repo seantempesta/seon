@@ -167,13 +167,14 @@ identities/indices and explicit elision markers, and pays only for opened data.
 Specialized message, source, error, and hiccup projections sit above it through
 the one resolution chain; they do not create another walker or floor.
 
-**The transcript has one bounded projection.** Messages and eval receipts join
-by agent and run, order by their durable instants, and render as reader-valid
-REPL text for AI and stable Hiccup entries for HTML. Provider reasoning
+**The transcript has one bounded projection.** Eval receipts order by their
+durable instants, while messages appear as explicit query forms followed by
+their actual returned values. AI renders strict form-then-value REPL text and
+HTML renders stable twin entries. Provider reasoning
 observations join the HTML projection only after the shared token-budget
 decisions. The budget preserves the bootstrap prefix, keeps a fixed recent tail
-at full detail when it fits, summarizes older entries when possible, and emits
-an explicit elision count for the rest. The database facts and blobs remain
+at full detail when it fits, summarizes older entries when possible, and keeps
+the elision count in an ordinary returned value. The database facts and blobs remain
 available through debug and `/data`; projection never rewrites them.
 
 **The database browser pays for opened data.** `/data` exposes the same

@@ -46,8 +46,8 @@ keyframe from retained bytes. This is losable performance state, never another
 truth or a second general function cache.
 
 Live root telemetry is an ordinary first-party render unit with explicit
-process-local inputs, not a tail outside the block system. It is comment-shaped,
-capped at roughly 50 estimated tokens, and omitted when normal. Whether fleet
+process-local inputs, not a tail outside the block system. It returns an
+ordinary value, is capped at roughly 50 estimated tokens, and is omitted when normal. Whether fleet
 ping summaries become durable facts remains a separate data-model decision;
 the render contract does not invent persistence for them. The sent prompt blob
 is the byte ground truth for process-local inputs, while the recorded database

@@ -96,15 +96,19 @@ The `::` creates **auto-resolved namespaced keywords**:
 
 ```clojure
 ;; INSIDE seon.search namespace:
-::pattern             ;; => :seon.search/pattern
-::match               ;; => :seon.search/match
+::pattern
+:seon.search/pattern
+::match
+:seon.search/match
 
 ;; OUTSIDE (user code with alias):
 (ns my-app.core
   (:require [seon.search :as search]))
 
-::pattern             ;; => :my-app.core/pattern  (WRONG namespace!)
-::search/pattern      ;; => :seon.search/pattern (correct)
+::pattern
+:my-app.core/pattern  ; WRONG namespace!
+::search/pattern
+:seon.search/pattern  ; correct
 ```
 
 **Inside your namespace, `::keyword` is the preferred form.** It's shorter,

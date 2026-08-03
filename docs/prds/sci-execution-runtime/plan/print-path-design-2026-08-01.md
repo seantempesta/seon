@@ -249,13 +249,13 @@ Notes on the grammar:
   (`admit.clj:96-102`: an elision must never be a structure, or the thing
   replacing an over-deep value would itself be over-deep) and the new
   `::pruned` scalar is added under the same rule.
-- **The loud "N of M shown" line is a RESULT-level fact, not a node
-  attribute.** Ruling #25 already derives `capped?` from `result-size`
-  (`README.md:1724-1725`), so per-node counts are not needed to satisfy
-  the audit's honesty question 2, and the walk still never calls `count`
-  on a possibly-infinite source (`admit.clj:281-285`). When a source is
-  `counted?` the collection node MAY carry `::count`; that is an
-  optimization, not a requirement.
+- **No result-level annotation follows the value.** A capped collection's
+  `::elided` or `::pruned` face is part of the actual computed value. Ruling
+  #25's `result-size` remains queryable receipt data, but the transcript does
+  not synthesize an "N of M shown" line or comment from it. When a source is
+  `counted?` the collection node MAY carry `::count`; that is an optimization,
+  not a requirement, and the walk still never calls `count` on a possibly
+  infinite source (`admit.clj:281-285`).
 - **`::record` nests its fields** instead of injecting a key into them.
   This costs one depth level; under ruling #25's `max-depth 64` that is
   free, and it removes an ambiguity that is representable today.
@@ -318,7 +318,7 @@ stock" means byte-identical to `clj` 1.12.5 for the values probed.
 | `{::type "user.R"}` | `user.R` | `span.seon-print-type` | **yes — D9 (the type value)** |
 | `{::class "java.lang.String"}` | `java.lang.String` | `span.seon-print-type` | **yes — D16** |
 | `{::object cls ::address a ::rep r}` | `#object[cls 0xa r]` / `#object[cls 0xa]` | `span.seon-print-object`, drill link when a rep exists | **near — D8/D15/D19** (see decision 3) |
-| `{::string s ::length n}` | `"s…"` then, at the result level, the loud line | `span.seon-print-string` + `‹n chars›` + inspect link (today's shape, `value.cljc:301-307`) | **near — D5** |
+| `{::string s ::length n}` | the ordinary truncated string value | `span.seon-print-string` + `‹n chars›` + inspect link (today's shape, `value.cljc:301-307`) | **near — D5** |
 | `::elided` (in a collection) | `...` | `span.seon-print-elision` + inspect link | **yes — D5** |
 | `::pruned` (replacing a node) | `#` | `span.seon-print-elision` + inspect link | **yes — D5** |
 | `{::failed cls ::message m}` | `#object[cls 0x0 "projection failed: m"]` | `span.seon-print-object.seon-print-failed` | honest |
@@ -520,8 +520,8 @@ through the floor renderer. (The `;; transcript/entry` headers and
 `(comment …)` sentences are dead under ruling #24 regardless; that is the
 transcript wave's cut, not this one's.)
 
-**Ordering.** This lands AFTER the caps/blob wave (ruling #25) — it reads
-`result-size` for the loud line and assumes generous caps — and BEFORE or
+**Ordering.** This lands AFTER the caps/blob wave (ruling #25) — it assumes
+generous caps and leaves `result-size` as queryable receipt data — and BEFORE or
 alongside the audit's S2 (error triage) and S3 (`*1`/`*e`, `source`,
 `clojure.pprint`), which touch `seon.sci.eval` and do not overlap this
 diff. The admission grammar change and the emitter should land in ONE
@@ -537,7 +537,7 @@ proof that ran once in a lane counts as NOT COVERED.
 |---|---|---|
 | **D1** seq→vector | admission list node + the list face | `(emit-text (admit (map inc [1 2])))` = `"(2 3)"`; also `'(1 2 3)`, `(keys m)`, `(sort …)`, `(seq "ab")`; `(first {:a 1})` = `"[:a 1]"` |
 | **D2** var as marker | `::var` face | `(def x 41)` receipt text = `"#'user/x"` |
-| **D5** elision face | `::elided`→`...`, `::pruned`→`#`, result-level loud line | `(range 200)` under `max-collection 64` ends `"… 63 ...)"` and the entry carries one `;; 64 of 189 shown`-shaped line derived from `result-size` |
+| **D5** elision face | `::elided`→`...`, `::pruned`→`#`, with no appended annotation | `(range 200)` under `max-collection 64` ends `"… 63 ...)"`; the next transcript entry begins only after that actual value |
 | **D8** namespace | `::object` + name | `(in-ns 'foo.bar)` text = `#object[sci.lang.Namespace 0x… "foo.bar"]` (decision 3a) |
 | **D9** record | `::record`/`::fields` + `::type` | `(->R 1 2)` = `"#user.R{:a 1, :b 2}"`; `(defrecord R [a b])` = `"user.R"` |
 | **D15** atom/fn | `::object` + `::address` | `(atom 1)` = `#object[clojure.lang.Atom 0x…]`; `(fn [] 1)` = `#object[sci.impl.fns$… 0x…]` — no `seon.sci.admit` word anywhere (closes W5) |

@@ -25,12 +25,12 @@ A new domain namespace `seon.health.metrics` stores body weight measurements. An
                                           :seon.health/value
                                           :seon.health/unit}
               :seon.discover/output-key :seon.render/html})
-;; => [{:fn/name "seon.health.render/metric-card"
-;;      :fn/match-score 3           ;; all 3 required keys match
-;;      :fn/ns-distance 0}          ;; same namespace family
-;;     {:fn/name "seon.render/default-entity"
-;;      :fn/match-score 0           ;; generic fallback
-;;      :fn/ns-distance 3}]
+[{:fn/name "seon.health.render/metric-card"
+  :fn/match-score 3
+  :fn/ns-distance 0}
+ {:fn/name "seon.render/default-entity"
+  :fn/match-score 0
+  :fn/ns-distance 3}]
 
 ```
 
@@ -42,9 +42,9 @@ Now the same agent wants to transform raw CSV imports into metric entities:
 ;; What functions produce health metrics from raw data?
 (gq/discover {:seon.discover/input-keys #{:seon.import/csv-row}
               :seon.discover/output-key :seon.health/metric-id})
-;; => [{:fn/name "seon.health.ingest/parse-metric"
-;;      :fn/match-score 1
-;;      :fn/ns-distance 0}]
+[{:fn/name "seon.health.ingest/parse-metric"
+  :fn/match-score 1
+  :fn/ns-distance 0}]
 
 ```
 

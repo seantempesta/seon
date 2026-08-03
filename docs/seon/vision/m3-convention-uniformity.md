@@ -16,12 +16,12 @@ An agent needs to calculate portfolio risk. It does not know what functions exis
 ```clojure
 ;; What functions accept trading positions?
 (gq/functions-with-input-key :seon.trading/position)
-;; => [{:fn/name "seon.trading.risk/calculate"
-;;      :fn/input-spec ::risk-request
-;;      :fn/output-spec ::risk-response}
-;;     {:fn/name "seon.trading.render/position-table"
-;;      :fn/input-spec ::position-render-request
-;;      :fn/output-spec ::position-render-response}]
+[{:fn/name "seon.trading.risk/calculate"
+  :fn/input-spec ::risk-request
+  :fn/output-spec ::risk-response}
+ {:fn/name "seon.trading.render/position-table"
+  :fn/input-spec ::position-render-request
+  :fn/output-spec ::position-render-response}]
 
 ```
 
@@ -31,10 +31,10 @@ Now the agent reads the schema to understand the interface:
 
 ```clojure
 (malli.core/form (schema/resolve ::risk-request))
-;; => [:map
-;;     [:seon.trading/position ::position]
-;;     [:seon.trading/market-data ::market-data]
-;;     [:seon.risk/confidence-level {:optional true} ::confidence-level]]
+[:map
+ [:seon.trading/position ::position]
+ [:seon.trading/market-data ::market-data]
+ [:seon.risk/confidence-level {:optional true} ::confidence-level]]
 
 ```
 
@@ -124,7 +124,7 @@ This is a large surface area. The strategy is incremental: each agent session ta
 
 ;; All tests pass
 (user/run-tests)
-;; => {:pass-count N, :fail-count 0}
+{:pass-count N, :fail-count 0}
 
 ```
 

@@ -33,7 +33,7 @@ mechanics stand; their PRESENTATION is replaced by this).
    loop already persists ordered form entities (exact source + ordinal)
    each with a receipt (result/output/error/instant). So:
    - CONTEXT = print the per-agent ordered interleave of {forms +
-     receipts + message arrivals} — a pure derived view over existing
+     receipts + explicit message-query results} — a pure derived view over existing
      facts. Oldest first ⇒ stable cache prefix until aging compresses.
    - REPLAY = eval the same forms in order.
    One artifact, two verbs (print / eval). The transcript may gain more
@@ -298,9 +298,10 @@ stored turn, zero authored bytes).
 - **Refusal face**: `Execution error: …` printed bare, exactly as
   clojure.main reports it (the comment-wrapped variant is deleted with
   the P9 redefinition).
-- **Arrivals** render as `;; ← <from> (HH:MM)` + the pr-str'd content
-  line (reader-clean); a message with no from-agent renders as
-  `the human`.
+- **Arrivals** are read by an explicit message query form; the next session
+  entry is that form's actual returned message value. A message with no
+  from-agent identifies its sender as `the human`. No synthetic arrival line
+  or comment-only entry is displayed.
 - **Prompt truth**: the historical prompt is derived from the receipt's
   own `:seon.cluster.eval/ns` (root's real turn prints
   `my.agents.root=> `), never from the current prompt fact.

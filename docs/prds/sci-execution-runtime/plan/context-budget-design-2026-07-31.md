@@ -334,35 +334,39 @@ claimed and this law is not buying what it promises.
 
 ## 7. How elision presents
 
-Reuse the existing idiom exactly — an error-valued node,
-`{:seon.error/kind ::elided, :seon.error/message …}`, which `prose` already
-prints as the node's contribution (`walk.clj:641-644`). No new shape.
+Reuse the existing error-valued node,
+`{:seon.error/kind ::elided, :seon.error/message …}`, as ordinary returned
+data. The walk call is the form and its computed value contains the elision
+fact; `prose` must not turn it into comment-framed output.
 
 One marker per elided branch, not one per elided unit: 25 markers is itself a
 budget problem. The marker carries the count, the reason, and the exact call
 that retrieves what was dropped:
 
-```text
-;; path=[:seon.render.walk/neighbours 3] depth=2 provenance=:seon.render.walk/elided
-;; 17 more namespace cards elided by the context budget (≈12,400 tokens).
-;; (seon.render/walk {:branch [:seon.render.walk/neighbours 3] :depth 2})
+```clojure
+{:seon.error/kind :seon.render.walk/elided
+ :seon.error/message "17 namespace cards elided (≈12,400 tokens)."
+ :seon.render.walk/path [:seon.render.walk/neighbours 3]
+ :seon.render.walk/depth 2
+ :seon.render.walk/provenance :seon.render.walk/elided}
 ```
 
 Three properties this must hold, each already named in the spec's P6:
 
 - the marker states a COUNT and a SIZE, so the agent can judge whether the
   drill is worth a turn;
-- the drill handle is a real `get-in` path that `seon.render/walk` accepts
+- the path is a real `get-in` drill handle that `seon.render/walk` accepts
   today (`render.clj:195-217` validates `:branch` and refuses an unknown path
-  with an error value), so the affordance is not aspirational prose;
+  with an error value); the reusable invocation belongs in `(help)` prose,
+  not in a synthetic result comment;
 - the size is estimated tokens through `seon.ai.tokens/estimate`, never
   characters. The 78-character `soft-clip` surviving in `ns.clj:363` violates
   this and should go in the same commit.
 
 Teaching the agent to self-serve is the walk's whole ethos (ruling #13: "to
 see more, call it again; the explanation of the system is the system"). The
-marker is where that teaching actually happens, so its wording is load-bearing
-and belongs in the design, not in an implementer's judgement.
+marker supplies the facts and `(help)` supplies the prose; neither turns a
+comment into displayed output.
 
 ## 8. The test-namespace pollution
 
@@ -391,8 +395,8 @@ requires me does not need its whole public surface in my context; it needs its
 name. Recommendation: reverse `:seon.ns/requires` neighbours render at
 distance 0 — the name line — collapsed into one aggregate unit per branch:
 
-```text
-;; required by 21 namespaces: seon.cluster, seon.cluster.agent, seon.cluster.loop, …
+```clojure
+[seon.cluster seon.cluster.agent seon.cluster.loop ...]
 ```
 
 That is one unit of a few dozen tokens replacing 21 cards, and it is a
