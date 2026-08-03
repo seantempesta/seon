@@ -3362,6 +3362,21 @@ everything and carry the event fact id back-reference. (4) The
 background-work PRD already existed and is owner-approved — no new
 design needed; wave-close owns its proof.
 
+**OWNER RULING — 2026-08-03 night, LUCENE FULL-TEXT SEARCH ADOPTED.**
+Overriding the search research's predicate-scan recommendation: Seon
+adopts Apache Lucene as the one full-text substrate, set up once and
+used everywhere we currently guess — agent search, the schema admission
+gate's reuse warnings (similar-NAMED schemas warn: if duplicating,
+delete the new one and reuse the old; parallel systems only when the
+user explicitly chooses), and future consumers. Integration laws:
+Lucene is a DERIVED index, never truth (built from the database value,
+event-driven updates via listen!, records its basis t, rebuilds from
+facts, nothing recovers from it); one index per cluster under the
+cluster's derived space; consumers see the ordinary contracted search
+function, never Lucene objects; exact pins vendored/recorded. The
+`schema-reuse-search` lane carries it with measured build/update/query
+latencies vs the 0.32-6 ms scan baseline.
+
 **ADDENDUM 24 — 2026-08-03 NIGHT, SESSION CLOSE. START A FRESH SESSION
 FROM HERE.** Sol credits hit zero; the owner is switching to an account
 with full credits. All lanes stopped at coherent boundaries; every lane
