@@ -21,6 +21,140 @@
     (spit file source)
     file))
 
+(defn- capability-fixture!
+  [root capability-source]
+  (write-source!
+   root "seon/effect.clj"
+   (str "(ns seon.effect)\n"
+        "(defn request! [owner request] [owner request])\n"))
+  (write-source! root "sample/capability.clj" capability-source)
+  root)
+
+(defn- capability-refusal
+  [capability-source]
+  (let [root (capability-fixture! (fixture-root) capability-source)]
+    (try
+      (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+      nil
+      (catch clojure.lang.ExceptionInfo error error))))
+
+(deftest capability-metadata-is-one-program-graph-contract
+  (let [root
+        (capability-fixture!
+         (fixture-root)
+         (str "(ns sample.capability\n"
+              "  (:require [seon.effect :as effect]))\n"
+              "(defn- handler\n"
+              "  {:malli/schema [:=> [:cat :map :map] :map]}\n"
+              "  [request effective] (assoc request :effective effective))\n"
+              "(defn leaf\n"
+              "  {:malli/schema [:=> [:cat :map] :map]\n"
+              "   :seon.workload :io\n"
+              "   :seon.effect/capability sample.capability/handler}\n"
+              "  [request] (effect/request! #'leaf request))\n"
+              "(defn pure-caller [request] (leaf request))\n"
+              "(defn blocking-helper {:seon.workload :io} [request] request)\n"
+              "(defn compute-leaf {:seon.workload :compute} [request] request)\n"
+              "(defn mixed-caller [request]\n"
+              "  [(compute-leaf request) (leaf request)])\n"))
+        rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+        by-symbol (into {} (keep (fn [row]
+                                  (when-let [sym (:seon.fn/sym row)]
+                                    [sym row]))) rows)
+        leaf (get by-symbol "sample.capability/leaf")]
+    (testing "the owner row carries handler, schema, and workload together"
+      (is (= "sample.capability/leaf" (:seon.fn/sym leaf)))
+      (is (= 'sample.capability/handler
+             (:seon.effect/capability leaf)))
+      (is (string? (:seon.fn/spec leaf)))
+      (is (= :io (:seon.fn/workload leaf))))
+    (testing "call edges alone reveal the capability owner"
+      (is (= [[:seon.fn/sym "sample.capability/leaf"]]
+             (:seon.fn/calls (get by-symbol "sample.capability/pure-caller"))))
+      (is (= [[:seon.fn/sym "sample.capability/compute-leaf"]
+              [:seon.fn/sym "sample.capability/leaf"]]
+             (:seon.fn/calls (get by-symbol "sample.capability/mixed-caller")))))
+    (testing "a pure blocking helper remains capability-free"
+      (is (= :io
+             (:seon.fn/workload
+              (get by-symbol "sample.capability/blocking-helper"))))
+      (is (nil? (:seon.effect/capability
+                 (get by-symbol "sample.capability/blocking-helper")))))))
+
+(deftest capability-indexing-refuses-every-malformed-declaration
+  (let [base
+        (fn [handler owner]
+          (str "(ns sample.capability\n"
+               "  (:require [seon.effect :as effect]))\n"
+               handler "\n" owner "\n"))
+        handler
+        (str "(defn- handler\n"
+             "  {:malli/schema [:=> [:cat :map :map] :map]}\n"
+             "  [request effective] (assoc request :effective effective))")
+        owner
+        (fn [metadata body]
+          (str "(defn leaf\n  " metadata "\n"
+               "  [request] " body ")"))
+        refusal-rule
+        (fn [source]
+          (:seon.fn/capability-rule
+           (some-> source capability-refusal ex-data)))]
+    (is (= :marker-without-workload
+           (refusal-rule
+            (base handler
+                  (owner
+                   "{:malli/schema [:=> [:cat :map] :map]\n   :seon.effect/capability sample.capability/handler}"
+                   "(effect/request! #'leaf request)")))))
+    (is (= :capability-workload-not-io
+           (refusal-rule
+            (base handler
+                  (owner
+                   "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :compute\n   :seon.effect/capability sample.capability/handler}"
+                   "(effect/request! #'leaf request)")))))
+    (is (= :missing-handler
+           (refusal-rule
+            (base handler
+                  (owner
+                   "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/missing}"
+                   "(effect/request! #'leaf request)")))))
+    (is (= :public-handler
+           (refusal-rule
+            (base
+             (str "(defn handler\n"
+                  "  {:malli/schema [:=> [:cat :map :map] :map]}\n"
+                  "  [request effective] (assoc request :effective effective))")
+             (owner
+              "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/handler}"
+              "(effect/request! #'leaf request)")))))
+    (is (= :unschemaed-handler
+           (refusal-rule
+            (base
+             "(defn- handler [request effective] (assoc request :effective effective))"
+             (owner
+              "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/handler}"
+              "(effect/request! #'leaf request)")))))
+    (is (= :capability-handler
+           (refusal-rule
+            (base
+             (str "(defn- handler\n"
+                  "  {:malli/schema [:=> [:cat :map :map] :map]\n"
+                  "   :seon.workload :io\n"
+                  "   :seon.effect/capability sample.capability/handler}\n"
+                  "  [request effective] (assoc request :effective effective))")
+             (owner
+              "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/handler}"
+              "(effect/request! #'leaf request)")))))
+    (is (= :unmarked-request
+           (refusal-rule
+            (base handler
+                  "(defn leaf [request] (effect/request! #'leaf request))"))))
+    (is (= :capability-without-request
+           (refusal-rule
+            (base handler
+                  (owner
+                   "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/handler}"
+                   "request")))))))
+
 (deftest static-index-preserves-the-jvm-program-row-contract
   (let [root (fixture-root)
         source

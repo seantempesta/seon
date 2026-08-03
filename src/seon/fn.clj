@@ -243,7 +243,17 @@
         namespace-entry
         (first (filter #(= namespace-name (::analyzer/name %))
                        (::analyzer/namespace-definitions analysis)))
-        source (exact-source entry)]
+        source (exact-source entry)
+        capability-declared? (contains? metadata :seon.effect/capability)
+        capability (:seon.effect/capability metadata)]
+    (when (and capability-declared? (not (qualified-symbol? capability)))
+      (throw
+       (ex-info
+        "A capability marker must name one qualified handler symbol."
+        {:seon.error/kind ::index-refused
+         :seon.fn/capability-rule :invalid-handler-symbol
+         :seon.fn/sym (str qualified)
+         :seon.effect/capability capability})))
     (cond
       (::analyzer/test entry)
       {:seon.test/sym (str qualified)
@@ -270,7 +280,9 @@
                (mapv (fn [target] [:seon.fn/sym target])
                      (sort (get calls-by-caller (str qualified)))))
         (contains? #{:io :compute} (:seon.workload metadata))
-        (assoc :seon.fn/workload (:seon.workload metadata)))
+        (assoc :seon.fn/workload (:seon.workload metadata))
+        capability-declared?
+        (assoc :seon.effect/capability capability))
 
       :else nil)))
 
@@ -317,7 +329,88 @@
      (->> canonical-rows
           (keep program/row-identity)
           (sort-by pr-str)
-          vec)}))
+     vec)}))
+
+(def ^:private request-symbol "seon.effect/request!")
+
+(defn- capability-refused!
+  [rule function-symbol data]
+  (throw
+   (ex-info
+    "The declared capability graph is malformed."
+    (merge {:seon.error/kind ::index-refused
+            :seon.fn/capability-rule rule
+            :seon.fn/sym function-symbol}
+           data))))
+
+(defn- reaches?
+  [rows-by-symbol root target]
+  (loop [pending [root]
+         visited #{}]
+    (if-let [function-symbol (first pending)]
+      (cond
+        (= target function-symbol) true
+        (contains? visited function-symbol)
+        (recur (subvec pending 1) visited)
+        :else
+        (let [called (mapv second
+                           (:seon.fn/calls
+                            (get rows-by-symbol function-symbol)))]
+          (recur (into (subvec pending 1) called)
+                 (conj visited function-symbol))))
+      false)))
+
+(defn- assert-capability-contracts!
+  [artifacts]
+  (let [function-rows
+        (into []
+              (comp (mapcat :seon.fn.file/rows)
+                    (filter :seon.fn/sym))
+              artifacts)
+        rows-by-symbol (into {} (map (juxt :seon.fn/sym identity)) function-rows)
+        marked (sort-by :seon.fn/sym
+                        (filter :seon.effect/capability function-rows))]
+    (doseq [{function-symbol :seon.fn/sym
+             workload :seon.fn/workload}
+            marked]
+      (cond
+        (nil? workload)
+        (capability-refused! :marker-without-workload function-symbol {})
+
+        (not= :io workload)
+        (capability-refused! :capability-workload-not-io function-symbol
+                             {:seon.fn/workload workload})))
+    (doseq [{function-symbol :seon.fn/sym
+             handler-symbol :seon.effect/capability}
+            marked]
+      (let [handler (get rows-by-symbol (str handler-symbol))]
+        (cond
+          (nil? handler)
+          (capability-refused! :missing-handler function-symbol
+                               {:seon.effect/capability handler-symbol})
+
+          (not (:seon.fn/private? handler))
+          (capability-refused! :public-handler function-symbol
+                               {:seon.effect/capability handler-symbol})
+
+          (nil? (:seon.fn/spec handler))
+          (capability-refused! :unschemaed-handler function-symbol
+                               {:seon.effect/capability handler-symbol})
+
+          (:seon.effect/capability handler)
+          (capability-refused! :capability-handler function-symbol
+                               {:seon.effect/capability handler-symbol}))))
+    (doseq [{function-symbol :seon.fn/sym
+             capability :seon.effect/capability
+             calls :seon.fn/calls}
+            (sort-by :seon.fn/sym function-rows)]
+      (when (and (nil? capability)
+                 (some #(= request-symbol (second %)) calls))
+        (capability-refused! :unmarked-request function-symbol {})))
+    (doseq [{function-symbol :seon.fn/sym} marked]
+      (when-not (reaches? rows-by-symbol function-symbol request-symbol)
+        (capability-refused! :capability-without-request function-symbol {})))
+    artifacts))
 
 (defn build-artifact
   "Build one deterministic first-party file projection."
@@ -372,7 +465,10 @@
 
 (defn- manifest-data
   [roots artifacts]
-  (let [artifacts (vec (sort-by :seon.fn.file/path artifacts))]
+  (let [artifacts (->> artifacts
+                       (sort-by :seon.fn.file/path)
+                       vec
+                       assert-capability-contracts!)]
     {:seon.fn.manifest/roots roots
      :seon.fn.manifest/digest
      (sha-256 (.getBytes
@@ -421,7 +517,6 @@
         files (source-files roots)
         paths (mapv #(.getCanonicalPath ^java.io.File %) files)
         analysis (analyzer/analyze {::analyzer/paths paths})
-        _ (assert-clean-analysis! analysis)
         first-party-functions (first-party-function-symbols analysis)
         rows-by-file (analysis-rows-by-file analysis first-party-functions)
         artifacts
@@ -430,10 +525,13 @@
                           (get rows-by-file
                                (.getCanonicalPath ^java.io.File file)
                                [])))
-              files)]
-    (manifest-data
-     (mapv #(.getCanonicalPath ^java.io.File (rooted-file %)) roots)
-     artifacts)))
+              files)
+        manifest
+        (manifest-data
+         (mapv #(.getCanonicalPath ^java.io.File (rooted-file %)) roots)
+         artifacts)]
+    (assert-clean-analysis! analysis)
+    manifest))
 
 (defn- row-by-identity
   [rows]

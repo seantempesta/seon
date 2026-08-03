@@ -25,7 +25,8 @@
     :seon.program/owned-attributes
     [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
      :seon.fn/doc :seon.fn/private? :seon.fn/spec :seon.fn/arities
-     :seon.fn/ast :seon.fn/workload :seon.schema.admission/source]}
+     :seon.fn/ast :seon.fn/workload :seon.effect/capability
+     :seon.schema.admission/source]}
    :seon.schema/key
    {:seon.program/identity-attribute :seon.schema/key
     :seon.program/source-attribute :seon.schema/form
