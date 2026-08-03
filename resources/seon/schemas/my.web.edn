@@ -1,21 +1,9 @@
 #:my.web{:body :my.web.body/value
          :content-type [:string {:min 1}]
          :credits [:int {:min 0}]
-         :dns-failed [:= true]
-         :dns-failed-error
-         [:map
-          {:seon.error/class true
-           :seon.render/ai seon.error/render-ai
-           :seon.render/html seon.error/render-html
-           :error/message "must identify a web hostname that did not resolve"}
-          [:my.web/dns-failed :my.web/dns-failed]
-          [:seon.error/message :seon.error/message]
-          [:my.web/url {:optional true} :my.web/url]]
          :error
          [:or
           :my.web/invalid-url-error
-          :my.web/target-refused-error
-          :my.web/dns-failed-error
           :my.web/redirect-limit-error
           :my.web/redirect-loop-error
           :my.web/missing-location-error
@@ -150,16 +138,6 @@
           [:my.web/raw-response :my.web/raw-response]
           [:my.web/raw-response-bytes :my.web/raw-response-bytes]]
          :status [:int {:min 100, :max 599}]
-         :target-refused [:= true]
-         :target-refused-error
-         [:map
-          {:seon.error/class true
-           :seon.render/ai seon.error/render-ai
-           :seon.render/html seon.error/render-html
-           :error/message "must identify a web target refused by public-address policy"}
-          [:my.web/target-refused :my.web/target-refused]
-          [:seon.error/message :seon.error/message]
-          [:my.web/url {:optional true} :my.web/url]]
          :timeout [:= true]
          :timeout-error
          [:map

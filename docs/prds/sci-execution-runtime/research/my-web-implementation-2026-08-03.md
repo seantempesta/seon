@@ -85,9 +85,8 @@ not sleeps. Observed on OpenJDK `26.0.1`:
 | stalled body after headers, timeout requested at 500 ms | body read failed with `IOException`, 510 ms | body read failed with `IOException`, 502 ms |
 
 Both transports satisfy the named falsifiers because Hato delegates them to
-the same JDK implementation. Neither records a redirect chain or supplies the
-per-hop private-address decision; `my.web` must keep redirects disabled and
-perform the bounded hop reduce itself either way.
+the same JDK implementation. Neither records a redirect chain; `my.web` must
+keep redirects disabled and perform the bounded hop reduce itself either way.
 
 **Decision: retain the current JDK client.** Hato adds a Ring-shaped request
 map and middleware stack but no behavior the protected handler needs. The JDK
@@ -102,9 +101,10 @@ measured gain.
 - Public capability API: exactly `my.web/fetch` and `my.web/search`, each
   declaring `:seon.workload :io` and its one protected `seon.web.jvm` handler.
 - Fetch accepts one absolute HTTP(S) URL and `:get` or `:head`. The handler
-  resolves and checks every hop, follows redirects itself with a declared
-  depth ceiling, records every hop, preserves final URL/status/content type,
-  and keeps raw body bytes as the authority.
+  follows redirects itself with a declared depth ceiling, records every hop,
+  preserves final URL/status/content type, and keeps raw body bytes as the
+  authority. Local and private-address targets remain callable; the web family
+  imposes honest-mistake bounds, not a speculative network allowlist.
 - A body at or below the measured inline threshold returns exact octet values.
   A larger body streams through `seon.blob`; both arms carry the same SHA-256
   and byte count, and the response ceiling applies to both declared-length and
@@ -121,28 +121,29 @@ measured gain.
   settled result EDN; no handler-side transaction or second receipt mechanism
   exists.
 
-The retained measured defaults are 30 seconds for the genuinely remote-call
-backstop, 2,000,000 response bytes from the quarry's web heap ceiling, five
-redirect hops, 20 search rows, and 8,192 inline bytes from the current
-filesystem/blob crossover evidence. Each is one config fact and no fallback
-literal lives in the handler.
+The shipped starting defaults are 30 seconds for the genuinely remote-call
+backstop, 16 MiB per response, five redirect hops, 10 search rows, and 8 KiB
+inline. The byte ceilings intentionally match the filesystem family's shipped
+starting bounds; they remain marked uncalibrated in `config/default.edn` until
+measured against representative fetches. Each is one config fact and no
+fallback literal lives in the handler.
 
 ## Verification boundary
 
-The implementation namespaces load successfully with jsoup `1.22.2` on the
-classpath. The focused test run passed the two public-entry metadata/schema
-falsifiers (nine assertions), then produced four fixture errors before a web
-handler ran. The concurrent program-indexing change
-attempted to transact `[:seon.cluster.agent/id
-:seon.config/agent-overlay]` as one value of `:seon.fn/keywords`; the installed
-attribute accepts a keyword, not a vector. The exact refusing boundary is
-`seon.fn/index!`'s declarations phase, called by
-`seon.test-support/populate-database!`.
+The implementation namespaces load successfully with the production jsoup
+`1.22.2` dependency. After the concurrent keyword-edge repair restored
+publication, `bin/test my.web-test seon.web.jvm-test` passed eight tests and
+41 assertions. The recurring proofs cover direct localhost fetches without an
+address allowlist, bounded and recorded redirects, jsoup extraction, exact
+blob spill, chunked-body size refusal, timeout and dead-host flat errors, live
+Serper-shape projection, and raw response bytes.
 
-Per the lane stop rule, handler falsifiers and the through-`effect/request!`
-receipt proof remain pending behind that external indexing boundary. The
-direct transport comparison and paid Serper probe above are complete; no
-second paid query was attempted.
+The public `my.web/search` proof binds the same ambient database and effect
+context as an agent evaluation, calls through `effect/request!`, and queries
+the resulting receipt. Exactly one receipt is present; it carries both open
+and settled instants, no interruption, and canonical result EDN equal to the
+returned value, including `:my.web/credits 1`. No second paid query was used;
+the receipt proof runs against the local provider-shaped test response.
 
 ## Tool/render feedback
 

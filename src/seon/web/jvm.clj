@@ -9,7 +9,7 @@
             [seon.web.extract])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream FilterInputStream
             InputStream SequenceInputStream]
-           [java.net InetAddress URI UnknownHostException]
+           [java.net URI]
            [java.net.http HttpClient HttpClient$Redirect HttpRequest HttpRequest$Builder
             HttpRequest$BodyPublishers HttpResponse HttpResponse$BodyHandlers]
            [java.nio.charset StandardCharsets]
@@ -24,8 +24,6 @@
       .build))
 
 (def ^:private redirect-statuses #{301 302 303 307 308})
-(def ^:private blocked-hostnames
-  #{"localhost" "localhost.localdomain" "metadata.google.internal"})
 (def ^:private io-buffer-bytes 65536)
 
 (defn- error-value
@@ -39,49 +37,12 @@
       classified
       (error-value marker message data))))
 
-(defn- unsigned-byte
-  [octets index]
-  (bit-and 0xff (aget ^bytes octets index)))
-
-(defn- private-address?
-  [^InetAddress address]
-  (let [octets (.getAddress address)
-        size (alength ^bytes octets)]
-    (or (.isAnyLocalAddress address)
-        (.isLoopbackAddress address)
-        (.isLinkLocalAddress address)
-        (.isSiteLocalAddress address)
-        (.isMulticastAddress address)
-        (and (= 4 size)
-             (let [a (unsigned-byte octets 0)
-                   b (unsigned-byte octets 1)]
-               (or (= 0 a)
-                   (= 10 a)
-                   (= 127 a)
-                   (and (= 100 a) (<= 64 b 127))
-                   (and (= 169 a) (= 254 b))
-                   (and (= 172 a) (<= 16 b 31))
-                   (and (= 192 a) (= 168 b)))))
-        (and (= 16 size)
-             (= 0xfc (bit-and 0xfe (unsigned-byte octets 0)))))))
-
-(defn- resolve-addresses
-  [hostname]
-  (vec (InetAddress/getAllByName hostname)))
-
-(defn- normalized-hostname
-  [hostname]
-  (let [lower (str/lower-case hostname)]
-    (if (str/ends-with? lower ".")
-      (subs lower 0 (dec (count lower)))
-      lower)))
-
 (defn- admitted-uri
   [url]
   (try
     (let [uri (URI/create url)
           scheme (some-> (.getScheme uri) str/lower-case)
-          hostname (some-> (.getHost uri) normalized-hostname)]
+          hostname (.getHost uri)]
       (cond
         (not (contains? #{"http" "https"} scheme))
         (error-value :my.web/invalid-url
@@ -93,30 +54,7 @@
                      "The URL must name a host and cannot contain user info."
                      {:my.web/url url})
 
-        (contains? blocked-hostnames hostname)
-        (error-value :my.web/target-refused
-                     "The web target is not a public hostname."
-                     {:my.web/url url})
-
-        :else
-        (try
-          (let [addresses (resolve-addresses hostname)]
-            (cond
-              (empty? addresses)
-              (error-value :my.web/dns-failed
-                           "The web target did not resolve to an address."
-                           {:my.web/url url})
-
-              (some private-address? addresses)
-              (error-value :my.web/target-refused
-                           "The web target resolves to a non-public address."
-                           {:my.web/url url})
-
-              :else uri))
-          (catch UnknownHostException _
-            (error-value :my.web/dns-failed
-                         "The web target did not resolve to an address."
-                         {:my.web/url url})))))
+        :else uri))
     (catch Throwable _
       (error-value :my.web/invalid-url
                    "The URL is not a valid absolute HTTP(S) URI."

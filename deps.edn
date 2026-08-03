@@ -53,6 +53,9 @@
         ;; coordinate needed): plain synchronous, virtual threads park.
         org.clojure/data.json {:mvn/version "2.5.1"}
 
+        ;; Derived HTML text projection over already-captured response bytes.
+        org.jsoup/jsoup {:mvn/version "1.22.2"}
+
         ;; Generative properties are runtime evaluation material as well as
         ;; developer tests: goal grading loads them in the eval host.
         org.clojure/test.check {:mvn/version "1.1.1"}

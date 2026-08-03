@@ -1,19 +1,23 @@
 (ns seon.web.jvm-test
   (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as datahike]
+            [my.web :as web]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.config :as seon-config]
             [seon.db :as db]
+            [seon.effect :as effect]
             [seon.fs :as filesystem]
             [seon.test-support :as support]
             [seon.web.jvm]
             [seon.web.search])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.io ByteArrayOutputStream]
-           [java.net InetAddress InetSocketAddress ServerSocket]
+           [java.net InetSocketAddress ServerSocket]
            [java.nio.charset StandardCharsets]
            [java.util Arrays]
            [java.util.concurrent CountDownLatch Executors TimeUnit]))
@@ -93,6 +97,13 @@
       #(response! % 200 {"Content-Type" "application/octet-stream"}
                   oversized)))
     (.createContext
+     server "/too-large-chunked"
+     (http-handler
+      (fn [exchange]
+        (.sendResponseHeaders exchange 200 0)
+        (with-open [output (.getResponseBody exchange)]
+          (.write output ^bytes oversized)))))
+    (.createContext
      server "/redirect-0"
      (http-handler
       (fn [exchange]
@@ -156,15 +167,10 @@
         (.stop ^HttpServer server 0)
         (.shutdownNow ^java.util.concurrent.ExecutorService executor)))))
 
-(defn- public-addresses
-  [_hostname]
-  [(InetAddress/getByAddress
-    (byte-array (map unchecked-byte [93 184 216 34])))])
-
 (defn- config
   [base-url]
   {:seon.config.web/timeout-ms 1000
-   :seon.config.web/max-response-bytes 64
+   :seon.config.web/max-response-bytes 4096
    :seon.config.web/max-inline-bytes 8
    :seon.config.web/max-redirects 3
    :seon.config.web/max-search-results 5
@@ -186,9 +192,19 @@
 (defn- fetch
   [connection request effective]
   (binding [db/*conn* connection]
-    (with-redefs-fn
-      {(ns-resolve 'seon.web.jvm 'resolve-addresses) public-addresses}
-      #((handler-var 'seon.web.jvm 'fetch) request effective))))
+    ((handler-var 'seon.web.jvm 'fetch) request effective)))
+
+(defn- effect-context
+  [connection]
+  {:seon.store/branch-connection connection
+   :seon.cluster.agent/id "web-agent"
+   :seon.cluster.run/id "web-receipt-run"
+   :seon.cluster.run.form/ordinal 0
+   :seon.boot/cluster-name "default"
+   :seon.sci.admit/caps
+   (seon-config/result-caps (seon-config/defaults))
+   :seon.config/on-core-error :record
+   :seon.effect/counter (atom -1)})
 
 (deftest oversized-bodies-spill-byte-exactly-through-the-blob-tier
   (with-file-database
@@ -207,6 +223,19 @@
             (is (= (:my.web.body/digest body) (:my.web.body/blob body)))
             (is (Arrays/equals ^bytes oversized ^bytes actual))
             (is (not (contains? body :my.web.body/octet-values)))))))))
+
+(deftest response-size-ceiling-refuses-a-chunked-body
+  (with-file-database
+    (fn [connection]
+      (with-server
+        (fn [{:keys [base-url]}]
+          (let [result
+                (fetch connection
+                       {:my.web/url (str base-url "/too-large-chunked")}
+                       (assoc (config base-url)
+                              :seon.config.web/max-response-bytes 16))]
+            (is (true? (:my.web/response-limit result)))
+            (is (string? (:seon.error/message result)))))))))
 
 (deftest redirects-are-bounded-recorded-and-extracted-from-raw-bytes
   (with-file-database
@@ -266,9 +295,7 @@
                 result
                 (binding [db/*conn* connection]
                   (with-redefs-fn
-                    {(ns-resolve 'seon.web.jvm 'resolve-addresses)
-                     public-addresses
-                     (ns-resolve 'seon.web.jvm 'credential)
+                    {(ns-resolve 'seon.web.jvm 'credential)
                      (constantly "test-serper-key")}
                     #((handler-var 'seon.web.jvm 'search)
                       {:my.web/query "web capability evidence"
@@ -296,3 +323,42 @@
                      :my.web.result/position 2}]
                    (:my.web/results result)))
             (is (Arrays/equals ^bytes search-body ^bytes raw))))))))
+
+(deftest public-search-settles-one-receipt-with-provider-credits
+  (with-file-database
+    (fn [connection]
+      (with-server
+        (fn [{:keys [base-url]}]
+          (db/transact!
+           connection
+           [(merge {:seon.config/cluster "default"} (config base-url))
+            {:seon.cluster.agent/id "web-agent"}
+            {:seon.cluster.run/id "web-receipt-run"
+             :seon.cluster.run/agent
+             [:seon.cluster.agent/id "web-agent"]}])
+          (let [result
+                (with-redefs-fn
+                  {(ns-resolve 'seon.web.jvm 'credential)
+                   (constantly "test-serper-key")}
+                  #(binding [db/*conn* connection
+                             effect/*context* (effect-context connection)]
+                     (web/search
+                      {:my.web/query "web capability evidence"
+                       :my.web/max-results 2})))
+                receipt-id (pr-str ["web-receipt-run" 0 0])
+                receipt
+                (db/pull @connection '[*]
+                         [:seon.effect/id receipt-id])
+                stored-result (edn/read-string
+                               (:seon.effect/result-edn receipt))
+                receipt-count
+                (db/q '[:find (count ?receipt) .
+                        :in $ ?id
+                        :where [?receipt :seon.effect/id ?id]]
+                      @connection receipt-id)]
+            (is (= 1 (:my.web/credits result)))
+            (is (= result stored-result))
+            (is (= 1 receipt-count))
+            (is (inst? (:seon.effect/opened-at receipt)))
+            (is (inst? (:seon.effect/settled-at receipt)))
+            (is (nil? (:seon.effect/interrupted-at receipt)))))))))
