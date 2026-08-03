@@ -1,4 +1,9 @@
-{; Unit: queued compute submissions.
+{; Unit: retained Datahike temporal indices for this operator-root store.
+ ; Provenance: owner ruling 2026-08-03. Ordinary/user roots retain history;
+ ; isolated scratch and eval roots may explicitly choose false at creation.
+ :seon.config.db/keep-history? true
+
+ ; Unit: queued compute submissions.
  ; Provenance: core.async.flow alpha3 uses a fixed buffer of 10 per channel;
  ; the scheduling testbed preserved it because a full channel parks the
  ; submitter and loses no work.

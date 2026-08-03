@@ -16,7 +16,9 @@
             [seon.test-support :as test-support]))
 
 (def ^:private application-ledger
-  {:seon.config.flow.compute/queue-depth
+  {:seon.config.db/keep-history?
+   {:mode :creation-fixed :consumer 'seon.cluster/acquire-root-store!}
+   :seon.config.flow.compute/queue-depth
    {:mode :arm-time :consumer 'seon.flow/start-work-launcher!}
    :seon.config.flow.compute/concurrency
    {:mode :arm-time :consumer 'seon.flow/start-work-launcher!}
@@ -103,7 +105,8 @@
    {:mode :live :consumer 'seon.cluster.loop/turn}})
 
 (def ^:private applied
-  {:seon.config.flow.compute/queue-depth 3
+  {:seon.config.db/keep-history? true
+   :seon.config.flow.compute/queue-depth 3
    :seon.config.flow.compute/concurrency 1
    :seon.config.eval.result/max-depth 2
    :seon.config.eval.result/max-collection 3
@@ -152,7 +155,7 @@
         (set (keys (edn/read-string (slurp config/default-manifest-path))))]
     (is (= registered (set (keys application-ledger)))
         "a newly registered entry cannot ship without an application owner")
-    (is (= #{:arm-time :live :mixed}
+    (is (= #{:creation-fixed :arm-time :live :mixed}
            (set (map (comp :mode val) application-ledger))))))
 
 (deftest applied-values-shape-the-running-system
@@ -167,6 +170,11 @@
             handle (:seon.cluster.loop/cluster instance)
             launcher (flow/current-work-launcher)]
         (try
+          (testing "the database representation is fixed at store creation"
+            (is (true?
+                 (get-in @(:seon.store/connection
+                            (:seon.store/store instance))
+                         [:config :keep-history?]))))
           (testing "flow structure consumes its applied values"
             (is (= (select-keys applied
                                 [:seon.config.flow.compute/queue-depth

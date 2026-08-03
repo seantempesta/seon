@@ -218,19 +218,39 @@
   (.getCanonicalPath (io/file store-dir)))
 
 (defn- acquire-root-store!
-  "The ONE store at `store-dir`, opened on first use and shared after."
-  [store-dir]
-  (let [store-key (root-store-key store-dir)]
-    (locking root-store-holder
-      (if-let [held (get @root-store-holder store-key)]
-        (do
-          (swap! root-store-holder update-in [store-key ::holders] inc)
-          (:seon.store/store held))
-        ; open OUTSIDE the map first: a failed open must leave no entry
-        (let [store (store/open-store! {:seon.store/dir store-key})]
-          (swap! root-store-holder assoc store-key
-                 {:seon.store/store store ::holders 1})
-          store)))))
+  "The ONE store at `store-dir`, opened on first use and shared after.
+
+  A supplied history policy is creation-fixed for the whole operator root.
+  A later cluster in the same JVM must request the held representation."
+  ([store-dir]
+   (acquire-root-store! store-dir ::unspecified-history-policy))
+  ([store-dir keep-history?]
+   (let [store-key (root-store-key store-dir)
+         requested? (not= ::unspecified-history-policy keep-history?)]
+     (locking root-store-holder
+       (if-let [held (get @root-store-holder store-key)]
+         (let [store (:seon.store/store held)
+               main-connection (:seon.store/connection store)
+               held-keep-history?
+               (get-in @main-connection [:config :keep-history?])]
+           (when (and requested?
+                      (not= keep-history? held-keep-history?))
+             (refused!
+              "The requested history policy conflicts with the held operator-root store."
+              {:seon.boot/rule ::keep-history-mismatch
+               :seon.config.db/keep-history? keep-history?
+               :seon.store/keep-history? held-keep-history?
+               :seon.store/dir store-key}))
+           (swap! root-store-holder update-in [store-key ::holders] inc)
+           store)
+         ; open OUTSIDE the map first: a failed open must leave no entry
+         (let [request (cond-> {:seon.store/dir store-key}
+                         requested?
+                         (assoc :seon.config.db/keep-history? keep-history?))
+               store (store/open-store! request)]
+           (swap! root-store-holder assoc store-key
+                  {:seon.store/store store ::holders 1})
+           store))))))
 
 (defn- release-root-store!
   "Drop one holder; the LAST one releases the store and its flock."
@@ -1283,10 +1303,13 @@
   Each layer is assoc'd as it stands, and the whole value is republished
   to the registry at every step, so the instance a failure carries is
   exactly what stands: absence marks where boot stopped."
-  [instance publish! config-request]
+  [instance publish! compiled-config]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
-        store (acquire-root-store! (:seon.boot/store-dir config))
+        keep-history?
+        (get-in compiled-config
+                [:seon.config/effective :seon.config.db/keep-history?])
+        store (acquire-root-store! (:seon.boot/store-dir config) keep-history?)
         instance (publish! (assoc instance :seon.store/store store))
         cluster-branch (registry/cluster-branch cluster-name)
         forked
@@ -1321,11 +1344,7 @@
         instance (publish!
                   (assoc instance
                          :seon.boot/config-result
-                         (config/apply!
-                          (merge
-                           {:seon.config/connection connection
-                            :seon.boot/cluster-name cluster-name}
-                           config-request))))
+                         (config/apply-compiled! connection compiled-config)))
         process (process-identity (:seon.boot/advertisement instance))
         _ (ensure-cluster-entity! connection cluster-name process)
         ;; AFTER the dials are facts, because the root agent is who the
@@ -1388,7 +1407,7 @@
   one recorded source
   digest and a coherent program graph (a complete older corpus is
   sovereign and allowed) → accrete the current schema
-  population → config/apply! with the shipped defaults → return the complete
+  population → config/apply-compiled! with the shipped defaults → return the complete
   instance. A later-layer failure THROWS
   with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance
   (tower fields absent from the failure point) while the REPL and
@@ -1406,6 +1425,9 @@
         (resolve-bootstrap
          (apply dissoc request (keys config-request)))
         cluster-name (:seon.boot/cluster-name config)
+        compiled-config
+        (config/compile-manifest
+         (assoc config-request :seon.boot/cluster-name cluster-name))
         paths (cluster-paths (:seon.boot/root config) cluster-name)
         server-symbol (server-name cluster-name)]
     (create-directories! config paths)
@@ -1463,7 +1485,7 @@
         ;; the elapsed measure belongs to boot, not to whoever prints
         ;; the banner: a caller timing `start!` from outside measures
         ;; its own require time too
-        (let [stood (stack-tower! instance publish! config-request)]
+        (let [stood (stack-tower! instance publish! compiled-config)]
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000))))
         (catch Throwable failure

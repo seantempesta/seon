@@ -19,11 +19,11 @@
 (def ^:private source-attributes
   [:seon.source/digest :seon.source/built-at])
 
-(defn- with-temporal-database [body]
+(defn- with-history-policy [keep-history? body]
   (let [configuration
         {:store {:backend :memory :id (random-uuid)}
          :schema-flexibility :write
-         :keep-history? true}
+         :keep-history? keep-history?}
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
@@ -36,6 +36,9 @@
       (finally
         (d/release connection)
         (d/delete-database configuration)))))
+
+(defn- with-temporal-database [body]
+  (with-history-policy true body))
 
 (defn- transaction-id [report]
   (:max-tx (:db-after report)))
@@ -134,6 +137,22 @@
                      :seon.schema.admission/source])))))))
   (is (nil? (ns-resolve 'seon.schema 'core-process-identities))
       "the classifier has no literal process roster"))
+
+(deftest non-temporal-admission-fails-closed-without-dependency-exceptions
+  (with-history-policy
+    false
+    (fn [connection]
+      (seed-process! connection boot-process-identity)
+      (seal! connection seal-digest)
+      (let [decision
+            (admission
+             connection
+             (transact-row!
+              connection
+              :test.schema.admission/non-temporal
+              [:seon.db.process/id boot-process-identity]))]
+        (is (= :agent (:seon.schema.admission/source decision)))
+        (is (string? (:seon.schema.admission/note decision)))))))
 
 (deftest post-genesis-and-trusted-looking-processes-fail-closed
   (with-temporal-database

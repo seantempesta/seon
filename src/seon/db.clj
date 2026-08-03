@@ -6,6 +6,7 @@
   (:require [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connector :as connector]
+            [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
             [datahike.store :as datahike.store]
@@ -627,8 +628,19 @@
 
 (defn- database-view
   [operation database arguments]
-  (if (error-value? database)
+  (cond
+    (error-value? database)
     database
+
+    (not (dbi/-temporal-index? database))
+    (do
+      (append-database-evidence! database :all)
+      (error-value
+       ::non-temporal-database
+       "The database does not retain temporal indices."
+       {::operation ::temporal-read}))
+
+    :else
     (try
       (let [result (apply operation database arguments)]
         (append-database-evidence! database :all)

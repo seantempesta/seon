@@ -81,25 +81,28 @@
   The source branch holds the schema plus the marker \"ancestral\", so every
   descendant inherits real rows and a sibling's invisibility is a fact
   about data, not about an empty branch."
-  [body]
-  (let [dir (str "tmp/registry-test/" (random-uuid) "/store")]
-    (.mkdirs (.getParentFile (io/file dir)))
-    (let [opened (store/open-store! {:seon.store/dir dir})]
-      (try
-        (d/transact (:seon.store/connection opened) probe-schema)
-        (d/transact (:seon.store/connection opened)
-                    [{:seon.schema/key :seon.cluster.eval/result-blob
-                      :seon.schema/form ":seon.blob/digest"}
-                     {:seon.schema/key :seon.code.def/blob
-                      :seon.schema/form ":seon.blob/digest"}])
-        (write-marker! (:seon.store/connection opened) "ancestral")
-        (registry/branch! {:seon.store/store opened
-                           :seon.cluster.registry/from :db
-                           :seon.store/branch source-branch})
-        (body opened)
-        (finally
-          (store/release-store! opened)
-          (delete-recursively! (str (io/file dir) "/..")))))))
+  ([body]
+   (with-source-store {} body))
+  ([store-request body]
+   (let [dir (str "tmp/registry-test/" (random-uuid) "/store")]
+     (.mkdirs (.getParentFile (io/file dir)))
+     (let [opened
+           (store/open-store! (assoc store-request :seon.store/dir dir))]
+       (try
+         (d/transact (:seon.store/connection opened) probe-schema)
+         (d/transact (:seon.store/connection opened)
+                     [{:seon.schema/key :seon.cluster.eval/result-blob
+                       :seon.schema/form ":seon.blob/digest"}
+                      {:seon.schema/key :seon.code.def/blob
+                       :seon.schema/form ":seon.blob/digest"}])
+         (write-marker! (:seon.store/connection opened) "ancestral")
+         (registry/branch! {:seon.store/store opened
+                            :seon.cluster.registry/from :db
+                            :seon.store/branch source-branch})
+         (body opened)
+         (finally
+           (store/release-store! opened)
+           (delete-recursively! (str (io/file dir) "/.."))))))))
 
 (defn- cluster-request [store cluster-name]
   {:seon.store/store store
@@ -137,6 +140,25 @@
         (registry/collect! opened)
         (is (nil? (blob/get (:seon.store/connection opened) digest))
             "retiring the last referencing branch makes the blob collectible")))))
+
+(deftest non-temporal-collection-marks-current-blob-references
+  (with-source-store
+    {:seon.config.db/keep-history? false}
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "current-blob-owner"))
+      (let [branch (registry/cluster-branch "current-blob-owner")
+            connection (store/open-branch! opened branch)
+            content "the current non-temporal result"
+            digest (blob/put! connection content)]
+        (try
+          (d/transact connection
+                      [{:seon.registry.test/marker "current blob"
+                        :seon.cluster.eval/result-blob digest}])
+          (finally
+            (d/release connection)))
+        (registry/collect! opened)
+        (is (= content (blob/get (:seon.store/connection opened) digest))
+            "current references remain live when historical datoms are absent")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivation

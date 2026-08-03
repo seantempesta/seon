@@ -68,6 +68,8 @@
     (is (schema/valid-candidate-value? :seon.config/entity row))
     (is (= (long (.availableProcessors (Runtime/getRuntime)))
            (:seon.config.flow.compute/concurrency effective)))
+    (is (true? (:seon.config.db/keep-history? effective))
+        "ordinary operator roots retain history by shipped decision")
     (is (not (contains? effective :seon.config.web/port))
         "an explicit absence decision resolves without storing nil")
     (is (not (contains? effective :seon.config.ai.backup/model)))
@@ -81,6 +83,7 @@
         (config/compile-manifest
          {:seon.config/manifest
           {:seon.config.flow.compute/queue-depth 11
+           :seon.config.db/keep-history? false
            :seon.config/on-core-error :record}
           :seon.config/environment
           {:seon.config.flow.compute/queue-depth 12}
@@ -90,6 +93,8 @@
         "explicit environment wins over the selected sparse overlay")
     (is (= :record (:seon.config/on-core-error effective))
         "the sparse overlay wins over shipped defaults")
+    (is (false? (:seon.config.db/keep-history? effective))
+        "an isolated root may select the non-temporal representation")
     (is (= 65536 (:seon.config.eval.result/max-nodes effective))
         "an unmentioned entry inherits its shipped decision")
     (is (= "alpha"

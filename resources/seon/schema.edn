@@ -589,6 +589,9 @@
  :seon.config/on-core-error
  [:enum {:seon.config/dial true} :record :panic]
 
+ :seon.config.db/keep-history?
+ [:boolean {:seon.config/dial true}]
+
  ; THE ONE LIMIT on an agent evaluation, as a dial. The evaluator takes
  ; it in its request and never defaults it: a deadline literal in code
  ; is what the ruling bans, and a dial with a provenanced default is

@@ -63,6 +63,7 @@
     told `:ok` and the branch was gone (b2-plan §0.3)."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
+            [seon.db :as db]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
@@ -302,8 +303,10 @@
   (let [db (d/branch-as-db (:seon.store/connection store) branch)]
     (try
       (let [digest-attributes (blob-digest-attributes db)
-            history-db (try (d/history db)
-                            (catch Throwable _ db))]
+            history-view (db/history db)
+            history-db (if (:seon.error/kind history-view)
+                         db
+                         history-view)]
         (into #{}
               (mapcat
                (fn [attribute]

@@ -526,10 +526,13 @@
       {})))
 
 (defn- history-value [db]
-  (try
-    (d/history db)
-    (catch Throwable _
-      nil)))
+  ;; `seon.db` depends on this namespace for schema registration, so this
+  ;; domain-specific fallback resolves the database owner only when admission
+  ;; provenance is actually derived. A flat temporal refusal means the
+  ;; database retained no first-assertion provenance and admission fails closed.
+  (let [history ((requiring-resolve 'seon.db/history) db)]
+    (when-not (:seon.error/kind history)
+      history)))
 
 (defn- source-seal-tx [db history]
   (when (and history

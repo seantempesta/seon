@@ -51,6 +51,16 @@
     (cluster/refresh-source! root)
     root))
 
+(defn- fresh-root-with-history-policy [keep-history?]
+  (let [root (bare-root)
+        opened
+        (store/open-store!
+         {:seon.store/dir (str (io/file root "store"))
+          :seon.config.db/keep-history? keep-history?})]
+    (store/release-store! opened)
+    (cluster/refresh-source! root)
+    root))
+
 (defn- delete-recursively! [path]
   (test-support/delete-recursively! path))
 
@@ -648,6 +658,48 @@
 (defn- stop-refused-instance!
   [failure]
   (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
+
+(deftest operator-root-history-policy-is-creation-fixed
+  (let [root (fresh-root-with-history-policy false)
+        instance
+        (cluster/start!
+         {:seon.boot/root root
+          :seon.boot/cluster-name "history-off"
+          :seon.config/manifest {:seon.config.db/keep-history? false}})]
+    (try
+      (let [store (:seon.store/store instance)
+            connection (:seon.boot/cluster-connection instance)]
+        (is (false? (get-in @(:seon.store/connection store)
+                            [:config :keep-history?])))
+        (is (false? (get-in @connection [:config :keep-history?])))
+        (is (false?
+             (:seon.config.db/keep-history?
+              (config/effective @connection "history-off"))))
+        (testing "a sibling cannot request a different held representation"
+          (let [failure
+                (start-refusal
+                 {:seon.boot/root root
+                  :seon.boot/cluster-name "history-on-conflict"
+                  :seon.config/manifest
+                  {:seon.config.db/keep-history? true}})
+                refusal (ex-cause failure)]
+            (try
+              (is (= :seon.cluster/keep-history-mismatch
+                     (get-in (ex-data refusal)
+                             [:seon.boot/offense :seon.boot/rule])))
+              (is (= false
+                     (get-in (ex-data refusal)
+                             [:seon.boot/offense
+                              :seon.store/keep-history?])))
+              (is (= true
+                     (get-in (ex-data refusal)
+                             [:seon.boot/offense
+                              :seon.config.db/keep-history?])))
+              (finally
+                (stop-refused-instance! failure))))))
+      (finally
+        (cluster/stop! instance)
+        (delete-recursively! root)))))
 
 (deftest start-allows-an-older-complete-program-without-indexing
   (let [root (fresh-root)

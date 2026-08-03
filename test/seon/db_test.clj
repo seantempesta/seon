@@ -310,6 +310,32 @@
                           :where [_ :seon.cluster.message/id ?id]]
                         (db/since before-t))))))))))
 
+(deftest non-temporal-reads-return-one-flat-error-before-datahike
+  (let [configuration
+        {:store {:backend :memory :id (random-uuid)}
+         :keep-history? false}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (let [database @connection
+            time-point (:max-tx database)
+            results [(db/history database)
+                     (db/as-of database time-point)
+                     (db/since database time-point)]]
+        (doseq [result results]
+          (is (= :seon.db/non-temporal-database
+                 (:seon.error/kind result)))
+          (is (= :seon.db/temporal-read
+                 (get-in result [:seon.error/data :seon.db/operation])))
+          (is (not (contains? (:seon.error/data result)
+                              :seon.db/dependency-data))))
+        (binding [db/*conn* connection]
+          (is (= :seon.db/non-temporal-database
+                 (:seon.error/kind (db/history))))))
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
+
 (deftest the-exam-query-returns-the-fixtures-true-count
   (test-support/with-database
    (fn [connection]

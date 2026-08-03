@@ -122,3 +122,43 @@ opened the cluster branch. READY proof is presently blocked by the protected
 schema lane's unrelated `:seon.ai/usage` agent-contract `:any`; this issue stays
 open until the exact protected boot/config/database-view handoff in the research
 report lands and both live shapes complete.
+
+## Authorized integration attempt 2026-08-03
+
+The six-part integration reached the protected live boundary:
+
+- `:seon.config.db/keep-history?` is declared beside the other config leaves
+  and the shipped default explicitly retains history
+  (`resources/seon/schema.edn:592-593`, `config/default.edn:1-4`).
+- `start!` compiles the selected manifest once before the tower, passes the
+  effective boolean into process-root store acquisition, applies the same
+  compiled value after the branch opens, and refuses a conflicting policy on
+  an already-held store (`src/seon/cluster.clj:220-253,1301-1347,1420-1430`).
+- The one temporal database-view owner refuses a non-temporal database with
+  `:seon.db/non-temporal-database` before Datahike is called
+  (`src/seon/db.clj:629-650`). Schema admission and blob collection now use
+  that owner instead of catching direct `d/history` exceptions
+  (`src/seon/schema.clj:528-535`,
+  `src/seon/cluster/registry.clj:301-319`).
+- The config roster gate passed 11 tests / 48 assertions. The database, store,
+  schema-admission, and registry gates passed every production assertion after
+  one overstrong synthetic expectation was removed; the corrected admission
+  focus passed 7 tests / 32 assertions. The boot plus config-application gate
+  ran 31 tests / 142 assertions with one error at the live history-off boundary.
+
+The remaining blocker is reproduced, not inferred. A real history-off tower
+opens the non-temporal main and cluster branches and applies its config row,
+then `cluster-ctx` refuses `:seon.ai/usage` because its shipped declaration is
+still `[:map-of :string :any]` (`resources/seon/schema.edn:172`). Without
+temporal first-assertion history, schema admission deliberately classifies the
+row as agent-authored (`src/seon/schema.clj:528-535`), and the protected
+contract gate rejects `:any` for agent-authored schemas
+(`src/seon/schema/internal.cljc:59-89`). This is the same blocker previously
+reported as cleared; the history-off boot falsifier shows it remains live on
+the non-temporal path.
+
+Exact remainder: settle the non-temporal source-row admission evidence at its
+protected owner without weakening agent-authored contracts, then rerun the
+history-off READY → real DeepSeek turn → rendered context → flat temporal
+error proof and the paired history-on `history` / `as-of` / `since` proof.
+Until then the issue remains open and no live-proof acceptance is claimed.
