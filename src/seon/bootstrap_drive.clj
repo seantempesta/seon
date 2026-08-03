@@ -16,6 +16,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -106,7 +107,7 @@
             str/replace "%PEER%" (or peer-id ""))))
 
 (defn- objective-run-ids [db message-id]
-  (->> (d/q '[:find ?run-id ?opened-tx
+  (->> (db/q '[:find ?run-id ?opened-tx
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
@@ -118,7 +119,7 @@
 
 (defn- candidate-functions [db run-ids namespace-name]
   (if (seq run-ids)
-    (->> (d/q '[:find ?sym ?spec ?run-id ?ordinal
+    (->> (db/q '[:find ?sym ?spec ?run-id ?ordinal
                 :in $ [?run-id ...] ?namespace-name
                 :where
                 [?namespace :seon.ns/name ?namespace-name]
@@ -188,7 +189,7 @@
    :p2b (= "discovered-by-contract" completed-result)})
 
 (defn- public-my-message-count [db]
-  (or (d/q '[:find (count ?function) .
+  (or (db/q '[:find (count ?function) .
              :where
              [?namespace :seon.ns/name my.message]
              [?function :seon.fn/ns ?namespace]
@@ -209,7 +210,7 @@
 
 (defn- messages-between? [db from-id to-id]
   (boolean
-   (d/q '[:find ?message .
+   (db/q '[:find ?message .
           :in $ ?from-id ?to-id
           :where
           [?from :seon.cluster.agent/id ?from-id]
@@ -221,7 +222,7 @@
 (defn- grade-o4
   [db agent-id peer-id receipts completed-result]
   (let [peer-message-ids
-        (d/q '[:find [?message-id ...]
+        (db/q '[:find [?message-id ...]
                :in $ ?from-id ?to-id
                :where
                [?from :seon.cluster.agent/id ?from-id]

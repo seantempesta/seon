@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
@@ -420,7 +421,7 @@
     (with-redefs [analyzer/analyze
                   (fn [_]
                     (throw (ex-info "analysis must not run" {})))
-                  d/q (fn [& _] nil)
+                  db/q (fn [& _] nil)
                   d/transact
                   (fn [_ request]
                     (swap! transactions conj request)

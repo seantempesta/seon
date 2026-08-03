@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.walk :as walk]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -649,7 +650,7 @@
         (:seon.schema.projection/predicate-functions projection)
         schema-keys (set (keys (:seon.schema.projection/forms projection)))
         missing
-        (d/q '[:find ?function ?function-symbol ?spec
+        (db/q '[:find ?function ?function-symbol ?spec
                :where
                [?function :seon.fn/sym ?function-symbol]
                [?function :seon.fn/spec ?spec]
@@ -661,7 +662,7 @@
          []
          (mapcat
           (fn [[function function-symbol spec]]
-            (let [current (d/pull db [:seon.fn/arities :seon.fn/ast]
+            (let [current (db/pull db [:seon.fn/arities :seon.fn/ast]
                                   function)
                   parsed
                   (program/contract-facts
@@ -730,7 +731,7 @@
         _ (assert-one-row-per-identity! program-rows)
         _ (assert-populated! program-rows)
         existing (some (fn [identity-attribute]
-                         (d/q '[:find ?entity .
+                         (db/q '[:find ?entity .
                                 :in $ ?attribute
                                 :where [?entity ?attribute]]
                               @connection identity-attribute))

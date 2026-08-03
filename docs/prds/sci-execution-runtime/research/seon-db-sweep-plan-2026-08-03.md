@@ -75,6 +75,12 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   generic debug entity used tuple offsets 1 and 2; `seon.db/datoms` deliberately
   returns ordinary maps. The consumer now reads `:a` and `:v`, and the two
   `/data` regressions cover both the ordinary entity root and capped 5 MB value.
+- The initialization/read gate exposed one production-aware test double in
+  `seon.fn-test/indexing-uses-a-prebuilt-manifest-without-analysis`: it replaced
+  `datahike.api/q`, not merely the analyzer, because the deliberately synthetic
+  connection cannot answer the indexer's freshness query. The focused wave
+  moved that exact double to `seon.db/q`; the test sweep still owns the file's
+  ordinary database calls.
 
 ## Current source census
 

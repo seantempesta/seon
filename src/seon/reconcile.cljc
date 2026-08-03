@@ -44,6 +44,7 @@
   either way."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.db :as seon.db]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@
          (fn [attr]
            (map (fn [[eid value]]
                   {:db/id eid ::identity [attr value]})
-                (d/q
+                (seon.db/q
                  '[:find ?entity ?value
                    :in $ ?identity-attr
                    :where
@@ -116,7 +117,7 @@
   [db identity-attrs]
   (if-not (true? (get-in db [:config :keep-history?]))
     {}
-    (let [history (d/history db)]
+    (let [history (seon.db/history db)]
       (reduce
        (fn [first-by-identity attr]
          (reduce
@@ -125,7 +126,7 @@
                     [eid [attr value]]
                     #(if (or (nil? %) (< tx %)) tx %)))
           first-by-identity
-          (d/q
+          (seon.db/q
            '[:find ?entity ?value ?tx
              :in $ ?identity-attr
              :where
@@ -138,7 +139,7 @@
 (defn- process-by-transaction
   [db]
   (into {}
-        (d/q
+        (seon.db/q
          '[:find ?tx ?process-id
            :where
            [?tx :seon.db/process ?process]
@@ -336,7 +337,7 @@
         (into {}
               (map
                (fn [eid]
-                 [eid (d/pull db '[*] eid)]))
+                 [eid (seon.db/pull db '[*] eid)]))
               (keys entity-identities))
         first-tx
         (first-assertion-transactions db installed-attrs)

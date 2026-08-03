@@ -5,6 +5,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.message :as message]
@@ -31,14 +32,14 @@
 (defn- bootstrap-complete? [db agent-id]
   (let [run-id (bootstrap/run-id agent-id)]
     (when-let [closed-at
-               (d/q '[:find ?closed .
+               (db/q '[:find ?closed .
                       :in $ ?run-id
                       :where
                       [?run :seon.cluster.run/id ?run-id]
                       [?run :seon.cluster.run/closed-at ?closed]]
                     db run-id)]
       (let [receipt-count
-            (or (d/q '[:find (count ?receipt) .
+            (or (db/q '[:find (count ?receipt) .
                        :in $ ?run-id
                        :where
                        [?run :seon.cluster.run/id ?run-id]
@@ -89,7 +90,7 @@
                 {:tx-data [[:db.fn/call #'message/inbound-tx request]]
                  :tx-meta {:seon.db/process
                            [:seon.db.process/id process]}})
-    (or (d/q '[:find ?id .
+    (or (db/q '[:find ?id .
                :in $ ?agent-id ?content
                :where
                [?agent :seon.cluster.agent/id ?agent-id]
@@ -101,7 +102,7 @@
                         {:seon.cluster.agent/id agent-id})))))
 
 (defn- objective-run-ids [db message-id]
-  (->> (d/q '[:find ?run-id ?opened-tx
+  (->> (db/q '[:find ?run-id ?opened-tx
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
@@ -124,7 +125,7 @@
 
 (defn- run-receipts [db run-ids]
   (if (seq run-ids)
-    (->> (d/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
+    (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.cluster.run/id ?run-id]
@@ -162,13 +163,13 @@
 
 (defn- model-attempts [db run-ids]
   (if (seq run-ids)
-    (->> (d/q '[:find [?attempt ...]
+    (->> (db/q '[:find [?attempt ...]
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.cluster.run/id ?run-id]
                 [?attempt :seon.ai.attempt/run ?run]]
               db run-ids)
-         (map #(d/pull
+         (map #(db/pull
                 db
                 '[:seon.ai.attempt/id
                   :seon.ai.attempt/ordinal
@@ -192,7 +193,7 @@
     []))
 
 (defn- run-records [db run-ids]
-  (mapv #(d/pull db
+  (mapv #(db/pull db
                  [:seon.cluster.run/id
                   :seon.cluster.run/opened-at
                   :seon.cluster.run/closed-at
@@ -208,7 +209,7 @@
         closed-count
         (if (seq run-ids)
           (count
-           (d/q '[:find [?run ...]
+           (db/q '[:find [?run ...]
                   :in $ [?run-id ...]
                   :where
                   [?run :seon.cluster.run/id ?run-id]
@@ -288,7 +289,7 @@
           (await-fact! connection timeout-ms (str "objective " episode-id)
                        #(terminal-state % agent-id process message-id run-cap))
           ending-db @connection
-          ending-commit (d/commit-id ending-db)
+          ending-commit (db/commit-id ending-db)
           run-ids (:seon.eval.drive/run-ids terminal)
           receipts (run-receipts ending-db run-ids)
           store (:seon.store/store instance)

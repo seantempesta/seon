@@ -461,7 +461,7 @@
   (let [present
         (into
          #{}
-         (d/q '[:find [?id ...]
+         (db/q '[:find [?id ...]
                 :where [_ :seon.db.process/id ?id]]
               db))]
     (into
@@ -478,7 +478,7 @@
    (keep
     (fn [{schema-key :seon.schema/key :as desired}]
       (let [current
-            (some-> (d/pull db schema-row-pattern
+            (some-> (db/pull db schema-row-pattern
                             [:seon.schema/key schema-key])
                     (dissoc :db/id))]
         (when-not (= desired (select-keys current (keys desired)))
@@ -492,7 +492,7 @@
          []
          (keep
           (fn [instruction-id]
-            (when (d/q '[:find ?instruction .
+            (when (db/q '[:find ?instruction .
                          :in $ ?instruction-id
                          :where
                          [?instruction :seon.cluster.instruction/id
@@ -505,7 +505,7 @@
      superseded
      (remove
       (fn [{instruction-id :seon.cluster.instruction/id}]
-        (some? (d/q '[:find ?instruction .
+        (some? (db/q '[:find ?instruction .
                       :in $ ?instruction-id
                       :where
                       [?instruction :seon.cluster.instruction/id
@@ -633,7 +633,7 @@
   [db attribute]
   (if (contains? (:schema db) attribute)
     (or
-     (d/q '[:find (count ?entity) .
+     (db/q '[:find (count ?entity) .
             :in $ ?attribute
             :where [?entity ?attribute]]
           db
@@ -647,7 +647,7 @@
         (if (contains? (:schema db) :seon.source/digest)
           (into
            #{}
-           (d/q '[:find [?digest ...]
+           (db/q '[:find [?digest ...]
                   :where [_ :seon.source/digest ?digest]]
                 db))
           #{})
@@ -903,7 +903,7 @@
   [connection process]
   (let [db @connection
         now (java.util.Date.)
-        open-runs (d/q '[:find [?run-id ...]
+        open-runs (db/q '[:find [?run-id ...]
                          :where
                          [?run :seon.cluster.run/id ?run-id]
                          (not [?run :seon.cluster.run/closed-at _])]
@@ -955,7 +955,7 @@
   ;; Transaction metadata cannot resolve a lookup ref introduced by that same
   ;; transaction. Establish this process under the bootstrap provenance first;
   ;; subsequent cluster and agent transactions can then name it honestly.
-  (when-not (d/q '[:find ?entity .
+  (when-not (db/q '[:find ?entity .
                    :in $ ?process
                    :where [?entity :seon.db.process/id ?process]]
                  @connection process)
@@ -996,7 +996,7 @@
                (map (fn [namespace-name]
                       {:seon.ns/name namespace-name}))
                toolkit-namespaces)}
-        current (some-> (d/pull @connection
+        current (some-> (db/pull @connection
                                 '[:seon.cluster/name
                                   {:seon.cluster/config
                                    [:seon.config/cluster]}
@@ -1041,7 +1041,7 @@
    {agent-id :seon.cluster.agent/id
     namespace-name :seon.ns/name
     :as request}]
-  (if (d/q '[:find ?agent .
+  (if (db/q '[:find ?agent .
              :in $ ?agent-id
              :where [?agent :seon.cluster.agent/id ?agent-id]]
            db agent-id)
@@ -1138,7 +1138,7 @@
   where the serial-era global query stopped being. That global query
   (`attributed-run`) is deleted at F2 §3.3."
   [db agent-id process]
-  (d/q '[:find ?id .
+  (db/q '[:find ?id .
          :in $ ?agent-id ?process
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
@@ -1684,7 +1684,7 @@
         served (:seon.render.web/served instance)
         advertisement (:seon.boot/advertisement instance)
         agents (if db
-                 (or (d/q '[:find (count ?a) . :where
+                 (or (db/q '[:find (count ?a) . :where
                             [?a :seon.cluster.agent/id _]] db)
                      0)
                  0)

@@ -13,6 +13,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -169,7 +170,7 @@
                                {:expected-current-commit expected-commit})
               ;; Equal heads are not strict descendants, so initial scratch
               ;; retirement remains safe under the existing registry rule.
-              (let [scratch-commit (d/commit-id @connection)
+              (let [scratch-commit (db/commit-id @connection)
                     {:seon.cluster/keys [created?]}
                     (registry/branch! {:seon.store/store store
                                        :seon.cluster.registry/from scratch
@@ -232,7 +233,7 @@
         (try
           (assert-scalar-rows! @connection rows)
           (let [digest-entities
-                (d/q '[:find [?entity ...]
+                (db/q '[:find [?entity ...]
                        :where [?entity :seon.source/digest]]
                      @connection)]
             (when-not (= 1 (count digest-entities))
@@ -242,7 +243,7 @@
                         ::digest-entity-count (count digest-entities)}))
             (let [digest-entity (first digest-entities)
                   old-digest (:seon.source/digest
-                              (d/entity @connection digest-entity))]
+                              (db/entity @connection digest-entity))]
               (d/transact
                connection
                (cond->
