@@ -1,0 +1,21 @@
+#:my.background{:descriptor
+                [:map
+                 [:seon.effect/id :seon.effect/id]
+                 [:seon.effect/request-edn :seon.effect/request-edn]
+                 [:seon.effect/result-edn
+                  {:optional true}
+                  :seon.effect/result-edn]
+                 [:seon.effect/result-blob
+                  {:optional true}
+                  :seon.effect/result-blob]
+                 [:seon.effect/result-size
+                  {:optional true}
+                  :seon.effect/result-size]
+                 [:seon.effect/duration-ms
+                  {:optional true}
+                  :seon.effect/duration-ms]
+                 [:seon.effect/interrupted-at
+                  {:optional true}
+                  :seon.effect/interrupted-at]],
+                :result
+                [:tuple [:= :seon.effect/id] :seon.effect/id]}

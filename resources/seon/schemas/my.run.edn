@@ -9,4 +9,7 @@
          :wait
          [:map
           [:my.run/disposition [:= :wait]]
-          [:my.run/note :my.run/note]]}
+          [:my.run/note :my.run/note]
+          [:my.background/result
+           {:optional true}
+           :my.background/result]]}

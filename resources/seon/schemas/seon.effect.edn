@@ -1,5 +1,12 @@
 #:seon.effect{:capability :qualified-symbol,
+              :background? :boolean,
+              :execution-options
+              [:map
+               [:seon.effect/background?
+                {:optional true}
+                :seon.effect/background?]],
               :form-ordinal [:int {:min 0}],
+              :duration-ms [:int {:min 0}],
               :id [:string {:min 1, :seon.db/identity true}],
               :interrupted-at :inst,
               :open-request :seon.effect/receipt,
@@ -16,9 +23,22 @@
                [:seon.effect/ordinal :seon.effect/ordinal]
                [:seon.effect/request-edn :seon.effect/request-edn]
                [:seon.effect/opened-at :seon.effect/opened-at]
+               [:seon.effect/notify
+                {:optional true}
+                :seon.effect/notify]
+               [:seon.effect/to {:optional true} :seon.effect/to]
                [:seon.effect/result-edn
                 {:optional true}
                 :seon.effect/result-edn]
+               [:seon.effect/result-blob
+                {:optional true}
+                :seon.effect/result-blob]
+               [:seon.effect/result-size
+                {:optional true}
+                :seon.effect/result-size]
+               [:seon.effect/duration-ms
+                {:optional true}
+                :seon.effect/duration-ms]
                [:seon.effect/settled-at
                 {:optional true}
                 :seon.effect/settled-at]
@@ -35,13 +55,30 @@
                [:seon.boot/cluster-name :seon.boot/cluster-name]
                [:seon.sci.admit/caps :seon.sci.admit/caps]
                [:seon.config/on-core-error
-                :seon.config/on-core-error]],
+                :seon.config/on-core-error]
+               [:seon.cluster.agent/id
+                {:optional true}
+                :seon.cluster.agent/id]
+               [:seon.flow/work-launcher
+                {:optional true}
+                :seon.flow/work-launcher]],
+              :notify [:and #:seon.db{:index true} :seon.db/ref],
               :request-edn [:string #:seon.db{:no-history? true}],
               :result-edn [:string #:seon.db{:no-history? true}],
+              :result-blob :seon.blob/digest,
+              :result-size [:int {:min 0}],
               :run [:and #:seon.db{:index true} :seon.db/ref],
               :settle-request
               [:map
                [:seon.effect/id :seon.effect/id]
                [:seon.effect/result-edn :seon.effect/result-edn]
+               [:seon.effect/result-blob
+                {:optional true}
+                :seon.effect/result-blob]
+               [:seon.effect/result-size
+                {:optional true}
+                :seon.effect/result-size]
+               [:seon.effect/duration-ms :seon.effect/duration-ms]
                [:seon.effect/settled-at :seon.effect/settled-at]],
-              :settled-at :inst}
+              :settled-at :inst,
+              :to [:and #:seon.db{:index true} :seon.db/ref]}

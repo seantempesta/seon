@@ -95,14 +95,18 @@
           (test-support/await-event!
            events
            ::background-effect-settled
-           #(some (fn [datom]
-                    (= :seon.effect/to (:a datom)))
-                  (:tx-data %)))
+           #(:seon.effect/to
+             (db/pull (:db-after %)
+                      [{:seon.effect/to [:seon.cluster.agent/id]}]
+                      [:seon.effect/id effect-id])))
           (let [receipt
-                (db/pull @connection '[*]
+                (db/pull @connection
+                         '[* {:seon.effect/to
+                              [:seon.cluster.agent/id]}]
                          [:seon.effect/id effect-id])]
-            (is (= [:seon.cluster.agent/id "effect-agent"]
-                   (:seon.effect/to receipt)))
+            (is (= "effect-agent"
+                   (get-in receipt
+                           [:seon.effect/to :seon.cluster.agent/id])))
             (is (nil? (:seon.effect/notify receipt)))
             (is (int? (:seon.effect/duration-ms receipt)))
             (is (not (neg? (:seon.effect/duration-ms receipt)))))

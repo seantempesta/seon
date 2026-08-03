@@ -10,11 +10,11 @@
            {:my.example/id 1}
            {:seon.effect/background? true})
          (macroexpand-1
-          '(background/background
+          '(my.background/background
             (my.example/call {:my.example/id 1})))))
   (is (= :my.background/invalid-call
          (:seon.error/kind
-          (macroexpand-1 '(background/background (+ 1 2 3)))))))
+          (macroexpand-1 '(my.background/background (+ 1 2 3)))))))
 
 (deftest poll-and-await-derive-terminal-presence-without-acknowledging
   (test-support/with-database
@@ -44,7 +44,9 @@
                (background/await
                 [:seon.effect/id "background-result"]
                 "Use the result."))))
-      (is (= [:seon.cluster.agent/id "background-agent"]
-             (:seon.effect/notify
-              (db/pull @connection '[*]
-                       [:seon.effect/id "background-result"])))))))
+      (is (= "background-agent"
+             (get-in
+              (db/pull @connection
+                       [{:seon.effect/notify [:seon.cluster.agent/id]}]
+                       [:seon.effect/id "background-result"])
+              [:seon.effect/notify :seon.cluster.agent/id]))))))
