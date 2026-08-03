@@ -13,12 +13,13 @@ tags: [architecture, agent]
 > A block is the informal name for one render-function call in either
 > projection, never a stored data type.
 
-The prompt is a **tree of render units rooted at one agent entity**. Schema'd
-data are renderable leaves and refs are branches. The recursive walk discovers
-the tree from one immutable database value; a separate display projection
-orders the resulting units and joins their AI bytes.
+The prompt is a **flat sequence of render-call units rooted at one agent
+entity**. Schema'd data are renderable values and refs are traversal edges. A
+bounded walk discovers the units from one immutable database value; the
+display projection orders them and joins their AI bytes. Recursive traversal
+state is private to the walk and never becomes another public render envelope.
 
-Every model call re-derives the tree from one frozen db value. Nothing is accumulated.
+Every model call re-derives the walk from one frozen db value. Nothing is accumulated.
 The agent, cluster, current run, namespace, window policy, tool/schema graph,
 plan, event membership, and tree edges are facts or pure queries over that
 value. Rendering the same database value (the same store ID, branch, commit ID,
@@ -37,14 +38,12 @@ from another commit merely because both lack revision history. The render
 therefore sees the selected database value whether a read computes, joins
 single-flight, or hits cache.
 
-Render caching is **per function call**: `(renderer fn × explicit args) →
-bytes`. Each process-local entry retains the bytes and digest, the call's
-attribute dependency set, last-seen per-attribute commit IDs, the conservative
-database revision, the process-local code revision, and the basis at which its
-bytes last changed. A call is stale when any dependency commit ID differs by
-`not=`, the conservative revision moves, or the code revision moves. The walk
-may therefore call renderers dumbly and compose independently cached results;
-the cache is losable performance state, never another truth.
+Render reuse belongs to the one render proc package owner. Each process-local
+fragment entry retains its dependency evidence and serialized bytes; the same
+state retains the latest revisioned package. A pass reuses a fragment when its
+evidence is equal, compares newly produced bytes when it is not, and builds the
+keyframe from retained bytes. This is losable performance state, never another
+truth or a second general function cache.
 
 Live root telemetry is an ordinary first-party render unit with explicit
 process-local inputs, not a tail outside the block system. It is comment-shaped,
@@ -197,14 +196,13 @@ is transport behavior and does not select a second evaluation mode.
 
 ## A render fn supplies twin projections
 
-A `defn` whose input accepts the db and whose output carries a render key is
-a **renderer**, and the keys present decide where it goes:
+A public `defn` whose declared input accepts a render unit and whose declared
+output is one of the two render shapes is a **renderer**:
 
-- `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
-- `{:seon.render/html …}` → a **surface**: its own HTML projection on the
-  agent's page.
-- **both keys → twins**: one value, two projections — the agent's context
-  and the human's screen showing the same thing.
+- `:seon.render/ai` → its string joins the agent's prompt.
+- `:seon.render/html` → its Hiccup is serialized for the agent's page.
+- both declared contracts → twins: the agent's context and the human's screen
+  show the same value through two typed functions.
 
 ### [TARGET] Generalized canvas focus
 
@@ -257,12 +255,14 @@ owner's context includes current source, dependents, observed calls, failures,
 performance evidence, tests, and incoming change requests. Ownership is a
 distributed collaboration protocol, not a private program copy.
 
-Render membership comes only from the tree walk. The walk discovers schema'd
-values, then resolves each value through one chain: explicit render keys on the
-value; a same-schema renderer found by a program-graph query in the viewing
-agent's namespace and then the data's owning namespace; the schema-attached
-default; and the structural floor. A namespace renderer is a possible
-projection for discovered data, never membership by itself.
+Render membership comes only from the walk. It discovers schema'd values, then
+resolves each through one chain: an explicit producer symbol on the value; the
+unique contract-fitting public function in an explicitly owning namespace; the
+schema-attached default; and the structural floor. Ownership comes only from a
+real ref on the data or traversal edge, never keyword text or the viewer's
+namespace. Without such a ref, resolution proceeds directly to schema metadata
+and then the floor. A namespace renderer is a possible projection for
+discovered data, never membership by itself.
 
 The cluster entity owns the authoritative ref set to
 `:seon.cluster.instruction` rows for the system message, reply grammar,
@@ -273,7 +273,7 @@ Datahike history retains the prior text. Plans, warnings, transcripts, and
 other agent facts are reached from their ordinary refs in the same tree.
 
 Rule: **derive the derivable; an override is data the same walk reads.** One
-walk produces one tree of render units—never two rendering systems.
+walk produces one flat sequence of render-call units—never two rendering systems.
 
 ## Explicit render inputs
 
@@ -291,13 +291,13 @@ from the presence of an injected argument.
 
 ## Renderer discovery — the walk queries the program graph
 
-The walk first discovers schema'd values. For each value, it queries the
-program graph for a same-schema renderer in the governing namespace and runs
-the winning function through the same render boundary. Renderer functions
-consume a unit carrying `:seon.db/db`, `:seon.cluster.agent/id`, and their
-domain values; their presence alone never inserts a context unit. This keeps
-membership in the entity tree while allowing the current namespace to override
-how discovered data renders with zero registry ceremony.
+The walk first discovers schema'd values. For each value with an explicit
+owning-namespace ref, it queries the program graph for the unique
+contract-fitting public function in that namespace and runs the winner through
+the same render boundary. Without an owning ref it proceeds to the schema
+property and floor. Renderer functions consume a unit carrying `:seon.db/db`,
+`:seon.cluster.agent/id`, and their domain values; their presence alone never
+inserts a context unit.
 
 ### Root is a small specialization of the same mechanism
 
@@ -338,13 +338,13 @@ the agent entity; it never installs a block or creates a second assembly path.
 ## Order = last change, so the cache holds
 
 Render units are ordered by **when their bytes last changed** and by nothing
-else. Each cached function call carries the basis at which its digest last
-transitioned; a no-op reassertion does not move it. Display order is ascending
+else. The render proc's retained fragment entry carries the basis at which its
+bytes last transitioned; a no-op reassertion does not move it. Display order is ascending
 across every unit regardless of tree position, so the prompt reads
 longest-unchanged → most-recently-changed and the provider prefix-cache survives
 most turns. Near-equal changes cluster by branch so related units remain
 together; the target does not invent a threshold here. The key is derived by
-the per-call cache at render time and is never a stored timestamp, stability
+the retained fragment state at render time and is never a stored timestamp, stability
 field, or authored priority. Stable render-call identity is the final
 deterministic tie-break within a branch cluster.
 

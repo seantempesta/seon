@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, deletion, rendering, testing]
 ---
@@ -75,3 +75,15 @@ do not.
 - A source/schema/test reference chase finds one live render selection
   mechanism, and current namespace page, debug page, prompt, and SSE proofs
   remain green.
+
+## Resolution
+
+The final debris wave deleted `seon.render.root`, its direct test, the
+unselected agent header/namespace renderers, the dead context execution and
+token helpers, and their root/agent CSS selectors. The surviving agent,
+transcript, namespace, oversight, and value renderers are selected through the
+typed program-graph/schema chain. `seon.render.value` is now JVM-only `.clj`,
+so the former CLJS-side require mismatch no longer exists.
+
+Proof: the source/schema/test reference chase finds no deleted symbol, and the
+focused page/prompt/SSE gate passed 165 tests and 861 assertions.

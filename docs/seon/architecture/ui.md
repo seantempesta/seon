@@ -32,16 +32,11 @@ value admission, and bounded output. No direct Var invocation or
 cheap flow-graph rebuilds protect the process; the UI does not rely on a
 process wall.
 
-**Kind is the boundary (owner, 2026-07-29).** A kind is never chosen
-interior to the system: the delivery boundary states it — the agent
-prompt boundary asks for `:seon.render/ai`, the browser boundary for
-`:seon.render/html`, the log sink for `:seon.render/log`. The same
-value returning from the same eval renders ai to the agent and html to
-the browser because the ENDPOINT differs, not the data. Only boundary
-owners name a kind; interior code passes units through; renderers
-declare what they can produce and the boundary picks. This is why kind
-is a request argument and never a stored fact: a boundary is a place,
-not a property of data.
+There are exactly two typed render outputs. The agent prompt asks for
+`:seon.render/ai`; the browser asks for `:seon.render/html`. Logs and other
+sinks call ordinary sink-specific functions rather than extending a generic
+render kind. The boundary selects one of the two outputs; the data does not
+carry a stored request kind.
 
 ## Human input becomes a message
 
@@ -52,7 +47,7 @@ datom and derives its run from database truth. The HTTP response is not an
 execution-result channel; the page feed renders the later message, run, and
 eval facts.
 
-## The projection contract — one router, an open kind set
+## The projection contract — two typed outputs
 
 Rendering is not a UI mechanism that other things borrow; it is one contract
 the UI is the largest consumer of. A **unit** is schema'd data discovered by
@@ -63,37 +58,31 @@ accepted and emits the ordinary Clojure-style warning. Agent-authored corpus
 functions are installed SCI values invoked through the guarded door, never
 host-resolved Vars.
 
-The kind set is open, and each kind names its consumer:
-`:seon.render/ai` is read by the prompt, `:seon.render/html` by a surface,
-`:seon.render/log` by the process log. Adding a kind adds a projection without
-changing the walk. Explicit declarations ride on the value being projected;
-otherwise the resolver queries the program graph and schema metadata.
+Explicit declarations ride on the value being projected; otherwise the
+selector queries the program graph and schema metadata. Logs use the error or
+problem domain's ordinary log function. A recursion-fence failure, overflow
+callback, development panic, or startup/export invariant may still write a
+brief direct stderr diagnostic because it reports the projection or durability
+machinery itself.
 
-The log kind governs projecting a renderable unit for a log sink; it does not
-turn process-control annunciators into render units. A recursion-fence failure,
-an overflow callback with no admitted fault fact, a development panic
-annunciator, or a startup/export invariant warning writes a brief direct stderr
-diagnostic because it reports the state of the projection or durability
-machinery itself. Once a durable fault exists, its reusable human
-representation is still only the notice's `:seon.render/log` projection. A
-direct annunciator never becomes another stored presentation or a consumer
-call to the fault's projection function.
-
-Failures are flat `:seon.error` values, never throws: the router runs on the
-error path, so an undeclared kind, an unresolvable symbol, and a projection
-that throws are each a value naming what is broken.
+Failures are flat `:seon.error` values, never throws. No declaration is
+required: a value with no specialist reaches the structural floor. An
+ambiguous contract fit or a selected producer failure is loud and does not
+fall through to another producer. The browser receives only an unavailable
+state; an explicitly assigned namespace owner receives the durable diagnostic
+message.
 
 ### One resolution chain and one floor
 
 Every discovered value resolves through one chain, most specific first:
 
 1. explicit `:seon.render/ai` or `:seon.render/html` keys on the value;
-2. a same-schema renderer found by a program-graph query in the viewing
-   agent's namespace, then the data's owning namespace;
+2. the unique contract-fitting public function in the data's explicitly
+   owning namespace, when a data or traversal ref names one;
 3. the schema-attached default renderer; and
 4. the structural floor.
 
-Function rows carry input and output schemas, so namespace override resolution
+Function rows carry input and output schemas, so namespace candidate selection
 is one ordinary corpus query through the query cache. There is no producer rule
 registry, slot redirect, or second floor. A broken renderer yields a flat error
 unit and never promotes a different mechanism silently.
@@ -111,16 +100,15 @@ projection derives one escaped stable DOM element id from that identity.
 The same call may provide either or both projections. Explicit render keys on a
 value override the corpus/schema chain, but their absence never makes the
 system partial: the structural floor can render any value in both projections.
-AI always includes every discovered unit. On the curated HTML page, a unit that
-would reach the generic structural floor is hidden by default and appears only
-when that tab enables **show everything**. The checkbox is transient per-tab
-display state, never a durable fact. Totality and default visibility are
-separate decisions.
+AI and HTML both include every discovered unit. HTML's floor is the same
+prepared admitted value as AI's floor, decorated by the value printer rather
+than hidden behind a second visibility mechanism.
 
 **The morph target is the block.** Each block is patched independently at its
 stable element id, so a transcript append repaints the transcript and the
-header is not recomputed. Cache and equality state are keyed by renderer
-function call, so equivalent calls share one byte result before fan-out.
+header is not recomputed. The render proc retains each fragment's dependency
+evidence and serialized bytes, so unchanged units reuse their bytes before
+fan-out.
 Whole-page morphing is not the live-update fallback: initial paint builds the
 page once, then every change targets the smallest stable block whose bytes
 changed. Serialization, authored evaluation, and slow-reader pressure
@@ -142,9 +130,8 @@ place on its stable identity.
 **Resolution is one chain, most specific first:**
 
 1. explicit `:seon.render/ai` / `:seon.render/html` keys ON THE VALUE;
-2. a same-schema render function in a governing namespace — the viewing
-   agent's own namespace first, else the data's owning namespace
-   (viewer-constancy);
+2. the unique contract-fitting public function in the data's explicitly
+   owning namespace;
 3. the schema-attached default renderer;
 4. the structural floor.
 
@@ -244,21 +231,19 @@ of the per-call identity; no free tail renders outside the block system.
 units by last-bytes-changed (no bands, no priority attributes) and the
 namespace-as-location model live in [[context]] — this doc owns the shared
 block/render machinery and the human-facing projection. The structural HTML
-floor remains available for every block even when the curated page hides it.
+floor remains visible for every block that has no specialist.
 
 ### Render coverage converges on blocks
 
-A domain value becomes broadly observable by accreting projections on the same
-unit: AI for agent context, HTML for a surface, log for operations, and later
-kinds without a router change. Consumers never rebuild or reclassify it. A new
-consumer asks the router for its kind; a producer that knows more selects a
-specialist while building the unit.
+A domain value becomes broadly observable by accreting the two projections on
+the same unit: AI for agent context and HTML for a surface. Operational sinks
+call ordinary domain functions. Consumers never rebuild or reclassify the
+value.
 
 Prompt assembly follows the same convergence. Context sections are AI renders
-of blocks, not strings assembled beside the renderer. As domains gain AI, HTML,
-and log projections, prompt, page, and operational views become different
-bounded projections of the same units rather than parallel presentation
-systems.
+of blocks, not strings assembled beside the renderer. As domains gain AI and
+HTML projections, prompt and page become different bounded projections of the
+same units rather than parallel presentation systems.
 
 ## Streamed replies — the one high-churn path
 
@@ -389,13 +374,13 @@ The live channel uses `core.async.flow` graphs inside the cluster JVM:
 
 1. a transaction commits and offers a coalesced wake through a
    `(sliding-buffer 1)` channel;
-2. the walk dumbly invokes each discovered renderer call; its per-call cache
-   answers immediately unless a dependency commit ID differs by `not=`, the
-   conservative revision moved, or the process-local code revision moved;
+2. the walk derives flat render-call units; retained fragment evidence lets the
+   render proc reuse already serialized bytes for unchanged units;
 3. first-party walk/render work runs on correctly classified Flow procs, while
    agent-authored calls cross the bounded SCI launcher with `:interrupt-fn`,
    invocation-class `time-limit`, admission, and output caps;
-4. the cache compares the completed bytes/digest and suppresses equal output;
+4. the render proc compares fragment evidence and completed bytes, suppressing
+   equal output in the same state that owns the package;
 5. the render proc builds ONE REVISIONED COMPOSITE PACKAGE per page —
    `{:seon.render.package/revision, /base-revision, /keyframe-bytes,
    /delta-bytes, /keyframe-size, /delta-size}` — where the keyframe is one
@@ -461,9 +446,9 @@ when one agent floods wakes. Each graph's report channel and unmodified
 are disposable in-process scheduling state, never a second database work
 ledger.
 
-**Nothing rendered is stored.** Per-call bytes, digests, dependency commit IDs,
-and last-bytes-changed bases exist only in process memory. Restart discards the
-cache and re-derives demanded pages from facts. There is no stored render
+**Nothing rendered is stored.** Retained fragment evidence, serialized bytes,
+and latest packages exist only in process memory. Restart discards them and
+re-derives demanded pages from facts. There is no stored render
 snapshot, presentation attribute, or replay log for display output.
 
 Streamed reply partials enter this same flow as another producer. The model

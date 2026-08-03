@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, sci, architecture]
 ---
@@ -97,3 +97,19 @@ This issue remains open. Its acceptance now includes declared thing → schema
 default → floor resolution, exact program-graph validation, the shared cluster
 SCI `ctx`, per-call caching, and end-to-end throw/non-Hiccup/`raw`/interpreted
 loop proofs. No implementation evidence was produced in this research lane.
+
+## Resolution
+
+The render simplification wave replaced JVM resolution with one guarded SCI
+invocation kernel for first-party and agent-authored functions. Candidate
+selection queries declared input and typed output contracts in the explicit
+owning namespace; installation immediately updates the live program snapshot,
+and cold acquisition rebuilds that snapshot from durable program rows.
+
+The recurring falsifier proves live SCI Var invocation, redefinition, cold
+reacquisition, output admission, interruption, and the absence of a compiled
+bypass. The isolated live proof additionally showed an agent-authored renderer
+on the namespace page, a first-party renderer through the same kernel, V2 on
+the next render and after restart, and a broken renderer reduced to an
+unavailable browser value while its namespace owner received the durable
+diagnostic.
