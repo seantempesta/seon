@@ -1,11 +1,39 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, config, schema]
 ---
 
 # Derived config attributes omit `:seon.config.ai.backup/api-key-variable`
+
+## Resolution — 2026-08-03
+
+THE DERIVATION WAS NEVER WRONG; the issue's own framing was the sixth
+disproven inherited claim. `derive-config-forms` includes all four
+backup keys (probed directly against the resource). The defect was in
+the TEST: `test/seon/config_test.clj:19` extracted manifest entries
+with `(drop 2 ...)`, which assumed `[:map {props} & entries]`. Ruling
+#48's open-maps migration removed the `{:closed true}` properties map,
+so `drop 2` began eating the FIRST ENTRY — and by the derivation's
+string sort (`.` sorts before `/`), the first entry is exactly
+`:seon.config.ai.backup/api-key-variable` (`ai.backup/*` sorts before
+`ai/*`). One key vanished because it sorted first, not because
+discovery had a rule.
+
+Fix: the test now extracts entries with `(filter vector?)`, the same
+shape-honest extraction production `seon.config/map-attributes` always
+used (`src/seon/config.clj:55-59`). A sweep of every `drop 2` over
+schema forms found no other misuse — `src/seon/schema.clj:101` and
+`src/seon/schema/internal.cljc:38-40` both guard with `map?`.
+
+Proof: `bin/test seon.config-test` — 11 tests, 46 assertions, 0
+failures (previously 3). The acceptance's regression requirement is
+satisfied structurally: the extraction no longer depends on the
+properties map's presence, so a fifth key cannot be dropped by
+position. Not an instance of
+`config-dial-discovery-has-three-authorities.md` — that issue remains
+open on its own merits.
 
 ## Problem
 

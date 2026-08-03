@@ -37,7 +37,6 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Derived config attributes omit one backup key](config-derivation-drops-one-backup-attribute.md) | friction | config derivation wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
 | [Give provider JSON values a named recursive schema](provider-json-contracts-use-unbounded-any.md) | friction | schema honesty wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |

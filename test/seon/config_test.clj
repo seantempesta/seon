@@ -14,9 +14,11 @@
 (schema.edn/load! {})
 
 (def ^:private dial-attributes
+  ;; entries only — never positional past :map, so an optional properties
+  ;; map can come or go without silently dropping the first entry
   (into #{}
-        (map first)
-        (drop 2 (schema/schema-definition :seon.config/manifest))))
+        (comp (filter vector?) (map first))
+        (schema/schema-definition :seon.config/manifest)))
 
 (deftest the-default-document-has-one-canonical-complete-location
   (is (.equals "config/default.edn" config/default-manifest-path))
