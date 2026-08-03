@@ -1,0 +1,8 @@
+#:my.web.extract{:text :string
+                 :title [:string {:min 1}]
+                 :value
+                 [:map
+                  [:my.web.extract/text :my.web.extract/text]
+                  [:my.web.extract/title
+                   {:optional true}
+                   :my.web.extract/title]]}

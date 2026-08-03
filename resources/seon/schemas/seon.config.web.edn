@@ -1,3 +1,19 @@
 #:seon.config.web{:port
                   [:int
-                   {:min 0, :max 65535, :seon.config/optional true}]}
+                   {:min 0, :max 65535, :seon.config/optional true}]
+                  :max-inline-bytes
+                  [:int {:min 1, :seon.config/dial true}]
+                  :max-redirects
+                  [:int {:min 0, :seon.config/dial true}]
+                  :max-response-bytes
+                  [:int {:min 1, :seon.config/dial true}]
+                  :max-search-results
+                  [:int {:min 1, :seon.config/dial true}]
+                  :search-api-key-variable
+                  [:string {:min 1, :seon.config/dial true}]
+                  :search-endpoint
+                  [:and {:seon.config/dial true} :my.web/url]
+                  :search-result-projection
+                  [:and {:seon.config/dial true} :qualified-symbol]
+                  :timeout-ms
+                  [:int {:min 1, :seon.config/dial true}]}

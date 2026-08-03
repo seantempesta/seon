@@ -1,0 +1,8 @@
+#:my.web.redirect{:from :my.web/url
+                  :status :my.web/status
+                  :to :my.web/url
+                  :value
+                  [:map
+                   [:my.web.redirect/from :my.web.redirect/from]
+                   [:my.web.redirect/to :my.web.redirect/to]
+                   [:my.web.redirect/status :my.web.redirect/status]]}

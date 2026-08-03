@@ -1,0 +1,12 @@
+#:my.web.result{:link :my.web/url
+                :position [:int {:min 1}]
+                :snippet :string
+                :title [:string {:min 1}]
+                :value
+                [:map
+                 [:my.web.result/title :my.web.result/title]
+                 [:my.web.result/link :my.web.result/link]
+                 [:my.web.result/snippet
+                  {:optional true}
+                  :my.web.result/snippet]
+                 [:my.web.result/position :my.web.result/position]]}

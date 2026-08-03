@@ -1,0 +1,195 @@
+#:my.web{:body :my.web.body/value
+         :content-type [:string {:min 1}]
+         :credits [:int {:min 0}]
+         :dns-failed [:= true]
+         :dns-failed-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a web hostname that did not resolve"}
+          [:my.web/dns-failed :my.web/dns-failed]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :error
+         [:or
+          :my.web/invalid-url-error
+          :my.web/target-refused-error
+          :my.web/dns-failed-error
+          :my.web/redirect-limit-error
+          :my.web/redirect-loop-error
+          :my.web/missing-location-error
+          :my.web/response-limit-error
+          :my.web/timeout-error
+          :my.web/transport-failed-error
+          :my.web/no-credential-error
+          :my.web/provider-failed-error
+          :my.web/unparseable-response-error
+          :my.web/projection-failed-error]
+         :extraction :my.web.extract/value
+         :extraction-error :string
+         :fetch-request
+         [:map
+          [:my.web/url :my.web/url]
+          [:my.web/method {:optional true} :my.web/method]]
+         :fetch-result
+         [:map
+          [:my.web/url :my.web/url]
+          [:my.web/final-url :my.web/final-url]
+          [:my.web/status :my.web/status]
+          [:my.web/redirects :my.web/redirects]
+          [:my.web/body :my.web/body]
+          [:my.web/content-type {:optional true} :my.web/content-type]
+          [:my.web/extraction {:optional true} :my.web/extraction]
+          [:my.web/extraction-error
+           {:optional true}
+           :my.web/extraction-error]]
+         :final-url :my.web/url
+         :invalid-url [:= true]
+         :invalid-url-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a malformed or unsupported web URL"}
+          [:my.web/invalid-url :my.web/invalid-url]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :max-results [:int {:min 1}]
+         :method [:enum :get :head]
+         :missing-location [:= true]
+         :missing-location-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a redirect with no Location header"}
+          [:my.web/missing-location :my.web/missing-location]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]
+          [:my.web/status {:optional true} :my.web/status]]
+         :no-credential [:= true]
+         :no-credential-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a missing search-provider credential"}
+          [:my.web/no-credential :my.web/no-credential]
+          [:seon.error/message :seon.error/message]
+          [:my.web/query {:optional true} :my.web/query]]
+         :projection-failed [:= true]
+         :projection-failed-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify an unavailable or failed search projection"}
+          [:my.web/projection-failed :my.web/projection-failed]
+          [:seon.error/message :seon.error/message]
+          [:my.web/query {:optional true} :my.web/query]]
+         :provider-failed [:= true]
+         :provider-failed-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a non-successful search-provider response"}
+          [:my.web/provider-failed :my.web/provider-failed]
+          [:seon.error/message :seon.error/message]
+          [:my.web/query {:optional true} :my.web/query]
+          [:my.web/status {:optional true} :my.web/status]]
+         :query [:string {:min 1}]
+         :raw-response :seon.blob/digest
+         :raw-response-bytes :my.fs/byte-count
+         :redirect-limit [:= true]
+         :redirect-limit-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a redirect chain beyond its configured bound"}
+          [:my.web/redirect-limit :my.web/redirect-limit]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :redirect-loop [:= true]
+         :redirect-loop-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a repeated URL in one redirect chain"}
+          [:my.web/redirect-loop :my.web/redirect-loop]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :redirects [:vector :my.web.redirect/value]
+         :response-limit [:= true]
+         :response-limit-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a web response beyond its configured byte bound"}
+          [:my.web/response-limit :my.web/response-limit]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :result-count [:int {:min 0}]
+         :results [:vector :my.web.result/value]
+         :returned [:int {:min 0}]
+         :search-request
+         [:map
+          [:my.web/query :my.web/query]
+          [:my.web/max-results {:optional true} :my.web/max-results]]
+         :search-result
+         [:map
+          [:my.web/query :my.web/query]
+          [:my.web/results :my.web/results]
+          [:my.web/result-count :my.web/result-count]
+          [:my.web/returned :my.web/returned]
+          [:my.web/credits :my.web/credits]
+          [:my.web/raw-response :my.web/raw-response]
+          [:my.web/raw-response-bytes :my.web/raw-response-bytes]]
+         :status [:int {:min 100, :max 599}]
+         :target-refused [:= true]
+         :target-refused-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a web target refused by public-address policy"}
+          [:my.web/target-refused :my.web/target-refused]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]]
+         :timeout [:= true]
+         :timeout-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a remote web request whose deadline fired"}
+          [:my.web/timeout :my.web/timeout]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]
+          [:my.web/query {:optional true} :my.web/query]]
+         :transport-failed [:= true]
+         :transport-failed-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify a web request that failed in transport"}
+          [:my.web/transport-failed :my.web/transport-failed]
+          [:seon.error/message :seon.error/message]
+          [:my.web/url {:optional true} :my.web/url]
+          [:my.web/query {:optional true} :my.web/query]]
+         :unparseable-response [:= true]
+         :unparseable-response-error
+         [:map
+          {:seon.error/class true
+           :seon.render/ai seon.error/render-ai
+           :seon.render/html seon.error/render-html
+           :error/message "must identify an unreadable successful search response"}
+          [:my.web/unparseable-response :my.web/unparseable-response]
+          [:seon.error/message :seon.error/message]
+          [:my.web/query {:optional true} :my.web/query]]
+         :url [:string {:min 1}]}

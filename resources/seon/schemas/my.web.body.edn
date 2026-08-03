@@ -1,0 +1,14 @@
+#:my.web.body{:blob :seon.blob/digest
+              :bytes :my.fs/byte-count
+              :digest :seon.blob/digest
+              :octet-values :my.fs/bytes
+              :value
+              [:or
+               [:map
+                [:my.web.body/bytes :my.web.body/bytes]
+                [:my.web.body/digest :my.web.body/digest]
+                [:my.web.body/octet-values :my.web.body/octet-values]]
+               [:map
+                [:my.web.body/bytes :my.web.body/bytes]
+                [:my.web.body/digest :my.web.body/digest]
+                [:my.web.body/blob :my.web.body/blob]]]}
