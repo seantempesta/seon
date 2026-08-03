@@ -113,7 +113,20 @@ At the definition-install seam, for a durable `defn`:
 4. **Auto-check** — the 25-case generative contract check for derived-pure
    candidates; config dial; seed on the receipt.
 5. **Wire the install seam** — green-to-install becomes the behavior;
-   failures render as teaching feedback; advisories attach.
+   failures render as teaching feedback; advisories attach. THE FEEDBACK
+   SHAPE (owner-approved 2026-08-03 night): one orientation line first
+   (`Gate: N tests · P passed · F failed · auto-check C/C · install
+   refused`); then ALL failures — never fail-fast, because shared root
+   causes reveal themselves as patterns — grouped by identical failure
+   shape, the first few rendered fully, the complete report blob-backed
+   and drillable. Each failure carries the test name, expected vs actual
+   through the print floor, and for generative failures the SHRUNK
+   minimal counterexample plus its seed. Contract violations explain
+   through `m/explain` and the predicate `:error/message` properties
+   (which key, which value, why — inline). The whole report is an
+   attribute-shaped error value with a declared per-class renderer
+   (agent face + HTML card), so gate refusals display well everywhere
+   and are queryable like every fact.
 6. **Pending-subject test facts** — test admission marks unresolvable
    subjects pending instead of erroring; the gate-set query picks them up
    when the subject arrives. Test-first becomes a documented agent flow in
