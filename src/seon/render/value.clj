@@ -113,6 +113,7 @@
   (try
     (if-let [entries (stable-entries value)]
       (let [available (max 0 size)
+            total (counted-size value)
             head (into [] (comp (drop offset) (take (inc available))) entries)
             more? (> (count head) available)
             page (subvec head 0 (min available (count head)))
@@ -124,13 +125,16 @@
          :seon.render.value/steps (mapv first page)
          :seon.render.value/offset offset
          :seon.render.value/shown (count page)
-         :seon.render.value/total (counted-size value)
+         :seon.render.value/total total
+         :seon.render.value/beyond-end?
+         (and (some? total) (> offset total))
          :seon.render.value/more? more?})
       {:seon.render.value/window value
        :seon.render.value/steps []
        :seon.render.value/offset 0
        :seon.render.value/shown 0
        :seon.render.value/total nil
+       :seon.render.value/beyond-end? false
        :seon.render.value/more? false})
     (catch Throwable failure
       {:seon.render.value/window
@@ -140,6 +144,7 @@
        :seon.render.value/offset offset
        :seon.render.value/shown 0
        :seon.render.value/total nil
+       :seon.render.value/beyond-end? false
        :seon.render.value/more? false})))
 
 (defn- display-value

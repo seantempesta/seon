@@ -152,6 +152,13 @@
     (is (= [:a] (:seon.render.value/window window)))
     (is (true? (:seon.render.value/more? window)))))
 
+(deftest a-window-beyond-a-counted-value-states-the-offset-and-length
+  (let [window (value/window [:a :b :c] 9 2)]
+    (is (= [] (:seon.render.value/window window)))
+    (is (= 9 (:seon.render.value/offset window)))
+    (is (= 3 (:seon.render.value/total window)))
+    (is (true? (:seon.render.value/beyond-end? window)))))
+
 (deftest realization-failure-is-visible-data
   (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
         text (value/render-ai (routed-unit raw 3))]

@@ -224,11 +224,10 @@
                    {:seon.render.data/path path
                     :seon.render.data/offset offset})]
         (if (contains? found :seon.render.data/value)
-          (:seon.render.value/window
-           (render.value/window
-            (:seon.render.data/value found) offset
-            (:seon.render.value/max-collection
-             (config/effective @connection cluster-name))))
+          (render.value/window
+           (:seon.render.data/value found) offset
+           (:seon.render.value/max-collection
+            (config/effective @connection cluster-name)))
           found))
       {:seon.error/kind :seon.dev.mcp/value-not-found
        :seon.error/message "No stored MCP value has this digest."

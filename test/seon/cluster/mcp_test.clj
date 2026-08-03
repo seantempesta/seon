@@ -79,9 +79,15 @@
           (let [stored (projected cluster-name effective value)
                 content-digest (:seon.blob/digest stored)
                 drilled (cluster/mcp-get-value
-                         cluster-name content-digest [] 7)]
+                         cluster-name content-digest [] 7)
+                past-end (cluster/mcp-get-value
+                          cluster-name content-digest [] 9000)]
             (is (= (:seon.blob/digest storeless) content-digest))
             (is (true? (:seon.dev.mcp/retrievable? stored)))
-            (is (= [7 8 9 10 11 12 13 14] drilled)))
+            (is (= [7 8 9 10 11 12 13 14]
+                   (:seon.render.value/window drilled)))
+            (is (= 9000 (:seon.render.value/offset past-end)))
+            (is (= 2000 (:seon.render.value/total past-end)))
+            (is (true? (:seon.render.value/beyond-end? past-end))))
           (finally
             (swap! running-instances dissoc cluster-name)))))))
