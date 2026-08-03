@@ -32,14 +32,14 @@
  :seon.config.eval.result/max-nodes 65536
 
  ; Unit: serialized result-edn characters. Provenance: DERIVED 2026-08-03
- ; from the production splitter on fresh fused-root, diff-buffered,
- ; history-on file stores. The least-amplified consumer grew 6,157 bytes
- ; inline versus 6,159 as a blob at 343 characters, then 6,163 inline
- ; versus 6,160 as a blob at 344. The splitter uses `>`, so 343 is the
- ; measured crossover. A blob write added about 8 ms and warm read plus
- ; EDN parsing stayed below 1 ms in this rig; an operator may raise the
- ; dial when avoiding that latency is worth greater retained growth.
- :seon.config.eval.result/blob-threshold 343
+ ; as the latency/object floor over the validated 198-sample workload.
+ ; At ~476 characters, two N=50 runs took 428.70–462.45 ms with threshold
+ ; 343 (50 blob writes) versus 1.11–1.69 ms with 4,096 (all inline). The
+ ; archive would mint 557 distinct blob objects at 343 versus 291 at 4,096
+ ; while GC still has no effective cutoff. Eligible results also compare the
+ ; REAL stored shapes — 4R inline versus 743 + 4W + R for the window,
+ ; digest/size envelope, and blob — so this floor never forces a larger row.
+ :seon.config.eval.result/blob-threshold 4096
 
  ; Unit: retained entries in one routed `/data` window; the navigation
  ; elision marker rides beside them, never inside the count (the

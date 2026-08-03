@@ -4,183 +4,163 @@ status: complete
 tags: [database, datahike, performance, evidence]
 ---
 
-# Blob-threshold derivation
+# Blob-threshold full-model derivation
 
-## Decision
+## Corrected decision
 
-The shipped `:seon.config.eval.result/blob-threshold` default is **343
-serialized characters**, derived from the measured physical-store crossover.
-The operator override remains. The production splitter stores a value inline
-when its character count is at most the dial and uses `seon.blob` above it, so
-343 selects the cheaper representation on both sides of the measured knee:
+The shipped `:seon.config.eval.result/blob-threshold` default is **4,096
+serialized characters**, restored as a measured latency and object-count
+floor. Crossing the floor is now only eligibility: `settlement-result` also
+compares the complete stored shapes and writes a blob only when the window,
+digest/size envelope, and blob payload are smaller than retaining the full
+result inline.
 
-| Characters | Inline growth | Blob growth | Cheaper |
-|---:|---:|---:|:---|
-| 343 | 6,157 B | 6,159 B | Inline by 2 B |
-| 344 | 6,163 B | 6,160 B | Blob by 3 B |
+The earlier 343 decision is rejected. It modeled the full transaction for a
+scalar string, but generalized that scalar crossover to every result shape and
+ignored the fixed synchronous blob-write cost in the eval settle path. Its
+test then copied two measured numbers into a table instead of asserting the
+production derivation. Commit `2bef865bf` is therefore corrected by this work.
 
-This is option (a), a config default derived from the validated store model,
-not a tuned compromise. The dial is still useful because the storage saving
-has a latency price: on this machine the blob path added roughly 7–21 ms to
-settlement across the small cells, while warm `bget` plus EDN parsing remained
-below 1 ms. An operator may raise the threshold when avoiding blob write/read
-latency is worth greater retained growth.
+## Question 1: full stored shapes
 
-Option (b), deleting the dial in favor of a per-value duration comparison, is
-the wrong seam. By the time `store-session-values!`, `settlement-result`, or
-`record-attempt!` invokes this choice, the system has already decided that the
-value is durable; the choice here is only inline Datahike value versus Konserve
-blob. The resume precedent compares a defining form's recomputation cost with
-stored-value read-back earlier in the lifecycle
-(`plan/README.md:1795-1810`). Result receipts and attempt reasoning have no
-equivalent recomputation alternative, so applying that rule here would create
-three consumer-specific persistence policies instead of strengthening the one
-existing storage-placement mechanism.
+The first curve did call the production `settlement-result` and transact
+`:seon.cluster.eval/result-edn`, `/result-blob`, and `/result-size`, so its blob
+cells included the inline window plus digest/size envelope and binary payload.
+The defect was the input: `exact-result-edn` supplied a scalar string. A scalar
+window collapses to a small truncated-string node, making that one shape look
+like a universal size crossover.
 
-## Dependency ledger
+The follow-up uses actual `seon.sci.admit/admit` output and the production
+eight-item `result-window-edn`. Fresh fused-root, diff-buffered, history-on file
+stores measured:
 
-The measurement ran on 2026-08-03 against:
+| Admitted shape | Full `R` | Window `W` | Inline growth | Forced blob growth | Decision |
+|---|---:|---:|---:|---:|:---|
+| scalar string | 258 B | 72 B | 5,822 B | 6,079 B | inline by 257 B |
+| scalar string | 358 B | 72 B | 6,220 B | 6,177 B | blob by 43 B |
+| one-item vector | 4,107 B | 4,107 B | 21,240 B | 26,090 B | inline by 4,850 B |
+| wide vector | 4,408 B | 850 B | 22,438 B | 13,353 B | blob by 9,085 B |
 
-- Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`;
-- Konserve `737697d9205e5e8f0bc08a666e4c97dad55e9dbe`; and
-- the production file-store configuration: fused roots, 256-entry diff buffer,
-  history enabled, and the self writer
-  (`src/seon/cluster/store.clj:150-164`).
+There is no honest global byte crossover: the 4,107-character one-item vector
+keeps its entire item in the window, so blob placement stores the full value
+twice and is always larger. A similarly sized wide vector has a much smaller
+window and benefits materially.
 
-The source boundaries establishing the comparison are:
+### Derived comparison
 
-- Datahike derives the stored database value and flushes its primary indexes
-  in `reference-code/datahike/src/datahike/writing.cljc:48-180`;
-- its writer orders changed index values, the immutable commit, and the mutable
-  branch head in `reference-code/datahike/src/datahike/writing.cljc:477-552`;
-- Konserve serializes and writes each supplied value in
-  `reference-code/konserve/src/konserve/impl/defaults.cljc:57-125`;
-- the binary blob path is `-bget` and `-bassoc` in
-  `reference-code/konserve/src/konserve/impl/defaults.cljc:580-611`, exposed as
-  `bget` and `bassoc` by
-  `reference-code/konserve/src/konserve/core.cljc:633-672`; and
-- Seon's production blob owner performs UTF-8 encoding, content addressing,
-  binary write, read-back, and digest verification in `src/seon/blob.clj:15-63`.
+`:seon.cluster.eval/result-edn` is `:db/noHistory`. In the validated shallow
+one-commit model, its payload occurs in EAVT and AEVT in both the immutable
+commit and mutable branch head. Full inline cost therefore contributes `4R`.
+Blob placement contributes the inline window on those four paths plus the full
+binary payload once: `4W + R`.
 
-The earlier anatomy's validated model remains the governing model: payload
-growth is linear in payload size and quadratic in sequential retained commit
-count while the fused roots remain shallow
-(`research/store-amplification-anatomy-2026-08-02.md:110-155`). The quoted
-86× was the `N=40` retained-snapshot slope, not a per-value multiplier. Ruling
-#44 consequently named 4,096 as unjustified and required this revisit
-(`plan/README.md:2058-2092`); the 2026-08-03 batch explicitly required a
-derived comparison (`plan/README.md:1927-1931`).
+Both scalar calibration cells independently leave **743 bytes** after removing
+those payload terms:
 
-## Owner and consumers
+```text
+R=258, W=72: (6,079 - 5,822) + 3R - 4W = 743
+R=358, W=72: (6,177 - 6,220) + 3R - 4W = 743
+```
 
-The owner is the config dial declared in `resources/seon/schema.edn:615-618`
-and defaulted in `config/default.edn:34-42`. The shipped 4,096 value and its
-disproven 86× provenance came from commit `063b09f327`; the earlier 65,536
-default came from `be37aac87`.
+That remainder contains the blob framing and digest/size receipt envelope. The
+production decision is consequently:
 
-There is one query owner and three write consumers:
+```text
+blob when threshold-eligible AND 743 + 4W + R < 4R
+```
 
-- `result-blob-threshold` reads the database fact
-  (`src/seon/cluster/loop.clj:469-473`);
-- session values choose `:seon.code.def/value-edn` or `/blob`
-  (`src/seon/cluster/loop.clj:475-495`);
-- settled eval results choose full inline EDN or a bounded window plus blob
-  (`src/seon/cluster/loop.clj:503-522`); and
-- model-attempt reasoning chooses inline reasoning or reasoning blob
-  (`src/seon/cluster/loop.clj:928-963`).
+The model predicts the two adversarial shapes exactly or within four bytes:
+4,850 B extra for the one-item vector and 9,081 B saved for the wide vector,
+versus measured 4,850 B and 9,085 B. The implementation uses UTF-8 byte counts,
+not character counts, for this physical comparison.
 
-The actual blob readers are cold session restoration, which performs `bget`
-plus `edn/read-string` (`src/seon/sci/eval.clj:1335-1351`), and settled
-reasoning rendering (`src/seon/render/transcript.clj:471-498`). The eval
-transcript renders the digest without eagerly reading the full result
-(`src/seon/render/transcript.clj:439-448`); the planned `get_value` consumer
-will read it on demand.
+## Question 2: settle wall time
 
-`:seon.cluster.eval/result-edn` is declared `:seon.db/no-history? true`
-(`resources/seon/schema.edn:2480`). Session value EDN and attempt reasoning are
-history-bearing. The result path is therefore the least-amplified of the three
-consumers; deriving the shared default there is conservative because history
-can only make an inline value recur in more retained indexes.
+`blob/put!` performs `exists?`, then synchronous Konserve `bassoc` inside
+`settlement-result` (`src/seon/blob.clj:29-40`;
+`src/seon/cluster/loop.clj:527-548`). Konserve serializes and writes the binary
+object, synchronizes it and the directory, and atomically renames it
+(`reference-code/konserve/src/konserve/impl/defaults.cljc:57-125,580-611`).
+This work is before the terminal Datahike transaction and directly lengthens
+eval settlement.
 
-## Falsifier
+The requested N=50 probe used unique admitted scalar results of 475–477
+characters on fresh production-format file stores. Two complete runs measured:
 
-The first direct cell falsified 4,096. The production condition is strictly
-`>` (`src/seon/cluster/loop.clj:510`), so a 4,096-character value stays inline.
-On a fresh production-format file store the two representations measured:
+| Threshold | Blob writes | Total settle time | Median | p95 |
+|---:|---:|---:|---:|---:|
+| 343 | 50 | 428.70–462.45 ms | 8.905–9.019 ms | 9.709–10.016 ms |
+| 4,096 | 0 | 1.11–1.69 ms | 0.0087–0.0160 ms | 0.036–0.061 ms |
 
-| Characters | Inline growth | Blob growth | Blob saving |
-|---:|---:|---:|---:|
-| 4,096 | 21,184 B | 9,925 B | 11,259 B / 53.15% |
+At this size, 343 makes settlement roughly 274–387 times slower in aggregate.
+That hot-loop regression disqualifies the byte-only scalar crossover. The
+4,096 floor keeps this measured small-result class inline; an operator may
+still override it, while the stored-shape comparison prevents an override from
+forcing a physically larger result receipt.
 
-This is the missing population in the earlier 67-commit replay. That replay
-contained 61 values of 59 characters and six values of 4,100–13,256, so every
-threshold from 64 through 4,096 made the same split
-(`research/store-census-reductions-2026-08-02.md:213-237`). Its result proved
-that 4,096 beat 65,536 for that observed distribution; the gap made it unable
-to test whether 4,096 was the crossover.
+## Question 3: the 198-sample object count
 
-## Measurement method
+The preserved archive has 5,368 current result receipts across 198 grading
+branches. The object-count script walks their real EAVT roots without opening
+or mutating a Datahike store, then counts distinct threshold-eligible content
+per physical operator root because `seon.blob` is content addressed within one
+store.
 
-The committed reproduction is
-`research/scripts/blob-threshold-derivation-2026-08-03.clj`. Every physical
-cell creates one private UUID-named file store below `tmp/`, installs only the
-production attributes required by `settlement-result`, transacts the config,
-records directory bytes, invokes the production splitter, transacts the
-result, reads a produced blob through `seon.blob/get`, and deletes the cell.
-There is one payload transaction per store, so sequential commit count does not
-confound the per-value crossover.
+| Threshold | Eligible receipts | Distinct blob objects, threshold-only |
+|---:|---:|---:|
+| 343 | 1,007 | 557 |
+| 4,096 | 444 | 291 |
 
-Inputs are ASCII serialized strings with exact character counts. This aligns
-the dial's declared unit with UTF-8 bytes one-for-one. Non-ASCII content may
-cross earlier because the dial counts characters while the blob stores UTF-8
-bytes; 343 is consequently conservative for storage, not a promise that every
-Unicode payload has the same exact knee.
+Thus accepting 343 under the old unconditional splitter would mint **557 blob
+objects**, 266 more than 4,096. Since GC currently runs without an effective
+cutoff, these are retained objects rather than harmless temporary files. At
+the measured scalar median, 557 unique synchronous writes also imply roughly
+5.0 seconds of settle work if every eligible value had the scalar's small
+window; this is an estimate, not a replay.
 
-The broad curve was:
+Applying the corrected stored-shape comparison to every archived result selects
+**zero** blobs at either threshold: all 557 threshold-eligible distinct values
+have windows whose complete blob-side shape is not smaller. This explains why
+the scalar synthetic curve was a poor workload proxy and means the corrected
+mechanism would mint no result blob objects for that exact archived run.
 
-| Characters | Inline growth | Blob growth | Blob saving |
-|---:|---:|---:|---:|
-| 64 | 5,042 B | 5,875 B | −833 B |
-| 256 | 5,811 B | 6,072 B | −261 B |
-| 1,024 | 8,884 B | 6,845 B | 2,039 B |
-| 4,096 | 21,184 B | 9,925 B | 11,259 B |
-| 8,192 | 37,568 B | 14,021 B | 23,547 B |
-| 13,256 | 57,825 B | 19,090 B | 38,735 B |
-| 65,536 | 266,945 B | 71,370 B | 195,575 B |
+## Dependency ledger and reproduction
 
-The boundary sweep was:
+Measurements use Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`,
+Konserve `737697d9205e5e8f0bc08a666e4c97dad55e9dbe`, fused roots, a 256-entry
+diff buffer, history enabled, and the self writer. The governing source is:
 
-| Characters | Inline growth | Blob growth | Difference, inline − blob |
-|---:|---:|---:|---:|
-| 337 | 6,135 B | 6,155 B | −20 B |
-| 338 | 6,139 B | 6,156 B | −17 B |
-| 339 | 6,141 B | 6,155 B | −14 B |
-| 340 | 6,145 B | 6,158 B | −13 B |
-| 341 | 6,151 B | 6,157 B | −6 B |
-| 342 | 6,155 B | 6,158 B | −3 B |
-| 343 | 6,157 B | 6,159 B | −2 B |
-| 344 | 6,163 B | 6,160 B | 3 B |
-| 345 | 6,167 B | 6,161 B | 6 B |
+- Datahike stored database and ordered writer shapes:
+  `reference-code/datahike/src/datahike/writing.cljc:48-180,477-552`;
+- Konserve binary write/read path:
+  `reference-code/konserve/src/konserve/impl/defaults.cljc:57-125,580-611`;
+- Seon result window: `src/seon/render/value.clj:220-257`;
+- result settlement: `src/seon/cluster/loop.clj:497-548`; and
+- validated linear-payload/quadratic-commit model:
+  `research/store-amplification-anatomy-2026-08-02.md:110-155`.
 
-The blob write path necessarily adds digest, existence check, binary file
-write, synchronization, and rename costs. In the reproduced run, settlement
-at the exact boundary took 1.74–1.91 ms inline and 8.65–9.77 ms through the
-blob path. First blob reads were 0.19–0.25 ms there; the median of seven warm
-`bget` plus EDN parses was 0.045–0.049 ms. These timings describe this APFS
-machine and are evidence for the override trade-off, not a latency contract.
+Reproduction scripts:
+
+- `research/scripts/blob-threshold-full-shape-2026-08-03.clj` creates only
+  UUID-named file stores under `tmp/`, measures forced inline/blob shapes plus
+  N=50 latency, and deletes every store; and
+- `research/scripts/blob-threshold-object-count-2026-08-03.clj` reads the
+  preserved archive and stores without opening a connection or writing data.
 
 ## Regression
 
-`test/seon/blob_threshold_test.clj` makes drift loud with two small in-memory
-tests:
+`test/seon/blob_threshold_test.clj` asserts the mechanism against real admitted
+shapes:
 
-- the file-measured 343/344 boundary derives 343, equals the shipped config,
-  and drives the production splitter to inline 343 and blob 344; and
-- one 4,096-character cell under the derived default has less raw retained
-  payload than forced-inline storage, while `seon.blob/get` restores the exact
-  serialized value.
+- a measured ~500-character result remains inline under the shipped floor;
+- an eligible one-item vector whose window equals the full result remains
+  inline; and
+- an eligible wide vector with a much smaller window uses a blob and restores
+  the exact full value.
 
-The focused gate on 2026-08-03 ran 2 tests and 9 assertions with zero failures
-or errors. The adjacent blob-settlement and config-application gate then ran 6
-tests and 28 assertions with zero failures or errors. The reproduction script
-also completed and deleted every private file-store cell.
+The test derives behavior from the production comparison; it does not copy a
+343/344 measurement table or assert that a byte crossover is universal. The
+focused gate covering blob threshold, existing blob settlement, cluster loop,
+and config application ran 25 tests / 116 assertions with zero failures or
+errors. Both reproduction scripts completed; the full-shape script deleted all
+of its private stores.

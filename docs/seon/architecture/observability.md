@@ -112,11 +112,13 @@ one print grammar and may re-render without changing the receipt.
 
 ## Large values and blobs
 
-Content-addressed blobs use SHA-256 `:seon.blob/digest`. Eval receipts keep a
-bounded result projection plus `:seon.cluster.eval/result-blob` and
-`/result-size`; provider attempts use the same digest family for large
-reasoning content; durable session definitions may use `:seon.code.def/blob`
-and `/size`.
+Content-addressed blobs use SHA-256 `:seon.blob/digest`. A result above the
+configured eligibility floor moves to a blob only when the complete blob-side
+shape—bounded window, digest/size envelope, and binary payload—is smaller than
+the full inline receipt. Such receipts keep the bounded projection plus
+`:seon.cluster.eval/result-blob` and `/result-size`; provider attempts use the
+same digest family for large reasoning content; durable session definitions
+may use `:seon.code.def/blob` and `/size`.
 
 Blob state never becomes a second lifecycle or replay log. The referencing
 row carries the semantic identity, digest, and size. Capped presentation derives

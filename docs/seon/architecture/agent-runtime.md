@@ -126,8 +126,10 @@ a flat error value; no exception escapes into a proc.
 The admission record's `:seon.eval/fn-entries`, `/host-interop-count`,
 `/duration-ms`, `/allocated-bytes`, and `/outcome` are in-memory diagnostics,
 not durable receipt attributes or limits. Result admission enforces node,
-collection, depth, and string ceilings; large serialized results keep a bounded
-projection plus `:seon.cluster.eval/result-blob` and `/result-size`.
+collection, depth, and string ceilings. A serialized result above the blob
+eligibility floor keeps a bounded projection plus
+`:seon.cluster.eval/result-blob` and `/result-size` only when that complete
+stored shape is smaller than retaining the full result inline.
 
 The session is a faithful REPL. A definition becomes live in the cluster `ctx`
 when SCI evaluates it, even if later persistence refuses. The persistence gate

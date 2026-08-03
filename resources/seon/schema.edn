@@ -612,8 +612,11 @@
  :seon.config.eval/time-limit-ms
  [:int {:min 1}]
 
- ; Serialized receipt text larger than this moves to `seon.blob`; the
- ; receipt retains a bounded presentation projection plus digest and size.
+ ; Serialized receipt text larger than this is eligible for `seon.blob`.
+ ; DERIVED 2026-08-03: the shipped 4,096 latency/object floor avoids the
+ ; measured ~9 ms synchronous blob write for small results; eligible eval
+ ; results also compare the full stored shapes, 4R inline versus
+ ; 743 + 4W + R for the window, digest/size envelope, and binary payload.
  :seon.config.eval.result/blob-threshold
  [:int {:min 1 :seon.config/dial true}]
 
@@ -1560,6 +1563,11 @@
  ; ref carries no persistence facet and would never install, and
  ; "what did bob send me" is a query BY the ref.
  :seon.cluster.message/from [:and {:seon.db/index true} :seon.db/ref]
+ ; The run that produced an outbound message. Absent on messages from
+ ; outside the agent population. Conversation causality follows this
+ ; ref to the run's recorded trigger; it never consults a transaction
+ ; entity, so the relationship survives a non-temporal database.
+ :seon.cluster.message/run [:and {:seon.db/index true} :seon.db/ref]
 
  ; THE ENTITY MAP, and it is not decoration: `canonical-database-
  ; attributes` installs entity-map entries BY CONSTRUCTION and
@@ -1579,6 +1587,7 @@
   [:seon.cluster.message/content :seon.cluster.message/content]
   [:seon.cluster.message/at :seon.cluster.message/at]
   [:seon.cluster.message/from {:optional true} :seon.cluster.message/from]
+  [:seon.cluster.message/run {:optional true} :seon.cluster.message/run]
   ; The referenced fact this message assigns to the recipient. The
   ; attribute is declared with its persistence facet in the ERROR section,
   ; where the error recorder first established the same relation.
@@ -2190,8 +2199,8 @@
 ;; ===========================================================================
 ; The derived prompt: a pure function of a database value, assembled
  ; from the agent's blocks through the ONE router. The request names the
- ; HELD RUN — never a message id: the run's creating transaction records
- ; its exact trigger as :seon.db/trigger tx-meta, and
+ ; HELD RUN — never a message id: the run records
+ ; its exact :seon.cluster.run/trigger when it opens, and
  ; seon.cluster.message/trigger reads it back, so a later queued message
  ; can never replace the recorded cause (review finding 6, repaired).
  :seon.cluster.prompt/request
@@ -2240,16 +2249,6 @@
  ; owner-ruled literal core set (:seon.db.process/{boot,config,core})
  ; seeded as GENESIS DATA in the ancestor, where bootstrap content lives
  :seon.db.process/id [:string {:min 1 :seon.db/identity true}]
-
- ; A RUN'S WHY IS TRANSACTION METADATA (owner ruling, 2026-07-27 night):
- ; the run-opening transaction carries a ref to the message that caused
- ; it, so "has this trigger been answered?" is "does any run-opening
- ; transaction point at it". The one deliberate extension of minimal
- ; provenance (user + process) on ONE transition — never copied onto
- ; the run entity, which is why this key is NOT :seon.cluster.run/*.
- ; Indexed like the other two: a bare ref never installs (the computed
- ; persistence-facet rule above), and "answered?" queries BY the ref.
- :seon.db/trigger [:and {:seon.db/index true} :seon.db/ref]
 
 ;; ===========================================================================
 ;; RECONCILE
@@ -2491,6 +2490,7 @@
  ; status restating which of those facts exist.
  :seon.cluster.eval/interrupted-at :inst
  :seon.cluster.run/agent :seon.db/ref
+ :seon.cluster.run/trigger [:and {:seon.db/index true} :seon.db/ref]
  :seon.cluster.run/closed-at :inst
  :seon.cluster.run/forms [:set {:seon.db/component true} :seon.db/ref]
  :seon.cluster.run/id [:string {:min 1 :seon.db/identity true}]
@@ -2508,7 +2508,7 @@
  ; present = held, absent = unheld. There is no claim epoch and no
  ; lease clock — the flock + single writer make a competing claimant
  ; unrepresentable, and the settle-once presence fences carry the rest.
- :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai :seon.render/html seon.cluster.run/render-html} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
+ :seon.cluster.run/run [:map {:seon.db/entity true :seon.render/ai seon.cluster.run/render-ai :seon.render/html seon.cluster.run/render-html} [:seon.cluster.run/id :seon.cluster.run/id] [:seon.cluster.run/agent :seon.cluster.run/agent] [:seon.cluster.run/trigger :seon.cluster.run/trigger] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at] [:seon.cluster.run/closed-at {:optional true} :seon.cluster.run/closed-at] [:seon.cluster.run/process {:optional true} :seon.cluster.run/process] [:seon.cluster.run/plan-digest {:optional true} :seon.cluster.run/plan-digest] [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]]
  ; The ordered form entity. Same reason as the message map: without it
  ; only `/id` installed, so a frozen plan could not be transacted on the
  ; live boot path. Every entry is required — `plan-call` writes all four

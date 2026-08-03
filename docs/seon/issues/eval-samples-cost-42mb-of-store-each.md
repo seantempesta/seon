@@ -109,6 +109,19 @@ saving 294,680 B / 18.743% while splitting six observed-shape results. Keep
 4,096; replace `config/default.edn`'s disproved 86× provenance at its config
 owner.
 
+**Corrected 2026-08-03:** that replay still supplied scalar strings, so it did
+not model the real result window. The full-shape follow-up in
+`docs/prds/sci-execution-runtime/research/blob-threshold-derivation-2026-08-03.md`
+found there is no size-only crossover: a 4,107-character one-item vector grows
+4,850 B more through forced blob placement, while a 4,408-character wide vector
+saves 9,085 B. The result seam now compares the measured complete shapes,
+`743 + 4W + R < 4R`, after the 4,096 eligibility floor. The floor remains for a
+separate measured reason: N=50 settlement of ~476-character results took
+428.70–462.45 ms at threshold 343 versus 1.11–1.69 ms at 4,096, and the archive
+would mint 557 distinct threshold-only objects at 343 versus 291 at 4,096.
+Applying the complete-shape comparison to all 5,368 archived receipts selects
+zero result blobs at either threshold.
+
 Measured `:db/noHistory` candidates account for 111,931,217 temporal bytes:
 result EDN, prompt capture until its blob cutover, frozen form source, captured
 output, message content, attempt settings, and attempt usage. The clock

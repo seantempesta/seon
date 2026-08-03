@@ -60,7 +60,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Date]))
+  (:import [java.nio.charset StandardCharsets]
+           [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -500,22 +501,47 @@
          :where [_ :seon.render.value/max-collection ?size]]
        db))
 
+(def ^:private result-blob-fixed-growth-bytes
+  ;; DERIVED 2026-08-03 from two production-format, one-commit file-store
+  ;; cells after subtracting the measured payload terms. With result-edn
+  ;; noHistory, inline payload recurs in EAVT + AEVT across the immutable
+  ;; commit and mutable head (4R). Blob placement stores the window on those
+  ;; same four paths plus the original once as binary (4W + R); digest, size,
+  ;; and blob framing contribute the remaining 743 bytes. Both calibration
+  ;; cells derive 743 exactly: R=258/W=72 grew 5,822 vs 6,079 bytes, and
+  ;; R=358/W=72 grew 6,220 vs 6,177. The stored-shape comparison is therefore
+  ;; blob < inline exactly when 743 + 4W + R < 4R.
+  743)
+
+(defn- utf8-size
+  [value]
+  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
+
+(defn- result-blob-smaller?
+  [result-edn window-edn]
+  (< (+ result-blob-fixed-growth-bytes
+        (* 4 (utf8-size window-edn))
+        (utf8-size result-edn))
+     (* 4 (utf8-size result-edn))))
+
 (defn- settlement-result
   [cluster evaluation]
   (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
     (let [connection (:seon.store/branch-connection cluster)
           result-size (long (count result-edn))
           db @connection
-          threshold (result-blob-threshold db)]
-      (if (and threshold (> result-size threshold))
+          threshold (result-blob-threshold db)
+          window-edn
+          (when (and threshold (> result-size threshold))
+            (render.value/result-window-edn
+             {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+              :seon.render.value/options
+              {:seon.render.value/max-collection
+               (result-window-page-size db)}}
+             result-edn))]
+      (if (and window-edn (result-blob-smaller? result-edn window-edn))
         (assoc evaluation
-               :seon.cluster.eval/result-edn
-               (render.value/result-window-edn
-                {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                 :seon.render.value/options
-                 {:seon.render.value/max-collection
-                  (result-window-page-size db)}}
-                result-edn)
+               :seon.cluster.eval/result-edn window-edn
                :seon.cluster.eval/result-blob
                (blob/put! connection result-edn)
                :seon.cluster.eval/result-size result-size)
@@ -1098,8 +1124,8 @@
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)]
     ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
-    ;; before the expensive part, and the trigger rides as tx-meta so
-    ;; answeredness needs no flag.
+    ;; before the expensive part, and the run records its trigger in
+    ;; this same transaction so answeredness is an ordinary fact.
     (let [id (str (random-uuid))
           outcome (db/transact!
                    connection
@@ -1107,15 +1133,15 @@
                     (into (run/open-tx {:seon.cluster.run/id id
                                         :seon.cluster.run/agent
                                         [:seon.cluster.agent/id agent-id]
+                                        :seon.cluster.run/trigger
+                                        [:seon.cluster.message/id
+                                         (:seon.cluster.message/id work)]
                                         :seon.cluster.run/opened-at now})
                           (run/claim-tx {:seon.cluster.run/id id
                                          :seon.cluster.run/process process
                                          :seon.cluster.run/live-processes
                                          #{process}
-                                         :seon.cluster.run/now now}))
-                    :tx-meta {:seon.db/trigger
-                              [:seon.cluster.message/id
-                               (:seon.cluster.message/id work)]}})]
+                                         :seon.cluster.run/now now}))})]
       ;; a REFUSED open has no run to attribute to — the run is what
       ;; failed to exist
       (report (if (refused! cluster outcome now
@@ -1508,29 +1534,14 @@
                   outcome
                   (db/transact!
                    connection
-                   (cond->
-                    {:tx-data
-                     (into (terminal-tx receipt now)
-                           (concat rows
-                                   refusals
-                                   (session-image-tx
-                                    @connection
-                                    session-evaluation
-                                    ordinal)))}
-                     ;; THE CHAIN, RECORDED WHERE IT IS DERIVED FROM.
-                     ;; A delivering transaction names the message
-                     ;; being answered, exactly as the opening one
-                     ;; does — so conversation depth is a walk over
-                     ;; metadata already committed and no message
-                     ;; carries a hop counter. Absent when nothing is
-                     ;; delivered: an ordinary receipt has no cause to
-                     ;; restate, and answeredness is existential, so
-                     ;; naming the trigger twice changes nothing that
-                     ;; `unanswered-triggers` asks.
-                     (and trigger (seq rows))
-                     (assoc :tx-meta
-                            {:seon.db/trigger
-                             [:seon.cluster.message/id trigger]})))
+                   {:tx-data
+                    (into (terminal-tx receipt now)
+                          (concat rows
+                                  refusals
+                                  (session-image-tx
+                                   @connection
+                                   session-evaluation
+                                   ordinal)))})
                   _
                   (if (and (:seon.sci.eval/program-row evaluation)
                            (not (:seon.error/kind outcome)))

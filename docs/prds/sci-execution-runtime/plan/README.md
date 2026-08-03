@@ -2089,13 +2089,18 @@ may reintroduce a shadow build into the dev feedback path.
   REVISIT: the 4,096-character blob threshold was lowered on the
   disproven reading, so its value is now unjustified rather than wrong
   — it needs deciding against the real model.
-  **SETTLED 2026-08-03:** a one-commit production-splitter file-store
-  curve falsified 4,096 (21,184 B inline versus 9,925 B blob) and placed
-  the physical crossover between 343 characters (6,157 B inline versus
-  6,159 B blob) and 344 (6,163 B versus 6,160 B). Because the splitter
-  uses `>`, the derived shipped default is 343; the operator override
-  remains for the measured blob-latency trade-off. The cheap in-memory
-  regression and full curve are in
+  **SETTLED 2026-08-03, CORRECTED after full-shape falsifier:** 343 was a
+  scalar-only crossover, not the receipt decision. A 4,107-character
+  one-item vector has a 4,107-character window, so forced blob placement
+  grew 26,090 B versus 21,240 B inline; a 4,408-character wide vector's
+  850-character window reversed that ordering (13,353 B versus 22,438 B).
+  The result seam now derives the decision from the complete stored shapes:
+  `743 + 4W + R < 4R`. The shipped floor returns to 4,096 because two
+  N=50 runs at ~476 characters cost 428.70–462.45 ms at threshold 343
+  versus 1.11–1.69 ms at 4,096, and the 198-sample archive would mint 557
+  distinct objects at 343 versus 291 at 4,096 before the shape comparison.
+  With that comparison, the exact archive selects zero result blobs. The
+  mechanism regression and complete evidence are in
   `research/blob-threshold-derivation-2026-08-03.md`.
   Only then the known
   wins, all filed and none adopted: the store is created WITHOUT any of
