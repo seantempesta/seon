@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, error, sci]
 ---
@@ -15,7 +15,7 @@ argument even when that value is the schema registry.
 ## Evidence
 
 Curriculum research probe, 2026-08-03
-([bootstrap-curriculum-2026-08-03.md](../../prds/sci-execution-runtime/research/bootstrap-curriculum-2026-08-03.md)
+([bootstrap-curriculum-2026-08-03.md](../../../prds/sci-execution-runtime/research/bootstrap-curriculum-2026-08-03.md)
 §Gaps): the first-defn failure's error value is 276,363 characters because
 the violation dumps the complete schema registry / candidate forms into the
 payload, allocating ~264 MB en route. Ugly-output standing order applies:
@@ -55,3 +55,23 @@ A contract violation's error value is bounded at construction (the
 offending key, value, expected shape, and a capped context), renders
 through the declared class face, and the 276 KB reproduction from the
 research doc returns a value under the admitted inline ceiling.
+
+## Resolution
+
+Resolved in `577ccbc59` at the construction seam. Contract violations now
+retain the exact offending key and a bounded offending value, the expected
+shape, the complete problem count, and capped representative problem context;
+the complete original argument is never installed in the error value. No
+print-time truncation was added.
+
+The registry-sized regression constructs a 966-character error value and
+allocates 4,819,968 bytes, down from 1,044,086 characters and 150,063,304
+bytes. It asserts the constructed value remains below the 4,096-character
+inline ceiling and allocation remains below 16 MiB.
+
+After consumer commit `c6a81988c`, `seon.sci.eval-test` passed 49 tests and
+221 assertions, including
+`failed-evaluation-assembles-failure-presence-facts`. The complete focused
+gate (`seon.instrument-test`, `seon.error-test`, `seon.sci.eval-test`, and
+`seon.schema-test`) passed 100 tests and 415 assertions with zero failures and
+zero errors.
