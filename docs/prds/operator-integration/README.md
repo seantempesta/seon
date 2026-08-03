@@ -67,9 +67,25 @@ a verb that grows its own logic has failed this PRD's conversion test.
 | `publish!` | Publish current source to `current-src` (complete, or `--changed`-shaped incremental). | the publication owner `bin/seon init` calls today |
 | `refork!` | Destroy and refork a named cluster from the published commit (destructive; same confirmation posture as today). | `seon.cluster/refork!` |
 
-**Deliberately absent**: `reload!` (var-level hot reload is already automatic
-and needs no verb; the sweep's §4 anticipated omission and the clj-reload
-verdict confirms it), `reset` (conflates three different operations and
+**`reload!` — reinstated by owner ruling (2026-08-03 evening), designed
+natively.** Plain var re-binding is automatic and needs no verb, but a
+changed macro or def-time-captured value does not propagate through var
+indirection alone — dependents must re-evaluate. clj-reload solves this
+with a text-parsed graph and `remove-ns`; `remove-ns` severs Var identity
+and is refuted for this runtime
+([clj-reload-evaluation-2026-08-03.md](../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md)).
+The native design: `(reload! changed-namespaces)` derives the first-party
+downstream closure from the program graph's namespace dependency facts,
+topologically orders it, and `require :reload`s each namespace in order —
+IDENTITY-PRESERVING (vars re-bind in place; no namespace is removed), no
+text parser (the graph is a query), refusing namespaces outside first-party
+source roots. The stale-var problem query (slice 3) covers deleted names,
+which is the case `remove-ns` existed to handle. Falsifiers: a macro
+change propagates to a dependent's behavior after `reload!`; a flow proc's
+step-fn Var keeps its identity across the reload and serves the new
+behavior; an SCI-ctx-held Var still resolves and serves the new behavior.
+
+**Deliberately absent**: `reset` (conflates three different operations and
 `bin/seon reset --force` already names destruction), `go`/`prep`/`clear` (no
 held config var exists to prep or clear), `suspend`/`resume` (Flow owns proc
 lifecycle).
