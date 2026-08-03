@@ -1948,6 +1948,10 @@
         ;; admission runs during publication.
         (require 'seon.schema.edn :reload)
         (require 'seon.fn.analyzer :reload)
+        ;; `seon.fn` canonicalizes analyzed rows through `seon.program`.
+        ;; Reload that owner first so newly recorded program attributes such
+        ;; as call edges cannot be dropped by a stale long-lived Var.
+        (require 'seon.program :reload)
         (require 'seon.fn :reload)
         ;; A live JVM may already have an older `seon.db` loaded, so
         ;; `requiring-resolve` cannot replay its new load-time registrations

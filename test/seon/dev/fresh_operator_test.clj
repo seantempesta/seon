@@ -1078,6 +1078,24 @@
                     'seon.db/connection?)}))))]
         (is (true? (::owner-loaded? stale)) stale)
         (is (false? (::connection-registered? stale)) stale))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters"
+                             cluster-name "prepl.edn")))
+            stale
+            (edn/read-string
+             (prepl-eval
+              advertisement
+              (pr-str
+               `(do
+                  (require 'seon.program)
+                  (alter-var-root
+                   #'seon.program/canonical-row
+                   (constantly
+                    (fn [row#]
+                      (dissoc row# :seon.fn/calls))))
+                  {:seon.dev.fresh-operator-test/program-stale? true}))))]
+        (is (true? (::program-stale? stale)) stale))
       (let [republished (run-operator root "init")]
         (is (= 0 (::exit republished)) (::output republished))
         (is (str/includes? (::output republished) (str source/current-branch))
