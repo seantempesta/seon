@@ -3306,3 +3306,18 @@ escape hatch for call-free property tests, never manual tracking);
 resolution paths are satisfy-existing-expectations (accretion: require
 no more, provide no less) or a NEW NAME with explicit caller migration.
 Install latency is measured, never assumed.
+
+**OWNER RULING — 2026-08-03 night, INDEX WHAT THE ANALYSIS COMPUTES:**
+anything the one clj-kondo analysis pass computes gets indexed unless a
+MEASURED reason says otherwise — discarding is the decision that needs
+justification (the test-call-edge gap was computed-then-discarded; the
+generalization is ruled). Dispatched: keyword-usage edges per function
+and test row (one honest fact, no read/write guessing, literal keywords
+only with the boundary documented), then the config application ledger's
+consumer half DERIVED from those edges (the hand map dies; the :mode
+column stays declared; a config attribute with no consuming function
+becomes a failing test — the honest dead-dial detector). Queued behind:
+schema-to-schema reference edges for reuse-similarity and impact
+queries. The keyword edges land BEFORE the error-conversion wave so the
+wave can verify its own completeness by query (zero functions still
+touching :seon.error/kind).
