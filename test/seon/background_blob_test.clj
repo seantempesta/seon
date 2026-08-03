@@ -86,7 +86,9 @@
           (recur (+ offset (alength ^bytes octets))))))
     (.toByteArray output)))
 
-(deftest background-binary-results-remain-exact-across-the-inline-threshold
+(deftest ^{:seon.test/long
+           "Uses a real file store and work launcher to cover durable background binary receipts."}
+  background-binary-results-remain-exact-across-the-inline-threshold
   (with-file-effect-store
     (fn [connection]
       (db/transact!

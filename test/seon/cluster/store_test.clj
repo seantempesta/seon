@@ -385,7 +385,9 @@
 ;;; The flock across processes — a real child JVM holds the store
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-flock-fences-across-processes
+(deftest ^{:seon.test/long
+           "Spawns and terminates a child JVM to cover the operating-system store fence."}
+  the-flock-fences-across-processes
   (let [dir (fresh-dir)
         ready-directory (.getParentFile (io/file dir))
         ready-file (io/file ready-directory "held.ready")
@@ -450,7 +452,9 @@
         (future-cancel output-reader)
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
-(deftest an-in-process-refusal-never-drops-the-os-fence
+(deftest ^{:seon.test/long
+           "Spawns a foreign JVM to prove an in-process refusal retains the operating-system fence."}
+  an-in-process-refusal-never-drops-the-os-fence
   ;; fcntl drops EVERY lock a process holds on a file when ANY of its
   ;; descriptors closes — so the same-process refusal path must never
   ;; open a second descriptor it then closes. The interaction proof:

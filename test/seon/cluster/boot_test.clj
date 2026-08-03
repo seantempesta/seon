@@ -971,7 +971,9 @@
   (is (not-any? #{"resources" "resources/seon/schemas"} cluster/source-roots)
       "schema directory organization is not part of the ancestor digest"))
 
-(deftest incremental-source-refresh-preserves-agreement-across-real-edits
+(deftest ^{:seon.test/long
+           "Publishes real source edits to cover complete fallback and incremental branch agreement."}
+  incremental-source-refresh-preserves-agreement-across-real-edits
   (let [root (bare-root)
         project (io/file root "project")
         source-root (io/file project "src")

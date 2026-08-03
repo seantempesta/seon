@@ -92,7 +92,9 @@
       (finally
         (delete-files! [source config directory])))))
 
-(deftest split-schema-edits-run-admission-before-publication
+(deftest ^{:seon.test/long
+           "Spawns real hook subprocesses to cover schema admission at the edit-hook process boundary."}
+  split-schema-edits-run-admission-before-publication
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")
         schema-file

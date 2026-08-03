@@ -1432,7 +1432,9 @@
           (stop-testbed! a)
           (stop-testbed! b))))))
 
-(deftest forced-child-jvm-death-preserves-committed-facts
+(deftest ^{:seon.test/long
+           "Forcibly terminates a child JVM to cover committed-fact survival across process death."}
+  forced-child-jvm-death-preserves-committed-facts
   (testing "SIGKILL loses process-local compute but not committed state"
     (let [store-id (random-uuid)
           root (File. "tmp" (str "flow-kill-" store-id))

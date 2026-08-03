@@ -72,7 +72,9 @@
            request
            (HttpResponse$BodyHandlers/ofString))))
 
-(deftest a-booted-cluster-tells-its-live-fleet-story
+(deftest ^{:seon.test/long
+           "Boots a real cluster and fetches its root page to cover live fleet integration."}
+  a-booted-cluster-tells-its-live-fleet-story
   (with-cluster
     "booted"
     (fn [instance]
