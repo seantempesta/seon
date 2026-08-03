@@ -1,5 +1,6 @@
 #:seon.test{:ns :seon.db/ref,
             :source :string,
+            :subject :seon.db/ref,
             :sym [:string {:min 1, :seon.db/identity true}],
             :test
             [:map
@@ -8,4 +9,6 @@
              [:seon.schema.admission/source
               :seon.schema.admission/source]
              [:seon.test/ns {:optional true} :seon.test/ns]
-             [:seon.test/source {:optional true} :seon.test/source]]}
+             [:seon.test/source {:optional true} :seon.test/source]
+             [:seon.fn/calls {:optional true} :seon.fn/calls]
+             [:seon.test/subject {:optional true} :seon.test/subject]]}

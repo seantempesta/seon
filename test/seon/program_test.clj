@@ -230,15 +230,28 @@
                  :seon.fn/private? false
                  :seon.fn/doc "old"
                  :seon.fn/spec "[:=> [:cat] :int]"
+                 :seon.fn/calls [[:seon.fn/sym "sample/old"]]
                  :seon.fn/workload :compute}
         desired {:seon.fn/sym "sample/f"
                  :seon.fn/ns [:seon.ns/name 'sample]
                  :seon.fn/source "(defn f [] 2)"
                  :seon.fn/arglists "([])"
                  :seon.fn/private? false}]
-    (is (= #{:seon.fn/source :seon.fn/doc
-             :seon.fn/spec :seon.fn/workload}
-           (set (program/changed-attributes current desired))))))
+    (is (= #{:seon.fn/source :seon.fn/doc :seon.fn/spec
+             :seon.fn/calls :seon.fn/workload}
+           (set (program/changed-attributes current desired)))))
+  (is (= {:seon.test/sym "sample/property"
+          :seon.test/ns [:seon.ns/name 'sample]
+          :seon.test/source "(deftest property)"
+          :seon.fn/calls [[:seon.fn/sym "sample/helper"]]
+          :seon.test/subject [:seon.fn/sym "sample/subject"]}
+         (program/canonical-row
+          {:seon.test/sym "sample/property"
+           :seon.test/ns [:seon.ns/name 'sample]
+           :seon.test/source "(deftest property)"
+           :seon.fn/calls [[:seon.fn/sym "sample/helper"]]
+           :seon.test/subject [:seon.fn/sym "sample/subject"]
+           :unowned/value :ignored}))))
 
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
   (let [source (str "(ns sample (:require [clojure.test :refer [deftest]] "

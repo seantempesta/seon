@@ -190,7 +190,7 @@
              "  contracted \"Exact doc.\" [f] (helper (f)))\n"
              "(defrecord Pair [left right])\n"
              "(deftype Cell [value])\n"
-             "(deftest example-test (throw (ex-info \"never\" {})))\n"
+             "(deftest example-test (contracted identity))\n"
              "(defspec generated-test 10 true)\n"
              "(throw (ex-info \"top-level source must never run\" {}))\n")]
     (write-source! root "sample/core.clj" source)
@@ -218,6 +218,9 @@
         (is (= [[:seon.fn/sym "sample.core/helper"]]
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/contracted"]))))
+        (is (= [[:seon.fn/sym "sample.core/contracted"]]
+               (:seon.fn/calls
+                (get by-id [:seon.test/sym "sample.core/example-test"]))))
         (is (nil? (:seon.fn/calls
                    (get by-id [:seon.fn/sym "sample.core/helper"])))
             "dependency and unresolved targets never become function refs")
@@ -564,13 +567,20 @@
              :seon.fn/ns [:seon.ns/name 'prebuilt]
              :seon.fn/source "(defn value [] 1)"
              :seon.fn/arglists "([])"
-             :seon.fn/private? false}]
+             :seon.fn/private? false}
+            {:seon.test/sym "prebuilt/value-test"
+             :seon.test/ns [:seon.ns/name 'prebuilt]
+             :seon.test/source "(deftest value-test (value))"
+             :seon.fn/calls [[:seon.fn/sym "prebuilt/value"]]
+             :seon.test/subject [:seon.fn/sym "prebuilt/value"]}]
            :seon.fn.file/identities
            [[:seon.ns/name 'prebuilt]
-            [:seon.fn/sym "prebuilt/value"]]}]
+            [:seon.fn/sym "prebuilt/value"]
+            [:seon.test/sym "prebuilt/value-test"]]}]
          :seon.fn.manifest/identities
          [[:seon.ns/name 'prebuilt]
-          [:seon.fn/sym "prebuilt/value"]]}
+          [:seon.fn/sym "prebuilt/value"]
+          [:seon.test/sym "prebuilt/value-test"]]}
         transactions (atom [])]
     (with-redefs [analyzer/analyze
                   (fn [_]
@@ -584,11 +594,17 @@
                     {:seon.store/branch-connection (atom :database)
                      :seon.fn/manifest manifest})]
         (is (pos? (:seon.reconcile/operations result)))
-        (is (= 2 (count @transactions)))
+        (is (= 4 (count @transactions)))
         (is (= 'prebuilt
                (-> @transactions first :tx-data first :seon.ns/name)))
         (is (some #(= "prebuilt/value" (:seon.fn/sym %))
-                  (-> @transactions second :tx-data)))))
+                  (-> @transactions second :tx-data)))
+        (is (= [{:seon.test/sym "prebuilt/value-test"
+                 :seon.test/subject [:seon.fn/sym "prebuilt/value"]}]
+               (-> @transactions (nth 2) :tx-data)))
+        (is (= [{:seon.test/sym "prebuilt/value-test"
+                 :seon.fn/calls [[:seon.fn/sym "prebuilt/value"]]}]
+               (-> @transactions (nth 3) :tx-data)))))
     (let [attempts (atom 0)
           result
           (with-redefs [db/q (fn [& _] nil)
@@ -607,6 +623,62 @@
       (is (= :seon.fn/namespaces (:seon.fn/index-phase result)))
       (is (= 1 @attempts)
           "a refused identity phase prevents dependent transactions"))))
+
+(deftest tests-reaching-follows-calls-and-explicit-subjects
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-ref [:seon.ns/name 'sample.reach]
+            function-row
+            (fn [function-symbol calls]
+              (cond-> {:seon.fn/sym function-symbol
+                       :seon.fn/ns namespace-ref
+                       :seon.fn/source (str "(defn " (name (symbol function-symbol))
+                                            " [] nil)")
+                       :seon.fn/arglists "([])"
+                       :seon.fn/private? false}
+                (seq calls) (assoc :seon.fn/calls calls)))
+            test-row
+            (fn [test-symbol references]
+              (merge {:seon.test/sym test-symbol
+                      :seon.test/ns namespace-ref
+                      :seon.test/source (str "(deftest "
+                                             (name (symbol test-symbol)) ")")}
+                     references))]
+        (db/transact!
+         connection
+         [{:seon.ns/name 'sample.reach
+           :seon.ns/source "(ns sample.reach)"}
+          (function-row "sample.reach/target" nil)
+          (function-row "sample.reach/bridge"
+                        [[:seon.fn/sym "sample.reach/target"]])
+          (function-row "sample.reach/direct"
+                        [[:seon.fn/sym "sample.reach/target"]])])
+        (db/transact!
+         connection
+         [(test-row "sample.reach/direct"
+                    {:seon.fn/calls
+                     [[:seon.fn/sym "sample.reach/target"]]})
+          (test-row "sample.reach/indirect"
+                    {:seon.fn/calls
+                     [[:seon.fn/sym "sample.reach/bridge"]]})
+          (test-row "sample.reach/property"
+                    {:seon.test/subject
+                     [:seon.fn/sym "sample.reach/bridge"]})])
+        (is (not= (:db/id (db/pull @connection [:db/id]
+                                   [:seon.fn/sym "sample.reach/direct"]))
+                  (:db/id (db/pull @connection [:db/id]
+                                   [:seon.test/sym "sample.reach/direct"])))
+            "function and test identities stay distinct at the same name")
+        (is (= ["sample.reach/direct"
+                "sample.reach/indirect"
+                "sample.reach/property"]
+               (seon.fn/tests-reaching @connection "sample.reach/target")))
+        (is (nil? (:seon.fn/calls
+                   (db/pull @connection [:seon.fn/calls]
+                            [:seon.test/sym "sample.reach/property"])))
+            "the schema-property test reaches its subject without a call edge")
+        (is (= []
+               (seon.fn/tests-reaching @connection "sample.reach/absent")))))))
 
 (deftest blocking-analysis-keeps-the-fresh-branch-unpublished
   (let [root (fixture-root)]

@@ -265,9 +265,13 @@
          :seon.effect/capability capability})))
     (cond
       (::analyzer/test entry)
-      {:seon.test/sym (str qualified)
-       :seon.test/ns [:seon.ns/name namespace-name]
-       :seon.test/source source}
+      (cond-> {:seon.test/sym (str qualified)
+               :seon.test/ns [:seon.ns/name namespace-name]
+               :seon.test/source source}
+        (seq (get calls-by-caller (str qualified)))
+        (assoc :seon.fn/calls
+               (mapv (fn [target] [:seon.fn/sym target])
+                     (sort (get calls-by-caller (str qualified))))))
 
       (and (seq (::analyzer/arglist-strs entry))
            (not (::analyzer/macro entry)))
@@ -325,12 +329,7 @@
 (defn- artifact
   [file rows]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
-        canonical-rows
-        (mapv (fn [row]
-                (cond-> (program/canonical-row row)
-                  (seq (:seon.fn/calls row))
-                  (assoc :seon.fn/calls (:seon.fn/calls row))))
-              rows)]
+        canonical-rows (mapv program/canonical-row rows)]
     {:seon.fn.file/path canonical-path
      :seon.fn.file/digest (file-digest file)
      :seon.fn.file/rows canonical-rows
@@ -341,6 +340,45 @@
      vec)}))
 
 (def ^:private request-symbol "seon.effect/request!")
+
+(def ^:private test-reach-rules
+  '[[(function-reaches ?function ?target)
+     [?function :seon.fn/calls ?target]]
+    [(function-reaches ?function ?target)
+     [?function :seon.fn/calls ?called]
+     (function-reaches ?called ?target)]
+    [(test-reaches ?test ?target)
+     [?test :seon.test/sym]
+     [?test :seon.fn/calls ?target]]
+    [(test-reaches ?test ?target)
+     [?test :seon.test/sym]
+     [?test :seon.fn/calls ?called]
+     (function-reaches ?called ?target)]
+    [(test-reaches ?test ?target)
+     [?test :seon.test/sym]
+     [?test :seon.test/subject ?target]]
+    [(test-reaches ?test ?target)
+     [?test :seon.test/sym]
+     [?test :seon.test/subject ?subject]
+     (function-reaches ?subject ?target)]])
+
+(defn tests-reaching
+  "Test symbols that directly or transitively reach a function."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:vector :seon.test/sym]]}
+  [database function-symbol]
+  (if-let [target
+           (:db/id (db/pull database [:db/id]
+                            [:seon.fn/sym function-symbol]))]
+    (->> (db/q '[:find [?test-symbol ...]
+                 :in $ % ?target
+                 :where
+                 (test-reaches ?test ?target)
+                 [?test :seon.test/sym ?test-symbol]]
+               database test-reach-rules target)
+         sort
+         vec)
+    []))
 
 (defn- capability-refused!
   [rule function-symbol data]
@@ -869,12 +907,25 @@
                                        [:seon.ns/name :seon.ns/requires]))))
                 namespaces)
           declarations (filterv #(not (:seon.ns/name %)) program-rows)
-          declaration-bases (mapv #(dissoc % :seon.fn/calls) declarations)
+          declaration-bases
+          (mapv #(dissoc % :seon.fn/calls :seon.test/subject) declarations)
+          subject-rows
+          (into []
+                (keep (fn [row]
+                        (when-some [subject (:seon.test/subject row)]
+                          (let [[identity-attribute identity-value]
+                                (program/row-identity row)]
+                            {identity-attribute identity-value
+                             :seon.test/subject subject}))))
+                declarations)
           call-rows
           (into []
                 (keep (fn [row]
                         (when (seq (:seon.fn/calls row))
-                          (select-keys row [:seon.fn/sym :seon.fn/calls]))))
+                          (let [[identity-attribute identity-value]
+                                (program/row-identity row)]
+                            {identity-attribute identity-value
+                             :seon.fn/calls (:seon.fn/calls row)}))))
                 declarations)
           commit-phase! (fn [phase tx-data]
                           (when (seq tx-data)
@@ -891,6 +942,7 @@
       (commit-phase! :seon.fn/namespaces
                      (into namespace-bases namespace-relations))
       (commit-phase! :seon.fn/declarations declaration-bases)
+      (commit-phase! :seon.test/subject subject-rows)
       (commit-phase! :seon.fn/calls call-rows)
       {:seon.reconcile/converged? false
        :seon.reconcile/operations (count program-rows)})))
