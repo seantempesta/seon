@@ -746,7 +746,8 @@
    (assoc args
           ::flow/in-ports {::core-fault fault-channel}
           ::committed 0
-          ::panicked 0))
+          ::panicked 0
+          ::seen-signatures #{}))
   ([{::keys [completion] :as state} transition]
    (when (= ::flow/stop transition)
      ;; Flow observes this transition only after an active transform
@@ -754,27 +755,49 @@
      ;; inventing a clock.
      (async/put! completion ::stopped))
    state)
-  ([{::keys [read-core-error-mode commit-fault! panic!] :as state}
+  ([{::keys [read-core-error-mode commit-fault! panic! seen-signatures]
+     :as state}
     _input fault]
    ;; A closed source error channel presents one terminal nil before
    ;; Flow removes that input. It is lifecycle, not a core fault.
    (if (nil? fault)
      [state nil]
-     (case (read-core-error-mode)
-       :record
-       (do
-         (commit-fault! fault)
-         [(update state ::committed inc) nil])
+    (let [mode (read-core-error-mode)
+          [fact outcome]
+          (commit-fault! (assoc fault ::seen-signatures seen-signatures))
+          signature (:seon.error/signature fact)
+          repeated? (and signature (contains? seen-signatures signature))
+          next-state (cond-> state
+                       signature (update ::seen-signatures conj signature)
+                       (= ::committed outcome) (update ::committed inc))
+          reported (assoc fault
+                          ::fault-fact fact
+                          ::commit-outcome outcome
+                          ::core-error-mode mode)
+          commit-refused?
+          (not (contains? #{::committed
+                            ::already-committed
+                            ::already-reported}
+                          outcome))]
+      (cond
+        repeated?
+        [next-state nil]
 
-       :panic
-       (do
-         (panic! fault)
-         [(update state ::panicked inc) nil])
+        (= :record mode)
+        (do
+          (when commit-refused? (panic! reported))
+          [next-state nil])
 
-       (throw
-        (ex-info
-         "Unknown fake :seon.config/on-core-error value."
-         {::core-error-mode (read-core-error-mode)}))))))
+        (= :panic mode)
+        (do
+          (panic! reported)
+          [(update next-state ::panicked inc) nil])
+
+        :else
+        (throw
+         (ex-info
+          "Unknown fake :seon.config/on-core-error value."
+          {::core-error-mode mode})))))))
 
 (defn fault-committer-proc
   "Create the Flow proc that turns core faults into durable facts.

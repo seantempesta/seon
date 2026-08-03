@@ -254,11 +254,14 @@
 
 (defn- commit-fault!
   [connection fault]
-  (db/transact!
-   connection
-   [{::fault-id (random-uuid)
-     ::fault-proc (::flow/pid fault)
-     ::fault-message (ex-message (::flow/ex fault))}]))
+  (let [message (ex-message (::flow/ex fault))
+        signature (str (::flow/pid fault) "|" message)]
+    (db/transact!
+     connection
+     [{::fault-id (random-uuid)
+       ::fault-proc (::flow/pid fault)
+       ::fault-message message}])
+    [{:seon.error/signature signature} ::sut/committed]))
 
 (defn- commit-fault-drop!
   [connection _fault]
@@ -1052,6 +1055,122 @@
               (sut/stop-error-fanout! fanout)
               (stop-testbed! testbed))))))))
 
+(deftest core-fault-signatures-bound-durable-and-stderr-output
+  (let [commit-core-fault!
+        (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+        emit-core-fault!
+        (var-get (ns-resolve 'seon.cluster 'emit-core-fault!))
+        committer-step
+        (var-get (ns-resolve 'seon.flow 'fault-committer-step))
+        inline-ceiling 96
+        caps {:seon.config.eval.result/max-depth 8
+              :seon.config.eval.result/max-collection 8
+              :seon.config.eval.result/max-string 64
+              :seon.config.eval.result/max-nodes 64}
+        repeated-message
+        (str "one repeated cause: " (apply str (repeat 10000 "x")))
+        repeated-fault
+        {::flow/pid :eval
+         ::flow/op :step
+         ::flow/ex (ex-info repeated-message
+                            {:seon.error/kind ::repeated-failure
+                             :seon.flow-test/payload
+                             (apply str (repeat 10000 "x"))})}
+        distinct-fault
+        {::flow/pid :eval
+         ::flow/op :step
+         ::flow/ex (IllegalStateException. "a distinct cause")}
+        effective
+        (fn [_database _cluster-name]
+          {:seon.config.error/recurrence-limit 3
+           :seon.config.eval.result/blob-threshold inline-ceiling})]
+    (testing "a writable database retains one bounded fact per signature"
+      (test-support/with-database
+        (fn [connection]
+          (with-redefs [config/effective effective]
+            (let [[first-fact first-outcome]
+                  (commit-core-fault! connection "fault-test" "process-1"
+                                      caps repeated-fault)
+                  [duplicate-fact duplicate-outcome]
+                  (commit-core-fault! connection "fault-test" "process-1"
+                                      caps repeated-fault)
+                  [distinct-fact distinct-outcome]
+                  (commit-core-fault! connection "fault-test" "process-1"
+                                      caps distinct-fault)
+                  signatures
+                  (db/q '[:find ?signature
+                          :where [_ :seon.error/signature ?signature]]
+                        @connection)]
+              (is (= ::sut/committed first-outcome))
+              (is (= ::sut/already-committed duplicate-outcome))
+              (is (= ::sut/committed distinct-outcome))
+              (is (= (:seon.error/signature first-fact)
+                     (:seon.error/signature duplicate-fact)))
+              (is (not= (:seon.error/signature first-fact)
+                        (:seon.error/signature distinct-fact)))
+              (is (= 2 (count signatures)))
+              (is (= #{1} (set (vals (frequencies (map first signatures)))))
+                  "each content signature owns one durable fact")
+              (is (= inline-ceiling
+                     (count (:seon.error/message first-fact))))
+              (is (str/ends-with? (:seon.error/message first-fact) "…"))
+              (is (true? (:seon.error/capped? first-fact)))
+              (is (< (count (:seon.error/data-edn first-fact)) 10000)
+                  "the normalizer caps the retained stack and ex-data"))))))
+
+    (testing "a dead writer still emits each signature only once"
+      (test-support/with-database
+        (fn [connection]
+          (let [writer-refusal
+                {:seon.error/message
+                 "Writer is shut down; release and reconnect."}
+                initial-state
+                (committer-step
+                 {::sut/fault-channel (async/chan 1)
+                  ::sut/completion (async/promise-chan)
+                  ::sut/read-core-error-mode (constantly :panic)
+                  ::sut/commit-fault!
+                  #(commit-core-fault! connection "fault-test" "process-2"
+                                       caps %)
+                  ::sut/panic!
+                  #(emit-core-fault!
+                    {:seon.config.eval.result/blob-threshold inline-ceiling}
+                    %)})
+                transaction-attempts (atom 0)
+                final-state (atom nil)
+                stderr-writer (java.io.StringWriter.)
+                _
+                (binding [*err* stderr-writer]
+                  (with-redefs [config/effective effective
+                                db/transact! (fn [_connection _transaction-data]
+                                               (swap! transaction-attempts inc)
+                                               writer-refusal)]
+                    (reset!
+                     final-state
+                     (reduce
+                      (fn [state fault]
+                        (first (committer-step state ::sut/core-fault fault)))
+                      initial-state
+                      [repeated-fault repeated-fault distinct-fault]))))
+                stderr (str stderr-writer)
+                lines (str/split-lines stderr)]
+            (is (= 2 (count lines))
+                "the repeated signature and the distinct signature print once")
+            (is (= 2 (count (::sut/seen-signatures @final-state))))
+            (is (= 2 @transaction-attempts)
+                "the repeated signature does not reach the dead writer twice")
+            (is (zero? (::sut/committed @final-state)))
+            (is (= 2 (::sut/panicked @final-state)))
+            (is (every? #(str/includes? % "durable record refused") lines))
+            (is (every? #(str/includes? % "signature ") lines))
+            (is (every? #(<= (count %) (+ (* 2 inline-ceiling) 192)) lines)
+                "the configured string ceiling bounds each single-line face")
+            (is (not (str/includes? stderr (apply str (repeat 100 "x")))))
+            (is (empty?
+                 (db/q '[:find ?error
+                         :where [?error :seon.error/signature _]]
+                       @connection)))))))))
+
 (deftest stopping-the-fanout-awaits-an-active-fault-commit
   (let [{::keys [graph] :as testbed} (single-eval-testbed 1)
         started (flow/start graph)
@@ -1067,7 +1186,9 @@
           ::sut/commit-fault!
           (fn [_fault]
             (.countDown commit-entered)
-            (test-support/await-event! finish-commit ::finish-fault-commit))
+            (test-support/await-event! finish-commit ::finish-fault-commit)
+            [{:seon.error/signature "active-fault-commit"}
+             ::sut/committed])
           ::sut/commit-drop! (fn [_])
           ::sut/panic! (fn [_])})]
     (try

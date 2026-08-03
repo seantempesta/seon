@@ -1359,8 +1359,53 @@
          [?run :seon.cluster.run/id ?id]]
        db agent-id process))
 
+(defn- bounded-fault-string
+  [value limit]
+  (if (and (string? value) (pos-int? limit) (< limit (count value)))
+    (str (subs value 0 (dec limit)) "…")
+    value))
+
+(defn- over-fault-inline-ceiling?
+  [value limit]
+  (and (string? value) (pos-int? limit) (< limit (count value))))
+
+(defn- bounded-fault-transaction
+  [transaction-data inline-ceiling]
+  (mapv
+   (fn [operation]
+     (let [message-capped?
+           (over-fault-inline-ceiling?
+            (:seon.error/message operation) inline-ceiling)]
+       (cond-> operation
+         message-capped?
+         (update :seon.error/message bounded-fault-string inline-ceiling)
+
+         message-capped?
+         (assoc :seon.error/capped? true)
+
+         (over-fault-inline-ceiling?
+          (:seon.cluster.message/content operation) inline-ceiling)
+         (update :seon.cluster.message/content
+                 bounded-fault-string inline-ceiling))))
+   transaction-data))
+
+(defn- committed-fault-signature?
+  [database signature]
+  (some?
+   (db/q '[:find ?error .
+           :in $ ?signature
+           :where [?error :seon.error/signature ?signature]]
+         database signature)))
+
 (defn- commit-fault!
-  "Commit one escaped Throwable as durable facts. TOTAL, never throws.
+  "Commit one escaped Throwable as at most one durable fact per signature.
+
+  TOTAL, never throws. Returns `[fact outcome]`, deriving `fact` and its
+  content signature before the transaction attempt so the Flow committer can
+  collapse repeated output even when the database writer is unavailable.
+  `outcome` is `:seon.flow/committed`, `:seon.flow/already-committed`,
+  `:seon.flow/already-reported`, or the transaction failure value.
+
   Everything it needs is read fresh: the dials from the config
   singleton, the attribution from the database value at the fault's
   own basis. A fault from an agent graph carries its agent as a
@@ -1369,38 +1414,94 @@
   render proc — attributes to NO run, and that is correct rather than
   missing: it is not a run's fault. The serial-era fallback query is
   gone (F2 §3.3). It goes through
-  `db/transact!`, which never throws, and it ignores its own
-  outcome — if the database refuses the fault, the answer is not to
-  fault about the fault (the recursion fence)."
+  `db/transact!`, which never throws. The signature query is the durable
+  deduplication authority; Flow's process-local signature set covers the
+  interval where the writer itself cannot persist that authority."
   [connection cluster-name process caps fault]
   (try
     (let [db @connection
           dials (config/effective db cluster-name)
-          agent-id (:seon.cluster.agent/id fault)
-          run-id (when agent-id (tagged-run db agent-id process))]
-      (db/transact!
-       connection
-       (error/commit-tx
-        db
-        (cond-> {:seon.error/source fault
-                 :seon.error/id (str (random-uuid))
-                 :seon.error/at (java.util.Date.)
-                 :seon.error/process process
-                 :seon.sci.admit/caps caps
-                 :seon.error/basis-t (:max-tx db)
-                 :seon.config.error/recurrence-limit
-                 (:seon.config.error/recurrence-limit dials)}
-          (:seon.config.error/escalate-to dials)
-          (assoc :seon.config.error/escalate-to
-                 (:seon.config.error/escalate-to dials))
-          run-id (assoc :seon.cluster.run/id run-id)
-          agent-id (assoc :seon.cluster.agent/id agent-id)))))
+          seen-signatures (::flow/seen-signatures fault)
+          source-fault (dissoc fault ::flow/seen-signatures)
+          agent-id (:seon.cluster.agent/id source-fault)
+          run-id (when agent-id (tagged-run db agent-id process))
+          transaction-data
+          (bounded-fault-transaction
+           (error/commit-tx
+            db
+            (cond-> {:seon.error/source source-fault
+                     :seon.error/id (str (random-uuid))
+                     :seon.error/at (java.util.Date.)
+                     :seon.error/process process
+                     :seon.sci.admit/caps caps
+                     :seon.error/basis-t (:max-tx db)
+                     :seon.config.error/recurrence-limit
+                     (:seon.config.error/recurrence-limit dials)}
+              (:seon.config.error/escalate-to dials)
+              (assoc :seon.config.error/escalate-to
+                     (:seon.config.error/escalate-to dials))
+              run-id (assoc :seon.cluster.run/id run-id)
+              agent-id (assoc :seon.cluster.agent/id agent-id)))
+           (:seon.config.eval.result/blob-threshold dials))
+          fact (first transaction-data)
+          signature (:seon.error/signature fact)]
+      (cond
+        (contains? seen-signatures signature)
+        [fact ::flow/already-reported]
+
+        (committed-fault-signature? db signature)
+        [fact ::flow/already-committed]
+
+        :else
+        (try
+          (let [result (db/transact! connection transaction-data)]
+            [fact (if (:db-after result) ::flow/committed result)])
+          (catch Throwable failure
+            [fact failure]))))
     (catch Throwable failure
-      ;; the last resort, and it is deliberately not a fact: the fault
-      ;; path failed, so the one place left that cannot fail is stderr
-      (binding [*out* *err*]
-        (println "seon.error commit-fault! failed:" (ex-message failure))
-        (flush))))
+      ;; `error/commit-tx` is total. This last-resort shape is only for a
+      ;; failure before its fact exists, so no content signature is available
+      ;; for Flow to collapse honestly.
+      [nil failure])))
+
+(defn- single-line-fault-text
+  [value]
+  (-> (str value)
+      (str/replace "\r" " ")
+      (str/replace "\n" " ")))
+
+(defn- emit-core-fault!
+  [configuration reported]
+  (let [fact (::flow/fault-fact reported)
+        outcome (::flow/commit-outcome reported)
+        mode (::flow/core-error-mode reported)
+        inline-ceiling
+        (:seon.config.eval.result/blob-threshold configuration)
+        message (bounded-fault-string
+                 (or (:seon.error/message fact)
+                     "A core fault could not be normalized.")
+                 inline-ceiling)
+        failure-message
+        (when-not (contains? #{::flow/committed
+                              ::flow/already-committed
+                              ::flow/already-reported}
+                             outcome)
+          (bounded-fault-string
+           (or (when (map? outcome) (:seon.error/message outcome))
+               (when (instance? Throwable outcome) (ex-message outcome))
+               (str outcome))
+           inline-ceiling))]
+    (binding [*out* *err*]
+      (println
+       (str "SEON CORE FAULT"
+            (when (= :panic mode) " (dev panic)")
+            ": " (single-line-fault-text message)
+            " [signature " (:seon.error/signature fact)
+            (when failure-message
+              (str "; durable record refused: "
+                   (single-line-fault-text failure-message)))
+            "]"))
+      (flush)))
   nil)
 
 (defn- loop-handle
@@ -1432,6 +1533,8 @@
               :seon.config/on-core-error (:seon.config/on-core-error dials)
               :seon.config.error/recurrence-limit
               (:seon.config.error/recurrence-limit dials)
+              :seon.config.eval.result/blob-threshold
+              (:seon.config.eval.result/blob-threshold dials)
               ;; the conversation bound: every delivery a turn makes is
               ;; measured against it, so the loop must carry it the same
               ;; way it carries every other dial — derived from facts
@@ -1564,19 +1667,12 @@
                               (pr-str (:clojure.core.async.flow/pid dropped)))
                      (flush)))
                  :seon.flow/panic!
-                 (fn [fault]
-                   ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): dev
-                   ;; panic makes the fault impossible to miss, and it
-                   ;; still COMMITS it — a panic that destroyed the
-                   ;; record would be the fire alarm burning the house.
-                   (commit-fault! connection cluster-name process
-                                  (:seon.sci.admit/caps handle) fault)
-                   (binding [*out* *err*]
-                     (println "SEON CORE FAULT (dev panic):"
-                              (or (ex-message
-                                   (:clojure.core.async.flow/ex fault))
-                                  (pr-str fault)))
-                     (flush)))})]
+                 (fn [reported]
+                   ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): Flow calls
+                   ;; this only for the first occurrence of a signature. The
+                   ;; same callback reports a refused durable write once,
+                   ;; including in record mode, without a second trace path.
+                   (emit-core-fault! handle reported))})]
     ;; the fault channel joins the routing entry so every later arm
     ;; can tap its agent graph's errors into the ONE committer inbox
     (swap! routing assoc :seon.cluster.agent/fault-channel
