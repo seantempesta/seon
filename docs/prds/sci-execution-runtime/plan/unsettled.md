@@ -3328,8 +3328,16 @@ with full credits. All lanes stopped at coherent boundaries; every lane
 below resumes BY NAME with full context (`bin/codex-agent resume <name>
 "<correction>"`).
 
-TREE STATE: 17 tracked files carry UNCOMMITTED work from two stopped
-units — do NOT discard them:
+TREE STATE: everything is COMMITTED and pushed; the working tree has
+zero tracked changes. The stopped units' in-flight work was preserved
+in five attributed `WIP(...)` commits (`2591dab1c` keyword-edges,
+`954e6dbc0` error-schemas, `e2240bb2e` effect interruption,
+`dca3d2393` my-shell deps/dials, `201901321` a design-doc update) —
+each message states plainly that it is UNVERIFIED and what is owed.
+NO FILE MIXES TWO UNITS; attribution was checked hunk-level before
+committing. TREAT THESE FIVE AS RED UNTIL GATED: the error-schemas
+state may still break fixture population, so run the property-lift
+correction and the gates FIRST. The original per-unit notes follow:
 - `error-schemas` (Sol, stopped mid-slice): error-class markers, the
   `:seon.error/class` -> `:seon.error/throwable-class` rename (owner
   approved), and the PROPERTY-LIFT DISCRIMINATION correction it was
