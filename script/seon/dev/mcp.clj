@@ -602,7 +602,7 @@
               (current-clj-session! root cluster session-id)]
           (.write ^java.io.Writer writer (str remote-form "\n"))
           (.flush ^java.io.Writer writer)
-          (let [events (mapv decoded-projection-event
+          (let [events (mapv #(assoc (decoded-projection-event %) :form code)
                              (collect-prepl-response! session timeout-ms))
                 terminal (some #(when (= :ret (:tag %)) %) events)
                 response {:seon.dev.mcp/runtime "clj"

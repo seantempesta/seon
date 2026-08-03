@@ -294,6 +294,43 @@
     (is (= "coordinates" (:seon.dev.mcp/session-id data)))
     (is (= "transport-fixture" (:seon.dev.mcp/failure data)))))
 
+(deftest evaluation-events-report-the-exact-caller-source
+  (let [source "  (+ 20 22)\n"]
+    (doseq [mode ["jvm" "door"]
+            exception? [false true]]
+      (let [writer (java.io.StringWriter.)
+            transport-form (atom nil)
+            raw-events
+            (if exception?
+              [{:tag :ret :val "fixture failure" :exception true}]
+              [{:tag :out :val "fixture output"}
+               {:tag :ret :val "42" :ns "user"}])
+            result
+            (with-redefs-fn
+              {(bridge-var 'current-clj-session!)
+               (fn [& _]
+                 {:writer writer
+                  :endpoint {:seon.dev.mcp/cluster-state :alive}})
+               (bridge-var 'collect-prepl-response!)
+               (fn [_ _]
+                 (let [generated (str/trim (str writer))]
+                   (reset! transport-form generated)
+                   (mapv #(assoc % :form generated) raw-events)))}
+              #((bridge-var 'execute-clj-eval)
+                {:root (.getCanonicalPath project-root)
+                 :cluster "fixture"
+                 :mode mode
+                 :code source}))
+            data (result-data result)
+            events (:seon.dev.mcp/events data)]
+        (is (= exception? (boolean (:isError result))))
+        (is (not= source @transport-form)
+            "the test must exercise a generated transport wrapper")
+        (is (= (count raw-events) (count events)))
+        (is (every? #(= source (:form %)) events)
+            (str mode " events must report the caller source on "
+                 (if exception? "evaluation error" "success")))))))
+
 (deftest endpoint-selection-is-root-scoped-and-reaches-degraded-registrations
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-root-" (random-uuid)))
