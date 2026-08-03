@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (11)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Remove closed map contracts outside the canonical schema population](closed-map-contracts-survive-outside-schema-population.md) | blocker | open-maps accretion wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Run agent renderers through the guarded SCI program context](agent-renderers-never-enter-the-sci-program-context.md) | blocker | SCI render-execution design gate |
@@ -32,11 +33,12 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (71)
+## Friction (72)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Make the opaque-reference test distinguish identity bytes from value bytes](opaque-reference-test-confuses-object-identity-with-value.md) | friction | render test-honesty wave |
+| [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
+| [Give provider JSON values a named recursive schema](provider-json-contracts-use-unbounded-any.md) | friction | schema honesty wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
 | [Make the AI transport taxonomy test assert its premise](ai-transport-taxonomy-test-can-run-zero-assertions.md) | friction | AI provider-integrity wave |
 | [Give the SCI source-size cap a declared owner](sci-reader-hides-a-production-source-cap.md) | friction | SCI reader-limit wave |
