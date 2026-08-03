@@ -170,6 +170,30 @@ is a config fact behind one schema, never a provider-shaped API);
 (6) schema split launched (see above). Nothing in the batch remains
 open.
 
+SCHEMA SPLIT REVISED BY OWNER (same afternoon): migration is PHASED —
+(1) additive namespace-nested split files created while the monolith
+stays authoritative (started immediately; unaffected by in-flight
+monolith hunks), (2) the one loader swaps to the split set only when
+the monolith is quiet, gated on a parse-set-equality falsifier +
+init + fresh-root READY, (3) the monolith is deleted in the same
+commit that proves the swap. Files nest like Clojure namespaces;
+declarations stay FULLY NAMESPACED — layout is organization only.
+This deliberately reverses part of the July one-file consolidation
+(ruling #14's glob deletion): the collision economics changed (three
+cross-lane schema.edn collisions on 2026-08-03 alone); the merged
+declaration set is digested in stable order so the ancestor-digest
+property survives. QUEUED BEHIND THE SPLIT — the SCHEMA ADMISSION
+GATE (owner-directed): one admission function with two entrances
+(edit hook on schema-file changes; later the agent declaration seam
+of the accretion pipeline) that Malli-compiles every declaration
+against the merged registry, enforces the house rules as data checks,
+and reports REUSE candidates derived by registry query — exact-key
+refusal at the loader, structural-equality ("same shape, new name")
+and name-token-overlap similarity as loud teaching warnings that
+never block. MCP DOOR ISSUE RESOLVED and archived with live proof
+(`a54b8bddb`, orchestrator-verified 304,265 → ~4,332 bytes,
+get_value paging proven).
+
 **ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
 THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
 
