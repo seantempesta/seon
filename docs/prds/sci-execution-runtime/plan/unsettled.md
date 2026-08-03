@@ -139,6 +139,24 @@ works. Fix lane `mcp-value-window` running with the diagnosis.
 LANES RUNNING: `mcp-value-window` (new), `effect-capability` (resumed),
 `cache-economics` (resumed with the prefix-stabilization direction).
 
+LATER SAME AFTERNOON — RULING #52 SEALED (see README: lazy agents
+everywhere, no-ack query-derived repair, disposition 1 = the audit
+constraint, schema split unGATED and launched). MCP fix IMPLEMENTED by
+`mcp-value-window` (recursive window + nested string clipping + shipped
+print defaults length 32 / level 8; falsifier 302,453 B → <8,192 B) —
+commit and live proof pending the publication unblock. CROSS-LANE
+BLOCKER found by three lanes independently: `effect-capability`'s
+refusal fixture `seon.effect-test/test-capability` published malformed
+capability source, so `bin/seon init` and every refork refuse with
+`:capability-without-request` — the lane is re-expressing the fixture
+without publishing malformed source. `cache-economics` measurement
+still NULL (blocked on that refork); resumes after publication greens.
+`schema-split` launched (owner: "It's quiet now maybe do the schemas
+now?"), correctly stopped at uncommitted schema.edn hunks from the two
+running lanes; relaunches the moment they commit. effect-capability
+landed `ba4d39423` + `7493c84bd` (capability indexing + effect/workload
+reachability separation).
+
 **ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
 THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
 

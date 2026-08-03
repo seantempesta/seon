@@ -1933,6 +1933,39 @@ may reintroduce a shadow build into the dev feedback path.
   policy per operator-root store accepted); the union codec decodes
   EVERYWHERE with the blast-radius table reported for morning review;
   subagent policy — no Fable subagents, opus and sol lanes only.
+  **Ruling 2026-08-03 #52 (owner, afternoon): EVERY NAMESPACE HAS AN
+  AGENT — LAZILY CREATED — AND ERROR REPAIR IS QUERY-DERIVED WITH NO
+  ACKNOWLEDGEMENT.** Owner verbatim, dissolving the agentless-namespace
+  stakeholder question (render disposition 2): "If no agent exists we
+  should create one (lazy until needed) and then everything should
+  work. If an error flows to a namespace and we need to deliver it to
+  the agent also start it. Make sense? Every namespace has an agent we
+  just don't need to explicit create them or run them until needed."
+  There are no agentless namespaces — only agents not yet
+  materialized; delivering anything to a namespace creates and starts
+  its agent on demand. Fan-out to "stakeholders" is therefore not a
+  mechanism: the owning (possibly just-created) agent receives the
+  failure, and escalation stays root-shaped per ruling #50 (4).
+  Repair acceptance (render disposition 3), owner verbatim: "In the
+  bootstrap forms we should query for all errors the agent is
+  responsible for and have a section saying first priority on a turn
+  should be to fix all of the errors and on the next turn the
+  bootstrap runs again and they should be gone. No explicit ack
+  needed. If the agent is down forward to root and tell it to debug
+  and restart the agent." So the bootstrap form series carries an
+  errors-I-own query section teaching first-priority repair;
+  completion is the error facts DISAPPEARING from the next turn's
+  query — no acceptance fact, no acknowledgement row, nothing stored;
+  a down agent escalates to root with a debug-and-restart
+  instruction. Same batch: render disposition 1 (the universal
+  ownership fact) resolves to the simplification audit's recommended
+  constraint — explicit ownership refs where the domain has one, the
+  governing namespace carries across walk edges, schema property then
+  the value-printer floor otherwise, never name inference (ruling #47
+  stands); and the SCHEMA SPLIT is unGATED from full render
+  verification — the shared single file's cross-lane collision cost
+  is being paid daily, so it runs at the next quiet window, and the
+  owner then ordered it launched immediately the same afternoon.
   **Ruling 2026-08-03 #49 (owner, night): TEST RUNS NEVER ACCUMULATE
   DATA, ALWAYS EXERCISE CURRENT CODE, AND THE SUITE'S DURATION IS A BIG
   PROBLEM.** Owner verbatim: "dont let the db collect a bunch of test
