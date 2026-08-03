@@ -10,6 +10,17 @@
 # opt-in only and refuse the owner's `default` cluster.
 
 set -euo pipefail
+
+# Bash may continue reading an executing script from disk. A 36-minute gate
+# proved that an in-place edit can therefore splice new bytes into the old
+# invocation after its JVM exits. Re-exec one complete in-memory command string
+# so this invocation's operator-root lifecycle is frozen with its launch bytes.
+if [ "${SEON_TEST_SCRIPT_SNAPSHOT-}" != "1" ]; then
+  export SEON_TEST_SCRIPT_SNAPSHOT=1
+  exec /bin/bash -c "$(command cat -- "$0")" "$0" "$@"
+fi
+unset SEON_TEST_SCRIPT_SNAPSHOT
+
 cd "$(dirname "$0")/.."
 source_root=$PWD
 
