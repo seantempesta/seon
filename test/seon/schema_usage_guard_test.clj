@@ -1,7 +1,7 @@
 (ns seon.schema-usage-guard-test
   "Schema replacement/removal safety at the terminal transaction boundary."
   (:require [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [datahike.db.interface :as dbi]
             [seon.cluster.run :as run]
             [seon.schema :as schema]
@@ -13,9 +13,9 @@
 (def ^:private direct-key :seon.schema-usage-guard/direct)
 (def ^:private transitive-key :seon.schema-usage-guard/transitive)
 (def ^:private unrelated-key :seon.schema-usage-guard/unrelated)
-(def ^:private entity-key :seon.schema-usage-guard/entity)
-(def ^:private entity-id-key :seon.schema-usage-guard/entity-id)
-(def ^:private entity-child-key :seon.schema-usage-guard/entity-child)
+(def ^:private entity-key :seon.schema-usage-guardb/entity)
+(def ^:private entity-id-key :seon.schema-usage-guardb/entity-id)
+(def ^:private entity-child-key :seon.schema-usage-guardb/entity-child)
 
 (def ^:private forms
   {base-key [:int {:seon.db/index true}]
@@ -33,7 +33,10 @@
 (defn- transact-result
   [connection tx-data]
   (try
-    {:report (d/transact connection tx-data)}
+    (let [result (db/transact! connection tx-data)]
+      (if (:seon.error/kind result)
+        {:error result}
+        {:report result}))
     (catch Throwable error
       {:error (deepest-ex-data error)})))
 
@@ -56,7 +59,7 @@
             {:seon.schema.admission/source :core}))
          (schema/projection-from-database @connection)
          selected-forms)]
-    (d/transact
+    (db/transact!
      connection
      (into
       (schema.datahike/malli->datahike-schema-in
@@ -118,7 +121,7 @@
       (test-support/with-database
         (fn [connection]
           (install-forms! connection selected-forms)
-          (when extra-row (d/transact connection [extra-row]))
+          (when extra-row (db/transact! connection [extra-row]))
           (let [before @connection
                 result
                 (transact-result
@@ -130,7 +133,7 @@
                    (get-in result [:error :seon.schema/error])))
             (is (= expected-value (get-in result [:error expected-key])))
             (is (= (:max-tx before) (:max-tx @connection)))
-            (is (some? (d/pull @connection [:db/id]
+            (is (some? (db/pull @connection [:db/id]
                                [:seon.schema/key base-key])))))))))
 
 (deftest nonidentical-change-refuses-direct-and-transitive-current-data
@@ -139,7 +142,7 @@
       (test-support/with-database
         (fn [connection]
           (install-forms! connection forms)
-          (d/transact connection [{used-key 7}])
+          (db/transact! connection [{used-key 7}])
           (let [before @connection
                 result
                 (transact-result
@@ -156,10 +159,10 @@
                 "refusal aborts the complete transaction")
             (is (= (pr-str (get forms base-key))
                    (:seon.schema/form
-                    (d/pull @connection [:seon.schema/form]
+                    (db/pull @connection [:seon.schema/form]
                             [:seon.schema/key base-key]))))
             (is (= 7
-                   (d/q '[:find ?value .
+                   (db/q '[:find ?value .
                           :in $ ?attribute
                           :where [_ ?attribute ?value]]
                         @connection used-key)))))))))
@@ -168,7 +171,7 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (d/transact connection [{base-key 7}])
+      (db/transact! connection [{base-key 7}])
       (let [result
             (transact-result
              connection
@@ -176,10 +179,10 @@
         (is (nil? (:error result)))
         (is (= (pr-str (get forms base-key))
                (:seon.schema/form
-                (d/pull @connection [:seon.schema/form]
+                (db/pull @connection [:seon.schema/form]
                         [:seon.schema/key base-key]))))
         (is (= 7
-               (d/q '[:find ?value .
+               (db/q '[:find ?value .
                       :in $ ?attribute
                       :where [_ ?attribute ?value]]
                     @connection base-key)))))))
@@ -188,16 +191,16 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (d/transact
+      (db/transact!
        connection
        [(schema-row unrelated-key [:string {:seon.db/index true}])])
       (is (not (contains? (:schema @connection) unrelated-key)))
-      (d/transact connection [{base-key 7}])
-      (let [entity (d/q '[:find ?entity .
+      (db/transact! connection [{base-key 7}])
+      (let [entity (db/q '[:find ?entity .
                           :in $ ?attribute
                           :where [?entity ?attribute _]]
                         @connection base-key)]
-        (d/transact connection [[:db/retract entity base-key]])
+        (db/transact! connection [[:db/retract entity base-key]])
         (let [result
               (transact-result
                connection
@@ -205,16 +208,16 @@
                 (schema-row base-key
                             [:int {:min 1 :seon.db/index true}])))]
           (is (nil? (:error result)))
-          (d/transact connection [{base-key 8}])
+          (db/transact! connection [{base-key 8}])
           (is (= 8
-                 (d/q '[:find ?value .
+                 (db/q '[:find ?value .
                         :in $ ?attribute
                         :where [_ ?attribute ?value]]
                       @connection base-key)))
           (is (some #(and (= entity (:e %))
                           (= base-key (:a %))
                           (= 7 (:v %)))
-                    (d/datoms (d/history @connection) :aevt base-key))
+                    (db/datoms (db/history @connection) :aevt base-key))
               "schema replacement does not purge historical data")
           (is (not (contains? (:schema @connection) unrelated-key))
               "replacement does not install unrelated absent attributes"))))))
@@ -235,10 +238,10 @@
              entity-child-key [:int {:seon.db/index true}]
              entity-key entity-form}]
         (install-forms! connection selected-forms)
-        (d/transact
+        (db/transact!
          connection
          [(schema-row unrelated-key [:string {:seon.db/index true}])])
-        (d/transact connection [{entity-child-key 7}])
+        (db/transact! connection [{entity-child-key 7}])
         (let [before @connection
               refusal
               (transact-result
@@ -251,14 +254,14 @@
           (is (= (:max-tx before) (:max-tx @connection)))
           (is (= (pr-str entity-form)
                  (:seon.schema/form
-                  (d/pull @connection [:seon.schema/form]
+                  (db/pull @connection [:seon.schema/form]
                           [:seon.schema/key entity-key])))))
         (let [entity
-              (d/q '[:find ?entity .
+              (db/q '[:find ?entity .
                      :in $ ?attribute
                      :where [?entity ?attribute _]]
                    @connection entity-child-key)]
-          (d/transact connection [[:db/retract entity entity-child-key]])
+          (db/transact! connection [[:db/retract entity entity-child-key]])
           (let [result
                 (transact-result
                  connection
@@ -267,7 +270,7 @@
             (is (nil? (:error result)))
             (is (= (pr-str replacement-form)
                    (:seon.schema/form
-                    (d/pull @connection [:seon.schema/form]
+                    (db/pull @connection [:seon.schema/form]
                             [:seon.schema/key entity-key]))))
             (is (contains? (:schema @connection) entity-child-key))
             (is (contains? (:schema @connection) entity-id-key))
@@ -302,16 +305,16 @@
                (program-row-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key entity-key]]})))))
-        (is (nil? (d/pull @connection [:db/id]
+        (is (nil? (db/pull @connection [:db/id]
                           [:seon.schema/key entity-key])))
         (doseq [leaf-key [entity-id-key entity-child-key]]
-          (is (some? (d/pull @connection [:db/id]
+          (is (some? (db/pull @connection [:db/id]
                              [:seon.schema/key leaf-key])))
           (is (contains? (:schema @connection) leaf-key)))
-        (d/transact connection [{entity-id-key "survivor"
+        (db/transact! connection [{entity-id-key "survivor"
                                  entity-child-key 7}])
         (is (= ["survivor" 7]
-               (d/q '[:find [?id ?child]
+               (db/q '[:find [?id ?child]
                       :in $ ?id-attribute ?child-attribute
                       :where
                       [?entity ?id-attribute ?id]
@@ -329,7 +332,7 @@
               {:seon.program/delete-identities
                [[:seon.schema/key base-key]]}))]
         (is (nil? (:error result)))
-        (is (nil? (d/pull @connection [:db/id]
+        (is (nil? (db/pull @connection [:db/id]
                           [:seon.schema/key base-key])))
         (is (not (contains? (:schema @connection) base-key)))))))
 
@@ -337,35 +340,35 @@
   (test-support/with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (d/transact connection [{base-key 7}])
+      (db/transact! connection [{base-key 7}])
       (let [data-t (:max-tx @connection)
             entity
-            (d/q '[:find ?entity .
+            (db/q '[:find ?entity .
                    :in $ ?attribute
                    :where [?entity ?attribute _]]
                  @connection base-key)]
-        (d/transact connection [[:db/retract entity base-key]])
+        (db/transact! connection [[:db/retract entity base-key]])
         (let [result
               (transact-result
                connection
                (program-row-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key base-key]]}))
-              past (d/as-of @connection data-t)
+              past (db/as-of @connection data-t)
               past-projection (schema/projection-from-database past)]
           (is (nil? (:error result)))
-          (is (nil? (d/pull @connection [:db/id]
+          (is (nil? (db/pull @connection [:db/id]
                             [:seon.schema/key base-key])))
           (is (not (contains? (:schema @connection) base-key)))
           (is (= 7
-                 (d/q '[:find ?value .
+                 (db/q '[:find ?value .
                         :in $ ?attribute
                         :where [_ ?attribute ?value]]
                       past base-key))
               "as-of Datalog retains the pre-retraction value")
           (is (= (pr-str (get forms base-key))
                  (:seon.schema/form
-                  (d/pull past [:seon.schema/form]
+                  (db/pull past [:seon.schema/form]
                           [:seon.schema/key base-key])))
               "the historical program row retains the validator source")
           (is (true?
@@ -381,17 +384,17 @@
             definition
             [:int {:seon.db/index true :seon.db/no-history? true}]]
         (install-forms! connection {schema-key definition})
-        (d/transact connection [{schema-key 7}])
+        (db/transact! connection [{schema-key 7}])
         (let [data-t (:max-tx @connection)
               entity
-              (d/q '[:find ?entity .
+              (db/q '[:find ?entity .
                      :in $ ?attribute
                      :where [?entity ?attribute _]]
                    @connection schema-key)]
-          (d/transact connection [[:db/retract entity schema-key]])
+          (db/transact! connection [[:db/retract entity schema-key]])
           (is (nil?
-               (d/q '[:find ?value .
+               (db/q '[:find ?value .
                       :in $ ?attribute
                       :where [_ ?attribute ?value]]
-                    (d/as-of @connection data-t) schema-key))
+                    (db/as-of @connection data-t) schema-key))
               ":seon.db/no-history? intentionally removes the past value"))))))

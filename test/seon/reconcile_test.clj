@@ -29,7 +29,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.db.process/id unmanaged-process}])
       (body connection))))
 
@@ -44,10 +44,10 @@
       (try
         (cluster/populate-source!
          {:seon.store/branch-connection connection})
-        (d/transact connection
+        (db/transact! connection
                     {:tx-data
                      [{:seon.source/digest (apply str (repeat 64 "0"))}]})
-        (d/transact connection
+        (db/transact! connection
                     [{:seon.db.process/id unmanaged-process}])
         (body connection)
         (finally
@@ -60,7 +60,7 @@
 
 (defn- transact-as!
   [connection process tx-data]
-  (d/transact connection
+  (db/transact! connection
               {:tx-data tx-data
                :tx-meta (transaction-meta process)}))
 
@@ -88,7 +88,7 @@
                     managing-process
                     [(config-row "provenance-proof" 10)])
       (is (= managing-process
-             (d/q
+             (db/q
               '[:find ?process-id .
                 :where
                 [?entity :seon.config/cluster "provenance-proof"]
@@ -131,7 +131,8 @@
 (deftest reconciliation-uses-current-provenance-without-history
   (with-non-temporal-database
     (fn [connection]
-      (is (thrown? clojure.lang.ExceptionInfo (d/history @connection))
+      (is (= :seon.db/non-temporal-database
+             (:seon.error/kind (db/history @connection)))
           "the fixture genuinely has no temporal indices")
       (let [desired [(config-row "non-temporal" 10)]
             adopted #{[:seon.config/cluster "non-temporal"]}
@@ -154,7 +155,7 @@
             "re-applying the managed identity commits nothing")
         (is (= "non-temporal"
                (:seon.config/cluster
-                (d/pull @connection
+                (db/pull @connection
                         '[:seon.config/cluster]
                         [:seon.config/cluster "non-temporal"]))))))))
 
@@ -169,13 +170,13 @@
                         :seon.config.flow.compute/queue-depth 99}])
         (is (= 99
                (:seon.config.flow.compute/queue-depth
-                (d/pull @connection
+                (db/pull @connection
                         '[*]
                         [:seon.config/cluster "drifted"]))))
         (reconcile/reconcile! connection (request desired))
         (is (= 10
                (:seon.config.flow.compute/queue-depth
-                (d/pull @connection
+                (db/pull @connection
                         '[*]
                         [:seon.config/cluster "drifted"]))))))))
 
@@ -189,10 +190,10 @@
       (reconcile/reconcile!
        connection
        (request [(config-row "keep" 10)]))
-      (is (some? (d/pull @connection
+      (is (some? (db/pull @connection
                          '[:seon.config/cluster]
                          [:seon.config/cluster "keep"])))
-      (is (nil? (d/pull @connection
+      (is (nil? (db/pull @connection
                         '[:seon.config/cluster]
                         [:seon.config/cluster "remove"]))))))
 

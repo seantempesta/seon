@@ -3,7 +3,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]))
@@ -138,8 +138,8 @@
      [(schema.datahike/malli->datahike-attr ::title)]}
     (fn [connection]
       (testing "derive, install, transact, and read through the public call shape"
-        (d/transact connection [{::title "Alpha"}])
+        (db/transact! connection [{::title "Alpha"}])
         (is (= "Alpha"
-               (d/q '[:find ?title .
+               (db/q '[:find ?title .
                       :where [_ ::title ?title]]
-                    (d/db connection))))))))
+                    (db/db connection))))))))

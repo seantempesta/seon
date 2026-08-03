@@ -1,7 +1,6 @@
 (ns seon.fn-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
@@ -101,7 +100,7 @@
     (fn [connection]
       (let [db @connection
             requires
-            (d/q '[:find ?namespace ?required ?required-name
+            (db/q '[:find ?namespace ?required ?required-name
                    :where
                    [?namespace :seon.ns/requires ?required]
                    [?required :seon.ns/name ?required-name]]
@@ -109,7 +108,7 @@
             required-eids
             (into #{} (map second) requires)
             name-only-eids
-            (d/q '[:find [?namespace ...]
+            (db/q '[:find [?namespace ...]
                    :where
                    [?namespace :seon.ns/name]
                    (not [?namespace :seon.ns/source])]
@@ -133,7 +132,7 @@
         (is (every? #(= 1 (count %)) (vals external-eids-by-name))
             "each external namespace name resolves to exactly one eid")
         (is (empty?
-             (d/q '[:find ?namespace ?required
+             (db/q '[:find ?namespace ?required
                     :where
                     [?namespace :seon.ns/requires ?required]
                     (not [?required :seon.ns/name])]
@@ -144,25 +143,25 @@
     (fn [connection]
       (let [db @connection
             contracted
-            (d/q '[:find [?function ...]
+            (db/q '[:find [?function ...]
                    :where [?function :seon.fn/spec]]
                  db)
             complete
-            (d/q '[:find [?function ...]
+            (db/q '[:find [?function ...]
                    :where
                    [?function :seon.fn/spec]
                    [?function :seon.fn/arities]
                    [?function :seon.fn/ast]]
                  db)
             assertion-transactions
-            (d/q '[:find ?function ?spec-tx ?arities-tx ?ast-tx
+            (db/q '[:find ?function ?spec-tx ?arities-tx ?ast-tx
                    :where
                    [?function :seon.fn/spec _ ?spec-tx]
                    [?function :seon.fn/arities _ ?arities-tx]
                    [?function :seon.fn/ast _ ?ast-tx]]
                  db)
             functions-by-role
-            (d/q '[:find ?role ?function-symbol
+            (db/q '[:find ?role ?function-symbol
                    :in $ ?schema-key
                    :where
                    [?schema :seon.schema/key ?schema-key]
@@ -192,14 +191,14 @@
       (let [functions
             (take 2
                   (sort
-                   (d/q '[:find [?function ...]
+                   (db/q '[:find [?function ...]
                           :where
                           [?function :seon.fn/spec]
                           [?function :seon.fn/arities]
                           [?function :seon.fn/ast]]
                         @connection)))]
         (is (= 2 (count functions)))
-        (d/transact
+        (db/transact!
          connection
          (into []
                (mapcat (fn [function]
@@ -228,7 +227,7 @@
           (is (= after-first after-second)
               "the converged second run writes nothing")
           (is (empty?
-               (d/q '[:find ?function
+               (db/q '[:find ?function
                       :where
                       [?function :seon.fn/spec]
                       (or (not [?function :seon.fn/arities])
@@ -472,7 +471,7 @@
                         (:seon.fn.analyzer/filename %))
                     (:seon.fn/findings (ex-data failure))))
           (is (= before (:max-tx @connection)))
-          (is (nil? (d/pull @connection [:db/id]
+          (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym "valid.core/value"]))))))))
 
 (deftest indexing-refuses-an-already-populated-branch

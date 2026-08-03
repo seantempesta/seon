@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -21,7 +22,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact
+      (db/transact!
        connection
        (schema.datahike/malli->datahike-schema
         (schema/canonical-database-attributes)))
@@ -36,10 +37,10 @@
 (defn- transact-schema-row!
   ([connection schema-key]
    (transaction-id
-    (d/transact connection [{:seon.schema/key schema-key}])))
+    (db/transact! connection [{:seon.schema/key schema-key}])))
   ([connection schema-key admission-source]
    (transaction-id
-    (d/transact
+    (db/transact!
      connection
      [{:seon.schema/key schema-key
        :seon.schema.admission/source admission-source}]))))
@@ -89,7 +90,8 @@
                    (:seon.schema.admission/source
                     (admission connection agent-tx))))
             (when-not keep-history?
-              (is (thrown? Exception (d/history @connection))
+              (is (= :seon.db/non-temporal-database
+                     (:seon.error/kind (db/history @connection)))
                   "the fixture must genuinely be non-temporal"))))))))
 
 (deftest missing-recorded-admission-source-fails-closed
@@ -108,7 +110,7 @@
   (with-history-policy
     false
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        (schema/canonical-schema-rows (schema.edn/packaged-forms)))
       (let [projection (schema/projection-from-database @connection)]
@@ -125,7 +127,7 @@
     (fn [connection]
       (let [database @connection
             missing
-            (d/q '[:find ?entity ?identity-attribute
+            (db/q '[:find ?entity ?identity-attribute
                    :in $ [?identity-attribute ...]
                    :where
                    [?entity ?identity-attribute]
@@ -134,7 +136,7 @@
                  program/identity-attributes)
             sources
             (set
-             (d/q '[:find [?source ...]
+             (db/q '[:find [?source ...]
                     :where [_ :seon.schema.admission/source ?source]]
                   database))]
         (is (empty? missing))
@@ -143,7 +145,7 @@
                (:seon.schema.admission/source
                 (schema/admission-from-asserting-transaction
                  database
-                 (d/q '[:find ?tx .
+                 (db/q '[:find ?tx .
                         :where
                         [_ :seon.schema/key :seon.config/manifest ?tx]]
                       database)))))))))

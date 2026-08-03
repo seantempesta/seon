@@ -3,7 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.config :as config]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -230,7 +230,7 @@
                (:seon.config/on-core-error
                 (config/effective @connection))))
         (is (= config/managing-process-identity
-               (d/q
+               (db/q
                 '[:find ?process-id .
                   :where
                   [?entity :seon.config/cluster "default"]
