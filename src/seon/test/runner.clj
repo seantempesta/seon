@@ -70,12 +70,13 @@
 
 (defn- announce!
   [progress description]
-  (reset! progress
-          {::description description
-           ::at-nanos (System/nanoTime)
-           ::at (Instant/now)})
-  (println "bin/test:" description)
-  (flush))
+  (let [at (Instant/now)]
+    (reset! progress
+            {::description description
+             ::at-nanos (System/nanoTime)
+             ::at at})
+    (println "bin/test:" (str at) description)
+    (flush)))
 
 (defn- progress-event!
   [progress event]
