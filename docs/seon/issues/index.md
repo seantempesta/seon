@@ -30,7 +30,7 @@ See `README.md` for the convention.
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [Bound internal contract violations before they retain the schema registry](internal-contract-violation-renders-whole-registry.md) | blocker | contract error-construction wave |
 
-## Friction (68)
+## Friction (76)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -104,6 +104,12 @@ See `README.md` for the convention.
 | [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
+| [Make SCI `doc` print documentation without comment syntax](sci-doc-prefixes-program-docstrings-as-comments.md) | friction | strict REPL display wave |
+| [Stop encoding namespace-render results as source comments](namespace-renderer-encodes-results-as-comments.md) | friction | strict REPL display wave |
+| [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
+| [Make the rendered walk an ordinary REPL value](render-walk-frames-values-as-comments.md) | friction | strict REPL display wave |
+| [Return walk state and failures without comment notices](render-walk-wrapper-returns-comment-notices.md) | friction | strict REPL display wave |
+| [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 
 ## Cleanup (13)
 

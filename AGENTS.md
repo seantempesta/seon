@@ -936,8 +936,13 @@ Dependency/classpath caches improve resolution but never publish external code
 as Seon facts. Do not add another graph builder, replay every eval to resume,
 or introduce a generated bootstrap authority.
 
-Comment grammar is agent-facing: `;` is prose/inline explanation, `;;` is a
-code-block comment above a form, and `;;;` is runtime-structure demarcation.
+Comment grammar is a SOURCE-writing convention only: `;` is prose/inline
+explanation, `;;` is a code-block comment above a form, and `;;;` demarcates
+runtime structure in source. Agents may write comments before their own forms,
+and the reply parser preserves that input. Displays model a real REPL: the form,
+then its actual computed value. Rendered results, doc/dir output, system notices,
+and lessons never use comment-prefixed prose, `;; =>` annotations, decorative
+comment framing, or comment-only pseudo-entries as output.
 
 ## Runtime contracts
 

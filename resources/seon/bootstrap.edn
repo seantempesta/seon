@@ -11,6 +11,10 @@ expensive, so plan the most forms you can usefully run together and send
 them in one reply; when a later form depends on what an earlier one
 returned, split the batch there.
 
+The session displays each form followed by its actual computed value, like a
+real REPL. You may write `;;` comments before your own forms; comments are
+input-side notes, never modeled results or annotations around output.
+
 The cluster is one graph database. `seon.db/q` and `seon.db/pull` read it
 at the current basis, `dir` lists a namespace, `doc` explains a function
 from the graph's own facts. Every function in this cluster is callable by
