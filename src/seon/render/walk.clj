@@ -581,16 +581,19 @@
           (unit-lines [unit]
             (let [path (:seon.render.walk/path unit)
                   depth (:seon.render.walk/found-depth unit)
+                  unit-provenance (provenance unit)
                   failure (:seon.error/value unit)
                   output (:seon.render/output unit)
                   text (cond
                          (string? output) output
                          (some? output) (pr-str output)
                          failure (:seon.error/message failure))]
-              [(str ";; d" depth " · " (pr-str (provenance unit))
-                    (when (= path (:seon.render.walk/branch unit))
-                      (str " · :branch " (pr-str path))))
-               text]))]
+              {:seon.render.walk/lines
+               [(str ";; d" depth " · " (pr-str unit-provenance)) text]
+               :seon.render.walk/branch-metadata
+               (when (= path (:seon.render.walk/branch unit))
+                 (str ";; unit=" (pr-str unit-provenance)
+                      " branch=" (pr-str path)))}))]
      (let [root-unit (first (sort-by #(count (:seon.render.walk/path %))
                                      rendered-units))
            root (:seon.render.walk/lookup root-unit)
@@ -608,16 +611,28 @@
                                       :seon.render.walk/path)))
            elisions (filter elision-unit? ordered)
            visible (remove elision-unit? ordered)
-           elision-line
+           rendered-visible (map unit-lines visible)
+           elision-summary
            (when (seq elisions)
              (let [former-noise (str/join "\n" (keep :seon.render/output
                                                        elisions))]
-               (str ";; " (count elisions) " branches elided · "
-                    (tokens/estimate former-noise) " tokens · inspect with "
-                    "(seon.render/walk "
-                    (pr-str {:root root :depth (inc requested-depth)}) ")")))
+               {:seon.render.walk/guidance
+                (str ";; Some branches are elided · inspect with "
+                     "(seon.render/walk "
+                     (pr-str {:root root :depth (inc requested-depth)}) ")")
+                :seon.render.walk/metadata
+                (str ";; branches-elided=" (count elisions)
+                     " elided-tokens=" (tokens/estimate former-noise))}))
            lines (concat [header]
-                         (when elision-line [elision-line])
-                         (mapcat unit-lines visible))
+                         (some-> elision-summary
+                                 :seon.render.walk/guidance
+                                 vector)
+                         (mapcat :seon.render.walk/lines rendered-visible)
+                         [";; Volatile context metadata"]
+                         (some-> elision-summary
+                                 :seon.render.walk/metadata
+                                 vector)
+                         (keep :seon.render.walk/branch-metadata
+                               rendered-visible))
            text (str/join "\n" lines)]
        (when-not (str/blank? text) text)))))

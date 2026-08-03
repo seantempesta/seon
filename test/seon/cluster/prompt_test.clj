@@ -112,7 +112,20 @@
                     :seon.config/on-core-error :panic}
                    render/walk)
            contribution (first (:seon.context/contributions rendered))
-           lines (str/split-lines text)]
+           lines (str/split-lines text)
+           volatile-index
+           (first (keep-indexed
+                   (fn [index line]
+                     (when (str/starts-with?
+                            line ";; Volatile context metadata")
+                       index))
+                   lines))
+           repl-index
+           (first (keep-indexed
+                   (fn [index line]
+                     (when (str/starts-with? line ";; REPL state ")
+                       index))
+                   lines))]
        (is (= direct text)
            "prompt assembly calls the same public function agents call")
        (is (= text (:seon.context.contribution/text contribution)))
@@ -123,6 +136,14 @@
            "unit labels use the compact depth and provenance form")
        (is (str/includes? text "inspect this walk")
            "the transcript is a branch inside the walk")
+       (is (str/starts-with?
+            (second lines)
+            ";; Some branches are elided · inspect with ")
+           "load-bearing elision guidance stays beside the walk header")
+       (is (and (some? volatile-index)
+                (some? repl-index)
+                (< volatile-index repl-index))
+           "exact elision metrics join basis and time in one suffix region")
        (is (str/starts-with? (last lines) ";; REPL state namespace="))
        (is (str/includes? (last lines) "my.agents.walker"))
        (is (str/includes?
