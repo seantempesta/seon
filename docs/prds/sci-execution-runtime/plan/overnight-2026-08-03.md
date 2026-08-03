@@ -40,9 +40,18 @@ own source for is the known integration-bug generator.
    (`tmp/renderer-kernel-prototype-2026-08-02.patch`); the 3B lane
    adopts the `admit-value` half explicitly; `eval.clj`'s
    invocation-arm half stays parked for render.
-4. RENDER IMPLEMENTATION DOES NOT START TONIGHT (ruling #50). The
-   audit's verdict table and minimal-rules model are the morning's
-   owner decision. Tier 2 below is therefore deferred wholesale.
+4. RENDER IMPLEMENTATION IS AUTHORIZED (owner, later same night) and
+   the gate document LANDED: `research/render-simplification-audit-
+   2026-08-03.md` (fc05ed9b2) — keep/kill/absorb table, nine
+   fail-first falsifiers, exact 9-step landing order. Orchestrator
+   dispositions of its three open points, from its own recommended
+   constraints: (a) owning namespace only from an explicit ref on the
+   data or traversal edge, else schema property/floor, never keyword
+   text; (b) agentless-namespace stakeholder fan-out waits on the
+   missing fact — owner-agent notification proceeds; (c) loading
+   derives from repair-acceptance events; where that fact is absent,
+   honest unavailable. Render starts after the quiet-window sweep,
+   follows the audit's landing order, commits every step.
 5. Hygiene now standing (ruling #49): dead test-run roots reaped (3.9
    GB → 384 MB), default root reset and rebuilt from current source,
    dead experiment clusters destroyed. bin/test gains bounded reaping
