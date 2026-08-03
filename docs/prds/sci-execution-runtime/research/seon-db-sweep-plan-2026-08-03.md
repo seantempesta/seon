@@ -61,9 +61,10 @@ seon.reconcile .cljc usages were emitted once per platform analysis.
   calls remain raw fixture custody and its reads/writes follow the ordinary
   explicit-custody test rule.
 - `src/seon/sci/eval.clj` carried the protected renderer-kernel prototype at
-  execution start. Its one planned core-read row is deferred so no prototype
-  hunk enters this lane's commits; the final census must report that exact
-  non-exempt remainder.
+  execution start, so its planned core-read row was initially deferred. The
+  orchestrator preserved and removed that prototype, restored the file to
+  HEAD, and released the row during the same quiet window; all eleven planned
+  reads then moved to `seon.db` without prototype hunks entering this sweep.
 - The leaf wave confirmed that `seon.db` statically requires `seon.schema` for
   predicate registration and transaction encoding. A static reverse require
   made `seon.schema` unloadable, so its four classified `q` sites now resolve

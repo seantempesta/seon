@@ -101,7 +101,6 @@
             [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
-            [datahike.api :as d]
             [my.message]
             [my.run]
             [sci.core :as sci]
@@ -769,7 +768,7 @@
   "Read the contract dial and admission caps from this database value."
   [db]
   (let [cluster-name
-        (d/q '[:find ?cluster .
+        (db/q '[:find ?cluster .
                :where
                [?config :seon.config/cluster ?cluster]
                [?config :seon.config/on-core-error _]]
@@ -809,7 +808,7 @@
               (conj program/identity-attributes
                     :seon.program/delete-identities))
         committed (when-not (= identity :seon.program/delete-identities)
-                    (d/pull db
+                    (db/pull db
                             (if (= identity :seon.ns/name)
                               '[* {:seon.ns/requires [:seon.ns/name]}
                                   {:seon.ns/aliases [*]}
@@ -870,7 +869,7 @@
             namespace-name (second (:seon.program/ns row))]
         (when-let [remaining
                    (some (fn [[identity-attribute identity-value]]
-                           (when (d/pull db [:db/id]
+                           (when (db/pull db [:db/id]
                                          [identity-attribute identity-value])
                              [identity-attribute identity-value]))
                          value)]
@@ -939,7 +938,7 @@
         (map (fn [[function-symbol doc arglists]]
                [function-symbol
                 {:seon.fn/doc doc :seon.fn/arglists arglists}]))
-        (d/q '[:find ?function-symbol ?doc ?arglists
+        (db/q '[:find ?function-symbol ?doc ?arglists
                :where
                [?function :seon.fn/sym ?function-symbol]
                [?function :seon.fn/doc ?doc]
@@ -992,7 +991,7 @@
         (memoize (fn [source-tx]
                    (admission-source db source-tx)))
         namespace-assertions
-        (d/q '[:find ?namespace-name ?source ?source-tx
+        (db/q '[:find ?namespace-name ?source ?source-tx
                :where
                [?namespace :seon.ns/name ?namespace-name]
                [?namespace :seon.ns/source ?source ?source-tx]]
@@ -1009,7 +1008,7 @@
          (comp
           (filter (fn [[_ _ source-tx]] (agent-authored? source-tx)))
           (map (fn [[namespace-name _ _]]
-                 (d/pull db
+                 (db/pull db
                          '[* {:seon.ns/requires [:seon.ns/name]}
                              {:seon.ns/aliases [*]}
                              {:seon.ns/imports [*]}
@@ -1021,7 +1020,7 @@
          []
          (filter
           (fn [[_ _ _ source-tx]] (agent-authored? source-tx)))
-         (d/q '[:find ?sym ?source ?namespace-name ?source-tx
+         (db/q '[:find ?sym ?source ?namespace-name ?source-tx
                 :where
                 [?function :seon.fn/sym ?sym]
                 [?function :seon.fn/source ?source ?source-tx]
@@ -1033,7 +1032,7 @@
         (into
          []
          (filter (fn [[_ _ _ source-tx]] (agent-authored? source-tx)))
-         (d/q '[:find ?sym ?source ?namespace-name ?source-tx
+         (db/q '[:find ?sym ?source ?namespace-name ?source-tx
                 :where
                 [?test :seon.test/sym ?sym]
                 [?test :seon.test/source ?source ?source-tx]
@@ -1157,16 +1156,16 @@
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
     connection :seon.store/branch-connection}]
-  (let [entry-ids (d/q '[:find [?entry ...]
+  (let [entry-ids (db/q '[:find [?entry ...]
                          :where [?entry :seon.code.def/id _]]
                        db)
         rows
-        (->> (d/pull-many db
+        (->> (db/pull-many db
                           '[* {:seon.code.def/ns [:seon.ns/name]}]
                           entry-ids)
              (remove
               (fn [row]
-                (some? (d/pull db [:db/id]
+                (some? (db/pull db [:db/id]
                                [:seon.fn/sym (:seon.code.def/id row)]))))
              (sort-by (juxt :seon.code.def/ordinal :seon.code.def/id))
              vec)]
