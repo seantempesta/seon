@@ -1218,7 +1218,7 @@
  ; The error disposition is REQUIRED and is passed straight to
  ; admission: R41 decides what a projection failure does, and a caller
  ; that has not decided has not thought about it.
- :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id]]
+ :seon.sci.eval/request [:map  [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.cluster.run.form/ns {:optional true} :seon.cluster.run.form/ns] [:seon.sci.admit/caps :seon.sci.admit/caps] [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms] [:seon.config/on-core-error :seon.config/on-core-error] [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx] [:seon.cluster.agent/id {:optional true} :seon.cluster.agent/id] [:seon.cluster.run/id {:optional true} :seon.cluster.run/id] [:seon.cluster.run.form/ordinal {:optional true} :seon.cluster.run.form/ordinal] [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]]
  ; What one evaluation leaves behind: the terminal facts the receipt
  ; stores (result-edn always; error when it failed; interrupted-at when
  ; the time limit fired), the admitted value the loop reads a
@@ -1228,6 +1228,50 @@
  ; label restating which keys exist (owner ruling 2026-07-28).
  :seon.sci.eval/ending-ns :symbol
  :seon.sci.eval/evaluation [:map  [:seon.sci.admit/value :any] [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn] [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error] [:seon.cluster.eval/interrupted-at {:optional true} :seon.cluster.eval/interrupted-at] [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output] [:seon.cluster.eval/ns :seon.cluster.eval/ns] [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns] [:seon.sci.eval/program-row {:optional true} :seon.sci.eval/program-row] [:seon.sci.eval/session-defs {:optional true} :seon.sci.eval/session-defs] [:seon.print/options :seon.print/options] [:seon.sci.admit/capped? :seon.sci.admit/capped?] [:seon.sci.admit/record :seon.sci.admit/record]]
+
+;; ===========================================================================
+;; EFFECT
+;; ===========================================================================
+; One deterministic identity per capability request. An open receipt has no
+; terminal attribute; result-edn or interrupted-at closes it. Recovery never
+; dispatches an existing identity again.
+ :seon.effect/id [:string {:min 1 :seon.db/identity true}]
+ :seon.effect/run [:and {:seon.db/index true} :seon.db/ref]
+ :seon.effect/owner :seon.db/ref
+ :seon.effect/form-ordinal [:int {:min 0}]
+ :seon.effect/ordinal [:int {:min 0}]
+ :seon.effect/request-edn [:string {:seon.db/no-history? true}]
+ :seon.effect/result-edn [:string {:seon.db/no-history? true}]
+ :seon.effect/opened-at :inst
+ :seon.effect/settled-at :inst
+ :seon.effect/interrupted-at :inst
+ :seon.effect/receipt
+ [:map {:seon.db/entity true}
+  [:seon.effect/id :seon.effect/id]
+  [:seon.effect/run :seon.effect/run]
+  [:seon.effect/owner :seon.effect/owner]
+  [:seon.effect/form-ordinal :seon.effect/form-ordinal]
+  [:seon.effect/ordinal :seon.effect/ordinal]
+  [:seon.effect/request-edn :seon.effect/request-edn]
+  [:seon.effect/opened-at :seon.effect/opened-at]
+  [:seon.effect/result-edn {:optional true} :seon.effect/result-edn]
+  [:seon.effect/settled-at {:optional true} :seon.effect/settled-at]
+  [:seon.effect/interrupted-at {:optional true}
+   :seon.effect/interrupted-at]]
+ :seon.effect/open-request :seon.effect/receipt
+ :seon.effect/settle-request
+ [:map
+  [:seon.effect/id :seon.effect/id]
+  [:seon.effect/result-edn :seon.effect/result-edn]
+  [:seon.effect/settled-at :seon.effect/settled-at]]
+ :seon.effect/request-context
+ [:map
+  [:seon.store/branch-connection :seon.store/branch-connection]
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+  [:seon.boot/cluster-name :seon.boot/cluster-name]
+  [:seon.sci.admit/caps :seon.sci.admit/caps]
+  [:seon.config/on-core-error :seon.config/on-core-error]]
 
 ;; ===========================================================================
 ;; EXPORT
