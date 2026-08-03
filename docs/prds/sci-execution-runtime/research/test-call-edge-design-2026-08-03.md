@@ -478,3 +478,43 @@ Accordingly:
 
 That precision policy is downstream of the requested missing-fact slice. The
 schema and query design above do not need an owner decision to land.
+
+## Implementation evidence
+
+The slice landed at `093670eff` after the owner ruled that linkage is derived
+plus an explicit override. The implementation reuses `:seon.fn/calls` on test
+rows and adds the optional `:seon.test/subject` ref; it adds no analyzer and no
+reverse edge. `seon.fn/tests-reaching` queries direct and transitive callers
+from one immutable database value, seeding the same reachability from an
+explicit subject.
+
+Focused gates passed:
+
+- `seon.fn-test seon.program-test`: 24 tests, 150 assertions;
+- `seon.schema.edn-test seon.schema.datahike-test`: 19 tests, 57 assertions;
+- the `src/seon/db.clj` plus `test/seon/db_test.clj` source probe found 16 test
+  rows and derived call sets for all 16; and
+- the recurring database falsifier proves exact analyzed callees, distinct
+  same-name function/test identities, direct and transitive selection, and a
+  subject-only schema property.
+
+`bin/seon init` published digest
+`28fef5435ab8357419447145c6c8401117ef62b94ee14c09c3afb72260259379`.
+A fresh isolated operator root then forked and started cluster `proof` from
+that digest. Its source census had grown from the earlier 794-row zero-edge
+baseline to 867 test rows during the concurrent landing wave. Of those, 817
+rows carried `:seon.fn/calls`, 50 did not, and the database contained 3,410
+distinct test-to-function pairs.
+
+The 50-row residue was classified from clj-kondo's structured caller, target,
+and arity fields rather than source text or names:
+
+- 39 tests have only core or dependency calls, so no first-party target can be
+  recorded; and
+- 11 reference a first-party function outside call position, the documented
+  higher-order/Var-reference limitation of the admitted edge.
+
+The live override falsifier transacted `proof.subject/schema-property` with a
+`:seon.test/subject` ref to `proof.subject/target` and no `:seon.fn/calls`.
+`seon.fn/tests-reaching` returned the test for that target, proving the
+explicit fact reaches the same selection boundary without inventing a call.
