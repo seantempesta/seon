@@ -215,7 +215,10 @@
   (let [namespace-text (print/emit-text
                         (admitted-node (sci-value "(create-ns 'face.ns)"))
                         no-cuts)
-        atom-text (print/emit-text (admitted-node (atom 42)) no-cuts)
+        atom-node (admitted-node (atom {:private/value 42}))
+        atom-text (print/emit-text atom-node no-cuts)
+        coincidental-identity-node
+        (assoc atom-node :seon.print/address "0x1f42ab")
         function-text (print/emit-text
                        (admitted-node (sci-value "(fn named_face [] 1)"))
                        no-cuts)]
@@ -232,9 +235,18 @@
             (admitted-node
              (sci-value "(defrecord FaceRecord [a]) (->FaceRecord 1)"))
             no-cuts)))
-    (is (re-matches #"#object\[clojure\.lang\.Atom 0x[0-9a-f]+\]"
-                    atom-text))
-    (is (not (str/includes? atom-text "42")) "atoms are never dereferenced")
+    (is (= #{:seon.print/face :seon.print/class :seon.print/address}
+           (set (keys atom-node)))
+        "an IDeref is represented only by its object marker, type, and identity")
+    (is (= :seon.print/object (:seon.print/face atom-node)))
+    (is (= "clojure.lang.Atom" (:seon.print/class atom-node)))
+    (is (re-matches #"0x[0-9a-f]+" (:seon.print/address atom-node)))
+    (is (= (str "#object[" (:seon.print/class atom-node) " "
+                (:seon.print/address atom-node) "]")
+           atom-text))
+    (is (= "#object[clojure.lang.Atom 0x1f42ab]"
+           (print/emit-text coincidental-identity-node no-cuts))
+        "value-like digits inside a permitted identity remain identity bytes")
     (is (str/starts-with? function-text "#object["))
     (is (not (str/includes? function-text "$"))
         "function class names are demunged")))
