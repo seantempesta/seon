@@ -55,6 +55,59 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 20 — 2026-08-02 SESSION CLOSE. START A FRESH SESSION FROM
+HERE, THEN READ `plan/overnight-2026-08-03.md`.**
+
+FIRST THREE ACTIONS, in order:
+1. `bin/codex-agent summary open-maps` — the last lane of the session was
+   still running at close, migrating `{:closed true}` out under ruling
+   #48. Collect it, verify its claims, commit anything coherent it left.
+2. `bin/seon init` then `bin/test` — publication was BROKEN mid-session
+   by that migration and repaired; confirm both. The last full green was
+   856 tests / 4,251 assertions, measured mid-migration, so re-establish
+   the number on the quiet tree.
+3. Read `plan/overnight-2026-08-03.md` WHOLE. Its first standing
+   condition — READ THE WHOLE SPEC, DO NOT GREP IT — is there because
+   partial reads produced three wrong conclusions in one evening,
+   including two by the orchestrator about a document it had already
+   opened twice.
+
+WHAT THIS SESSION SETTLED (rulings #41-#48 in README, all with their
+reasoning): seon.db is the one database namespace with dual
+positional/argument-map interfaces and elidable custody; agents receive
+only public vars; custody derives from the cluster ctx and the write
+door refuses a foreign connection; a corrupted provider stream fails the
+turn rather than splicing agent code; maps are OPEN because the system
+exists to accrete, and a key's meaning never changes once declared; no
+naming conventions and no regexes without permission; everything is
+declared and queryable, and a question you cannot answer by query means
+a missing FACT, not a missing convention.
+
+WHAT IS BUILT AND PROVEN: reachability closed and live-proven with a
+real model turn; ctx-derived custody; the write-door custody fence;
+stream integrity; suite isolation, progress output and a loud silence
+backstop; `disarm!`'s readiness protocol (the real cause of an 87-minute
+hang, and NOT the child JVMs everyone assumed); bounded Flow submission
+with its control-priority issue DISSOLVED rather than patched; the
+analysis-gate fix; 14 `.cljc`→`.clj` conversions; SCI copy-on-write
+(fork SHA `72150fd44`) making candidate contexts viable; the store model
+validated to 0.05%; seven `:db/noHistory` attributes; `created-at`
+deleted; per-cluster history measured at 37.9% on a real GPQA replay.
+
+WHAT IS OPEN: `plan/overnight-2026-08-03.md` has it in four dependency
+tiers plus a "mixed models to collapse" section. The short version —
+the union read-decoding codec is the unblocker; the render model needs
+its ~200-reference vocabulary collapse and the guarded kernel; the
+`seon.db` call-site sweep wants a quiet tree; MCP's value chain waits on
+a protected owner.
+
+THE WARNING THAT MATTERS MOST: five recorded figures were disproven in
+one evening, four in storage alone, and ONE OF THOSE by our own fresh
+measurement hours later — a census attributed 187 MB to an attribute
+whose deletion saved 9.66 MB, because ATTRIBUTION IS NOT A
+COUNTERFACTUAL. Three orchestrator claims were also wrong. Every number
+you inherit in this repository is a hypothesis until you reproduce it.
+
 **ADDENDUM 19 — 2026-08-02 night, THE CUSTODY/RELIABILITY WAVE LANDED.
 START A NEW SESSION FROM HERE.**
 
