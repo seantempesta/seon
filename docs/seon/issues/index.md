@@ -33,10 +33,11 @@ See `README.md` for the convention.
 | [Remove the platform thread held by every armed agent's error fan-out](armed-agent-holds-a-platform-thread.md) | blocker | flow-protocol wave |
 | [Make agent graph stop always publish turn completion](agent-graph-stop-can-wait-forever-for-turn-completion.md) | blocker | agent lifecycle repair wave |
 
-## Friction (72)
+## Friction (73)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Derived config attributes omit one backup key](config-derivation-drops-one-backup-attribute.md) | friction | config derivation wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
 | [Give provider JSON values a named recursive schema](provider-json-contracts-use-unbounded-any.md) | friction | schema honesty wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
