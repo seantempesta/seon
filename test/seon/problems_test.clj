@@ -8,12 +8,12 @@
   count of zero. Every one of those is a status somebody then has to
   maintain, and the whole point of deriving is that nobody does.
 
-  So the shape of the suite is: one fixture per family, the empty
-  cluster, and a GENERATIVE ABSENCE PROPERTY over the power set of the
-  four families — whatever is absent produces nothing, whatever is
-  present produces exactly its own family, for all sixteen
-  combinations. Fixed seed 20260727, one fresh in-memory database per
-  trial, and the attributes come from
+  So the shape of the suite is: one fixture per database-fact family,
+  the empty cluster, a GENERATIVE ABSENCE PROPERTY over those fixtures,
+  and one process-image interaction proof for stale Vars. Whatever is
+  absent produces nothing and whatever is present produces exactly its
+  own family. Fixed seed 20260727, one fresh in-memory database per trial,
+  and the attributes come from
   `canonical-database-attributes` — the live boot derivation, not a
   hand-listed fixture set."
   (:require [clojure.set :as set]
@@ -28,6 +28,8 @@
             [seon.problems :as problems]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support]))
 
 (def ^:private live "9999-1785191833372")
@@ -58,7 +60,7 @@
                      {:seon.cluster.run/live-processes #{live}}))
 
 ;;; ---------------------------------------------------------------------------
-;;; The four fixtures — each one commits ONLY its own family's facts
+;;; The database fixtures — each commits ONLY its own family's facts
 ;;; ---------------------------------------------------------------------------
 
 (defn- commit-error!
@@ -142,6 +144,51 @@
             "not an empty vector per family, not :healthy? true, not a
              count of zero — nothing, because nothing is wrong")
         (is (seon.schema/valid-candidate-value? :seon.problems/problems value))))))
+
+(deftest stale-var-findings-declare-their-render-producers
+  (let [properties
+        (-> (schema.edn/packaged-forms)
+            (get :seon.problems/stale-var)
+            schema.form/schema-properties)]
+    (is (= `problems/stale-var-ai (:seon.render/ai properties)))
+    (is (= `problems/stale-var-html (:seon.render/html properties)))))
+
+(deftest a-deleted-function-var-is-derived-from-the-loaded-image
+  (with-db
+    (fn [connection]
+      (let [database @connection
+            namespace-name 'seon.problems-test
+            intern-name 'slice-3-stale-var-proof
+            qualified-name "seon.problems-test/slice-3-stale-var-proof"
+            loaded-namespace (the-ns namespace-name)
+            derive #(problems/problems
+                     database
+                     {:seon.cluster.run/live-processes #{live}})]
+        (is (nil? (ns-resolve loaded-namespace intern-name)))
+        (is (nil? (:seon.problems/stale-vars (derive)))
+            "the synchronized source image and program graph are clean")
+        (when-not (ns-resolve loaded-namespace intern-name)
+          (let [created
+                (binding [*ns* loaded-namespace]
+                  (eval (list 'defn intern-name [] :stale)))]
+            (try
+              (let [value (derive)
+                    stale-vars (:seon.problems/stale-vars value)]
+                (is (= [{:seon.fn/sym qualified-name}] stale-vars))
+                (is (seon.schema/valid-candidate-value?
+                     :seon.problems/problems value))
+                (is (str/includes? (problems/ai-prose value) qualified-name))
+                (is (str/includes? (problems/log-report value) qualified-name))
+                (is (str/includes?
+                     (hiccup/->string (problems/html-report value))
+                     qualified-name)))
+              (finally
+                (when (identical? created
+                                  (ns-resolve loaded-namespace intern-name))
+                  (ns-unmap loaded-namespace intern-name))))))
+        (is (nil? (ns-resolve loaded-namespace intern-name)))
+        (is (nil? (:seon.problems/stale-vars (derive)))
+            "removing the process-local Var makes the finding disappear")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One family at a time

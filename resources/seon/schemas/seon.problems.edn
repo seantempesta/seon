@@ -70,13 +70,21 @@
                   [:vector :seon.problems/deferred-agent]]
                  [:seon.problems/unowned-namespaces
                   {:optional true}
-                  [:vector :seon.problems/unowned-namespace]]],
+                  [:vector :seon.problems/unowned-namespace]]
+                 [:seon.problems/stale-vars
+                  {:optional true}
+                  [:vector :seon.problems/stale-var]]],
                 :request
                 [:map
                  [:seon.cluster.run/live-processes
                   :seon.cluster.run/live-processes]],
                 :unowned-namespace
                 [:map [:seon.ns/name :seon.ns/name]],
+                :stale-var
+                [:map
+                 #:seon.render{:ai seon.problems/stale-var-ai,
+                               :html seon.problems/stale-var-html}
+                 [:seon.fn/sym :seon.fn/sym]],
                 :wedged-run
                 [:map
                  [:seon.cluster.run/id :seon.cluster.run/id]

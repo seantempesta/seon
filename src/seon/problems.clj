@@ -9,11 +9,10 @@
   something is fixed. A problem stops being a problem when the facts
   stop saying so, which is the only definition that cannot go stale.
 
-  PURE, over a database value and one set. Everything it needs is a
-  query except which processes are alive, and that is an observable
-  fact about the operating system rather than something the database
-  can know — so it is a parameter, by the same name
-  `run/recover-tx` already uses.
+  DERIVED from one immutable database value, one live-process set, and
+  one snapshot of the loaded JVM namespaces. Database families are
+  queries. Process liveness and the loaded image are observable facts
+  outside the database, read without storing another status value.
 
   A HEALTHY CLUSTER DERIVES `{}`. The value is a map keyed by FAMILY and
   an empty family is ABSENT, never an empty vector and never a
@@ -22,7 +21,7 @@
   `:type` discriminator because the key a family arrives under IS the
   family.
 
-  SIX FAMILIES, and each one is a fact nobody has to maintain:
+  SEVEN FAMILIES, and each one is a fact nobody has to maintain:
 
   - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
     signature. Grouping is the point: a hundred errors of one signature
@@ -40,8 +39,13 @@
     own mistake is NOT a core fault and never becomes an error fact,
     but a plan that keeps erroring is something a human wants to see.
     The distinction survives into the value instead of being flattened.
+  - DEFERRED AGENTS — agents whose self-triggered work is waiting for
+    an outside trigger to begin another episode.
   - UNOWNED NAMESPACES — a source-bearing program namespace with no
     agent namespace ref. Assignment makes the row disappear immediately.
+  - STALE VARS — function Vars still interned in a loaded first-party
+    namespace after their `[namespace name]` pair disappeared from the
+    published program graph. Restarting the JVM removes them.
 
   WHAT IS DELIBERATELY NOT HERE: a stale-trigger family. \"Unanswered\"
   is derivable and already owned (`work/unanswered-triggers`); STALE is
@@ -51,7 +55,7 @@
   loop's next pass. When the loop publishes a pass boundary, staleness
   becomes derivable from THAT and this is where it lands.
 
-  Crash walk: pure, reads only. A kill loses a value nobody had
+  Crash walk: reads only. A kill loses a value nobody had
   committed; the next caller re-derives it from the same facts."
   (:require [clojure.string :as str]
             [seon.db :as db]
@@ -66,7 +70,7 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The four derivations
+;;; The derivations
 ;;; ---------------------------------------------------------------------------
 
 (defn- error-signatures
@@ -254,17 +258,69 @@
        (mapv (fn [namespace-name]
                {:seon.ns/name namespace-name}))))
 
+(defn- indexed-function-var?
+  "Whether an interned Var has the static function index's shape."
+  [interned-var]
+  (let [metadata (meta interned-var)]
+    (and (bound? interned-var)
+         (seq (:arglists metadata))
+         (not (:macro metadata))
+         (not (:test metadata)))))
+
+(defn- stale-vars
+  "Loaded first-party function Vars absent from the published graph."
+  [db]
+  (let [first-party-namespaces
+        (sort
+         (db/q '[:find [?namespace-name ...]
+                 :where
+                 [?namespace :seon.ns/name ?namespace-name]
+                 [?namespace :seon.ns/source _]
+                 [?namespace :seon.schema.admission/source :core]]
+               db))
+        published-functions
+        (db/q '[:find ?namespace-name ?function-symbol
+                :where
+                [?namespace :seon.ns/name ?namespace-name]
+                [?namespace :seon.ns/source _]
+                [?namespace :seon.schema.admission/source :core]
+                [?function :seon.fn/ns ?namespace]
+                [?function :seon.fn/sym ?function-symbol]]
+              db)
+        loaded-namespaces
+        (into {} (map (juxt ns-name identity)) (all-ns))]
+    (into []
+          (comp
+           (mapcat
+            (fn [namespace-name]
+              (when-let [loaded-namespace (get loaded-namespaces namespace-name)]
+                (map (fn [[intern-name interned-var]]
+                       [namespace-name intern-name interned-var])
+                     (sort-by key (ns-interns loaded-namespace))))))
+           (filter (fn [[_ _ interned-var]]
+                     (indexed-function-var? interned-var)))
+           (remove
+            (fn [[namespace-name intern-name _]]
+              (contains?
+               published-functions
+               [namespace-name
+                (str (symbol (str namespace-name) (str intern-name)))])))
+           (map (fn [[namespace-name intern-name _]]
+                  {:seon.fn/sym
+                   (str (symbol (str namespace-name) (str intern-name)))})))
+          first-party-namespaces)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation
 ;;; ---------------------------------------------------------------------------
 
-(declare ai-prose html-report)
+(declare ai-prose html-report stale-var-ai stale-var-html)
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
-  Pure over `db` plus `:seon.cluster.run/live-processes`, the same set
-  by the same name `run/recover-tx` takes — liveness is the one thing a
-  database cannot know about the operating system.
+  Reads one immutable `db`, `:seon.cluster.run/live-processes`, and one
+  loaded-namespace snapshot. The same database value drives every
+  query; neither process liveness nor JVM namespace state is stored.
 
   An empty family is ABSENT rather than an empty vector, so a healthy
   cluster derives `{}` and `(seq (problems …))` is the whole question.
@@ -282,6 +338,7 @@
         errored (errored-receipts db)
         deferred (deferred-agents db)
         unowned (unowned-namespaces db)
+        stale (stale-vars db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq wedged) (assoc :seon.problems/wedged-runs wedged)
@@ -289,7 +346,8 @@
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
                 (seq unowned)
-                (assoc :seon.problems/unowned-namespaces unowned))]
+                (assoc :seon.problems/unowned-namespaces unowned)
+                (seq stale) (assoc :seon.problems/stale-vars stale))]
     found))
 
 ;;; ---------------------------------------------------------------------------
@@ -314,6 +372,21 @@
      [:span {:class "seon-problems-field"}
       [:span {:class "seon-problems-label"} label]
       [:span {:class "seon-problems-value"} (str value)]])])
+
+(defn stale-var-html
+  "A stale loaded Var as one problems-surface row."
+  {:malli/schema
+   [:=> [:cat :seon.problems/stale-var] :seon.render/hiccup]}
+  [entry]
+  (row "var" (:seon.fn/sym entry)))
+
+(defn stale-var-ai
+  "Steering for one loaded Var absent from the published program graph."
+  {:malli/schema [:=> [:cat :seon.problems/stale-var] :string]}
+  [entry]
+  (str "Restart the JVM to remove stale loaded Var "
+       (:seon.fn/sym entry)
+       "; it is absent from the published program graph."))
 
 (defn html-report
   "`:seon.render/html` — everything wrong now, as a surface.
@@ -378,15 +451,18 @@
    (family-section
     "unowned namespaces"
     (for [entry (:seon.problems/unowned-namespaces found)]
-      (row "namespace" (:seon.ns/name entry))))])
+      (row "namespace" (:seon.ns/name entry))))
+   (family-section
+    "stale vars"
+    (map stale-var-html (:seon.problems/stale-vars found)))])
 
 (defn block
   "The problems BLOCK's html render: derive, then project.
 
   The unit a block projection receives carries the exact immutable
-  database value, so this derives `problems` at that value and renders
-  it — which is what makes the surface a pure function of the database
-  and a reconnect a repaint.
+  database value, so every database-backed family is derived at that
+  value. Stale Vars additionally observe one snapshot of the loaded JVM
+  namespaces; reconnect re-derives both current inputs.
 
   `:seon.cluster.run/live-processes` must ride on the unit. It is the
   one input a database cannot answer, `problems` already takes it by
@@ -434,7 +510,8 @@
                (:seon.cluster.work/episode-runs entry)
                " self-triggered runs since the last outside trigger; "
                (:seon.problems/deferred-count entry)
-               " triggers are deferred until one arrives.")))
+               " triggers are deferred until one arrives."))
+        (map stale-var-ai (:seon.problems/stale-vars found)))
        (str/join "\n")))
 
 (defn log-report
@@ -482,5 +559,8 @@
                " (agent-sent triggers wait for an outside trigger)"))
         (for [entry (:seon.problems/unowned-namespaces found)]
           (str "seon.problems unowned-namespace namespace="
-               (:seon.ns/name entry))))
+               (:seon.ns/name entry)))
+        (for [entry (:seon.problems/stale-vars found)]
+          (str "seon.problems stale-var var=" (:seon.fn/sym entry)
+               " (absent from the published program graph; restart the JVM)")))
        (str/join "\n")))
