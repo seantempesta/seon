@@ -67,10 +67,20 @@ At the definition-install seam, for a durable `defn`:
 1. **Schema gate** (exists): complete `:malli/schema` required; declarations
    through admission (entrance 2 — the same `admit` function the hook
    calls, now fed parsed declarations).
-2. **Assemble the gate set** by query: tests reaching this function
-   (direct `:seon.fn/calls` edge, or transitive within a bounded depth),
-   plus tests declaring it via `:seon.test/subject`, plus PENDING tests
-   whose unresolved subject matches the new name (test-first arrivals).
+2. **Assemble the gate set** by query (owner-ruled 2026-08-03 night: FULL
+   REACH): every test whose call chain transitively reaches this function,
+   plus tests declaring it via `:seon.test/subject` (the rare derivation
+   escape hatch for tests that validate without calling — never manual
+   dependency tracking; all edges are indexed automatically), plus PENDING
+   tests whose unresolved subject matches the new name (test-first
+   arrivals). For a REDEFINITION this closure includes the callers' tests
+   by construction, and a redefinition that breaks any caller's test is
+   REFUSED synchronously — the agent either satisfies the existing
+   expectations (require no more, provide no less; adding capability is
+   fine) or mints a NEW NAME with explicit caller migration (ruling #48:
+   different semantics is a new key, never a redefinition). The feedback
+   hands the agent the complete failing contract to iterate against in
+   the candidate.
 3. **Candidate context**: copy-on-write fork of the cluster context;
    install the candidate definition (and its contract) there.
 4. **Auto-check** (pure + generatable only): 25 seeded generated cases

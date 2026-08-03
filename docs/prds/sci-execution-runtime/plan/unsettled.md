@@ -3187,6 +3187,20 @@ derives from inside. No "reconcile" verb exists in code and none is added.
 (4) KIMI K3 CALIBRATION runs AFTER the prefix-cache work banks, so one paid
 matrix measures both providers on the same stable prefix.
 
+**TEST LINKAGE LANDED (2026-08-03, `093670eff`):** the existing static
+analysis now retains each test's direct first-party call-position targets as
+`:seon.fn/calls`; `:seon.test/subject` is the optional explicit override; and
+`seon.fn/tests-reaching` derives direct and transitive consumers from one
+immutable database value. A fresh isolated proof cluster forked from published
+digest `28fef5435ab8357419447145c6c8401117ef62b94ee14c09c3afb72260259379`
+contained 867 test rows: 817 carried 3,410 distinct call edges and 50 carried
+none. Structured clj-kondo usage records classify the residue as 39 tests that
+call only core/dependency functions and 11 that reference first-party
+functions outside call position. A live subject-only schema-property row had
+no call edge and was returned by the reachability query. The focused indexing,
+program, schema, and Datahike gates passed 43 tests / 207 assertions; the
+`seon.db`/`db_test` design probe derived calls for all 16 tests.
+
 **GUARDED-KERNEL MERGE LANDED (2026-08-03, `04fe5f247` + `db0d78368`
 + `dd62545c3`):** ruling #46's kernel had already landed as
 `seon.sci.kernel` (`094127076`), but its SEMANTICS were still two
@@ -3281,3 +3295,14 @@ class schema; (4) :seon.error/message stays REQUIRED on every value.
 Orchestrator-endorsed pending owner veto (recommendations he did not
 individually rule): the §2.3 merge table as recommended, and
 converting the :seon.ai/error-class second taxonomy in the same wave.
+
+**ACCRETION-TESTING RULINGS COMPLETE (owner, 2026-08-03 night):** the PRD
+(docs/prds/accretion-testing/README.md) is APPROVED with two final
+rulings: (1) GATE REACH IS THE FULL LINKED CLOSURE — every test
+transitively reaching the function runs at install (all edges derived
+from the indexed call graph; :seon.test/subject is the rare declared
+escape hatch for call-free property tests, never manual tracking);
+(2) REDEFINITIONS THAT BREAK CALLERS ARE REFUSED SYNCHRONOUSLY — the
+resolution paths are satisfy-existing-expectations (accretion: require
+no more, provide no less) or a NEW NAME with explicit caller migration.
+Install latency is measured, never assumed.
